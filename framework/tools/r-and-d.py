@@ -63,7 +63,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # ── Constantes ────────────────────────────────────────────────────
 
@@ -152,6 +152,7 @@ class Idea:
     reward: float = 0.0
     created_at: str = ""
     cycle_id: int = 0
+    mutation_depth: int = 0        # profondeur de chaîne de mutations (0 = original)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -759,8 +760,13 @@ def _mutate_past_winners(project_root: Path,
         try:
             mutated = mutator(winner)
             mutated["source"] = "mutation"
+            # Calculer la profondeur de chaîne de mutations
+            parent_depth = winner.get("mutation_depth", 0)
+            if winner.get("source") == "mutation" and parent_depth == 0:
+                parent_depth = 1  # rétro-compat : ancien format sans depth
+            mutated["mutation_depth"] = parent_depth + 1
             mutated["description"] = (
-                f"Mutation ({mut_name}) de l'innovation "
+                f"Mutation ({mut_name}, depth={parent_depth + 1}) de l'innovation "
                 f"'{winner.get('title', '')[:50]}' (reward: {winner.get('reward', 0):.3f})"
             )
             # Ne pas re-proposer un titre déjà en mémoire
@@ -978,6 +984,7 @@ def harvest(project_root: Path, policy: Policy,
             action=raw.get("action", "add"),
             created_at=datetime.now().isoformat(),
             cycle_id=cycle_id,
+            mutation_depth=int(raw.get("mutation_depth", 0)),
         ))
 
     return ideas
@@ -1111,6 +1118,34 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
             if source_success < 0.2:
                 notes.append(f"⚠️ Source '{idea.source}' historiquement faible ({source_success:.0%})")
                 go_score -= 0.10
+
+        # Check 8: Pénalité chaîne de mutations — depth > 1 = dérivative
+        if idea.mutation_depth > 1:
+            chain_penalty = min(0.30, (idea.mutation_depth - 1) * 0.12)
+            notes.append(
+                f"⚠️ Chaîne de mutations profondeur {idea.mutation_depth} "
+                f"(-{chain_penalty:.2f})"
+            )
+            go_score -= chain_penalty
+
+        # Check 9: Actionnabilité — titres purement méta-combinatoires
+        _mut_prefixes = ("transposer '", "escalader:", "inverser:", "fusionner '")
+        title_lower = idea.title.lower()
+        if idea.source == "mutation":
+            nesting = sum(1 for p in _mut_prefixes if p in title_lower)
+            if nesting > 1:
+                notes.append("🔴 Titre non actionnable — mutation imbriquée")
+                go_score -= 0.20
+            elif nesting == 1 and idea.mutation_depth > 0:
+                # Vérifier si le corps contient aussi un prefix de mutation
+                for p in _mut_prefixes:
+                    idx = title_lower.find(p)
+                    if idx >= 0:
+                        rest = title_lower[idx + len(p):]
+                        if any(p2 in rest for p2 in _mut_prefixes):
+                            notes.append("⚠️ Mutation de mutation détectée dans le titre")
+                            go_score -= 0.15
+                        break
 
         # Verdict — seuils relevés
         idea.challenge_notes = notes
@@ -2235,7 +2270,7 @@ def analyze(project_root: Path) -> dict[str, Any]:
         "action": "{idea.action}",
     }}
 
-    # TODO: Implémenter la logique métier
+    # Logique métier à compléter lors de l'implémentation
     # Basé sur: {desc[:100]}
 
     return results

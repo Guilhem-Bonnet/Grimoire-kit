@@ -731,9 +731,78 @@ def main():
     parser.add_argument("--trend", action="store_true", help="Tendance historique")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")
     parser.add_argument("--dry-run", action="store_true", help="Ne pas sauvegarder")
+    parser.add_argument("--multi-project", nargs="+", metavar="DIR",
+                        help="Comparer le score entre plusieurs projets")
 
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
+
+    # Mode multi-projet : comparer le score entre plusieurs projets
+    if args.multi_project:
+        projects = [Path(d).resolve() for d in args.multi_project]
+        # Inclure aussi le project-root principal s'il n'est pas déjà dans la liste
+        if project_root not in projects:
+            projects.insert(0, project_root)
+
+        results: list[tuple[str, AntifragileResult]] = []
+        for proj in projects:
+            if not (proj / "_bmad" / "_memory").exists():
+                print(f"⚠️  {proj.name}: pas de mémoire BMAD — ignoré")
+                continue
+            result = compute_antifragile_score(proj, args.since)
+            results.append((proj.name, result))
+
+        if not results:
+            print("❌ Aucun projet valide trouvé.")
+            return
+
+        if args.json:
+            data = {
+                name: {
+                    "score": r.global_score,
+                    "level": r.level,
+                    "evidence": r.total_evidence,
+                    "dimensions": {
+                        d.name: round(d.score * 100, 1)
+                        for d in r.dimensions
+                    },
+                }
+                for name, r in results
+            }
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+        else:
+            print("# 🔀 Comparaison Multi-Projet — Anti-Fragilité\n")
+            print("| Projet | Score | Niveau | Signaux | Meilleure dim. | Plus faible dim. |")
+            print("|--------|-------|--------|---------|----------------|-----------------|")
+            for name, r in sorted(results, key=lambda x: x[1].global_score, reverse=True):
+                icon = LEVEL_ICONS.get(r.level, "❓")
+                best = max(r.dimensions, key=lambda d: d.score)
+                worst = min(r.dimensions, key=lambda d: d.score)
+                print(
+                    f"| {name} | {r.global_score}/100 | {icon} {r.level} | "
+                    f"{r.total_evidence} | {best.name} ({best.score:.0%}) | "
+                    f"{worst.name} ({worst.score:.0%}) |"
+                )
+
+            # Recommandations croisées
+            if len(results) >= 2:
+                print("\n## 💡 Insights croisés\n")
+                all_results = [(n, r) for n, r in results]
+                best_proj = max(all_results, key=lambda x: x[1].global_score)
+                worst_proj = min(all_results, key=lambda x: x[1].global_score)
+                delta = best_proj[1].global_score - worst_proj[1].global_score
+                print(f"- **Écart** : {delta:.1f} points entre {best_proj[0]} et {worst_proj[0]}")
+
+                # Trouver les dimensions où un projet excelle et l'autre non
+                for dim_idx, dim in enumerate(best_proj[1].dimensions):
+                    other_dim = worst_proj[1].dimensions[dim_idx]
+                    if dim.score - other_dim.score > 0.3:
+                        print(
+                            f"- **{dim.name}** : {best_proj[0]} ({dim.score:.0%}) "
+                            f">> {worst_proj[0]} ({other_dim.score:.0%}) — "
+                            f"transférer les bonnes pratiques"
+                        )
+        return
 
     # Mode tendance
     if args.trend:

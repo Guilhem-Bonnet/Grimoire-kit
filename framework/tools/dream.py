@@ -1004,10 +1004,112 @@ def main():
                         help="Mode rapide O(n) — patterns + opportunités seulement")
     parser.add_argument("--emit", action="store_true",
                         help="Émettre les insights comme phéromones stigmergy")
+    parser.add_argument("--multi-project", nargs="+", metavar="DIR",
+                        help="Croiser les insights entre plusieurs projets")
 
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
 
+    # Mode multi-projet : croiser les insights entre projets
+    if args.multi_project:
+        projects = [Path(d).resolve() for d in args.multi_project]
+        if project_root not in projects:
+            projects.insert(0, project_root)
+
+        all_project_insights: dict[str, list[DreamInsight]] = {}
+        all_project_sources: dict[str, list[DreamSource]] = {}
+
+        since = args.since
+        if since == "auto":
+            since = read_last_dream_timestamp(project_root)
+
+        for proj in projects:
+            if not (proj / "_bmad" / "_memory").exists():
+                print(f"⚠️  {proj.name}: pas de mémoire BMAD — ignoré")
+                continue
+            sources = collect_sources(proj, since, args.agent)
+            if not sources:
+                continue
+            # Taguer les sources avec le nom du projet
+            for s in sources:
+                s.name = f"[{proj.name}] {s.name}"
+            all_project_sources[proj.name] = sources
+
+            fn = dream_quick if args.quick else dream
+            insights = fn(proj, since, args.agent, _sources=sources)
+            all_project_insights[proj.name] = insights
+
+        if not all_project_insights:
+            print("💤 Aucun projet avec des insights — rien à croiser.")
+            sys.exit(0)
+
+        # Croiser : trouver les patterns communs et divergents
+        print("# 🔀 Dream Multi-Projet — Insights Croisés\n")
+        total_insights = sum(len(v) for v in all_project_insights.values())
+        print(f"  {len(all_project_insights)} projets, "
+              f"{total_insights} insights totaux\n")
+
+        # Table comparative
+        print("| Projet | Insights | Actionnables | Top catégorie |")
+        print("|--------|----------|-------------|----------------|")
+        for proj_name, insights in sorted(all_project_insights.items()):
+            actionable = sum(1 for i in insights if i.actionable)
+            cats = {}
+            for i in insights:
+                cats[i.category] = cats.get(i.category, 0) + 1
+            top_cat = max(cats, key=cats.get) if cats else "-"
+            print(f"| {proj_name} | {len(insights)} | {actionable} | {top_cat} |")
+
+        # Thèmes communs (titres similaires entre projets)
+        if len(all_project_insights) >= 2:
+            print("\n## 🔗 Thèmes communs\n")
+            proj_names = list(all_project_insights.keys())
+            found_common = False
+            for i, p1 in enumerate(proj_names):
+                for p2 in proj_names[i + 1:]:
+                    for ins1 in all_project_insights[p1]:
+                        for ins2 in all_project_insights[p2]:
+                            # Similarité simple : mots partagés dans le titre
+                            words1 = set(ins1.title.lower().split())
+                            words2 = set(ins2.title.lower().split())
+                            common = words1 & words2 - {"le", "la", "les", "de", "du",
+                                                         "des", "un", "une", "et", "ou",
+                                                         "à", "en", "par", "pour", "dans"}
+                            if len(common) >= 3:
+                                found_common = True
+                                print(f"- **{p1}**: {ins1.title}")
+                                print(f"  **{p2}**: {ins2.title}")
+                                print(f"  Mots communs: {', '.join(sorted(common))}\n")
+            if not found_common:
+                print("  Aucun thème commun détecté — les projets divergent.\n")
+
+            # Insights uniques à chaque projet
+            print("## 🌟 Insights uniques\n")
+            for proj_name, insights in all_project_insights.items():
+                unique = [i for i in insights if i.confidence >= 0.6]
+                if unique:
+                    print(f"### {proj_name}")
+                    for ins in unique[:3]:
+                        icon = CATEGORY_ICONS.get(ins.category, "❓")
+                        print(f"  {icon} {ins.title} ({ins.confidence:.0%})")
+                    print()
+
+        if args.json:
+            data = {
+                proj_name: [
+                    {
+                        "title": i.title,
+                        "category": i.category,
+                        "confidence": i.confidence,
+                        "actionable": i.actionable,
+                    }
+                    for i in insights
+                ]
+                for proj_name, insights in all_project_insights.items()
+            }
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+
+        sys.exit(0)
     # Résoudre --since auto
     since = args.since
     if since == "auto":
