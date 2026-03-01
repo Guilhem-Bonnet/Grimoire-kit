@@ -19,7 +19,7 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `cross-migrate.py` | `migrate` | Migration cross-projet d'artefacts BMAD (learnings, rules, DNA, agents) |
 | `agent-darwinism.py` | `darwinism` | Sélection naturelle des agents — fitness, évolution, leaderboard |
 | `stigmergy.py` | `stigmergy` | Coordination stigmergique — phéromones numériques entre agents |
-| `r-and-d.py` | *(direct)* | Innovation Engine — cycles R&D avec reinforcement learning |
+| `r-and-d.py` | *(direct)* | Innovation Engine v2.0 — RL + closed-loop + seed + prototypes |
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
 | `bmad-completion.zsh` | *(source)* | Autocomplétion zsh pour `bmad-init.sh` |
 
@@ -368,19 +368,32 @@ bash bmad-init.sh stigmergy stats
 
 ---
 
-## `r-and-d.py` — Innovation Engine
+## `r-and-d.py` — Innovation Engine v2.0
 
-Moteur d'innovation autonome avec reinforcement learning. Exécute des cycles R&D
-(harvest → evaluate → challenge → simulate → select → converge) et apprend de
-ses résultats pour concentrer les prochains cycles sur les meilleurs patterns.
+Moteur d'innovation autonome avec reinforcement learning et **closed-loop reward**.
+Exécute des cycles R&D (harvest → evaluate → challenge → simulate → select → converge),
+mesure la santé réelle du projet avant/après, et module le reward par ce signal empirique.
+
+### Commandes
 
 ```bash
+# Cycle & entraînement
 python3 r-and-d.py --project-root . cycle                          # 1 cycle complet
 python3 r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs
 python3 r-and-d.py --project-root . train --epochs 10 --auto-stop  # avec auto-stop
 python3 r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
 python3 r-and-d.py --project-root . harvest                        # récolte seule
 python3 r-and-d.py --project-root . evaluate                       # harvest + scoring
+
+# Closed-loop & santé
+python3 r-and-d.py --project-root . health                         # santé du projet (composite score)
+python3 r-and-d.py --project-root . seed                           # ensemencer les sources réelles
+
+# Prototypage
+python3 r-and-d.py --project-root . prototype                      # générer des squelettes Python
+python3 r-and-d.py --project-root . prototype --idea-id RND-0001-01 # prototype pour une idée
+
+# Monitoring
 python3 r-and-d.py --project-root . dashboard                      # tableau de bord markdown
 python3 r-and-d.py --project-root . status                         # état du moteur
 python3 r-and-d.py --project-root . history                        # historique des cycles
@@ -388,14 +401,41 @@ python3 r-and-d.py --project-root . tune --epsilon 0.3             # ajuster exp
 python3 r-and-d.py --project-root . reset                          # reset policy (garde mémoire)
 ```
 
-**7 phases par cycle :** HARVEST (dream+oracle+early-warning+harmony+incubator+stigmergy) →
-EVALUATE (scoring 6D adaptatif) → CHALLENGE (red-team+pre-mortem) → SIMULATE (digital-twin) →
-QUALITY GATES (tests+harmony+antifragile) → SELECT (tournament) → CONVERGE (critère d'arrêt)
+### Architecture v2.0
 
-**Reinforcement Learning :** policy à poids adaptatifs (sources × domaines × actions),
-epsilon-greedy exploration, learning rate décroissant, convergence par rendement décroissant.
+**7 phases par cycle :** HARVEST (13 sources : dream, oracle-swot, oracle-attract, early-warning,
+harmony, incubator, stigmergy, dna-drift, workflow-adapt, antifragile, synthetic, mutation,
+gap-analysis) → EVALUATE (scoring 6D adaptatif) → CHALLENGE (**durci** : seuil GO 0.60,
+quota 20% rejet, médiane-based, pénalité progressive) → SIMULATE (digital-twin) →
+QUALITY GATES (tests+harmony+antifragile) → SELECT (tournament + health delta) → CONVERGE
 
-**Sortie :** `.bmad-rnd/` — policy, mémoire d'innovation, historique par cycle, dashboard.
+### Nouveautés v2.0
+
+| Feature | Description |
+|---|---|
+| **Closed-loop reward** | Snapshot santé projet (before/after), health delta module le reward réel |
+| **Challenge durci** | Seuil GO 0.50→0.60, quota ≥20% rejet, médiane-based, check historique source |
+| **Seed memory** | Commande `seed` : ensemence incubator + stigmergy + mémoire baseline |
+| **Mutation** | `_mutate_past_winners()` : transpose/escalade/inverse les gagnants passés |
+| **Gap-analysis** | `_gap_driven_ideas()` : tests manquants, docs, domaines sous-représentés |
+| **Prototype** | `prototype` : génère des squelettes Python (argparse, --project-root, --json) |
+| **Health** | `health` : affiche la santé composite du projet (score /100) |
+
+### Reinforcement Learning
+
+Policy à poids adaptatifs (13 sources × 10 domaines × 6 actions),
+epsilon-greedy exploration (decay 0.95/epoch), learning rate décroissant,
+convergence par rendement décroissant + oscillation detection.
+
+### Health Metrics (closed-loop)
+
+- Nombre d'outils, tests, docs
+- Ratio tests/outils
+- Dissonances harmony (count + severity)
+- Score antifragile
+- Score composite de santé (0-100)
+
+**Sortie :** `.bmad-rnd/` — policy, mémoire d'innovation, historique, prototypes, dashboard.
 
 ---
 

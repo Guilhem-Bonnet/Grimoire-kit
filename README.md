@@ -55,6 +55,7 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 - ⛓️ **Decision Log** — blockchain légère de décisions architecturales : log, chain, verify, audit
 - 🪞 **Mirror Agent** — neurones miroirs : observation, apprentissage inter-agents, transfert de patterns
 - 🧠 **Sensory Buffer** — mémoire sensorielle court terme à décroissance exponentielle
+- 🔬 **R&D Engine v2** — moteur d'innovation autonome avec reinforcement learning, closed-loop reward, challenge durci, seed memory, mutation/gap-analysis, génération de prototypes
 
 ## Quick Start
 
@@ -431,12 +432,16 @@ python framework/tools/sensory-buffer.py --project-root . decay --agent dev     
 python framework/tools/sensory-buffer.py --project-root . prioritize --agent dev --top 5
 python framework/tools/sensory-buffer.py --project-root . flush --agent dev --older-than 24h
 
-# R&D Innovation Engine — reinforcement learning pour l'auto-amélioration
+# R&D Innovation Engine v2.0 — reinforcement learning + closed-loop
 python framework/tools/r-and-d.py --project-root . cycle                          # 1 cycle d'innovation
 python framework/tools/r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs avec RL
 python framework/tools/r-and-d.py --project-root . train --epochs 10 --auto-stop  # auto-stop si convergence
 python framework/tools/r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
 python framework/tools/r-and-d.py --project-root . harvest                        # récolte d'idées seule
+python framework/tools/r-and-d.py --project-root . seed                           # ensemencer les sources (incubator, stigmergy, mémoire)
+python framework/tools/r-and-d.py --project-root . health                         # santé du projet (closed-loop metrics)
+python framework/tools/r-and-d.py --project-root . prototype                      # générer des squelettes Python pour les gagnants
+python framework/tools/r-and-d.py --project-root . prototype --idea-id RND-0001-01 # prototype pour une idée spécifique
 python framework/tools/r-and-d.py --project-root . dashboard                      # tableau de bord markdown
 python framework/tools/r-and-d.py --project-root . status                         # état du moteur
 python framework/tools/r-and-d.py --project-root . tune --epsilon 0.3             # ajuster l'exploration
