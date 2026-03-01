@@ -53,17 +53,23 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Helm</item>
-    <item cmd="WL or fuzzy match on workload or deploy" action="#workload-ops">[WL] Workloads — déployer/modifier des services dans K3s</item>
-    <item cmd="FX or fuzzy match on flux or gitops" action="#fluxcd-ops">[FX] FluxCD &amp; GitOps — HelmReleases, Kustomizations, réconciliation</item>
-    <item cmd="LH or fuzzy match on longhorn or storage" action="#longhorn-ops">[LH] Longhorn &amp; Stockage — PVC, snapshots, NFS, volumes</item>
-    <item cmd="TB or fuzzy match on troubleshoot or debug" action="#troubleshoot-ops">[TB] Troubleshooting — debug pods, crashloop, OOM, scheduling</item>
-    <item cmd="MG or fuzzy match on migrate or migration" action="#migration-ops">[MG] Migration LXC → K3s — migrer un service Docker Compose vers K8s</item>
-    <item cmd="GP or fuzzy match on gpu" action="#gpu-ops">[GP] GPU — scheduling, NVIDIA device plugin, workloads GPU</item>
-    <item cmd="NP or fuzzy match on network or policy" action="#network-ops">[NP] Réseau &amp; Policies — NetworkPolicies, Services, Ingress</item>
+    <item cmd="WL or fuzzy match on workload or deploy" action="#workload-ops">[WL] Workloads — déployer/modifier des services K3s</item>
+    <item cmd="FX or fuzzy match on flux or gitops" action="#fluxcd-ops">[FX] FluxCD &amp; GitOps — HelmReleases, réconciliation</item>
+    <item cmd="TB or fuzzy match on troubleshoot or debug" action="#troubleshoot-ops">[TB] Troubleshooting — debug pods, crashloop, OOM</item>
+    <item cmd="LH or fuzzy match on longhorn or storage" action="#longhorn-ops">[LH] Longhorn &amp; Stockage — PVC, snapshots, NFS</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Migration, GPU, Réseau</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="MG or fuzzy match on migrate or migration" action="#migration-ops">[MG] Migration LXC → K3s — migrer Docker Compose vers K8s</item>
+    <item cmd="GP or fuzzy match on gpu" action="#gpu-ops">[GP] GPU — scheduling, NVIDIA device plugin</item>
+    <item cmd="NP or fuzzy match on network or policy" action="#network-ops">[NP] Réseau &amp; Policies — NetworkPolicies, Ingress</item>
+  </submenu
   </menu>
 
   <prompts>

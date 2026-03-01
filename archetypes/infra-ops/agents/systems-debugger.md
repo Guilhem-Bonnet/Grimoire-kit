@@ -55,17 +55,23 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Probe</item>
-    <item cmd="DG or fuzzy match on diagnostic or debug" action="#full-diagnostic">[DG] Diagnostic Complet — triage multi-couche d'un symptôme</item>
-    <item cmd="KN or fuzzy match on kernel or sysctl or cgroup" action="#kernel-ops">[KN] Kernel &amp; OS — sysctl, cgroups, namespaces, modules, scheduling</item>
-    <item cmd="PF or fuzzy match on perf or performance or flamegraph" action="#perf-ops">[PF] Performance — perf, strace, bpftrace, flamegraphs, profiling CPU/mémoire</item>
-    <item cmd="IO or fuzzy match on storage or io or disk or nfs" action="#storage-ops">[IO] Storage &amp; I/O — iostat, blktrace, fio, NFS, mount options, block devices</item>
-    <item cmd="NT or fuzzy match on network or tcpdump or iptables" action="#network-ops">[NT] Réseau — tcpdump, ss, iptables/nftables, bridges, ARP, DNS, MTU</item>
-    <item cmd="HW or fuzzy match on hardware or smart or gpu or sensor" action="#hardware-ops">[HW] Hardware — SMART, lm-sensors, GPU (nvidia-smi), lspci, IRQ</item>
-    <item cmd="PX or fuzzy match on proxmox or lxc or vm" action="#proxmox-ops">[PX] Proxmox — LXC limits, passthrough, vzdump, qemu, storage backend</item>
+    <item cmd="DG or fuzzy match on diagnostic or debug" action="#full-diagnostic">[DG] Diagnostic Complet — triage multi-couche</item>
+    <item cmd="PF or fuzzy match on perf or performance or flamegraph" action="#perf-ops">[PF] Performance — perf, strace, flamegraphs</item>
+    <item cmd="NT or fuzzy match on network or tcpdump or iptables" action="#network-ops">[NT] Réseau — tcpdump, ss, iptables, DNS</item>
+    <item cmd="IO or fuzzy match on storage or io or disk or nfs" action="#storage-ops">[IO] Storage &amp; I/O — iostat, fio, NFS</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Kernel, Hardware, Proxmox</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="KN or fuzzy match on kernel or sysctl or cgroup" action="#kernel-ops">[KN] Kernel &amp; OS — sysctl, cgroups, namespaces, modules</item>
+    <item cmd="HW or fuzzy match on hardware or smart or gpu or sensor" action="#hardware-ops">[HW] Hardware — SMART, lm-sensors, GPU, lspci</item>
+    <item cmd="PX or fuzzy match on proxmox or lxc or vm" action="#proxmox-ops">[PX] Proxmox — LXC limits, passthrough, vzdump</item>
+  </submenu
   </menu>
 
   <prompts>

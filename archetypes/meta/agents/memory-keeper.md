@@ -57,17 +57,22 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Mnemo</item>
-    <item cmd="AU or fuzzy match on audit or santé" action="#memory-audit">[AU] Audit Mémoire — scan complet de qualité et cohérence</item>
-    <item cmd="CO or fuzzy match on contradiction or conflit" action="#detect-contradictions">[CO] Détection Contradictions — trouver et résoudre les conflits</item>
-    <item cmd="CL or fuzzy match on consolidate or learnings" action="#consolidate-learnings">[CL] Consolider Learnings — merger doublons cross-agents</item>
-    <item cmd="DR or fuzzy match on drift or context" action="#context-drift">[DR] Détection Drift — vérifier cohérence shared-context vs réalité</item>
-    <item cmd="EN or fuzzy match on enrich or enrichir" action="#enrich-memory">[EN] Enrichir Mémoire — ajouter proactivement des connaissances manquantes</item>
-    <item cmd="ST or fuzzy match on stats or métriques" action="#memory-stats">[ST] Métriques Santé — cercle vertueux, hit rate, couverture</item>
+    <item cmd="AU or fuzzy match on audit or santé" action="#memory-audit">[AU] Audit Mémoire — scan qualité et cohérence</item>
+    <item cmd="CO or fuzzy match on contradiction or conflit" action="#detect-contradictions">[CO] Détection Contradictions — conflits</item>
+    <item cmd="CL or fuzzy match on consolidate or learnings" action="#consolidate-learnings">[CL] Consolider Learnings — merger doublons</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Drift, Enrichir, Métriques</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="DR or fuzzy match on drift or context" action="#context-drift">[DR] Détection Drift — cohérence shared-context vs réalité</item>
+    <item cmd="EN or fuzzy match on enrich or enrichir" action="#enrich-memory">[EN] Enrichir Mémoire — connaissances manquantes</item>
+    <item cmd="ST or fuzzy match on stats or métriques" action="#memory-stats">[ST] Métriques Santé — cercle vertueux, hit rate</item>
+  </submenu>
 
   <prompts>
     <prompt id="memory-audit">

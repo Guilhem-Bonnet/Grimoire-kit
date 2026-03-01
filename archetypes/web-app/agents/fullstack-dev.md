@@ -57,17 +57,23 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Stack</item>
     <item cmd="FF or fuzzy match on feature or fonctionnalité" action="#implement-feature">[FF] Implémenter Feature — de l'UI jusqu'à la DB</item>
-    <item cmd="BG or fuzzy match on bug or fix" action="#fix-bug">[BG] Corriger Bug — diagnostic couche par couche + fix</item>
-    <item cmd="AP or fuzzy match on api or endpoint or route" action="#api-design">[AP] Design API — spécifier une nouvelle route avant implémentation</item>
-    <item cmd="DB or fuzzy match on database or migration or schema" action="#db-ops">[DB] Base de Données — migration, requêtes, indexes, optimisation</item>
-    <item cmd="AU or fuzzy match on auth or authentification or session" action="#auth">[AU] Authentification — JWT, session, middleware, RBAC</item>
-    <item cmd="PF or fuzzy match on perf or performance" action="#performance">[PF] Performance — profiling, cache, bundle size, N+1 queries</item>
-    <item cmd="TS or fuzzy match on test or couverture" action="#tests">[TS] Tests — audit couverture + ajout tests manquants</item>
+    <item cmd="BG or fuzzy match on bug or fix" action="#fix-bug">[BG] Corriger Bug — diagnostic couche par couche</item>
+    <item cmd="AP or fuzzy match on api or endpoint or route" action="#api-design">[AP] Design API — spécifier une route</item>
+    <item cmd="TS or fuzzy match on test or couverture" action="#tests">[TS] Tests — audit couverture + ajout tests</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — DB, Auth, Perf</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="DB or fuzzy match on database or migration or schema" action="#db-ops">[DB] Base de Données — migration, requêtes, indexes</item>
+    <item cmd="AU or fuzzy match on auth or authentification or session" action="#auth">[AU] Authentification — JWT, session, middleware, RBAC</item>
+    <item cmd="PF or fuzzy match on perf or performance" action="#performance">[PF] Performance — profiling, cache, bundle size</item>
+  </submenu>
 
   <prompts>
     <prompt id="implement-feature">

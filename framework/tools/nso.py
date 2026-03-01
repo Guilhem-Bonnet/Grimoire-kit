@@ -101,9 +101,10 @@ def _load_tool(name: str) -> object | None:
 
 # ── Phase executors ───────────────────────────────────────────────────────────
 
-def _run_dream(project_root: Path, since: str | None = None,
+def _run_dream(project_root: Path | str, since: str | None = None,
                quick: bool = False, emit: bool = False) -> PhaseResult:
     """Phase 1 : Dream Mode."""
+    project_root = Path(project_root)
     start = time.monotonic()
     mod = _load_tool("dream")
     if mod is None:
@@ -181,8 +182,9 @@ def _run_dream(project_root: Path, since: str | None = None,
         )
 
 
-def _run_stigmergy(project_root: Path) -> PhaseResult:
+def _run_stigmergy(project_root: Path | str) -> PhaseResult:
     """Phase 2 : Stigmergy evaporation + stats."""
+    project_root = Path(project_root)
     start = time.monotonic()
     mod = _load_tool("stigmergy")
     if mod is None:
@@ -219,9 +221,10 @@ def _run_stigmergy(project_root: Path) -> PhaseResult:
         )
 
 
-def _run_antifragile(project_root: Path,
+def _run_antifragile(project_root: Path | str,
                      since: str | None = None) -> PhaseResult:
     """Phase 3 : Antifragile Score."""
+    project_root = Path(project_root)
     start = time.monotonic()
     mod = _load_tool("antifragile-score")
     if mod is None:
@@ -250,9 +253,10 @@ def _run_antifragile(project_root: Path,
         )
 
 
-def _run_darwinism(project_root: Path,
+def _run_darwinism(project_root: Path | str,
                    since: str | None = None) -> PhaseResult:
     """Phase 4 : Agent Darwinism."""
+    project_root = Path(project_root)
     start = time.monotonic()
     mod = _load_tool("agent-darwinism")
     if mod is None:
@@ -260,8 +264,11 @@ def _run_darwinism(project_root: Path,
                            summary="agent-darwinism.py introuvable")
 
     try:
-        evaluations = mod.evaluate_agents(project_root, since=since)
-        if not evaluations:
+        # Darwinism needs a trace file path
+        trace_path = project_root / "_bmad-output" / "BMAD_TRACE.md"
+        scores = mod.cmd_evaluate(project_root, trace_path,
+                                  since=since, save=False)
+        if not scores:
             return PhaseResult(
                 name="darwinism", status="ok",
                 duration_ms=int((time.monotonic() - start) * 1000),
@@ -270,17 +277,17 @@ def _run_darwinism(project_root: Path,
             )
 
         agents_data = {}
-        for ev in evaluations:
-            agents_data[ev.agent_name] = {
-                "fitness": round(ev.fitness_score, 1),
-                "level": ev.evolution_level,
+        for sc in scores:
+            agents_data[sc.agent_id] = {
+                "fitness": round(sc.composite, 1),
+                "level": sc.level,
             }
 
-        top = max(evaluations, key=lambda e: e.fitness_score)
+        top = max(scores, key=lambda s: s.composite)
         return PhaseResult(
             name="darwinism", status="ok",
             duration_ms=int((time.monotonic() - start) * 1000),
-            summary=f"{len(evaluations)} agents — top: {top.agent_name} ({top.fitness_score:.0f})",
+            summary=f"{len(scores)} agents — top: {top.agent_id} ({top.composite:.0f})",
             data={"agents": agents_data},
         )
     except Exception as e:
@@ -291,9 +298,10 @@ def _run_darwinism(project_root: Path,
         )
 
 
-def _run_memory_lint(project_root: Path,
+def _run_memory_lint(project_root: Path | str,
                      emit: bool = False) -> PhaseResult:
     """Phase 5 : Memory Lint."""
+    project_root = Path(project_root)
     start = time.monotonic()
     mod = _load_tool("memory-lint")
     if mod is None:
@@ -334,12 +342,12 @@ def _run_memory_lint(project_root: Path,
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
-def run_nso(project_root: Path, since: str | None = None,
+def run_nso(project_root: Path | str, since: str | None = None,
             quick: bool = False, emit: bool = False) -> NSOReport:
     """Exécute toutes les phases du Nervous System Orchestrator.
 
     Args:
-        project_root: racine du projet BMAD
+        project_root: racine du projet BMAD (str ou Path)
         since: filtre temporel (YYYY-MM-DD ou 'auto')
         quick: mode rapide pour le dream
         emit: émettre les résultats vers stigmergy
@@ -347,6 +355,7 @@ def run_nso(project_root: Path, since: str | None = None,
     Returns:
         NSOReport avec les résultats de chaque phase
     """
+    project_root = Path(project_root)
     total_start = time.monotonic()
     report = NSOReport(
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -440,6 +449,279 @@ def report_to_dict(report: NSOReport) -> dict:
     }
 
 
+# ── Retrospective ────────────────────────────────────────────────────────────
+
+@dataclass
+class RetroItem:
+    """Un élément de rétrospective."""
+    category: str          # went_well | problem | action
+    text: str
+    source: str            # phase or file that produced this
+    priority: int = 0      # 0=normal, 1=high
+
+
+@dataclass
+class RetroReport:
+    """Rapport de rétrospective."""
+    timestamp: str = ""
+    went_well: list[RetroItem] = field(default_factory=list)
+    problems: list[RetroItem] = field(default_factory=list)
+    actions: list[RetroItem] = field(default_factory=list)
+
+    @property
+    def total_items(self) -> int:
+        return len(self.went_well) + len(self.problems) + len(self.actions)
+
+
+def _collect_retro_learnings(project_root: Path,
+                             since: str | None = None) -> list[RetroItem]:
+    """Collecte les learnings récents → went_well."""
+    items: list[RetroItem] = []
+    memory_dir = project_root / "_bmad" / "_memory"
+
+    # Agent learnings
+    learnings_dir = memory_dir / "agent-learnings"
+    if learnings_dir.is_dir():
+        for f in sorted(learnings_dir.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Filter by date if since is set
+                if since and line[:10] < since:
+                    continue
+                if len(line) > 20:
+                    items.append(RetroItem(
+                        category="went_well",
+                        text=line[:200],
+                        source=f.name,
+                    ))
+    return items
+
+
+def _collect_retro_failures(project_root: Path,
+                            since: str | None = None) -> list[RetroItem]:
+    """Collecte les failures récents → problems."""
+    items: list[RetroItem] = []
+    museum = project_root / "_bmad" / "_memory" / "failure-museum.md"
+    if not museum.is_file():
+        return items
+
+    try:
+        text = museum.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return items
+
+    current_entry = ""
+    for line in text.splitlines():
+        if line.startswith("## ") or line.startswith("### "):
+            if current_entry and len(current_entry) > 15:
+                items.append(RetroItem(
+                    category="problem",
+                    text=current_entry[:200],
+                    source="failure-museum.md",
+                    priority=1,
+                ))
+            current_entry = line.lstrip("#").strip()
+        elif line.strip():
+            if len(current_entry) < 200:
+                current_entry += " " + line.strip()
+
+    if current_entry and len(current_entry) > 15:
+        items.append(RetroItem(
+            category="problem",
+            text=current_entry[:200],
+            source="failure-museum.md",
+            priority=1,
+        ))
+    return items
+
+
+def _collect_retro_pheromones(project_root: Path) -> list[RetroItem]:
+    """Collecte les phéromones NEED non résolues → actions."""
+    items: list[RetroItem] = []
+    mod = _load_tool("stigmergy")
+    if mod is None:
+        return items
+
+    try:
+        board = mod.load_board(project_root)
+        for p in board.pheromones:
+            if not p.resolved and p.pheromone_type in ("NEED", "ALERT"):
+                items.append(RetroItem(
+                    category="action",
+                    text=f"[{p.pheromone_type}] {p.location}: {p.text}"[:200],
+                    source="stigmergy",
+                    priority=1 if p.pheromone_type == "ALERT" else 0,
+                ))
+    except Exception:
+        pass
+    return items
+
+
+def _collect_retro_lint(project_root: Path) -> list[RetroItem]:
+    """Collecte les issues memory-lint → problems ou actions."""
+    items: list[RetroItem] = []
+    mod = _load_tool("memory-lint")
+    if mod is None:
+        return items
+
+    try:
+        report = mod.lint_memory(project_root)
+        for issue in report.issues:
+            if issue.severity == "error":
+                items.append(RetroItem(
+                    category="problem",
+                    text=f"[LINT] {issue.title}: {issue.description}"[:200],
+                    source="memory-lint",
+                    priority=1,
+                ))
+            elif issue.severity == "warning":
+                items.append(RetroItem(
+                    category="action",
+                    text=f"[LINT] {issue.title}"[:200],
+                    source="memory-lint",
+                ))
+    except Exception:
+        pass
+    return items
+
+
+def _collect_retro_antifragile(project_root: Path) -> list[RetroItem]:
+    """Collecte les stresseurs antifragile → went_well ou problems."""
+    items: list[RetroItem] = []
+    mod = _load_tool("antifragile-score")
+    if mod is None:
+        return items
+
+    try:
+        result = mod.compute_antifragile_score(project_root)
+        for d in result.dimensions:
+            score_pct = d.score * 100
+            if score_pct >= 70:
+                items.append(RetroItem(
+                    category="went_well",
+                    text=f"Anti-fragile {d.name}: {score_pct:.0f}%",
+                    source="antifragile",
+                ))
+            elif score_pct < 40:
+                items.append(RetroItem(
+                    category="problem",
+                    text=f"Anti-fragile {d.name}: {score_pct:.0f}% (faible)",
+                    source="antifragile",
+                    priority=1,
+                ))
+    except Exception:
+        pass
+    return items
+
+
+def run_retro(project_root: Path | str,
+              since: str | None = None) -> RetroReport:
+    """Exécute la rétrospective : croise learnings, failures, phéromones,
+    lint et antifragile pour produire un rapport went_well/problems/actions."""
+    project_root = Path(project_root)
+    report = RetroReport(
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+    # Collecter depuis toutes les sources
+    all_items: list[RetroItem] = []
+    all_items.extend(_collect_retro_learnings(project_root, since))
+    all_items.extend(_collect_retro_failures(project_root, since))
+    all_items.extend(_collect_retro_pheromones(project_root))
+    all_items.extend(_collect_retro_lint(project_root))
+    all_items.extend(_collect_retro_antifragile(project_root))
+
+    # Trier et limiter
+    for item in all_items:
+        if item.category == "went_well":
+            report.went_well.append(item)
+        elif item.category == "problem":
+            report.problems.append(item)
+        elif item.category == "action":
+            report.actions.append(item)
+
+    # Trier par priorité (high first), puis limiter à 10 par catégorie
+    report.went_well.sort(key=lambda x: -x.priority)
+    report.problems.sort(key=lambda x: -x.priority)
+    report.actions.sort(key=lambda x: -x.priority)
+    report.went_well = report.went_well[:10]
+    report.problems = report.problems[:10]
+    report.actions = report.actions[:10]
+
+    return report
+
+
+def render_retro(report: RetroReport) -> str:
+    """Rend le rapport de rétrospective en texte formaté."""
+    lines = [
+        "",
+        "╔══════════════════════════════════════════════════════════════╗",
+        "║        🔄 Rétrospective — Nervous System                   ║",
+        "╚══════════════════════════════════════════════════════════════╝",
+        "",
+        f"  Timestamp : {report.timestamp}",
+        f"  Éléments  : {report.total_items}",
+        "",
+    ]
+
+    # Went well
+    lines.append("  ✅ CE QUI A BIEN MARCHÉ")
+    lines.append("  " + "─" * 55)
+    if report.went_well:
+        for item in report.went_well:
+            lines.append(f"    • [{item.source}] {item.text}")
+    else:
+        lines.append("    (aucun élément)")
+    lines.append("")
+
+    # Problems
+    lines.append("  ❌ PROBLÈMES DÉTECTÉS")
+    lines.append("  " + "─" * 55)
+    if report.problems:
+        for item in report.problems:
+            flag = "🔴" if item.priority > 0 else "🟡"
+            lines.append(f"    {flag} [{item.source}] {item.text}")
+    else:
+        lines.append("    (aucun problème)")
+    lines.append("")
+
+    # Actions
+    lines.append("  🎯 ACTIONS RECOMMANDÉES")
+    lines.append("  " + "─" * 55)
+    if report.actions:
+        for i, item in enumerate(report.actions, 1):
+            lines.append(f"    {i}. [{item.source}] {item.text}")
+    else:
+        lines.append("    (aucune action)")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def retro_to_dict(report: RetroReport) -> dict:
+    """Convertit le rapport de rétrospective en dict JSON."""
+    def _item_dict(item: RetroItem) -> dict:
+        return {
+            "text": item.text,
+            "source": item.source,
+            "priority": item.priority,
+        }
+
+    return {
+        "timestamp": report.timestamp,
+        "total_items": report.total_items,
+        "went_well": [_item_dict(i) for i in report.went_well],
+        "problems": [_item_dict(i) for i in report.problems],
+        "actions": [_item_dict(i) for i in report.actions],
+    }
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -463,6 +745,13 @@ def main():
     run_p.add_argument("--emit", action="store_true",
                        help="Émettre les résultats vers stigmergy")
 
+    # retro
+    retro_p = sub.add_parser("retro", help="Rétrospective croisée")
+    retro_p.add_argument("--since", default=None,
+                         help="Date début (YYYY-MM-DD)")
+    retro_p.add_argument("--json", action="store_true",
+                         help="Sortie JSON")
+
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
 
@@ -480,6 +769,17 @@ def main():
             print(render_report(report))
 
         sys.exit(1 if report.error_count > 0 else 0)
+
+    if args.command == "retro":
+        retro = run_retro(project_root, args.since)
+
+        if args.json:
+            print(json.dumps(retro_to_dict(retro), indent=2,
+                             ensure_ascii=False))
+        else:
+            print(render_retro(retro))
+
+        sys.exit(0)
 
 
 if __name__ == "__main__":

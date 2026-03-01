@@ -266,5 +266,200 @@ class TestConstants(unittest.TestCase):
         self.assertIn("memory-lint", self.mod.PHASES)
 
 
+# ── Tests Retro — data classes ────────────────────────────────────────────────
+
+class TestRetroItem(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+
+    def test_defaults(self):
+        item = self.mod.RetroItem(category="went_well", text="ok", source="test")
+        self.assertEqual(item.priority, 0)
+
+    def test_fields(self):
+        item = self.mod.RetroItem(
+            category="problem", text="boom", source="lint", priority=1,
+        )
+        self.assertEqual(item.category, "problem")
+        self.assertEqual(item.source, "lint")
+        self.assertEqual(item.priority, 1)
+
+
+class TestRetroReport(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+
+    def test_empty_report(self):
+        report = self.mod.RetroReport()
+        self.assertEqual(report.total_items, 0)
+        self.assertEqual(report.went_well, [])
+        self.assertEqual(report.problems, [])
+        self.assertEqual(report.actions, [])
+
+    def test_total_items(self):
+        report = self.mod.RetroReport(
+            went_well=[self.mod.RetroItem("went_well", "a", "s")],
+            problems=[self.mod.RetroItem("problem", "b", "s"),
+                      self.mod.RetroItem("problem", "c", "s")],
+            actions=[],
+        )
+        self.assertEqual(report.total_items, 3)
+
+
+# ── Tests Retro — collectors ─────────────────────────────────────────────────
+
+class TestRetroCollectors(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+        self.tmpdir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_collect_learnings_empty(self):
+        items = self.mod._collect_retro_learnings(self.tmpdir)
+        self.assertEqual(items, [])
+
+    def test_collect_learnings_with_data(self):
+        ldir = self.tmpdir / "_bmad" / "_memory" / "agent-learnings"
+        ldir.mkdir(parents=True)
+        (ldir / "agent-dev.md").write_text(
+            "# Dev\n2026-01-01 This works great for testing\n"
+            "short\n"
+            "2026-01-02 Another long enough learning that should appear\n",
+            encoding="utf-8",
+        )
+        items = self.mod._collect_retro_learnings(self.tmpdir)
+        self.assertGreaterEqual(len(items), 1)
+        self.assertTrue(all(i.category == "went_well" for i in items))
+
+    def test_collect_failures_empty(self):
+        items = self.mod._collect_retro_failures(self.tmpdir)
+        self.assertEqual(items, [])
+
+    def test_collect_failures_with_museum(self):
+        mem = self.tmpdir / "_bmad" / "_memory"
+        mem.mkdir(parents=True)
+        (mem / "failure-museum.md").write_text(
+            "# Failure Museum\n"
+            "## Incident: Deploy failed badly\n"
+            "The deploy pipeline broke because of X.\n"
+            "## Incident: Data loss event\n"
+            "Corrupt write to disk caused data loss.\n",
+            encoding="utf-8",
+        )
+        items = self.mod._collect_retro_failures(self.tmpdir)
+        self.assertGreaterEqual(len(items), 1)
+        self.assertTrue(all(i.category == "problem" for i in items))
+        self.assertTrue(all(i.priority == 1 for i in items))
+
+    def test_collect_pheromones_empty(self):
+        items = self.mod._collect_retro_pheromones(self.tmpdir)
+        self.assertEqual(items, [])
+
+    def test_collect_lint_empty(self):
+        items = self.mod._collect_retro_lint(self.tmpdir)
+        self.assertIsInstance(items, list)
+
+    def test_collect_antifragile_empty(self):
+        items = self.mod._collect_retro_antifragile(self.tmpdir)
+        self.assertIsInstance(items, list)
+
+
+# ── Tests Retro — run / render / dict ────────────────────────────────────────
+
+class TestRunRetro(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+        self.tmpdir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_empty_retro(self):
+        report = self.mod.run_retro(self.tmpdir)
+        self.assertIsInstance(report, self.mod.RetroReport)
+        self.assertNotEqual(report.timestamp, "")
+
+    def test_retro_accepts_string_path(self):
+        report = self.mod.run_retro(str(self.tmpdir))
+        self.assertIsInstance(report, self.mod.RetroReport)
+
+    def test_retro_with_since(self):
+        report = self.mod.run_retro(self.tmpdir, since="2099-01-01")
+        self.assertIsInstance(report, self.mod.RetroReport)
+
+    def test_retro_limits_to_10(self):
+        # Créer beaucoup de learnings
+        ldir = self.tmpdir / "_bmad" / "_memory" / "agent-learnings"
+        ldir.mkdir(parents=True)
+        lines = "\n".join(
+            f"2026-01-{i:02d} Learning number {i} with enough text to pass"
+            for i in range(1, 25)
+        )
+        (ldir / "agent-xyz.md").write_text(f"# X\n{lines}\n", encoding="utf-8")
+        report = self.mod.run_retro(self.tmpdir)
+        self.assertLessEqual(len(report.went_well), 10)
+
+
+class TestRenderRetro(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+
+    def test_render_empty(self):
+        report = self.mod.RetroReport(timestamp="2026-06-01 12:00:00")
+        text = self.mod.render_retro(report)
+        self.assertIn("Rétrospective", text)
+        self.assertIn("aucun élément", text)
+        self.assertIn("aucun problème", text)
+        self.assertIn("aucune action", text)
+
+    def test_render_with_items(self):
+        report = self.mod.RetroReport(
+            timestamp="2026-06-01 12:00:00",
+            went_well=[self.mod.RetroItem("went_well", "Bonne chose", "test")],
+            problems=[self.mod.RetroItem("problem", "Bug grave", "lint", priority=1)],
+            actions=[self.mod.RetroItem("action", "Corriger X", "stigmergy")],
+        )
+        text = self.mod.render_retro(report)
+        self.assertIn("Bonne chose", text)
+        self.assertIn("Bug grave", text)
+        self.assertIn("Corriger X", text)
+        self.assertIn("🔴", text)  # priority=1
+
+    def test_render_shows_item_count(self):
+        report = self.mod.RetroReport(
+            timestamp="2026-06-01",
+            problems=[self.mod.RetroItem("problem", "Pb", "s")],
+        )
+        text = self.mod.render_retro(report)
+        self.assertIn("1", text)  # total items = 1
+
+
+class TestRetroToDict(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_nso()
+
+    def test_empty(self):
+        report = self.mod.RetroReport(timestamp="T")
+        d = self.mod.retro_to_dict(report)
+        self.assertEqual(d["total_items"], 0)
+        self.assertEqual(d["went_well"], [])
+        self.assertEqual(d["problems"], [])
+        self.assertEqual(d["actions"], [])
+        self.assertEqual(d["timestamp"], "T")
+
+    def test_with_items(self):
+        report = self.mod.RetroReport(
+            timestamp="T",
+            went_well=[self.mod.RetroItem("went_well", "ok", "s", 1)],
+        )
+        d = self.mod.retro_to_dict(report)
+        self.assertEqual(d["total_items"], 1)
+        self.assertEqual(d["went_well"][0]["text"], "ok")
+        self.assertEqual(d["went_well"][0]["priority"], 1)
+        self.assertEqual(d["went_well"][0]["source"], "s")
+
+
 if __name__ == "__main__":
     unittest.main()

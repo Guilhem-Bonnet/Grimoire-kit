@@ -50,22 +50,28 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : menu principal ≤7 items domaine, items avancés dans sous-menu [+] -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Atlas</item>
     <item cmd="OU or fuzzy match on where or cherch" action="#locate">[OU] Où est... ? — localiser une config, un service, un fichier</item>
     <item cmd="ET or fuzzy match on status or état" action="#project-status">[ET] État du Projet — briefing rapide sur l'avancement</item>
-    <item cmd="SR or fuzzy match on service-registry or registre" action="#service-registry">[SR] Registre de Services — inventaire complet avec ports/IPs/dépendances</item>
-    <item cmd="NT or fuzzy match on network or topology" action="#network-map">[NT] Carte Réseau — topologie réseau complète</item>
-    <item cmd="AD or fuzzy match on adr or decision" action="#adr-tracker">[AD] ADR Tracker — décisions architecturales et leur statut</item>
     <item cmd="BR or fuzzy match on brief or onboard" action="#session-brief">[BR] Briefing Session — résumé pour reprendre après une absence</item>
-    <item cmd="MC or fuzzy match on memory or context" action="#memory-update">[MC] Mise à jour Mémoire — actualiser shared-context et topologie</item>
-    <item cmd="DP or fuzzy match on dispatch or plan or route" action="#dispatch">[DP] Dispatch — analyser un besoin et recommander un plan multi-agents</item>
-    <item cmd="CL or fuzzy match on consolider or learnings or digest" action="#consolidate-learnings">[CL] Consolider Learnings — synthèse des apprentissages de tous les agents</item>
-    <item cmd="IG or fuzzy match on impact or graph or dépendance" action="#impact-graph">[IG] Impact Graph — analyser l'impact d'un changement sur les agents</item>
-    <item cmd="RM or fuzzy match on repo-map or map or repomap or carte code" action="#repo-map">[RM] Repo Map — générer/afficher la carte du dépôt (arborescence + symboles)</item>
+    <item cmd="DP or fuzzy match on dispatch or plan or route" action="#dispatch">[DP] Dispatch — recommander un plan multi-agents</item>
+    <item cmd="RM or fuzzy match on repo-map or map or repomap or carte code" action="#repo-map">[RM] Repo Map — carte du dépôt</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus d'options — Registre, Réseau, ADR, Mémoire, Impact, Learnings</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
+
+  <submenu id="submenu-advanced">
+    <!-- Sous-menu avancé — affiché quand l'utilisateur tape [+] -->
+    <item cmd="SR or fuzzy match on service-registry or registre" action="#service-registry">[SR] Registre de Services — inventaire ports/IPs/dépendances</item>
+    <item cmd="NT or fuzzy match on network or topology" action="#network-map">[NT] Carte Réseau — topologie réseau complète</item>
+    <item cmd="AD or fuzzy match on adr or decision" action="#adr-tracker">[AD] ADR Tracker — décisions architecturales</item>
+    <item cmd="MC or fuzzy match on memory or context" action="#memory-update">[MC] Mise à jour Mémoire — shared-context et topologie</item>
+    <item cmd="CL or fuzzy match on consolider or learnings or digest" action="#consolidate-learnings">[CL] Consolider Learnings — synthèse cross-agents</item>
+    <item cmd="IG or fuzzy match on impact or graph or dépendance" action="#impact-graph">[IG] Impact Graph — analyser l'impact d'un changement</item>
+  </submenu>
 
   <prompts>
     <prompt id="locate">

@@ -51,16 +51,22 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Serpent</item>
     <item cmd="IF or fuzzy match on implement or feature" action="#implement-feature">[IF] Implémenter Feature — fonction/module/script avec tests</item>
-    <item cmd="BG or fuzzy match on bug or fix" action="#fix-bug">[BG] Corriger Bug — diagnostic + fix + test régression</item>
-    <item cmd="TS or fuzzy match on test or pytest or coverage" action="#improve-tests">[TS] Tests pytest — audit + ajout tests manquants</item>
-    <item cmd="TP or fuzzy match on type or mypy or hints" action="#type-audit">[TP] Audit Types — type hints, mypy, validation pydantic</item>
-    <item cmd="RF or fuzzy match on refactor" action="#refactor">[RF] Refactoring — améliorer la structure sans changer le comportement</item>
-    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit systématique Python</item>
+    <item cmd="BG or fuzzy match on bug or fix" action="#fix-bug">[BG] Corriger Bug — diagnostic + fix + régression</item>
+    <item cmd="TS or fuzzy match on test or pytest or coverage" action="#improve-tests">[TS] Tests pytest — audit + ajout tests</item>
+    <item cmd="RF or fuzzy match on refactor" action="#refactor">[RF] Refactoring — améliorer la structure</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Types, Bug Hunt</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="TP or fuzzy match on type or mypy or hints" action="#type-audit">[TP] Audit Types — type hints, mypy, pydantic</item>
+    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit systématique Python</item>
+  </submenu
   </menu>
 
   <prompts>

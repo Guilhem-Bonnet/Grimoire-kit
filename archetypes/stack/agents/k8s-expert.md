@@ -50,17 +50,22 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Kube</item>
     <item cmd="WL or fuzzy match on workload or deploy or deployment" action="#workload-ops">[WL] Workloads — déployer/modifier Deployments, StatefulSets</item>
-    <item cmd="TB or fuzzy match on troubleshoot or debug or crashloop" action="#troubleshoot">[TB] Troubleshooting — debug pods, crashloop, OOM, scheduling</item>
+    <item cmd="TB or fuzzy match on troubleshoot or debug or crashloop" action="#troubleshoot">[TB] Troubleshooting — debug pods, crashloop, OOM</item>
     <item cmd="NP or fuzzy match on network or ingress or policy" action="#network-ops">[NP] Réseau — Services, Ingress, NetworkPolicies</item>
-    <item cmd="ST or fuzzy match on storage or pvc or volume" action="#storage-ops">[ST] Stockage — PVC, StorageClass, volumes persistants</item>
-    <item cmd="SC or fuzzy match on security or rbac or secret" action="#security-ops">[SC] Sécurité — RBAC, Secrets, PodSecurity, NetworkPolicies</item>
-    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit K8s systématique</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Stockage, Sécurité, Bug Hunt</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="ST or fuzzy match on storage or pvc or volume" action="#storage-ops">[ST] Stockage — PVC, StorageClass, volumes</item>
+    <item cmd="SC or fuzzy match on security or rbac or secret" action="#security-ops">[SC] Sécurité — RBAC, Secrets, PodSecurity</item>
+    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit K8s systématique</item>
+  </submenu>
 
   <prompts>
     <prompt id="workload-ops">

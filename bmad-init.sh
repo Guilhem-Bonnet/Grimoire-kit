@@ -987,6 +987,48 @@ cmd_nso() {
     exit $?
 }
 
+# ─── Schema Validator ────────────────────────────────────────────────────────
+# Validation des fichiers YAML (archetype DNA, team manifests, agent DNA)
+# Usage: bmad-init.sh schema-validate [--type dna|team|agent_dna] [--file PATH] [--json]
+cmd_schemav() {
+    shift  # retirer "schema-validate"
+
+    local sv_script
+    sv_script="$(dirname "$(realpath "$0")")/framework/tools/schema-validator.py"
+
+    if [[ ! -f "$sv_script" ]]; then
+        error "framework/tools/schema-validator.py introuvable — lancez depuis la racine du kit"
+    fi
+    if ! command -v python3 &>/dev/null; then
+        error "python3 requis pour schema-validate"
+    fi
+
+    echo ""
+    python3 "$sv_script" --project-root "$(pwd)" validate "$@"
+    exit $?
+}
+
+# ─── Auto-Doc Sync ───────────────────────────────────────────────────────────
+# Détection et correction automatique du drift README ↔ code
+# Usage: bmad-init.sh auto-doc check [--json] | auto-doc sync [--json]
+cmd_autodoc() {
+    shift  # retirer "auto-doc"
+
+    local ad_script
+    ad_script="$(dirname "$(realpath "$0")")/framework/tools/auto-doc.py"
+
+    if [[ ! -f "$ad_script" ]]; then
+        error "framework/tools/auto-doc.py introuvable — lancez depuis la racine du kit"
+    fi
+    if ! command -v python3 &>/dev/null; then
+        error "python3 requis pour auto-doc"
+    fi
+
+    echo ""
+    python3 "$ad_script" --project-root "$(pwd)" "$@"
+    exit $?
+}
+
 # ─── Dream Mode ──────────────────────────────────────────────────────────────
 # Consolidation hors-session : insights émergents depuis la mémoire
 # Usage: bmad-init.sh dream [--since DATE] [--agent ID] [--validate] [--dry-run]
@@ -2071,6 +2113,12 @@ if [[ "${1:-}" == "memory-lint" ]]; then
 fi
 if [[ "${1:-}" == "nso" ]]; then
     cmd_nso "$@"
+fi
+if [[ "${1:-}" == "schema-validate" ]]; then
+    cmd_schemav "$@"
+fi
+if [[ "${1:-}" == "auto-doc" ]]; then
+    cmd_autodoc "$@"
 fi
 
 # ─── Parsing arguments ──────────────────────────────────────────────────────

@@ -51,19 +51,24 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Gopher</item>
     <item cmd="IF or fuzzy match on implement or feature" action="#implement-feature">[IF] Implémenter Feature — nouvelle fonctionnalité avec tests</item>
     <item cmd="BG or fuzzy match on bug or fix or debug" action="#fix-bug">[BG] Corriger Bug — diagnostic + fix + régression test</item>
-    <item cmd="RF or fuzzy match on refactor or refactoring" action="#refactor">[RF] Refactoring — amélioration structure sans changement comportement</item>
-    <item cmd="TS or fuzzy match on test or coverage" action="#improve-tests">[TS] Tests &amp; Couverture — audit + ajout tests manquants</item>
+    <item cmd="RF or fuzzy match on refactor or refactoring" action="#refactor">[RF] Refactoring — amélioration structure</item>
+    <item cmd="TS or fuzzy match on test or coverage" action="#improve-tests">[TS] Tests &amp; Couverture — audit + ajout tests</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Perf, API, DB, Bug Hunt</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
     <item cmd="PR or fuzzy match on perf or performance or profiling" action="#performance">[PR] Performance — profiling, benchmarks, optimisation</item>
     <item cmd="API or fuzzy match on api or endpoint or route" action="#api-review">[API] API Review — audit contrats HTTP, erreurs, validation</item>
     <item cmd="DB or fuzzy match on database or migration or sqlite" action="#db-ops">[DB] Base de Données — migrations, queries, indexes</item>
     <item cmd="BH or fuzzy match on bug-hunt or hunt" action="#bug-hunt">[BH] Bug Hunt — audit systématique par vagues</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
-    <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
-  </menu>
+  </submenu>
 
   <prompts>
     <prompt id="implement-feature">

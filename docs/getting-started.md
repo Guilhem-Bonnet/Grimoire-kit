@@ -74,12 +74,17 @@ Ce fichier centralise toute la configuration de votre projet :
 project:
   name: "Mon API Backend"
   type: "api"
+  metaphor: "forteresse"                # Guide les agents (optionnel)
   stack: ["Python", "FastAPI", "PostgreSQL"]
 
 user:
   name: "Alice"
   language: "Français"
+  skill_level: "intermediate"           # beginner | intermediate | expert
 ```
+
+> **`skill_level`** adapte la verbosité des agents : `beginner` = pédagogique avec explications détaillées, `intermediate` = équilibré, `expert` = direct et concis.
+> **`metaphor`** donne une métaphore structurante au projet que les agents utilisent pour nommer et prioriser (ex: "forteresse" → vocabulaire sécurité-first).
 
 ### 2. Installer un archétype supplémentaire (optionnel)
 

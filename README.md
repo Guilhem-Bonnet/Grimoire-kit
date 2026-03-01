@@ -35,6 +35,19 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 - 📦 **Cross-Project Migration** — exporte et importe des artefacts BMAD entre projets (learnings, rules, DNA, agents, consensus, anti-fragile)
 - 🧬 **Agent Darwinism** — sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation
 - 🐜 **Stigmergy** — coordination indirecte par phéromones numériques : émission, détection, amplification, évaporation, patterns émergents
+- 🗣️ **Maximes de Grice** — protocole de communication optimal : quantité, qualité, pertinence, manière
+- 📦 **Chunking 7±2** — structuration cognitive des outputs et menus (loi de Miller)
+- 🎭 **Camouflage Adaptatif** — adaptation automatique beginner/intermediate/expert
+- 🧲 **Priming Cognitif** — contexte chargé avant chaque question ou décision
+- 🏣 **Wabi-sabi** — acceptation pragmatique de l'imperfection (MVP > perfection)
+- 🧭 **Context Router** — routage intelligent du contexte vers les bons agents
+- 🛡️ **Immune System** — détection d'anomalies et auto-réparation diagnostique
+- 🔮 **Oracle Introspectif** — CTO virtuel : SWOT, maturité, attracteurs, conseils
+- 🧠 **Bias Toolkit** — 12 biais cognitifs documentés avec guidelines éthiques
+- 🎵 **Harmony Check** — score d'harmonie architecturale et détection de dissonances
+- 🧩 **Workflow Snippets** — composition modulaire de workflows depuis des briques réutilisables
+- 📊 **Dashboard** — tableau de bord complet : santé, entropie Shannon, Pareto Gini, activité git
+- 🌐 **Project Graph** — graphe de dépendances avec centralité, clustering et export Mermaid
 
 ## Quick Start
 
@@ -346,6 +359,25 @@ bash bmad-init.sh stigmergy amplify --id PH-xx --agent qa  # renforcer
 bash bmad-init.sh stigmergy landscape            # carte phéromonique
 bash bmad-init.sh stigmergy trails               # patterns émergents
 bash bmad-init.sh stigmergy evaporate            # nettoyer les signaux morts
+
+# Memory Lint — validation de cohérence mémoire
+bash bmad-init.sh memory-lint                    # vérifier la mémoire
+bash bmad-init.sh memory-lint --fix              # corriger automatiquement
+bash bmad-init.sh memory-lint --json             # sortie JSON
+
+# NSO — Nervous System Orchestrator
+bash bmad-init.sh nso run                        # cycle complet (dream→stigmergy→antifragile→darwinism→lint)
+bash bmad-init.sh nso run --quick --json         # mode rapide, sortie JSON
+bash bmad-init.sh nso retro                      # rétrospective croisée
+
+# Schema Validator — validation des fichiers YAML du kit
+bash bmad-init.sh schema-validate                # valider tous les fichiers
+bash bmad-init.sh schema-validate --type dna     # valider uniquement les DNA
+bash bmad-init.sh schema-validate --file path    # valider un fichier spécifique
+
+# Auto-Doc — synchronisation README ↔ code
+bash bmad-init.sh auto-doc check                 # détecter les drifts
+bash bmad-init.sh auto-doc sync                  # corriger automatiquement
 ```
 
 Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète.
@@ -390,9 +422,9 @@ bash _bmad/_config/custom/sil-collect.sh
 
 ## 🧪 Tests
 
-Le kit inclut une suite de tests complète (737+ tests) en deux catégories :
+Le kit inclut une suite de tests complète (1016+ tests) en deux catégories :
 
-**Tests unitaires Python** (15 fichiers, 737 tests) :
+**Tests unitaires Python** (20 fichiers, 1016 tests) :
 ```bash
 # Lancer tous les tests
 python3 -m unittest discover -s tests -v
@@ -406,18 +438,23 @@ python3 -m unittest tests.test_context_guard_advanced -v
 | `test_python_tools.py` | Tous les outils (base) | 48 |
 | `test_context_guard_advanced.py` | Context Guard avancé | 42 |
 | `test_maintenance_advanced.py` | Maintenance mémoire | 29 |
-| `test_agent_forge.py` | Agent Forge | 36 |
+| `test_agent_forge.py` | Agent Forge | 39 |
 | `test_agent_bench.py` | Agent Bench | 19 |
 | `test_dna_evolve.py` | DNA Evolve | 25 |
 | `test_session_save.py` | Session Save | 11 |
-| `test_gen_tests.py` | Gen Tests (scaffolding) | 31 |
-| `test_dream.py` | Dream Mode | 68 |
+| `test_gen_tests.py` | Gen Tests (scaffolding) | 32 |
+| `test_dream.py` | Dream Mode | 170 |
 | `test_adversarial_consensus.py` | Adversarial Consensus | 76 |
 | `test_antifragile_score.py` | Anti-Fragile Score | 76 |
 | `test_reasoning_stream.py` | Reasoning Stream | 56 |
 | `test_cross_migrate.py` | Cross-Project Migration | 59 |
 | `test_agent_darwinism.py` | Agent Darwinism | 62 |
 | `test_stigmergy.py` | Stigmergy | 96 |
+| `test_memory_lint.py` | Memory Lint | 33 |
+| `test_nso.py` | NSO Orchestrator | 43 |
+| `test_robustness.py` | Robustesse (fuzzing) | 38 |
+| `test_schema_validator.py` | Schema Validator | 28 |
+| `test_auto_doc.py` | Auto-Doc Sync | 34 |
 
 **Smoke tests Bash** (78 assertions) :
 ```bash

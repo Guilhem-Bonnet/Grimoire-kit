@@ -54,17 +54,23 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Phoenix</item>
-    <item cmd="AB or fuzzy match on audit-backup" action="#audit-backup">[AB] Audit Backup — inventorier la couverture et les trous</item>
-    <item cmd="SP or fuzzy match on snapshot or proxmox" action="#snapshot-ops">[SP] Snapshots Proxmox — vzdump, planification, rétention</item>
-    <item cmd="LB or fuzzy match on longhorn-backup" action="#longhorn-backup">[LB] Longhorn Backups — snapshots, RecurringJobs, exports</item>
-    <item cmd="DR or fuzzy match on disaster-recovery or plan" action="#dr-plan">[DR] Plan DR — créer/maintenir le plan de disaster recovery</item>
-    <item cmd="RT or fuzzy match on retention" action="#retention-ops">[RT] Rétention — politiques Prometheus TSDB, Loki, volumes</item>
-    <item cmd="TR or fuzzy match on test-restore" action="#test-restore">[TR] Test Restauration — valider un backup par restauration réelle</item>
-    <item cmd="KS or fuzzy match on keys or age" action="#key-safety">[KS] Sécurité Clés — backup hors-site des clés age/SOPS</item>
+    <item cmd="AB or fuzzy match on audit-backup" action="#audit-backup">[AB] Audit Backup — inventorier couverture et trous</item>
+    <item cmd="SP or fuzzy match on snapshot or proxmox" action="#snapshot-ops">[SP] Snapshots Proxmox — vzdump, planification</item>
+    <item cmd="DR or fuzzy match on disaster-recovery or plan" action="#dr-plan">[DR] Plan DR — disaster recovery</item>
+    <item cmd="TR or fuzzy match on test-restore" action="#test-restore">[TR] Test Restauration — valider un backup</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Longhorn, Rétention, Clés</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="LB or fuzzy match on longhorn-backup" action="#longhorn-backup">[LB] Longhorn Backups — snapshots, RecurringJobs</item>
+    <item cmd="RT or fuzzy match on retention" action="#retention-ops">[RT] Rétention — politiques Prometheus TSDB, Loki</item>
+    <item cmd="KS or fuzzy match on keys or age" action="#key-safety">[KS] Sécurité Clés — backup hors-site age/SOPS</item>
+  </submenu
   </menu>
 
   <prompts>

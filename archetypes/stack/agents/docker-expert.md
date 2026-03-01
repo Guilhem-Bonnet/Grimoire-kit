@@ -51,16 +51,22 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Container</item>
     <item cmd="DF or fuzzy match on dockerfile or build or image" action="#dockerfile-ops">[DF] Dockerfile — optimisation, multi-stage, sécurité</item>
-    <item cmd="CP or fuzzy match on compose or service" action="#compose-ops">[CP] Docker Compose — services, networks, volumes, healthchecks</item>
-    <item cmd="SC or fuzzy match on security or hardening" action="#security-audit">[SC] Sécurité — audit non-root, capabilities, secrets</item>
-    <item cmd="TB or fuzzy match on troubleshoot or debug or logs" action="#troubleshoot">[TB] Troubleshooting — logs, exec, inspect, crashloop</item>
-    <item cmd="OP or fuzzy match on optimize or size or layers" action="#optimize">[OP] Optimisation — réduire taille image, améliorer cache layers</item>
-    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit Docker/Compose systématique</item>
+    <item cmd="CP or fuzzy match on compose or service" action="#compose-ops">[CP] Docker Compose — services, networks, volumes</item>
+    <item cmd="TB or fuzzy match on troubleshoot or debug or logs" action="#troubleshoot">[TB] Troubleshooting — logs, exec, inspect</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Sécurité, Optimisation, Bug Hunt</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="SC or fuzzy match on security or hardening" action="#security-audit">[SC] Sécurité — audit non-root, capabilities, secrets</item>
+    <item cmd="OP or fuzzy match on optimize or size or layers" action="#optimize">[OP] Optimisation — réduire taille image, cache layers</item>
+    <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit Docker/Compose systématique</item>
+  </submenu
   </menu>
 
   <prompts>

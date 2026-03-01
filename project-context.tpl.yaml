@@ -5,6 +5,13 @@ project:
   name: "Mon Projet"
   description: "Description courte"
   type: "infrastructure"                # infrastructure | webapp | data-pipeline | mobile | game
+  metaphor: ""                          # Métaphore structurante du projet — guide le raisonnement des agents
+                                        # Exemples : "forteresse" (sécurité first), "organisme vivant" (résilience),
+                                        # "orchestre" (coordination), "jardin" (croissance organique),
+                                        # "vaisseau spatial" (autonomie, ressources limitées)
+                                        # Quand définie, les agents utilisent cette métaphore pour nommer,
+                                        # prioriser et communiquer. Ex: "forteresse" → les agents parlent
+                                        # de "remparts" (firewall), "douves" (DMZ), "sentinelles" (monitoring).
   stack: []                             # ["terraform", "ansible", "docker", "k8s"]
   repos:
     - name: "main-repo"
@@ -15,6 +22,7 @@ user:
   name: "Votre Nom"
   language: "Français"
   document_language: "Français"
+  skill_level: "intermediate"           # beginner | intermediate | expert — adapte la verbosité des agents
 
 # Décommentez les sections pertinentes — exemples complets dans docs/getting-started.md
 

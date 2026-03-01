@@ -51,18 +51,24 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : menu principal ≤7 items domaine -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Sentinel</item>
-    <item cmd="AA or fuzzy match on audit-agent" action="#audit-single">[AA] Audit Agent — analyser un agent spécifique en profondeur</item>
-    <item cmd="AT or fuzzy match on audit-all or audit-team" action="#audit-all">[AT] Audit Équipe — analyser tous les agents custom du projet</item>
-    <item cmd="SC or fuzzy match on scope or chevauchement" action="#scope-analysis">[SC] Analyse de Scope — détecter chevauchements et trous entre agents</item>
-    <item cmd="PC or fuzzy match on protocol or inter-agent" action="#protocol-check">[PC] Vérification Protocoles — cohérence des protocoles inter-agents</item>
-    <item cmd="QR or fuzzy match on quality-report or health" action="#quality-report">[QR] Agent Health Report — rapport de qualité périodique</item>
-    <item cmd="OP or fuzzy match on optimize or améliorer" action="#optimize-prompt">[OP] Optimiser Prompt — analyser et proposer l'amélioration d'un prompt spécifique</item>
-    <item cmd="FA or fuzzy match on failure or pattern or sil or self-improve" action="#failure-analysis">[FA] Self-Improvement Loop — analyser les patterns d'échec et proposer des améliorations framework</item>
-    <item cmd="BR or fuzzy match on bench-review or benchmark or performance" action="#bench-review">[BR] Bench Review — analyser les métriques agent-bench.py et produire des recommandations concrètes</item>
+    <item cmd="AA or fuzzy match on audit-agent" action="#audit-single">[AA] Audit Agent — analyser un agent spécifique</item>
+    <item cmd="AT or fuzzy match on audit-all or audit-team" action="#audit-all">[AT] Audit Équipe — analyser tous les agents du projet</item>
+    <item cmd="QR or fuzzy match on quality-report or health" action="#quality-report">[QR] Health Report — rapport de qualité</item>
+    <item cmd="OP or fuzzy match on optimize or améliorer" action="#optimize-prompt">[OP] Optimiser Prompt</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Scope, Protocoles, Failures, Bench</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="SC or fuzzy match on scope or chevauchement" action="#scope-analysis">[SC] Analyse de Scope — chevauchements et trous entre agents</item>
+    <item cmd="PC or fuzzy match on protocol or inter-agent" action="#protocol-check">[PC] Vérification Protocoles — cohérence inter-agents</item>
+    <item cmd="FA or fuzzy match on failure or pattern or sil or self-improve" action="#failure-analysis">[FA] Self-Improvement Loop — patterns d'échec</item>
+    <item cmd="BR or fuzzy match on bench-review or benchmark or performance" action="#bench-review">[BR] Bench Review — métriques agent-bench.py</item>
+  </submenu
   </menu>
 
   <prompts>

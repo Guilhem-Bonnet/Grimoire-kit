@@ -53,6 +53,20 @@ signed_by: "{{agent_name}}"    # agent qui signe (ex: "John — PM")
 
 ---
 
+## 🚫 Hors Périmètre (Espace Négatif)
+
+> **Ce qui N'EST PAS inclus** dans cette livraison. Aussi important que ce qui est inclus.
+> La clarté sur le hors-périmètre évite les malentendus et les scope creep.
+
+| # | Exclusion | Raison | Propriétaire futur |
+|---|---|---|---|
+| 1 | {{exclusion_1}} | {{raison_exclusion_1}} | {{owner_futur_1}} |
+| 2 | {{exclusion_2}} | {{raison_exclusion_2}} | {{owner_futur_2}} |
+
+> **Règle Dunbar** (#39) : un contrat avec >15 items de scope est trop large. Si le périmètre dépasse 15 items, découper en sous-contrats.
+
+---
+
 ## ❓ Questions Ouvertes
 
 > Lister ici toutes les ambiguïtés, hypothèses, et points à clarifier.

@@ -52,18 +52,24 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Pixel</item>
     <item cmd="IF or fuzzy match on implement or feature or composant" action="#implement-feature">[IF] Implémenter Feature — composant/hook/page avec tests</item>
-    <item cmd="BG or fuzzy match on bug or fix or debug" action="#fix-bug">[BG] Corriger Bug — diagnostic + fix + test de régression</item>
-    <item cmd="TS or fuzzy match on test or coverage or rtl" action="#improve-tests">[TS] Tests RTL — audit + ajout tests manquants</item>
-    <item cmd="TP or fuzzy match on type or types or typescript" action="#type-audit">[TP] Audit Types — éliminer any, renforcer les interfaces</item>
+    <item cmd="BG or fuzzy match on bug or fix or debug" action="#fix-bug">[BG] Corriger Bug — diagnostic + fix + régression</item>
+    <item cmd="TS or fuzzy match on test or coverage or rtl" action="#improve-tests">[TS] Tests RTL — audit + ajout tests</item>
     <item cmd="RF or fuzzy match on refactor or split or decompose" action="#refactor">[RF] Refactoring — split composants, extract hooks</item>
-    <item cmd="PR or fuzzy match on perf or performance or render" action="#performance">[PR] Performance — re-renders inutiles, profiler, optimiser</item>
-    <item cmd="BH or fuzzy match on bug-hunt or hunt" action="#bug-hunt">[BH] Bug Hunt — audit systématique React/TS</item>
-    <item cmd="A11 or fuzzy match on accessibility or aria" action="#accessibility">[A11] Accessibilité — audit WCAG, aria-labels, navigation clavier</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Types, Perf, A11y, Bug Hunt</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="TP or fuzzy match on type or types or typescript" action="#type-audit">[TP] Audit Types — éliminer any, renforcer les interfaces</item>
+    <item cmd="PR or fuzzy match on perf or performance or render" action="#performance">[PR] Performance — re-renders, profiler, optimiser</item>
+    <item cmd="A11 or fuzzy match on accessibility or aria" action="#accessibility">[A11] Accessibilité — WCAG, aria-labels, clavier</item>
+    <item cmd="BH or fuzzy match on bug-hunt or hunt" action="#bug-hunt">[BH] Bug Hunt — audit systématique React/TS</item>
+  </submenu
   </menu>
 
   <prompts>

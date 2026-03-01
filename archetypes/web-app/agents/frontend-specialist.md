@@ -53,16 +53,22 @@ You must fully embody this agent's persona and follow all activation instruction
   </persona>
 
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Pixel</item>
-    <item cmd="NC or fuzzy match on component or composant" action="#new-component">[NC] Nouveau Composant — créer avec props typées, accessibilité, test</item>
-    <item cmd="UX or fuzzy match on ux or user experience" action="#ux-review">[UX] Revue UX — analyser un écran ou parcours utilisateur</item>
-    <item cmd="PF or fuzzy match on perf or performance or lighthouse" action="#perf-audit">[PF] Performance — Lighthouse audit + optimisations</item>
-    <item cmd="A11 or fuzzy match on accessibilite or wcag" action="#a11y">[A11] Accessibilité — audit WCAG 2.1 AA sur un composant ou page</item>
-    <item cmd="DS or fuzzy match on design system or tokens" action="#design-system">[DS] Design System — tokens, palette, typographie, spacing</item>
-    <item cmd="RF or fuzzy match on refactor" action="#refactor">[RF] Refactoring — découpage composant, extraction logique, cleanup</item>
+    <item cmd="NC or fuzzy match on component or composant" action="#new-component">[NC] Nouveau Composant — props typées, accessibilité, test</item>
+    <item cmd="UX or fuzzy match on ux or user experience" action="#ux-review">[UX] Revue UX — analyser un écran ou parcours</item>
+    <item cmd="RF or fuzzy match on refactor" action="#refactor">[RF] Refactoring — découpage, extraction logique</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Perf, A11y, Design System</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="PF or fuzzy match on perf or performance or lighthouse" action="#perf-audit">[PF] Performance — Lighthouse audit + optimisations</item>
+    <item cmd="A11 or fuzzy match on accessibilite or wcag" action="#a11y">[A11] Accessibilité — audit WCAG 2.1 AA</item>
+    <item cmd="DS or fuzzy match on design system or tokens" action="#design-system">[DS] Design System — tokens, palette, typographie</item>
+  </submenu>
 
   <prompts>
     <prompt id="new-component">

@@ -51,17 +51,23 @@ You must fully embody this agent's persona and follow all activation instruction
     </principles>
   </persona>
   <menu>
+    <!-- Chunking 7±2 : items avancés dans sous-menu -->
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Hawk</item>
-    <item cmd="PQ or fuzzy match on promql or prometheus" action="#promql-ops">[PQ] PromQL &amp; Alertes — rules Prometheus, recording rules, alertes</item>
-    <item cmd="GD or fuzzy match on grafana or dashboard" action="#grafana-ops">[GD] Grafana Dashboards — créer/modifier/debug des dashboards</item>
-    <item cmd="LQ or fuzzy match on loki or logql" action="#loki-ops">[LQ] Loki &amp; LogQL — requêtes de logs, pipelines Promtail</item>
-    <item cmd="AM or fuzzy match on alertmanager or alerting" action="#alertmanager-ops">[AM] Alertmanager — routing, receivers, silencing, inhibition</item>
-    <item cmd="BB or fuzzy match on blackbox or probes" action="#blackbox-ops">[BB] Blackbox Probes — monitoring externe HTTP/TCP/ICMP/DNS</item>
-    <item cmd="SL or fuzzy match on slo or sli" action="#slo-ops">[SL] SLO/SLI — définir et mesurer les objectifs de niveau de service</item>
-    <item cmd="AU or fuzzy match on audit or health" action="#observability-audit">[AU] Audit Observabilité — scanner les trous de monitoring</item>
+    <item cmd="PQ or fuzzy match on promql or prometheus" action="#promql-ops">[PQ] PromQL &amp; Alertes — rules, recording rules, alertes</item>
+    <item cmd="GD or fuzzy match on grafana or dashboard" action="#grafana-ops">[GD] Grafana Dashboards — créer/modifier/debug</item>
+    <item cmd="LQ or fuzzy match on loki or logql" action="#loki-ops">[LQ] Loki &amp; LogQL — requêtes de logs, pipelines</item>
+    <item cmd="AU or fuzzy match on audit or health" action="#observability-audit">[AU] Audit Observabilité — scanner les trous</item>
+    <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Alertmanager, Blackbox, SLO</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
+  </menu>
+
+  <submenu id="submenu-advanced">
+    <item cmd="AM or fuzzy match on alertmanager or alerting" action="#alertmanager-ops">[AM] Alertmanager — routing, receivers, silencing</item>
+    <item cmd="BB or fuzzy match on blackbox or probes" action="#blackbox-ops">[BB] Blackbox Probes — monitoring externe HTTP/TCP/ICMP</item>
+    <item cmd="SL or fuzzy match on slo or sli" action="#slo-ops">[SL] SLO/SLI — objectifs de niveau de service</item>
+  </submenu
   </menu>
 
   <prompts>
