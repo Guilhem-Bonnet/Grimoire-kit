@@ -51,6 +51,8 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 
 ## Quick Start
 
+> **Nouveau ?** Commencez par lire [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués simplement avec des analogies.
+
 ```bash
 # 1. Cloner le kit
 git clone https://github.com/Guilhem-Bonnet/bmad-custom-kit.git
