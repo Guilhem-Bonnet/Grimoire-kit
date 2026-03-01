@@ -63,7 +63,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # ── Constantes ────────────────────────────────────────────────────
 
@@ -86,6 +86,8 @@ HARVEST_SOURCES = [
     "stigmergy",       # phéromones actives
     "incubator",       # idées dormantes à réveiller
     "synthetic",       # idées générées par concept blending
+    "mutation",        # mutations des gagnants passés
+    "gap-analysis",    # gaps détectés dans le projet réel
 ]
 
 # Domaines d'innovation
@@ -112,6 +114,10 @@ DEFAULT_EPSILON = 0.2       # taux d'exploration (20%)
 DEFAULT_LEARNING_RATE = 0.1 # vitesse d'ajustement policy
 CONVERGENCE_WINDOW = 3      # cycles pour détecter convergence
 MIN_REWARD_DELTA = 0.05     # seuil de rendement décroissant
+GO_THRESHOLD = 0.60         # seuil GO pour challenge (relevé de 0.5)
+CONDITIONAL_THRESHOLD = 0.40  # seuil CONDITIONAL (relevé de 0.3)
+MIN_REJECT_RATIO = 0.20     # au moins 20% d'idées rejetées par cycle
+PROTOTYPE_DIR = "prototypes"  # squelettes générés
 
 # Scoring dimensions & weights
 SCORING_DIMS = {
@@ -212,12 +218,17 @@ class CycleReport:
     ideas_simulated: int = 0
     ideas_implemented: int = 0
     ideas_merged: int = 0
+    ideas_rejected: int = 0
     avg_reward: float = 0.0
     best_reward: float = 0.0
     convergence_metric: float = 0.0   # moving avg of best_reward
     policy_snapshot: dict[str, Any] = field(default_factory=dict)
     ideas: list[dict[str, Any]] = field(default_factory=list)
     verdict: str = ""   # CONTINUE, SLOW_DOWN, CONSOLIDATE, STOP
+    health_before: dict[str, Any] = field(default_factory=dict)
+    health_after: dict[str, Any] = field(default_factory=dict)
+    health_delta: float = 0.0
+    prototypes_generated: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -250,6 +261,7 @@ def _ensure_dirs(project_root: Path) -> None:
     base = _rnd_dir(project_root)
     (base / HISTORY_DIR).mkdir(parents=True, exist_ok=True)
     (base / FOSSIL_DIR).mkdir(parents=True, exist_ok=True)
+    (base / PROTOTYPE_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def load_policy(project_root: Path) -> Policy:
@@ -697,6 +709,160 @@ def _generate_synthetic_ideas(project_root: Path, policy: Policy,
     return unique[:max_ideas]
 
 
+def _mutate_past_winners(project_root: Path,
+                         max_ideas: int = 5) -> list[dict[str, str]]:
+    """Génère des idées par mutation des gagnants passés.
+
+    Prend les meilleures idées qui ont été merged et les mute :
+      - Change le domaine (transposition)
+      - Change l'action (escalade/simplification)
+      - Change la portée (outil spécifique → générique, ou inversement)
+    """
+    memory = load_memory(project_root)
+    winners = [m for m in memory if m.get("merged") and m.get("reward", 0) > 0]
+    if not winners:
+        return []
+
+    # Trier par reward décroissant → muter les meilleures
+    winners.sort(key=lambda m: m.get("reward", 0), reverse=True)
+
+    rng = random.Random()
+    ideas: list[dict[str, str]] = []
+    mutations = [
+        ("transposition", lambda w: {
+            **w,
+            "domain": rng.choice([d for d in DOMAINS if d != w.get("domain")]),
+            "title": f"Transposer '{w.get('title', '')[:40]}' au domaine "
+                     f"{rng.choice([d for d in DOMAINS if d != w.get('domain')])}",
+        }),
+        ("escalade", lambda w: {
+            **w,
+            "action": "merge" if w.get("action") == "add" else "add",
+            "title": f"Escalader: {w.get('title', '')[:40]} → version avancée",
+        }),
+        ("inverse", lambda w: {
+            **w,
+            "action": "simplify" if w.get("action") in ("add", "merge") else "add",
+            "title": f"Inverser: simplifier ce que '{w.get('title', '')[:40]}' complexifie",
+        }),
+        ("fusion", lambda w: {
+            **w,
+            "action": "merge",
+            "title": f"Fusionner '{w.get('title', '')[:30]}' avec un outil adjacent",
+        }),
+    ]
+
+    past_titles = {m.get("title", "").lower().strip() for m in memory}
+
+    for winner in winners[:max_ideas * 2]:
+        mut_name, mutator = rng.choice(mutations)
+        try:
+            mutated = mutator(winner)
+            mutated["source"] = "mutation"
+            mutated["description"] = (
+                f"Mutation ({mut_name}) de l'innovation "
+                f"'{winner.get('title', '')[:50]}' (reward: {winner.get('reward', 0):.3f})"
+            )
+            # Ne pas re-proposer un titre déjà en mémoire
+            if mutated["title"].lower().strip() not in past_titles:
+                ideas.append(mutated)
+        except Exception:
+            continue
+
+    return ideas[:max_ideas]
+
+
+def _gap_driven_ideas(project_root: Path,
+                      max_ideas: int = 5) -> list[dict[str, str]]:
+    """Génère des idées basées sur les vrais gaps du projet.
+
+    Analyse la structure réelle pour trouver des manques concrets :
+      - Outils sans tests dédiés
+      - Docs manquantes pour des outils complexes
+      - Domaines sous-représentés
+      - Patterns de nommage incohérents
+    """
+    ideas: list[dict[str, str]] = []
+    tools_dir = project_root / "framework" / "tools"
+    tests_dir = project_root / "tests"
+    docs_dir = project_root / "docs"
+
+    tools = sorted(f.stem for f in tools_dir.glob("*.py")) if tools_dir.exists() else []
+    tests = {f.stem.replace("test_", "").replace("_", "-")
+             for f in tests_dir.glob("test_*.py")} if tests_dir.exists() else set()
+
+    # Gap 1: Outils sans tests
+    untested = [t for t in tools if t not in tests and t.replace("-", "_") not in
+                {f.stem.replace("test_", "") for f in tests_dir.glob("test_*.py")}
+                ] if tests_dir.exists() else []
+    for tool in untested[:3]:
+        ideas.append({
+            "title": f"Ajouter tests pour {tool}.py",
+            "description": f"L'outil {tool}.py n'a pas de fichier test dédié. "
+                          f"Créer test_{tool.replace('-', '_')}.py",
+            "source": "gap-analysis",
+            "domain": "testing",
+            "action": "add",
+        })
+
+    # Gap 2: Outils > 500 lignes sans doc spécifique
+    for tool_file in tools_dir.glob("*.py") if tools_dir.exists() else []:
+        try:
+            n_lines = sum(1 for _ in tool_file.open())
+            if n_lines > 500:
+                doc_exists = any(
+                    tool_file.stem in d.stem
+                    for d in docs_dir.glob("*.md")
+                ) if docs_dir.exists() else False
+                if not doc_exists:
+                    ideas.append({
+                        "title": f"Documenter {tool_file.stem}.py ({n_lines} lignes)",
+                        "description": f"Outil complexe ({n_lines} lignes) sans doc dédiée.",
+                        "source": "gap-analysis",
+                        "domain": "documentation",
+                        "action": "add",
+                    })
+        except Exception:
+            continue
+
+    # Gap 3: Domaines sous-représentés dans les outils
+    memory = load_memory(project_root)
+    domain_counts: dict[str, int] = defaultdict(int)
+    for m in memory:
+        if m.get("merged"):
+            domain_counts[m.get("domain", "?")] += 1
+    underserved = [d for d in DOMAINS if domain_counts.get(d, 0) == 0]
+    for domain in underserved[:2]:
+        ideas.append({
+            "title": f"Explorer le domaine '{domain}' — aucune innovation à ce jour",
+            "description": f"Le domaine '{domain}' n'a produit aucune innovation mergée. "
+                          f"Rechercher des opportunités spécifiques.",
+            "source": "gap-analysis",
+            "domain": domain,
+            "action": "add",
+        })
+
+    # Gap 4: Outils qui importent beaucoup d'autres → point de fragilité
+    for tool_file in tools_dir.glob("*.py") if tools_dir.exists() else []:
+        try:
+            content = tool_file.read_text(encoding="utf-8", errors="ignore")
+            imports = [line for line in content.split("\n")
+                       if line.strip().startswith(("import ", "from ")) and "tools" in line]
+            if len(imports) > 5:
+                ideas.append({
+                    "title": f"Découpler {tool_file.stem}.py ({len(imports)} dépendances internes)",
+                    "description": f"Outil avec {len(imports)} imports internes = point de fragilité.",
+                    "source": "gap-analysis",
+                    "domain": "architecture",
+                    "action": "simplify",
+                })
+        except Exception:
+            continue
+
+    random.shuffle(ideas)
+    return ideas[:max_ideas]
+
+
 def harvest(project_root: Path, policy: Policy,
             budget: int = DEFAULT_BUDGET) -> list[Idea]:
     """Phase 1 : Récolte d'idées depuis toutes les sources.
@@ -732,6 +898,12 @@ def harvest(project_root: Path, policy: Policy,
     # Enrichir avec des idées synthétiques par combinaison croisée
     # (concept blending : croiser outils existants × domaines × actions)
     raw_ideas.extend(_generate_synthetic_ideas(project_root, policy, budget * 2))
+
+    # Enrichir avec des mutations des gagnants passés
+    raw_ideas.extend(_mutate_past_winners(project_root, max_ideas=budget))
+
+    # Enrichir avec des idées gap-driven (manques réels du projet)
+    raw_ideas.extend(_gap_driven_ideas(project_root, max_ideas=budget))
 
     # Déduplication par titre normalisé (intra-cycle)
     seen_titles: set[str] = set()
@@ -873,8 +1045,19 @@ def evaluate(ideas: list[Idea], project_root: Path,
 # ── Phase 3 : CHALLENGE ─────────────────────────────────────────
 
 def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
-    """Phase 3 : Adversarial red-team — pre-mortem automatique."""
+    """Phase 3 : Adversarial red-team durci — pre-mortem automatique.
+
+    Filtre plus sévère qu'en v1 :
+      - Seuil GO relevé à 0.60 (était 0.50)
+      - Rejet médiane : score < 85% de la médiane → pénalité
+      - Quota minimum : au moins 20% d'idées doivent être rejetées
+      - Pénalité domaine saturé réduit le plafond progressivement
+    """
     memory = load_memory(project_root)
+
+    # Calcul de la médiane du batch pour seuil adaptatif
+    batch_scores = sorted(i.total_score for i in ideas)
+    median_score = batch_scores[len(batch_scores) // 2] if batch_scores else 0.5
 
     for idea in ideas:
         notes: list[str] = []
@@ -886,40 +1069,87 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
             notes.append("⚠️ Idée déjà explorée dans un cycle précédent")
             go_score -= 0.15
 
-        # Check 2: Domaine surinvesti
+        # Check 2: Domaine surinvesti (pénalité progressive)
         domain_count = sum(1 for m in memory
                            if m.get("domain") == idea.domain and m.get("merged"))
-        if domain_count > 5:
-            notes.append(f"⚠️ Domaine '{idea.domain}' déjà saturé ({domain_count} innovations)")
-            go_score -= 0.10
+        if domain_count > 3:
+            penalty = min(0.25, domain_count * 0.03)
+            notes.append(f"⚠️ Domaine '{idea.domain}' saturé ({domain_count} innovations, -{penalty:.2f})")
+            go_score -= penalty
 
         # Check 3: Pattern d'échec récurrent
         failed_in_domain = sum(1 for m in memory
                                if m.get("domain") == idea.domain
                                and not m.get("merged") and m.get("reward", 0) < 0)
         if failed_in_domain > 2:
-            notes.append(f"🔴 Pattern d'échec détecté dans '{idea.domain}' ({failed_in_domain} échecs)")
+            notes.append(f"🔴 Pattern d'échec dans '{idea.domain}' ({failed_in_domain} échecs)")
             go_score -= 0.20
 
-        # Check 4: Complexité vs budget
-        if idea.action in ("split", "merge") and idea.scores.get("feasibility", 1) < 0.5:
+        # Check 4: Complexité vs faisabilité
+        if idea.action in ("split", "merge") and idea.scores.get("feasibility", 1) < 0.6:
             notes.append("⚠️ Action complexe avec faible faisabilité")
             go_score -= 0.10
 
         # Check 5: Pre-mortem — raisons d'échec probables
         if idea.scores.get("risk_inverse", 1) < 0.4:
             notes.append("🔴 Pre-mortem: risque élevé de régression")
+            go_score -= 0.05
         if idea.scores.get("uniqueness", 1) < 0.3:
             notes.append("⚠️ Pre-mortem: trop proche d'un outil existant")
+            go_score -= 0.05
 
-        # Verdict
+        # Check 6: Sous la médiane → pénalité adaptative
+        if idea.total_score < median_score * 0.85:
+            gap = median_score - idea.total_score
+            notes.append(f"🔴 Score ({idea.total_score:.3f}) < 85% médiane ({median_score:.3f})")
+            go_score -= gap * 0.5
+
+        # Check 7: Taux de succès historique de la source
+        source_ideas = [m for m in memory if m.get("source") == idea.source]
+        if len(source_ideas) >= 3:
+            source_success = sum(1 for m in source_ideas if m.get("merged")) / len(source_ideas)
+            if source_success < 0.2:
+                notes.append(f"⚠️ Source '{idea.source}' historiquement faible ({source_success:.0%})")
+                go_score -= 0.10
+
+        # Verdict — seuils relevés
         idea.challenge_notes = notes
-        if go_score >= 0.5:
+        if go_score >= GO_THRESHOLD:
             idea.challenge_result = "GO"
-        elif go_score >= 0.3:
+        elif go_score >= CONDITIONAL_THRESHOLD:
             idea.challenge_result = "CONDITIONAL"
         else:
             idea.challenge_result = "NO-GO"
+
+    # Contrainte dure : au moins MIN_REJECT_RATIO d'idées rejetées
+    go_count = sum(1 for i in ideas if i.challenge_result in ("GO", "CONDITIONAL"))
+    min_rejects = max(1, int(len(ideas) * MIN_REJECT_RATIO))
+    if go_count > len(ideas) - min_rejects:
+        # Trop d'idées passent → forcer le rejet des plus faibles CONDITIONAL
+        conditionals = sorted(
+            [i for i in ideas if i.challenge_result == "CONDITIONAL"],
+            key=lambda x: x.total_score,
+        )
+        nogo_count = sum(1 for i in ideas if i.challenge_result == "NO-GO")
+        for idea in conditionals:
+            if nogo_count >= min_rejects:
+                break
+            idea.challenge_result = "NO-GO"
+            idea.challenge_notes.append("⚫ Rejeté par quota minimum de filtre (20%)")
+            nogo_count += 1
+
+        # Si toujours pas assez, forcer les GO les plus faibles
+        if nogo_count < min_rejects:
+            weakest_go = sorted(
+                [i for i in ideas if i.challenge_result == "GO"],
+                key=lambda x: x.total_score,
+            )
+            for idea in weakest_go:
+                if nogo_count >= min_rejects:
+                    break
+                idea.challenge_result = "NO-GO"
+                idea.challenge_notes.append("⚫ Rejeté par quota (GO le plus faible)")
+                nogo_count += 1
 
     return ideas
 
@@ -1009,11 +1239,122 @@ def check_quality_gates(project_root: Path) -> dict[str, Any]:
     return gates
 
 
+# ── Phase 5b : HEALTH SNAPSHOT (closed-loop) ────────────────────
+
+def _snapshot_project_health(project_root: Path) -> dict[str, Any]:
+    """Capture un instantané de la santé du projet pour closed-loop reward.
+
+    Mesures empiriques :
+      - Nombre d'outils, tests, docs
+      - Ratio couverture tests/outils
+      - Dissonances harmony (count + severity)
+      - Score antifragile
+    Le delta entre snapshots before/after module le reward réel.
+    """
+    health: dict[str, Any] = {
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    tools_dir = project_root / "framework" / "tools"
+    health["tool_count"] = len(list(tools_dir.glob("*.py"))) if tools_dir.exists() else 0
+
+    tests_dir = project_root / "tests"
+    health["test_count"] = len(list(tests_dir.glob("test_*.py"))) if tests_dir.exists() else 0
+
+    docs_dir = project_root / "docs"
+    health["doc_count"] = len(list(docs_dir.glob("*.md"))) if docs_dir.exists() else 0
+
+    # Harmony dissonances
+    mod = _load_tool("harmony-check")
+    if mod is not None:
+        try:
+            scan = mod.scan_project(project_root)
+            health["harmony_dissonances"] = len(scan.dissonances)
+            health["harmony_high"] = len([d for d in scan.dissonances
+                                          if d.severity == "HIGH"])
+        except Exception:
+            health["harmony_dissonances"] = 0
+            health["harmony_high"] = 0
+    else:
+        health["harmony_dissonances"] = 0
+        health["harmony_high"] = 0
+
+    # Antifragile score
+    mod_af = _load_tool("antifragile-score")
+    if mod_af is not None:
+        try:
+            if hasattr(mod_af, "compute_score"):
+                score = mod_af.compute_score(project_root)
+                health["antifragile_score"] = getattr(score, "total", 50)
+            else:
+                health["antifragile_score"] = 50
+        except Exception:
+            health["antifragile_score"] = 50
+    else:
+        health["antifragile_score"] = 50
+
+    # Ratios dérivés
+    if health["tool_count"] > 0:
+        health["test_ratio"] = round(health["test_count"] / health["tool_count"], 3)
+    else:
+        health["test_ratio"] = 0.0
+
+    # Score composite de santé (0-100)
+    h_score = 50.0
+    h_score += min(20, health["tool_count"] * 0.5)
+    h_score += min(10, health["test_ratio"] * 10)
+    h_score -= min(15, health["harmony_high"] * 5)
+    h_score += min(15, (health["antifragile_score"] - 50) * 0.3)
+    health["composite_score"] = round(max(0, min(100, h_score)), 2)
+
+    return health
+
+
+def _compute_health_delta(before: dict[str, Any],
+                          after: dict[str, Any]) -> float:
+    """Calcule le delta de santé entre deux snapshots.
+
+    Retourne un float [-1, +1] :
+      >0 = le projet s'améliore
+      <0 = le projet se dégrade
+      ~0 = stable
+    """
+    if not before or not after:
+        return 0.0
+
+    delta = 0.0
+    # Composite score movement (poids principal)
+    comp_before = before.get("composite_score", 50)
+    comp_after = after.get("composite_score", 50)
+    delta += (comp_after - comp_before) / 100.0 * 2.0
+
+    # Fewer harmony issues = good
+    h_before = before.get("harmony_high", 0)
+    h_after = after.get("harmony_high", 0)
+    if h_before > h_after:
+        delta += 0.1
+    elif h_after > h_before:
+        delta -= 0.1
+
+    # Better antifragile score = good
+    af_before = before.get("antifragile_score", 50)
+    af_after = after.get("antifragile_score", 50)
+    delta += (af_after - af_before) / 100.0
+
+    return max(-1.0, min(1.0, round(delta, 4)))
+
+
 # ── Phase 6 : SELECT (Tournament) ───────────────────────────────
 
 def select_winners(ideas: list[Idea],
-                   quality_gates: dict[str, Any]) -> list[Idea]:
-    """Phase 6 : Tournament selection — seuls les meilleurs survivent."""
+                   quality_gates: dict[str, Any],
+                   health_delta: float = 0.0) -> list[Idea]:
+    """Phase 6 : Tournament selection — seuls les meilleurs survivent.
+
+    Le health_delta (closed-loop) module le reward :
+      - Projet en amélioration → bonus pour toutes les idées
+      - Projet en dégradation → malus
+    """
     candidates = [i for i in ideas if i.challenge_result in ("GO", "CONDITIONAL")]
 
     for idea in candidates:
@@ -1025,7 +1366,13 @@ def select_winners(ideas: list[Idea],
         # Bonus si quality gates passent
         gate_bonus = 0.1 if quality_gates.get("all_pass") else 0.0
 
-        idea.reward = round(score - risk_penalty - complexity_penalty + gate_bonus, 4)
+        # Closed-loop : modulation par la santé réelle du projet
+        health_bonus = health_delta * 0.2  # [-0.2, +0.2]
+
+        idea.reward = round(
+            score - risk_penalty - complexity_penalty + gate_bonus + health_bonus,
+            4,
+        )
 
     # Tri par reward
     candidates.sort(key=lambda x: x.reward, reverse=True)
@@ -1143,7 +1490,11 @@ def run_cycle(project_root: Path, policy: Policy,
               budget: int = DEFAULT_BUDGET,
               epoch: int = 1,
               quick: bool = False) -> CycleReport:
-    """Exécute un cycle complet d'innovation (7 phases)."""
+    """Exécute un cycle complet d'innovation (7 phases).
+
+    Closed-loop : capture la santé du projet avant/après pour moduler
+    le reward avec un signal empirique réel.
+    """
     start = time.monotonic()
     cycle_id = next_cycle_id(project_root)
 
@@ -1152,6 +1503,10 @@ def run_cycle(project_root: Path, policy: Policy,
         epoch=epoch,
         timestamp=datetime.now().isoformat(),
     )
+
+    # Closed-loop : snapshot AVANT le cycle
+    health_before = _snapshot_project_health(project_root)
+    report.health_before = health_before
 
     # Phase 1: HARVEST
     ideas = harvest(project_root, policy, budget=budget)
@@ -1173,11 +1528,13 @@ def run_cycle(project_root: Path, policy: Policy,
         report.duration_ms = int((time.monotonic() - start) * 1000)
         return report
 
-    # Phase 3: CHALLENGE
+    # Phase 3: CHALLENGE (durci v2)
     ideas = challenge(ideas, project_root)
     go_ideas = [i for i in ideas if i.challenge_result in ("GO", "CONDITIONAL")]
+    rejected = [i for i in ideas if i.challenge_result == "NO-GO"]
     report.ideas_challenged = len(ideas)
     report.ideas_go = len(go_ideas)
+    report.ideas_rejected = len(rejected)
 
     if not go_ideas:
         report.ideas = [i.to_dict() for i in ideas]
@@ -1192,8 +1549,14 @@ def run_cycle(project_root: Path, policy: Policy,
     # Phase 5: QUALITY GATES
     quality_gates = check_quality_gates(project_root)
 
-    # Phase 6: SELECT
-    candidates = select_winners(go_ideas, quality_gates)
+    # Closed-loop : snapshot APRÈS les gates pour mesurer le delta
+    health_after = _snapshot_project_health(project_root)
+    report.health_after = health_after
+    h_delta = _compute_health_delta(health_before, health_after)
+    report.health_delta = h_delta
+
+    # Phase 6: SELECT (avec health delta pour closed-loop reward)
+    candidates = select_winners(go_ideas, quality_gates, health_delta=h_delta)
     winners = [c for c in candidates if c.merged]
     report.ideas_merged = len(winners)
 
@@ -1331,10 +1694,14 @@ def _print_cycle_summary(report: CycleReport, epoch: int, total: int) -> None:
 
     print(f"\n  📊 Cycle {report.cycle_id} (epoch {epoch}/{total})")
     print(f"  ├── Idées: {report.ideas_harvested} récoltées"
-          f" → {report.ideas_go} GO → {report.ideas_merged} merged")
+          f" → {report.ideas_go} GO / {report.ideas_rejected} rejetées"
+          f" → {report.ideas_merged} merged")
     print(f"  ├── Reward: [{bar}] {report.best_reward:.3f} "
           f"(avg: {report.avg_reward:.3f})")
     print(f"  ├── Verdict: {report.verdict}")
+    if report.health_delta != 0:
+        sign = "+" if report.health_delta > 0 else ""
+        print(f"  ├── Santé projet: Δ{sign}{report.health_delta:.3f}")
     print(f"  └── Durée: {report.duration_ms}ms")
 
     # Top idées mergées
@@ -1697,6 +2064,289 @@ def cmd_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seed(args: argparse.Namespace) -> int:
+    """Commande: ensemencer la mémoire pour alimenter les sources réelles.
+
+    Analyse le projet et crée :
+      - Des idées incubateur à partir des gaps détectés
+      - Des phéromones stigmergy à partir des patterns
+      - Des entrées mémoire à partir de l'état du projet
+    """
+    project_root = Path(args.project_root).resolve()
+    _ensure_dirs(project_root)
+    seeded = 0
+
+    # 1. Seed l'incubateur avec des idées gap-driven
+    mod_incubator = _load_tool("incubator")
+    if mod_incubator is not None:
+        gaps = _gap_driven_ideas(project_root, max_ideas=10)
+        try:
+            all_ideas = mod_incubator.load_incubator(project_root)
+            existing_titles = {i.title.lower() for i in all_ideas}
+            for gap in gaps:
+                if gap["title"].lower() not in existing_titles:
+                    if hasattr(mod_incubator, "add_idea"):
+                        mod_incubator.add_idea(
+                            project_root,
+                            title=gap["title"],
+                            description=gap["description"],
+                            domain=gap.get("domain", "tools"),
+                        )
+                        seeded += 1
+        except Exception:
+            pass
+        if not args.json:
+            print(f"  🌱 Incubateur: {seeded} idées ensemencées")
+
+    # 2. Seed stigmergy avec des phéromones OPPORTUNITY
+    mod_stigmergy = _load_tool("stigmergy")
+    stig_count = 0
+    if mod_stigmergy is not None:
+        health = _snapshot_project_health(project_root)
+        opportunities = []
+
+        if health.get("test_ratio", 1) < 0.5:
+            opportunities.append(
+                f"NEED: Ratio tests/outils faible ({health['test_ratio']:.0%}). "
+                f"Augmenter la couverture."
+            )
+        if health.get("harmony_high", 0) > 0:
+            opportunities.append(
+                f"NEED: {health['harmony_high']} dissonances HIGH détectées. "
+                f"Résoudre les conflits architecturaux."
+            )
+        if health.get("antifragile_score", 100) < 60:
+            opportunities.append(
+                f"OPPORTUNITY: Score antifragile bas ({health['antifragile_score']}). "
+                f"Renforcer la résilience."
+            )
+
+        # Déposer les phéromones
+        for opp_text in opportunities:
+            try:
+                if hasattr(mod_stigmergy, "deposit_pheromone"):
+                    ptype = "NEED" if opp_text.startswith("NEED") else "OPPORTUNITY"
+                    mod_stigmergy.deposit_pheromone(
+                        project_root, ptype=ptype, text=opp_text,
+                    )
+                    stig_count += 1
+            except Exception:
+                pass
+        if not args.json:
+            print(f"  🐜 Stigmergy: {stig_count} phéromones déposées")
+
+    # 3. Seed la mémoire R&D avec des learnings de baseline
+    memory = load_memory(project_root)
+    health = _snapshot_project_health(project_root)
+    baseline_learnings = [
+        {
+            "title": "Baseline: état du projet au moment du seed",
+            "description": f"Health snapshot: {json.dumps(health)}",
+            "source": "seed",
+            "domain": "meta",
+            "action": "add",
+            "merged": False,
+            "reward": 0.0,
+            "cycle_id": 0,
+            "created_at": datetime.now().isoformat(),
+        },
+    ]
+
+    existing_titles = {m.get("title", "").lower() for m in memory}
+    seed_mem = 0
+    for learning in baseline_learnings:
+        if learning["title"].lower() not in existing_titles:
+            memory.append(learning)
+            seed_mem += 1
+    if seed_mem > 0:
+        save_memory(project_root, memory)
+    if not args.json:
+        print(f"  🧠 Mémoire: {seed_mem} entrée(s) baseline")
+
+    total = seeded + stig_count + seed_mem
+    if args.json:
+        print(json.dumps({
+            "seeded": total,
+            "incubator": seeded,
+            "stigmergy": stig_count,
+            "memory": seed_mem,
+            "health": health,
+        }, indent=2, ensure_ascii=False))
+    else:
+        print(f"\n  ✅ Total ensemencé: {total} entrées")
+        print("  Relancer 'cycle' ou 'train' pour utiliser les nouvelles graines.")
+    return 0
+
+
+def _generate_prototype(idea: Idea, project_root: Path) -> Path | None:
+    """Génère un squelette Python pour une idée d'innovation.
+
+    Crée un fichier minimal mais fonctionnel dans .bmad-rnd/prototypes/
+    suivant le pattern BMAD : argparse, --project-root, --json, stdlib only.
+    Retourne le chemin du fichier généré, ou None si non applicable.
+    """
+    if idea.domain not in ("tools", "meta", "testing", "integration"):
+        return None  # Seuls certains domaines produisent des prototypes Python
+
+    proto_dir = _rnd_dir(project_root) / PROTOTYPE_DIR
+    proto_dir.mkdir(parents=True, exist_ok=True)
+
+    slug = idea.id.lower().replace(" ", "-")
+    tool_name = f"proto-{slug}"
+    proto_path = proto_dir / f"{tool_name}.py"
+
+    # Ne pas écraser un prototype existant
+    if proto_path.exists():
+        return proto_path
+
+    # Description nettoyée pour le docstring
+    desc = idea.description.replace('"""', "'''")[:200]
+    title_clean = idea.title.replace('"', "'")[:80]
+
+    skeleton = f'''#!/usr/bin/env python3
+"""
+{tool_name}.py — Prototype auto-généré par R&D Engine v{VERSION}
+{'=' * 60}
+
+{title_clean}
+
+{desc}
+
+Origine: {idea.source} | Domaine: {idea.domain} | Action: {idea.action}
+Cycle: {idea.cycle_id} | Score: {idea.total_score:.3f} | Reward: {idea.reward:.3f}
+
+Stdlib only — aucune dépendance externe.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def analyze(project_root: Path) -> dict[str, Any]:
+    """Analyse principale — à implémenter."""
+    results: dict[str, Any] = {{
+        "status": "prototype",
+        "idea": "{title_clean}",
+        "domain": "{idea.domain}",
+        "action": "{idea.action}",
+    }}
+
+    # TODO: Implémenter la logique métier
+    # Basé sur: {desc[:100]}
+
+    return results
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="{title_clean}")
+    parser.add_argument("--project-root", required=True, help="Racine du projet")
+    parser.add_argument("--json", action="store_true", help="Sortie JSON")
+    args = parser.parse_args()
+
+    project_root = Path(args.project_root).resolve()
+    results = analyze(project_root)
+
+    if args.json:
+        print(json.dumps(results, indent=2, ensure_ascii=False))
+    else:
+        print(f"\\n🔬 Prototype: {title_clean}")
+        for k, v in results.items():
+            print(f"  {{k}}: {{v}}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+    try:
+        proto_path.write_text(skeleton, encoding="utf-8")
+        return proto_path
+    except OSError:
+        return None
+
+
+def cmd_prototype(args: argparse.Namespace) -> int:
+    """Commande: générer des prototypes pour les idées gagnantes."""
+    project_root = Path(args.project_root).resolve()
+    _ensure_dirs(project_root)
+    memory = load_memory(project_root)
+
+    # Filtrer les idées éligibles
+    if args.idea_id:
+        # Prototype pour une idée spécifique
+        candidates = [m for m in memory if m.get("id") == args.idea_id]
+    else:
+        # Toutes les idées mergées non encore prototypées
+        proto_dir = _rnd_dir(project_root) / PROTOTYPE_DIR
+        existing_protos = {f.stem for f in proto_dir.glob("*.py")} if proto_dir.exists() else set()
+        candidates = [
+            m for m in memory
+            if m.get("merged") and f"proto-{m.get('id', '').lower().replace(' ', '-')}"
+            not in existing_protos
+        ]
+
+    if not candidates:
+        if not args.json:
+            print("  Aucune idée éligible pour prototypage.")
+        return 0
+
+    generated = []
+    for m in candidates:
+        idea = Idea.from_dict(m)
+        proto_path = _generate_prototype(idea, project_root)
+        if proto_path is not None:
+            generated.append({
+                "idea_id": idea.id,
+                "title": idea.title,
+                "prototype": str(proto_path.relative_to(project_root)),
+            })
+
+    if args.json:
+        print(json.dumps({"prototypes": generated}, indent=2, ensure_ascii=False))
+    else:
+        print(f"\n  🏗️  {len(generated)} prototype(s) générés:")
+        for g in generated:
+            print(f"    • {g['idea_id']}: {g['prototype']}")
+        if generated:
+            print(f"\n  Fichiers dans {_rnd_dir(project_root) / PROTOTYPE_DIR}/")
+    return 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Commande: afficher la santé du projet (closed-loop metrics)."""
+    project_root = Path(args.project_root).resolve()
+    health = _snapshot_project_health(project_root)
+
+    if args.json:
+        print(json.dumps(health, indent=2, ensure_ascii=False))
+    else:
+        print("\n  🏥 Santé du projet")
+        print(f"  ├── Outils: {health['tool_count']}")
+        print(f"  ├── Tests: {health['test_count']} "
+              f"(ratio: {health['test_ratio']:.0%})")
+        print(f"  ├── Docs: {health['doc_count']}")
+        print(f"  ├── Harmony: {health['harmony_dissonances']} dissonances "
+              f"({health['harmony_high']} HIGH)")
+        print(f"  ├── Antifragile: {health['antifragile_score']}")
+        print(f"  └── Score composite: {health['composite_score']:.1f}/100")
+
+    # Comparer avec le dernier cycle si disponible
+    reports = load_cycle_reports(project_root)
+    if reports and not args.json:
+        last = reports[-1]
+        if last.health_before:
+            delta = _compute_health_delta(last.health_before, health)
+            trend = "↑" if delta > 0 else "↓" if delta < 0 else "→"
+            print(f"\n  Tendance depuis cycle #{last.cycle_id}: "
+                  f"{trend} (Δ{'+' if delta > 0 else ''}{delta:.3f})")
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1708,6 +2358,9 @@ Exemples :
   %(prog)s --project-root . cycle                     # 1 cycle complet
   %(prog)s --project-root . train --epochs 5          # 5 cycles intensifs
   %(prog)s --project-root . train --epochs 10 --auto-stop  # Avec auto-stop
+  %(prog)s --project-root . seed                      # Ensemencer les sources
+  %(prog)s --project-root . health                    # Santé du projet
+  %(prog)s --project-root . prototype                 # Générer des squelettes
   %(prog)s --project-root . dashboard                 # Tableau de bord
   %(prog)s --project-root . status                    # État du moteur
 """,
@@ -1772,6 +2425,23 @@ Exemples :
     # reset
     p_reset = subs.add_parser("reset", help="Reset policy (garde historique)")
     p_reset.set_defaults(func=cmd_reset)
+
+    # seed
+    p_seed = subs.add_parser("seed",
+                             help="Ensemencer les sources (incubateur, stigmergy, mémoire)")
+    p_seed.set_defaults(func=cmd_seed)
+
+    # prototype
+    p_proto = subs.add_parser("prototype",
+                              help="Générer des squelettes Python pour les idées gagnantes")
+    p_proto.add_argument("--idea-id", default=None,
+                         help="ID d'une idée spécifique (ex: RND-0001-01)")
+    p_proto.set_defaults(func=cmd_prototype)
+
+    # health
+    p_health = subs.add_parser("health",
+                               help="Santé du projet (closed-loop metrics)")
+    p_health.set_defaults(func=cmd_health)
 
     args = parser.parse_args()
     if not args.command:
