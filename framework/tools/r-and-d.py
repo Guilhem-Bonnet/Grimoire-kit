@@ -85,6 +85,7 @@ HARVEST_SOURCES = [
     "harmony",         # dissonances architecturales
     "stigmergy",       # phéromones actives
     "incubator",       # idées dormantes à réveiller
+    "synthetic",       # idées générées par concept blending
 ]
 
 # Domaines d'innovation
@@ -571,6 +572,131 @@ def _classify_action(text: str) -> str:
     return "improve"
 
 
+# ── Générateur d'idées synthétiques (concept blending) ───────────
+
+# Templates d'innovation par croisement outil × domaine × action
+_INNOVATION_TEMPLATES = [
+    # Croisements inter-outils
+    ("Combiner {tool_a} et {tool_b} en un pipeline unifié",
+     "meta", "merge"),
+    ("Créer un mode interactif pour {tool_a}",
+     "tools", "improve"),
+    ("Ajouter export {format} à {tool_a}",
+     "integration", "improve"),
+    # Améliorations par domaine
+    ("Ajouter métriques de {domain} au dashboard NSO",
+     "meta", "improve"),
+    ("Créer un hook pre-commit qui vérifie {domain}",
+     "integration", "add"),
+    ("Documenter les best practices pour {domain}",
+     "documentation", "add"),
+    # Patterns architecturaux
+    ("Ajouter cache intelligent à {tool_a} pour accélérer les re-runs",
+     "performance", "improve"),
+    ("Créer un mode watch pour {tool_a} (détection de changements)",
+     "tools", "add"),
+    ("Ajouter scoring composite {domain} au oracle.py",
+     "meta", "improve"),
+    # Résilience
+    ("Ajouter retry automatique quand {tool_a} échoue",
+     "resilience", "improve"),
+    ("Créer un health-check pour le domaine {domain}",
+     "resilience", "add"),
+    # Testing
+    ("Ajouter property-based testing pour {tool_a}",
+     "testing", "add"),
+    ("Créer benchmark de performance pour {tool_a}",
+     "testing", "add"),
+    # Agent
+    ("Créer un agent spécialisé en {domain}",
+     "agents", "add"),
+    ("Ajouter persona alternative à l'agent {agent}",
+     "agents", "improve"),
+    # Workflows
+    ("Créer un workflow automatisé pour {domain}",
+     "workflows", "add"),
+    ("Simplifier le workflow existant en supprimant les étapes inutilisées",
+     "workflows", "simplify"),
+    # Architecture
+    ("Créer un adapteur MCP pour {tool_a}",
+     "integration", "add"),
+    ("Ajouter support multi-projet à {tool_a}",
+     "architecture", "improve"),
+    # Simplification
+    ("Fusionner {tool_a} et {tool_b} qui ont des responsabilités proches",
+     "architecture", "merge"),
+    ("Supprimer les fonctionnalités inutilisées de {tool_a}",
+     "architecture", "simplify"),
+]
+
+_EXPORT_FORMATS = ["CSV", "HTML", "Mermaid", "SQLite", "SARIF"]
+
+
+def _generate_synthetic_ideas(project_root: Path, policy: Policy,
+                              max_ideas: int = 10) -> list[dict[str, str]]:
+    """Génère des idées synthétiques par combinaison croisée.
+
+    Concept blending : croise outils × domaines × actions × templates
+    pour produire des innovations que les sources réelles ne voient pas.
+    Guidé par la policy (domaines à forte pondération = plus d'idées).
+    """
+    ideas: list[dict[str, str]] = []
+
+    # Inventorier les outils et agents existants
+    tools_dir = project_root / "framework" / "tools"
+    tools = sorted(f.stem for f in tools_dir.glob("*.py")) if tools_dir.exists() else []
+    agent_files = []
+    for adir in project_root.rglob("agents/*.md"):
+        agent_files.append(adir.stem)
+    agents = sorted(set(agent_files))[:10] if agent_files else ["dev", "pm", "qa"]
+
+    if not tools:
+        return []
+
+    # Sélectionner les domaines prioritaires selon la policy
+    domain_pool = list(DOMAINS)
+    if policy.domain_weights:
+        domain_pool = sorted(policy.domain_weights.keys(),
+                             key=lambda d: policy.domain_weights.get(d, 0),
+                             reverse=True)
+
+    rng = random.Random()  # Seed non fixé = variété entre cycles
+
+    for _ in range(max_ideas * 3):  # sur-générer puis tronquer
+        template, tpl_domain, tpl_action = rng.choice(_INNOVATION_TEMPLATES)
+        tool_a = rng.choice(tools)
+        tool_b = rng.choice([t for t in tools if t != tool_a] or tools)
+        domain = rng.choice(domain_pool[:5])  # favoriser les top domaines
+        agent = rng.choice(agents)
+        fmt = rng.choice(_EXPORT_FORMATS)
+
+        title = template.format(
+            tool_a=tool_a, tool_b=tool_b,
+            domain=domain, agent=agent, format=fmt,
+        )
+
+        ideas.append({
+            "title": title,
+            "description": f"Innovation synthétique : {title}",
+            "source": "synthetic",
+            "domain": tpl_domain,
+            "action": tpl_action,
+        })
+
+    # Dédupliquer les synthétiques entre eux
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for idea in ideas:
+        norm = idea["title"].lower()
+        if norm not in seen:
+            seen.add(norm)
+            unique.append(idea)
+
+    # Tronquer au max demandé
+    rng.shuffle(unique)
+    return unique[:max_ideas]
+
+
 def harvest(project_root: Path, policy: Policy,
             budget: int = DEFAULT_BUDGET) -> list[Idea]:
     """Phase 1 : Récolte d'idées depuis toutes les sources.
@@ -603,7 +729,11 @@ def harvest(project_root: Path, policy: Policy,
         # Fallback: générer des idées synthétiques par analyse structurelle
         raw_ideas = _harvest_from_project_scan(project_root)
 
-    # Dédupliquation par titre normalisé
+    # Enrichir avec des idées synthétiques par combinaison croisée
+    # (concept blending : croiser outils existants × domaines × actions)
+    raw_ideas.extend(_generate_synthetic_ideas(project_root, policy, budget * 2))
+
+    # Déduplication par titre normalisé (intra-cycle)
     seen_titles: set[str] = set()
     unique_ideas: list[dict[str, str]] = []
     for raw in raw_ideas:
@@ -611,6 +741,34 @@ def harvest(project_root: Path, policy: Policy,
         if norm not in seen_titles:
             seen_titles.add(norm)
             unique_ideas.append(raw)
+
+    # Déduplication inter-cycles : exclure les idées déjà explorées en mémoire
+    memory = load_memory(project_root)
+    past_titles = {m.get("title", "").lower().strip() for m in memory}
+    fresh_ideas: list[dict[str, str]] = []
+    recycled_count = 0
+    for raw in unique_ideas:
+        norm = raw["title"].lower().strip()
+        if norm in past_titles:
+            recycled_count += 1
+            continue
+        fresh_ideas.append(raw)
+
+    if recycled_count > 0 and fresh_ideas:
+        unique_ideas = fresh_ideas
+    elif recycled_count > 0 and not fresh_ideas:
+        # Toutes les idées sont recyclées — forcer une mutation
+        # Garder les moins récentes en mémoire (plus de chances d'être périmées)
+        past_by_title: dict[str, dict] = {}
+        for m in memory:
+            t = m.get("title", "").lower().strip()
+            past_by_title[t] = m
+        # Filtrer celles qui n'ont jamais été merged (échecs passés = pas la peine)
+        candidates = [raw for raw in unique_ideas
+                      if not past_by_title.get(raw["title"].lower().strip(), {}).get("merged")]
+        if candidates:
+            unique_ideas = candidates
+        # Sinon on garde tout mais elles seront pénalisées par le challenge
 
     # Pondération par policy (reinforcement)
     scored_raw: list[tuple[float, dict[str, str]]] = []
