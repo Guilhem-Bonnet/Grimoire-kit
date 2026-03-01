@@ -19,7 +19,7 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `cross-migrate.py` | `migrate` | Migration cross-projet d'artefacts BMAD (learnings, rules, DNA, agents) |
 | `agent-darwinism.py` | `darwinism` | Sélection naturelle des agents — fitness, évolution, leaderboard |
 | `stigmergy.py` | `stigmergy` | Coordination stigmergique — phéromones numériques entre agents |
-| `r-and-d.py` | *(direct)* | Innovation Engine v2.0 — RL + closed-loop + seed + prototypes |
+| `r-and-d.py` | *(direct)* | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes |
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
 | `bmad-completion.zsh` | *(source)* | Autocomplétion zsh pour `bmad-init.sh` |
 
@@ -130,6 +130,7 @@ bash bmad-init.sh dream --agent dev         # focus un agent
 bash bmad-init.sh dream --validate          # valider les insights (no hallucination)
 bash bmad-init.sh dream --dry-run           # preview sans écrire
 bash bmad-init.sh dream --json              # sortie JSON
+bash bmad-init.sh dream --multi-project ../proj-a ../proj-b  # croiser entre projets
 ```
 
 **6 sources analysées :** learnings, decisions-log, BMAD_TRACE, failure-museum, shared-context, contradiction-log
@@ -176,6 +177,7 @@ bash bmad-init.sh antifragile --trend        # tendance historique
 bash bmad-init.sh antifragile --since 2026-01-01  # depuis une date
 bash bmad-init.sh antifragile --json         # sortie JSON
 bash bmad-init.sh antifragile --dry-run      # sans sauvegarder
+bash bmad-init.sh antifragile --multi-project ../proj-a ../proj-b  # comparer entre projets
 ```
 
 **6 dimensions pondérées :**
@@ -368,11 +370,12 @@ bash bmad-init.sh stigmergy stats
 
 ---
 
-## `r-and-d.py` — Innovation Engine v2.0
+## `r-and-d.py` — Innovation Engine v2.1
 
-Moteur d'innovation autonome avec reinforcement learning et **closed-loop reward**.
+Moteur d'innovation autonome avec reinforcement learning, **closed-loop reward** et **filtre anti-chaînes de mutations**.
 Exécute des cycles R&D (harvest → evaluate → challenge → simulate → select → converge),
 mesure la santé réelle du projet avant/après, et module le reward par ce signal empirique.
+Les mutations de mutations sont détectées et pénalisées progressivement (v2.1).
 
 ### Commandes
 
@@ -401,15 +404,23 @@ python3 r-and-d.py --project-root . tune --epsilon 0.3             # ajuster exp
 python3 r-and-d.py --project-root . reset                          # reset policy (garde mémoire)
 ```
 
-### Architecture v2.0
+### Architecture v2.1
 
 **7 phases par cycle :** HARVEST (13 sources : dream, oracle-swot, oracle-attract, early-warning,
 harmony, incubator, stigmergy, dna-drift, workflow-adapt, antifragile, synthetic, mutation,
-gap-analysis) → EVALUATE (scoring 6D adaptatif) → CHALLENGE (**durci** : seuil GO 0.60,
-quota 20% rejet, médiane-based, pénalité progressive) → SIMULATE (digital-twin) →
+gap-analysis) → EVALUATE (scoring 6D adaptatif) → CHALLENGE (**durci + anti-mutation** : seuil GO 0.60,
+quota 20% rejet, médiane-based, pénalité chaîne de mutations, filtre actionnabilité) → SIMULATE (digital-twin) →
 QUALITY GATES (tests+harmony+antifragile) → SELECT (tournament + health delta) → CONVERGE
 
-### Nouveautés v2.0
+### Nouveautés v2.1
+
+| Feature | Description |
+|---|---|
+| **Anti-mutation chains** | `mutation_depth` tracking — pénalité progressive depth > 1 (-0.12/level, max -0.30) |
+| **Filtre actionnabilité** | Détecte les titres imbriqués ("Transposer 'Transposer'") → -0.20 |
+| **Résultat mesuré** | v2.0 : 60% mutations merged → v2.1 : 0% mutations merged, 100% idées actionnables |
+
+### Acquis v2.0
 
 | Feature | Description |
 |---|---|

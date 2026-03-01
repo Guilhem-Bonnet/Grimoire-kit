@@ -55,7 +55,7 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 - ⛓️ **Decision Log** — blockchain légère de décisions architecturales : log, chain, verify, audit
 - 🪞 **Mirror Agent** — neurones miroirs : observation, apprentissage inter-agents, transfert de patterns
 - 🧠 **Sensory Buffer** — mémoire sensorielle court terme à décroissance exponentielle
-- 🔬 **R&D Engine v2** — moteur d'innovation autonome avec reinforcement learning, closed-loop reward, challenge durci, seed memory, mutation/gap-analysis, génération de prototypes
+- 🔬 **R&D Engine v2.1** — moteur d'innovation autonome avec reinforcement learning, closed-loop reward, challenge durci, filtre anti-chaînes de mutations, multi-projet, seed memory, gap-analysis, prototypes
 
 ## Quick Start
 
@@ -329,6 +329,7 @@ bash bmad-init.sh dream --since 2026-01-01  # depuis une date
 bash bmad-init.sh dream --agent dev         # focus un agent
 bash bmad-init.sh dream --validate          # valider les insights (no hallucination)
 bash bmad-init.sh dream --dry-run           # preview sans écrire
+bash bmad-init.sh dream --multi-project ../proj-a ../proj-b  # croiser les insights entre projets
 
 # Consensus — protocole de consensus adversarial pour décisions critiques
 bash bmad-init.sh consensus --proposal "Utiliser PostgreSQL pour le cache sessions"
@@ -341,6 +342,7 @@ bash bmad-init.sh antifragile                # score compact
 bash bmad-init.sh antifragile --detail       # rapport complet avec recommandations
 bash bmad-init.sh antifragile --trend        # tendance historique
 bash bmad-init.sh antifragile --since 2026-01-01  # depuis une date
+bash bmad-init.sh antifragile --multi-project ../proj-a ../proj-b  # comparer entre projets
 
 # Reasoning Stream — flux de raisonnement structuré
 bash bmad-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis pourrait remplacer memcached"
@@ -432,7 +434,7 @@ python framework/tools/sensory-buffer.py --project-root . decay --agent dev     
 python framework/tools/sensory-buffer.py --project-root . prioritize --agent dev --top 5
 python framework/tools/sensory-buffer.py --project-root . flush --agent dev --older-than 24h
 
-# R&D Innovation Engine v2.0 — reinforcement learning + closed-loop
+# R&D Innovation Engine v2.1 — reinforcement learning + closed-loop + anti-mutation
 python framework/tools/r-and-d.py --project-root . cycle                          # 1 cycle d'innovation
 python framework/tools/r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs avec RL
 python framework/tools/r-and-d.py --project-root . train --epochs 10 --auto-stop  # auto-stop si convergence

@@ -253,7 +253,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `decision-log` | Blockchain légère de décisions | Le registre notarié |
 | `mirror-agent` | Apprentissage inter-agents par mimétisme | Les neurones miroirs |
 | `sensory-buffer` | Mémoire court terme à décroissance | La mémoire de travail |
-| `r-and-d` | Innovation Engine v2 — RL + closed-loop + prototypes | Le laboratoire de R&D autonome |
+| `r-and-d` | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes | Le laboratoire de R&D autonome |
 
 ---
 
@@ -363,7 +363,7 @@ votre-projet/
 | **CRISPR** | Édition chirurgicale précise de workflows |
 | **Decision Chain** | Chaîne immuable de décisions (blockchain légère) |
 | **Sensory Buffer** | Mémoire court terme qui décroît exponentiellement |
-| **R&D Engine** | Moteur d'innovation autonome avec reinforcement learning (v2.0) |
+| **R&D Engine** | Moteur d'innovation autonome avec reinforcement learning (v2.1) |
 | **Reinforcement Learning** | Ajustement automatique des poids par récompense/pénalité |
 | **Epoch** | Un cycle complet d'innovation (harvest → select → converge) |
 | **Policy** | Poids adaptatifs qui guident les choix du moteur R&D |
@@ -371,6 +371,8 @@ votre-projet/
 | **Closed-loop** | Reward modulé par la santé réelle du projet (mesure before/after) |
 | **Health snapshot** | Capture des métriques projet (outils, tests, harmony, antifragile) |
 | **Mutation** | Transformation d'une idée gagnante (transposition, escalade, inverse) |
+| **Mutation depth** | Profondeur de chaîne — mutations de mutations pénalisées progressivement |
+| **Multi-projet** | Comparer ou croiser les données entre plusieurs projets BMAD |
 | **Gap-analysis** | Détection automatique des manques réels (tests, docs, dépendances) |
 | **GO threshold** | Seuil de score minimum (0.60) pour qu'une idée passe le challenge |
 | **Prototype** | Squelette Python auto-généré pour implémenter une idée gagnante |
