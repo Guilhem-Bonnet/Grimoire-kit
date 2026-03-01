@@ -19,6 +19,7 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `cross-migrate.py` | `migrate` | Migration cross-projet d'artefacts BMAD (learnings, rules, DNA, agents) |
 | `agent-darwinism.py` | `darwinism` | Sélection naturelle des agents — fitness, évolution, leaderboard |
 | `stigmergy.py` | `stigmergy` | Coordination stigmergique — phéromones numériques entre agents |
+| `r-and-d.py` | *(direct)* | Innovation Engine — cycles R&D avec reinforcement learning |
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
 | `bmad-completion.zsh` | *(source)* | Autocomplétion zsh pour `bmad-init.sh` |
 
@@ -364,6 +365,37 @@ bash bmad-init.sh stigmergy stats
 - 🔄 **Relay** — COMPLETE suivi de NEED/PROGRESS par un agent différent
 
 **Sortie :** `_bmad-output/pheromone-board.json`
+
+---
+
+## `r-and-d.py` — Innovation Engine
+
+Moteur d'innovation autonome avec reinforcement learning. Exécute des cycles R&D
+(harvest → evaluate → challenge → simulate → select → converge) et apprend de
+ses résultats pour concentrer les prochains cycles sur les meilleurs patterns.
+
+```bash
+python3 r-and-d.py --project-root . cycle                          # 1 cycle complet
+python3 r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs
+python3 r-and-d.py --project-root . train --epochs 10 --auto-stop  # avec auto-stop
+python3 r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
+python3 r-and-d.py --project-root . harvest                        # récolte seule
+python3 r-and-d.py --project-root . evaluate                       # harvest + scoring
+python3 r-and-d.py --project-root . dashboard                      # tableau de bord markdown
+python3 r-and-d.py --project-root . status                         # état du moteur
+python3 r-and-d.py --project-root . history                        # historique des cycles
+python3 r-and-d.py --project-root . tune --epsilon 0.3             # ajuster exploration
+python3 r-and-d.py --project-root . reset                          # reset policy (garde mémoire)
+```
+
+**7 phases par cycle :** HARVEST (dream+oracle+early-warning+harmony+incubator+stigmergy) →
+EVALUATE (scoring 6D adaptatif) → CHALLENGE (red-team+pre-mortem) → SIMULATE (digital-twin) →
+QUALITY GATES (tests+harmony+antifragile) → SELECT (tournament) → CONVERGE (critère d'arrêt)
+
+**Reinforcement Learning :** policy à poids adaptatifs (sources × domaines × actions),
+epsilon-greedy exploration, learning rate décroissant, convergence par rendement décroissant.
+
+**Sortie :** `.bmad-rnd/` — policy, mémoire d'innovation, historique par cycle, dashboard.
 
 ---
 

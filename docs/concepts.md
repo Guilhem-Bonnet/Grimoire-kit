@@ -253,6 +253,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `decision-log` | Blockchain légère de décisions | Le registre notarié |
 | `mirror-agent` | Apprentissage inter-agents par mimétisme | Les neurones miroirs |
 | `sensory-buffer` | Mémoire court terme à décroissance | La mémoire de travail |
+| `r-and-d` | Innovation Engine avec reinforcement learning | Le laboratoire de R&D autonome |
 
 ---
 
@@ -267,7 +268,7 @@ bmad-custom-kit/
 ├── framework/                   ← Le "système d'exploitation" (jamais modifié par projet)
 │   ├── agent-base.md            ← Protocole commun à tous les agents
 │   ├── cc-verify.sh             ← Completion Contract vérifieur
-│   ├── tools/                   ← 41 outils Python (stdlib only)
+│   ├── tools/                   ← 49 outils Python (stdlib only)
 │   ├── teams/                   ← Définitions des 3 teams
 │   ├── workflows/               ← Workflows de base (boomerang, subagent, etc.)
 │   ├── memory/                  ← Scripts mémoire (mem0-bridge, maintenance)
@@ -362,6 +363,11 @@ votre-projet/
 | **CRISPR** | Édition chirurgicale précise de workflows |
 | **Decision Chain** | Chaîne immuable de décisions (blockchain légère) |
 | **Sensory Buffer** | Mémoire court terme qui décroît exponentiellement |
+| **R&D Engine** | Moteur d'innovation autonome avec reinforcement learning |
+| **Reinforcement Learning** | Ajustement automatique des poids par récompense/pénalité |
+| **Epoch** | Un cycle complet d'innovation (harvest → select → converge) |
+| **Policy** | Poids adaptatifs qui guident les choix du moteur R&D |
+| **Convergence** | Point où l'innovation n'apporte plus de gain significatif |
 
 ---
 

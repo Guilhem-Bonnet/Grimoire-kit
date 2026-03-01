@@ -430,6 +430,16 @@ python framework/tools/sensory-buffer.py --project-root . recall --agent dev    
 python framework/tools/sensory-buffer.py --project-root . decay --agent dev       # état de décroissance
 python framework/tools/sensory-buffer.py --project-root . prioritize --agent dev --top 5
 python framework/tools/sensory-buffer.py --project-root . flush --agent dev --older-than 24h
+
+# R&D Innovation Engine — reinforcement learning pour l'auto-amélioration
+python framework/tools/r-and-d.py --project-root . cycle                          # 1 cycle d'innovation
+python framework/tools/r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs avec RL
+python framework/tools/r-and-d.py --project-root . train --epochs 10 --auto-stop  # auto-stop si convergence
+python framework/tools/r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
+python framework/tools/r-and-d.py --project-root . harvest                        # récolte d'idées seule
+python framework/tools/r-and-d.py --project-root . dashboard                      # tableau de bord markdown
+python framework/tools/r-and-d.py --project-root . status                         # état du moteur
+python framework/tools/r-and-d.py --project-root . tune --epsilon 0.3             # ajuster l'exploration
 ```
 
 Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète.
@@ -508,7 +518,7 @@ python3 -m unittest tests.test_context_guard_advanced -v
 | `test_schema_validator.py` | Schema Validator | 28 |
 | `test_auto_doc.py` | Auto-Doc Sync | 34 |
 
-**Smoke tests Bash** (121 assertions) :
+**Smoke tests Bash** (122 assertions) :
 ```bash
 bash tests/smoke-test.sh
 ```
