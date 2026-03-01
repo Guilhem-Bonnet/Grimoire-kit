@@ -211,7 +211,6 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `nudge-engine` | Suggestions non-intrusives | Le GPS qui propose des détours |
 | `desire-paths` | Détecter les usages réels vs conçus | Les chemins de traverse dans l'herbe |
 | `early-warning` | Alertes précoces (dette, complexité) | Le détecteur de fumée |
-| `confidence-scores` | Score de confiance sur les décisions | Le baromètre de certitude |
 
 ### Intégrité & résilience (Vague 3)
 
@@ -231,7 +230,6 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `workflow-adapt` | Adapter les workflows à l'usage | La route qui s'élargit au trafic |
 | `bias-toolkit` | Détecter et gérer les biais cognitifs | Les lunettes anti-illusion |
 | `crescendo` | Progression beginner → expert | L'escalier pédagogique |
-| `quorum` | Modes collectifs (security, speed, quality) | Le thermostat d'équipe |
 | `new-game-plus` | Héritage intelligent cross-projets | Le New Game+ jeu vidéo |
 | `swarm-consensus` | Estimation multi-agent | Le vote de l'essaim |
 | `incubator` | Faire mûrir des idées | La couveuse à idées |
@@ -244,7 +242,6 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `dashboard` | Tableau de bord santé complet | Le cockpit d'avion |
 | `mycelium` | Partager des patterns entre projets | Le réseau de champignons |
 | `distill` | Condenser un document (5 niveaux) | L'alambic à idées |
-| `workflow-snippets` | Composer des workflows modulaires | Les LEGO du workflow |
 | `harmony-check` | Score d'harmonie architecturale | L'accordeur de piano |
 | `digital-twin` | Simulation d'impact de changements | Le simulateur de vol |
 | `quantum-branch` | Timelines parallèles de configuration | Les mondes parallèles |

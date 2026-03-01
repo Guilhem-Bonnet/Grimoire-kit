@@ -5,6 +5,22 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.1.1] — 2026-03-01
+
+### Supprimé
+
+- **workflow-snippets.py** (389 lignes) — aucune intégration CLI, aucun test, aucune
+  cross-référence. Overlap avec `workflow-design-patterns.md`
+- **quorum.py** (400 lignes) — aucune intégration CLI, aucun test. Overlap fonctionnel
+  avec `antifragile-score.py` (signaux SIL) et `stigmergy.py` (seuils phéromoniques)
+- **confidence-scores.py** (572 lignes) — aucune intégration CLI, aucun test. Heuristiques
+  simplistes, overlap avec `reasoning-stream.py` (niveaux de confiance)
+
+### Corrigé
+
+- Nettoyage des références aux 3 outils supprimés dans `docs/concepts.md`
+- Total : **−1361 lignes** de dead code, 49 → 46 outils
+
 ## [2.1.0] — 2026-03-01
 
 ### Ajouté
