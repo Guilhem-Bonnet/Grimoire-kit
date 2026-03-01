@@ -246,6 +246,13 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `distill` | Condenser un document (5 niveaux) | L'alambic à idées |
 | `workflow-snippets` | Composer des workflows modulaires | Les LEGO du workflow |
 | `harmony-check` | Score d'harmonie architecturale | L'accordeur de piano |
+| `digital-twin` | Simulation d'impact de changements | Le simulateur de vol |
+| `quantum-branch` | Timelines parallèles de configuration | Les mondes parallèles |
+| `time-travel` | Checkpoints et archéologie temporelle | La machine à remonter le temps |
+| `crispr` | Édition chirurgicale de workflows | Le scalpel génétique |
+| `decision-log` | Blockchain légère de décisions | Le registre notarié |
+| `mirror-agent` | Apprentissage inter-agents par mimétisme | Les neurones miroirs |
+| `sensory-buffer` | Mémoire court terme à décroissance | La mémoire de travail |
 
 ---
 
@@ -350,6 +357,11 @@ votre-projet/
 | **Priming** | Charger le contexte avant une question |
 | **Wabi-sabi** | Accepter l'imperfection pragmatiquement |
 | **Stigmergy** | Coordination indirecte par signaux persistants |
+| **Digital Twin** | Jumeau numérique — simule l'impact de changements |
+| **Quantum Branch** | Fork de configurations pour explorer des alternatives |
+| **CRISPR** | Édition chirurgicale précise de workflows |
+| **Decision Chain** | Chaîne immuable de décisions (blockchain légère) |
+| **Sensory Buffer** | Mémoire court terme qui décroît exponentiellement |
 
 ---
 

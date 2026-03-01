@@ -48,6 +48,13 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 - 🧩 **Workflow Snippets** — composition modulaire de workflows depuis des briques réutilisables
 - 📊 **Dashboard** — tableau de bord complet : santé, entropie Shannon, Pareto Gini, activité git
 - 🌐 **Project Graph** — graphe de dépendances avec centralité, clustering et export Mermaid
+- 🪞 **Digital Twin** — jumeau numérique du projet : snapshot, simulation d'impact, scénarios "what if"
+- 🌀 **Quantum Branch** — timelines parallèles : fork, compare, merge de configurations alternatives
+- ⏪ **Time-Travel** — archéologie temporelle : checkpoints, replay, restore, bisect
+- 🧬 **CRISPR** — édition chirurgicale de workflows : scan, splice, excise, transplant
+- ⛓️ **Decision Log** — blockchain légère de décisions architecturales : log, chain, verify, audit
+- 🪞 **Mirror Agent** — neurones miroirs : observation, apprentissage inter-agents, transfert de patterns
+- 🧠 **Sensory Buffer** — mémoire sensorielle court terme à décroissance exponentielle
 
 ## Quick Start
 
@@ -380,6 +387,49 @@ bash bmad-init.sh schema-validate --file path    # valider un fichier spécifiqu
 # Auto-Doc — synchronisation README ↔ code
 bash bmad-init.sh auto-doc check                 # détecter les drifts
 bash bmad-init.sh auto-doc sync                  # corriger automatiquement
+
+# Digital Twin — simulation d'impact
+python framework/tools/digital-twin.py --project-root . snapshot                              # capturer un cliché
+python framework/tools/digital-twin.py --project-root . simulate --change "remove agent:analyst" # simuler un changement
+python framework/tools/digital-twin.py --project-root . impact --target agent:dev              # analyser la criticité
+python framework/tools/digital-twin.py --project-root . scenario --name refactor --change "remove agent:old" --change "add agent:new"
+
+# Quantum Branch — timelines parallèles
+python framework/tools/quantum-branch.py --project-root . fork --name "experiment-1" --description "Test sans analyst"
+python framework/tools/quantum-branch.py --project-root . list                   # lister les branches
+python framework/tools/quantum-branch.py --project-root . compare --branches main,experiment-1
+python framework/tools/quantum-branch.py --project-root . merge --source experiment-1 --dry-run
+
+# Time-Travel — archéologie temporelle
+python framework/tools/time-travel.py --project-root . checkpoint --label "pre-refactor"
+python framework/tools/time-travel.py --project-root . history                   # historique des checkpoints
+python framework/tools/time-travel.py --project-root . replay --from cp-001 --to cp-003
+python framework/tools/time-travel.py --project-root . bisect --good cp-001 --bad cp-005 --test "python -m pytest"
+
+# CRISPR — édition chirurgicale de workflows
+python framework/tools/crispr.py --project-root . scan --workflow review-cycle    # scanner la structure
+python framework/tools/crispr.py --project-root . splice --workflow review-cycle --at seg-003 --insert "gate: approval" --position after
+python framework/tools/crispr.py --project-root . transplant --from review:seg-002 --to deploy:seg-001
+python framework/tools/crispr.py --project-root . validate --workflow review-cycle
+
+# Decision Log — blockchain de décisions
+python framework/tools/decision-log.py --project-root . log --title "Choix DB" --decision "PostgreSQL" --rationale "ACID, relationnelle" --scope architecture
+python framework/tools/decision-log.py --project-root . chain --limit 10         # dernières décisions
+python framework/tools/decision-log.py --project-root . verify                   # vérifier l'intégrité
+python framework/tools/decision-log.py --project-root . export --format markdown --output decisions.md
+
+# Mirror Agent — neurones miroirs
+python framework/tools/mirror-agent.py --project-root . observe --agent dev       # observer un agent
+python framework/tools/mirror-agent.py --project-root . learn --source dev        # apprendre ses patterns
+python framework/tools/mirror-agent.py --project-root . mirror --from dev --to qa # transférer les patterns
+python framework/tools/mirror-agent.py --project-root . diff --agents dev,qa,architect
+
+# Sensory Buffer — mémoire sensorielle
+python framework/tools/sensory-buffer.py --project-root . capture --agent dev --data '{"task": "implement login"}' --category context --importance 0.8
+python framework/tools/sensory-buffer.py --project-root . recall --agent dev      # rappeler le contexte actif
+python framework/tools/sensory-buffer.py --project-root . decay --agent dev       # état de décroissance
+python framework/tools/sensory-buffer.py --project-root . prioritize --agent dev --top 5
+python framework/tools/sensory-buffer.py --project-root . flush --agent dev --older-than 24h
 ```
 
 Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète.
@@ -458,7 +508,7 @@ python3 -m unittest tests.test_context_guard_advanced -v
 | `test_schema_validator.py` | Schema Validator | 28 |
 | `test_auto_doc.py` | Auto-Doc Sync | 34 |
 
-**Smoke tests Bash** (78 assertions) :
+**Smoke tests Bash** (121 assertions) :
 ```bash
 bash tests/smoke-test.sh
 ```
