@@ -526,14 +526,19 @@ def emit_to_stigmergy(report: LintReport, project_root: Path) -> int:
     """
     try:
         import importlib.util
-        sg_path = Path(__file__).parent / "stigmergy.py"
-        if not sg_path.exists():
-            return 0
-        spec = importlib.util.spec_from_file_location("stigmergy", sg_path)
-        if spec is None or spec.loader is None:
-            return 0
-        sg = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(sg)
+        # Cache hit : réutiliser le module déjà chargé
+        if "stigmergy" in sys.modules:
+            sg = sys.modules["stigmergy"]
+        else:
+            sg_path = Path(__file__).parent / "stigmergy.py"
+            if not sg_path.exists():
+                return 0
+            spec = importlib.util.spec_from_file_location("stigmergy", sg_path)
+            if spec is None or spec.loader is None:
+                return 0
+            sg = importlib.util.module_from_spec(spec)
+            sys.modules["stigmergy"] = sg
+            spec.loader.exec_module(sg)
     except Exception:
         return 0
 

@@ -5,6 +5,24 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.2.0] — 2026-03-02
+
+### Corrigé — Fuites mémoire Python
+
+- **r-and-d.py** — 5 correctifs mémoire :
+  - `save_memory()` : ajout cap `MAX_MEMORY_SIZE = 500` — tronque aux N entrées
+    les plus récentes au lieu de grossir indéfiniment
+  - `_load_tool()` : cache via `sys.modules` — évite de recréer le module à chaque
+    appel (14 exec_module/cycle → 1 par outil)
+  - `load_cycle_reports()` : paramètre `last_n` — ne charge que les N derniers
+    rapports au lieu de tout l'historique
+  - `next_cycle_id()` : extraction directe depuis le nom du dernier fichier
+    au lieu de charger et parser tous les rapports JSON
+  - `tool_file.open()` L817 : ajout `with` context manager (file descriptor leak)
+- **nso.py** — `_load_tool()` : même cache `sys.modules`
+- **dream.py** — `emit_to_stigmergy()` : cache `sys.modules` pour stigmergy
+- **memory-lint.py** — `emit_to_stigmergy()` : cache `sys.modules` pour stigmergy
+
 ## [2.1.1] — 2026-03-01
 
 ### Supprimé

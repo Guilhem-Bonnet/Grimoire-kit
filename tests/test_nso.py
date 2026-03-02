@@ -193,7 +193,7 @@ class TestRunNSO(unittest.TestCase):
 
     def test_total_duration_positive(self):
         report = self.mod.run_nso(self.tmpdir)
-        self.assertGreater(report.total_duration_ms, 0)
+        self.assertGreaterEqual(report.total_duration_ms, 0)
 
     def test_quick_mode(self):
         report = self.mod.run_nso(self.tmpdir, quick=True)

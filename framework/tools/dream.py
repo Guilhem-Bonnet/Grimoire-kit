@@ -649,19 +649,24 @@ def emit_to_stigmergy(insights: list[DreamInsight],
     # Import dynamique pour éviter les dépendances circulaires
     try:
         import importlib.util
-        # Chemin co-localisé d'abord (dream.py et stigmergy.py dans le même dossier)
-        sg_path = Path(__file__).parent / "stigmergy.py"
-        if not sg_path.exists():
-            # Fallback : chemin relatif au project_root (projet installé)
-            sg_path = project_root / "framework" / "tools" / "stigmergy.py"
-        if not sg_path.exists():
-            return 0
+        # Cache hit : réutiliser le module déjà chargé
+        if "stigmergy" in sys.modules:
+            sg = sys.modules["stigmergy"]
+        else:
+            # Chemin co-localisé d'abord (dream.py et stigmergy.py dans le même dossier)
+            sg_path = Path(__file__).parent / "stigmergy.py"
+            if not sg_path.exists():
+                # Fallback : chemin relatif au project_root (projet installé)
+                sg_path = project_root / "framework" / "tools" / "stigmergy.py"
+            if not sg_path.exists():
+                return 0
 
-        spec = importlib.util.spec_from_file_location("stigmergy", sg_path)
-        if spec is None or spec.loader is None:
-            return 0
-        sg = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(sg)
+            spec = importlib.util.spec_from_file_location("stigmergy", sg_path)
+            if spec is None or spec.loader is None:
+                return 0
+            sg = importlib.util.module_from_spec(spec)
+            sys.modules["stigmergy"] = sg
+            spec.loader.exec_module(sg)
     except Exception:
         return 0
 

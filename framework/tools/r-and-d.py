@@ -118,6 +118,8 @@ GO_THRESHOLD = 0.60         # seuil GO pour challenge (relevé de 0.5)
 CONDITIONAL_THRESHOLD = 0.40  # seuil CONDITIONAL (relevé de 0.3)
 MIN_REJECT_RATIO = 0.20     # au moins 20% d'idées rejetées par cycle
 PROTOTYPE_DIR = "prototypes"  # squelettes générés
+MAX_MEMORY_SIZE = 500        # cap mémoire : ne garder que les N dernières entrées
+MAX_CYCLE_REPORTS_LOAD = 50  # charger au max N rapports historiques
 
 # Scoring dimensions & weights
 SCORING_DIMS = {
@@ -295,6 +297,9 @@ def load_memory(project_root: Path) -> list[dict[str, Any]]:
 
 def save_memory(project_root: Path, memory: list[dict[str, Any]]) -> None:
     _ensure_dirs(project_root)
+    # Cap mémoire : tronquer aux N entrées les plus récentes
+    if len(memory) > MAX_MEMORY_SIZE:
+        memory = memory[-MAX_MEMORY_SIZE:]
     fpath = _rnd_dir(project_root) / MEMORY_FILE
     fpath.write_text(json.dumps(memory, indent=2, ensure_ascii=False),
                      encoding="utf-8")
@@ -307,12 +312,22 @@ def save_cycle_report(project_root: Path, report: CycleReport) -> None:
                      encoding="utf-8")
 
 
-def load_cycle_reports(project_root: Path) -> list[CycleReport]:
+def load_cycle_reports(project_root: Path,
+                       last_n: int = 0) -> list[CycleReport]:
+    """Charge les rapports de cycles historiques.
+
+    Args:
+        last_n: Si >0, ne charger que les N derniers fichiers (performance).
+                Si 0, charger tous (comportement par défaut).
+    """
     hdir = _rnd_dir(project_root) / HISTORY_DIR
     if not hdir.exists():
         return []
+    files = sorted(hdir.glob("cycle-*.json"))
+    if last_n > 0:
+        files = files[-last_n:]
     reports = []
-    for f in sorted(hdir.glob("cycle-*.json")):
+    for f in files:
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             reports.append(CycleReport(**{k: v for k, v in data.items()
@@ -323,21 +338,38 @@ def load_cycle_reports(project_root: Path) -> list[CycleReport]:
 
 
 def next_cycle_id(project_root: Path) -> int:
-    reports = load_cycle_reports(project_root)
-    if reports:
-        return max(r.cycle_id for r in reports) + 1
-    return 1
+    """Détermine le prochain cycle ID sans charger tous les rapports."""
+    hdir = _rnd_dir(project_root) / HISTORY_DIR
+    if not hdir.exists():
+        return 1
+    files = sorted(hdir.glob("cycle-*.json"))
+    if not files:
+        return 1
+    # Extraire l'ID du dernier fichier : cycle-0042.json → 42
+    last = files[-1].stem  # "cycle-0042"
+    try:
+        return int(last.split("-")[1]) + 1
+    except (IndexError, ValueError):
+        return len(files) + 1
 
 
 # ── Dynamic tool loader ─────────────────────────────────────────
 
 def _load_tool(name: str) -> Any:
-    """Charge dynamiquement un outil Python co-localisé."""
+    """Charge dynamiquement un outil Python co-localisé.
+
+    Utilise sys.modules comme cache — ne recharge le module que s'il
+    n'est pas déjà présent, évitant ainsi la fuite mémoire par
+    création répétée d'objets module.
+    """
+    mod_name = name.replace("-", "_")
+    # Cache hit : retourner le module déjà chargé
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
     tool_path = Path(__file__).parent / f"{name}.py"
     if not tool_path.exists():
         return None
     try:
-        mod_name = name.replace("-", "_")
         spec = importlib.util.spec_from_file_location(mod_name, tool_path)
         if spec is None or spec.loader is None:
             return None
@@ -814,7 +846,8 @@ def _gap_driven_ideas(project_root: Path,
     # Gap 2: Outils > 500 lignes sans doc spécifique
     for tool_file in tools_dir.glob("*.py") if tools_dir.exists() else []:
         try:
-            n_lines = sum(1 for _ in tool_file.open())
+            with tool_file.open() as fh:
+                n_lines = sum(1 for _ in fh)
             if n_lines > 500:
                 doc_exists = any(
                     tool_file.stem in d.stem
@@ -1484,7 +1517,7 @@ def check_convergence(project_root: Path,
     Returns: (verdict, convergence_metric)
       verdict: CONTINUE, SLOW_DOWN, CONSOLIDATE, STOP
     """
-    reports = load_cycle_reports(project_root)
+    reports = load_cycle_reports(project_root, last_n=CONVERGENCE_WINDOW * 2)
     if len(reports) < CONVERGENCE_WINDOW:
         return "CONTINUE", current_reward
 
@@ -2371,7 +2404,7 @@ def cmd_health(args: argparse.Namespace) -> int:
         print(f"  └── Score composite: {health['composite_score']:.1f}/100")
 
     # Comparer avec le dernier cycle si disponible
-    reports = load_cycle_reports(project_root)
+    reports = load_cycle_reports(project_root, last_n=1)
     if reports and not args.json:
         last = reports[-1]
         if last.health_before:

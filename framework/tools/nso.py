@@ -80,13 +80,18 @@ class NSOReport:
 # ── Module loader ─────────────────────────────────────────────────────────────
 
 def _load_tool(name: str) -> object | None:
-    """Charge dynamiquement un outil Python co-localisé."""
+    """Charge dynamiquement un outil Python co-localisé.
+
+    Utilise sys.modules comme cache pour éviter les rechargements
+    répétés et la fuite mémoire associée.
+    """
+    mod_name = name.replace("-", "_")
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
     tool_path = Path(__file__).parent / f"{name}.py"
     if not tool_path.exists():
         return None
     try:
-        # Use underscore variant for module name (Python doesn't allow hyphens)
-        mod_name = name.replace("-", "_")
         spec = importlib.util.spec_from_file_location(mod_name, tool_path)
         if spec is None or spec.loader is None:
             return None
