@@ -1,0 +1,36 @@
+name: Cleanup Merged Branches
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-branch:
+    name: "Delete merged branch"
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    steps:
+      - name: Delete feature/fix branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            // Ne jamais supprimer main ou develop
+            if (['main', 'develop', 'release'].includes(branch)) {
+              console.log(`⚠️ Protected branch '${branch}' — skip`);
+              return;
+            }
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branch}`
+              });
+              console.log(`✅ Branch '${branch}' deleted after merge`);
+            } catch (error) {
+              console.log(`⚠️ Could not delete '${branch}': ${error.message}`);
+            }

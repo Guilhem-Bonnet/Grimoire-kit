@@ -5,6 +5,33 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.4.0] — 2026-03-02
+
+### Ajouté — Cross-pollination depuis zav-sandbox (GSANE)
+
+- **cognitive-flywheel.py** (outil #47) — Boucle d'auto-amélioration continue :
+  analyse BMAD_TRACE.md pour détecter les patterns récurrents (failures,
+  AC-FAIL), calcule un score de santé (A+ à D), génère des corrections
+  automatiques avec système de gates (max 5 corrections, collision → escalade).
+  6 commandes CLI : `analyze`, `report`, `apply`, `history`, `score`, `dashboard`
+- **failure-museum.py** (outil #48) — Catalogue structuré des échecs :
+  enregistre chaque failure avec root-cause, règle ajoutée, sévérité et tags.
+  Persistance JSONL + sync markdown automatique.
+  7 commandes CLI : `add`, `list`, `search`, `stats`, `export`, `lessons`, `check`
+- **cleanup-branches.yml** — Workflow CI GitHub Actions pour supprimer
+  automatiquement les branches mergées (protège main/develop/release/*)
+- **tests/test_cognitive_flywheel.py** — 45 tests couvrant dataclasses,
+  parsing trace, extraction de patterns, scoring, corrections, gates,
+  persistence report/history, scoreboard, commandes, CLI, constantes
+- **tests/test_failure_museum.py** — 43 tests couvrant dataclasses,
+  persistence JSONL, markdown sync, commandes, CLI, intégration, constantes
+- Total : **1 875 tests**, 0 échecs
+
+### Inspiré par
+
+- [zav-sandbox](https://github.com/zavrocKk/zav-sandbox) (framework GSANE) :
+  Cognitive Flywheel, Failure Museum, branch cleanup CI
+
 ## [2.3.0] — 2026-03-02
 
 ### Ajouté — Couverture de tests complète (31 fichiers, +787 tests)
