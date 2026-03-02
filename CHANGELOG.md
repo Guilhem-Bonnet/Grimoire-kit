@@ -5,6 +5,28 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.2.1] — 2026-03-02
+
+### Corrigé — Audit multi-cycles (15 cycles, 3 fichiers)
+
+- **nso.py:323** — condition morte `status = "ok" if ... else "ok"` corrigée
+  en `"warn"` — le NSO signale désormais correctement les erreurs memory-lint
+- **gen-tests.py** — ajout `encoding="utf-8"` sur 2 appels `open()` (L167, L260)
+  — évite les erreurs d'encodage sur Windows avec des fichiers contenant des
+  accents/emojis
+- **r-and-d.py:849** — ajout `encoding="utf-8"` sur `tool_file.open()` dans
+  l'analyse de gap (même correctif portabilité Windows)
+
+### Vérifié — Aucun problème trouvé
+
+- Division par zéro : 15+ sites vérifiés, tous protégés par des gardes
+- Regex : toutes les regex compilées valides
+- Références croisées `_load_tool()` : 8 appels, tous vers des fichiers existants
+- Aucun `open()` sans `with`, aucun chemin absolu hardcodé
+- Aucune variable non-initialisée dans `finally`, aucun dict muté pendant itération
+- Aucun import inutilisé, aucune variable morte (ruff F401/F841 clean)
+- Chemins mémoire/output cohérents entre tous les outils
+
 ## [2.2.0] — 2026-03-02
 
 ### Corrigé — Fuites mémoire Python

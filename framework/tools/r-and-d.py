@@ -846,7 +846,7 @@ def _gap_driven_ideas(project_root: Path,
     # Gap 2: Outils > 500 lignes sans doc spécifique
     for tool_file in tools_dir.glob("*.py") if tools_dir.exists() else []:
         try:
-            with tool_file.open() as fh:
+            with tool_file.open(encoding="utf-8") as fh:
                 n_lines = sum(1 for _ in fh)
             if n_lines > 500:
                 doc_exists = any(

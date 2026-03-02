@@ -320,7 +320,7 @@ def _run_memory_lint(project_root: Path | str,
         if emit and report.error_count > 0:
             emitted = mod.emit_to_stigmergy(report, project_root)
 
-        status = "ok" if report.error_count == 0 else "ok"
+        status = "ok" if report.error_count == 0 else "warn"
         return PhaseResult(
             name="memory-lint", status=status,
             duration_ms=int((time.monotonic() - start) * 1000),

@@ -164,7 +164,7 @@ def load_dna(dna_path: str) -> dict:
         print(f"❌  Fichier DNA non trouvé : {dna_path}")
         sys.exit(1)
 
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     if not isinstance(data, dict):
@@ -257,7 +257,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
         filename = f"test_{safe_trait}{tmpl['ext']}"
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             # Header
             header = tmpl["header"].format(
                 dna_path=dna_path,
