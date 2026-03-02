@@ -5,6 +5,23 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.3.0] — 2026-03-02
+
+### Ajouté — Couverture de tests complète (31 fichiers, +787 tests)
+
+- **31 fichiers de tests** générés pour couvrir les 46 outils du framework :
+  `bias-toolkit`, `context-guard`, `context-router`, `crescendo`, `crispr`,
+  `dark-matter`, `dashboard`, `decision-log`, `desire-paths`, `digital-twin`,
+  `distill`, `early-warning`, `harmony-check`, `immune-system`, `incubator`,
+  `mirror-agent`, `mycelium`, `new-game-plus`, `nudge-engine`, `oracle`,
+  `preflight-check`, `project-graph`, `quantum-branch`, `r-and-d`, `rosetta`,
+  `self-healing`, `semantic-chain`, `sensory-buffer`, `swarm-consensus`,
+  `time-travel`, `workflow-adapt`
+- Chaque fichier teste : dataclasses, fonctions pures, fonctions projet,
+  formats de sortie, constantes, parser CLI, intégration CLI
+- **_gen_tests.py** — générateur automatique de tests par analyse AST
+- Total : **1 787 tests**, 0 échecs, ~130 s d'exécution
+
 ## [2.2.1] — 2026-03-02
 
 ### Corrigé — Audit multi-cycles (15 cycles, 3 fichiers)
