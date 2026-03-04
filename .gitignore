@@ -15,6 +15,9 @@ session-summaries/
 .last-health-check
 archives/
 
+# Project context (local config, not distributed — use .tpl.yaml as template)
+project-context.yaml
+
 # IDE — personnels uniquement (.vscode/ intentionnellement suivi pour le kit)
 # .vscode/  ← supprimé : settings/tasks/snippets font partie du kit distribué
 .idea/

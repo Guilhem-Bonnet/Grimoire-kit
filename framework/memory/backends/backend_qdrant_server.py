@@ -106,13 +106,13 @@ class QdrantServerBackend:
             flt = Filter(
                 must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
             )
-        results = self._client.search(
+        response = self._client.query_points(
             collection_name=self._collection,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             query_filter=flt,
         )
-        return [{"id": r.id, "score": r.score, **r.payload} for r in results]
+        return [{"id": r.id, "score": r.score, **r.payload} for r in response.points]
 
     def get_all(self, user_id: str = "") -> list[dict]:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
