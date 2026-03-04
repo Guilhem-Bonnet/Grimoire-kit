@@ -105,7 +105,7 @@ class TestArchive(_MaintenanceTestBase):
         # Archive file created
         archives = list(self.maint.ARCHIVE_DIR.glob("*.json"))
         self.assertEqual(len(archives), 1)
-        with open(archives[0]) as f:
+        with open(archives[0], encoding="utf-8") as f:
             archived = json.load(f)
         self.assertEqual(len(archived), 1)
         self.assertEqual(archived[0]["memory"], "old memory")
@@ -249,7 +249,7 @@ class TestPruneActivity(_MaintenanceTestBase):
             {"ts": old_ts, "cmd": "add", "top_score": 0.5},
             {"ts": recent_ts, "cmd": "search", "top_score": 0.8},
         ]
-        with open(self.maint.ACTIVITY_LOG, "w") as f:
+        with open(self.maint.ACTIVITY_LOG, "w", encoding="utf-8") as f:
             for e in events:
                 f.write(json.dumps(e) + "\n")
 
@@ -262,14 +262,14 @@ class TestPruneActivity(_MaintenanceTestBase):
         self.assertEqual(len(archives), 1)
 
         # Check remaining
-        with open(self.maint.ACTIVITY_LOG) as f:
+        with open(self.maint.ACTIVITY_LOG, encoding="utf-8") as f:
             remaining = [json.loads(ln) for ln in f if ln.strip()]
         self.assertEqual(len(remaining), 1)
         self.assertEqual(remaining[0]["ts"], recent_ts)
 
     def test_nothing_to_prune(self):
         recent_ts = datetime.now().isoformat()
-        with open(self.maint.ACTIVITY_LOG, "w") as f:
+        with open(self.maint.ACTIVITY_LOG, "w", encoding="utf-8") as f:
             f.write(json.dumps({"ts": recent_ts, "cmd": "search"}) + "\n")
         captured = StringIO()
         with patch("sys.stdout", captured):
@@ -390,7 +390,7 @@ class TestDetectContextDrift(_MaintenanceTestBase):
             "| hawk  | Monitoring |\n"
         )
         self.maint.AGENT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.maint.AGENT_MANIFEST, "w", newline="") as f:
+        with open(self.maint.AGENT_MANIFEST, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=["name", "module"])
             writer.writeheader()
             writer.writerow({"name": "forge", "module": "custom"})
@@ -407,7 +407,7 @@ class TestDetectContextDrift(_MaintenanceTestBase):
             "| forge | Terraform |\n"
         )
         self.maint.AGENT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.maint.AGENT_MANIFEST, "w", newline="") as f:
+        with open(self.maint.AGENT_MANIFEST, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=["name", "module"])
             writer.writeheader()
             writer.writerow({"name": "forge", "module": "custom"})

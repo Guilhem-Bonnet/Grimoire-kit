@@ -443,7 +443,6 @@ def apply_gates(corrections: list[Correction], max_corrections: int) -> list[Cor
     Gate 2: If ≥2 medium corrections target same file → elevate to high.
     """
     eligible = [c for c in corrections if c.status == "pending"]
-    high = [c for c in corrections if c.status == "high-escalated"]
 
     # Gate 2: same-file medium collision
     file_counts: dict[str, list[Correction]] = {}
@@ -459,7 +458,6 @@ def apply_gates(corrections: list[Correction], max_corrections: int) -> list[Cor
                 c.status = "high-escalated"
                 c.severity = "high"
                 eligible.remove(c)
-                high.append(c)
 
     # Gate 1: max corrections
     if len(eligible) > max_corrections:
@@ -553,6 +551,17 @@ def cmd_analyze(root: Path, args: argparse.Namespace) -> int:
         corrections=corrections,
     )
     save_report(root, report)
+
+    # Append to history for trend tracking
+    append_history(root, {
+        "cycle_id": score.cycle_id,
+        "timestamp": score.timestamp,
+        "failure_rate": score.failure_rate,
+        "patterns_confirmed": score.patterns_confirmed,
+        "health_grade": score.health_grade,
+        "trend": score.trend,
+        "corrections_applied": 0,
+    })
 
     # Render scoreboard
     scoreboard = render_scoreboard(score, patterns)

@@ -14,7 +14,6 @@ Fonctions testées :
 
 import importlib
 import importlib.util
-import json
 import shutil
 import subprocess
 import sys

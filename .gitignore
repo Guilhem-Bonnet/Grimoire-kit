@@ -36,3 +36,4 @@ env/
 *.pem
 *.env.local
 .bmad-rnd/
+nohup.out

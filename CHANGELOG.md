@@ -5,6 +5,30 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [2.4.1] — 2026-03-03
+
+### Corrigé — Bug hunt (3 fichiers, 10 corrections)
+
+- **cognitive-flywheel.py** — `cmd_analyze()` n'écrivait pas dans l'historique →
+  la tendance (trend) restait toujours "stable" car `compute_score` n'avait
+  jamais de cycle précédent. Ajout d'un `append_history()` à chaque analyse.
+- **cognitive-flywheel.py** — Variable morte `high` dans `apply_gates()` :
+  construite mais jamais utilisée dans le return (dead code supprimé).
+- **tests/test_maintenance_advanced.py** — 6 appels `open()` sans
+  `encoding="utf-8"` : crash potentiel sur Windows/locales non-UTF8.
+
+### Vérifié — Aucun problème trouvé
+
+- Division par zéro : 12 sites vérifiés, tous protégés (max, or, if guards)
+- Pyflakes (F) : 0 erreur sur 48 outils + 53 tests
+- Bare except : 0 (tous les except ont un type)
+- eval/exec : 0 appel dangereux
+- assert en production : 0
+- Fonctions dupliquées : 0
+- Mutable default args : 0
+- Shadowing builtins : 0
+- 82 swallowed-exception (`except ... pass`) : tous intentionnels (graceful degradation)
+
 ## [2.4.0] — 2026-03-02
 
 ### Ajouté — Cross-pollination depuis zav-sandbox (GSANE)
