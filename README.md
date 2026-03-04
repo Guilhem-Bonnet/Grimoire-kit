@@ -1,10 +1,10 @@
-# BMAD Custom Kit
+# Grimoire Kit
 
 > Toolkit pour créer et gérer un écosystème d'agents IA spécialisés par projet — teams Enterprise, personas, mémoire sémantique, workflows et qualité automatisée.
 
 ## Qu'est-ce que c'est ?
 
-BMAD Custom Kit est un **starter kit** pour déployer une ou plusieurs équipes d'agents IA spécialisés dans n'importe quel projet.  
+Grimoire Kit est un **starter kit** pour déployer une ou plusieurs équipes d'agents IA spécialisés dans n'importe quel projet.  
 Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit dans une **team avec workflow de livraison complet** — comme dans une vraie entreprise.
 
 **Ce que vous obtenez :**
@@ -63,11 +63,11 @@ Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit d
 
 ```bash
 # 1. Cloner le kit
-git clone https://github.com/Guilhem-Bonnet/bmad-custom-kit.git
+git clone https://github.com/Guilhem-Bonnet/grimoire-kit.git
 
 # 2. Initialiser dans votre projet (manuel)
 cd votre-projet/
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --lang "Français" \
@@ -75,7 +75,7 @@ bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
 
 # 2. OU initialiser en mode auto (Modal Team Engine)
 # détecte le stack automatiquement → déploie les bons agents
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --auto
@@ -84,7 +84,7 @@ bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
 bash _bmad/_config/custom/cc-verify.sh
 
 # 4. Créer une branche de session pour explorer une approche (optionnel)
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh session-branch --name "explore-graphql"
+bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --name "explore-graphql"
 
 # 5. Analyser les patterns d'échec après quelques semaines (optionnel)
 bash _bmad/_config/custom/sil-collect.sh
@@ -93,7 +93,7 @@ bash _bmad/_config/custom/sil-collect.sh
 
 ## 🏢 Modèle Team of Teams
 
-BMAD Custom Kit v3 introduit le modèle **Team of Teams** : chaque team est une unité de livraison autonome avec ses agents, son workflow, et son Delivery Contract.
+Grimoire Kit v3 introduit le modèle **Team of Teams** : chaque team est une unité de livraison autonome avec ses agents, son workflow, et son Delivery Contract.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -204,7 +204,7 @@ BMAD expose un serveur MCP (Model Context Protocol) local — compatible avec to
   "mcpServers": {
     "bmad": {
       "command": "node",
-      "args": ["/chemin/vers/bmad-custom-kit/framework/mcp/server.js"],
+      "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
       "env": { "BMAD_PROJECT_ROOT": "/votre-projet" }
     }
   }
@@ -219,7 +219,7 @@ Spécification complète : `framework/mcp/bmad-mcp-server.md`
 ## Structure du Kit
 
 ```
-bmad-custom-kit/
+grimoire-kit/
 ├── bmad-init.sh                    # Script d'init + session-branch subcommand
 ├── project-context.tpl.yaml        # Template contexte projet
 │

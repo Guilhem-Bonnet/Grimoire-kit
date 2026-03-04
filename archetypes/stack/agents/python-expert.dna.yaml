@@ -5,7 +5,7 @@ name: "Stack — Python Expert"
 version: "1.0.0"
 description: "Agent spécialisé Python — type hints, pytest, ruff, async, data science"
 icon: "🐍"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [python, fastapi, django, flask, pytest, ruff, mypy, async, data]
 
 inherits: minimal

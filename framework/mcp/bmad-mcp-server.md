@@ -253,7 +253,7 @@ Recherche sémantique cross-collection avec filtres optionnels.
 
 ```bash
 # 1. Installer les dépendances (Node.js ou Python)
-cd bmad-custom-kit/framework/mcp/
+cd grimoire-kit/framework/mcp/
 npm install   # ou pip install -r requirements.txt
 
 # 2. Configurer dans votre IDE compatible MCP
@@ -262,7 +262,7 @@ npm install   # ou pip install -r requirements.txt
   "mcpServers": {
     "bmad": {
       "command": "node",
-      "args": ["/chemin/vers/bmad-custom-kit/framework/mcp/server.js"],
+      "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
       "env": {
         "BMAD_PROJECT_ROOT": "/chemin/vers/votre-projet"
       }

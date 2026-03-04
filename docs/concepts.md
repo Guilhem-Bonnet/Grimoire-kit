@@ -257,7 +257,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 ## Architecture du projet
 
 ```
-bmad-custom-kit/
+grimoire-kit/
 │
 ├── bmad-init.sh                 ← Point d'entrée : installe et configure tout
 ├── project-context.tpl.yaml     ← Template : identité du projet

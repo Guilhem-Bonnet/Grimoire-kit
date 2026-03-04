@@ -7,7 +7,7 @@ Démonstration de l'archétype `web-app` sur un projet concret : une application
 ## Stack détecté automatiquement
 
 ```bash
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "TodoApp" --user "Alice" --auto
 ```
 

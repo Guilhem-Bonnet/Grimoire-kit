@@ -5,7 +5,7 @@ name: "Minimal"
 version: "1.0.0"
 description: "Archétype de base universel — meta-agents (Atlas, Sentinel, Mnemo) + agent template vierge"
 icon: "🔬"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [base, universal, starter, meta]
 
 inherits: null  # Archétype racine — tous les autres en héritent

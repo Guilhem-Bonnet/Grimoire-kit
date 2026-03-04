@@ -77,7 +77,7 @@ jobs:
             ## Installation rapide
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/Guilhem-Bonnet/bmad-custom-kit/${{ github.ref_name || inputs.tag }}/bmad-init.sh -o bmad-init.sh
+            curl -fsSL https://raw.githubusercontent.com/Guilhem-Bonnet/grimoire-kit/${{ github.ref_name || inputs.tag }}/bmad-init.sh -o bmad-init.sh
             bash bmad-init.sh doctor
             bash bmad-init.sh install --archetype minimal
             ```

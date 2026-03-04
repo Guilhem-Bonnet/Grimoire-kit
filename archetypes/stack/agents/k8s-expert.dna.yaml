@@ -5,7 +5,7 @@ name: "Stack — Kubernetes Expert"
 version: "1.0.0"
 description: "Agent spécialisé Kubernetes — workloads, RBAC, troubleshooting, K3s, Helm, FluxCD"
 icon: "⎈"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [kubernetes, k8s, k3s, helm, fluxcd, rbac, gitops, workloads]
 
 inherits: minimal

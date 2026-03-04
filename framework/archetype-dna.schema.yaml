@@ -11,7 +11,7 @@ name: string                        # Nom lisible
 version: string                     # SemVer : "1.0.0"
 description: string                 # Description courte (< 120 chars)
 icon: string                        # Emoji représentatif
-author: string                      # Créateur (ex: "bmad-custom-kit")
+author: string                      # Créateur (ex: "grimoire-kit")
 tags: [string]                      # Mots-clés pour la recherche du registry
 
 # ── Héritage ──────────────────────────────────────────────────────────────────

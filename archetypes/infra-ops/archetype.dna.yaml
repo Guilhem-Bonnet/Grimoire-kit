@@ -5,7 +5,7 @@ name: "Infra Ops"
 version: "1.0.0"
 description: "Infrastructure & DevOps complète — 10 agents spécialisés pour Terraform, K8s, Ansible, monitoring, sécurité, backup"
 icon: "⚙️"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [infrastructure, devops, k8s, terraform, ansible, monitoring, security, backup, ops]
 
 inherits: minimal

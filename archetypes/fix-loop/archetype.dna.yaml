@@ -5,7 +5,7 @@ name: "Fix Loop"
 version: "1.0.0"
 description: "Boucle de correction certifiée — zéro 'done' sans preuve d'exécution. FER sessions isolées, sévérité adaptative S1/S2/S3"
 icon: "🔁"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [fix, loop, tdd, certification, regression, evidence, quality]
 
 inherits: minimal

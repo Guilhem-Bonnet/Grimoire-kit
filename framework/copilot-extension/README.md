@@ -79,7 +79,7 @@ bmad-copilot-extension/
 ```yaml
 name: BMAD
 description: "BMAD Agent Framework — activate agents, run workflows, manage sessions"
-homepage: https://github.com/bmad-custom-kit
+homepage: https://github.com/grimoire-kit
 capabilities:
   - chat
   - context

@@ -1,4 +1,4 @@
-# BMAD Custom Kit — Contributing Guide
+# Grimoire Kit — Contributing Guide
 
 ## Bienvenue
 
@@ -9,7 +9,7 @@ Tu veux améliorer le kit ? Excellent. Voici comment fonctionne le processus.
 ## Structure du projet
 
 ```
-bmad-custom-kit/
+grimoire-kit/
 ├── bmad-init.sh              # Script d'installation — teste après tout changement
 ├── framework/
 │   ├── agent-base.md         # Protocole universel — impacte TOUS les agents
@@ -225,7 +225,7 @@ feat: Rust archetype + detect_stack Cargo.toml
 
 ```bash
 # Lancer tous les tests Python (244+ tests)
-cd bmad-custom-kit
+cd grimoire-kit
 python3 -m unittest discover -s tests -v
 
 # Lancer un fichier spécifique
@@ -242,7 +242,7 @@ bash tests/smoke-test.sh
 ```bash
 # Smoke test complet
 cd /tmp && mkdir test-project && cd test-project && git init
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Test" --user "Test" --auto
 
 # Vérifier la structure générée

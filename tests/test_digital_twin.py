@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour digital-twin.py — Digital Twin — Simulation d'impact pour projets bmad-custom-kit.
+Tests pour digital-twin.py — Digital Twin — Simulation d'impact pour projets grimoire-kit.
 
 Fonctions testées :
   - scan_project()

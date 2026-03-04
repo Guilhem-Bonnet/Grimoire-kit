@@ -49,6 +49,10 @@ user:
 
 memory:
   backend: "auto"                      # auto | local | qdrant-local | qdrant-server | ollama
+  # qdrant_url: "http://localhost:6333"  # si qdrant-server
+  # ollama_url: "http://localhost:11434"  # si ollama
+  # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # modèle d'embedding
+  # collection_prefix: "bmad"          # préfixe des collections Qdrant
 
 agents:
   archetype: "minimal"
@@ -56,7 +60,110 @@ agents:
 
 installed_archetypes: []               # Rempli par bmad-init.sh install
 
-# models:                              # Multi-LLM routing — voir docs/getting-started.md
+# ── LLM Router (BM-40) — Route les requêtes vers le modèle optimal ──────────
+# Voir framework/tools/llm-router.py pour l'utilisation CLI
+# Références : https://github.com/lm-sys/RouteLLM, https://github.com/BerriAI/litellm
+
+# llm_router:
+#   enabled: true
+#   default_model: claude-sonnet
+#
+#   models:
+#     - id: claude-opus
+#       provider: anthropic
+#       api: copilot                   # copilot | direct | ollama | openrouter
+#       cost_per_1m_tokens: 15.0
+#       max_tokens: 200000
+#       capabilities: [reasoning, architecture, complex-analysis]
+#
+#     - id: claude-sonnet
+#       provider: anthropic
+#       api: copilot
+#       cost_per_1m_tokens: 3.0
+#       max_tokens: 200000
+#       capabilities: [coding, review, general, reasoning]
+#
+#     - id: claude-haiku
+#       provider: anthropic
+#       api: copilot
+#       cost_per_1m_tokens: 0.25
+#       max_tokens: 200000
+#       capabilities: [formatting, simple-qa, summarization]
+#
+#     - id: gpt-4o
+#       provider: openai
+#       api: copilot
+#       cost_per_1m_tokens: 2.5
+#       max_tokens: 128000
+#       capabilities: [coding, reasoning, general]
+#
+#     - id: gpt-4o-mini
+#       provider: openai
+#       api: copilot
+#       cost_per_1m_tokens: 0.15
+#       max_tokens: 128000
+#       capabilities: [coding, formatting, simple-qa]
+#
+#     - id: deepseek-coder
+#       provider: deepseek
+#       api: ollama
+#       cost_per_1m_tokens: 0.0        # local
+#       max_tokens: 128000
+#       capabilities: [coding, refactoring]
+#
+#     - id: nomic-embed
+#       provider: nomic
+#       api: ollama
+#       cost_per_1m_tokens: 0.0        # local
+#       max_tokens: 8192
+#       capabilities: [embedding]
+#
+#   rules:
+#     # Par agent — quel modèle par défaut pour quel agent
+#     - match: { agent: architect }
+#       model: claude-opus
+#       fallback: claude-sonnet
+#
+#     - match: { agent: dev }
+#       model: claude-sonnet
+#       fallback: deepseek-coder
+#
+#     - match: { agent: qa }
+#       model: claude-haiku
+#       fallback: claude-sonnet
+#
+#     # Par type de tâche
+#     - match: { task_type: formatting }
+#       model: claude-haiku
+#
+#     - match: { task_type: architecture-review }
+#       model: claude-opus
+#
+#     - match: { task_type: embedding }
+#       model: nomic-embed
+#
+#   # Mots-clés custom pour le classifieur de complexité
+#   # custom_keywords:
+#   #   expert: ["terraform state", "k8s operator"]
+#   #   trivial: ["readme", "changelog"]
+
+# ── RAG Pipeline (BM-42) — Indexation et retrieval sémantique ────────────────
+# Voir framework/tools/rag-indexer.py pour l'utilisation CLI
+# Références : https://qdrant.tech/documentation/, https://arxiv.org/abs/2401.18059
+
+# rag:
+#   enabled: true
+#   auto_retrieve: true                # Retrieval auto avant chaque réponse agent
+#   max_chunks: 5                      # Nombre max de chunks injectés dans le contexte
+#   min_score: 0.3                     # Score cosine minimum pour inclusion
+#   max_chunk_tokens: 512              # Taille max d'un chunk en tokens
+#   qdrant_url: ""                     # Vide = mode fichier local
+#   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+#   collection_prefix: "bmad"
+#   index_on_init: false               # Indexer au bmad up
+#   index_on_commit: false             # Indexer en hook pre-commit
+
+# models:                              # Multi-LLM routing (legacy format)
 #   available:
 #     - id: claude-opus-4
 #       tier: premium                  # premium | standard | economy

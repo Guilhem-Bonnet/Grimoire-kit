@@ -5,7 +5,7 @@ name: "Web App"
 version: "1.0.0"
 description: "Applications web full-stack — Frontend, API, base de données, CI/CD"
 icon: "🌐"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [web, frontend, backend, api, fullstack, react, nextjs, typescript, python, go]
 
 inherits: minimal

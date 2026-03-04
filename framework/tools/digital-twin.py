@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Digital Twin — Simulation d'impact pour projets bmad-custom-kit.
+"""Digital Twin — Simulation d'impact pour projets grimoire-kit.
 
 Crée un jumeau numérique du projet permettant de simuler l'impact
 de changements avant de les appliquer réellement. Game changer décisionnel.
@@ -694,7 +694,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Construit le parser CLI."""
     parser = argparse.ArgumentParser(
         prog="digital-twin",
-        description="Digital Twin — Simulation d'impact pour projets bmad-custom-kit",
+        description="Digital Twin — Simulation d'impact pour projets grimoire-kit",
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),
                         help="Racine du projet")

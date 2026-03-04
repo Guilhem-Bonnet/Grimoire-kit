@@ -5,7 +5,7 @@ name: "Stack — Terraform Expert"
 version: "1.0.0"
 description: "Agent spécialisé Terraform — plan obligatoire, modules, tfsec, remote state, workspaces"
 icon: "🌍"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [terraform, iac, aws, gcp, azure, modules, tfstate, tfsec]
 
 inherits: minimal

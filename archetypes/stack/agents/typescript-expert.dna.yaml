@@ -5,7 +5,7 @@ name: "Stack — TypeScript Expert"
 version: "1.0.0"
 description: "Agent spécialisé TypeScript/JavaScript — React, Vue, Next.js, Node, types stricts"
 icon: "⚛️"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [typescript, javascript, react, nextjs, vue, frontend, node, types]
 
 inherits: minimal

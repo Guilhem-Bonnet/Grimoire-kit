@@ -1,4 +1,4 @@
-# Getting Started — BMAD Custom Kit
+# Getting Started — Grimoire Kit
 
 ## Prérequis
 
@@ -10,19 +10,19 @@
 
 ```bash
 # 1. Cloner le kit
-git clone https://github.com/Guilhem-Bonnet/bmad-custom-kit.git
-cd bmad-custom-kit
+git clone https://github.com/Guilhem-Bonnet/grimoire-kit.git
+cd grimoire-kit
 
 # 2a. Initialiser en mode automatique (recommandé)
 # Détecte le stack et déploie les agents adaptés automatiquement
 cd votre-projet/
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Alice" \
   --auto
 
 # 2b. OU initialiser manuellement avec un archétype spécifique
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Alice" \
   --archetype infra-ops
@@ -90,31 +90,31 @@ user:
 
 ```bash
 # Lister tous les archétypes disponibles
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh install --list
+bash /chemin/vers/grimoire-kit/bmad-init.sh install --list
 
 # Installer un agent de stack spécifique dans un projet existant
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh install --archetype stack/go
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh install --archetype stack/typescript
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh install --archetype fix-loop
+bash /chemin/vers/grimoire-kit/bmad-init.sh install --archetype stack/go
+bash /chemin/vers/grimoire-kit/bmad-init.sh install --archetype stack/typescript
+bash /chemin/vers/grimoire-kit/bmad-init.sh install --archetype fix-loop
 
 # Inspecter avant d'installer
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh install --inspect infra-ops
+bash /chemin/vers/grimoire-kit/bmad-init.sh install --inspect infra-ops
 ```
 
 ### 3. Session Branching — travailler sur une exploration séparée
 
 ```bash
 # Créer une branche de session pour une exploration risquée
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh session-branch --name explore-graphql
+bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --name explore-graphql
 
 # Lister les branches actives
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh session-branch --list
+bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --list
 
 # Différences entre branches
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh session-branch --diff main explore-graphql
+bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --diff main explore-graphql
 
 # Merger vers main quand valide
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh session-branch --merge explore-graphql
+bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --merge explore-graphql
 ```
 
 ### 4. Mémoire structurée — protocol remember/recall

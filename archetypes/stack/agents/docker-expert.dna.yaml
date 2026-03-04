@@ -5,7 +5,7 @@ name: "Stack — Docker Expert"
 version: "1.0.0"
 description: "Agent spécialisé Docker — multi-stage builds, sécurité images, Compose, healthchecks"
 icon: "🐋"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [docker, containers, compose, registry, security, multi-stage]
 
 inherits: minimal

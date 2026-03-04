@@ -5,7 +5,7 @@ name: "Stack — Ansible Expert"
 version: "1.0.0"
 description: "Agent spécialisé Ansible — idempotence, vault, ansible-lint, roles, inventories"
 icon: "🎭"
-author: "bmad-custom-kit"
+author: "grimoire-kit"
 tags: [ansible, automation, idempotent, vault, roles, inventory, linux, servers]
 
 inherits: minimal

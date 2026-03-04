@@ -234,7 +234,7 @@ Fournit l'autocomplétion zsh pour tous les subcommands et options de `bmad-init
 **Installation :**
 ```bash
 # zsh
-echo "source /chemin/vers/bmad-custom-kit/framework/tools/bmad-completion.zsh" >> ~/.zshrc
+echo "source /chemin/vers/grimoire-kit/framework/tools/bmad-completion.zsh" >> ~/.zshrc
 source ~/.zshrc
 ```
 

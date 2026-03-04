@@ -2,12 +2,12 @@
 # bmad-completion.zsh — BM-38 : Shell completions pour bmad-init.sh
 #
 # Installation (zsh) :
-#   echo "source /path/to/bmad-custom-kit/framework/tools/bmad-completion.zsh" >> ~/.zshrc
+#   echo "source /path/to/grimoire-kit/framework/tools/bmad-completion.zsh" >> ~/.zshrc
 #   source ~/.zshrc
 #
 # Installation (bash) :
 #   # Le fichier bash-completion est à la fin de ce script
-#   echo "source /path/to/bmad-custom-kit/framework/tools/bmad-completion.bash" >> ~/.bashrc
+#   echo "source /path/to/grimoire-kit/framework/tools/bmad-completion.bash" >> ~/.bashrc
 
 # ── Détection du répertoire du kit ──────────────────────────────────────────
 _BMAD_KIT_DIR="${BMAD_KIT_DIR:-$(dirname "$(dirname "$(dirname "${(%):-%x}")")")}"
