@@ -314,6 +314,56 @@ Ce message vient du provider (GitHub / OpenAI / Anthropic) quand le quota de req
 
 ---
 
+## 15. Fuite de processus Python — VS Code test auto-discovery
+
+**Symptôme** : Des centaines de processus `python3 -m unittest discover` apparaissent dans le gestionnaire de tâches, consommant des Go de RAM. La machine devient inutilisable (swap massif).
+
+**Diagnostic** :
+```bash
+# Compter les processus unittest orphelins
+ps aux | grep -c 'unittest discover'
+
+# Vérifier la mémoire consommée
+ps aux | grep 'unittest discover' | awk '{sum += $6} END {printf "%.0f Mo (%d processus)\n", sum/1024, NR}'
+```
+
+**Cause** : L'extension Python de VS Code (Pylance + test explorer) lance automatiquement `python3 -m unittest discover -s <dossier_tests> -p test_*.py` pour alimenter le panneau "Testing". Sur un projet avec 50+ fichiers de test, chaque événement du file watcher (sauvegarde, modification Copilot, etc.) peut déclencher un nouveau spawn. Les processus s'accumulent car les anciens ne sont pas toujours terminés avant que les nouveaux soient lancés.
+
+**Impact observé** : 670+ processus orphelins, ~21 Go de RAM consommés sur 31 Go, 6,7 Go de swap.
+
+**Fix immédiat** — tuer les processus orphelins :
+```bash
+pkill -f 'unittest discover'
+```
+
+**Fix permanent** — désactiver la test discovery automatique dans `.vscode/settings.json` :
+```json
+{
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": false
+}
+```
+
+**Alternative** — si tu veux garder le panneau Testing fonctionnel, configure pytest explicitement avec un scope limité :
+```json
+{
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests/", "--no-header", "-q"]
+}
+```
+
+**Prévention** : lancer les tests manuellement depuis le terminal :
+```bash
+python3 -m pytest tests/ -v
+# ou
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+> **Note** : ce problème est spécifique aux workspaces multi-root ou aux projets avec un grand nombre de fichiers de test. Les projets avec < 10 fichiers de test ne sont généralement pas affectés.
+
+---
+
 ## Obtenir de l'aide
 
 Si le problème persiste :
