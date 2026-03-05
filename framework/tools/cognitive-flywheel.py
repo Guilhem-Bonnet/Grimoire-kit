@@ -28,7 +28,7 @@ import json
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 VERSION = "1.0.0"
@@ -388,12 +388,12 @@ def compute_score(
         grade = "D"
 
     cycle_id = hashlib.sha256(
-        datetime.now(timezone.utc).isoformat().encode()
+        datetime.now(UTC).isoformat().encode()
     ).hexdigest()[:8]
 
     return FlywheelScore(
         cycle_id=f"FW-{cycle_id}",
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         sessions_analyzed=0,  # would need session tracking
         total_entries=total,
         failure_rate=round(failure_rate, 4),
@@ -481,8 +481,8 @@ def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
         "",
         "## 📊 Health Score",
         "",
-        f"| Métrique | Valeur |",
-        f"|---|---|",
+        "| Métrique | Valeur |",
+        "|---|---|",
         f"| Grade | **{score.health_grade}** |",
         f"| Entries analysées | {score.total_entries} |",
         f"| Taux d'échec | {score.failure_rate:.1%} |",
@@ -622,7 +622,7 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> int:
             print(f"  [DRY-RUN] {c.correction_id}: {c.description}")
         else:
             c.status = "applied"
-            c.applied_at = datetime.now(timezone.utc).isoformat()
+            c.applied_at = datetime.now(UTC).isoformat()
             applied_count += 1
             print(f"  ✅ {c.correction_id}: {c.description}")
 
@@ -633,7 +633,7 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> int:
         # Append to history
         append_history(root, {
             "cycle_id": report.cycle_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "corrections_applied": applied_count,
             "failure_rate": report.score.failure_rate,
             "patterns_confirmed": report.score.patterns_confirmed,

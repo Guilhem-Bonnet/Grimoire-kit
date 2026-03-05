@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -400,7 +401,7 @@ def cmd_bisect(root: Path, good_ref: str, bad_ref: str, test_cmd: str,
         if test_cmd:
             try:
                 proc = subprocess.run(
-                    test_cmd, shell=True, capture_output=True, text=True,
+                    shlex.split(test_cmd), capture_output=True, text=True,
                     timeout=60, cwd=str(root),
                 )
                 test_result = "good" if proc.returncode == 0 else "bad"
