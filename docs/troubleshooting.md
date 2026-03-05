@@ -300,9 +300,21 @@ Ce message vient du provider (GitHub / OpenAI / Anthropic) quand le quota de req
 
 4. **Éviter les instructions inutilement longues** — les prompts système (copilot-instructions.md, agent-base.md) sont envoyés à **chaque** requête
 
+### Configurer le fallback automatique
+
+Ajouter dans User Settings pour basculer automatiquement sur GPT-4.1 quand le modèle premium est limité :
+```jsonc
+{
+  "chat.models.fallback.enabled": true,
+  "chat.models.fallback.model": "copilot:gpt-4.1"
+}
+```
+
+> **Voir aussi** : [docs/vscode-setup.md](vscode-setup.md#5-modèles-et-rate-limits) pour la configuration complète des modèles.
+
 ### Quand le rate limit est atteint
 
-1. **Switcher de modèle** — les quotas sont **par modèle**. Changer de Claude à GPT-4o (ou inversement) dans le sélecteur de modèle Copilot Chat reset le compteur
+1. **Switcher de modèle** — les quotas sont **par modèle**. Changer de Claude à GPT-4.1 (ou inversement) dans le sélecteur de modèle Copilot Chat reset le compteur
 2. **Attendre 1-2 minutes** — la plupart des rate limits sont par minute
 3. **Utiliser les outils CLI en attendant** — `guard`, `bench`, `evolve`, `forge` sont 100% locaux (Python stdlib) et ne consomment aucun quota :
    ```bash
@@ -364,6 +376,56 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 ---
 
+## 16. Erreurs réseau — ERR_CONNECTION_CLOSED
+
+**Symptôme** : `net::ERR_CONNECTION_CLOSED` ou `Désolé, erreur au niveau du réseau` dans Copilot Chat. Les agents sont interrompus en pleine exécution.
+
+**Cause principale** : VPN routant le trafic via un serveur distant (latence élevée → timeout des connexions longues Copilot).
+
+**Diagnostic** :
+```bash
+# Vérifier la latence vers GitHub
+ping -c 3 api.github.com
+# Normal : < 50ms | Problématique : > 200ms
+
+# Vérifier le VPN
+nordvpn status 2>/dev/null || echo "Pas de NordVPN"
+```
+
+**Fix** :
+```bash
+# Option 1 — Déconnecter le VPN
+nordvpn disconnect
+
+# Option 2 — Se connecter sur un serveur proche
+nordvpn connect France
+
+# Option 3 — Exclure VS Code du VPN (split tunneling)
+nordvpn allowlist add app /usr/share/code/code
+```
+
+> **Voir aussi** : [docs/vscode-setup.md](vscode-setup.md#7-réseau-et-vpn) pour la configuration réseau complète.
+
+---
+
+## 17. Confirmations bloquantes — agents interrompus
+
+**Symptôme** : L'agent demande confirmation à chaque commande terminal, chaque lecture de fichier, chaque outil — rendant les workflows inutilisables.
+
+**Fix rapide** — ajouter dans User Settings (`Ctrl+Shift+P` → `Preferences: Open User Settings (JSON)`) :
+```jsonc
+{
+  "chat.tools.terminal.autoApprove": {
+    "/.*/": { "approve": true, "matchCommandLine": true }
+  },
+  "chat.agent.maxRequests": 500
+}
+```
+
+> **Voir aussi** : [docs/vscode-setup.md](vscode-setup.md) pour les options de contrôle fin (approuver sélectivement, bloquer les commandes à risque).
+
+---
+
 ## Obtenir de l'aide
 
 Si le problème persiste :
@@ -372,4 +434,5 @@ Si le problème persiste :
 2. `bash _bmad/_config/custom/cc-verify.sh` — état du CC
 3. `bash bmad-init.sh doctor` — diagnostic global du kit
 4. `bash bmad-init.sh guard --json` — budget de contexte agents (JSON pour le partager)
-5. Ouvrir une issue sur GitHub avec la sortie de ces commandes
+5. Consulter [docs/vscode-setup.md](vscode-setup.md) pour la configuration VS Code
+6. Ouvrir une issue sur GitHub avec la sortie de ces commandes

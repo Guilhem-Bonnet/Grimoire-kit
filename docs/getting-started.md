@@ -275,3 +275,10 @@ Si votre projet utilise `pre-commit`, ajoutez dans `.pre-commit-config.yaml` :
       pass_filenames: false
       stages: [pre-commit]
 ```
+
+## Configuration VS Code
+
+Pour une expérience optimale avec les agents BMAD (pas de confirmations bloquantes,
+pas d'erreurs réseau, gestion des rate limits) :
+
+→ **[docs/vscode-setup.md](vscode-setup.md)** — Guide complet de configuration VS Code
