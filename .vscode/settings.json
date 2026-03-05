@@ -64,6 +64,14 @@
   },
   "python.analysis.typeCheckingMode": "basic",
 
+  // ── Python Testing — désactiver la discovery automatique ──────────────
+  // Empêche VS Code de spawner des centaines de processus
+  // `unittest discover` sur les 75+ fichiers de test.
+  // Lancer les tests manuellement : python3 -m pytest tests/ -v
+  // Voir docs/troubleshooting.md #15
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": false,
+
   // ── Shell ────────────────────────────────────────────────────────────
   "[shellscript]": {
     "editor.defaultFormatter": "foxundermoon.shell-format"
