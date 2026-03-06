@@ -33,13 +33,17 @@ from pathlib import Path
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-LINT_VERSION = "1.0.0"
+LINT_VERSION = "1.1.0"
 
 # Seuil de similarité pour la détection de doublons
 DUPLICATE_THRESHOLD = 0.75
 
 # Seuil de similarité pour la détection de contradictions
 CONTRADICTION_THRESHOLD = 0.30
+
+# Memory decay — entries older than this are flagged as stale
+STALENESS_DAYS = 90
+DECAY_HALFLIFE_DAYS = 30
 
 # Marqueurs de contradiction (même logique que dream.py)
 POSITIVE_MARKERS = frozenset({
@@ -528,6 +532,66 @@ def check_chronological_consistency(files: list[MemoryFile]) -> list[LintIssue]:
     return issues
 
 
+def check_memory_freshness(files: list[MemoryFile]) -> list[LintIssue]:
+    """Détecte les entrées mémoire périmées (stale).
+
+    Chaque entrée datée reçoit un freshness_score = 2^(-age/halflife).
+    Les fichiers dont la majorité des entrées sont périmées (> STALENESS_DAYS)
+    sont signalés comme candidats à l'archivage.
+    """
+    from datetime import datetime
+    import math
+
+    issues: list[LintIssue] = []
+    now = datetime.now()
+
+    for mf in files:
+        dated = [(d, t) for d, t in mf.entries if d and len(d) >= 10]
+        if not dated:
+            continue
+
+        stale_count = 0
+        total_freshness = 0.0
+
+        for date_str, _text in dated:
+            try:
+                entry_date = datetime(int(date_str[:4]), int(date_str[5:7]),
+                                      int(date_str[8:10]))
+            except (ValueError, IndexError):
+                continue
+            age_days = max(0, (now - entry_date).days)
+            freshness = math.pow(2.0, -age_days / DECAY_HALFLIFE_DAYS)
+            total_freshness += freshness
+            if age_days > STALENESS_DAYS:
+                stale_count += 1
+
+        if not dated:
+            continue
+
+        avg_freshness = total_freshness / len(dated)
+        stale_pct = stale_count / len(dated)
+
+        if stale_pct > 0.5:
+            issues.append(LintIssue(
+                issue_id=_next_id(),
+                severity=SEVERITY_INFO,
+                category="staleness",
+                title=f"Fichier périmé : {mf.path}",
+                description=(
+                    f"{stale_count}/{len(dated)} entrées datées ont > {STALENESS_DAYS} jours. "
+                    f"Freshness moyen : {avg_freshness:.2f}. "
+                    f"Candidat à l'archivage ou au nettoyage."
+                ),
+                files=[mf.path],
+                fix_suggestion=(
+                    "Archiver les entrées anciennes dans un sous-dossier 'archive/' "
+                    "ou supprimer les entrées obsolètes."
+                ),
+            ))
+
+    return issues
+
+
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
 def lint_memory(project_root: Path) -> LintReport:
@@ -551,6 +615,7 @@ def lint_memory(project_root: Path) -> LintReport:
     report.issues.extend(check_orphan_decisions(files))
     report.issues.extend(check_failure_without_lesson(files))
     report.issues.extend(check_chronological_consistency(files))
+    report.issues.extend(check_memory_freshness(files))
 
     # Trier : errors > warnings > info
     severity_order = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 1, SEVERITY_INFO: 2}

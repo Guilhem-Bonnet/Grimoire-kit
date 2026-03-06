@@ -93,10 +93,12 @@ class TestCycle:
     def test_run_cycle_no_tools(self, tmp_project):
         result = daemon.run_maintenance_cycle(tmp_project)
         assert result.cycle == 1
-        assert len(result.tasks) == 3
-        # All skipped since tools don't exist in tmp dir
-        for t in result.tasks:
+        assert len(result.tasks) == 4
+        # First 3 skipped since tools don't exist in tmp dir
+        for t in result.tasks[:3]:
             assert t.status == "skipped"
+        # memory-bridge succeeds (syncs 0 files)
+        assert result.tasks[3].name == "memory-bridge"
 
     def test_run_cycle_increments(self, tmp_project):
         r1 = daemon.run_maintenance_cycle(tmp_project, cycle_num=1)
@@ -122,6 +124,52 @@ class TestMCP:
     def test_mcp_unknown_action(self, tmp_project):
         result = daemon.mcp_grimoire_daemon(str(tmp_project), action="nope")
         assert result["status"] == "error"
+
+
+# ── Memory Bridge ────────────────────────────────────────────────────────────
+
+
+class TestMemoryBridge:
+    def test_bridge_no_source(self, tmp_path):
+        # tmp_path frais sans _bmad/_memory/
+        result = daemon._run_memory_bridge(tmp_path)
+        assert result.name == "memory-bridge"
+        assert result.status == "skipped"
+
+    def test_bridge_syncs_md_files(self, tmp_project):
+        src = tmp_project / daemon.MEMORY_BRIDGE_SOURCE
+        src.mkdir(parents=True, exist_ok=True)
+        (src / "test.md").write_text("# Test\n", encoding="utf-8")
+        (src / "data.json").write_text('{"k": 1}', encoding="utf-8")
+
+        result = daemon._run_memory_bridge(tmp_project)
+        assert result.status == "success"
+        assert "2" in result.message  # 2 files synced
+
+        target = tmp_project / daemon.MEMORY_BRIDGE_TARGET
+        assert (target / "test.md").exists()
+        assert (target / "data.json").exists()
+
+    def test_bridge_skips_jsonl(self, tmp_project):
+        src = tmp_project / daemon.MEMORY_BRIDGE_SOURCE
+        src.mkdir(parents=True, exist_ok=True)
+        (src / "large.jsonl").write_text('{"big": true}\n', encoding="utf-8")
+
+        result = daemon._run_memory_bridge(tmp_project)
+        assert result.status == "success"
+        target = tmp_project / daemon.MEMORY_BRIDGE_TARGET
+        assert not (target / "large.jsonl").exists()
+
+    def test_bridge_skip_unchanged(self, tmp_project):
+        src = tmp_project / daemon.MEMORY_BRIDGE_SOURCE
+        src.mkdir(parents=True, exist_ok=True)
+        (src / "test.md").write_text("# V1\n", encoding="utf-8")
+
+        # First sync
+        daemon._run_memory_bridge(tmp_project)
+        # Second sync — should sync 0
+        result = daemon._run_memory_bridge(tmp_project)
+        assert "0" in result.message
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────

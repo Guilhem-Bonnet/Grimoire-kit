@@ -477,5 +477,61 @@ class TestKeywordsAndSimilarity(unittest.TestCase):
         self.assertTrue(neg)
 
 
+class TestCheckMemoryFreshness(unittest.TestCase):
+    """Tests for memory decay / freshness scoring (QW5)."""
+
+    def setUp(self):
+        self.mod = _import_mod()
+
+    def test_function_exists(self):
+        self.assertTrue(callable(self.mod.check_memory_freshness))
+
+    def test_no_dated_entries_no_issue(self):
+        files = [self.mod.MemoryFile(
+            path="learnings/dev.md", kind="learnings",
+            entries=[("", "no date entry")],
+        )]
+        issues = self.mod.check_memory_freshness(files)
+        self.assertEqual(len(issues), 0)
+
+    def test_recent_entries_no_issue(self):
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        files = [self.mod.MemoryFile(
+            path="learnings/dev.md", kind="learnings",
+            entries=[(today, "fresh entry 1"), (today, "fresh entry 2")],
+        )]
+        issues = self.mod.check_memory_freshness(files)
+        self.assertEqual(len(issues), 0)
+
+    def test_old_entries_flagged(self):
+        files = [self.mod.MemoryFile(
+            path="learnings/dev.md", kind="learnings",
+            entries=[("2020-01-01", "ancient entry 1"), ("2020-02-01", "ancient entry 2")],
+        )]
+        issues = self.mod.check_memory_freshness(files)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].category, "staleness")
+        self.assertIn("périmé", issues[0].title)
+
+    def test_staleness_in_lint_report(self):
+        """Verify check_memory_freshness is called by lint_memory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mem = root / "_bmad" / "_memory" / "agent-learnings"
+            mem.mkdir(parents=True, exist_ok=True)
+            (mem / "dev.md").write_text(
+                "# Dev\n- [2020-01-01] ancient\n- [2020-02-01] old\n",
+                encoding="utf-8",
+            )
+            report = self.mod.lint_memory(root)
+            stale = [i for i in report.issues if i.category == "staleness"]
+            self.assertGreaterEqual(len(stale), 1)
+
+    def test_constants_defined(self):
+        self.assertEqual(self.mod.STALENESS_DAYS, 90)
+        self.assertEqual(self.mod.DECAY_HALFLIFE_DAYS, 30)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,12 +35,14 @@ from pathlib import Path
 
 _log = logging.getLogger("grimoire.daemon")
 
-DAEMON_VERSION = "1.0.0"
+DAEMON_VERSION = "1.1.0"
 DAEMON_DIR = "_bmad/_memory/daemon"
 PID_FILE = "grimoire-daemon.pid"
 STATE_FILE = "daemon-state.json"
 LOG_FILE = "daemon.log"
 DEFAULT_INTERVAL = 600  # 10 minutes
+MEMORY_BRIDGE_SOURCE = "_bmad/_memory"
+MEMORY_BRIDGE_TARGET = ".github/memories/repo"
 
 # ── Data Model ───────────────────────────────────────────────────────────────
 
@@ -162,6 +164,45 @@ def _run_tool(root: Path, tool_name: str, args: list[str]) -> TaskResult:
                           message=str(exc)[:200])
 
 
+def _run_memory_bridge(root: Path) -> TaskResult:
+    """Synchronise _bmad/_memory/ → .github/memories/repo/ (one-way bridge).
+
+    Copie les fichiers .md et .json (pas .jsonl — trop volumineux) depuis la
+    mémoire BMAD vers le dossier que VS Code Copilot consulte nativement.
+    Seuls les fichiers modifiés sont copiés (compare mtime).
+    """
+    start = time.monotonic()
+    source = root / MEMORY_BRIDGE_SOURCE
+    target = root / MEMORY_BRIDGE_TARGET
+
+    if not source.exists():
+        return TaskResult(name="memory-bridge", status="skipped",
+                          duration_s=round(time.monotonic() - start, 3),
+                          message="Source _bmad/_memory/ absent")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        synced = 0
+        for src_file in source.iterdir():
+            if not src_file.is_file():
+                continue
+            if src_file.suffix not in (".md", ".json"):
+                continue
+            dst_file = target / src_file.name
+            # Copy only if source is newer
+            if dst_file.exists() and dst_file.stat().st_mtime >= src_file.stat().st_mtime:
+                continue
+            dst_file.write_bytes(src_file.read_bytes())
+            synced += 1
+
+        duration = round(time.monotonic() - start, 3)
+        return TaskResult(name="memory-bridge", status="success", duration_s=duration,
+                          message=f"{synced} fichier(s) synchronisé(s)")
+    except Exception as exc:
+        duration = round(time.monotonic() - start, 3)
+        return TaskResult(name="memory-bridge", status="failed", duration_s=duration,
+                          message=str(exc)[:200])
+
+
 def run_maintenance_cycle(root: Path, cycle_num: int = 1) -> CycleResult:
     """Exécute un cycle complet de maintenance."""
     start = time.monotonic()
@@ -175,6 +216,9 @@ def run_maintenance_cycle(root: Path, cycle_num: int = 1) -> CycleResult:
 
     # 3. RAG re-index (incremental)
     tasks.append(_run_tool(root, "rag-indexer.py", ["index", "--all"]))
+
+    # 4. Memory bridge sync
+    tasks.append(_run_memory_bridge(root))
 
     total = round(time.monotonic() - start, 3)
     return CycleResult(

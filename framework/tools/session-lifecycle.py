@@ -35,12 +35,14 @@ from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-SESSION_LIFECYCLE_VERSION = "1.0.0"
+SESSION_LIFECYCLE_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
 LIFECYCLE_DIR = "_bmad-output/.session-lifecycle"
 STATE_FILE = "current-session.json"
+SESSION_CHAIN_FILE = "_bmad/_memory/session-chain.jsonl"
+SESSION_CHAIN_MAX_ENTRIES = 50  # Keep last N summaries for context injection
 
 # ── Data Structures ──────────────────────────────────────────────────────────
 
@@ -228,6 +230,79 @@ def _hook_session_save(project_root: Path) -> HookResult:
     return result
 
 
+def _hook_session_chain(project_root: Path, lifecycle_result: LifecycleResult) -> HookResult:
+    """Écrit un résumé structuré de la session dans session-chain.jsonl.
+
+    Ce fichier JSONL sert de mémoire cross-session : les N derniers
+    résumés sont injectés en contexte au début de la session suivante.
+    """
+    result = HookResult(name="session-chain")
+    start = time.monotonic()
+
+    try:
+        chain_path = project_root / SESSION_CHAIN_FILE
+        chain_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build session summary from hook results
+        hook_summaries = []
+        for h in lifecycle_result.hooks:
+            if h.status == "completed" and h.message:
+                hook_summaries.append(h.message)
+
+        entry = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "phase": lifecycle_result.phase,
+            "status": lifecycle_result.status,
+            "duration_s": lifecycle_result.total_duration_seconds,
+            "hooks_completed": [h.name for h in lifecycle_result.hooks if h.status == "completed"],
+            "hooks_failed": [h.name for h in lifecycle_result.hooks if h.status == "failed"],
+            "summaries": hook_summaries,
+        }
+
+        # Append entry
+        with open(chain_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Prune old entries if over cap
+        _prune_session_chain(chain_path)
+
+        result.status = "completed"
+        result.message = f"Session chain updated ({chain_path.name})"
+    except Exception as exc:
+        result.status = "failed"
+        result.message = f"Erreur: {exc}"
+
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
+
+
+def _prune_session_chain(chain_path: Path) -> None:
+    """Garde uniquement les N dernières entrées du fichier JSONL."""
+    try:
+        lines = chain_path.read_text(encoding="utf-8").strip().splitlines()
+        if len(lines) > SESSION_CHAIN_MAX_ENTRIES:
+            kept = lines[-SESSION_CHAIN_MAX_ENTRIES:]
+            chain_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_session_chain(project_root: Path, limit: int = 5) -> list[dict]:
+    """Charge les N derniers résumés de session pour injection contextuelle."""
+    chain_path = project_root / SESSION_CHAIN_FILE
+    if not chain_path.exists():
+        return []
+    try:
+        lines = chain_path.read_text(encoding="utf-8").strip().splitlines()
+        entries = []
+        for line in lines[-limit:]:
+            if line.strip():
+                entries.append(json.loads(line))
+        return entries
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
 # ── Lifecycle Orchestration ──────────────────────────────────────────────────
 
 
@@ -274,6 +349,10 @@ def run_post_session(project_root: Path) -> LifecycleResult:
     for hook_fn in hooks:
         hook_result = hook_fn(project_root)
         result.hooks.append(hook_result)
+
+    # Session chain — append structured summary for cross-session memory
+    chain_result = _hook_session_chain(project_root, result)
+    result.hooks.append(chain_result)
 
     failed = [h for h in result.hooks if h.status == "failed"]
     result.status = "completed" if not failed else "partial"

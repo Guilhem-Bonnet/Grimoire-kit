@@ -755,6 +755,78 @@ def emit_to_stigmergy(insights: list[DreamInsight],
     return emitted
 
 
+# ── Dream → Incubator Bridge (Dream-Driven Development) ──────────────────────
+
+_CATEGORY_TO_TAGS = {
+    "tension":     ["auto-dream", "tension", "needs-fix"],
+    "opportunity": ["auto-dream", "opportunity", "feature"],
+    "connection":  ["auto-dream", "connection", "architecture"],
+    "pattern":     ["auto-dream", "pattern", "tech-debt"],
+}
+
+
+def emit_to_incubator(insights: list[DreamInsight],
+                      project_root: Path,
+                      min_confidence: float = 0.5) -> int:
+    """Convertit les insights dream actionables en idées dans l'incubateur.
+
+    Seuls les insights avec actionable=True et confidence >= min_confidence
+    sont soumis. Les doublons (même titre) sont ignorés.
+
+    Returns le nombre d'idées créées.
+    """
+    try:
+        import importlib.util
+        if "incubator" in sys.modules:
+            inc = sys.modules["incubator"]
+        else:
+            inc_path = Path(__file__).parent / "incubator.py"
+            if not inc_path.exists():
+                inc_path = project_root / "framework" / "tools" / "incubator.py"
+            if not inc_path.exists():
+                return 0
+            spec = importlib.util.spec_from_file_location("incubator", inc_path)
+            if spec is None or spec.loader is None:
+                return 0
+            inc = importlib.util.module_from_spec(spec)
+            sys.modules["incubator"] = inc
+            spec.loader.exec_module(inc)
+    except Exception:
+        return 0
+
+    ideas = inc.load_incubator(project_root)
+    existing_titles = {i.title.lower() for i in ideas}
+    created = 0
+    now_str = datetime.now().isoformat()
+
+    for ins in insights:
+        if not ins.actionable or ins.confidence < min_confidence:
+            continue
+        # Deduplicate by title
+        if ins.title.lower() in existing_titles:
+            continue
+
+        tags = _CATEGORY_TO_TAGS.get(ins.category, ["auto-dream"])
+        idea = inc.Idea(
+            id=inc.next_id(ideas),
+            title=ins.title,
+            description=ins.description[:500],
+            status="SEED",
+            created_at=now_str,
+            updated_at=now_str,
+            sponsor="dream-mode",
+            tags=tags,
+        )
+        ideas.append(idea)
+        existing_titles.add(ins.title.lower())
+        created += 1
+
+    if created > 0:
+        inc.save_incubator(project_root, ideas)
+
+    return created
+
+
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
 CATEGORY_ICONS = {
@@ -1061,6 +1133,8 @@ def main():
                         help="Mode rapide O(n) — patterns + opportunités seulement")
     parser.add_argument("--emit", action="store_true",
                         help="Émettre les insights comme phéromones stigmergy")
+    parser.add_argument("--incubate", action="store_true",
+                        help="Soumettre les insights actionables à l'incubateur (Dream-Driven Development)")
     parser.add_argument("--multi-project", nargs="+", metavar="DIR",
                         help="Croiser les insights entre plusieurs projets")
 
@@ -1221,6 +1295,13 @@ def main():
         count = emit_to_stigmergy(insights, project_root)
         if count > 0:
             print(f"🐜 {count} insight(s) émis comme phéromones stigmergy")
+            print()
+
+    # Emit → incubator (Dream-Driven Development)
+    if args.incubate:
+        count = emit_to_incubator(insights, project_root)
+        if count > 0:
+            print(f"🌰 {count} insight(s) soumis à l'incubateur")
             print()
 
     # Sortie JSON (enrichie avec dream diff et agents)

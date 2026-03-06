@@ -2189,5 +2189,97 @@ class TestJsonOutputStructure(unittest.TestCase):
         self.assertEqual(data["agents_relevant"], ["dev"])
 
 
+class TestEmitToIncubator(unittest.TestCase):
+    """Tests for Dream-Driven Development (QW4)."""
+
+    def setUp(self):
+        self.dream = _import_dream()
+
+    def test_emit_to_incubator_function_exists(self):
+        self.assertTrue(callable(self.dream.emit_to_incubator))
+
+    def test_no_actionable_insights_creates_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ins = self.dream.DreamInsight(
+                title="Test insight",
+                description="Not actionable",
+                sources=["src1"],
+                category="pattern",
+                confidence=0.8,
+                actionable=False,
+            )
+            count = self.dream.emit_to_incubator([ins], root)
+            self.assertEqual(count, 0)
+
+    def test_low_confidence_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ins = self.dream.DreamInsight(
+                title="Weak insight",
+                description="Too uncertain",
+                sources=["src1"],
+                category="opportunity",
+                confidence=0.2,
+                actionable=True,
+            )
+            count = self.dream.emit_to_incubator([ins], root, min_confidence=0.5)
+            self.assertEqual(count, 0)
+
+    def test_actionable_insight_creates_idea(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Ensure incubator.py is importable
+            tools_dir = KIT_DIR / "framework" / "tools"
+            if not (root / "framework" / "tools").exists():
+                (root / "framework" / "tools").mkdir(parents=True)
+            import shutil
+            shutil.copy(tools_dir / "incubator.py", root / "framework" / "tools" / "incubator.py")
+
+            ins = self.dream.DreamInsight(
+                title="Add GraphQL support",
+                description="Multiple agents mention GraphQL as needed",
+                sources=["learnings/dev.md", "decisions/arch.md"],
+                category="opportunity",
+                confidence=0.75,
+                actionable=True,
+            )
+            count = self.dream.emit_to_incubator([ins], root)
+            self.assertEqual(count, 1)
+
+    def test_duplicate_title_not_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tools_dir = KIT_DIR / "framework" / "tools"
+            (root / "framework" / "tools").mkdir(parents=True)
+            import shutil
+            shutil.copy(tools_dir / "incubator.py", root / "framework" / "tools" / "incubator.py")
+
+            ins = self.dream.DreamInsight(
+                title="Same Idea",
+                description="Test dedup",
+                sources=["src1"],
+                category="opportunity",
+                confidence=0.8,
+                actionable=True,
+            )
+            self.dream.emit_to_incubator([ins], root)
+            # Second call with same title — should create 0
+            count = self.dream.emit_to_incubator([ins], root)
+            self.assertEqual(count, 0)
+
+    def test_category_to_tags_mapping(self):
+        self.assertIn("tension", self.dream._CATEGORY_TO_TAGS)
+        self.assertIn("opportunity", self.dream._CATEGORY_TO_TAGS)
+
+    def test_incubate_flag_in_parser(self):
+        """Verify --incubate flag exists in CLI parser."""
+        import argparse
+        # Check the source for the flag
+        import inspect
+        source = inspect.getsource(self.dream.main)
+        self.assertIn("--incubate", source)
+
+
 if __name__ == "__main__":
     unittest.main()

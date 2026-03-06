@@ -56,7 +56,49 @@ _log = logging.getLogger("grimoire.bmad_mcp_tools")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-BMAD_MCP_TOOLS_VERSION = "2.0.0"
+BMAD_MCP_TOOLS_VERSION = "2.1.0"
+
+# ── Input Sanitization ──────────────────────────────────────────────────────
+
+import re as _re
+
+# Patterns that indicate prompt injection attempts in MCP inputs
+_INJECTION_PATTERNS = [
+    _re.compile(r"<\s*system\s*>", _re.IGNORECASE),
+    _re.compile(r"<\s*/?\s*(?:tool_use|function_call|tool_result)\s*>", _re.IGNORECASE),
+    _re.compile(r"\bignore\s+(?:all\s+)?(?:previous|above)\s+instructions?\b", _re.IGNORECASE),
+    _re.compile(r"\byou\s+are\s+now\b.*\bassistant\b", _re.IGNORECASE),
+    _re.compile(r"\[\s*SYSTEM\s*\]", _re.IGNORECASE),
+]
+
+# Path traversal patterns
+_PATH_TRAVERSAL_PATTERN = _re.compile(r"(?:\.\./|\.\.\\){2,}")
+
+
+def _sanitize_mcp_input(args: dict) -> dict:
+    """Sanitize MCP tool arguments against prompt injection and path traversal.
+
+    Returns sanitized copy of args. Raises ValueError on dangerous patterns.
+    """
+    sanitized = {}
+    for key, value in args.items():
+        if isinstance(value, str):
+            # Check for prompt injection
+            for pattern in _INJECTION_PATTERNS:
+                if pattern.search(value):
+                    raise ValueError(
+                        f"⛔ Entrée rejetée — pattern d'injection détecté dans '{key}'"
+                    )
+            # Check for aggressive path traversal
+            if _PATH_TRAVERSAL_PATTERN.search(value):
+                raise ValueError(
+                    f"⛔ Entrée rejetée — traversée de chemin détectée dans '{key}'"
+                )
+            # Limit input length (generous but bounded)
+            sanitized[key] = value[:10_000]
+        else:
+            sanitized[key] = value
+    return sanitized
 
 # ── Rate Limiting ────────────────────────────────────────────────────────────
 
@@ -539,6 +581,9 @@ def create_server():
 
 def _handle_tool(name: str, args: dict) -> str:
     """Dispatch tool calls vers les implémentations."""
+
+    # Sanitize all inputs before processing
+    args = _sanitize_mcp_input(args)
 
     if name == "bmad_route_request":
         router = _get_router()

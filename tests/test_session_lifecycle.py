@@ -100,10 +100,11 @@ class TestPostSession(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = sl.run_post_session(Path(tmp))
             self.assertIn(result.status, ("completed", "partial"))
-            self.assertEqual(len(result.hooks), 3)
+            self.assertEqual(len(result.hooks), 4)
             self.assertEqual(result.hooks[0].name, "dream-quick")
             self.assertEqual(result.hooks[1].name, "stigmergy-evaporate")
             self.assertEqual(result.hooks[2].name, "session-save")
+            self.assertEqual(result.hooks[3].name, "session-chain")
 
 
 class TestStatus(unittest.TestCase):
@@ -146,6 +147,56 @@ class TestCLI(unittest.TestCase):
         parser = sl.build_parser()
         args = parser.parse_args(["status"])
         self.assertEqual(args.command, "status")
+
+
+class TestSessionChain(unittest.TestCase):
+    """Tests for the cross-session summary chain (QW1)."""
+
+    def test_chain_file_created_after_post(self):
+        """Post-session creates session-chain.jsonl."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sl.run_post_session(Path(tmp))
+            chain = Path(tmp) / sl.SESSION_CHAIN_FILE
+            self.assertTrue(chain.exists())
+
+    def test_chain_entry_is_valid_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sl.run_post_session(Path(tmp))
+            chain = Path(tmp) / sl.SESSION_CHAIN_FILE
+            lines = chain.read_text(encoding="utf-8").strip().splitlines()
+            self.assertGreaterEqual(len(lines), 1)
+            entry = json.loads(lines[0])
+            self.assertIn("timestamp", entry)
+            self.assertIn("phase", entry)
+            self.assertEqual(entry["phase"], "post")
+
+    def test_load_session_chain_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = sl.load_session_chain(Path(tmp))
+            self.assertEqual(entries, [])
+
+    def test_load_session_chain_returns_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sl.run_post_session(Path(tmp))
+            entries = sl.load_session_chain(Path(tmp), limit=5)
+            self.assertGreaterEqual(len(entries), 1)
+            self.assertIn("timestamp", entries[0])
+
+    def test_prune_respects_max(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = Path(tmp) / sl.SESSION_CHAIN_FILE
+            chain.parent.mkdir(parents=True, exist_ok=True)
+            # Write more than max entries
+            with open(chain, "w", encoding="utf-8") as f:
+                for i in range(sl.SESSION_CHAIN_MAX_ENTRIES + 10):
+                    f.write(json.dumps({"idx": i}) + "\n")
+            sl._prune_session_chain(chain)
+            lines = chain.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), sl.SESSION_CHAIN_MAX_ENTRIES)
+
+    def test_chain_constants(self):
+        self.assertEqual(sl.SESSION_CHAIN_MAX_ENTRIES, 50)
+        self.assertIn("session-chain.jsonl", sl.SESSION_CHAIN_FILE)
 
 
 if __name__ == "__main__":
