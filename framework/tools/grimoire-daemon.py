@@ -29,13 +29,14 @@ import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 _log = logging.getLogger("grimoire.daemon")
 
-DAEMON_VERSION = "1.2.0"
+DAEMON_VERSION = "1.3.0"
 DAEMON_DIR = "_bmad/_memory/daemon"
 PID_FILE = "grimoire-daemon.pid"
 STATE_FILE = "daemon-state.json"
@@ -279,24 +280,46 @@ def _run_evolve_cycle(root: Path) -> TaskResult:
                       duration_s=duration, message=msg[:200])
 
 
-def run_maintenance_cycle(root: Path, cycle_num: int = 1) -> CycleResult:
-    """Exécute un cycle complet de maintenance."""
+def run_maintenance_cycle(root: Path, cycle_num: int = 1,
+                         parallel: bool = True) -> CycleResult:
+    """Exécute un cycle complet de maintenance.
+
+    Args:
+        root: Racine du projet.
+        cycle_num: Numéro du cycle.
+        parallel: Si True, exécute les tâches indépendantes en parallèle.
+    """
     start = time.monotonic()
+
+    # Tâches indépendantes — peuvent tourner en parallèle
+    parallel_specs: list[tuple[str, list[str]]] = [
+        ("dream.py", ["--quick"]),
+        ("stigmergy.py", ["evaporate"]),
+        ("rag-indexer.py", ["index", "--all"]),
+    ]
+
     tasks: list[TaskResult] = []
 
-    # 1. Dream --quick
-    tasks.append(_run_tool(root, "dream.py", ["--quick"]))
+    if parallel and len(parallel_specs) > 1:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(_run_tool, root, name, args): name
+                for name, args in parallel_specs
+            }
+            results_map: dict[str, TaskResult] = {}
+            for future in as_completed(futures):
+                name = futures[future]
+                results_map[name] = future.result()
 
-    # 2. Stigmergy evaporate
-    tasks.append(_run_tool(root, "stigmergy.py", ["evaporate"]))
+        # Préserver l'ordre d'origine
+        for name, _ in parallel_specs:
+            tasks.append(results_map[name])
+    else:
+        for name, args in parallel_specs:
+            tasks.append(_run_tool(root, name, args))
 
-    # 3. RAG re-index (incremental)
-    tasks.append(_run_tool(root, "rag-indexer.py", ["index", "--all"]))
-
-    # 4. Memory bridge sync
+    # Tâches séquentielles (dépendent de l'état)
     tasks.append(_run_memory_bridge(root))
-
-    # 5. Auto-evolve: fitness check + proactive improvements
     tasks.append(_run_evolve_cycle(root))
 
     total = round(time.monotonic() - start, 3)
