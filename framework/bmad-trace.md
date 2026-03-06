@@ -59,6 +59,35 @@ Localisé à la racine du projet BMAD : `_bmad-output/BMAD_TRACE.md`
 | `RULE:triggered` | Règle DNA ou `.agent-rules` activée | Context Router |
 | `WARN` | Alerte non-bloquante | Tout agent |
 | `ERROR` | Erreur bloquante | Tout agent |
+| `HUP:preflight` | Vérification pré-réponse de confiance | HUP (BM-50) |
+| `HUP:postflight` | Validation post-réponse anti-hallucination | HUP (BM-50) |
+| `HUP:escalation` | Escalade incertitude ROUGE | HUP (BM-50) |
+| `QEC:received` | Question reçue d'un sub-agent | QEC (BM-51) |
+| `QEC:auto-resolved` | Question auto-résolue par contexte | QEC (BM-51) |
+| `QEC:presented` | Lot de questions présenté à l'utilisateur | QEC (BM-51) |
+| `QEC:user-resolved` | Réponse utilisateur redistribuée | QEC (BM-51) |
+| `CVTL:requested` | Validation croisée demandée | CVTL (BM-52) |
+| `CVTL:verdict` | Verdict du validateur avec trust score | CVTL (BM-52) |
+| `CVTL:adversarial` | Revue adversariale déclenchée | CVTL (BM-52) |
+| `SOG:routed` | Requête routée vers agent(s) | SOG (BM-53) |
+| `SOG:clarify` | Clarification demandée à l'utilisateur | SOG (BM-53) |
+| `SOG:aggregated` | Résultats agrégés et livrés | SOG (BM-53) |
+| `PCE:mode` | Mode de discussion sélectionné | PCE (BM-54) |
+| `PCE:divergence` | Score de divergence vérifié | PCE (BM-54) |
+| `PCE:vote` | Vote déclenché ou résultat | PCE (BM-54) |
+| `AMN:register` | Agent enregistré dans le mesh | AMN (BM-55) |
+| `AMN:heartbeat` | Heartbeat reçu/manqué | AMN (BM-55) |
+| `AMN:p2p` | Message P2P direct inter-agents | AMN (BM-55) |
+| `SHP:huddle` | Huddle démarré/terminé | SHP (BM-56) |
+| `SHP:escalate` | Huddle escaladé en party mode | SHP (BM-56) |
+| `ARG:update` | Profil ou relation agent mis à jour | ARG (BM-57) |
+| `ARG:synergy` | Synergie détectée entre agents | ARG (BM-57) |
+| `HPE:schedule` | DAG planifié et dispatché | HPE (BM-58) |
+| `HPE:critical-path` | Alerte sur chemin critique | HPE (BM-58) |
+| `HPE:checkpoint` | Checkpoint DAG sauvegardé | HPE (BM-58) |
+| `ELSS:emit` | Événement émis sur l'event bus | ELSS (BM-59) |
+| `ELSS:observe` | Observation reçue par un agent | ELSS (BM-59) |
+| `ELSS:conflict` | Conflit d'état partagé détecté | ELSS (BM-59) |
 
 ---
 

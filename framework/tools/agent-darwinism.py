@@ -42,6 +42,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.agent_darwinism")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -268,8 +271,9 @@ def parse_trace_stats(trace_path: Path,
     if since:
         try:
             since_dt = datetime.fromisoformat(since)
-        except ValueError:
-            pass
+        except ValueError as _exc:
+            _log.debug("ValueError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     current_header: dict = {}
     content_lines: list[str] = []
@@ -290,8 +294,9 @@ def parse_trace_stats(trace_path: Path,
                 entry_dt = datetime.fromisoformat(ts.replace(" ", "T"))
                 if entry_dt < since_dt:
                     return
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                _log.debug("ValueError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         if ag not in agents:
             agents[ag] = RawAgentStats(agent_id=ag)
@@ -341,8 +346,9 @@ def parse_trace_stats(trace_path: Path,
                 elif current_header:
                     content_lines.append(line)
         flush()
-    except OSError:
-        pass
+    except OSError as _exc:
+        _log.debug("OSError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
 
     return agents
 
@@ -360,8 +366,9 @@ def count_agent_learnings(project_root: Path) -> dict[str, int]:
             count = sum(1 for ln in lines
                         if ln.strip() and (ln.startswith("- ") or ln.startswith("* ")))
             counts[agent] = count
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     return counts
 
 

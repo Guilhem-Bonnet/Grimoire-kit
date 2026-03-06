@@ -44,12 +44,52 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.rag_indexer")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
 RAG_INDEXER_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
+
+# SSRF-safe URL schemes and blocked IP ranges
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_BLOCKED_IP_PREFIXES = (
+    "169.254.",    # Link-local / cloud metadata
+    "127.",        # Loopback
+    "10.",         # Private Class A
+    "172.16.", "172.17.", "172.18.", "172.19.",
+    "172.20.", "172.21.", "172.22.", "172.23.",
+    "172.24.", "172.25.", "172.26.", "172.27.",
+    "172.28.", "172.29.", "172.30.", "172.31.",  # Private Class B
+    "192.168.",    # Private Class C
+    "0.",          # Unspecified
+    "[::1]",       # IPv6 loopback
+    "[fe80:",      # IPv6 link-local
+)
+
+
+def _validate_url(url: str, *, allow_localhost: bool = True) -> str:
+    """Validate a URL against SSRF attacks.
+
+    Blocks cloud metadata endpoints and optionally private IPs.
+    Raises ValueError on invalid/dangerous URLs.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise ValueError(f"URL scheme '{parsed.scheme}' non autorisé (http/https uniquement)")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("URL sans hostname")
+    # Always block cloud metadata endpoints
+    if host in ("169.254.169.254", "metadata.google.internal"):
+        raise ValueError(f"URL bloquée (cloud metadata): {host}")
+    if not allow_localhost and any(host.startswith(p) for p in _BLOCKED_IP_PREFIXES):
+        raise ValueError(f"URL vers IP privée bloquée: {host}")
+    return url
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_VECTOR_SIZE = 384
@@ -457,8 +497,9 @@ class EmbeddingProvider:
                 self._st_model = SentenceTransformer(model)
                 self._mode = "sentence-transformers"
                 return
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                _log.debug("ImportError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Sinon, ollama
         if ollama_url:
@@ -533,6 +574,7 @@ class RAGIndexer:
             ) from exc
 
         if qdrant_url:
+            _validate_url(qdrant_url)
             self._client = QdrantClient(url=qdrant_url, timeout=10)
         else:
             path = qdrant_path or str(project_root / DEFAULT_QDRANT_PATH)

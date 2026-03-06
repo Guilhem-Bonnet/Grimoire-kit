@@ -35,6 +35,9 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.context_router")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -170,8 +173,9 @@ def extract_agent_tag(agent_file: Path) -> str:
         m = re.search(r'^name:\s*"?([^"\n]+)"?', content, re.MULTILINE)
         if m:
             return m.group(1).strip()
-    except OSError:
-        pass
+    except OSError as _exc:
+        _log.debug("OSError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return agent_file.stem
 
 

@@ -43,6 +43,22 @@ from pathlib import Path
 
 RAG_RETRIEVER_VERSION = "1.0.0"
 
+# ── SSRF Protection ──────────────────────────────────────────────────────────
+
+_BLOCKED_METADATA_HOSTS = frozenset({"169.254.169.254", "metadata.google.internal"})
+
+
+def _validate_qdrant_url(url: str) -> str:
+    """Validate Qdrant URL against SSRF (cloud metadata endpoints)."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme '{parsed.scheme}' non autorisé")
+    host = (parsed.hostname or "").lower()
+    if host in _BLOCKED_METADATA_HOSTS:
+        raise ValueError(f"URL bloquée (cloud metadata): {host}")
+    return url
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_MAX_CHUNKS = 5
@@ -236,6 +252,7 @@ class RAGRetriever:
         try:
             from qdrant_client import QdrantClient
             if self._qdrant_url:
+                _validate_qdrant_url(self._qdrant_url)
                 self._client = QdrantClient(url=self._qdrant_url, timeout=5)
             else:
                 if not Path(self._qdrant_path).parent.exists():

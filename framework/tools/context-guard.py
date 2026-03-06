@@ -27,6 +27,9 @@ import argparse
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.context_guard")
 
 # ── Modèles LLM — fenêtres de contexte connues (en tokens) ──────────────────
 
@@ -249,8 +252,9 @@ def resolve_agent_loads(
             # Éviter le recompute
             loads[-1].loaded = True
             return loads
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     loads.append(FileLoad(path=trace_path, role="trace"))
 
     return loads
@@ -299,8 +303,9 @@ def find_agents(project_root: Path) -> list[Path]:
                 content = f.read_text(encoding="utf-8", errors="replace")[:500]
                 if "<activation" in content or 'NEVER break character' in content:
                     agents.append(f)
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return agents
 
 

@@ -45,6 +45,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.early_warning")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -269,8 +272,9 @@ def measure_entropy(project_root: Path) -> Metric:
                 unresolved += content.count("- [ ]")
                 unresolved += content.count("TODO")
                 unresolved += content.count("⚠️")
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     unresolved_norm = min(1.0, unresolved / 30)
     score_components.append(unresolved_norm * 0.25)
 
@@ -416,8 +420,9 @@ def measure_drift(project_root: Path) -> Metric:
                 max_drift = max(max_drift, drift_days)
                 if drift_days > 3:
                     drift_details.append(f"{Path(path_a).name}↔{Path(path_b).name}: {drift_days:.0f}j")
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     norm_drift = min(1.0, max_drift / 30)  # 30 jours = drift max
 
@@ -546,8 +551,9 @@ def emit_alerts(project_root: Path, report: EarlyWarningReport) -> int:
                     capture_output=True, text=True, cwd=project_root, timeout=10,
                 )
                 emitted += 1
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass
+            except (subprocess.TimeoutExpired, FileNotFoundError) as _exc:
+                _log.debug("subprocess.TimeoutExpired, FileNotFoundError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     return emitted
 

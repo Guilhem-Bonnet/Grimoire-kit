@@ -40,6 +40,9 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.harmony_check")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -147,8 +150,9 @@ def scan_project(project_root: Path) -> ArchScan:
                             refs.append(other)
                 if refs:
                     scan.cross_refs[fpath] = refs
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     return scan
 
@@ -204,8 +208,9 @@ def detect_oversized(scan: ArchScan, project_root: Path) -> list[Dissonance]:
                         f"Fichier volumineux ({lines} lignes > {MAX_FILE_LINES} max)",
                         "Envisager de découper en modules plus petits",
                     ))
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -235,8 +240,9 @@ def detect_manifest_mismatch(scan: ArchScan, project_root: Path) -> list[Dissona
                                     f"'{name}' référencé dans le manifest mais pas de fichier agent correspondant",
                                     "Vérifier si l'agent existe ou retirer du manifest",
                                 ))
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -265,8 +271,9 @@ def detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
                                 f"Référence cassée : '{ref}' — fichier introuvable",
                                 "Corriger le chemin ou retirer la référence",
                             ))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -282,8 +289,9 @@ def detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
             try:
                 content = full.read_text(encoding="utf-8", errors="replace")[:500].lower()
                 agent_summaries[agent_path] = content
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     # Simple Jaccard sur les mots
     agent_list = list(agent_summaries.items())

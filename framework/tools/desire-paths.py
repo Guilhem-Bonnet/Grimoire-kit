@@ -40,6 +40,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.desire_paths")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -167,8 +170,9 @@ def analyze_agents(project_root: Path, use_git: bool) -> list[DesireEntry]:
                     count = content.lower().count(agent_name.lower())
                     if count > 0:
                         used_agents[agent_name] += count
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     # Git activity
     if use_git:
@@ -221,8 +225,9 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
                 count = content.lower().count(wf_name.lower())
                 if count > 0:
                     used_wf[wf_name] += count
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Chercher dans session-state et shared-context
     for md in project_root.glob("_bmad/_memory/*.md"):
@@ -232,8 +237,9 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
                 count = content.lower().count(wf_name.lower())
                 if count > 0:
                     used_wf[wf_name] += count
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     all_wf = designed_wf | set(used_wf.keys())
     for wf in sorted(all_wf):
@@ -276,8 +282,9 @@ def analyze_tools(project_root: Path, use_git: bool) -> list[DesireEntry]:
                     # Chercher tool_name.py ou tool-name
                     if f"{tool_name}.py" in content or tool_name in content:
                         used_tools[tool_name] += 1
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     # Git activity
     git_activity: dict[str, int] = {}

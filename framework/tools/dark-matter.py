@@ -43,6 +43,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.dark_matter")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -163,8 +166,9 @@ def detect_magic_values(project_root: Path) -> list[DarkMatterItem]:
                         confidence=0.6,
                         recommendation="Extraire dans une constante nommée avec commentaire",
                     ))
-        except (OSError, UnicodeDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError) as _exc:
+            _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return items[:20]  # Cap
 
@@ -216,8 +220,9 @@ def detect_naming_conventions(project_root: Path) -> list[DarkMatterItem]:
     if readme.exists():
         try:
             docs_content = readme.read_text(encoding="utf-8").lower()
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     for prefix, count in prefixes.most_common(10):
         if prefix.lower() not in docs_content and count >= 2:
@@ -317,8 +322,9 @@ def detect_implicit_assumptions(project_root: Path) -> list[DarkMatterItem]:
                         confidence=0.5,
                         recommendation="Valider l'hypothèse et la documenter ou la résoudre",
                     ))
-        except (OSError, UnicodeDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError) as _exc:
+            _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return items[:30]
 
@@ -341,8 +347,9 @@ def detect_undocumented_dependencies(project_root: Path) -> list[DarkMatterItem]
                     other_name = other_py.stem.replace("-", "_")
                     if other_name in content or other_py.stem in content:
                         tool_deps[py.stem].append(other_py.stem)
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Dépendances non documentées
         for tool, deps in tool_deps.items():
@@ -359,8 +366,9 @@ def detect_undocumented_dependencies(project_root: Path) -> list[DarkMatterItem]
                         confidence=0.7,
                         recommendation="Documenter les dépendances dans le docstring de l'outil",
                     ))
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     return items
 

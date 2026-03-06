@@ -33,6 +33,9 @@ import json
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.synapse_config")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -226,8 +229,9 @@ def _parse_yaml_simple(text: str) -> dict:
     try:
         import yaml  # noqa: F811
         return yaml.safe_load(text) or {}
-    except ImportError:
-        pass
+    except ImportError as _exc:
+        _log.debug("ImportError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
 
     # Fallback: mini parser ligne par ligne
     result: dict = {}
@@ -286,12 +290,14 @@ def _coerce_value(val: str):
         return None
     try:
         return int(val)
-    except ValueError:
-        pass
+    except ValueError as _exc:
+        _log.debug("ValueError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     try:
         return float(val)
-    except ValueError:
-        pass
+    except ValueError as _exc:
+        _log.debug("ValueError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     # Strip quotes
     if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
         return val[1:-1]
@@ -326,8 +332,9 @@ def load_synapse_config(project_root: str | Path) -> SynapseConfig:
                 if synapse_data:
                     config = SynapseConfig.from_dict(synapse_data)
                 break
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     _CONFIG_CACHE[cache_key] = config
     return config

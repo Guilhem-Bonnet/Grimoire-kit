@@ -35,6 +35,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.preflight_check")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -183,8 +186,9 @@ def check_tools_available(project_root: Path) -> list[Check]:
                                 ))
                     elif not line.startswith(" ") and not line.startswith("\t"):
                         in_tools = False
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return checks
 
@@ -260,8 +264,9 @@ def check_memory_state(project_root: Path) -> list[Check]:
                     message=f"{unresolved} contradiction(s) non résolue(s) dans contradiction-log.md",
                     fix_hint="Activer Mnemo pour résoudre les contradictions",
                 ))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Session state périmé
     session_state = memory_dir / "session-state.md"
@@ -276,8 +281,9 @@ def check_memory_state(project_root: Path) -> list[Check]:
                     message=f"session-state.md date de {age_hours:.0f}h — potentiellement obsolète",
                     fix_hint="Re-briefer l'agent via [BR] pour rafraîchir le contexte",
                 ))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Requêtes inter-agents en attente
     shared_context = memory_dir / "shared-context.md"
@@ -292,8 +298,9 @@ def check_memory_state(project_root: Path) -> list[Check]:
                     message=f"{pending} requête(s) inter-agents en attente dans shared-context.md",
                     fix_hint="Résoudre les requêtes avant de commencer une nouvelle tâche",
                 ))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return checks
 
@@ -366,8 +373,9 @@ def check_wuwei(project_root: Path, agent: str) -> list[Check]:
                     message=f"Agent {agent} a {len(in_progress)} tâche(s) en cours — "
                             f"mode flow actif, minimiser les interruptions",
                 ))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return checks
 

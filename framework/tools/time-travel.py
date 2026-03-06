@@ -490,7 +490,10 @@ def build_parser() -> argparse.ArgumentParser:
     # restore
     rst = subs.add_parser("restore", help="Restaurer un checkpoint")
     rst.add_argument("--checkpoint", required=True, help="ID ou label du checkpoint")
-    rst.add_argument("--dry-run", action="store_true", help="Simulation")
+    rst.add_argument("--dry-run", action="store_true", default=True,
+                     help="Simulation (activé par défaut — utiliser --no-dry-run pour appliquer)")
+    rst.add_argument("--no-dry-run", dest="dry_run", action="store_false",
+                     help="Appliquer réellement la restauration")
 
     # bisect
     bs = subs.add_parser("bisect", help="Bisect entre deux checkpoints")

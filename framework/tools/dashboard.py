@@ -42,6 +42,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.dashboard")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -168,8 +171,9 @@ def analyze_health(project_root: Path) -> HealthReport:
     for f in project_root.rglob("*.py"):
         try:
             todo_count += f.read_text(encoding="utf-8", errors="ignore").upper().count("TODO")
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     coherence_score = max(0, 100 - todo_count * 2)
     report.metrics.append(HealthMetric("Cohérence", coherence_score,
                                        f"{todo_count} TODOs"))
@@ -200,8 +204,9 @@ def analyze_entropy(project_root: Path) -> EntropyReport:
             rel = f.relative_to(project_root)
             top = rel.parts[0] if rel.parts else "(root)"
             dir_counts[top] += 1
-        except ValueError:
-            pass
+        except ValueError as _exc:
+            _log.debug("ValueError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     report.dir_entropy = _shannon_entropy(dict(dir_counts))
 
     return report
@@ -216,8 +221,9 @@ def analyze_pareto(project_root: Path) -> ParetoReport:
         if f.is_file() and ".git" not in str(f) and "__pycache__" not in str(f):
             try:
                 files.append((str(f.relative_to(project_root)), f.stat().st_size))
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     if not files:
         return report

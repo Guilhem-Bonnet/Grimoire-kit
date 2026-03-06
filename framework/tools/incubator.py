@@ -45,6 +45,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.incubator")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -130,8 +133,9 @@ def next_id(ideas: list[Idea]) -> str:
     for idea in ideas:
         try:
             nums.append(int(idea.id.split("-")[1]))
-        except (IndexError, ValueError):
-            pass
+        except (IndexError, ValueError) as _exc:
+            _log.debug("IndexError, ValueError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     next_num = max(nums, default=0) + 1
     return f"IDEA-{next_num:03d}"
 
@@ -179,8 +183,9 @@ def auto_prune(ideas: list[Idea], max_dormant_days: int = 90) -> list[Idea]:
                     idea.status = "DEAD"
                     idea.notes.append(f"Auto-pruned après {max_dormant_days}j de dormance")
                     pruned.append(idea)
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                _log.debug("ValueError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return pruned
 
 

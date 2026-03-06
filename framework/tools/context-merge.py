@@ -38,6 +38,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.context_merge")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -434,8 +437,9 @@ class ContextMerger:
                     if source_info:
                         source_info.status = "merged"
                         mgr._save_branch_info(source_info)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Write merge log
         self._write_merge_log(result)

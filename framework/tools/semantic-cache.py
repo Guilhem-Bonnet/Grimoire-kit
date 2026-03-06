@@ -39,6 +39,9 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.semantic_cache")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -130,8 +133,9 @@ class CacheStatsManager:
             try:
                 with open(self.stats_file, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
         return {"hits": 0, "misses": 0, "tokens_saved": 0, "stores": 0}
 
     def _save(self) -> None:
@@ -242,8 +246,9 @@ class SemanticCache:
                     ollama_url=self._ollama_url,
                 )
                 return True
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("Exception suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
         return False
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
@@ -317,8 +322,9 @@ class SemanticCache:
                 self._stats.record_hit(result.tokens_saved)
                 return result
 
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("Exception suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
         self._stats.record_miss()
         return result
@@ -486,8 +492,9 @@ class SemanticCache:
 
             stats.oldest_entry_hours = round((now - oldest) / 3600, 1) if points else 0
 
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("Exception suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
         return stats
 

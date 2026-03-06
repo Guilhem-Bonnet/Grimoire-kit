@@ -44,6 +44,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.background_tasks")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -362,8 +365,9 @@ class BackgroundTaskManager:
                 time.sleep(0.5)
                 if self._is_process_alive(task.pid):
                     os.kill(task.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
+            except (OSError, ProcessLookupError) as _exc:
+                _log.debug("OSError, ProcessLookupError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         task.status = "cancelled"
         task.completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

@@ -40,6 +40,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.conversation_history")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -129,8 +132,9 @@ class EmbeddingProvider:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(EMBEDDING_MODEL)
             self._available = True
-        except ImportError:
-            pass
+        except ImportError as _exc:
+            _log.debug("ImportError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:
@@ -180,8 +184,9 @@ class QdrantHistoryBackend:
                     ),
                 )
             self._available = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("Exception suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:

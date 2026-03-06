@@ -43,6 +43,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.mycelium")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -117,8 +120,9 @@ def scan_patterns(project_root: Path) -> list[Pattern]:
                         if len(line) > 10 and not line.startswith("!") and not line.startswith("---"):
                             desc = line[:100]
                             break
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    _log.debug("OSError suppressed: %s", _exc)
+                    # Silent exception — add logging when investigating issues
 
                 patterns.append(Pattern(
                     id=f"PAT-{idx:03d}",
@@ -166,8 +170,9 @@ def export_patterns(project_root: Path, output: Path, patterns: list[Pattern],
                 content = anonymize_content(content)
             dst.write_text(content, encoding="utf-8")
             exported += 1
-        except (OSError, UnicodeDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError) as _exc:
+            _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Manifest
     manifest = {

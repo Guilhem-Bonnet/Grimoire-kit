@@ -33,16 +33,16 @@ class TestConstants(unittest.TestCase):
     def test_valid_modes(self):
         self.assertIn("simulated", orc.VALID_MODES)
         self.assertIn("sequential", orc.VALID_MODES)
-        self.assertIn("parallel", orc.VALID_MODES)
+        self.assertIn("concurrent-cpu", orc.VALID_MODES)
 
     def test_mode_rules(self):
         self.assertEqual(orc.MODE_RULES["party-mode"], "simulated")
         self.assertEqual(orc.MODE_RULES["boomerang"], "sequential")
-        self.assertEqual(orc.MODE_RULES["adversarial-review"], "parallel")
+        self.assertEqual(orc.MODE_RULES["adversarial-review"], "concurrent-cpu")
 
     def test_cost_multipliers(self):
         self.assertEqual(orc.COST_MULTIPLIERS["simulated"], 1.0)
-        self.assertGreater(orc.COST_MULTIPLIERS["parallel"], orc.COST_MULTIPLIERS["sequential"])
+        self.assertGreater(orc.COST_MULTIPLIERS["concurrent-cpu"], orc.COST_MULTIPLIERS["sequential"])
 
 
 class TestExecutionStep(unittest.TestCase):
@@ -96,8 +96,8 @@ class TestOrchestrator(unittest.TestCase):
         self.assertEqual(mode, "simulated")
 
     def test_decide_mode_override(self):
-        mode, reason = self.orch.decide_mode("party-mode", override="parallel")
-        self.assertEqual(mode, "parallel")
+        mode, reason = self.orch.decide_mode("party-mode", override="concurrent-cpu")
+        self.assertEqual(mode, "concurrent-cpu")
 
     def test_decide_mode_unknown_workflow(self):
         mode, reason = self.orch.decide_mode("unknown-workflow")
@@ -208,7 +208,7 @@ class TestParallelExecution(unittest.TestCase):
             agents=["dev", "qa", "architect"],
             task="Review security",
         )
-        self.assertEqual(plan.mode, "parallel")
+        self.assertEqual(plan.mode, "concurrent-cpu")
 
     def test_parallel_execution_completes(self):
         plan = self.orch.create_plan(
@@ -289,7 +289,7 @@ class TestParallelExecution(unittest.TestCase):
         self.orch.execute(plan)
         history = self.orch.get_history()
         self.assertGreater(len(history), 0)
-        self.assertEqual(history[-1].mode, "parallel")
+        self.assertEqual(history[-1].mode, "concurrent-cpu")
 
     def test_parallel_tokens_summed(self):
         plan = self.orch.create_plan(

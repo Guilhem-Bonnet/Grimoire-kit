@@ -41,6 +41,9 @@ import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.tool_registry")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -258,8 +261,9 @@ class ToolDiscoverer:
                 description = description.rstrip(".")
                 if len(description) > 200:
                     description = description[:197] + "..."
-        except SyntaxError:
-            pass
+        except SyntaxError as _exc:
+            _log.debug("SyntaxError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
         # Extract version
         version_match = re.search(r'(\w+_VERSION)\s*=\s*["\']([^"\']+)["\']', source)

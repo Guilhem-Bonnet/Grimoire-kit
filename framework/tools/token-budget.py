@@ -35,6 +35,9 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.token_budget")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -134,8 +137,9 @@ class TiktokenCounter(TokenCounter):
                 self._encoding = tiktoken.encoding_for_model(model)
             except KeyError:
                 self._encoding = tiktoken.get_encoding("cl100k_base")
-        except ImportError:
-            pass
+        except ImportError as _exc:
+            _log.debug("ImportError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     def count(self, text: str) -> int:
         if self._encoding is None:
@@ -312,8 +316,9 @@ class TokenBudgetEnforcer:
                     path = getattr(cf, "path", str(cf))
                     files.append((str(path), tokens, prio))
                 return files
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Fallback: scan memory / agent files manually
         for pattern, prio in [

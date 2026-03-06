@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 VERSION = "1.0.0"
@@ -173,7 +174,7 @@ def cmd_add(root: Path, args: argparse.Namespace) -> int:
     failure = Failure(
         failure_id=fid,
         sequence=seq,
-        timestamp=datetime.now(UTC).isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
         title=args.title,
         severity=args.severity,
         agents=agents_list,
@@ -329,6 +330,81 @@ def cmd_check(root: Path, args: argparse.Namespace) -> int:
         print(f"    Règle: {e.rule_added}")
         print()
     return 1 if any(s >= 0.5 for _, s in warnings) else 0
+
+
+# ── MCP Tool Interface ──────────────────────────────────────────────────────
+
+
+def mcp_failure_museum_check(
+    project_root: str,
+    description: str = "",
+) -> dict:
+    """MCP tool ``bmad_failure_museum_check`` — vérifie un changement contre l'historique.
+
+    Retourne les échecs passés similaires pour éviter de répéter les mêmes erreurs.
+
+    Args:
+        project_root: Racine du projet.
+        description: Description du changement prévu.
+
+    Returns:
+        dict avec ``status``, ``warnings`` (liste de risques), ``risk_level``.
+    """
+    if not description:
+        return {"status": "error", "error": "description required"}
+
+    root = Path(project_root)
+    entries = load_failures(root)
+    if not entries:
+        return {"status": "ok", "warnings": [], "risk_level": "none"}
+
+    desc_words = set(description.lower().split())
+    warnings: list[dict] = []
+
+    for e in entries:
+        corpus = f"{e.description} {e.root_cause} {e.fix} {e.rule_added}".lower()
+        corpus_words = set(corpus.split())
+        overlap = len(desc_words & corpus_words)
+        if overlap >= 2:
+            score = overlap / max(len(desc_words), 1)
+            warnings.append({
+                "failure_id": e.failure_id,
+                "title": e.title,
+                "root_cause": e.root_cause,
+                "rule": e.rule_added,
+                "relevance": round(score, 2),
+            })
+
+    warnings.sort(key=lambda x: -x["relevance"])
+    warnings = warnings[:5]
+
+    if not warnings:
+        risk = "none"
+    elif any(w["relevance"] >= 0.5 for w in warnings):
+        risk = "high"
+    else:
+        risk = "low"
+
+    return {"status": "ok", "warnings": warnings, "risk_level": risk}
+
+
+def mcp_failure_museum_lessons(project_root: str) -> dict:
+    """MCP tool ``bmad_failure_museum_lessons`` — extrait les règles/leçons apprises.
+
+    Returns:
+        dict avec ``status`` et ``lessons`` (liste de règles).
+    """
+    root = Path(project_root)
+    entries = load_failures(root)
+    lessons = []
+    for e in entries:
+        if e.rule_added:
+            lessons.append({
+                "failure_id": e.failure_id,
+                "severity": e.severity,
+                "rule": e.rule_added,
+            })
+    return {"status": "ok", "lessons": lessons, "count": len(lessons)}
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

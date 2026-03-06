@@ -24,6 +24,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import logging
+
+_log = logging.getLogger("grimoire.crispr")
 
 VERSION = "1.0.0"
 
@@ -271,7 +274,8 @@ def cmd_scan(root: Path, workflow_name: str | None, as_json: bool) -> dict[str, 
 
 
 def cmd_splice(root: Path, workflow_name: str, at_ref: str,
-               insert_content: str, position: str, as_json: bool) -> dict[str, Any]:
+               insert_content: str, position: str, as_json: bool,
+               dry_run: bool = True) -> dict[str, Any]:
     """Insère du contenu à un point précis du workflow."""
     workflows = _find_workflows(root)
     if workflow_name not in workflows:
@@ -307,7 +311,9 @@ def cmd_splice(root: Path, workflow_name: str, at_ref: str,
         lines.insert(insert_at + i, new_line)
 
     new_content = "\n".join(lines) + "\n"
-    wpath.write_text(new_content, encoding="utf-8")
+
+    if not dry_run:
+        wpath.write_text(new_content, encoding="utf-8")
 
     edit = EditOperation(
         operation="splice",
@@ -318,10 +324,12 @@ def cmd_splice(root: Path, workflow_name: str, at_ref: str,
         after_hash=_hash_content(new_content),
         details={"position": position, "lines_inserted": len(insert_lines)},
     )
-    _log_edit(root, edit)
+    if not dry_run:
+        _log_edit(root, edit)
 
     result = {
         "operation": "splice",
+        "action": "applied" if not dry_run else "dry_run",
         "workflow": workflow_name,
         "target_segment": at_ref,
         "position": position,
@@ -331,16 +339,19 @@ def cmd_splice(root: Path, workflow_name: str, at_ref: str,
     }
 
     if not as_json:
-        print(f"✂️ Splice effectué sur {workflow_name}")
+        mode = "SPLICE" if not dry_run else "DRY RUN — splice"
+        print(f"✂️ {mode} sur {workflow_name}")
         print(f"   Cible : {at_ref} ({position})")
         print(f"   Lignes insérées : {len(insert_lines)}")
         print(f"   Hash : {edit.before_hash} → {edit.after_hash}")
+        if dry_run:
+            print("\n   ℹ️ Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
 
     return result
 
 
 def cmd_excise(root: Path, workflow_name: str, segment_ref: str,
-               as_json: bool) -> dict[str, Any]:
+               as_json: bool, dry_run: bool = True) -> dict[str, Any]:
     """Supprime un segment d'un workflow."""
     workflows = _find_workflows(root)
     if workflow_name not in workflows:
@@ -364,7 +375,9 @@ def cmd_excise(root: Path, workflow_name: str, segment_ref: str,
     del lines[target_seg.line_start - 1:target_seg.line_end]
 
     new_content = "\n".join(lines) + "\n"
-    wpath.write_text(new_content, encoding="utf-8")
+
+    if not dry_run:
+        wpath.write_text(new_content, encoding="utf-8")
 
     edit = EditOperation(
         operation="excise",
@@ -375,10 +388,12 @@ def cmd_excise(root: Path, workflow_name: str, segment_ref: str,
         after_hash=_hash_content(new_content),
         details={"lines_removed": len(excised), "excised_content": "\n".join(excised)},
     )
-    _log_edit(root, edit)
+    if not dry_run:
+        _log_edit(root, edit)
 
     result = {
         "operation": "excise",
+        "action": "applied" if not dry_run else "dry_run",
         "workflow": workflow_name,
         "segment": segment_ref,
         "lines_removed": len(excised),
@@ -387,10 +402,13 @@ def cmd_excise(root: Path, workflow_name: str, segment_ref: str,
     }
 
     if not as_json:
-        print(f"🗑️ Excision effectuée sur {workflow_name}")
+        mode = "EXCISION" if not dry_run else "DRY RUN — excision"
+        print(f"🗑️ {mode} sur {workflow_name}")
         print(f"   Segment : {segment_ref} ({target_seg.name})")
         print(f"   Lignes supprimées : {len(excised)}")
         print(f"   Hash : {edit.before_hash} → {edit.after_hash}")
+        if dry_run:
+            print("\n   ℹ️ Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
 
     return result
 
@@ -533,8 +551,8 @@ def cmd_validate(root: Path, workflow_name: str, as_json: bool) -> dict[str, Any
                     edit_data = json.loads(line)
                     if edit_data.get("workflow") == workflow_name:
                         edit_count += 1
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as _exc:
+                    _log.debug("json.JSONDecodeError suppressed: %s", _exc)
 
     is_valid = len(issues) == 0
     health = "healthy" if not issues and not warnings else "warning" if not issues else "broken"
@@ -599,11 +617,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--insert", required=True, help="Contenu à insérer")
     sp.add_argument("--position", choices=["before", "after", "replace"], default="after",
                     help="Position d'insertion (défaut: after)")
+    sp.add_argument("--dry-run", action="store_true", default=True,
+                    help="Simulation (activé par défaut — utiliser --no-dry-run pour appliquer)")
+    sp.add_argument("--no-dry-run", dest="dry_run", action="store_false",
+                    help="Appliquer réellement la modification")
 
     # excise
     ex = subs.add_parser("excise", help="Supprimer un segment")
     ex.add_argument("--workflow", required=True, help="Nom du workflow")
     ex.add_argument("--segment", required=True, help="Segment à supprimer")
+    ex.add_argument("--dry-run", action="store_true", default=True,
+                    help="Simulation (activé par défaut — utiliser --no-dry-run pour appliquer)")
+    ex.add_argument("--no-dry-run", dest="dry_run", action="store_false",
+                    help="Appliquer réellement la suppression")
 
     # transplant
     tr = subs.add_parser("transplant", help="Transplanter un segment entre workflows")
@@ -636,9 +662,11 @@ def main() -> None:
         result = cmd_scan(root, getattr(args, "workflow", None), args.as_json)
     elif args.command == "splice":
         result = cmd_splice(root, args.workflow, args.at_ref,
-                            args.insert, args.position, args.as_json)
+                            args.insert, args.position, args.as_json,
+                            args.dry_run)
     elif args.command == "excise":
-        result = cmd_excise(root, args.workflow, args.segment, args.as_json)
+        result = cmd_excise(root, args.workflow, args.segment, args.as_json,
+                            args.dry_run)
     elif args.command == "transplant":
         result = cmd_transplant(root, args.source, args.dest, args.as_json)
     elif args.command == "validate":

@@ -5,9 +5,10 @@ orchestrator.py — Orchestrateur hybride BMAD (BM-43 Story 4.3).
 
 L'orchestrateur décide dynamiquement du mode d'exécution selon le type
 de tâche :
-  - simulated   : Un LLM, persona switching (party-mode, discussions)
-  - sequential  : Agents séquentiels, chacun sur son LLM (boomerang, reviews)
-  - parallel    : Agents sur LLMs séparés, message bus (adversarial, validation)
+  - simulated      : Un LLM, persona switching (party-mode, discussions)
+  - sequential     : Agents séquentiels, chacun sur son worker (boomerang, reviews)
+  - concurrent-cpu : Workers Python en parallèle via ThreadPoolExecutor (adversarial, validation)
+                     NOTE: Ce n'est PAS du multi-LLM — c'est du parallélisme CPU local.
 
 Gère le budget coûts en temps réel avec fallback automatique vers
 simulated si le budget est dépassé.
@@ -49,7 +50,7 @@ ORCHESTRATOR_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-VALID_MODES = frozenset({"simulated", "sequential", "parallel"})
+VALID_MODES = frozenset({"simulated", "sequential", "concurrent-cpu"})
 
 HISTORY_DIR = "_bmad-output/.orchestrator"
 HISTORY_FILE = "history.jsonl"
@@ -69,17 +70,17 @@ MODE_RULES: dict[str, str] = {
     "architecture-review": "sequential",
     "story-implementation": "sequential",
     "sprint-planning": "sequential",
-    "adversarial-review": "parallel",
-    "cross-validation": "parallel",
-    "parallel-analysis": "parallel",
-    "stress-test": "parallel",
+    "adversarial-review": "concurrent-cpu",
+    "cross-validation": "concurrent-cpu",
+    "parallel-analysis": "concurrent-cpu",
+    "stress-test": "concurrent-cpu",
 }
 
 # Cost multipliers per mode
 COST_MULTIPLIERS = {
     "simulated": 1.0,
     "sequential": 2.5,
-    "parallel": 4.0,
+    "concurrent-cpu": 4.0,
 }
 
 # Default budget cap (in token-equivalent cost units)
@@ -249,8 +250,8 @@ class Orchestrator:
         reason = f"Règle par défaut pour workflow '{workflow}': {mode}"
 
         # Budget check — if parallel is too expensive, fallback
-        if mode == "parallel":
-            estimated_cost = 10000 * COST_MULTIPLIERS["parallel"]
+        if mode == "concurrent-cpu":
+            estimated_cost = 10000 * COST_MULTIPLIERS["concurrent-cpu"]
             if estimated_cost > self.budget_cap:
                 mode = "sequential"
                 reason = f"Fallback parallel→sequential: budget estimé ({estimated_cost:,.0f}) > cap ({self.budget_cap:,.0f})"
@@ -312,7 +313,8 @@ class Orchestrator:
 
         En mode simulé, chaque step est exécuté séquentiellement.
         En mode sequential, chaque agent est invoqué via son worker.
-        En mode parallel, les agents sont lancés en parallèle via ThreadPoolExecutor.
+        En mode concurrent-cpu, les workers Python sont lancés en parallèle
+        via ThreadPoolExecutor (parallélisme CPU, PAS multi-LLM).
         """
         result = ExecutionResult(
             plan_id=plan.plan_id,
@@ -329,7 +331,7 @@ class Orchestrator:
         result.status = "running"
         start_time = time.monotonic()
 
-        if plan.mode == "parallel" and len(plan.steps) > 1:
+        if plan.mode == "concurrent-cpu" and len(plan.steps) > 1:
             result = self._execute_parallel(plan, result, start_time)
         else:
             result = self._execute_sequential(plan, result, start_time)
@@ -548,7 +550,7 @@ def mcp_orchestrate(
 
 
 def _print_plan(plan: ExecutionPlan) -> None:
-    mode_icons = {"simulated": "🎭", "sequential": "🔗", "parallel": "⚡"}
+    mode_icons = {"simulated": "🎭", "sequential": "🔗", "concurrent-cpu": "⚡"}
     icon = mode_icons.get(plan.mode, "❓")
     print(f"\n  {icon} Execution Plan — {plan.workflow}")
     print(f"  {'─' * 55}")

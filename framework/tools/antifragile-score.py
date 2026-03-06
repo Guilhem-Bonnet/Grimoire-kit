@@ -27,6 +27,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.antifragile_score")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -584,8 +587,9 @@ def save_score(result: AntifragileResult, project_root: Path) -> Path:
     if path.exists():
         try:
             history = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as _exc:
+            _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     entry = {
         "timestamp": result.timestamp,

@@ -37,6 +37,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.immune_system")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -275,8 +278,9 @@ def scan_innate(project_root: Path, target: str = "") -> tuple[list[Finding], in
                                 fix=rule.get("fix", ""),
                                 source="innate",
                             ))
-                except (OSError, UnicodeDecodeError):
-                    pass
+                except (OSError, UnicodeDecodeError) as _exc:
+                    _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                    # Silent exception — add logging when investigating issues
 
     return findings, files_scanned
 
@@ -361,10 +365,12 @@ def scan_adaptive(project_root: Path, target: str = "") -> tuple[list[Finding], 
                                 fix=ab.fix,
                                 source="adaptive",
                             ))
-                    except re.error:
-                        pass
-        except (OSError, UnicodeDecodeError):
-            pass
+                    except re.error as _exc:
+                        _log.debug("re.error suppressed: %s", _exc)
+                        # Silent exception — add logging when investigating issues
+        except (OSError, UnicodeDecodeError) as _exc:
+            _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return findings, len(antibodies)
 

@@ -40,6 +40,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.agent_caller")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -226,8 +229,9 @@ class CallHistoryManager:
             try:
                 with open(self.history_file, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
         return []
 
     def _save(self, entries: list[dict]) -> None:
@@ -421,8 +425,9 @@ class AgentCaller:
                 router = self._router_mod.LLMRouter(project_root=self.project_root)
                 route_result = router.route(task_description=request.task)
                 model_used = getattr(route_result, "selected_model", model_used)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         response.model_used = model_used
 

@@ -46,6 +46,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.agent_worker")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -304,8 +307,9 @@ class AgentWorkerManager:
                     # Use tier as complexity proxy
                     model = classifier.classify(f"Agent {agent_id} task — tier {tier}")
                     return model
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Fallback
         tier_defaults = {
@@ -383,8 +387,9 @@ class AgentWorkerManager:
             try:
                 start = time.mktime(time.strptime(worker.started_at, "%Y-%m-%dT%H:%M:%SZ"))
                 worker.uptime_seconds = round(time.time() - start, 1)
-            except (ValueError, OverflowError):
-                pass
+            except (ValueError, OverflowError) as _exc:
+                _log.debug("ValueError, OverflowError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         return worker
 

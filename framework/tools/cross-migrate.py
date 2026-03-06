@@ -34,6 +34,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.cross_migrate")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -175,8 +178,9 @@ def _get_project_name(project_root: Path) -> str:
             match = re.search(r'name:\s*"?([^"\n]+)', content)
             if match:
                 return match.group(1).strip()
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     return project_root.name
 
 
@@ -547,8 +551,9 @@ def import_bundle(bundle: MigrationBundle, project_root: Path,
             try:
                 existing_data = json.loads(
                     cons_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Deduplicate by timestamp
         existing_timestamps = {e.get("timestamp") for e in existing_data}
@@ -572,8 +577,9 @@ def import_bundle(bundle: MigrationBundle, project_root: Path,
             try:
                 existing_data = json.loads(
                     af_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         existing_timestamps = {e.get("timestamp") for e in existing_data}
         new_entries = [e for e in bundle.antifragile

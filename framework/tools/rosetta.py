@@ -36,6 +36,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.rosetta")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -192,8 +195,9 @@ def build_glossary(project_root: Path) -> Glossary:
                             term_sources[term].append(rel_path)
 
                     scanned += 1
-                except (OSError, UnicodeDecodeError):
-                    pass
+                except (OSError, UnicodeDecodeError) as _exc:
+                    _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                    # Silent exception — add logging when investigating issues
 
     # Construire les entrées
     all_terms: set[str] = set()
@@ -262,8 +266,9 @@ def trace_etymology(project_root: Path, term: str) -> EtymologyRecord:
                     "context": ctx,
                     "date": date_str,
                 })
-        except (OSError, UnicodeDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError) as _exc:
+            _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Construire l'étymologie
     if mentions:

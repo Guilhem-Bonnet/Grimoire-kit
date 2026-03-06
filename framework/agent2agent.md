@@ -245,6 +245,8 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md)
 - Boomerang : [framework/workflows/boomerang-orchestration.md](workflows/boomerang-orchestration.md)
 - BMAD Trace : [framework/bmad-trace.md](bmad-trace.md)
+- Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — communication P2P interne (alternative locale au A2A cross-outils)
+- Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — routage intelligent
 
 ---
 

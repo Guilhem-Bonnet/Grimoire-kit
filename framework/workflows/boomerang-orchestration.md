@@ -209,4 +209,13 @@ Décisions clés : {key_decisions}
 
 ---
 
+## Références Croisées
+
+- Hybrid Parallelism Engine : [framework/hybrid-parallelism-engine.md](../hybrid-parallelism-engine.md) (BM-58) — étend le boomerang avec DAG parallèle/séquentiel/opportuniste
+- Subagent Orchestration : [framework/workflows/subagent-orchestration.md](subagent-orchestration.md) (BM-19)
+- Orchestrator Gateway : [framework/orchestrator-gateway.md](../orchestrator-gateway.md) (BM-53) — supervision des boomerang steps
+- Event Log : [framework/event-log-shared-state.md](../event-log-shared-state.md) (BM-59) — événements de step completion
+
+---
+
 *BM-11 Boomerang Orchestration Workflow | framework/workflows/boomerang-orchestration.md*

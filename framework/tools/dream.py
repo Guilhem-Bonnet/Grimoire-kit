@@ -28,6 +28,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.dream")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -736,8 +739,9 @@ def read_last_dream_timestamp(project_root: Path) -> str | None:
         # Valider le format YYYY-MM-DD
         if len(ts) == 10 and ts[4] == "-" and ts[7] == "-":
             return ts
-    except OSError:
-        pass
+    except OSError as _exc:
+        _log.debug("OSError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return None
 
 

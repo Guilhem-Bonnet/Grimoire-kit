@@ -48,6 +48,7 @@
 | `first-wins` | Premier sous-agent à terminer décide, les autres valident ou overrident | Decisions rapides avec validation |
 | `vote` | Chaque agent vote pour la meilleure option — majorité gagne | Choix techniques controversés |
 | `structured` | Chaque output va dans une section prédéfinie du résultat final | Rapports multi-sections |
+| `cross-validate` | Un agent produit, un second valide avec Trust Score (BM-52 CVTL) | Outputs critiques, ADRs, décisions irréversibles |
 
 ---
 
@@ -132,6 +133,54 @@ merge:
   template: "framework/workflows/boomerang-report.tpl.md"
 ```
 
+### Pattern 4 — Cross-Validation avec Trust Score (BM-52)
+
+```yaml
+# Contexte : un output critique doit être vérifié par un second agent
+type: orchestrate
+spawn:
+  - agent: dev
+    task: "Implémenter le module auth JWT selon ADR-042. CC PASS obligatoire."
+    output_key: implementation
+  - agent: architect
+    task: "Valider l'implémentation {implementation}. Produire un cross_validation_report avec trust_score."
+    output_key: validation
+    depends_on: implementation
+merge:
+  strategy: cross-validate         # NOUVELLE STRATÉGIE (BM-52)
+  primary_agent: dev
+  validator_agent: architect
+  trust_threshold: 70              # score minimum pour accepter
+  on_below_threshold: escalate_to_user
+  save_to: "_bmad-output/implementation-artifacts/auth-validated.md"
+```
+
+> Référence complète : `framework/cross-validation-trust.md` (BM-52)
+
+### Pattern 5 — Orchestration avec HUP + QEC (BM-50/51)
+
+```yaml
+# Contexte : tâche incertaine où les agents peuvent avoir besoin de clarifications
+type: orchestrate
+spawn:
+  - agent: dev
+    task: "Implémenter la feature {description}. HUP actif : si confiance ROUGE, produire uncertainty_report au lieu d'halluciner."
+    output_key: implementation
+    # HUP + QEC activés automatiquement sur chaque sub-agent
+
+on_escalation:
+  strategy: batch                  # batch | immediate
+  batch_trigger: end_of_spawn      # quand présenter le lot
+  auto_resolve: true               # tenter l'auto-résolution par contexte
+  auto_resolve_sources:
+    - shared-context.md
+    - decisions-log.md
+    - _bmad-output/.qa-history.yaml
+  max_questions_per_lot: 7         # chunking 7±2
+```
+
+> Référence complète : `framework/honest-uncertainty-protocol.md` (BM-50) · `framework/question-escalation-chain.md` (BM-51)
+
 ---
 
 ## Règles Obligatoires
@@ -141,6 +190,47 @@ merge:
 3. **L'orchestrateur ne modifie JAMAIS les fichiers pendant le spawn** — il attend les résultats
 4. **Si un sous-agent échoue**, l'orchestrateur le signale, n'annule pas les autres, et agrège ce qui a réussi
 5. **Le merge produit toujours un artefact persisté** — jamais un résultat éphémère
+6. **HUP actif sur chaque sub-agent** — confiance ROUGE = uncertainty_report, pas d'hallucination (BM-50)
+7. **Escalations QEC agrégées** — les questions des sub-agents sont collectées et présentées en lot (BM-51)
+8. **Dispatch via AMN** — les tâches sont dispatchées via le mesh (BM-55), avec discovery et load balancing
+9. **Assignation via ARG** — l'agent optimal est sélectionné par le graphe relationnel (BM-57)
+10. **Events ELSS émis** — chaque spawn, completion, et failure émet un événement dans l'event bus (BM-59)
+
+---
+
+## Extension — Hybrid Orchestrate (BM-58)
+
+Pour les workflows complexes avec dépendances mixtes, utiliser `type: hybrid-orchestrate` :
+
+```yaml
+- step: "feature-complete"
+  type: hybrid-orchestrate
+  dag:
+    tasks:
+      - id: "analyze"
+        agent: "analyst"
+        depends_on: []
+        output_key: "analysis"
+      - id: "design"
+        agent: "architect"
+        depends_on: ["analyze"]
+        output_key: "architecture"
+      - id: "implement"
+        agent: "dev"
+        depends_on: ["design"]
+        output_key: "code"
+      - id: "test"
+        agent: "qa"
+        depends_on: ["implement"]
+        output_key: "tests"
+        mode: opportunistic  # peut commencer les test specs dès analyze
+    config:
+      max_parallel: 5
+      on_failure: pause-and-escalate
+```
+
+Le HPE construit le DAG, identifie le chemin critique, et exécute en parallèle
+tout ce qui peut l'être. Voir `framework/hybrid-parallelism-engine.md` (BM-58) pour les détails.
 
 ---
 

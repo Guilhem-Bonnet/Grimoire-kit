@@ -26,6 +26,9 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.auto_doc")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -87,8 +90,9 @@ def count_tests(project_root: Path) -> tuple[int, int]:
         match = re.search(r"Ran (\d+) test", output)
         if match:
             return int(match.group(1)), file_count
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
+    except (subprocess.TimeoutExpired, FileNotFoundError) as _exc:
+        _log.debug("subprocess.TimeoutExpired, FileNotFoundError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
 
     # Fallback: count test methods
     count = 0
@@ -96,8 +100,9 @@ def count_tests(project_root: Path) -> tuple[int, int]:
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
             count += len(re.findall(r"def test_", text))
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return count, file_count
 
@@ -122,8 +127,9 @@ def count_tests_per_file(project_root: Path) -> dict[str, int]:
             text = f.read_text(encoding="utf-8", errors="replace")
             count = len(re.findall(r"def test_", text))
             result[f.name] = count
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     return result
 
 

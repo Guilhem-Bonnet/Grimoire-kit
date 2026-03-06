@@ -25,6 +25,9 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.agent_forge")
 
 # ── Taxonomie domaine → profil agent ─────────────────────────────────────────
 # Chaque domaine mappe vers : icône, outil CLI principal, tools_list, pattern de prompts
@@ -453,8 +456,9 @@ def read_project_context(ctx_path: Path) -> dict:
                 value = value.strip().strip('"').strip("'")
                 if key and value:
                     ctx[key] = value
-    except OSError:
-        pass
+    except OSError as _exc:
+        _log.debug("OSError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return ctx
 
 
@@ -470,8 +474,9 @@ def read_active_dna(archetypes_dir: Path) -> list[str]:
                 desc = m.group(1)
                 if len(desc) > 10:
                     ac_items.append(desc)
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     return ac_items[:10]  # Max 10 pour ne pas surcharger
 
 

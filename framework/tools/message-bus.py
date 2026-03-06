@@ -46,6 +46,9 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.message_bus")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -380,8 +383,9 @@ class RedisBus(MessageBus):
                     self._redis.xdel(key, entry_id)
                     data = json.loads(fields["data"])
                     return AgentMessage.from_dict(data)
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("Exception suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
         return None
 
     def subscribe(self, agent_id: str, pattern: str) -> bool:
@@ -432,8 +436,9 @@ class RedisBus(MessageBus):
         if self._redis:
             try:
                 self._redis.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("Exception suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
 
 # ── NATSBus (stub) ──────────────────────────────────────────────────────────
@@ -454,8 +459,9 @@ class NATSBus(MessageBus):
         try:
             import nats  # noqa: F401
             self._available = True
-        except ImportError:
-            pass
+        except ImportError as _exc:
+            _log.debug("ImportError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:

@@ -32,6 +32,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.nso")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -563,8 +566,9 @@ def _collect_retro_pheromones(project_root: Path) -> list[RetroItem]:
                     source="stigmergy",
                     priority=1 if p.pheromone_type == "ALERT" else 0,
                 ))
-    except Exception:
-        pass
+    except Exception as _exc:
+        _log.debug("Exception suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return items
 
 
@@ -591,8 +595,9 @@ def _collect_retro_lint(project_root: Path) -> list[RetroItem]:
                     text=f"[LINT] {issue.title}"[:200],
                     source="memory-lint",
                 ))
-    except Exception:
-        pass
+    except Exception as _exc:
+        _log.debug("Exception suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return items
 
 
@@ -620,8 +625,9 @@ def _collect_retro_antifragile(project_root: Path) -> list[RetroItem]:
                     source="antifragile",
                     priority=1,
                 ))
-    except Exception:
-        pass
+    except Exception as _exc:
+        _log.debug("Exception suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return items
 
 

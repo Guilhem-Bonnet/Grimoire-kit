@@ -42,6 +42,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.memory_sync")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -321,8 +324,9 @@ class SyncStateManager:
         """Marque un fichier comme synchronisé."""
         try:
             self.state.file_hashes[str(filepath)] = hashlib.sha256(filepath.read_bytes()).hexdigest()
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
 
 # ── Memory Syncer ────────────────────────────────────────────────────────────

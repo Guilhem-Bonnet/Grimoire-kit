@@ -35,6 +35,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.workflow_adapt")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -135,8 +138,9 @@ def _parse_trace_json(fpath: Path) -> list[TraceEntry]:
                     duration_s=float(step.get("duration_s", 0)),
                     timestamp=step.get("timestamp", ""),
                 ))
-    except (json.JSONDecodeError, OSError, ValueError):
-        pass
+    except (json.JSONDecodeError, OSError, ValueError) as _exc:
+        _log.debug("json.JSONDecodeError, OSError, ValueError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return entries
 
 
@@ -156,8 +160,9 @@ def _parse_trace_log(fpath: Path) -> list[TraceEntry]:
                     status=m.group("status").lower(),
                     timestamp=m.group("ts"),
                 ))
-    except (OSError, UnicodeDecodeError):
-        pass
+    except (OSError, UnicodeDecodeError) as _exc:
+        _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+        # Silent exception — add logging when investigating issues
     return entries
 
 
@@ -194,8 +199,9 @@ def _synthesize_workflow_files(project_root: Path) -> list[WorkflowStats]:
                 for m in step_pat.finditer(content):
                     step_name = m.group(1).strip().strip("'\"")
                     ws.step_usage[step_name] = 0
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
             stats.append(ws)
     return stats
 
@@ -299,8 +305,9 @@ def detect_from_workflow_structure(project_root: Path) -> list[Adaptation]:
                         reason=f"{step_count} étapes — workflow trop long",
                         confidence=0.5,
                     ))
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return adaptations
 
 
@@ -329,8 +336,9 @@ def save_history(project_root: Path, report: AdaptReport) -> Path:
     if out.exists():
         try:
             history = json.loads(out.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as _exc:
+            _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
     entry = {
         "timestamp": datetime.now().isoformat(),
         "workflows_analyzed": report.workflows_analyzed,

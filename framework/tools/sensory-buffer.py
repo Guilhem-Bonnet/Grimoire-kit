@@ -22,6 +22,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import logging
+
+_log = logging.getLogger("grimoire.sensory_buffer")
 
 VERSION = "1.0.0"
 
@@ -131,8 +134,9 @@ def _next_item_id(items: list[SensoryItem]) -> str:
             try:
                 num = int(item.item_id[3:])
                 max_num = max(max_num, num)
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                _log.debug("ValueError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return f"si-{max_num + 1:03d}"
 
 
@@ -387,8 +391,9 @@ def cmd_flush(root: Path, agent: str, older_than: str | None,
                 hours = _parse_duration(older_than)
                 if (now - created).total_seconds() > hours * 3600:
                     should_flush = True
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as _exc:
+                _log.debug("ValueError, TypeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         # Critère de force
         if below_strength is not None:

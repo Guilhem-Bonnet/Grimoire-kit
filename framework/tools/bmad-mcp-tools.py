@@ -50,10 +50,45 @@ import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.bmad_mcp_tools")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
 BMAD_MCP_TOOLS_VERSION = "2.0.0"
+
+# ── Rate Limiting ────────────────────────────────────────────────────────────
+
+# Prevents accidental DOS from rapid-fire MCP tool calls
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX_CALLS = 120  # max calls per window per tool
+_call_timestamps: dict[str, list[float]] = {}
+
+
+def _rate_limit_check(tool_name: str) -> str | None:
+    """Returns error message if rate limited, None if OK."""
+    import time as _time
+    now = _time.monotonic()
+    if tool_name not in _call_timestamps:
+        _call_timestamps[tool_name] = []
+
+    # Purge old entries
+    _call_timestamps[tool_name] = [
+        t for t in _call_timestamps[tool_name]
+        if now - t < _RATE_LIMIT_WINDOW
+    ]
+
+    if len(_call_timestamps[tool_name]) >= _RATE_LIMIT_MAX_CALLS:
+        return (
+            f"⚠️ Rate limit atteint pour {tool_name}: "
+            f"{_RATE_LIMIT_MAX_CALLS} appels/{_RATE_LIMIT_WINDOW}s. "
+            f"Réessayez dans quelques secondes."
+        )
+
+    _call_timestamps[tool_name].append(now)
+    return None
+
 
 # ── Project Root ─────────────────────────────────────────────────────────────
 
@@ -231,6 +266,11 @@ def discover_synapse_tools() -> dict[str, dict]:
 
 def _call_discovered_tool(tool_name: str, args: dict) -> str:
     """Dispatch un appel vers un outil auto-découvert."""
+    # Rate limiting
+    rl_error = _rate_limit_check(tool_name)
+    if rl_error:
+        return json.dumps({"error": rl_error, "tool": tool_name}, ensure_ascii=False)
+
     tools = discover_synapse_tools()
     if tool_name not in tools:
         return f"❌ Unknown discovered tool: {tool_name}"
@@ -254,8 +294,9 @@ def _call_discovered_tool(tool_name: str, args: dict) -> str:
             elif annotation is int and isinstance(val, str):
                 try:
                     val = int(val)
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    _log.debug("ValueError suppressed: %s", _exc)
+                    # Silent exception — add logging when investigating issues
             call_args[param_name] = val
         elif param.default != inspect.Parameter.empty:
             pass  # Let the function use its default

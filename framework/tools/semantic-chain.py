@@ -38,6 +38,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.semantic_chain")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -277,8 +280,9 @@ def analyze_impact(project_root: Path, target_file: str, concept: str) -> list[I
                         concepts_affected=[concept],
                         impact_score=min(1.0, count / 10),
                     ))
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     # Trier par impact décroissant
     nodes.sort(key=lambda n: n.impact_score, reverse=True)
@@ -420,8 +424,9 @@ def cmd_trace(args: argparse.Namespace) -> int:
                 if count > 0:
                     rel = str(fpath.relative_to(project_root))
                     found_in.append((atype, rel, count))
-            except (OSError, UnicodeDecodeError):
-                pass
+            except (OSError, UnicodeDecodeError) as _exc:
+                _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     if args.json:
         print(json.dumps([{"type": t, "file": f, "count": c} for t, f, c in found_in],

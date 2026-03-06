@@ -79,12 +79,12 @@ def _get_infrastructure_pattern() -> str:
 def load_memories() -> list[dict]:
     if not MEMORIES_FILE.exists():
         return []
-    with open(MEMORIES_FILE) as f:
+    with open(MEMORIES_FILE, encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_memories(memories: list[dict]) -> None:
-    with open(MEMORIES_FILE, "w") as f:
+    with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
         json.dump(memories, f, indent=2, ensure_ascii=False)
 
 
@@ -159,7 +159,7 @@ def archive(days: int = 30):
     # Sauvegarder l'archive
     ARCHIVE_DIR.mkdir(exist_ok=True)
     archive_file = ARCHIVE_DIR / f"archive-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
-    with open(archive_file, "w") as f:
+    with open(archive_file, "w", encoding="utf-8") as f:
         json.dump(to_archive, f, indent=2, ensure_ascii=False)
 
     # Garder les entrées récentes

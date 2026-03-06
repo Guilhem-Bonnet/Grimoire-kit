@@ -36,6 +36,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.dna_evolve")
 
 # ── Structures ────────────────────────────────────────────────────────────────
 
@@ -227,13 +230,15 @@ def analyze_trace(
                     try:
                         line_dt = datetime.fromisoformat(dm.group(0))
                         include = line_dt >= since_dt
-                    except ValueError:
-                        pass
+                    except ValueError as _exc:
+                        _log.debug("ValueError suppressed: %s", _exc)
+                        # Silent exception — add logging when investigating issues
                 if include:
                     filtered_lines.append(line)
             lines = filtered_lines if filtered_lines else lines
-        except ValueError:
-            pass
+        except ValueError as _exc:
+            _log.debug("ValueError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     # Extraire le contexte d'agent courant
     current_agent = "unknown"

@@ -1,0 +1,82 @@
+$schema: "bmad-archetype-dna/v1"
+
+id: creative-studio
+name: "Creative Studio"
+version: "1.0.0"
+description: "Projets créatifs — design, branding, contenu visuel, identité graphique, sites vitrines"
+icon: "🎨"
+author: "grimoire-kit"
+tags: [creative, design, branding, visual, identity, content, illustration, web-design]
+
+inherits: minimal
+
+traits:
+  - name: visual-consistency
+    description: "Cohérence visuelle sur tous les livrables"
+    rule: "Tous les visuels respectent les design tokens du projet. Aucune couleur, typo ou espacement ad-hoc. Utiliser le template design-tokens.md comme référence."
+    agents_affected: [art-director, brand-designer, content-creator]
+  - name: accessibility-visual
+    description: "Accessibilité visuelle WCAG 2.1 AA"
+    rule: "Contraste texte/fond ≥ 4.5:1. Pas de couleur comme seul vecteur d'information. Alt-text sur toutes les images."
+    agents_affected: "*"
+  - name: brand-voice
+    description: "Voix de marque cohérente"
+    rule: "Tout contenu textuel (copy, microcopy, titres) respecte le tone-of-voice défini dans shared-context.md. Auditer la cohérence à chaque livrable."
+    agents_affected: [content-creator, brand-designer]
+  - name: iteration-first
+    description: "Itération rapide avec feedback"
+    rule: "Chaque livrable passe par un cycle : draft → feedback → refine → validate. Ne jamais livrer un V1 sans au moins un cycle de feedback."
+    agents_affected: "*"
+
+constraints:
+  - id: design-tokens-mandatory
+    description: "Les design tokens doivent être définis avant tout livrable visuel"
+    enforcement: hard
+    checked_by: art-director
+  - id: no-unlicensed-assets
+    description: "Aucun asset (image, police, icône) sans licence vérifiée"
+    enforcement: hard
+    checked_by: brand-designer
+  - id: format-spec
+    description: "Tout livrable accompagné de ses specs (dimensions, format, espace couleur)"
+    enforcement: soft
+    checked_by: art-director
+
+values:
+  - name: aesthetic-quality
+    description: "La qualité esthétique est un critère de livraison, pas un bonus"
+    priority: 1
+  - name: brand-coherence
+    description: "Chaque pixel renforce l'identité de la marque"
+    priority: 2
+  - name: user-emotion
+    description: "Le design provoque une émotion intentionnelle chez l'utilisateur"
+    priority: 3
+
+tools_required:
+  - name: image-prompt
+    description: "Générateur de prompts pour images (framework/tools/image-prompt.py)"
+    required: true
+    check_command: "python3 framework/tools/image-prompt.py --version"
+  - name: design-tokens-template
+    description: "Template de design tokens (framework/prompt-templates/design-tokens.md)"
+    required: true
+    check_command: "test -f framework/prompt-templates/design-tokens.md"
+
+team_manifest:
+  name: "Creative Team"
+  agents:
+    - tag: art-director
+      role: "Direction artistique, cohérence visuelle, validation esthétique"
+      scope: "Tous les livrables visuels, charte graphique, design system"
+    - tag: brand-designer
+      role: "Identité de marque, logo, palette, typographie"
+      scope: "Branding, guidelines, assets de marque"
+    - tag: content-creator
+      role: "Contenu textuel et visuel, copywriting, illustrations"
+      scope: "Textes marketing, descriptions, visuels sociaux"
+  communication_protocol:
+    - "[art-director→brand-designer] : briefing identité, validation palette"
+    - "[brand-designer→content-creator] : guidelines de marque, tone-of-voice"
+    - "[content-creator→art-director] : soumission visuels pour validation"
+    - "[*→image-prompt] : génération de prompts pour assets visuels"

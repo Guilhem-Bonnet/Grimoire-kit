@@ -22,6 +22,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.agent_bench")
 
 # ── Structures ────────────────────────────────────────────────────────────────
 
@@ -153,8 +156,9 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
                 entry_dt = datetime.fromisoformat(ts.replace(" ", "T"))
                 if entry_dt < since_dt:
                     return
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                _log.debug("ValueError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
         if agent_filter and agent_filter.lower() not in ag:
             return
@@ -244,8 +248,9 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
                 t1 = datetime.fromisoformat(story_last_seen[story_id].replace(" ", "T"))
                 delta_days = (t1 - t0).total_seconds() / 86400
                 session.story_cycle_times[story_id] = round(delta_days, 2)
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                _log.debug("ValueError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     return session
 
@@ -264,8 +269,9 @@ def read_memory_stats(bmad_dir: Path) -> dict:
                 content = item.read_text(encoding="utf-8", errors="replace")
                 lines = [ln for ln in content.splitlines() if ln.startswith("- ") or ln.startswith("* ")]
                 stats[item.stem] = len(lines)
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
 
     # Tentative API Qdrant local
     try:

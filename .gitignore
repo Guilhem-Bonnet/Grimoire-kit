@@ -38,5 +38,20 @@ env/
 *.key
 *.pem
 *.env.local
+.env
+secrets.yaml
+secrets.yml
+*.secret
+**/secrets/
+
+# Runtime data
 .bmad-rnd/
 nohup.out
+_bmad-output/.qdrant_data/
+_bmad-output/.workers/
+_bmad-output/.background/
+_bmad-output/.runs/
+_bmad-output/.orchestrator/
+_bmad-output/.semantic-cache-stats.json
+.bmad-memory/
+.bmad-twin/

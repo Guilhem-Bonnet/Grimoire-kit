@@ -36,6 +36,9 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import logging
+
+_log = logging.getLogger("grimoire.llm_router")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -513,8 +516,9 @@ class LLMRouter:
             self.stats_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.stats_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError:
-            pass
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     def get_stats(self) -> list[UsageStat]:
         """Lit et agrège les stats d'utilisation."""
@@ -536,8 +540,9 @@ class LLMRouter:
                     stat.request_count += 1
                     stat.total_tokens += entry.get("prompt_tokens_est", 0)
                     stat.estimated_cost += entry.get("estimated_cost", 0.0)
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as _exc:
+            _log.debug("OSError, json.JSONDecodeError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
         return sorted(model_stats.values(), key=lambda s: s.request_count, reverse=True)
 
@@ -615,8 +620,9 @@ def _load_yaml_basic(project_root: Path) -> dict:
                 match = re.search(r"^llm_router:\s*\n((?:  .+\n)*)", content, re.MULTILINE)
                 if match:
                     return {"_raw": match.group(1)}  # Signal qu'on a trouvé le bloc
-            except OSError:
-                pass
+            except OSError as _exc:
+                _log.debug("OSError suppressed: %s", _exc)
+                # Silent exception — add logging when investigating issues
     return {}
 
 
