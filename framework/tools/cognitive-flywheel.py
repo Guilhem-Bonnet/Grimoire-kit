@@ -35,7 +35,7 @@ VERSION = "1.0.0"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-FLYWHEEL_DIR = ".bmad-memory"
+FLYWHEEL_DIR = "_bmad/_memory"
 REPORT_FILE = "flywheel-report.json"
 HISTORY_FILE = "flywheel-history.jsonl"
 SCOREBOARD_FILE = "flywheel-scoreboard.md"

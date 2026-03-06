@@ -14,6 +14,7 @@ Fonctions testées :
 
 import importlib
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -41,7 +42,7 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    (root / ".bmad-memory").mkdir(parents=True, exist_ok=True)
+    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
     (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
     return root
 

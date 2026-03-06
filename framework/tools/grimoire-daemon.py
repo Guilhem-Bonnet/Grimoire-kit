@@ -14,7 +14,7 @@ Usage :
   python3 grimoire-daemon.py --project-root . run-once
   python3 grimoire-daemon.py --project-root . status
 
-Le daemon écrit un fichier PID et un état dans .bmad-memory/daemon/.
+Le daemon écrit un fichier PID et un état dans _bmad/_memory/daemon/.
 Sous forme de boucle Python, pas un vrai démon Unix (pas de fork/double-fork).
 
 Stdlib only.
@@ -36,7 +36,7 @@ from pathlib import Path
 _log = logging.getLogger("grimoire.daemon")
 
 DAEMON_VERSION = "1.0.0"
-DAEMON_DIR = ".bmad-memory/daemon"
+DAEMON_DIR = "_bmad/_memory/daemon"
 PID_FILE = "grimoire-daemon.pid"
 STATE_FILE = "daemon-state.json"
 LOG_FILE = "daemon.log"

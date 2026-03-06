@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VERSION = "1.0.0"
-MUSEUM_DIR = ".bmad-memory"
+MUSEUM_DIR = "_bmad/_memory"
 MUSEUM_FILE = "failure-museum.jsonl"
 MUSEUM_MD = "failure-museum.md"
 

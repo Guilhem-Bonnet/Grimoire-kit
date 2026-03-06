@@ -30,7 +30,7 @@ from pathlib import Path
 _log = logging.getLogger("grimoire.cc_feedback")
 
 CC_FEEDBACK_VERSION = "1.0.0"
-FEEDBACK_DIR = ".bmad-memory"
+FEEDBACK_DIR = "_bmad/_memory"
 FEEDBACK_FILE = "cc-feedback.jsonl"
 
 # ── Data Model ───────────────────────────────────────────────────────────────

@@ -31,8 +31,8 @@ _spec.loader.exec_module(cc_feedback)
 
 @pytest.fixture
 def tmp_project(tmp_path):
-    """Crée un projet temporaire avec .bmad-memory."""
-    (tmp_path / ".bmad-memory").mkdir()
+    """Crée un projet temporaire avec _bmad/_memory."""
+    (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
     return tmp_path
 
 

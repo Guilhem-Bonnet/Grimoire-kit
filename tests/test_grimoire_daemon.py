@@ -27,7 +27,7 @@ _spec.loader.exec_module(daemon)
 @pytest.fixture
 def tmp_project(tmp_path):
     """Crée un projet temp avec structure minimale."""
-    (tmp_path / ".bmad-memory" / "daemon").mkdir(parents=True)
+    (tmp_path / "_bmad" / "_memory" / "daemon").mkdir(parents=True)
     (tmp_path / "framework" / "tools").mkdir(parents=True)
     return tmp_path
 

@@ -77,7 +77,7 @@ class LintIssue:
 class MemoryFile:
     """Un fichier mémoire parsé."""
     path: str              # chemin relatif depuis _bmad/_memory
-    kind: str              # learnings | decisions | trace | failure-museum | shared-context | contradictions
+    kind: str              # learnings | decisions | trace | failure-museum | shared-context | contradictions | cc-feedback | flywheel
     entries: list[tuple[str, str]] = field(default_factory=list)  # (date, text)
 
 
@@ -145,6 +145,29 @@ def _parse_trace_entries(path: Path) -> list[tuple[str, str]]:
     return entries
 
 
+def _parse_jsonl_entries(path: Path) -> list[tuple[str, str]]:
+    """Parse un fichier JSONL en (date, summary)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    entries: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ts = rec.get("timestamp", "")
+        entry_date = ts[:10] if len(ts) >= 10 else ""
+        summary = rec.get("details") or rec.get("title") or rec.get("description", "")
+        if summary:
+            entries.append((entry_date, summary))
+    return entries
+
+
 def collect_memory_files(project_root: Path) -> list[MemoryFile]:
     """Collecte tous les fichiers mémoire du projet."""
     files: list[MemoryFile] = []
@@ -208,6 +231,26 @@ def collect_memory_files(project_root: Path) -> list[MemoryFile]:
         if entries:
             files.append(MemoryFile(
                 path="shared-context.md", kind="shared-context",
+                entries=entries,
+            ))
+
+    # CC-feedback (JSONL)
+    cc_file = memory_dir / "cc-feedback.jsonl"
+    if cc_file.exists():
+        entries = _parse_jsonl_entries(cc_file)
+        if entries:
+            files.append(MemoryFile(
+                path="cc-feedback.jsonl", kind="cc-feedback",
+                entries=entries,
+            ))
+
+    # Flywheel history (JSONL)
+    fw_file = memory_dir / "flywheel-history.jsonl"
+    if fw_file.exists():
+        entries = _parse_jsonl_entries(fw_file)
+        if entries:
+            files.append(MemoryFile(
+                path="flywheel-history.jsonl", kind="flywheel",
                 entries=entries,
             ))
 

@@ -51,7 +51,7 @@ MAX_OPPORTUNITIES_PER_SOURCE = 3  # Cap par source pour éviter la saturation
 class DreamSource:
     """Une source de données pour le dream."""
     name: str          # ex. "learnings/dev.md"
-    kind: str          # learnings | decisions | trace | failure-museum | shared-context
+    kind: str          # learnings | decisions | trace | failure-museum | shared-context | cc-feedback | flywheel
     entries: list[str] = field(default_factory=list)
     dates: list[str] = field(default_factory=list)
 
@@ -161,7 +161,55 @@ def collect_sources(project_root: Path, since: str | None = None,
             dates=[e[0] for e in pheromone_entries],
         ))
 
+    # 8. CC-feedback history (JSONL)
+    cc_entries = _parse_jsonl_entries(memory_dir / "cc-feedback.jsonl", since)
+    if cc_entries:
+        sources.append(DreamSource(
+            name="cc-feedback.jsonl",
+            kind="cc-feedback",
+            entries=[e[1] for e in cc_entries],
+            dates=[e[0] for e in cc_entries],
+        ))
+
+    # 9. Cognitive flywheel history (JSONL)
+    fw_entries = _parse_jsonl_entries(
+        memory_dir / "flywheel-history.jsonl", since,
+    )
+    if fw_entries:
+        sources.append(DreamSource(
+            name="flywheel-history.jsonl",
+            kind="flywheel",
+            entries=[e[1] for e in fw_entries],
+            dates=[e[0] for e in fw_entries],
+        ))
+
     return sources
+
+
+def _parse_jsonl_entries(path: Path, since: str | None = None) -> list[tuple[str, str]]:
+    """Parse un fichier JSONL et retourne [(date, summary), ...]."""
+    if not path.is_file():
+        return []
+    entries: list[tuple[str, str]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = rec.get("timestamp", "")
+            entry_date = ts[:10] if len(ts) >= 10 else ""
+            if since and entry_date and entry_date < since:
+                continue
+            summary = rec.get("details") or rec.get("title") or rec.get("description", "")
+            if summary:
+                entries.append((entry_date, summary))
+    except OSError:
+        pass
+    return entries
 
 
 def _parse_markdown_entries(path: Path, since: str | None = None) -> list[tuple[str, str]]:

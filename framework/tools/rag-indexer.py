@@ -118,6 +118,7 @@ DISCOVERY_PATTERNS: dict[str, list[str]] = {
         "_bmad/_memory/*.md",
         "_bmad/_memory/**/*.md",
         "_bmad/_memory/*.json",
+        "_bmad/_memory/*.jsonl",
     ],
     COLLECTION_DOCS: [
         "docs/**/*.md",
