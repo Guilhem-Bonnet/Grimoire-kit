@@ -15,8 +15,10 @@ Note : Ces tests sont conçus pour fonctionner même sans le package `mcp` insta
 import importlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -431,6 +433,89 @@ class TestInputSanitization(unittest.TestCase):
             self.assertIn("rejet", result.lower())
         except ValueError:
             pass  # Expected: sanitization raised ValueError
+
+
+class TestAuditTrail(unittest.TestCase):
+    """Tests for MCP audit trail and output integrity."""
+
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = Path(tempfile.mkdtemp())
+        # Patch PROJECT_ROOT temporarily
+        self._orig_root = self.mod.PROJECT_ROOT
+        self.mod.PROJECT_ROOT = self.tmpdir
+
+    def tearDown(self):
+        self.mod.PROJECT_ROOT = self._orig_root
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_audit_log_creates_file(self):
+        self.mod._audit_log("test_tool", {"key": "val"}, "abc123", "ok", 42.5)
+        audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+        self.assertTrue(audit_path.exists())
+
+    def test_audit_log_writes_jsonl(self):
+        self.mod._audit_log("tool_a", {"x": "1"}, "hash1", "ok", 10.0)
+        self.mod._audit_log("tool_b", {}, "hash2", "error", 5.0)
+        audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+        lines = audit_path.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        import json
+        entry = json.loads(lines[0])
+        self.assertEqual(entry["tool"], "tool_a")
+        self.assertEqual(entry["status"], "ok")
+        self.assertIn("ts", entry)
+        self.assertEqual(entry["args_keys"], ["x"])
+
+    def test_audit_log_never_stores_arg_values(self):
+        secret = "super-secret-password-12345"
+        self.mod._audit_log("tool", {"password": secret}, "h", "ok", 1.0)
+        audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+        content = audit_path.read_text(encoding="utf-8")
+        self.assertNotIn(secret, content)
+        self.assertIn("password", content)  # Key name OK
+
+    def test_prune_audit_trail(self):
+        audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write more than max
+        lines = ['{"ts":"2026-01-01","tool":"t","args_keys":[],"result_hash":"h","status":"ok","duration_ms":0}'] * 6000
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.mod._prune_audit_trail()
+        remaining = audit_path.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(remaining), self.mod.AUDIT_TRAIL_MAX_ENTRIES)
+
+    def test_hash_result_deterministic(self):
+        h1 = self.mod._hash_result("hello world")
+        h2 = self.mod._hash_result("hello world")
+        self.assertEqual(h1, h2)
+        self.assertEqual(len(h1), 16)  # Truncated SHA-256
+
+    def test_hash_result_different_for_different_input(self):
+        h1 = self.mod._hash_result("output A")
+        h2 = self.mod._hash_result("output B")
+        self.assertNotEqual(h1, h2)
+
+    def test_audit_constants(self):
+        self.assertEqual(self.mod.AUDIT_TRAIL_FILE, "_bmad/_memory/mcp-audit.jsonl")
+        self.assertEqual(self.mod.AUDIT_TRAIL_MAX_ENTRIES, 5000)
+
+    def test_audit_disabled_flag(self):
+        self.mod._AUDIT_ENABLED = False
+        try:
+            self.mod._audit_log("tool", {}, "h", "ok", 1.0)
+            audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+            self.assertFalse(audit_path.exists())
+        finally:
+            self.mod._AUDIT_ENABLED = True
+
+    def test_handle_tool_audits_unknown_tool(self):
+        """Unknown tool calls should be audit-logged."""
+        self.mod._handle_tool("bmad_nonexistent_xyz", {})
+        audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
+        if audit_path.exists():
+            content = audit_path.read_text(encoding="utf-8")
+            self.assertIn("unknown_tool", content)
 
 
 if __name__ == "__main__":

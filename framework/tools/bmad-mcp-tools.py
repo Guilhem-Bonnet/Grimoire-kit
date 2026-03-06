@@ -56,7 +56,64 @@ _log = logging.getLogger("grimoire.bmad_mcp_tools")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-BMAD_MCP_TOOLS_VERSION = "2.1.0"
+BMAD_MCP_TOOLS_VERSION = "2.2.0"
+
+# ── Audit Trail ──────────────────────────────────────────────────────────────
+
+import hashlib as _hashlib
+import time as _time_mod
+
+AUDIT_TRAIL_FILE = "_bmad/_memory/mcp-audit.jsonl"
+AUDIT_TRAIL_MAX_ENTRIES = 5000  # Prune when exceeding
+_AUDIT_ENABLED = True
+
+
+def _audit_log(tool_name: str, args: dict, result_hash: str, status: str,
+               duration_ms: float = 0.0) -> None:
+    """Append a structured audit entry to the MCP audit trail.
+
+    Each entry is a single JSON line with: timestamp, tool, args_keys
+    (never raw values — security), result_hash, status, duration_ms.
+    """
+    if not _AUDIT_ENABLED:
+        return
+    try:
+        audit_path = PROJECT_ROOT / AUDIT_TRAIL_FILE
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = json.dumps({
+            "ts": _time_mod.strftime("%Y-%m-%dT%H:%M:%S"),
+            "tool": tool_name,
+            "args_keys": sorted(args.keys()) if args else [],
+            "result_hash": result_hash,
+            "status": status,
+            "duration_ms": round(duration_ms, 1),
+        }, ensure_ascii=False)
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception:
+        pass  # Audit must never break tool execution
+
+
+def _prune_audit_trail() -> None:
+    """Keep only the last AUDIT_TRAIL_MAX_ENTRIES entries."""
+    try:
+        audit_path = PROJECT_ROOT / AUDIT_TRAIL_FILE
+        if not audit_path.exists():
+            return
+        lines = audit_path.read_text(encoding="utf-8").splitlines()
+        if len(lines) > AUDIT_TRAIL_MAX_ENTRIES:
+            audit_path.write_text(
+                "\n".join(lines[-AUDIT_TRAIL_MAX_ENTRIES:]) + "\n",
+                encoding="utf-8",
+            )
+    except Exception:
+        pass
+
+
+def _hash_result(result: str) -> str:
+    """SHA-256 hash of tool output for integrity verification."""
+    return _hashlib.sha256(result.encode("utf-8")).hexdigest()[:16]
+
 
 # ── Input Sanitization ──────────────────────────────────────────────────────
 
@@ -574,6 +631,7 @@ def create_server():
             result = _handle_tool(name, arguments)
             return [TextContent(type="text", text=result)]
         except Exception as e:
+            _audit_log(name, arguments, "", "error", 0.0)
             return [TextContent(type="text", text=f"❌ Error: {e}")]
 
     return server, stdio_server
@@ -581,24 +639,35 @@ def create_server():
 
 def _handle_tool(name: str, args: dict) -> str:
     """Dispatch tool calls vers les implémentations."""
+    _start = _time_mod.monotonic()
 
     # Sanitize all inputs before processing
-    args = _sanitize_mcp_input(args)
+    try:
+        args = _sanitize_mcp_input(args)
+    except ValueError as exc:
+        _audit_log(name, args, "", "rejected", 0.0)
+        raise
+
+    # Rate limit check
+    rl_error = _rate_limit_check(name)
+    if rl_error:
+        _audit_log(name, args, "", "rate_limited", 0.0)
+        return rl_error
 
     if name == "bmad_route_request":
         router = _get_router()
         if not router:
             return "❌ LLM Router non disponible (llm-router.py introuvable)"
         decision = router.route(args["prompt"], args.get("agent", ""))
-        return json.dumps(asdict(decision), ensure_ascii=False, indent=2)
+        result = json.dumps(asdict(decision), ensure_ascii=False, indent=2)
 
     elif name == "bmad_classify_task":
         mod = _import_tool("llm-router.py", "llm_router_mcp")
         if not mod:
             return "❌ LLM Router non disponible"
         classifier = mod.TaskClassifier()
-        result = classifier.classify(args["prompt"], args.get("agent", ""))
-        return json.dumps(asdict(result), ensure_ascii=False, indent=2)
+        _res = classifier.classify(args["prompt"], args.get("agent", ""))
+        result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
 
     elif name == "bmad_router_stats":
         router = _get_router()
@@ -608,7 +677,7 @@ def _handle_tool(name: str, args: dict) -> str:
         output = {"stats": [asdict(s) for s in stats]}
         if args.get("recommend"):
             output["recommendations"] = router.get_recommendations()
-        return json.dumps(output, ensure_ascii=False, indent=2)
+        result = json.dumps(output, ensure_ascii=False, indent=2)
 
     elif name == "bmad_rag_search":
         retriever = _get_retriever()
@@ -616,83 +685,92 @@ def _handle_tool(name: str, args: dict) -> str:
             # Fallback file-based
             mod = _import_tool("rag-retriever.py", "rag_retriever_mcp")
             if mod:
-                result = mod.file_based_fallback(
+                _res = mod.file_based_fallback(
                     PROJECT_ROOT, args["query"], args.get("agent", ""),
                     args.get("max_chunks", 5),
                 )
-                return json.dumps(asdict(result), ensure_ascii=False, indent=2)
-            return "❌ RAG Retriever non disponible"
+                result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
+            else:
+                result = "❌ RAG Retriever non disponible"
+        else:
+            collections = [args["collection"]] if args.get("collection") else None
+            _res = retriever.retrieve(
+                query=args["query"],
+                agent_id=args.get("agent", ""),
+                collections=collections,
+                max_chunks=args.get("max_chunks"),
+            )
 
-        collections = [args["collection"]] if args.get("collection") else None
-        result = retriever.retrieve(
-            query=args["query"],
-            agent_id=args.get("agent", ""),
-            collections=collections,
-            max_chunks=args.get("max_chunks"),
-        )
+            if not _res.qdrant_available:
+                mod = _import_tool("rag-retriever.py", "rag_retriever_mcp")
+                if mod:
+                    _res = mod.file_based_fallback(
+                        PROJECT_ROOT, args["query"], args.get("agent", ""),
+                    )
 
-        if not result.qdrant_available:
-            mod = _import_tool("rag-retriever.py", "rag_retriever_mcp")
-            if mod:
-                result = mod.file_based_fallback(
-                    PROJECT_ROOT, args["query"], args.get("agent", ""),
-                )
-
-        return json.dumps(asdict(result), ensure_ascii=False, indent=2)
+            result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
 
     elif name == "bmad_rag_augment":
         retriever = _get_retriever()
         if not retriever:
-            return json.dumps({
+            result = json.dumps({
                 "augmented_prompt": args["prompt"],
                 "chunks_count": 0,
                 "fallback": True,
                 "note": "RAG non disponible — prompt original retourné",
             })
-
-        aug = retriever.augment_prompt(
-            prompt=args["prompt"],
-            agent_id=args.get("agent", ""),
-        )
-        return json.dumps({
-            "augmented_prompt": aug.augmented_prompt,
-            "chunks_count": len(aug.retrieval.chunks),
-            "tokens_used": aug.budget_tokens_used,
-            "budget_pct": aug.budget_pct,
-            "retrieval_time_ms": aug.retrieval.retrieval_time_ms,
-            "fallback_used": aug.retrieval.fallback_used,
-        }, ensure_ascii=False, indent=2)
+        else:
+            aug = retriever.augment_prompt(
+                prompt=args["prompt"],
+                agent_id=args.get("agent", ""),
+            )
+            result = json.dumps({
+                "augmented_prompt": aug.augmented_prompt,
+                "chunks_count": len(aug.retrieval.chunks),
+                "tokens_used": aug.budget_tokens_used,
+                "budget_pct": aug.budget_pct,
+                "retrieval_time_ms": aug.retrieval.retrieval_time_ms,
+                "fallback_used": aug.retrieval.fallback_used,
+            }, ensure_ascii=False, indent=2)
 
     elif name == "bmad_rag_status":
         retriever = _get_retriever()
         if not retriever:
-            return json.dumps({"error": "RAG non disponible", "qdrant_reachable": False})
-        report = retriever.preflight()
-        return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+            result = json.dumps({"error": "RAG non disponible", "qdrant_reachable": False})
+        else:
+            report = retriever.preflight()
+            result = json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
     elif name == "bmad_memory_push":
         syncer = _get_syncer()
         if not syncer:
-            return "❌ Memory Sync non disponible"
-        report = syncer.push(
-            specific_file=args.get("file"),
-            force=args.get("force", False),
-        )
-        return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+            result = "❌ Memory Sync non disponible"
+        else:
+            report = syncer.push(
+                specific_file=args.get("file"),
+                force=args.get("force", False),
+            )
+            result = json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
     elif name == "bmad_memory_diff":
         syncer = _get_syncer()
         if not syncer:
-            return "❌ Memory Sync non disponible"
-        diffs = syncer.diff()
-        return json.dumps([asdict(d) for d in diffs], ensure_ascii=False, indent=2)
+            result = "❌ Memory Sync non disponible"
+        else:
+            diffs = syncer.diff()
+            result = json.dumps([asdict(d) for d in diffs], ensure_ascii=False, indent=2)
 
     else:
         # Try auto-discovered Synapse tools
         result = _call_discovered_tool(name, args)
-        if not result.startswith("❌ Unknown discovered tool:"):
-            return result
-        return f"❌ Unknown tool: {name}"
+        if result.startswith("❌ Unknown discovered tool:"):
+            _audit_log(name, args, "", "unknown_tool", 0.0)
+            return f"❌ Unknown tool: {name}"
+
+    # ── Audit trail for ALL successful calls ─────────────────────────
+    _duration = (_time_mod.monotonic() - _start) * 1000
+    _audit_log(name, args, _hash_result(result), "ok", _duration)
+    return result
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
