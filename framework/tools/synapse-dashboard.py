@@ -40,7 +40,7 @@ from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-DASHBOARD_VERSION = "1.0.0"
+DASHBOARD_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -201,7 +201,7 @@ def _collect_cache(project_root: Path) -> SectionResult:
 
 
 def _collect_budget(project_root: Path) -> SectionResult:
-    """Section Token Budget."""
+    """Section Token Budget — enhanced with trend and visual bar."""
     start = time.monotonic()
     mod = _import_tool("token-budget.py", "token_budget_dash")
     if not mod:
@@ -214,20 +214,61 @@ def _collect_budget(project_root: Path) -> SectionResult:
 
         result = mcp_fn(str(project_root))
         lines = ["## 📊 Token Budget\n"]
+
         if isinstance(result, dict):
-            if "budgets" in result:
-                for b in result["budgets"][:5]:
-                    agent = b.get("agent", "default")
-                    model = b.get("model", "?")
-                    used = b.get("used", 0)
-                    limit = b.get("limit", "?")
-                    lines.append(f"- **{agent}** ({model}): {used:,}/{limit:,}" if isinstance(limit, int) else f"- **{agent}** ({model}): {used:,} tokens")
-            else:
-                for k, v in list(result.items())[:8]:
-                    lines.append(f"- **{k}** : {v}")
+            model = result.get("model", "?")
+            used = result.get("used_tokens", 0)
+            window = result.get("window_tokens", 0)
+            pct = result.get("usage_pct", 0)
+            level = result.get("level", "?")
+            level_icons = {"ok": "✅", "warning": "⚠️", "critical": "🔶", "emergency": "🔴"}
+            icon = level_icons.get(level, "❓")
+
+            lines.append(f"- **Modèle** : {model}")
+            lines.append(f"- **Utilisation** : {used:,} / {window:,} tokens ({pct:.1%}) {icon}")
+            lines.append(f"- **Niveau** : {level.upper()}")
+
+            # Visual bar
+            bar_w = 30
+            filled = int(min(1.0, pct) * bar_w)
+            bar = "█" * filled + "░" * (bar_w - filled)
+            lines.append(f"\n`[{bar}]` {pct:.1%}\n")
+
+            # Buckets breakdown
+            buckets = result.get("buckets", [])
+            if buckets:
+                lines.append("| Priorité | Tokens | % Fenêtre | Fichiers |")
+                lines.append("|----------|--------|-----------|----------|")
+                for b in buckets:
+                    if isinstance(b, dict) and b.get("tokens", 0) > 0:
+                        lines.append(
+                            f"| {b.get('name', '?')} | {b.get('tokens', 0):,} "
+                            f"| {b.get('percentage', 0):.1%} | {b.get('files_count', 0)} |"
+                        )
+                lines.append("")
+
+            # Trend data
+            trend = result.get("trend", {})
+            if isinstance(trend, dict) and trend.get("entries", 0) > 0:
+                direction = trend.get("direction", "→")
+                avg = trend.get("avg_pct", 0)
+                max_p = trend.get("max_pct", 0)
+                min_p = trend.get("min_pct", 0)
+                lines.append(f"**Tendance** {direction} : moy {avg:.1%} | "
+                             f"min {min_p:.1%} | max {max_p:.1%} "
+                             f"({trend.get('entries', 0)} mesures)")
+                lines.append("")
+
+            # Recommendations
+            recs = result.get("recommendations", [])
+            if recs:
+                lines.append("**Recommandations :**")
+                for r in recs:
+                    lines.append(f"- {r}")
+                lines.append("")
         else:
             lines.append(f"_{result}_")
-        lines.append("")
+            lines.append("")
 
         elapsed = round((time.monotonic() - start) * 1000, 1)
         return SectionResult(

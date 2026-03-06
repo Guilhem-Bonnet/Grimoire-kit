@@ -225,5 +225,57 @@ class TestCLIIntegration(unittest.TestCase):
         self.assertIn(r.returncode, (0, 1, 2))
 
 
+# ── Token Budget Metric (Sprint 2) ──────────────────────────────────────────
+
+class TestTokenBudgetMetric(unittest.TestCase):
+    """Tests for the new measure_token_budget metric added in v1.1.0."""
+
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        _make_project(self.project_root)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_version_bumped(self):
+        self.assertEqual(self.mod.EARLY_WARNING_VERSION, "1.1.0")
+
+    def test_measure_token_budget_exists(self):
+        self.assertTrue(callable(getattr(self.mod, "measure_token_budget", None)))
+
+    def test_measure_token_budget_returns_metric(self):
+        result = self.mod.measure_token_budget(self.project_root)
+        self.assertIsInstance(result, self.mod.Metric)
+        self.assertEqual(result.name, "Budget token")
+
+    def test_measure_token_budget_has_level(self):
+        result = self.mod.measure_token_budget(self.project_root)
+        self.assertIn(result.level, [
+            self.mod.Level.NOMINAL,
+            self.mod.Level.WATCH,
+            self.mod.Level.ALERT,
+        ])
+
+    def test_measure_token_budget_has_trend(self):
+        result = self.mod.measure_token_budget(self.project_root)
+        self.assertIn(result.trend, ["↑", "↓", "→"])
+
+    def test_build_report_includes_token_budget(self):
+        report = self.mod.build_report(self.project_root)
+        metric_names = [m.name for m in report.metrics]
+        self.assertIn("Budget token", metric_names)
+
+    def test_build_report_has_6_metrics(self):
+        report = self.mod.build_report(self.project_root)
+        self.assertEqual(len(report.metrics), 6)
+
+    def test_import_token_budget_helper(self):
+        mod = self.mod._import_token_budget()
+        # May be None in isolation but should not crash
+        self.assertTrue(mod is None or hasattr(mod, "TokenBudgetEnforcer"))
+
+
 if __name__ == "__main__":
     unittest.main()

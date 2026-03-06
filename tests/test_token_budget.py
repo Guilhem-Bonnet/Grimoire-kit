@@ -269,5 +269,133 @@ class TestCLIIntegration(unittest.TestCase):
         self.assertIn(r.returncode, (0, 1))
 
 
+# ── Usage History (Sprint 2) ────────────────────────────────────────────────
+
+class TestUsageHistory(unittest.TestCase):
+    """Tests for token usage JSONL tracking added in v1.2.0."""
+
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        (self.project_root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_version_bumped(self):
+        self.assertEqual(self.mod.TOKEN_BUDGET_VERSION, "1.2.0")
+
+    def test_token_usage_log_constant(self):
+        self.assertEqual(self.mod.TOKEN_USAGE_LOG, "_bmad/_memory/token-usage.jsonl")
+
+    def test_token_usage_max_entries_constant(self):
+        self.assertEqual(self.mod.TOKEN_USAGE_MAX_ENTRIES, 1000)
+
+    def test_log_usage_creates_file(self):
+        status = self.mod.BudgetStatus(
+            model="test-model", window_tokens=100000,
+            used_tokens=50000, usage_pct=0.5, level="ok",
+        )
+        self.mod._log_usage(self.project_root, status)
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        self.assertTrue(log_path.exists())
+
+    def test_log_usage_writes_valid_jsonl(self):
+        status = self.mod.BudgetStatus(
+            model="test-model", window_tokens=200000,
+            used_tokens=80000, usage_pct=0.4, level="ok",
+        )
+        self.mod._log_usage(self.project_root, status)
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        lines = log_path.read_text().strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        entry = json.loads(lines[0])
+        self.assertIn("ts", entry)
+        self.assertIn("model", entry)
+        self.assertIn("used", entry)
+        self.assertIn("window", entry)
+        self.assertIn("pct", entry)
+        self.assertIn("level", entry)
+        self.assertEqual(entry["model"], "test-model")
+        self.assertEqual(entry["used"], 80000)
+
+    def test_prune_usage_log(self):
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            for i in range(1500):
+                f.write(json.dumps({"ts": f"t{i}", "pct": 0.1}) + "\n")
+        self.mod._prune_usage_log(self.project_root, max_entries=1000)
+        lines = log_path.read_text().strip().splitlines()
+        self.assertEqual(len(lines), 1000)
+
+    def test_prune_noop_when_under_limit(self):
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            for i in range(50):
+                f.write(json.dumps({"ts": f"t{i}", "pct": 0.1}) + "\n")
+        self.mod._prune_usage_log(self.project_root, max_entries=1000)
+        lines = log_path.read_text().strip().splitlines()
+        self.assertEqual(len(lines), 50)
+
+    def test_load_usage_history_empty(self):
+        entries = self.mod._load_usage_history(self.project_root)
+        self.assertEqual(entries, [])
+
+    def test_load_usage_history_reads_entries(self):
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            for i in range(5):
+                f.write(json.dumps({"ts": f"t{i}", "pct": i * 0.1}) + "\n")
+        entries = self.mod._load_usage_history(self.project_root, last_n=3)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0]["ts"], "t2")
+
+    def test_usage_trend_empty(self):
+        trend = self.mod.usage_trend(self.project_root)
+        self.assertEqual(trend["entries"], 0)
+        self.assertEqual(trend["direction"], "→")
+        self.assertIsNone(trend["latest"])
+
+    def test_usage_trend_with_data(self):
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            for i in range(20):
+                f.write(json.dumps({"ts": f"t{i}", "pct": 0.3 + i * 0.01}) + "\n")
+        trend = self.mod.usage_trend(self.project_root)
+        self.assertEqual(trend["entries"], 20)
+        self.assertGreater(trend["avg_pct"], 0)
+        self.assertIn(trend["direction"], ["↑", "↓", "→"])
+        self.assertIsNotNone(trend["latest"])
+
+    def test_usage_trend_increasing(self):
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            # First half: low, second half: high
+            for i in range(10):
+                f.write(json.dumps({"ts": f"t{i}", "pct": 0.1}) + "\n")
+            for i in range(10):
+                f.write(json.dumps({"ts": f"t{i+10}", "pct": 0.9}) + "\n")
+        trend = self.mod.usage_trend(self.project_root)
+        self.assertEqual(trend["direction"], "↑")
+
+    def test_check_auto_logs_usage(self):
+        enforcer = self.mod.TokenBudgetEnforcer(self.project_root)
+        enforcer.check()
+        log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
+        self.assertTrue(log_path.exists())
+
+    def test_mcp_context_budget_includes_trend(self):
+        result = self.mod.mcp_context_budget(str(self.project_root))
+        self.assertIn("trend", result)
+        self.assertIsInstance(result["trend"], dict)
+        self.assertIn("entries", result["trend"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ import argparse
 import importlib.util
 import json
 import sys
+import time as _time_mod
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -41,7 +42,7 @@ _log = logging.getLogger("grimoire.token_budget")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-TOKEN_BUDGET_VERSION = "1.1.0"
+TOKEN_BUDGET_VERSION = "1.2.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,10 @@ CHARS_PER_TOKEN = 4
 WARNING_THRESHOLD = 0.60
 CRITICAL_THRESHOLD = 0.80
 EMERGENCY_THRESHOLD = 0.95
+
+# Usage history tracking
+TOKEN_USAGE_LOG = "_bmad/_memory/token-usage.jsonl"
+TOKEN_USAGE_MAX_ENTRIES = 1000
 
 # Priority names for display
 PRIORITY_NAMES = {
@@ -396,7 +401,7 @@ class TokenBudgetEnforcer:
             )
             recommendations.append("Lancez: token-budget.py enforce --force")
 
-        return BudgetStatus(
+        status = BudgetStatus(
             model=self.model,
             window_tokens=window,
             used_tokens=total_tokens,
@@ -406,6 +411,9 @@ class TokenBudgetEnforcer:
             buckets=[buckets_data[p] for p in range(5)],
             recommendations=recommendations,
         )
+        # Auto-log usage snapshot
+        _log_usage(self.project_root, status)
+        return status
 
     def enforce(self, force: bool = False, dry_run: bool = False) -> EnforcementReport:
         """
@@ -515,6 +523,104 @@ class TokenBudgetEnforcer:
         return report
 
 
+# ── Usage History Tracking ───────────────────────────────────────────────────
+
+
+def _log_usage(project_root: Path, status: BudgetStatus) -> None:
+    """Append usage snapshot to JSONL history file."""
+    log_path = project_root / TOKEN_USAGE_LOG
+    entry = {
+        "ts": _time_mod.strftime("%Y-%m-%dT%H:%M:%SZ", _time_mod.gmtime()),
+        "model": status.model,
+        "used": status.used_tokens,
+        "window": status.window_tokens,
+        "pct": round(status.usage_pct, 4),
+        "level": status.level,
+        "agent": status.agent or "",
+    }
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        _log.debug("Failed to write usage log: %s", exc)
+
+
+def _prune_usage_log(project_root: Path, max_entries: int = TOKEN_USAGE_MAX_ENTRIES) -> None:
+    """Keep only the last *max_entries* in the usage log."""
+    log_path = project_root / TOKEN_USAGE_LOG
+    if not log_path.exists():
+        return
+    try:
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+        if len(lines) > max_entries:
+            log_path.write_text(
+                "\n".join(lines[-max_entries:]) + "\n", encoding="utf-8"
+            )
+    except OSError as exc:
+        _log.debug("Failed to prune usage log: %s", exc)
+
+
+def _load_usage_history(project_root: Path, last_n: int = 100) -> list[dict]:
+    """Load the last *last_n* usage snapshots from JSONL."""
+    log_path = project_root / TOKEN_USAGE_LOG
+    if not log_path.exists():
+        return []
+    entries: list[dict] = []
+    try:
+        for raw in log_path.read_text(encoding="utf-8").strip().splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entries.append(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        return []
+    return entries[-last_n:]
+
+
+def usage_trend(project_root: Path, last_n: int = 50) -> dict:
+    """
+    Compute token usage trend from history.
+
+    Returns dict with: entries (count), avg_pct, max_pct, min_pct,
+    direction (↑ ↓ →), latest.
+    """
+    history = _load_usage_history(project_root, last_n)
+    if not history:
+        return {"entries": 0, "avg_pct": 0, "max_pct": 0, "min_pct": 0,
+                "direction": "→", "latest": None}
+
+    pcts = [h.get("pct", 0) for h in history]
+    avg_pct = round(sum(pcts) / len(pcts), 4)
+    max_pct = max(pcts)
+    min_pct = min(pcts)
+
+    # Direction: compare first half vs second half
+    mid = len(pcts) // 2
+    if mid > 0:
+        first_avg = sum(pcts[:mid]) / mid
+        second_avg = sum(pcts[mid:]) / (len(pcts) - mid)
+        if second_avg > first_avg * 1.1:
+            direction = "↑"
+        elif second_avg < first_avg * 0.9:
+            direction = "↓"
+        else:
+            direction = "→"
+    else:
+        direction = "→"
+
+    return {
+        "entries": len(history),
+        "avg_pct": avg_pct,
+        "max_pct": max_pct,
+        "min_pct": min_pct,
+        "direction": direction,
+        "latest": history[-1] if history else None,
+    }
+
+
 # ── MCP Tool Interface ──────────────────────────────────────────────────────
 
 def mcp_context_budget(project_root: str, model: str = "", agent: str = "") -> dict:
@@ -530,7 +636,9 @@ def mcp_context_budget(project_root: str, model: str = "", agent: str = "") -> d
         agent=agent,
     )
     status = enforcer.check()
-    return asdict(status)
+    result = asdict(status)
+    result["trend"] = usage_trend(root)
+    return result
 
 
 # ── Config Loading ──────────────────────────────────────────────────────────

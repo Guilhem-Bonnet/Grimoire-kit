@@ -493,5 +493,54 @@ class TestCLIIntegration(unittest.TestCase):
         self.assertIn(r.returncode, (0, 1))
 
 
+# ── Auto-Prune (Sprint 2) ───────────────────────────────────────────────────
+
+class TestAutoPrune(unittest.TestCase):
+    """Tests for auto_prune() trigger added in v1.1.0."""
+
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self.tmpdir)
+        (self.project_root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_version_bumped(self):
+        self.assertEqual(self.mod.CONTEXT_SUMMARIZER_VERSION, "1.1.0")
+
+    def test_auto_prune_threshold_constant(self):
+        self.assertEqual(self.mod.AUTO_PRUNE_THRESHOLD, 0.80)
+
+    def test_auto_prune_callable(self):
+        self.assertTrue(callable(getattr(self.mod, "auto_prune", None)))
+
+    def test_mcp_context_auto_prune_callable(self):
+        self.assertTrue(callable(getattr(self.mod, "mcp_context_auto_prune", None)))
+
+    def test_auto_prune_not_triggered_low_budget(self):
+        result = self.mod.auto_prune(self.project_root, threshold=0.80)
+        # Budget on empty project is ~0%, should not trigger
+        self.assertFalse(result.get("triggered", True))
+
+    def test_auto_prune_returns_dict(self):
+        result = self.mod.auto_prune(self.project_root)
+        self.assertIsInstance(result, dict)
+
+    def test_auto_prune_dry_run_flag(self):
+        result = self.mod.auto_prune(self.project_root, dry_run=True)
+        self.assertIsInstance(result, dict)
+        self.assertFalse(result.get("triggered", True))
+
+    def test_mcp_context_auto_prune_returns_dict(self):
+        result = self.mod.mcp_context_auto_prune(str(self.project_root))
+        self.assertIsInstance(result, dict)
+
+    def test_import_token_budget_helper(self):
+        mod = self.mod._import_token_budget()
+        self.assertTrue(mod is None or hasattr(mod, "TokenBudgetEnforcer"))
+
+
 if __name__ == "__main__":
     unittest.main()

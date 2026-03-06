@@ -368,5 +368,42 @@ class TestImportTool(unittest.TestCase):
         self.assertIsNone(mod)
 
 
+# ── Enhanced Budget Section (Sprint 2) ───────────────────────────────────────
+
+class TestEnhancedBudgetSection(unittest.TestCase):
+    """Tests for enhanced _collect_budget in v1.1.0."""
+
+    def test_version_bumped(self):
+        self.assertEqual(dash.DASHBOARD_VERSION, "1.1.0")
+
+    def test_collect_budget_callable(self):
+        self.assertTrue(callable(dash._collect_budget))
+
+    def test_collect_budget_returns_section_result(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = dash._collect_budget(Path(tmpdir))
+            self.assertIsInstance(result, dash.SectionResult)
+            self.assertEqual(result.name, "budget")
+
+    def test_collect_budget_with_real_project(self):
+        result = dash._collect_budget(KIT_DIR)
+        self.assertIsInstance(result, dash.SectionResult)
+        if result.status == "ok":
+            self.assertIn("Token Budget", result.markdown)
+            # Check for new enhanced features
+            self.assertIn("Utilisation", result.markdown)
+
+    def test_collect_budget_contains_bar(self):
+        result = dash._collect_budget(KIT_DIR)
+        if result.status == "ok":
+            # Bar uses █ or ░ characters depending on usage
+            self.assertTrue("█" in result.markdown or "░" in result.markdown)
+
+    def test_collect_budget_data_has_trend(self):
+        result = dash._collect_budget(KIT_DIR)
+        if result.status == "ok" and isinstance(result.data, dict):
+            self.assertIn("trend", result.data)
+
+
 if __name__ == "__main__":
     unittest.main()

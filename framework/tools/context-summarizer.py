@@ -41,7 +41,7 @@ from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-CONTEXT_SUMMARIZER_VERSION = "1.0.0"
+CONTEXT_SUMMARIZER_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -555,6 +555,98 @@ def build_summarizer_from_config(project_root: Path) -> ContextSummarizer:
         learnings_age_days=config.get("learnings_age_days", DEFAULT_LEARNINGS_AGE_DAYS),
         max_summary_tokens=config.get("max_summary_tokens", DEFAULT_MAX_SUMMARY_TOKENS),
         preserve_tags=config.get("preserve_tags", DEFAULT_PRESERVE_TAGS),
+    )
+
+
+# ── Auto-Prune Trigger ────────────────────────────────────────────────────────────
+
+AUTO_PRUNE_THRESHOLD = 0.80   # trigger summarize when budget >= 80%
+
+
+def _import_token_budget():
+    """Import dynamique de token-budget.py."""
+    import importlib.util as _ilu
+    mod_name = "_cs_token_budget"
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
+    tool_path = Path(__file__).resolve().parent / "token-budget.py"
+    if not tool_path.exists():
+        return None
+    try:
+        spec = _ilu.spec_from_file_location(mod_name, tool_path)
+        if not spec or not spec.loader:
+            return None
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        sys.modules.pop(mod_name, None)
+        return None
+
+
+def auto_prune(
+    project_root: Path,
+    model: str = "",
+    threshold: float = AUTO_PRUNE_THRESHOLD,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Auto-prune: checks token budget and summarizes if usage exceeds threshold.
+
+    Returns dict with: triggered (bool), budget_pct, report (SummaryReport or None).
+    """
+    tb_mod = _import_token_budget()
+    if not tb_mod:
+        return {"triggered": False, "reason": "token-budget.py unavailable"}
+
+    enforcer_cls = getattr(tb_mod, "TokenBudgetEnforcer", None)
+    if not enforcer_cls:
+        return {"triggered": False, "reason": "TokenBudgetEnforcer not found"}
+
+    default_model = getattr(tb_mod, "DEFAULT_MODEL", "claude-sonnet-4-20250514")
+    enforcer = enforcer_cls(project_root, model=model or default_model)
+    status = enforcer.check()
+
+    if status.usage_pct < threshold:
+        return {
+            "triggered": False,
+            "budget_pct": round(status.usage_pct, 4),
+            "level": status.level,
+        }
+
+    # Budget above threshold — trigger summarize with aggressive settings
+    summarizer = ContextSummarizer(
+        project_root=project_root,
+        age_threshold_days=14,     # more aggressive than default 30
+        max_summary_tokens=300,
+    )
+    report = summarizer.summarize(dry_run=dry_run)
+
+    return {
+        "triggered": True,
+        "budget_pct": round(status.usage_pct, 4),
+        "level": status.level,
+        "sections_summarized": report.sections_summarized,
+        "tokens_before": report.tokens_before,
+        "tokens_after": report.tokens_after,
+        "compression_ratio": report.compression_ratio,
+        "dry_run": dry_run,
+    }
+
+
+def mcp_context_auto_prune(
+    project_root: str,
+    model: str = "",
+    threshold: float = AUTO_PRUNE_THRESHOLD,
+    dry_run: bool = False,
+) -> dict:
+    """MCP tool for auto-pruning context when token budget exceeds threshold."""
+    return auto_prune(
+        Path(project_root).resolve(),
+        model=model,
+        threshold=threshold,
+        dry_run=dry_run,
     )
 
 

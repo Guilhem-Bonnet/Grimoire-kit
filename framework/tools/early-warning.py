@@ -51,7 +51,7 @@ _log = logging.getLogger("grimoire.early_warning")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-EARLY_WARNING_VERSION = "1.0.0"
+EARLY_WARNING_VERSION = "1.1.0"
 
 # Niveaux d'alerte
 class Level:
@@ -446,6 +446,81 @@ def measure_drift(project_root: Path) -> Metric:
     )
 
 
+def _import_token_budget():
+    """Import dynamique de token-budget.py."""
+    import importlib.util as _ilu
+    mod_name = "_ew_token_budget"
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
+    tool_path = Path(__file__).resolve().parent / "token-budget.py"
+    if not tool_path.exists():
+        return None
+    try:
+        spec = _ilu.spec_from_file_location(mod_name, tool_path)
+        if not spec or not spec.loader:
+            return None
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        sys.modules.pop(mod_name, None)
+        return None
+
+
+def measure_token_budget(project_root: Path) -> Metric:
+    """Token budget usage — détecte les dépassements de budget token."""
+    mod = _import_token_budget()
+    if not mod:
+        return Metric(
+            name="Budget token",
+            value=0.0,
+            level=Level.NOMINAL,
+            detail="token-budget.py non disponible",
+            trend="→",
+        )
+
+    try:
+        enforcer_cls = getattr(mod, "TokenBudgetEnforcer", None)
+        if not enforcer_cls:
+            return Metric(
+                name="Budget token", value=0.0, level=Level.NOMINAL,
+                detail="TokenBudgetEnforcer non trouvé", trend="→",
+            )
+
+        enforcer = enforcer_cls(project_root)
+        status = enforcer.check()
+        pct = status.usage_pct
+
+        if pct >= 0.95:
+            level = Level.ALERT
+        elif pct >= 0.80:
+            level = Level.WATCH
+        else:
+            level = Level.NOMINAL
+
+        # Trend from history
+        trend_fn = getattr(mod, "usage_trend", None)
+        direction = "→"
+        if trend_fn:
+            trend_data = trend_fn(project_root)
+            direction = trend_data.get("direction", "→")
+
+        return Metric(
+            name="Budget token",
+            value=pct,
+            level=level,
+            detail=f"{status.used_tokens:,}/{status.window_tokens:,} tokens "
+                   f"({pct:.0%}) — {status.model}",
+            trend=direction,
+        )
+    except Exception as e:
+        return Metric(
+            name="Budget token", value=0.0, level=Level.NOMINAL,
+            detail=f"Erreur: {e}", trend="→",
+        )
+
+
 # ── Report Assembly ──────────────────────────────────────────────────────────
 
 def build_report(project_root: Path, window_days: int = DEFAULT_WINDOW_DAYS) -> EarlyWarningReport:
@@ -462,6 +537,7 @@ def build_report(project_root: Path, window_days: int = DEFAULT_WINDOW_DAYS) -> 
     report.metrics.append(measure_concentration(project_root, commits))
     report.metrics.append(measure_stagnation(project_root, commits))
     report.metrics.append(measure_drift(project_root))
+    report.metrics.append(measure_token_budget(project_root))
 
     report.entropy_score = next(
         (m.value for m in report.metrics if m.name == "Entropie projet"), 0.0
