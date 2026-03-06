@@ -218,5 +218,126 @@ class TestCLIIntegration(unittest.TestCase):
         self.assertIn(r.returncode, (0, 1, 2))
 
 
+# ── Suggest Improvements (v1.1) ─────────────────────────────────────────────
+
+import json
+
+
+class TestSuggestImprovements(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = Path(tempfile.mkdtemp())
+        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_history(self):
+        result = self.mod.suggest_improvements(self.tmpdir)
+        self.assertEqual(result, [])
+
+    def test_recurrent_pattern_detected(self):
+        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        records = [
+            {"timestamp": f"2025-01-0{i}T00:00:00", "error": "file not found: x.md",
+             "rule_id": "HE-001", "strategy": "CREATE", "success": True, "detail": "ok"}
+            for i in range(1, 6)  # 5 occurrences of HE-001
+        ]
+        data = {"version": self.mod.SELF_HEALING_VERSION, "records": records}
+        log_file.write_text(json.dumps(data), encoding="utf-8")
+
+        suggestions = self.mod.suggest_improvements(self.tmpdir)
+        types = [s["type"] for s in suggestions]
+        self.assertIn("recurrent_pattern", types)
+
+    def test_automation_candidate_detected(self):
+        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        records = [
+            {"timestamp": "2025-01-01T00:00:00", "error": "merge conflict",
+             "rule_id": "HE-002", "strategy": "ROLLBACK", "success": False, "detail": "manual"},
+            {"timestamp": "2025-01-02T00:00:00", "error": "merge conflict",
+             "rule_id": "HE-002", "strategy": "ROLLBACK", "success": False, "detail": "manual"},
+        ]
+        data = {"version": self.mod.SELF_HEALING_VERSION, "records": records}
+        log_file.write_text(json.dumps(data), encoding="utf-8")
+
+        suggestions = self.mod.suggest_improvements(self.tmpdir)
+        types = [s["type"] for s in suggestions]
+        self.assertIn("automation_candidate", types)
+
+    def test_low_heal_rate_detected(self):
+        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        records = [
+            {"timestamp": f"2025-01-{i:02d}T00:00:00", "error": f"error {i}",
+             "rule_id": "HE-999", "strategy": "ESCALATE", "success": False, "detail": "nope"}
+            for i in range(1, 8)  # 7 failures, 0 success → < 50%
+        ]
+        data = {"version": self.mod.SELF_HEALING_VERSION, "records": records}
+        log_file.write_text(json.dumps(data), encoding="utf-8")
+
+        suggestions = self.mod.suggest_improvements(self.tmpdir)
+        types = [s["type"] for s in suggestions]
+        self.assertIn("low_heal_rate", types)
+
+    def test_suggestion_fields(self):
+        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        records = [
+            {"timestamp": f"2025-01-0{i}T00:00:00", "error": "file not found: x.md",
+             "rule_id": "HE-001", "strategy": "CREATE", "success": True, "detail": "ok"}
+            for i in range(1, 5)
+        ]
+        data = {"version": self.mod.SELF_HEALING_VERSION, "records": records}
+        log_file.write_text(json.dumps(data), encoding="utf-8")
+
+        suggestions = self.mod.suggest_improvements(self.tmpdir)
+        for s in suggestions:
+            self.assertIn("type", s)
+            self.assertIn("suggestion", s)
+
+
+class TestMCPInterface(unittest.TestCase):
+    def setUp(self):
+        self.mod = _import_mod()
+        self.tmpdir = Path(tempfile.mkdtemp())
+        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_status(self):
+        result = self.mod.mcp_self_healing(str(self.tmpdir), action="status")
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("total_attempts", result)
+
+    def test_diagnose(self):
+        result = self.mod.mcp_self_healing(
+            str(self.tmpdir), action="diagnose", error="file not found: x.md")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["rule"], "HE-001")
+
+    def test_diagnose_no_error(self):
+        result = self.mod.mcp_self_healing(str(self.tmpdir), action="diagnose")
+        self.assertEqual(result["status"], "error")
+
+    def test_heal(self):
+        result = self.mod.mcp_self_healing(
+            str(self.tmpdir), action="heal", error="file not found: x.md")
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("healed", result)
+
+    def test_heal_no_error(self):
+        result = self.mod.mcp_self_healing(str(self.tmpdir), action="heal")
+        self.assertEqual(result["status"], "error")
+
+    def test_suggest(self):
+        result = self.mod.mcp_self_healing(str(self.tmpdir), action="suggest")
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("suggestions", result)
+
+    def test_unknown_action(self):
+        result = self.mod.mcp_self_healing(str(self.tmpdir), action="bogus")
+        self.assertEqual(result["status"], "error")
+
+
 if __name__ == "__main__":
     unittest.main()

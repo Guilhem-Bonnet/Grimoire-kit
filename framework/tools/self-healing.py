@@ -41,7 +41,7 @@ from pathlib import Path
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-SELF_HEALING_VERSION = "1.0.0"
+SELF_HEALING_VERSION = "1.1.0"
 HEALING_LOG = "healing-log.json"
 
 # Stratégies de réparation
@@ -507,6 +507,131 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"      {count}× [{rule_id}] {name}")
 
     return 0
+
+
+# ── Proactive Improvements ──────────────────────────────────────────────────
+
+def suggest_improvements(project_root: Path) -> list[dict]:
+    """Analyse l'historique et propose des améliorations proactives.
+
+    Détecte les patterns récurrents dans les échecs et génère des suggestions
+    d'amélioration plutôt que de simplement réagir aux erreurs.
+    """
+    records = load_history(project_root)
+    if not records:
+        return []
+
+    from collections import Counter
+    rule_freq = Counter(r.rule_id for r in records)
+    fail_freq = Counter(r.rule_id for r in records if not r.success)
+    total = len(records)
+    suggestions: list[dict] = []
+
+    # 1. Erreurs récurrentes → besoin d'une règle plus forte
+    for rule_id, count in rule_freq.most_common(5):
+        if count >= 3:
+            rule_name = next(
+                (r["name"] for r in PLAYBOOK if r["id"] == rule_id), rule_id
+            )
+            success_count = count - fail_freq.get(rule_id, 0)
+            rate = success_count / count * 100
+            suggestions.append({
+                "type": "recurrent_pattern",
+                "rule_id": rule_id,
+                "rule_name": rule_name,
+                "occurrences": count,
+                "success_rate": round(rate, 1),
+                "suggestion": (
+                    f"Le pattern [{rule_id}] {rule_name} apparaît {count}× "
+                    f"(succès: {rate:.0f}%). Envisager un guard-rail préventif."
+                ),
+            })
+
+    # 2. Faible taux de réparation global
+    success_total = sum(1 for r in records if r.success)
+    global_rate = success_total / total * 100 if total > 0 else 0
+    if global_rate < 50 and total >= 5:
+        suggestions.append({
+            "type": "low_heal_rate",
+            "success_rate": round(global_rate, 1),
+            "total": total,
+            "suggestion": (
+                f"Taux de guérison faible ({global_rate:.0f}% sur {total} tentatives). "
+                "Enrichir le playbook avec de nouvelles stratégies auto-heal."
+            ),
+        })
+
+    # 3. Règles non auto-réparables fréquentes → candidats à l'automatisation
+    manual_rules = {r["id"] for r in PLAYBOOK if not r.get("auto_heal")}
+    for rule_id, count in rule_freq.most_common():
+        if rule_id in manual_rules and count >= 2:
+            rule_name = next(
+                (r["name"] for r in PLAYBOOK if r["id"] == rule_id), rule_id
+            )
+            suggestions.append({
+                "type": "automation_candidate",
+                "rule_id": rule_id,
+                "rule_name": rule_name,
+                "occurrences": count,
+                "suggestion": (
+                    f"[{rule_id}] {rule_name} est manuel mais apparaît {count}×. "
+                    "Candidat à l'automatisation."
+                ),
+            })
+
+    return suggestions
+
+
+# ── MCP Interface ────────────────────────────────────────────────────────────
+
+def mcp_self_healing(
+    project_root: str,
+    action: str = "status",
+    error: str = "",
+) -> dict:
+    """MCP tool ``bmad_self_healing`` — diagnostic et réparation automatique.
+
+    Args:
+        project_root: Racine du projet.
+        action: diagnose | heal | status | suggest.
+        error: Message d'erreur (requis pour diagnose/heal).
+
+    Returns:
+        dict avec le résultat de l'action.
+    """
+    root = Path(project_root).resolve()
+
+    if action == "diagnose":
+        if not error:
+            return {"status": "error", "error": "Paramètre 'error' requis"}
+        diag = diagnose_error(error)
+        return {"status": "ok", **diag.to_dict()}
+
+    if action == "heal":
+        if not error:
+            return {"status": "error", "error": "Paramètre 'error' requis"}
+        diag = diagnose_error(error)
+        diag = attempt_heal(root, diag)
+        save_to_history(root, diag)
+        return {"status": "ok", "healed": diag.healed, **diag.to_dict()}
+
+    if action == "status":
+        records = load_history(root)
+        total = len(records)
+        success = sum(1 for r in records if r.success)
+        return {
+            "status": "ok",
+            "total_attempts": total,
+            "successes": success,
+            "rate": round(success / total * 100, 1) if total > 0 else 0,
+            "rules_count": len(PLAYBOOK),
+        }
+
+    if action == "suggest":
+        suggestions = suggest_improvements(root)
+        return {"status": "ok", "suggestions": suggestions}
+
+    return {"status": "error", "error": f"Unknown action: {action}"}
 
 
 # ── CLI Builder ──────────────────────────────────────────────────────────────

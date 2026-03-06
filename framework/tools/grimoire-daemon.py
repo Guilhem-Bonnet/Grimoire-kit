@@ -35,7 +35,7 @@ from pathlib import Path
 
 _log = logging.getLogger("grimoire.daemon")
 
-DAEMON_VERSION = "1.1.0"
+DAEMON_VERSION = "1.2.0"
 DAEMON_DIR = "_bmad/_memory/daemon"
 PID_FILE = "grimoire-daemon.pid"
 STATE_FILE = "daemon-state.json"
@@ -203,6 +203,82 @@ def _run_memory_bridge(root: Path) -> TaskResult:
                           message=str(exc)[:200])
 
 
+def _run_evolve_cycle(root: Path) -> TaskResult:
+    """Cycle d'auto-évolution — fitness check + améliorations proactives.
+
+    1. Calcule le score de fitness via fitness-tracker.py
+    2. Si score < seuil, lance suggest_improvements via self-healing.py
+    3. Logue les résultats dans le JSONL d'évolution
+    """
+    start = time.monotonic()
+    evolve_log = root / "_bmad" / "_memory" / "evolve-cycle.jsonl"
+
+    # 1. Fitness check
+    fitness_tool = root / "framework" / "tools" / "fitness-tracker.py"
+    fitness_score: float | None = None
+    fitness_level = "unknown"
+
+    if fitness_tool.exists():
+        try:
+            result = subprocess.run(
+                [sys.executable, str(fitness_tool),
+                 "--project-root", str(root), "--json", "check"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                fitness_score = data.get("fitness_score", 0)
+                fitness_level = data.get("level", "unknown")
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            pass
+
+    # 2. Si fitness <= WARNING, proposer des améliorations
+    suggestions: list[str] = []
+    if fitness_score is not None and fitness_score < 70:
+        healing_tool = root / "framework" / "tools" / "self-healing.py"
+        if healing_tool.exists():
+            try:
+                # Import dynamique pour suggest_improvements
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("self_healing", healing_tool)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    raw = mod.suggest_improvements(root)
+                    suggestions = [s.get("suggestion", "") for s in raw[:5]]
+            except Exception:
+                pass
+
+    # 3. Loguer le cycle
+    evolve_log.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fitness": fitness_score,
+        "level": fitness_level,
+        "suggestions_count": len(suggestions),
+    }
+    try:
+        with open(evolve_log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+    duration = round(time.monotonic() - start, 3)
+
+    if fitness_score is None:
+        return TaskResult(
+            name="auto-evolve", status="skipped", duration_s=duration,
+            message="fitness-tracker.py indisponible",
+        )
+
+    msg = f"Fitness: {fitness_score}/100 ({fitness_level})"
+    if suggestions:
+        msg += f", {len(suggestions)} suggestion(s)"
+
+    return TaskResult(name="auto-evolve", status="success",
+                      duration_s=duration, message=msg[:200])
+
+
 def run_maintenance_cycle(root: Path, cycle_num: int = 1) -> CycleResult:
     """Exécute un cycle complet de maintenance."""
     start = time.monotonic()
@@ -219,6 +295,9 @@ def run_maintenance_cycle(root: Path, cycle_num: int = 1) -> CycleResult:
 
     # 4. Memory bridge sync
     tasks.append(_run_memory_bridge(root))
+
+    # 5. Auto-evolve: fitness check + proactive improvements
+    tasks.append(_run_evolve_cycle(root))
 
     total = round(time.monotonic() - start, 3)
     return CycleResult(

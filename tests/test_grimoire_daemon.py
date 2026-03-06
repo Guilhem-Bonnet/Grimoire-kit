@@ -93,12 +93,14 @@ class TestCycle:
     def test_run_cycle_no_tools(self, tmp_project):
         result = daemon.run_maintenance_cycle(tmp_project)
         assert result.cycle == 1
-        assert len(result.tasks) == 4
+        assert len(result.tasks) == 5
         # First 3 skipped since tools don't exist in tmp dir
         for t in result.tasks[:3]:
             assert t.status == "skipped"
         # memory-bridge succeeds (syncs 0 files)
         assert result.tasks[3].name == "memory-bridge"
+        # auto-evolve skipped (no fitness-tracker.py in tmp dir)
+        assert result.tasks[4].name == "auto-evolve"
 
     def test_run_cycle_increments(self, tmp_project):
         r1 = daemon.run_maintenance_cycle(tmp_project, cycle_num=1)
@@ -191,3 +193,79 @@ class TestCLI:
     def test_stop_no_daemon(self, capsys, tmp_project):
         ret = daemon.main(["--project-root", str(tmp_project), "stop"])
         assert ret == 1
+
+
+# ── Auto-Evolve Cycle ───────────────────────────────────────────────────────
+
+
+class TestAutoEvolve:
+    def test_evolve_no_fitness_tool(self, tmp_project):
+        """Sans fitness-tracker.py, le cycle evolve est skipped."""
+        result = daemon._run_evolve_cycle(tmp_project)
+        assert result.name == "auto-evolve"
+        assert result.status == "skipped"
+        assert "indisponible" in result.message
+
+    def test_evolve_with_fitness_tool(self, tmp_project):
+        """Avec un fitness-tracker.py minimal, le cycle evolve fonctionne."""
+        tool = tmp_project / "framework" / "tools" / "fitness-tracker.py"
+        tool.write_text(
+            'import argparse, json\n'
+            'p = argparse.ArgumentParser()\n'
+            'p.add_argument("--project-root")\n'
+            'p.add_argument("--json", action="store_true")\n'
+            'p.add_argument("command", nargs="?")\n'
+            'p.parse_args()\n'
+            'print(json.dumps({"fitness_score": 85, "level": "HEALTHY"}))\n',
+        )
+        result = daemon._run_evolve_cycle(tmp_project)
+        assert result.name == "auto-evolve"
+        assert result.status == "success"
+        assert "85" in result.message
+        assert "HEALTHY" in result.message
+
+    def test_evolve_low_fitness_triggers_suggestions(self, tmp_project):
+        """Fitness < 70 déclenche les suggestions (si self-healing existe)."""
+        tool = tmp_project / "framework" / "tools" / "fitness-tracker.py"
+        tool.write_text(
+            'import argparse, json\n'
+            'p = argparse.ArgumentParser()\n'
+            'p.add_argument("--project-root")\n'
+            'p.add_argument("--json", action="store_true")\n'
+            'p.add_argument("command", nargs="?")\n'
+            'p.parse_args()\n'
+            'print(json.dumps({"fitness_score": 35, "level": "CRITICAL"}))\n',
+        )
+        result = daemon._run_evolve_cycle(tmp_project)
+        assert result.status == "success"
+        assert "35" in result.message
+
+    def test_evolve_logs_to_jsonl(self, tmp_project):
+        """Le cycle evolve écrit dans evolve-cycle.jsonl."""
+        tool = tmp_project / "framework" / "tools" / "fitness-tracker.py"
+        tool.write_text(
+            'import argparse, json\n'
+            'p = argparse.ArgumentParser()\n'
+            'p.add_argument("--project-root")\n'
+            'p.add_argument("--json", action="store_true")\n'
+            'p.add_argument("command", nargs="?")\n'
+            'p.parse_args()\n'
+            'print(json.dumps({"fitness_score": 72, "level": "HEALTHY"}))\n',
+        )
+        daemon._run_evolve_cycle(tmp_project)
+        log_path = tmp_project / "_bmad" / "_memory" / "evolve-cycle.jsonl"
+        assert log_path.exists()
+
+        import json
+        lines = log_path.read_text().strip().splitlines()
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["fitness"] == 72
+        assert entry["level"] == "HEALTHY"
+
+    def test_cycle_includes_evolve(self, tmp_project):
+        """run_maintenance_cycle inclut la tâche auto-evolve."""
+        result = daemon.run_maintenance_cycle(tmp_project)
+        task_names = [t.name for t in result.tasks]
+        assert "auto-evolve" in task_names
+        assert len(result.tasks) == 5  # 4 original + auto-evolve
