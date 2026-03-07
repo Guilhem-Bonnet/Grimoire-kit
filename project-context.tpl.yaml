@@ -47,6 +47,38 @@ user:
 #   secrets_manager: "sops"            # sops | vault | aws-secrets | none
 #   tls: true
 
+# ── Platform Engineering (archétype platform-engineering) ────────────────────
+# Section pour les projets orientés plateforme / backend distribué.
+# Utilisée par les agents Archie, Stack, Guardian, Convoy.
+
+# platform:
+#   type: "microservices"              # microservices | modular-monolith | event-driven | serverless
+#   services:
+#     - name: "api-gateway"
+#       tech: "nginx"                  # nginx | envoy | traefik | kong
+#       port: 8080
+#     - name: "user-service"
+#       tech: "go"                     # go | dotnet | node | python
+#       port: 8081
+#       database: "postgresql"
+#       events_produced: ["user.created", "user.updated"]
+#       events_consumed: []
+#       slo_availability: "99.9%"
+#       slo_latency_p99: "200ms"
+#   messaging:
+#     broker: "nats"                   # nats | rabbitmq | kafka | redis-streams
+#     schema_registry: false           # true si AsyncAPI/Avro/Protobuf
+#   observability:
+#     metrics: "prometheus"            # prometheus | victoriametrics | datadog
+#     logs: "loki"                     # loki | elasticsearch | cloudwatch
+#     traces: "tempo"                  # tempo | jaeger | zipkin | datadog
+#     dashboards: "grafana"
+#   deployment:
+#     strategy: "canary"               # rolling | canary | blue-green | feature-flags
+#     gitops: "fluxcd"                 # fluxcd | argocd | github-actions
+#     rollback: "automatic"            # automatic | manual
+#   architecture_doc: "docs/architecture.md"   # chemin vers la source de vérité architecture
+
 memory:
   backend: "auto"                      # auto | local | qdrant-local | qdrant-server | ollama
   # qdrant_url: "http://localhost:6333"  # si qdrant-server

@@ -1,0 +1,154 @@
+$schema: "bmad-archetype-dna/v1"
+
+id: platform-engineering
+name: "Platform Engineering"
+version: "1.0.0"
+description: "Ingénierie de plateforme end-to-end — Architecture système, backend, déploiement, fiabilité. De l'idée au service observable en production."
+icon: "🏗️"
+author: "grimoire-kit"
+tags: [platform, architecture, backend, sre, reliability, observability, deployment, gitops, ddd, microservices, event-driven]
+
+inherits: minimal
+
+traits:
+  - name: architecture-first
+    description: "Toute feature significative commence par un ADR ou un schéma d'architecture"
+    rule: "Avant d'implémenter une feature impactant ≥2 services : créer un ADR minimal (contexte, décision, conséquences) ou mettre à jour architecture.md. Jamais coder un service sans savoir comment il s'intègre."
+    agents_affected: [platform-architect, backend-engineer, deploy-orchestrator]
+  - name: contract-driven
+    description: "Contrats d'API définis avant implémentation"
+    rule: "Toute nouvelle API/event/message → définir le contrat (OpenAPI, AsyncAPI, protobuf, type interface) AVANT d'implémenter. Les producteurs et consommateurs s'accordent sur le contrat."
+    agents_affected: [platform-architect, backend-engineer]
+  - name: observability-by-design
+    description: "L'observabilité est intégrée dès la conception, pas ajoutée après"
+    rule: "Chaque nouveau service définit ses SLI (latency, error rate, throughput) dès le design. Métriques, logs structurés et traces sont dans le template de service, pas optionnels."
+    agents_affected: [reliability-engineer, backend-engineer, platform-architect]
+  - name: deploy-safely
+    description: "Chaque déploiement est progressif et réversible"
+    rule: "Zéro big-bang deploy. Toute mise en production utilise : blue-green, canary, ou feature flags. Rollback automatique si SLO violé dans les 5 premières minutes."
+    agents_affected: [deploy-orchestrator, reliability-engineer]
+  - name: twelve-factor
+    description: "Les services suivent les principes 12-Factor App"
+    rule: "Config via env vars, stateless processes, port binding, logs en stdout, dev/prod parity. Vérifier la conformité 12-factor avant tout deploy en staging."
+    agents_affected: [backend-engineer, deploy-orchestrator]
+  - name: resilience-patterns
+    description: "Patterns de résilience obligatoires pour les appels inter-services"
+    rule: "Circuit breaker, retry avec backoff exponentiel, timeout explicite, bulkhead sur tout appel distant. Jamais d'appel HTTP/gRPC sans timeout configuré."
+    agents_affected: [backend-engineer, reliability-engineer]
+
+constraints:
+  - id: no-deploy-without-observability
+    description: "Un service sans métriques/logs/traces ne peut pas être déployé en staging/prod"
+    enforcement: hard
+    checked_by: reliability-engineer
+  - id: adr-on-architecture-change
+    description: "Tout changement architectural significatif doit avoir un ADR"
+    enforcement: soft
+    checked_by: platform-architect
+  - id: rollback-plan-required
+    description: "Chaque déploiement a un plan de rollback documenté"
+    enforcement: hard
+    checked_by: deploy-orchestrator
+  - id: cc-platform-pass
+    description: "cc-verify.sh --stack platform obligatoire avant livraison"
+    enforcement: hard
+    checked_by: agent-optimizer
+
+values:
+  - name: platform-as-product
+    description: "La plateforme est un produit interne — ses utilisateurs sont les développeurs"
+    priority: 1
+  - name: paved-roads
+    description: "Fournir des chemins balisés (templates, golden paths) plutôt que des contraintes"
+    priority: 1
+  - name: shift-left-everything
+    description: "Tests, sécurité, observabilité — tout se décale vers le développeur"
+    priority: 2
+  - name: toil-reduction
+    description: "Automatiser le travail répétitif — si c'est fait 3 fois, c'est scriptable"
+    priority: 2
+
+tools_required:
+  - name: docker
+    description: "Conteneurisation des services"
+    required: true
+    check_command: "which docker"
+  - name: kubectl
+    description: "Gestion cluster Kubernetes"
+    required: false
+    check_command: "which kubectl"
+  - name: terraform
+    description: "Infrastructure as Code"
+    required: false
+    check_command: "which terraform || which tofu"
+  - name: helm
+    description: "Package manager Kubernetes"
+    required: false
+    check_command: "which helm"
+
+acceptance_criteria:
+  - id: architecture-documented
+    description: "Chaque service a une entrée dans architecture.md avec ses dépendances et SLI"
+    enforcement: soft
+    context: "Trait architecture-first — source de vérité architecturale"
+    triggers_on: ["**/architecture.md", "**/adr-*.md"]
+    checked_by: platform-architect
+  - id: api-contract-before-impl
+    description: "Contrat API/event défini avant l'implémentation du service"
+    enforcement: hard
+    context: "Trait contract-driven — éviter les intégrations cassées"
+    triggers_on: ["**/openapi*.yaml", "**/openapi*.json", "**/*.proto", "**/asyncapi*.yaml"]
+    checked_by: platform-architect
+  - id: sli-defined-per-service
+    description: "Chaque service en production a des SLI mesurables (latency p99, error rate, throughput)"
+    enforcement: soft
+    context: "Trait observability-by-design"
+    triggers_on: ["**/slo-*.yaml", "**/monitoring/**/*"]
+    checked_by: reliability-engineer
+  - id: rollback-tested
+    description: "Le mécanisme de rollback est testé en staging avant déploiement prod"
+    enforcement: soft
+    context: "Trait deploy-safely — rollback réversible"
+    triggers_on: ["**/.github/workflows/**", "**/deploy/**/*"]
+    checked_by: deploy-orchestrator
+  - id: structured-logs
+    description: "Tous les services émettent des logs JSON structurés avec trace_id, service_name, level"
+    enforcement: soft
+    context: "Trait observability-by-design — corrélation logs/traces"
+    triggers_on: ["**/src/**/*", "**/cmd/**/*"]
+    checked_by: reliability-engineer
+
+agents:
+  - path: "../../archetypes/platform-engineering/agents/platform-architect.md"
+    required: true
+    description: "Archie — Architecture système, DDD, event-driven, scaling"
+  - path: "../../archetypes/platform-engineering/agents/backend-engineer.md"
+    required: true
+    description: "Stack — Backend agnostique, APIs, CQRS, event sourcing"
+  - path: "../../archetypes/platform-engineering/agents/reliability-engineer.md"
+    required: true
+    description: "Guardian — SRE, SLO/SLI, observabilité, incident response"
+  - path: "../../archetypes/platform-engineering/agents/deploy-orchestrator.md"
+    required: true
+    description: "Convoy — Déploiement progressif, GitOps, pipelines"
+
+workflows: []
+
+shared_context_template: "../../archetypes/platform-engineering/shared-context.tpl.md"
+
+compatible_with: [minimal, fix-loop, infra-ops, web-app, stack/terraform, stack/k8s, stack/docker, stack/go, stack/typescript, stack/python, stack/ansible]
+incompatible_with: []
+requires: []
+
+auto_detect:
+  files: ["docker-compose*.yml", "Dockerfile", "*.proto", "openapi*.yaml", "asyncapi*.yaml", "helm/**/*"]
+  directories: ["src/", "services/", "deploy/", "infra/", "k8s/"]
+  confidence_boost: 70
+  exclusive: false  # Peut coexister avec d'autres archétypes
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-03-06"
+    changes:
+      - "DNA initiale — traits architecture-first, contract-driven, observability-by-design, deploy-safely, twelve-factor, resilience-patterns"
+      - "4 agents : platform-architect, backend-engineer, reliability-engineer, deploy-orchestrator"

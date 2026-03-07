@@ -98,6 +98,69 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 
 ---
 
+### `platform-engineering` — Ingénierie de Plateforme End-to-End
+
+**Cas d'usage** : Plateformes distribuées, backends scalables, microservices/modular monolith. De l'architecture au service observable en production.
+
+**Traits DNA :** Architecture First, Contract Driven, Observability by Design, Deploy Safely, Twelve-Factor, Resilience Patterns  
+**Tools requis :** docker, kubectl (optionnel), terraform (optionnel), helm (optionnel)
+
+**Agents inclus (3 meta + 4 spécialisés) :**
+
+| Agent | Icône | Rôle |
+|-------|-------|------|
+| Atlas | 🗺️ | Navigation & Mémoire projet |
+| Sentinel | 🔍 | Qualité & Optimisation agents |
+| Mnemo | 🧠 | Mémoire & Qualité connaissances |
+| Archie (platform-architect) | 🏛️ | Architecture système, DDD, event-driven, C4 diagrams |
+| Stack (backend-engineer) | ⚙️ | Backend polyglotte, APIs, CQRS, event sourcing |
+| Guardian (reliability-engineer) | 🛡️ | SRE, SLO/SLI, observabilité, incident response |
+| Convoy (deploy-orchestrator) | 🚀 | Déploiement progressif, GitOps, pipelines CI/CD |
+
+**Combinable avec les agents stack/** : Terra 🌍, Kube ⎈, Container 🐋, Gopher 🐹, Pixel ⚛️, Serpent 🐍 selon le stack détecté.
+
+**Acceptance Criteria notables :**
+- `architecture-documented` — chaque service documenté dans architecture.md (**soft**)
+- `api-contract-before-impl` — contrat API/event avant implémentation (**hard**)
+- `sli-defined-per-service` — SLI mesurables par service (**soft**)
+- `rollback-tested` — rollback testé en staging avant prod (**soft**)
+- `structured-logs` — logs JSON structurés avec trace_id (**soft**)
+
+**Templates inclus :**
+- `architecture.tpl.md` — source de vérité architecturale (C4, services, events, SLO, infra)
+
+**Installation :**
+```bash
+bash bmad-init.sh install --archetype platform-engineering
+
+# Combiné avec des stack agents
+bash bmad-init.sh install --archetype platform-engineering
+bash bmad-init.sh install --archetype stack/go
+bash bmad-init.sh install --archetype stack/docker
+bash bmad-init.sh install --archetype stack/k8s
+```
+
+**Section `project-context.yaml` dédiée :**
+```yaml
+platform:
+  type: "microservices"
+  services:
+    - name: "user-service"
+      tech: "go"
+      slo_availability: "99.9%"
+  messaging:
+    broker: "nats"
+  observability:
+    metrics: "prometheus"
+    logs: "loki"
+    traces: "tempo"
+  deployment:
+    strategy: "canary"
+    gitops: "fluxcd"
+```
+
+---
+
 ### `fix-loop` — Boucle de Correction Certifiée
 
 **Cas d'usage** : Tout projet avec bugs récurrents — zéro "done" sans preuve d'exécution.
