@@ -5,7 +5,7 @@
 </picture>
 
 <p align="center">
-  <a href="https://github.com/Guilhem-Bonnet/bmad-custom-kit/releases"><img src="https://img.shields.io/badge/version-2.4.1-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-2.4.1-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
   <a href="#-tests"><img src="https://img.shields.io/badge/tests-1875+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
@@ -88,22 +88,22 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 ```bash
 # 1. Cloner le kit
-git clone https://github.com/Guilhem-Bonnet/bmad-custom-kit.git
+git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
 
 # 2. (Optionnel) Installer le package Python
-cd bmad-custom-kit/
+cd Grimoire-kit/
 pip install -e ".[dev]"
 
 # 3. Initialiser dans votre projet
 cd votre-projet/
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/Grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --lang "Français" \
   --archetype web-app
 
 # 4. OU mode auto — détecte le stack → déploie les bons agents
-bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
+bash /chemin/vers/Grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --auto
@@ -798,8 +798,8 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
 </p>
 
 <p align="center">
-  <a href="https://github.com/Guilhem-Bonnet/bmad-custom-kit/stargazers">
-    <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/bmad-custom-kit?style=social" alt="Stars">
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/stargazers">
+    <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/Grimoire-kit?style=social" alt="Stars">
   </a>
 </p>
 
