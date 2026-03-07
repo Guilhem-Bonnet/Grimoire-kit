@@ -109,3 +109,41 @@ class TestDoctor:
     def test_doctor_shows_version(self, healthy_project: Path) -> None:
         result = runner.invoke(app, ["doctor", str(healthy_project)])
         assert "bmad-kit" in result.output
+
+
+# ── Status ────────────────────────────────────────────────────────────────────
+
+class TestStatus:
+    @pytest.fixture()
+    def project(self, tmp_path: Path) -> Path:
+        runner.invoke(app, ["init", str(tmp_path), "--name", "my-app"])
+        return tmp_path
+
+    def test_status_shows_name(self, project: Path) -> None:
+        result = runner.invoke(app, ["status", str(project)])
+        assert result.exit_code == 0
+        assert "my-app" in result.output
+
+    def test_status_shows_archetype(self, project: Path) -> None:
+        result = runner.invoke(app, ["status", str(project)])
+        assert "minimal" in result.output
+
+    def test_status_shows_memory(self, project: Path) -> None:
+        result = runner.invoke(app, ["status", str(project)])
+        assert "auto" in result.output
+
+    def test_status_shows_structure(self, project: Path) -> None:
+        result = runner.invoke(app, ["status", str(project)])
+        assert "_bmad" in result.output
+
+    def test_status_no_project(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["status", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_status_in_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert "status" in result.output
+
+    def test_status_shows_version(self, project: Path) -> None:
+        result = runner.invoke(app, ["status", str(project)])
+        assert "bmad-kit" in result.output

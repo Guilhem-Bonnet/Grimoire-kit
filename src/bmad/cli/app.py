@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from bmad.__version__ import __version__
 from bmad.core.config import BmadConfig
@@ -166,3 +167,65 @@ def doctor(
     console.print(f"\n[bold]{checks_ok}/{total} checks passed[/bold]")
     if checks_fail > 0:
         raise typer.Exit(1)
+
+
+# ── bmad status ───────────────────────────────────────────────────────────────
+
+_status_path_arg = typer.Argument(Path("."), help="Project root.")
+
+
+@app.command()
+def status(
+    path: Path = _status_path_arg,
+) -> None:
+    """Show project dashboard — config, agents, memory, health."""
+    target = path.resolve()
+    config_path = target / "project-context.yaml"
+
+    if not config_path.is_file():
+        console.print("[red]Not a BMAD project[/red] — run [bold]bmad init[/bold] first.")
+        raise typer.Exit(1)
+
+    try:
+        cfg = BmadConfig.from_yaml(config_path)
+    except BmadConfigError as exc:
+        console.print(f"[red]Config error:[/red] {exc}")
+        raise typer.Exit(1) from None
+
+    # Header
+    console.print(f"\n[bold]BMAD Project:[/bold] {cfg.project.name}")
+    console.print(f"bmad-kit {__version__}\n")
+
+    # Project table
+    tbl = Table(title="Project", show_header=False, padding=(0, 2))
+    tbl.add_column("Key", style="bold")
+    tbl.add_column("Value")
+    tbl.add_row("Name", cfg.project.name)
+    tbl.add_row("Type", cfg.project.type)
+    if cfg.project.stack:
+        tbl.add_row("Stack", ", ".join(cfg.project.stack))
+    if cfg.project.repos:
+        tbl.add_row("Repos", ", ".join(r.name for r in cfg.project.repos))
+    tbl.add_row("User", cfg.user.name or "(not set)")
+    tbl.add_row("Language", cfg.user.language)
+    tbl.add_row("Skill level", cfg.user.skill_level)
+    console.print(tbl)
+
+    # Agents
+    console.print(f"\n[bold]Agents[/bold]")
+    console.print(f"  Archetype: {cfg.agents.archetype}")
+    if cfg.agents.custom_agents:
+        console.print(f"  Custom: {', '.join(cfg.agents.custom_agents)}")
+
+    # Memory
+    console.print(f"\n[bold]Memory[/bold]")
+    console.print(f"  Backend: {cfg.memory.backend}")
+
+    # Structure health
+    console.print(f"\n[bold]Structure[/bold]")
+    dirs = ["_bmad", "_bmad-output", "_bmad/_memory"]
+    for d in dirs:
+        icon = "[green]✓[/green]" if (target / d).is_dir() else "[red]✗[/red]"
+        console.print(f"  {icon} {d}/")
+
+    console.print()
