@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <i>The missing operating system for AI agents in your IDE.</i>
+</p>
+
+<p align="center">
   <b>Transformez votre IDE en entreprise virtuelle peuplée d'agents IA spécialisés.</b><br>
   <sub>Teams · Personas · Mémoire sémantique · Workflows · Qualité automatisée · Self-Healing</sub>
 </p>
@@ -24,7 +28,8 @@
   <a href="#-features">Features</a> •
   <a href="#-outils-cli">Outils CLI</a> •
   <a href="docs/concepts.md">Concepts</a> •
-  <a href="docs/getting-started.md">Guide complet</a>
+  <a href="docs/getting-started.md">Guide complet</a> •
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 <br>
@@ -83,18 +88,22 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 ```bash
 # 1. Cloner le kit
-git clone https://github.com/Guilhem-Bonnet/grimoire-kit.git
+git clone https://github.com/Guilhem-Bonnet/bmad-custom-kit.git
 
-# 2. Initialiser dans votre projet
+# 2. (Optionnel) Installer le package Python
+cd bmad-custom-kit/
+pip install -e ".[dev]"
+
+# 3. Initialiser dans votre projet
 cd votre-projet/
-bash /chemin/vers/grimoire-kit/bmad-init.sh \
+bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --lang "Français" \
   --archetype web-app
 
-# 3. OU mode auto — détecte le stack → déploie les bons agents
-bash /chemin/vers/grimoire-kit/bmad-init.sh \
+# 4. OU mode auto — détecte le stack → déploie les bons agents
+bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --auto
@@ -785,7 +794,7 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
 <br>
 
 <p align="center">
-  <sub>MIT License · Made with 🔮 by <a href="https://github.com/Guilhem-Bonnet">Guilhem Bonnet</a></sub>
+  <sub>MIT License · Made with 🔮 by <a href="https://github.com/Guilhem-Bonnet">Guilhem Bonnet</a> · <a href="CHANGELOG.md">Changelog</a></sub>
 </p>
 
 <p align="center">
