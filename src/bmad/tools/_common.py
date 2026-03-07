@@ -18,7 +18,6 @@ import abc
 from pathlib import Path
 from typing import Any
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def find_project_root(start: Path | None = None) -> Path:

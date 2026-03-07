@@ -8,7 +8,6 @@ import pytest
 
 from bmad.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 
-
 # ── MemoryEntry ───────────────────────────────────────────────────────────────
 
 class TestMemoryEntry:

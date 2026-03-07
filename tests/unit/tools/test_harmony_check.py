@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 
 from bmad.tools.harmony_check import (
+    SEVERITY_HIGH,
+    SEVERITY_LOW,
+    SEVERITY_MEDIUM,
+    ArchScan,
     Dissonance,
     HarmonyCheck,
     HarmonyResult,
@@ -15,12 +19,7 @@ from bmad.tools.harmony_check import (
     _detect_orphans,
     _detect_oversized,
     _scan_project,
-    ArchScan,
-    SEVERITY_HIGH,
-    SEVERITY_LOW,
-    SEVERITY_MEDIUM,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

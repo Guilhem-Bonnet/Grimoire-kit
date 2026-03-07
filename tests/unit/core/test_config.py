@@ -17,7 +17,6 @@ from bmad.core.config import (
 )
 from bmad.core.exceptions import BmadConfigError
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _minimal_dict(**overrides: Any) -> dict[str, Any]:

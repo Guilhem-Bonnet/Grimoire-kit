@@ -212,17 +212,17 @@ def status(
     console.print(tbl)
 
     # Agents
-    console.print(f"\n[bold]Agents[/bold]")
+    console.print("\n[bold]Agents[/bold]")
     console.print(f"  Archetype: {cfg.agents.archetype}")
     if cfg.agents.custom_agents:
         console.print(f"  Custom: {', '.join(cfg.agents.custom_agents)}")
 
     # Memory
-    console.print(f"\n[bold]Memory[/bold]")
+    console.print("\n[bold]Memory[/bold]")
     console.print(f"  Backend: {cfg.memory.backend}")
 
     # Structure health
-    console.print(f"\n[bold]Structure[/bold]")
+    console.print("\n[bold]Structure[/bold]")
     dirs = ["_bmad", "_bmad-output", "_bmad/_memory"]
     for d in dirs:
         icon = "[green]✓[/green]" if (target / d).is_dir() else "[red]✗[/red]"

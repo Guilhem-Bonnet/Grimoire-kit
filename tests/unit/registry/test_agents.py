@@ -10,7 +10,6 @@ import pytest
 from bmad.core.exceptions import BmadAgentError, BmadRegistryError
 from bmad.registry.agents import AgentDef, AgentRegistry, ArchetypeDNA
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _make_archetype(root: Path, arch_id: str, agents: list[dict[str, str]]) -> Path:
@@ -37,8 +36,8 @@ def _make_archetype(root: Path, arch_id: str, agents: list[dict[str, str]]) -> P
         f"tags: [test]\n"
         f"agents:\n"
         + "\n".join(agent_lines) + "\n"
-        f"compatible_with: [minimal]\n"
-        f"incompatible_with: []\n"
+        "compatible_with: [minimal]\n"
+        "incompatible_with: []\n"
     )
     (arch_dir / "archetype.dna.yaml").write_text(dna_content)
     return root

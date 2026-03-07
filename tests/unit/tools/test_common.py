@@ -9,7 +9,6 @@ import pytest
 
 from bmad.tools._common import BmadTool, estimate_tokens, find_project_root, load_yaml, save_yaml
 
-
 # ── find_project_root ─────────────────────────────────────────────────────────
 
 class TestFindProjectRoot:
@@ -51,7 +50,7 @@ class TestLoadYaml:
         assert load_yaml(f) is None
 
     def test_load_missing_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(OSError):
             load_yaml(tmp_path / "nope.yaml")
 
 

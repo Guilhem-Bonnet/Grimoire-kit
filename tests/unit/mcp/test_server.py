@@ -16,7 +16,6 @@ from bmad.mcp.server import (
     mcp,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -106,7 +105,6 @@ class TestAgentList:
     )
     def test_on_real_kit(self) -> None:
         # Use the kit root which has archetypes/
-        (cfg_path := _KIT_ROOT / "project-context.yaml").is_file()
         result = bmad_agent_list(str(_KIT_ROOT))
         data = json.loads(result)
         # Should list agents from the configured archetype
