@@ -2274,7 +2274,6 @@ class TestEmitToIncubator(unittest.TestCase):
 
     def test_incubate_flag_in_parser(self):
         """Verify --incubate flag exists in CLI parser."""
-        import argparse
         # Check the source for the flag
         import inspect
         source = inspect.getsource(self.dream.main)

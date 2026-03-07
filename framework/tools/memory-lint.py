@@ -539,8 +539,8 @@ def check_memory_freshness(files: list[MemoryFile]) -> list[LintIssue]:
     Les fichiers dont la majorité des entrées sont périmées (> STALENESS_DAYS)
     sont signalés comme candidats à l'archivage.
     """
-    from datetime import datetime
     import math
+    from datetime import datetime
 
     issues: list[LintIssue] = []
     now = datetime.now()

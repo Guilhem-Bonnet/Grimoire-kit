@@ -31,12 +31,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.dna_evolve")
 

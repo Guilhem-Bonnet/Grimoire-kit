@@ -22,13 +22,13 @@ Stdlib only — aucune dépendance externe.
 
 import argparse
 import json
+import logging
 import math
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.dream")
 

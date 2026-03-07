@@ -46,11 +46,11 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import logging
 import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.bmad_mcp_tools")
 
@@ -644,7 +644,7 @@ def _handle_tool(name: str, args: dict) -> str:
     # Sanitize all inputs before processing
     try:
         args = _sanitize_mcp_input(args)
-    except ValueError as exc:
+    except ValueError:
         _audit_log(name, args, "", "rejected", 0.0)
         raise
 

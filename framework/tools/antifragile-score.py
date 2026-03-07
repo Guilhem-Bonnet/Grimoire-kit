@@ -23,11 +23,11 @@ Stdlib only — aucune dépendance externe.
 
 import argparse
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.antifragile_score")
 

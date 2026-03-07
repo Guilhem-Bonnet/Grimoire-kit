@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
 import time  # noqa: F401 — re-exported for rnd_engine
 from collections import defaultdict  # noqa: F401 — re-exported
@@ -19,7 +20,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime  # noqa: F401 — re-exported
 from pathlib import Path
 from typing import Any
-import logging
 
 _log = logging.getLogger("grimoire.rnd_core")
 

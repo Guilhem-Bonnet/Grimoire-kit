@@ -59,17 +59,17 @@ from __future__ import annotations
 
 import argparse
 import json
+
+# ── Re-export de tous les symboles publics ───────────────────────
+# Permet la rétro-compatibilité : les tests et outils qui font
+# `import r_and_d; r_and_d.harvest(...)` continuent de fonctionner.
+import logging
 import sys
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any  # noqa: F401
-
-# ── Re-export de tous les symboles publics ───────────────────────
-# Permet la rétro-compatibilité : les tests et outils qui font
-# `import r_and_d; r_and_d.harvest(...)` continuent de fonctionner.
-import logging
 
 from rnd_core import (  # noqa: F401
     ACTIONS,

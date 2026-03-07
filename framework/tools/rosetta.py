@@ -30,13 +30,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.rosetta")
 

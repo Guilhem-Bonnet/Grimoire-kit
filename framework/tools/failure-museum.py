@@ -29,10 +29,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 VERSION = "1.0.0"
@@ -174,7 +173,7 @@ def cmd_add(root: Path, args: argparse.Namespace) -> int:
     failure = Failure(
         failure_id=fid,
         sequence=seq,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         title=args.title,
         severity=args.severity,
         agents=agents_list,

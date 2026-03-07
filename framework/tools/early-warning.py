@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import subprocess
 import sys
@@ -45,7 +46,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.early_warning")
 

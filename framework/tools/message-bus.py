@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import collections
 import json
+import logging
 import sys
 import threading
 import time
@@ -46,7 +47,6 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.message_bus")
 

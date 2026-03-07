@@ -31,12 +31,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import logging
 import sys
 import time as _time_mod
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.token_budget")
 

@@ -34,13 +34,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import logging
 import re
 import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.agent_caller")
 

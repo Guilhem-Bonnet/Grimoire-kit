@@ -27,12 +27,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import logging
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.nso")
 
@@ -531,7 +531,7 @@ def _collect_retro_failures(project_root: Path,
                 items.append(RetroItem(
                     category="problem",
                     text=current_entry[:200],
-                    source="failure-museum.md",
+                    source="failure-museum",
                     priority=1,
                 ))
             current_entry = line.lstrip("#").strip()
@@ -543,7 +543,7 @@ def _collect_retro_failures(project_root: Path,
         items.append(RetroItem(
             category="problem",
             text=current_entry[:200],
-            source="failure-museum.md",
+            source="failure-museum",
             priority=1,
         ))
     return items

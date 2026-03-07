@@ -193,7 +193,7 @@ def main() -> None:
             elif report.status == "clean":
                 print(f"  ✅ Intégrité OK — {report.total_files} fichiers vérifiés")
             else:
-                print(f"  ⚠️ Modifications détectées :")
+                print("  ⚠️ Modifications détectées :")
                 for f in report.modified:
                     print(f"    🔄 Modifié : {f}")
                 for f in report.added:

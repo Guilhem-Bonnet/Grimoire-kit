@@ -23,11 +23,11 @@ Stdlib only — aucune dépendance externe.
 import argparse
 import hashlib
 import json
+import logging
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.adversarial_consensus")
 

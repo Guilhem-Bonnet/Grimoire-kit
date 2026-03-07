@@ -6,7 +6,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -256,7 +255,6 @@ class TestAutoEvolve:
         log_path = tmp_project / "_bmad" / "_memory" / "evolve-cycle.jsonl"
         assert log_path.exists()
 
-        import json
         lines = log_path.read_text().strip().splitlines()
         assert len(lines) == 1
         entry = json.loads(lines[0])

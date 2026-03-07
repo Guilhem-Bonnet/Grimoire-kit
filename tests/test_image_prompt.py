@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "framework" / "tools"
 sys.path.insert(0, str(TOOLS))

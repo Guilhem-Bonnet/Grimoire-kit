@@ -37,11 +37,11 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import logging
 import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import logging
 
 _log = logging.getLogger("grimoire.tool_registry")
 

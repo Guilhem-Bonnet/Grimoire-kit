@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import logging
 
 _log = logging.getLogger("grimoire.sensory_buffer")
 
