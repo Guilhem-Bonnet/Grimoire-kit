@@ -436,8 +436,9 @@ def generate_html(data: ObservatoryData, *, auto_refresh: bool = False) -> str:
     """Generate the self-contained observatory HTML."""
     json_data = data_to_json(data)
     html = _HTML_TEMPLATE.replace("__BMAD_DATA__", json_data)
-    refresh_meta = '<meta http-equiv="refresh" content="4">' if auto_refresh else ''
-    return html.replace("__AUTO_REFRESH__", refresh_meta)
+    # auto_refresh is handled by JS HEAD-check (preserves tab/scroll state)
+    # No meta refresh tag — it would cause full reloads losing all state
+    return html.replace("__AUTO_REFRESH__", "")
 
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -542,8 +543,8 @@ main{flex:1;overflow-y:auto}
 .gantt-bar.waiting{background:var(--bg3);border:1px solid var(--border);color:var(--fg2)}
 .gantt-bar.failed{background:rgba(248,81,73,.2);border:1px solid var(--red);color:var(--red)}
 @keyframes barPulse{0%,100%{opacity:1}50%{opacity:.6}}
-.gantt-dep-svg{position:absolute;top:0;left:180px;pointer-events:none}
-.gantt-dep-svg line{stroke:var(--fg2);stroke-width:1;stroke-dasharray:4 3;opacity:.4}
+.gantt-dep-svg{position:absolute;top:0;left:180px;right:0;pointer-events:none}
+.gantt-dep-svg line{stroke:var(--fg2);stroke-width:1;stroke-dasharray:4 3;opacity:.4;vector-effect:non-scaling-stroke}
 .gantt-time-axis{display:flex;margin-left:180px;border-top:1px solid var(--border);padding-top:4px}
 .gantt-time-tick{font-size:.65rem;color:var(--fg2);font-family:var(--mono)}
 
@@ -712,6 +713,14 @@ const $ = (s,e) => (e||document).querySelector(s);
 const $$ = (s,e) => [...(e||document).querySelectorAll(s)];
 const esc = s => { const d=document.createElement('div');d.textContent=s;return d.innerHTML; };
 
+// ── Global item store for event delegation (no inline onclick) ──
+const ITEMS = [];
+function storeItem(item) { const idx = ITEMS.length; ITEMS.push(item); return idx; }
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-item-idx]');
+  if (el) showItemDetail(ITEMS[parseInt(el.dataset.itemIdx)]);
+});
+
 // ── Agent Colors ────────────────────────────────────────────
 const AG_COLORS = {dev:'#3fb950',qa:'#bc8cff',architect:'#39d2c0',pm:'#f0883e',analyst:'#d29922',sm:'#f778ba',orchestr:'#58a6ff',techwr:'#7ee787',hpe:'#58a6ff',default:'#8b949e'};
 
@@ -823,9 +832,10 @@ function renderTimeline() {
   const ct = $('#timeline-ct');
   if (!items.length) { ct.innerHTML = `<div class="empty-state"><div class="icon">📭</div><h2>Aucune trace</h2><p>Lancez un workflow pour voir l'activité.</p></div>`; return; }
   const shown = items.slice(0, 500);
-  ct.innerHTML = shown.map((i,idx) => {
+  ct.innerHTML = shown.map(i => {
     const time = i.ts.replace(/.*T/,'').replace('Z','');
-    return `<div class="tl-entry ${agentClass(i.agent)}" onclick="showItemDetail(${esc(JSON.stringify(i).replace(/"/g,'&quot;'))})"><span class="ts">${esc(time)}</span><span class="agent">${esc(i.agent)}<br><span class="ev-type">${esc(i.type)}</span></span><span class="payload">${esc(i.payload)}</span></div>`;
+    const idx = storeItem(i);
+    return `<div class="tl-entry ${agentClass(i.agent)}" data-item-idx="${idx}"><span class="ts">${esc(time)}</span><span class="agent">${esc(i.agent)}<br><span class="ev-type">${esc(i.type)}</span></span><span class="payload">${esc(i.payload)}</span></div>`;
   }).join('') + (items.length > 500 ? `<div style="text-align:center;padding:14px;color:var(--fg2)">… et ${items.length-500} entrées supplémentaires</div>` : '');
 }
 ['#f-tl-agent','#f-tl-type','#f-tl-session'].forEach(s => $(s).addEventListener('change', renderTimeline));
@@ -918,7 +928,7 @@ function renderSwimlane() {
     }
 
     // Event node
-    bodyHtml += `<div class="sl-event" style="left:${x-70}px;top:${y-12}px;border:1px solid ${color}20;background:${color}10" data-idx="${idx}" onclick='showItemDetail(${JSON.stringify(item).replace(/'/g,"&#39;")})'><span class="dot" style="background:${color}"></span><span class="sl-label">${esc(shortType)}</span></div>`;
+    bodyHtml += `<div class="sl-event" style="left:${x-70}px;top:${y-12}px;border:1px solid ${color}20;background:${color}10" data-idx="${idx}" data-item-idx="${storeItem(item)}"><span class="dot" style="background:${color}"></span><span class="sl-label">${esc(shortType)}</span></div>`;
   });
 
   // Draw connection arrows between agents
@@ -1002,7 +1012,6 @@ function svgArrow(x1, y1, x2, y2, color, dashed) {
 }
 
 $('#f-sl-session').addEventListener('change', renderSwimlane);
-renderSwimlane();
 
 // ══════════════════════════════════════════════════════════════
 // DAG — Gantt Style
@@ -1048,29 +1057,29 @@ function renderDAG() {
   const allTimes = taskList.flatMap(t => [t.start, t.end].filter(Boolean)).map(t => new Date(t).getTime());
   const minT = Math.min(...allTimes), maxT = Math.max(...allTimes);
   const range = maxT - minT || 1;
-  const trackW = 600;
 
   let html = `<div class="gantt-header"><h3>📊 Task DAG — ${taskList.length} tâches</h3><div class="gantt-legend"><span class="gl-item"><span class="gl-dot" style="background:var(--green)"></span>Done</span><span class="gl-item"><span class="gl-dot" style="background:var(--yellow)"></span>Running</span><span class="gl-item"><span class="gl-dot" style="background:var(--border)"></span>Waiting</span><span class="gl-item"><span class="gl-dot" style="background:var(--red)"></span>Failed</span></div></div>`;
   html += `<div class="gantt-chart" style="position:relative">`;
 
-  // SVG for dependency lines
-  let depSvg = `<svg class="gantt-dep-svg" width="${trackW}" height="${taskList.length * 40}">`;
+  // SVG for dependency lines — use percentage-based viewBox for alignment with flex tracks
+  let depLines = '';
   const taskY = {};
   taskList.forEach((t, i) => { taskY[t.id] = i * 40 + 20; });
 
-  // Dependency lines
+  // Dependency lines (percentage X positions mapped to 0-100 viewBox)
   taskList.forEach(t => {
     t.deps.forEach(depId => {
       if (taskY[depId] !== undefined && taskY[t.id] !== undefined) {
         const startX = tasks.has(depId) && tasks.get(depId).end
-          ? ((new Date(tasks.get(depId).end).getTime() - minT) / range) * trackW
+          ? ((new Date(tasks.get(depId).end).getTime() - minT) / range) * 100
           : 0;
-        const endX = t.start ? ((new Date(t.start).getTime() - minT) / range) * trackW : 0;
-        depSvg += `<line x1="${startX}" y1="${taskY[depId]}" x2="${endX}" y2="${taskY[t.id]}"/>`;
+        const endX = t.start ? ((new Date(t.start).getTime() - minT) / range) * 100 : 0;
+        depLines += `<line x1="${startX}" y1="${taskY[depId]}" x2="${endX}" y2="${taskY[t.id]}"/>`;
       }
     });
   });
-  depSvg += '</svg>';
+  const svgH = taskList.length * 40;
+  const depSvg = `<svg class="gantt-dep-svg" viewBox="0 0 100 ${svgH}" preserveAspectRatio="none" style="width:100%;height:${svgH}px">${depLines}</svg>`;
 
   // Task rows
   taskList.forEach((t, i) => {
@@ -1079,12 +1088,12 @@ function renderDAG() {
     const widthPct = Math.max(endPct - startPct, 3);
     const trustBadge = t.trust ? ` 🛡️${t.trust}` : '';
     const color = agentColor(t.agent);
-    html += `<div class="gantt-row"><div class="gantt-label" style="color:${color}">${esc(t.id)}<div class="gl-agent">${esc(t.agent)}</div></div><div class="gantt-track"><div class="gantt-bar ${t.status}" style="left:${startPct}%;width:${widthPct}%" onclick='showItemDetail(${JSON.stringify({ts:t.start,agent:t.agent,type:"task:"+t.id,payload:"Status: "+t.status+(t.trust?" | Trust: "+t.trust:""),session:""}).replace(/'/g,"&#39;")})'>${esc(t.desc.substring(0,20))}${trustBadge}</div></div></div>`;
+    html += `<div class="gantt-row"><div class="gantt-label" style="color:${color}">${esc(t.id)}<div class="gl-agent">${esc(t.agent)}</div></div><div class="gantt-track"><div class="gantt-bar ${t.status}" style="left:${startPct}%;width:${widthPct}%" data-item-idx="${storeItem({ts:t.start,agent:t.agent,type:"task:"+t.id,payload:"Status: "+t.status+(t.trust?" | Trust: "+t.trust:""),session:""})}">${esc(t.desc.substring(0,20))}${trustBadge}</div></div></div>`;
   });
 
-  // Time axis
+  // Time axis — flex-based, no fixed width
   const steps = 5;
-  html += `<div class="gantt-time-axis" style="width:${trackW}px">`;
+  html += `<div class="gantt-time-axis">`;
   for (let s = 0; s <= steps; s++) {
     const t = new Date(minT + (range * s / steps));
     const time = t.toISOString().substring(11,19);
@@ -1197,6 +1206,15 @@ function renderGraph() {
   }).join('');
 }
 
+// Re-render graph on window resize
+let _graphResizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(_graphResizeTimer);
+  _graphResizeTimer = setTimeout(() => {
+    if ($('#view-graph').classList.contains('active')) renderGraph();
+  }, 200);
+});
+
 // ══════════════════════════════════════════════════════════════
 // TRACE LOG TABLE
 // ══════════════════════════════════════════════════════════════
@@ -1210,7 +1228,8 @@ function renderTraceLog() {
   if (!items.length) { tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--fg2)">Aucune entrée</td></tr>`; return; }
   tbody.innerHTML = items.slice(0,1000).map(t => {
     const color = agentColor(t.agent);
-    return `<tr onclick='showItemDetail(${JSON.stringify({ts:t.timestamp,agent:t.agent,type:t.event_type,payload:t.payload,session:t.session}).replace(/'/g,"&#39;")})'><td class="mono">${esc(t.timestamp.replace(/.*T/,'').replace('Z',''))}</td><td style="color:${color}">${esc(t.agent)}</td><td class="mono">${esc(t.event_type)}</td><td>${esc(t.payload)}</td><td class="mono">${esc(t.session)}</td></tr>`;
+    const idx = storeItem({ts:t.timestamp,agent:t.agent,type:t.event_type,payload:t.payload,session:t.session});
+    return `<tr data-item-idx="${idx}"><td class="mono">${esc(t.timestamp.replace(/.*T/,'').replace('Z',''))}</td><td style="color:${color}">${esc(t.agent)}</td><td class="mono">${esc(t.event_type)}</td><td>${esc(t.payload)}</td><td class="mono">${esc(t.session)}</td></tr>`;
   }).join('');
 }
 ['#f-log-agent','#f-log-type'].forEach(s => $(s).addEventListener('change', renderTraceLog));
@@ -1309,6 +1328,7 @@ function renderMetrics() {
 })();
 
 // ── Initial renders ─────────────────────────────────────────
+// Swimlane is the default tab — only render it once
 renderSwimlane();
 </script>
 </body>

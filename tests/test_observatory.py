@@ -324,7 +324,9 @@ class TestGenerateHtml:
     def test_auto_refresh_on(self, tmp_project):
         data = obs.load_all(tmp_project)
         html = obs.generate_html(data, auto_refresh=True)
-        assert 'http-equiv="refresh"' in html
+        # No meta refresh (it loses tab/scroll state) — JS HEAD-check handles refresh
+        assert 'http-equiv="refresh"' not in html
+        assert "__AUTO_REFRESH__" not in html
 
     def test_all_views_present(self, tmp_project):
         data = obs.load_all(tmp_project)
@@ -343,6 +345,13 @@ class TestGenerateHtml:
         html = obs.generate_html(data)
         assert "<!DOCTYPE html>" in html
         assert "BMAD Observatory" in html
+
+    def test_no_inline_onclick(self, tmp_project):
+        """Ensure event delegation via data-item-idx, no fragile inline onclick."""
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        assert "data-item-idx" in html
+        assert 'onclick=' not in html.split("<script>")[0]  # no onclick in HTML body
 
 
 # ── CLI Tests ────────────────────────────────────────────────────────────────
