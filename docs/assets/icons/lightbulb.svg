@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<g class="s">
+  <path d="M12 2 C8 2, 5 5, 5 9 C5 12, 7 13.5, 8 15 V17 H16 V15
+    C17 13.5, 19 12, 19 9 C19 5, 16 2, 12 2 Z"/>
+  <line x1="9" y1="17" x2="9" y2="19.5"/>
+  <line x1="15" y1="17" x2="15" y2="19.5"/>
+  <path d="M9 19.5 C9 21.5, 15 21.5, 15 19.5"/>
+  <line x1="10" y1="9" x2="12" y2="12"/>
+  <line x1="14" y1="9" x2="12" y2="12"/>
+  <line x1="12" y1="6" x2="12" y2="12"/>
+</g>
+
+</svg>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<path class="s" d="
+  M5 4 H10
+  C10 4, 10 2, 12 2 C14 2, 14 4, 14 4
+  H19 V9.5
+  C19 9.5, 21 9.5, 21 12 C21 14.5, 19 14.5, 19 14.5
+  V20 H14
+  C14 20, 14 18, 12 18 C10 18, 10 20, 10 20
+  H5 V14.5
+  C5 14.5, 7 14.5, 7 12 C7 9.5, 5 9.5, 5 9.5
+  Z"/>
+
+</svg>

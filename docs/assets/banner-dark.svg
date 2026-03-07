@@ -1,116 +1,221 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" fill="none">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="900" y2="320" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0d1117"/>
-      <stop offset="50%" stop-color="#161b22"/>
-      <stop offset="100%" stop-color="#0d1117"/>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="900" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0a0d14"/>
+      <stop offset="40%" stop-color="#0d1117"/>
+      <stop offset="60%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#0a0d14"/>
     </linearGradient>
-    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+    <radialGradient id="nebula" cx="50%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#a371f7" stop-opacity="0.08"/>
+      <stop offset="60%" stop-color="#8957e5" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#8957e5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0.5">
       <stop offset="0%" stop-color="#c9a0ff"/>
       <stop offset="50%" stop-color="#a371f7"/>
       <stop offset="100%" stop-color="#8957e5"/>
     </linearGradient>
-    <linearGradient id="glowSoft" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#c9a0ff" stop-opacity="0.35"/>
-      <stop offset="50%" stop-color="#a371f7" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="#8957e5" stop-opacity="0.15"/>
+    <linearGradient id="titleGlow" x1="0" y1="0" x2="1" y2="0.5">
+      <stop offset="0%" stop-color="#c9a0ff" stop-opacity="0.25"/>
+      <stop offset="50%" stop-color="#a371f7" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#8957e5" stop-opacity="0.08"/>
     </linearGradient>
-    <radialGradient id="orbGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#a371f7" stop-opacity="0.3"/>
+    <linearGradient id="coverGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d1b4e"/>
+      <stop offset="100%" stop-color="#1a0e30"/>
+    </linearGradient>
+    <linearGradient id="spineGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1a0e30"/>
+      <stop offset="50%" stop-color="#2d1b4e"/>
+      <stop offset="100%" stop-color="#1a0e30"/>
+    </linearGradient>
+    <linearGradient id="pageGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8dff5"/>
+      <stop offset="100%" stop-color="#d4c5ed"/>
+    </linearGradient>
+    <linearGradient id="sigilGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c9a0ff"/>
+      <stop offset="50%" stop-color="#a371f7"/>
+      <stop offset="100%" stop-color="#8957e5"/>
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c9a0ff" stop-opacity="0.7"/>
+      <stop offset="40%" stop-color="#a371f7" stop-opacity="0.25"/>
       <stop offset="100%" stop-color="#a371f7" stop-opacity="0"/>
     </radialGradient>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#21262d" stroke-width="0.5"/>
-    </pattern>
+    <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a371f7" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#a371f7" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#a371f7" stop-opacity="0"/>
+    </linearGradient>
   </defs>
-  
+
+  <style>
+    @keyframes float { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+    @keyframes pulse { from { opacity: 0.4; } to { opacity: 0.9; } }
+  </style>
+
   <!-- Background -->
-  <rect width="900" height="320" fill="url(#bg)"/>
-  <rect width="900" height="320" fill="url(#grid)" opacity="0.4"/>
-  
-  <!-- Ambient orbs -->
-  <circle cx="150" cy="80" r="120" fill="url(#orbGlow)"/>
-  <circle cx="750" cy="240" r="100" fill="url(#orbGlow)"/>
-  <circle cx="450" cy="160" r="180" fill="url(#orbGlow)" opacity="0.5"/>
-  
-  <!-- Decorative runes - left -->
-  <g opacity="0.15" fill="url(#glow)">
-    <text x="60" y="100" font-family="serif" font-size="28">&#x2727;</text>
-    <text x="30" y="180" font-family="serif" font-size="22">&#x2726;</text>
-    <text x="80" y="250" font-family="serif" font-size="18">&#x2728;</text>
-    <text x="110" y="140" font-family="serif" font-size="15">&#x2735;</text>
-  </g>
-  
-  <!-- Decorative runes - right -->
-  <g opacity="0.15" fill="url(#glow)">
-    <text x="820" y="90" font-family="serif" font-size="22">&#x2726;</text>
-    <text x="850" y="200" font-family="serif" font-size="28">&#x2727;</text>
-    <text x="790" y="260" font-family="serif" font-size="15">&#x2735;</text>
-    <text x="830" y="150" font-family="serif" font-size="18">&#x2728;</text>
+  <rect width="900" height="300" fill="url(#bgGrad)"/>
+
+  <!-- Sparse hex grid -->
+  <g opacity="0.15" stroke="#30363d" stroke-width="0.4" fill="none">
+    <path d="M42,10 L52,27 L42,44 L22,44 L12,27 L22,10 Z"/>
+    <path d="M168,10 L178,27 L168,44 L148,44 L138,27 L148,10 Z"/>
+    <path d="M294,10 L304,27 L294,44 L274,44 L264,27 L274,10 Z"/>
+    <path d="M606,10 L616,27 L606,44 L586,44 L576,27 L586,10 Z"/>
+    <path d="M732,10 L742,27 L732,44 L712,44 L702,27 L712,10 Z"/>
+    <path d="M858,10 L868,27 L858,44 L838,44 L828,27 L838,10 Z"/>
+    <path d="M105,35 L115,52 L105,69 L85,69 L75,52 L85,35 Z"/>
+    <path d="M231,35 L241,52 L231,69 L211,69 L201,52 L211,35 Z"/>
+    <path d="M669,35 L679,52 L669,69 L649,69 L639,52 L649,35 Z"/>
+    <path d="M795,35 L805,52 L795,69 L775,69 L765,52 L775,35 Z"/>
+    <path d="M42,256 L52,273 L42,290 L22,290 L12,273 L22,256 Z"/>
+    <path d="M168,256 L178,273 L168,290 L148,290 L138,273 L148,256 Z"/>
+    <path d="M606,256 L616,273 L606,290 L586,290 L576,273 L586,256 Z"/>
+    <path d="M732,256 L742,273 L732,290 L712,290 L702,273 L712,256 Z"/>
+    <path d="M858,256 L868,273 L858,290 L838,290 L828,273 L838,256 Z"/>
+    <path d="M105,231 L115,248 L105,265 L85,265 L75,248 L85,231 Z"/>
+    <path d="M795,231 L805,248 L795,265 L775,265 L765,248 L775,231 Z"/>
   </g>
 
-  <!-- Book icon -->
-  <g transform="translate(310, 65)">
-    <rect x="0" y="20" width="60" height="75" rx="4" fill="#21262d" stroke="url(#glow)" stroke-width="2"/>
-    <rect x="0" y="20" width="12" height="75" rx="2" fill="#30363d" stroke="url(#glow)" stroke-width="1"/>
-    <line x1="18" y1="35" x2="50" y2="35" stroke="#484f58" stroke-width="1.5" stroke-linecap="round"/>
-    <line x1="18" y1="45" x2="50" y2="45" stroke="#484f58" stroke-width="1.5" stroke-linecap="round"/>
-    <line x1="18" y1="55" x2="50" y2="55" stroke="#484f58" stroke-width="1.5" stroke-linecap="round"/>
-    <line x1="18" y1="65" x2="42" y2="65" stroke="#484f58" stroke-width="1.5" stroke-linecap="round"/>
-    <text x="30" y="60" text-anchor="middle" font-family="serif" font-size="26" fill="url(#glow)">&#x2726;</text>
-    <circle cx="55" cy="15" r="2" fill="#a371f7" opacity="0.8"/>
-    <circle cx="65" cy="30" r="1.5" fill="#c9a0ff" opacity="0.6"/>
-    <circle cx="-5" cy="10" r="1.5" fill="#a371f7" opacity="0.7"/>
+  <!-- Nebula glow -->
+  <rect width="900" height="300" fill="url(#nebula)"/>
+
+  <!-- Orbital arcs -->
+  <g fill="none" stroke-linecap="round" opacity="0.12">
+    <path d="M100 80 C130 60, 160 55, 190 65" stroke="#a371f7" stroke-width="0.8"/>
+    <path d="M85 120 C105 90, 145 70, 180 75" stroke="#c9a0ff" stroke-width="0.6"/>
+    <path d="M80 200 C100 230, 150 245, 190 235" stroke="#a371f7" stroke-width="0.8"/>
+    <path d="M90 180 C110 210, 140 225, 175 220" stroke="#c9a0ff" stroke-width="0.6"/>
+    <path d="M710 65 C740 55, 770 60, 800 80" stroke="#a371f7" stroke-width="0.8"/>
+    <path d="M720 75 C755 70, 795 90, 815 120" stroke="#c9a0ff" stroke-width="0.6"/>
+    <path d="M710 235 C750 245, 800 230, 820 200" stroke="#a371f7" stroke-width="0.8"/>
+    <path d="M725 220 C760 225, 790 210, 810 180" stroke="#c9a0ff" stroke-width="0.6"/>
   </g>
 
-  <!-- Title glow layer (faux-glow via larger semi-transparent duplicate) -->
-  <text x="450" y="131" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="59" font-weight="800" letter-spacing="-1" fill="url(#glowSoft)">Grimoire Kit</text>
-  <!-- Main Title -->
-  <text x="450" y="130" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="56" font-weight="800" letter-spacing="-1" fill="url(#glow)">Grimoire Kit</text>
-  
-  <!-- Subtitle line -->
-  <line x1="280" y1="152" x2="620" y2="152" stroke="url(#glow)" stroke-width="1" opacity="0.3"/>
-  
-  <!-- Tagline -->
-  <text x="450" y="180" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif" font-size="18" fill="#8b949e" letter-spacing="2">COMPOSABLE AI AGENT PLATFORM</text>
-  
+  <!-- Particles -->
+  <g>
+    <circle cx="120" cy="60" r="1.2" fill="#a371f7" opacity="0.4" style="animation:float 5s ease-in-out 0s infinite alternate"/>
+    <circle cx="780" cy="55" r="1.0" fill="#c9a0ff" opacity="0.35" style="animation:float 5s ease-in-out 1.2s infinite alternate"/>
+    <circle cx="160" cy="240" r="0.8" fill="#8957e5" opacity="0.3" style="animation:float 5s ease-in-out 2.5s infinite alternate"/>
+    <circle cx="740" cy="245" r="1.1" fill="#a371f7" opacity="0.35" style="animation:float 5s ease-in-out 0.8s infinite alternate"/>
+    <circle cx="200" cy="100" r="0.6" fill="#c9a0ff" opacity="0.25" style="animation:float 5s ease-in-out 3.5s infinite alternate"/>
+    <circle cx="700" cy="95" r="0.7" fill="#a371f7" opacity="0.28" style="animation:float 5s ease-in-out 4.2s infinite alternate"/>
+    <circle cx="350" cy="35" r="0.9" fill="#a371f7" opacity="0.3" style="animation:float 5s ease-in-out 1.8s infinite alternate"/>
+    <circle cx="550" cy="270" r="1.0" fill="#c9a0ff" opacity="0.25" style="animation:float 5s ease-in-out 3.0s infinite alternate"/>
+    <circle cx="450" cy="20" r="1.3" fill="#a371f7" opacity="0.2" style="animation:float 5s ease-in-out 2.0s infinite alternate"/>
+    <circle cx="850" cy="150" r="0.8" fill="#8957e5" opacity="0.2" style="animation:float 5s ease-in-out 4.8s infinite alternate"/>
+    <circle cx="50" cy="150" r="0.7" fill="#c9a0ff" opacity="0.2" style="animation:float 5s ease-in-out 0.5s infinite alternate"/>
+  </g>
+
+  <!-- GRIMOIRE LOGO -->
+  <g transform="translate(450, 150) scale(0.30)">
+    <circle cx="0" cy="0" r="220" fill="url(#coreGlow)" opacity="0.4"/>
+    <g transform="translate(-256, -260)">
+      <path d="M80 115 C80 107, 86 101, 94 101 L248 101 L248 405 L94 405 C86 405, 80 399, 80 391 Z" fill="url(#coverGrad)" stroke="#3d2066" stroke-width="2.5"/>
+      <path d="M264 101 L418 101 C426 101, 432 107, 432 115 L432 391 C432 399, 426 405, 418 405 L264 405 Z" fill="url(#coverGrad)" stroke="#3d2066" stroke-width="2.5"/>
+      <rect x="244" y="101" width="24" height="304" fill="url(#spineGrad)" stroke="#3d2066" stroke-width="1.5"/>
+      <line x1="248" y1="130" x2="264" y2="130" stroke="#4a2d73" stroke-width="2" stroke-linecap="round"/>
+      <line x1="248" y1="150" x2="264" y2="150" stroke="#4a2d73" stroke-width="2" stroke-linecap="round"/>
+      <line x1="248" y1="355" x2="264" y2="355" stroke="#4a2d73" stroke-width="2" stroke-linecap="round"/>
+      <line x1="248" y1="375" x2="264" y2="375" stroke="#4a2d73" stroke-width="2" stroke-linecap="round"/>
+      <path d="M92 112 L245 112 L245 395 L92 395 C88 395, 85 392, 85 388 L85 119 C85 115, 88 112, 92 112 Z" fill="url(#pageGrad)" opacity="0.9"/>
+      <path d="M267 112 L420 112 C424 112, 427 115, 427 119 L427 388 C427 392, 424 395, 420 395 L267 395 Z" fill="url(#pageGrad)" opacity="0.9"/>
+      <g opacity="0.18" stroke="#4a2d73" stroke-width="2.5" stroke-linecap="round">
+        <line x1="108" y1="150" x2="228" y2="150"/>
+        <line x1="108" y1="170" x2="222" y2="170"/>
+        <line x1="108" y1="190" x2="215" y2="190"/>
+        <line x1="108" y1="330" x2="220" y2="330"/>
+        <line x1="108" y1="350" x2="228" y2="350"/>
+        <line x1="108" y1="370" x2="210" y2="370"/>
+      </g>
+      <g opacity="0.18" stroke="#4a2d73" stroke-width="2.5" stroke-linecap="round">
+        <line x1="284" y1="150" x2="408" y2="150"/>
+        <line x1="284" y1="170" x2="402" y2="170"/>
+        <line x1="284" y1="190" x2="395" y2="190"/>
+        <line x1="284" y1="330" x2="400" y2="330"/>
+        <line x1="284" y1="350" x2="408" y2="350"/>
+        <line x1="284" y1="370" x2="392" y2="370"/>
+      </g>
+      <circle cx="256" cy="260" r="60" fill="url(#coreGlow)" opacity="0.5"/>
+      <polygon points="256,204 299,230 299,282 256,308 213,282 213,230" fill="none" stroke="url(#sigilGrad)" stroke-width="2" opacity="0.7"/>
+      <g transform="rotate(30, 256, 260)">
+        <polygon points="256,220 288,238 288,282 256,300 224,282 224,238" fill="none" stroke="url(#sigilGrad)" stroke-width="1.2" opacity="0.4"/>
+      </g>
+      <polygon points="256,210 294,270 218,270" fill="none" stroke="url(#sigilGrad)" stroke-width="1.5" opacity="0.5"/>
+      <polygon points="256,310 294,250 218,250" fill="none" stroke="url(#sigilGrad)" stroke-width="1.5" opacity="0.5"/>
+      <polygon points="256,244 272,260 256,276 240,260" fill="url(#sigilGrad)" opacity="0.2"/>
+      <polygon points="256,244 272,260 256,276 240,260" fill="none" stroke="url(#sigilGrad)" stroke-width="1.5"/>
+      <circle cx="256" cy="260" r="4" fill="#c9a0ff"/>
+      <circle cx="256" cy="260" r="2.5" fill="#fff" opacity="0.8"/>
+      <g fill="url(#sigilGrad)">
+        <circle cx="256" cy="204" r="3.5"/><circle cx="299" cy="230" r="3.5"/><circle cx="299" cy="282" r="3.5"/>
+        <circle cx="256" cy="308" r="3.5"/><circle cx="213" cy="282" r="3.5"/><circle cx="213" cy="230" r="3.5"/>
+      </g>
+      <path d="M90 115 L90 128 M90 115 L103 115" stroke="#a371f7" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+      <path d="M422 115 L422 128 M422 115 L409 115" stroke="#a371f7" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+      <path d="M90 391 L90 378 M90 391 L103 391" stroke="#a371f7" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+      <path d="M422 391 L422 378 M422 391 L409 391" stroke="#a371f7" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+    </g>
+    <g fill="none" stroke-linecap="round">
+      <path d="M0,-130 C40,-130, 70,-115, 85,-90" stroke="#c9a0ff" stroke-width="1.2" opacity="0.2"/>
+      <path d="M0,-130 C-40,-130, -70,-115, -85,-90" stroke="#c9a0ff" stroke-width="1.2" opacity="0.2"/>
+      <path d="M0,-140 C55,-140, 95,-115, 110,-80" stroke="#a371f7" stroke-width="0.8" opacity="0.15"/>
+      <path d="M0,-140 C-55,-140, -95,-115, -110,-80" stroke="#a371f7" stroke-width="0.8" opacity="0.15"/>
+    </g>
+    <circle cx="0" cy="-122" r="2.5" fill="#a371f7" opacity="0.6" style="animation:pulse 3s ease-in-out infinite alternate"/>
+    <circle cx="50" cy="-108" r="1.5" fill="#c9a0ff" opacity="0.4"/>
+    <circle cx="-48" cy="-110" r="1.8" fill="#a371f7" opacity="0.45"/>
+    <circle cx="75" cy="-85" r="1.2" fill="#c9a0ff" opacity="0.3"/>
+    <circle cx="-72" cy="-87" r="1.0" fill="#a371f7" opacity="0.3"/>
+  </g>
+
+  <!-- Title glow -->
+  <text x="450" y="108" text-anchor="middle" font-family="'Segoe UI',system-ui,-apple-system,sans-serif" font-size="48" font-weight="800" letter-spacing="-0.5" fill="url(#titleGlow)">Grimoire Kit</text>
+  <!-- Title -->
+  <text x="450" y="107" text-anchor="middle" font-family="'Segoe UI',system-ui,-apple-system,sans-serif" font-size="46" font-weight="800" letter-spacing="-0.5" fill="url(#titleGrad)">Grimoire Kit</text>
+  <!-- Accent line -->
+  <line x1="340" y1="120" x2="560" y2="120" stroke="url(#lineGrad)" stroke-width="0.6"/>
+  <!-- Subtitle -->
+  <text x="450" y="141" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="13" fill="#8b949e" letter-spacing="3.5" font-weight="400">COMPOSABLE AI AGENT PLATFORM</text>
+
   <!-- Feature pills -->
-  <g transform="translate(130, 215)">
-    <rect width="130" height="32" rx="16" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-    <text x="14" y="21" font-size="14">&#x1F3E2;</text>
-    <text x="34" y="22" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#c9d1d9" font-weight="500">Team of Teams</text>
+  <g>
+    <g transform="translate(155, 262)">
+      <rect width="140" height="26" rx="13" fill="#161b22" stroke="#30363d" stroke-width="0.7"/>
+      <g transform="translate(10, 5) scale(0.75)" fill="none" stroke="#a371f7" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="10" cy="5" r="2.5"/><path d="M6 14 C6 11, 8 9, 10 9 C12 9, 14 11, 14 14"/><circle cx="3" cy="9" r="1.8"/><circle cx="17" cy="9" r="1.8"/>
+      </g>
+      <text x="28" y="17" font-family="'Segoe UI',system-ui,sans-serif" font-size="11" fill="#c9d1d9" font-weight="500">Team of Teams</text>
+    </g>
+    <g transform="translate(307, 262)">
+      <rect width="152" height="26" rx="13" fill="#161b22" stroke="#30363d" stroke-width="0.7"/>
+      <g transform="translate(10, 5) scale(0.75)" fill="none" stroke="#a371f7" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 2 C5 2, 2 5, 2 9 C2 13, 5 16, 10 16"/><path d="M10 2 C15 2, 18 5, 18 9 C18 13, 15 16, 10 16"/><line x1="10" y1="2" x2="10" y2="16"/>
+      </g>
+      <text x="28" y="17" font-family="'Segoe UI',system-ui,sans-serif" font-size="11" fill="#c9d1d9" font-weight="500">Semantic Memory</text>
+    </g>
+    <g transform="translate(471, 262)">
+      <rect width="106" height="26" rx="13" fill="#161b22" stroke="#30363d" stroke-width="0.7"/>
+      <g transform="translate(10, 5) scale(0.75)" fill="none" stroke="#a371f7" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14 L8 3 L12 14"/><path d="M14 3 L14 14 C14 14, 18 14, 18 10 C18 6, 14 6, 14 6"/>
+      </g>
+      <text x="28" y="17" font-family="'Segoe UI',system-ui,sans-serif" font-size="11" fill="#c9d1d9" font-weight="500">93+ Tools</text>
+    </g>
+    <g transform="translate(589, 262)">
+      <rect width="128" height="26" rx="13" fill="#161b22" stroke="#30363d" stroke-width="0.7"/>
+      <g transform="translate(10, 5) scale(0.75)" fill="none" stroke="#a371f7" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 2 L3 5 V10 C3 14, 6 17, 10 19 C14 17, 17 14, 17 10 V5 Z"/><polyline points="6,10 9,13 14,8"/>
+      </g>
+      <text x="28" y="17" font-family="'Segoe UI',system-ui,sans-serif" font-size="11" fill="#c9d1d9" font-weight="500">Self-Healing</text>
+    </g>
   </g>
-  
-  <g transform="translate(275, 215)">
-    <rect width="145" height="32" rx="16" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-    <text x="14" y="21" font-size="14">&#x1F9E0;</text>
-    <text x="36" y="22" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#c9d1d9" font-weight="500">Semantic Memory</text>
-  </g>
-  
-  <g transform="translate(435, 215)">
-    <rect width="120" height="32" rx="16" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-    <text x="14" y="21" font-size="14">&#x1F504;</text>
-    <text x="36" y="22" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#c9d1d9" font-weight="500">93+ Tools</text>
-  </g>
-  
-  <g transform="translate(570, 215)">
-    <rect width="115" height="32" rx="16" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-    <text x="14" y="21" font-size="14">&#x1F6E1;</text>
-    <text x="36" y="22" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#c9d1d9" font-weight="500">Self-Healing</text>
-  </g>
-  
-  <g transform="translate(700, 215)">
-    <rect width="95" height="32" rx="16" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-    <text x="14" y="21" font-size="14">&#x26A1;</text>
-    <text x="34" y="22" font-family="'Segoe UI', system-ui, sans-serif" font-size="13" fill="#c9d1d9" font-weight="500">IDE-First</text>
-  </g>
-  
+
   <!-- Version badge -->
-  <g transform="translate(370, 270)">
-    <rect width="160" height="26" rx="13" fill="none" stroke="url(#glow)" stroke-width="1" opacity="0.5"/>
-    <text x="80" y="18" text-anchor="middle" font-family="'Segoe UI Mono', 'Cascadia Code', monospace" font-size="12" fill="#a371f7" letter-spacing="1">v2.4.1 · MIT License</text>
+  <g transform="translate(822, 10)">
+    <rect width="50" height="16" rx="8" fill="#161b22" stroke="#30363d" stroke-width="0.5"/>
+    <text x="25" y="12" text-anchor="middle" font-family="'Segoe UI',system-ui,monospace" font-size="9" fill="#8b949e">v2.4.1</text>
   </g>
-  
-  <!-- Bottom decorative line -->
-  <line x1="0" y1="318" x2="900" y2="318" stroke="url(#glow)" stroke-width="2" opacity="0.4"/>
 </svg>

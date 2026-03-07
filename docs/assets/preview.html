@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Grimoire Kit — Design System Preview</title>
+<style>
+  body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', system-ui, sans-serif; padding: 40px; max-width: 960px; margin: 0 auto; }
+  h1 { color: #a371f7; border-bottom: 1px solid #30363d; padding-bottom: 16px; }
+  h2 { color: #c9a0ff; margin-top: 48px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; margin-top: 16px; }
+  .banner { margin: 24px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+  .banner img { width: 100%; display: block; }
+  .divider { margin: 32px 0; }
+  .divider img { width: 100%; }
+  .size-demo { display: flex; align-items: center; gap: 24px; margin-top: 16px; padding: 16px; background: #161b22; border-radius: 8px; }
+  .size-demo span { color: #8b949e; font-size: 12px; }
+  code { background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .toggle { position: fixed; top: 16px; right: 16px; padding: 8px 16px; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.body.style.background=document.body.style.background==='#ffffff'?'#0d1117':'#ffffff';document.body.style.color=document.body.style.color==='#1f2328'?'#c9d1d9':'#1f2328'">Toggle Light/Dark</button>
+
+<h1>Grimoire Kit — Design System</h1>
+<p>Asset audit preview. All icons adapt to dark/light mode via CSS <code>@media (prefers-color-scheme)</code>.</p>
+
+<h2>Logo (Dark / Light)</h2>
+<div style="display:flex;gap:24px;margin-top:16px">
+  <div style="flex:1;text-align:center;padding:32px;background:#0d1117;border:1px solid #30363d;border-radius:8px">
+    <img src="logo.svg" width="200" height="200" alt="Logo Dark">
+    <p style="color:#8b949e;margin-top:12px"><code>logo.svg</code> — 8.6KB</p>
+  </div>
+  <div style="flex:1;text-align:center;padding:32px;background:#ffffff;border:1px solid #d0d7de;border-radius:8px">
+    <img src="logo-light.svg" width="200" height="200" alt="Logo Light">
+    <p style="color:#656d76;margin-top:12px"><code>logo-light.svg</code> — 7.9KB</p>
+  </div>
+</div>
+<div style="margin-top:16px">
+  <h3 style="color:#8b949e">Logo sizes</h3>
+  <div class="size-demo">
+    <div><img src="logo.svg" width="16" height="16"><span> 16px</span></div>
+    <div><img src="logo.svg" width="32" height="32"><span> 32px</span></div>
+    <div><img src="logo.svg" width="48" height="48"><span> 48px</span></div>
+    <div><img src="logo.svg" width="64" height="64"><span> 64px</span></div>
+    <div><img src="logo.svg" width="96" height="96"><span> 96px</span></div>
+    <div><img src="logo.svg" width="128" height="128"><span> 128px</span></div>
+  </div>
+</div>
+
+<h2>Banner (Dark)</h2>
+<div class="banner"><img src="banner-dark.svg" alt="Banner Dark"></div>
+
+<h2>Banner (Light)</h2>
+<div class="banner" style="background:#fff"><img src="banner-light.svg" alt="Banner Light"></div>
+
+<h2>Divider</h2>
+<div class="divider"><img src="divider.svg" alt="Divider"></div>
+
+<h2>Icon Set (30 icons)</h2>
+<div class="grid">
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/bolt.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">bolt</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/boomerang.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">boomerang</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/brain.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">brain</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/branch.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">branch</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/chart.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">chart</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/clipboard.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">clipboard</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/cognition.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">cognition</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/dna.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">dna</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/flask.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">flask</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/folder-tree.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">folder-tree</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/grimoire.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">grimoire</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/handshake.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">handshake</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/hexagon.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">hexagon</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/integration.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">integration</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/lightbulb.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">lightbulb</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/microscope.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">microscope</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/moon.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">moon</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/network.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">network</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/plug.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">plug</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/puzzle.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">puzzle</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/resilience.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">resilience</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/rocket.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">rocket</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/seal.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">seal</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/server.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">server</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/shield-pulse.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">shield-pulse</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/sparkle.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">sparkle</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/team.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">team</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/temple.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">temple</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/workflow.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">workflow</code>
+      </div>
+      <div style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px;background:#161b22">
+        <img src="icons/wrench.svg" width="48" height="48" style="margin-bottom:8px"><br>
+        <code style="color:#8b949e;font-size:11px">wrench</code>
+      </div>
+</div>
+
+<h2>Size Reference</h2>
+<div class="size-demo">
+  <div><img src="icons/grimoire.svg" width="16" height="16"><span> 16px</span></div>
+  <div><img src="icons/grimoire.svg" width="24" height="24"><span> 24px</span></div>
+  <div><img src="icons/grimoire.svg" width="32" height="32"><span> 32px</span></div>
+  <div><img src="icons/grimoire.svg" width="48" height="48"><span> 48px</span></div>
+  <div><img src="icons/grimoire.svg" width="64" height="64"><span> 64px</span></div>
+</div>
+
+<h2>Inline Usage Demo</h2>
+<div style="padding:16px;background:#161b22;border-radius:8px;margin-top:16px">
+  <h3 style="display:flex;align-items:center;gap:8px">
+    <img src="icons/temple.svg" width="28" height="28"> Architecture
+  </h3>
+  <p style="color:#8b949e">Section header with inline icon at 28px.</p>
+
+  <table style="width:100%;margin-top:16px">
+    <tr>
+      <td style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px">
+        <img src="icons/team.svg" width="36" height="36"><br>
+        <b>Team of Teams</b><br>
+        <small style="color:#8b949e">Feature card at 36px</small>
+      </td>
+      <td style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px">
+        <img src="icons/brain.svg" width="36" height="36"><br>
+        <b>Semantic Memory</b><br>
+        <small style="color:#8b949e">Feature card at 36px</small>
+      </td>
+      <td style="text-align:center;padding:16px;border:1px solid #30363d;border-radius:8px">
+        <img src="icons/shield-pulse.svg" width="36" height="36"><br>
+        <b>Self-Healing</b><br>
+        <small style="color:#8b949e">Feature card at 36px</small>
+      </td>
+    </tr>
+  </table>
+</div>
+
+</body>
+</html>

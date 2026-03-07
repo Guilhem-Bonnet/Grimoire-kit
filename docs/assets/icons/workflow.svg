@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<g class="s">
+  <rect x="2" y="3" width="7" height="5" rx="1.5"/>
+  <rect x="15" y="3" width="7" height="5" rx="1.5"/>
+  <rect x="8.5" y="16" width="7" height="5" rx="1.5"/>
+  <line x1="9" y1="5.5" x2="15" y2="5.5"/>
+  <line x1="5.5" y1="8" x2="5.5" y2="12"/>
+  <line x1="18.5" y1="8" x2="18.5" y2="12"/>
+  <line x1="5.5" y1="12" x2="12" y2="16"/>
+  <line x1="18.5" y1="12" x2="12" y2="16"/>
+  <circle cx="5.5" cy="12" r="1" class="f" style="stroke:none;fill-opacity:0.5"/>
+  <circle cx="18.5" cy="12" r="1" class="f" style="stroke:none;fill-opacity:0.5"/>
+</g>
+
+</svg>

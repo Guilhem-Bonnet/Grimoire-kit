@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<g class="s">
+  <path d="M3 4 H9 L10.5 5.5 H18 V10 H3 Z"/>
+  <rect x="3" y="10" width="15" height="4" rx="0"/>
+  <line x1="7" y1="14" x2="7" y2="17"/>
+  <line x1="7" y1="17" x2="10" y2="17"/>
+  <line x1="7" y1="17" x2="7" y2="20.5"/>
+  <line x1="7" y1="20.5" x2="10" y2="20.5"/>
+  <rect x="10" y="15.5" width="8" height="3" rx="0.5"/>
+  <rect x="10" y="19" width="8" height="3" rx="0.5"/>
+</g>
+
+</svg>

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<g class="s">
+  <path d="M12 5.5 L3.5 7.5 V18.5 L12 16.5 Z"/>
+  <path d="M12 5.5 L20.5 7.5 V18.5 L12 16.5 Z"/>
+  <line x1="12" y1="5.5" x2="12" y2="16.5"/>
+  <path d="M16.5 10.5 L15.2 12 L16.5 13.5 L17.8 12 Z" class="f" style="fill-opacity:0.5;stroke:none"/>
+</g>
+<circle cx="18" cy="3.5" r="1" class="f" style="stroke:none"/>
+<circle cx="20" cy="5.5" r="0.6" class="f" style="fill-opacity:0.6;stroke:none"/>
+<circle cx="16" cy="2.5" r="0.5" class="f" style="fill-opacity:0.4;stroke:none"/>
+
+</svg>

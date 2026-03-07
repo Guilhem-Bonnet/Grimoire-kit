@@ -38,7 +38,7 @@
 
 <br>
 
-## 🔮 Pourquoi Grimoire Kit ?
+## <img src="docs/assets/icons/grimoire.svg" width="28" height="28" alt=""> Pourquoi Grimoire Kit ?
 
 <table>
 <tr>
@@ -52,10 +52,10 @@ Les assistants IA génériques manquent de **contexte**, de **spécialisation** 
 
 Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vraie entreprise :
 
-- 🎭 Chaque agent a une **persona forte** et un domaine d'expertise
-- 🧠 Mémoire **persistante et sémantique** entre les sessions
-- 📋 **Protocoles** standardisés de livraison et qualité
-- 🔄 **Self-improvement** — le système apprend de ses erreurs
+- Chaque agent a une **persona forte** et un domaine d'expertise
+- Mémoire **persistante et sémantique** entre les sessions
+- **Protocoles** standardisés de livraison et qualité
+- **Self-improvement** — le système apprend de ses erreurs
 
 </td>
 <td width="50%">
@@ -84,7 +84,7 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 <br>
 
-## ⚡ Quick Start
+## <img src="docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Quick Start
 
 ```bash
 # 1. Cloner le kit
@@ -109,7 +109,7 @@ bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
   --auto
 ```
 
-> **💡 Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
+> **Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
 
 <br>
 
@@ -117,41 +117,41 @@ bash /chemin/vers/bmad-custom-kit/bmad-init.sh \
 
 <br>
 
-## 🏛 Architecture
+## <img src="docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 <table>
 <tr><td>
 
 ```mermaid
 graph TB
-    subgraph VISION["🔭 TEAM VISION"]
-        PM["📋 PM"]
-        AN["🔍 Analyst"]
-        UX["🎨 UX Designer"]
+    subgraph VISION["TEAM VISION"]
+        PM["PM"]
+        AN["Analyst"]
+        UX["UX Designer"]
     end
 
-    subgraph BUILD["🔨 TEAM BUILD"]
-        DEV["⌨️ Dev"]
-        ARCH["🏗️ Architect"]
-        QA["🧪 QA"]
-        SM["📊 Scrum Master"]
+    subgraph BUILD["TEAM BUILD"]
+        DEV["Dev"]
+        ARCH["Architect"]
+        QA["QA"]
+        SM["Scrum Master"]
     end
 
-    subgraph OPS["⚙️ TEAM OPS"]
-        INFRA["🏗️ Infra"]
-        SEC["🔒 Security"]
-        MON["📈 Monitoring"]
+    subgraph OPS["TEAM OPS"]
+        INFRA["Infra"]
+        SEC["Security"]
+        MON["Monitoring"]
     end
 
-    subgraph ENGINE["🧠 GRIMOIRE ENGINE"]
-        MEM["💾 Semantic Memory"]
-        TOOLS["🔧 93+ Tools"]
-        PROTO["📜 Protocols"]
-        HEAL["🛡️ Self-Healing"]
+    subgraph ENGINE["GRIMOIRE ENGINE"]
+        MEM["Semantic Memory"]
+        TOOLS["93+ Tools"]
+        PROTO["Protocols"]
+        HEAL["Self-Healing"]
     end
 
-    VISION -- "📄 Delivery Contract" --> BUILD
-    BUILD -- "📄 Delivery Contract" --> OPS
+    VISION -- "Delivery Contract" --> BUILD
+    BUILD -- "Delivery Contract" --> OPS
     ENGINE -.- VISION
     ENGINE -.- BUILD
     ENGINE -.- OPS
@@ -169,27 +169,27 @@ graph TB
 
 <br>
 
-## ✨ Features
+## <img src="docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Features
 
 <table>
 <tr>
 <td align="center" width="33%">
 
-### 🏢 Team of Teams
+### <img src="docs/assets/icons/team.svg" width="24" height="24" alt=""> Team of Teams
 
 Trois teams autonomes : **Vision**, **Build**, **Ops**. Chacune avec ses agents, workflows et contrats de livraison inter-teams.
 
 </td>
 <td align="center" width="33%">
 
-### 🧠 Mémoire Sémantique
+### <img src="docs/assets/icons/brain.svg" width="24" height="24" alt=""> Mémoire Sémantique
 
 Recherche vectorielle **Qdrant** + fallback JSON. Détection de contradictions, consolidation automatique, failure museum.
 
 </td>
 <td align="center" width="33%">
 
-### 🔒 Completion Contract
+### <img src="docs/assets/icons/seal.svg" width="24" height="24" alt=""> Completion Contract
 
 `cc-verify.sh` détecte le stack et vérifie build + tests + lint avant tout "terminé". Zéro livraison sans validation.
 
@@ -198,21 +198,21 @@ Recherche vectorielle **Qdrant** + fallback JSON. Détection de contradictions, 
 <tr>
 <td align="center">
 
-### 🪃 Boomerang Orchestration
+### <img src="docs/assets/icons/boomerang.svg" width="24" height="24" alt=""> Boomerang Orchestration
 
 L'orchestrateur décompose, **délègue en parallèle** à des sous-agents, et agrège les résultats. Coordination invisible.
 
 </td>
 <td align="center">
 
-### 🌿 Session Branching
+### <img src="docs/assets/icons/branch.svg" width="24" height="24" alt=""> Session Branching
 
 Explorez plusieurs approches en parallèle — comme des branches Git, mais pour vos sessions d'agents. Diff, merge, cherry-pick.
 
 </td>
 <td align="center">
 
-### 🔀 Plan / Act / Think
+### <img src="docs/assets/icons/lightbulb.svg" width="24" height="24" alt=""> Plan / Act / Think
 
 Switch explicite entre **planification**, **exécution autonome** et **délibération profonde** `[THINK]` pour les décisions critiques.
 
@@ -221,21 +221,21 @@ Switch explicite entre **planification**, **exécution autonome** et **délibér
 <tr>
 <td align="center">
 
-### 🛡️ Self-Healing
+### <img src="docs/assets/icons/shield-pulse.svg" width="24" height="24" alt=""> Self-Healing
 
 Système immunitaire : détecte les anomalies, diagnostique, et propose des réparations automatiques. Failure museum intégré.
 
 </td>
 <td align="center">
 
-### 🧬 Agent Darwinism
+### <img src="docs/assets/icons/dna.svg" width="24" height="24" alt=""> Agent Darwinism
 
 Sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation.
 
 </td>
 <td align="center">
 
-### 🐜 Stigmergy
+### <img src="docs/assets/icons/network.svg" width="24" height="24" alt=""> Stigmergy
 
 Coordination **indirecte** par phéromones numériques : émission, détection, amplification, évaporation. Intelligence émergente.
 
@@ -244,21 +244,21 @@ Coordination **indirecte** par phéromones numériques : émission, détection, 
 <tr>
 <td align="center">
 
-### 🌙 Dream Mode
+### <img src="docs/assets/icons/moon.svg" width="24" height="24" alt=""> Dream Mode
 
 Consolidation **hors-session** : croise mémoire, trace, décisions et failure museum pour produire des insights émergents.
 
 </td>
 <td align="center">
 
-### 🔌 MCP Server
+### <img src="docs/assets/icons/plug.svg" width="24" height="24" alt=""> MCP Server
 
 Expose BMAD comme serveur MCP local. Compatible **Cursor, Cline, Claude Desktop** et tout IDE MCP.
 
 </td>
 <td align="center">
 
-### 🔬 R&D Engine v2.1
+### <img src="docs/assets/icons/microscope.svg" width="24" height="24" alt=""> R&D Engine v2.1
 
 Innovation autonome : reinforcement learning, closed-loop reward, prototypage automatique, seed memory, gap-analysis.
 
@@ -267,26 +267,26 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 </table>
 
 <details>
-<summary><b>🔽 Et bien plus encore... (15+ features avancées)</b></summary>
+<summary><b>Et bien plus encore... (15+ features avancées)</b></summary>
 <br>
 
 | Feature | Description |
 |:--------|:-----------|
-| 🏛️ **Adversarial Consensus** | Protocole BFT : 3 votants + 1 avocat du diable pour les décisions critiques |
-| 🛡️ **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
-| 🧠 **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
-| 📦 **Cross-Project Migration** | Exporte/importe learnings, rules, DNA, agents entre projets |
-| 🪞 **Digital Twin** | Jumeau numérique : snapshot, simulation d'impact, scénarios "what if" |
-| 🌀 **Quantum Branch** | Timelines parallèles : fork, compare, merge de configurations alternatives |
-| ⏪ **Time-Travel** | Archéologie temporelle : checkpoints, replay, restore, bisect |
-| 🧬 **CRISPR** | Édition chirurgicale de workflows : scan, splice, excise, transplant |
-| ⛓️ **Decision Log** | Blockchain légère de décisions architecturales avec vérification d'intégrité |
-| 🪞 **Mirror Agent** | Neurones miroirs : observation et transfert de patterns inter-agents |
-| 🧠 **Sensory Buffer** | Mémoire sensorielle court terme à décroissance exponentielle |
-| 🔁 **Self-Improvement Loop** | Analyse les patterns d'échec → améliore le framework automatiquement |
-| 🧭 **Context Budget Guard** | Mesure le budget LLM consommé par chaque agent |
-| 🎵 **Harmony Check** | Score d'harmonie architecturale et détection de dissonances |
-| 📊 **Dashboard** | Santé, entropie Shannon, Pareto Gini, activité git — en un coup d'œil |
+| **Adversarial Consensus** | Protocole BFT : 3 votants + 1 avocat du diable pour les décisions critiques |
+| **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
+| **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
+| **Cross-Project Migration** | Exporte/importe learnings, rules, DNA, agents entre projets |
+| **Digital Twin** | Jumeau numérique : snapshot, simulation d'impact, scénarios "what if" |
+| **Quantum Branch** | Timelines parallèles : fork, compare, merge de configurations alternatives |
+| **Time-Travel** | Archéologie temporelle : checkpoints, replay, restore, bisect |
+| **CRISPR** | Édition chirurgicale de workflows : scan, splice, excise, transplant |
+| **Decision Log** | Blockchain légère de décisions architecturales avec vérification d'intégrité |
+| **Mirror Agent** | Neurones miroirs : observation et transfert de patterns inter-agents |
+| **Sensory Buffer** | Mémoire sensorielle court terme à décroissance exponentielle |
+| **Self-Improvement Loop** | Analyse les patterns d'échec → améliore le framework automatiquement |
+| **Context Budget Guard** | Mesure le budget LLM consommé par chaque agent |
+| **Harmony Check** | Score d'harmonie architecturale et détection de dissonances |
+| **Dashboard** | Santé, entropie Shannon, Pareto Gini, activité git — en un coup d'œil |
 
 </details>
 
@@ -296,7 +296,7 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 
 <br>
 
-## 🧩 Archétypes
+## <img src="docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes
 
 Des packs d'agents pré-configurés selon votre type de projet :
 
@@ -305,7 +305,7 @@ Des packs d'agents pré-configurés selon votre type de projet :
 <td align="center" width="25%">
 <br>
 
-**🗺️ minimal**
+**minimal**
 
 <sub>Atlas · Sentinel · Mnemo</sub>
 
@@ -315,7 +315,7 @@ Point de départ universel
 <td align="center" width="25%">
 <br>
 
-**🌐 web-app**
+**web-app**
 
 <sub>+ agents stack auto-détectés</sub>
 
@@ -325,7 +325,7 @@ SPA + API + DB
 <td align="center" width="25%">
 <br>
 
-**⚙️ infra-ops**
+**infra-ops**
 
 <sub>Forge · Vault · Flow · Hawk<br>Helm · Phoenix · Probe</sub>
 
@@ -335,7 +335,7 @@ Infrastructure & DevOps
 <td align="center" width="25%">
 <br>
 
-**🧬 meta**
+**meta**
 
 <sub>Atlas · Sentinel · Mnemo</sub>
 
@@ -347,7 +347,7 @@ Auto-amélioration du kit
 <td align="center">
 <br>
 
-**🎨 creative-studio**
+**creative-studio**
 
 <sub>Agents créatifs</sub>
 
@@ -357,7 +357,7 @@ Design & Contenu
 <td align="center">
 <br>
 
-**🔧 platform-engineering**
+**platform-engineering**
 
 <sub>Agents plateforme</sub>
 
@@ -367,7 +367,7 @@ Developer Experience
 <td align="center">
 <br>
 
-**🔁 fix-loop**
+**fix-loop**
 
 <sub>Agents correctifs</sub>
 
@@ -377,7 +377,7 @@ Bug fixing rapide
 <td align="center">
 <br>
 
-**📦 stack**
+**stack**
 
 <sub>Gopher · Pixel · Serpent<br>Container · Terra · Kube</sub>
 
@@ -401,12 +401,12 @@ bash bmad-init.sh --auto
 
 <br>
 
-## 🔧 Outils CLI
+## <img src="docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Outils CLI
 
 **93 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
 
 <details>
-<summary><b>🧠 Cognition & Mémoire</b> — 12 outils</summary>
+<summary><b><img src="docs/assets/icons/brain.svg" width="18" height="18" alt=""> Cognition & Mémoire</b> — 12 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -426,7 +426,7 @@ bash bmad-init.sh --auto
 </details>
 
 <details>
-<summary><b>🧬 Évolution & Innovation</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/dna.svg" width="18" height="18" alt=""> Évolution & Innovation</b> — 10 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -444,7 +444,7 @@ bash bmad-init.sh --auto
 </details>
 
 <details>
-<summary><b>🛡️ Résilience & Qualité</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/resilience.svg" width="18" height="18" alt=""> Résilience & Qualité</b> — 10 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -462,7 +462,7 @@ bash bmad-init.sh --auto
 </details>
 
 <details>
-<summary><b>🌀 Architecture & Workflows</b> — 11 outils</summary>
+<summary><b><img src="docs/assets/icons/workflow.svg" width="18" height="18" alt=""> Architecture & Workflows</b> — 11 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -481,7 +481,7 @@ bash bmad-init.sh --auto
 </details>
 
 <details>
-<summary><b>🐜 Coordination & Communication</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/network.svg" width="18" height="18" alt=""> Coordination & Communication</b> — 10 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -499,7 +499,7 @@ bash bmad-init.sh --auto
 </details>
 
 <details>
-<summary><b>🔌 Intégrations & DevTools</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/plug.svg" width="18" height="18" alt=""> Intégrations & DevTools</b> — 10 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -526,7 +526,7 @@ Voir [framework/tools/README.md](framework/tools/README.md) pour la référence 
 
 <br>
 
-## 🔌 MCP Server
+## <img src="docs/assets/icons/plug.svg" width="28" height="28" alt=""> MCP Server
 
 Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcontextprotocol.io/) :
 
@@ -547,7 +547,7 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 
 <br>
 
-## 🧪 Tests
+## <img src="docs/assets/icons/flask.svg" width="28" height="28" alt=""> Tests
 
 <table>
 <tr>
@@ -590,7 +590,7 @@ bash tests/smoke-test.sh
 
 <br>
 
-## 📊 Grimoire vs. Alternatives
+## <img src="docs/assets/icons/chart.svg" width="28" height="28" alt=""> Grimoire vs. Alternatives
 
 <table>
 <tr>
@@ -602,18 +602,18 @@ bash tests/smoke-test.sh
 <th>Cline</th>
 <th><b>Grimoire Kit</b></th>
 </tr>
-<tr><td>🏠 Local / IDE-native</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>🏢 Team of Teams</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>📄 Delivery Contracts</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🧠 Semantic Memory</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🌿 Session Branching</td><td>❌</td><td>❌</td><td>~</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🪃 Agent Orchestration</td><td>~</td><td>✅</td><td>✅</td><td>❌</td><td>✅</td><td>✅</td></tr>
-<tr><td>🔌 MCP Server</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🔁 Self-Improvement</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🧬 Agent Evolution</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🔀 Plan/Act/Think</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td></tr>
-<tr><td>🏛️ Failure Museum</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
-<tr><td>🛡️ Anti-Fragile Score</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td><b>Local / IDE-native</b></td><td>—</td><td>—</td><td>—</td><td>&#x2713;</td><td>&#x2713;</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Team of Teams</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Delivery Contracts</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Semantic Memory</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Session Branching</b></td><td>—</td><td>—</td><td>~</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Agent Orchestration</b></td><td>~</td><td>&#x2713;</td><td>&#x2713;</td><td>—</td><td>&#x2713;</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>MCP Server</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Self-Improvement</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Agent Evolution</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Plan/Act/Think</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>&#x2713;</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Failure Museum</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
+<tr><td><b>Anti-Fragile Score</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><b>&#x2713;</b></td></tr>
 </table>
 
 <br>
@@ -622,14 +622,14 @@ bash tests/smoke-test.sh
 
 <br>
 
-## 📁 Structure du Kit
+## <img src="docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du Kit
 
 ```
 grimoire-kit/
-├── 📜 bmad-init.sh                     # Script d'initialisation + session-branch
-├── 📋 project-context.tpl.yaml         # Template contexte projet
+├── bmad-init.sh                     # Script d'initialisation + session-branch
+├── project-context.tpl.yaml         # Template contexte projet
 │
-├── 🔧 framework/                       # Moteur générique (ne pas modifier par projet)
+├── framework/                       # Moteur générique (ne pas modifier par projet)
 │   ├── agent-base.md                   # Protocole activation + CC + Plan/Act + [THINK]
 │   ├── cc-verify.sh                    # Completion Contract verifier (multi-stack)
 │   ├── sil-collect.sh                  # Self-Improvement Loop collector
@@ -641,7 +641,7 @@ grimoire-kit/
 │   ├── workflows/                      # Boomerang, orchestration, state checkpoint
 │   └── hooks/                          # Git hooks & lifecycle
 │
-├── 🧩 archetypes/                      # 9 starter kits thématiques
+├── archetypes/                      # 9 starter kits thématiques
 │   ├── minimal/                        # Point de départ universel
 │   ├── web-app/                        # Applications web
 │   ├── infra-ops/                      # Infrastructure & DevOps
@@ -652,22 +652,22 @@ grimoire-kit/
 │   ├── fix-loop/                       # Bug fixing rapide
 │   └── features/                       # Feature-driven development
 │
-├── 📚 docs/                            # Documentation complète
-├── 🧪 tests/                           # 1 875+ tests Python + smoke tests Bash
-└── 📦 src/                             # Package Python installable
+├── docs/                            # Documentation complète
+├── tests/                           # 1 875+ tests Python + smoke tests Bash
+└── src/                             # Package Python installable
 ```
 
 <br>
 
-## 🧠 Système de Mémoire
+## <img src="docs/assets/icons/brain.svg" width="28" height="28" alt=""> Système de Mémoire
 
 Un système à **4 niveaux** pour ne jamais repartir de zéro :
 
 ```mermaid
 graph LR
-    A["🔍 Mémoire<br>Sémantique"] --> B["📝 Learnings<br>par Agent"]
-    B --> C["📋 Contexte<br>Partagé"]
-    C --> D["🏛️ Failure<br>Museum"]
+    A["Mémoire<br>Sémantique"] --> B["Learnings<br>par Agent"]
+    B --> C["Contexte<br>Partagé"]
+    C --> D["Failure<br>Museum"]
 
     A -.- E["Qdrant / JSON"]
     B -.- F["agent-learnings/"]
@@ -684,7 +684,7 @@ graph LR
 
 <br>
 
-## 🚀 Gestion du Kit
+## <img src="docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Gestion du Kit
 
 ```bash
 # Version actuelle
@@ -702,7 +702,7 @@ bash _bmad/_config/custom/sil-collect.sh
 ```
 
 <details>
-<summary><b>📖 Commandes avancées complètes</b></summary>
+<summary><b>Commandes avancées complètes</b></summary>
 
 ```bash
 # Bench — mesurer les scores de performance des agents
@@ -767,7 +767,7 @@ bash bmad-init.sh nso retro
 
 <br>
 
-## 📋 Prérequis
+## <img src="docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Prérequis
 
 | Requis | Version |
 |:-------|:--------|
@@ -783,7 +783,7 @@ bash bmad-init.sh nso retro
 
 <br>
 
-## 🤝 Contribuer
+## <img src="docs/assets/icons/handshake.svg" width="28" height="28" alt=""> Contribuer
 
 Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour les guidelines.
 
@@ -794,7 +794,7 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
 <br>
 
 <p align="center">
-  <sub>MIT License · Made with 🔮 by <a href="https://github.com/Guilhem-Bonnet">Guilhem Bonnet</a> · <a href="CHANGELOG.md">Changelog</a></sub>
+  <sub>MIT License · Made with Grimoire by <a href="https://github.com/Guilhem-Bonnet">Guilhem Bonnet</a> · <a href="CHANGELOG.md">Changelog</a></sub>
 </p>
 
 <p align="center">

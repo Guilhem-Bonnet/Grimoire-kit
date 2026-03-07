@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 4" fill="none">
-  <defs>
-    <linearGradient id="line" x1="0" y1="0" x2="800" y2="0">
-      <stop offset="0%" stop-color="#0d1117" stop-opacity="0"/>
-      <stop offset="20%" stop-color="#a371f7" stop-opacity="0.6"/>
-      <stop offset="50%" stop-color="#c9a0ff"/>
-      <stop offset="80%" stop-color="#a371f7" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#0d1117" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <rect width="800" height="4" rx="2" fill="url(#line)"/>
+<style>
+  .l{stroke:#a371f7}
+  .h{fill:#a371f7}
+  @media(prefers-color-scheme:light){
+    .l{stroke:#6e40c9}
+    .h{fill:#6e40c9}
+  }
+</style>
+<line x1="100" y1="2" x2="360" y2="2" class="l" stroke-width="0.5" opacity="0.3"/>
+<path d="M403.0,2.0 L401.5,4.6 L398.5,4.6 L397.0,2.0 L398.5,-0.6 L401.5,-0.6 Z" class="h" opacity="0.6"/>
+<line x1="440" y1="2" x2="700" y2="2" class="l" stroke-width="0.5" opacity="0.3"/>
 </svg>

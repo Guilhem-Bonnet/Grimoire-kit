@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<style>
+.s{stroke:#a371f7;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.f{fill:#a371f7}
+.fs{fill:#c9a0ff}
+@media(prefers-color-scheme:light){
+.s{stroke:#6e40c9}
+.f{fill:#6e40c9}
+.fs{fill:#8250df}
+}
+</style>
+
+<g class="s">
+  <path d="M12 2 L4 5.5 V11 C4 16, 7.5 19.5, 12 22 C16.5 19.5, 20 16, 20 11 V5.5 Z"/>
+  <path d="M7 11 C8 9, 10 9, 12 11 C14 13, 16 13, 17 11" style="fill:none"/>
+  <path d="M7 14.5 C8 12.5, 10 12.5, 12 14.5 C14 16.5, 16 16.5, 17 14.5" style="fill:none;stroke-opacity:0.5"/>
+</g>
+
+</svg>
