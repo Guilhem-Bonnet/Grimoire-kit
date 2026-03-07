@@ -1,205 +1,528 @@
-# Grimoire Kit
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg">
+  <img alt="Grimoire Kit — Composable AI Agent Platform" src="docs/assets/banner-dark.svg" width="100%">
+</picture>
 
-> Toolkit pour créer et gérer un écosystème d'agents IA spécialisés par projet — teams Enterprise, personas, mémoire sémantique, workflows et qualité automatisée.
+<p align="center">
+  <a href="https://github.com/Guilhem-Bonnet/bmad-custom-kit/releases"><img src="https://img.shields.io/badge/version-2.4.1-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-1875+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
+  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-93-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+</p>
 
-## Qu'est-ce que c'est ?
+<p align="center">
+  <b>Transformez votre IDE en entreprise virtuelle peuplée d'agents IA spécialisés.</b><br>
+  <sub>Teams · Personas · Mémoire sémantique · Workflows · Qualité automatisée · Self-Healing</sub>
+</p>
 
-Grimoire Kit est un **starter kit** pour déployer une ou plusieurs équipes d'agents IA spécialisés dans n'importe quel projet.  
-Chaque agent a une persona forte, un domaine d'expertise précis, et s'inscrit dans une **team avec workflow de livraison complet** — comme dans une vraie entreprise.
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-pourquoi-grimoire-kit-">Pourquoi ?</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-outils-cli">Outils CLI</a> •
+  <a href="docs/concepts.md">Concepts</a> •
+  <a href="docs/getting-started.md">Guide complet</a>
+</p>
 
-**Ce que vous obtenez :**
-- 🏢 **Team of Teams** — Team Vision, Team Build, Team Ops avec Delivery Contracts inter-teams
-- 🤖 **Agents spécialisés** — personas avec domaine, style de communication et principes
-- 🧠 **Mémoire persistante** — recherche sémantique (Qdrant) + fallback JSON, consolidation automatique
-- 📋 **Protocole d'activation** — chaque agent suit un workflow standardisé (health-check, inbox, consolidation)
-- 🔒 **Completion Contract (CC)** — `cc-verify.sh` détecte le stack et vérifie (build, tests, lint) avant tout "terminé"
-- 🔀 **Plan/Act Mode** — switch explicite entre planification pure et exécution autonome
-- 🧠 **Extended Thinking** — délibération profonde [THINK] pour les décisions critiques
-- 🔄 **Modal Team Engine** — `--auto` détecte le stack et déploie les bons agents
-- 🌿 **Session Branching** — branches isolées pour explorer plusieurs approches en parallèle
-- 🪃 **Boomerang Orchestration** — orchestrateur (SM) qui délègue + récupère les résultats
-- 📜 **Delivery Contracts** — artefacts contractuels inter-teams (aucun handoff sans contrat signé)
-- 🏛️ **Failure Museum** — mémoire collective des erreurs pour ne pas les répéter
-- 🔌 **MCP Server** — expose BMAD comme server MCP local (cross-IDE : Cursor, Cline, Claude Desktop)
-- 🎯 **Prompt Skills Library** — prompts réutilisables par team dans `.github/prompts/{team}/`
-- ⚡ **Qualité automatisée** — détection contradictions, consolidation learnings, drift check
-- 🔁 **Self-Improvement Loop** — `sil-collect.sh` analyse les patterns d'échec et Sentinel améliore le framework
-- 🧭 **Context Budget Guard** — mesure précise du budget LLM consommé par chaque agent avant la première question
-- 🧬 **DNA Evolution Engine** — fait évoluer `archetype.dna.yaml` depuis l'usage réel du projet (BMAD_TRACE)
-- 🔨 **Agent Forge** — génère des squelettes d'agents depuis une description textuelle ou les lacunes détectées
-- 📊 **Agent Bench** — mesure les scores de performance des agents et produit un plan d'amélioration
-- 🌙 **Dream Mode** — consolidation hors-session : croise mémoire, trace, decisions et failure museum pour produire des insights émergents
-- 🏛️ **Adversarial Consensus** — protocole BFT simplifié pour les décisions critiques : 3 votants + 1 avocat du diable
-- 🛡️ **Anti-Fragile Score** — mesure la résilience adaptative du système (recovery, learning velocity, signal trend, etc.)
-- 🧠 **Reasoning Stream** — flux de raisonnement structuré : capture HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE avec analyse et compaction
-- 📦 **Cross-Project Migration** — exporte et importe des artefacts BMAD entre projets (learnings, rules, DNA, agents, consensus, anti-fragile)
-- 🧬 **Agent Darwinism** — sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation
-- 🐜 **Stigmergy** — coordination indirecte par phéromones numériques : émission, détection, amplification, évaporation, patterns émergents
-- 🗣️ **Maximes de Grice** — protocole de communication optimal : quantité, qualité, pertinence, manière
-- 📦 **Chunking 7±2** — structuration cognitive des outputs et menus (loi de Miller)
-- 🎭 **Camouflage Adaptatif** — adaptation automatique beginner/intermediate/expert
-- 🧲 **Priming Cognitif** — contexte chargé avant chaque question ou décision
-- 🏣 **Wabi-sabi** — acceptation pragmatique de l'imperfection (MVP > perfection)
-- 🧭 **Context Router** — routage intelligent du contexte vers les bons agents
-- 🛡️ **Immune System** — détection d'anomalies et auto-réparation diagnostique
-- 🔮 **Oracle Introspectif** — CTO virtuel : SWOT, maturité, attracteurs, conseils
-- 🧠 **Bias Toolkit** — 12 biais cognitifs documentés avec guidelines éthiques
-- 🎵 **Harmony Check** — score d'harmonie architecturale et détection de dissonances
-- 🧩 **Workflow Snippets** — composition modulaire de workflows depuis des briques réutilisables
-- 📊 **Dashboard** — tableau de bord complet : santé, entropie Shannon, Pareto Gini, activité git
-- 🌐 **Project Graph** — graphe de dépendances avec centralité, clustering et export Mermaid
-- 🪞 **Digital Twin** — jumeau numérique du projet : snapshot, simulation d'impact, scénarios "what if"
-- 🌀 **Quantum Branch** — timelines parallèles : fork, compare, merge de configurations alternatives
-- ⏪ **Time-Travel** — archéologie temporelle : checkpoints, replay, restore, bisect
-- 🧬 **CRISPR** — édition chirurgicale de workflows : scan, splice, excise, transplant
-- ⛓️ **Decision Log** — blockchain légère de décisions architecturales : log, chain, verify, audit
-- 🪞 **Mirror Agent** — neurones miroirs : observation, apprentissage inter-agents, transfert de patterns
-- 🧠 **Sensory Buffer** — mémoire sensorielle court terme à décroissance exponentielle
-- 🔬 **R&D Engine v2.1** — moteur d'innovation autonome avec reinforcement learning, closed-loop reward, challenge durci, filtre anti-chaînes de mutations, multi-projet, seed memory, gap-analysis, prototypes
+<br>
 
-## Quick Start
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-> **Nouveau ?** Commencez par lire [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués simplement avec des analogies.
+<br>
+
+## 🔮 Pourquoi Grimoire Kit ?
+
+<table>
+<tr>
+<td width="50%">
+
+### Le problème
+
+Les assistants IA génériques manquent de **contexte**, de **spécialisation** et de **mémoire**. Chaque session repart de zéro. Aucune coordination entre les tâches. Pas de contrôle qualité.
+
+### La solution
+
+Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vraie entreprise :
+
+- 🎭 Chaque agent a une **persona forte** et un domaine d'expertise
+- 🧠 Mémoire **persistante et sémantique** entre les sessions
+- 📋 **Protocoles** standardisés de livraison et qualité
+- 🔄 **Self-improvement** — le système apprend de ses erreurs
+
+</td>
+<td width="50%">
+
+```
+    Votre Projet
+         │
+    ┌────┴────┐
+    │  _bmad/ │  ← "Les bureaux" de votre
+    │         │     entreprise virtuelle
+    ├─────────┤
+    │ agents/ │  ← Les employés spécialisés
+    │ memory/ │  ← La mémoire collective
+    │ config/ │  ← Le règlement intérieur
+    │ tools/  │  ← La boîte à outils (93+)
+    └─────────┘
+         │
+    ┌────┴────────────┐
+    │  IDE / Copilot  │  ← Interface naturelle
+    └─────────────────┘
+```
+
+</td>
+</tr>
+</table>
+
+<br>
+
+## ⚡ Quick Start
 
 ```bash
 # 1. Cloner le kit
 git clone https://github.com/Guilhem-Bonnet/grimoire-kit.git
 
-# 2. Initialiser dans votre projet (manuel)
+# 2. Initialiser dans votre projet
 cd votre-projet/
 bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --lang "Français" \
-  --archetype infra-ops
+  --archetype web-app
 
-# 2. OU initialiser en mode auto (Modal Team Engine)
-# détecte le stack automatiquement → déploie les bons agents
+# 3. OU mode auto — détecte le stack → déploie les bons agents
 bash /chemin/vers/grimoire-kit/bmad-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --auto
-
-# 3. Vérifier votre code (Completion Contract)
-bash _bmad/_config/custom/cc-verify.sh
-
-# 4. Créer une branche de session pour explorer une approche (optionnel)
-bash /chemin/vers/grimoire-kit/bmad-init.sh session-branch --name "explore-graphql"
-
-# 5. Analyser les patterns d'échec après quelques semaines (optionnel)
-bash _bmad/_config/custom/sil-collect.sh
-# puis activer Sentinel → [FA] Self-Improvement Loop
 ```
 
-## 🏢 Modèle Team of Teams
+> **💡 Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
 
-Grimoire Kit v3 introduit le modèle **Team of Teams** : chaque team est une unité de livraison autonome avec ses agents, son workflow, et son Delivery Contract.
+<br>
 
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 🏛 Architecture
+
+<table>
+<tr><td>
+
+```mermaid
+graph TB
+    subgraph VISION["🔭 TEAM VISION"]
+        PM["📋 PM"]
+        AN["🔍 Analyst"]
+        UX["🎨 UX Designer"]
+    end
+
+    subgraph BUILD["🔨 TEAM BUILD"]
+        DEV["⌨️ Dev"]
+        ARCH["🏗️ Architect"]
+        QA["🧪 QA"]
+        SM["📊 Scrum Master"]
+    end
+
+    subgraph OPS["⚙️ TEAM OPS"]
+        INFRA["🏗️ Infra"]
+        SEC["🔒 Security"]
+        MON["📈 Monitoring"]
+    end
+
+    subgraph ENGINE["🧠 GRIMOIRE ENGINE"]
+        MEM["💾 Semantic Memory"]
+        TOOLS["🔧 93+ Tools"]
+        PROTO["📜 Protocols"]
+        HEAL["🛡️ Self-Healing"]
+    end
+
+    VISION -- "📄 Delivery Contract" --> BUILD
+    BUILD -- "📄 Delivery Contract" --> OPS
+    ENGINE -.- VISION
+    ENGINE -.- BUILD
+    ENGINE -.- OPS
+
+    style VISION fill:#1a1040,stroke:#a371f7,color:#c9d1d9
+    style BUILD fill:#0d2818,stroke:#3fb950,color:#c9d1d9
+    style OPS fill:#2d1a02,stroke:#d29922,color:#c9d1d9
+    style ENGINE fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  🔭 TEAM VISION              🔨 TEAM BUILD                  │
-│  PM · Analyst · UX    ──►   Dev · Arch · QA · SM           │
-│  Discovery → PRD → UX   PRD  Architecture → Stories → Code  │
-│                      Contract                               │
-└──────────────────────────────────────┬──────────────────────┘
-                                       │ Delivery Contract
-                                       ▼
-                            ┌─────────────────────┐
-                            │  ⚙️ TEAM OPS          │
-                            │  Infra · CI/CD · Sec  │
-                            │  IaC → Pipeline → Run │
-                            └─────────────────────┘
-```
 
-**Règle fondamentale** : Aucune team ne commence sans un **Delivery Contract** signé de la team précédente.  
-Template : `framework/delivery-contract.tpl.md`  
-Manifests : `framework/teams/team-vision.yaml`, `team-build.yaml`, `team-ops.yaml`  
-Schema : `framework/team-manifest.schema.yaml`
+</td></tr>
+</table>
 
-## 🌿 Session Branching
+**Règle fondamentale** : aucune team ne commence sans un **Delivery Contract** signé de la team précédente. Zéro handoff informel.
 
-Explorez plusieurs approches en parallèle — comme des branches Git, mais pour vos sessions d'agents.
+<br>
+
+## ✨ Features
+
+<table>
+<tr>
+<td align="center" width="33%">
+
+### 🏢 Team of Teams
+
+Trois teams autonomes : **Vision**, **Build**, **Ops**. Chacune avec ses agents, workflows et contrats de livraison inter-teams.
+
+</td>
+<td align="center" width="33%">
+
+### 🧠 Mémoire Sémantique
+
+Recherche vectorielle **Qdrant** + fallback JSON. Détection de contradictions, consolidation automatique, failure museum.
+
+</td>
+<td align="center" width="33%">
+
+### 🔒 Completion Contract
+
+`cc-verify.sh` détecte le stack et vérifie build + tests + lint avant tout "terminé". Zéro livraison sans validation.
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+### 🪃 Boomerang Orchestration
+
+L'orchestrateur décompose, **délègue en parallèle** à des sous-agents, et agrège les résultats. Coordination invisible.
+
+</td>
+<td align="center">
+
+### 🌿 Session Branching
+
+Explorez plusieurs approches en parallèle — comme des branches Git, mais pour vos sessions d'agents. Diff, merge, cherry-pick.
+
+</td>
+<td align="center">
+
+### 🔀 Plan / Act / Think
+
+Switch explicite entre **planification**, **exécution autonome** et **délibération profonde** `[THINK]` pour les décisions critiques.
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+### 🛡️ Self-Healing
+
+Système immunitaire : détecte les anomalies, diagnostique, et propose des réparations automatiques. Failure museum intégré.
+
+</td>
+<td align="center">
+
+### 🧬 Agent Darwinism
+
+Sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation.
+
+</td>
+<td align="center">
+
+### 🐜 Stigmergy
+
+Coordination **indirecte** par phéromones numériques : émission, détection, amplification, évaporation. Intelligence émergente.
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+### 🌙 Dream Mode
+
+Consolidation **hors-session** : croise mémoire, trace, décisions et failure museum pour produire des insights émergents.
+
+</td>
+<td align="center">
+
+### 🔌 MCP Server
+
+Expose BMAD comme serveur MCP local. Compatible **Cursor, Cline, Claude Desktop** et tout IDE MCP.
+
+</td>
+<td align="center">
+
+### 🔬 R&D Engine v2.1
+
+Innovation autonome : reinforcement learning, closed-loop reward, prototypage automatique, seed memory, gap-analysis.
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>🔽 Et bien plus encore... (15+ features avancées)</b></summary>
+<br>
+
+| Feature | Description |
+|:--------|:-----------|
+| 🏛️ **Adversarial Consensus** | Protocole BFT : 3 votants + 1 avocat du diable pour les décisions critiques |
+| 🛡️ **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
+| 🧠 **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
+| 📦 **Cross-Project Migration** | Exporte/importe learnings, rules, DNA, agents entre projets |
+| 🪞 **Digital Twin** | Jumeau numérique : snapshot, simulation d'impact, scénarios "what if" |
+| 🌀 **Quantum Branch** | Timelines parallèles : fork, compare, merge de configurations alternatives |
+| ⏪ **Time-Travel** | Archéologie temporelle : checkpoints, replay, restore, bisect |
+| 🧬 **CRISPR** | Édition chirurgicale de workflows : scan, splice, excise, transplant |
+| ⛓️ **Decision Log** | Blockchain légère de décisions architecturales avec vérification d'intégrité |
+| 🪞 **Mirror Agent** | Neurones miroirs : observation et transfert de patterns inter-agents |
+| 🧠 **Sensory Buffer** | Mémoire sensorielle court terme à décroissance exponentielle |
+| 🔁 **Self-Improvement Loop** | Analyse les patterns d'échec → améliore le framework automatiquement |
+| 🧭 **Context Budget Guard** | Mesure le budget LLM consommé par chaque agent |
+| 🎵 **Harmony Check** | Score d'harmonie architecturale et détection de dissonances |
+| 📊 **Dashboard** | Santé, entropie Shannon, Pareto Gini, activité git — en un coup d'œil |
+
+</details>
+
+<br>
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 🧩 Archétypes
+
+Des packs d'agents pré-configurés selon votre type de projet :
+
+<table>
+<tr>
+<td align="center" width="25%">
+<br>
+
+**🗺️ minimal**
+
+<sub>Atlas · Sentinel · Mnemo</sub>
+
+Point de départ universel
+
+</td>
+<td align="center" width="25%">
+<br>
+
+**🌐 web-app**
+
+<sub>+ agents stack auto-détectés</sub>
+
+SPA + API + DB
+
+</td>
+<td align="center" width="25%">
+<br>
+
+**⚙️ infra-ops**
+
+<sub>Forge · Vault · Flow · Hawk<br>Helm · Phoenix · Probe</sub>
+
+Infrastructure & DevOps
+
+</td>
+<td align="center" width="25%">
+<br>
+
+**🧬 meta**
+
+<sub>Atlas · Sentinel · Mnemo</sub>
+
+Auto-amélioration du kit
+
+</td>
+</tr>
+<tr>
+<td align="center">
+<br>
+
+**🎨 creative-studio**
+
+<sub>Agents créatifs</sub>
+
+Design & Contenu
+
+</td>
+<td align="center">
+<br>
+
+**🔧 platform-engineering**
+
+<sub>Agents plateforme</sub>
+
+Developer Experience
+
+</td>
+<td align="center">
+<br>
+
+**🔁 fix-loop**
+
+<sub>Agents correctifs</sub>
+
+Bug fixing rapide
+
+</td>
+<td align="center">
+<br>
+
+**📦 stack**
+
+<sub>Gopher · Pixel · Serpent<br>Container · Terra · Kube</sub>
+
+Auto-détection stack
+
+</td>
+</tr>
+</table>
 
 ```bash
-# Créer une branche pour explorer une option
-bash bmad-init.sh session-branch --name "explore-graphql"
+# Déployer un archétype
+bash bmad-init.sh --archetype infra-ops
 
-# Lister les branches actives
-bash bmad-init.sh session-branch --list
-
-# Comparer les artefacts produits dans deux branches
-bash bmad-init.sh session-branch --diff main explore-graphql
-
-# Merger une branche vers main
-bash bmad-init.sh session-branch --merge explore-graphql
-
-# Cherry-pick un artefact spécifique
-bash bmad-init.sh session-branch --cherry-pick explore-graphql \
-  "_bmad-output/.runs/explore-graphql/arch.md" \
-  "_bmad-output/planning-artifacts/architecture-final.md"
+# Mode auto : détecte le stack → choisit les bons agents
+bash bmad-init.sh --auto
 ```
 
-Structure : `_bmad-output/.runs/{branch-name}/{run-id}/`  
-Guide complet : `framework/sessions/README.md`
+<br>
 
-## 🔀 Plan/Act Mode & Extended Thinking
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-Chaque agent supporte deux modes et un mode de délibération :
+<br>
 
-| Trigger | Mode | Comportement |
-|---------|------|-------------|
-| `[PLAN]` ou "planifie" | Planification | Structure + attend validation avant toute modification |
-| `[ACT]` ou rien | Exécution (défaut) | Exécute directement jusqu'à CC PASS sans interruption |
-| `[THINK]` ou "réfléchis profondément" | Délibération | ≥ 3 options, simulation des échecs, ADR obligatoire |
+## 🔧 Outils CLI
 
-## 🪃 Boomerang Orchestration
+**93 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
 
-Un agent orchestrateur (SM) décompose, délègue à des sous-agents en parallèle, et agrège les résultats.
+<details>
+<summary><b>🧠 Cognition & Mémoire</b> — 12 outils</summary>
 
-```yaml
-# Exemple dans un workflow YAML
-- step: "analyse-codebase"
-  type: orchestrate
-  spawn:
-    - agent: dev
-      task: "Analyse sécurité dans src/"
-      output_key: security_findings
-    - agent: qa
-      task: "Coverage analysis dans src/"
-      output_key: coverage_findings
-  merge:
-    strategy: summarize
-    save_to: "_bmad-output/team-build/analysis-report.md"
-```
+| Outil | Description |
+|:------|:-----------|
+| `dream.py` | Consolidation hors-session, insights émergents |
+| `reasoning-stream.py` | Hypothèses, doutes, alternatives structurées |
+| `sensory-buffer.py` | Mémoire court terme à décroissance exponentielle |
+| `procedural-memory.py` | Mémoire procédurale persistante |
+| `semantic-cache.py` | Cache sémantique intelligent |
+| `semantic-chain.py` | Chaînes de pensée sémantiques |
+| `memory-lint.py` | Validation de cohérence mémoire |
+| `memory-sync.py` | Synchronisation mémoire multi-agents |
+| `context-guard.py` | Garde-fou du budget contexte LLM |
+| `context-router.py` | Routage intelligent du contexte |
+| `context-merge.py` | Fusion de contextes multi-sources |
+| `context-summarizer.py` | Résumé intelligent de contexte |
 
-Documentation : `framework/workflows/boomerang-orchestration.md`  
-Protocol : `framework/workflows/subagent-orchestration.md`
+</details>
 
-## 🎯 Prompt Skills Library
+<details>
+<summary><b>🧬 Évolution & Innovation</b> — 10 outils</summary>
 
-Prompts réutilisables par team, invocables via slash commands dans Copilot Chat :
+| Outil | Description |
+|:------|:-----------|
+| `r-and-d.py` | Moteur R&D v2.1 avec reinforcement learning |
+| `agent-darwinism.py` | Sélection naturelle, fitness, hybridation |
+| `dna-evolve.py` | Évolution du DNA depuis l'usage réel |
+| `incubator.py` | Incubateur d'idées et de prototypes |
+| `agent-forge.py` | Génération de squelettes d'agents |
+| `agent-bench.py` | Benchmarks de performance agents |
+| `mirror-agent.py` | Observation et transfert de patterns |
+| `cognitive-flywheel.py` | Boucle d'auto-amélioration continue |
+| `fitness-tracker.py` | Suivi de fitness des agents |
+| `new-game-plus.py` | Redémarrage enrichi de sessions |
 
-```
-.github/prompts/
-├── team-vision/
-│   ├── competitive-intelligence.prompt.md   # Analyse concurrentielle sprint
-│   ├── user-interview.prompt.md             # Interview utilisateur structuré
-│   └── mvp-scoping.prompt.md               # Priorisation MoSCoW
-├── team-build/
-│   ├── tdd-cycle.prompt.md                  # Cycle TDD red-green-refactor
-│   ├── adversarial-code-review.prompt.md    # Revue de code adversariale
-│   └── architecture-decision-record.prompt.md  # ADR avec [THINK]
-└── team-ops/
-    ├── incident-runbook.prompt.md           # Runbook opérationnel step-by-step
-    └── security-audit.prompt.md            # Audit sécurité OWASP + infra
-```
+</details>
 
-## 🔌 MCP Server BMAD
+<details>
+<summary><b>🛡️ Résilience & Qualité</b> — 10 outils</summary>
 
-BMAD expose un serveur MCP (Model Context Protocol) local — compatible avec tout IDE MCP.
+| Outil | Description |
+|:------|:-----------|
+| `self-healing.py` | Diagnostic et réparation automatique |
+| `immune-system.py` | Détection d'anomalies et auto-réparation |
+| `antifragile-score.py` | Score de résilience adaptative |
+| `early-warning.py` | Système d'alerte précoce |
+| `harmony-check.py` | Score d'harmonie architecturale |
+| `preflight-check.py` | Validation pre-flight du projet |
+| `failure-museum.py` | Catalogue structuré des échecs |
+| `bug-finder.py` | Détection automatique de bugs |
+| `quality-score.py` | Score de qualité multi-dimensionnel |
+| `schema-validator.py` | Validation des fichiers YAML |
 
-```bash
-# Configurer dans Claude Desktop / Cursor / Cline
+</details>
+
+<details>
+<summary><b>🌀 Architecture & Workflows</b> — 11 outils</summary>
+
+| Outil | Description |
+|:------|:-----------|
+| `crispr.py` | Édition chirurgicale de workflows |
+| `digital-twin.py` | Simulation d'impact "what if" |
+| `quantum-branch.py` | Timelines parallèles |
+| `time-travel.py` | Checkpoints, replay, bisect |
+| `decision-log.py` | Blockchain de décisions |
+| `project-graph.py` | Graphe de dépendances |
+| `dashboard.py` | Tableau de bord santé projet |
+| `oracle.py` | CTO virtuel : SWOT, maturité |
+| `dark-matter.py` | Détection de patterns cachés |
+| `desire-paths.py` | Chemins de désir émergents |
+| `workflow-adapt.py` | Adaptation dynamique de workflows |
+
+</details>
+
+<details>
+<summary><b>🐜 Coordination & Communication</b> — 10 outils</summary>
+
+| Outil | Description |
+|:------|:-----------|
+| `stigmergy.py` | Phéromones numériques émergentes |
+| `adversarial-consensus.py` | Consensus BFT avec avocat du diable |
+| `swarm-consensus.py` | Consensus en essaim |
+| `nso.py` | Nervous System Orchestrator |
+| `orchestrator.py` | Orchestration multi-agents |
+| `nudge-engine.py` | Nudges comportementaux doux |
+| `bias-toolkit.py` | 12 biais cognitifs documentés |
+| `mycelium.py` | Réseau mycelium inter-agents |
+| `message-bus.py` | Bus de messages inter-agents |
+| `rosetta.py` | Traduction cross-format |
+
+</details>
+
+<details>
+<summary><b>🔌 Intégrations & DevTools</b> — 10 outils</summary>
+
+| Outil | Description |
+|:------|:-----------|
+| `bmad-mcp-tools.py` | Serveur MCP BMAD |
+| `mcp-proxy.py` | Proxy MCP multi-server |
+| `cross-migrate.py` | Migration cross-projet |
+| `auto-doc.py` | Synchronisation README ↔ code |
+| `gen-tests.py` | Générateur de tests automatique |
+| `llm-router.py` | Routage intelligent LLM |
+| `token-budget.py` | Gestion budget tokens |
+| `tool-registry.py` | Registre des outils disponibles |
+| `tool-advisor.py` | Conseiller d'outils contextuel |
+| `observatory.py` | Observatoire de métriques |
+
+</details>
+
+<br>
+
+Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète des 93 outils.
+
+<br>
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 🔌 MCP Server
+
+Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcontextprotocol.io/) :
+
+```jsonc
+// Claude Desktop / Cursor / Cline
 {
   "mcpServers": {
     "bmad": {
@@ -211,336 +534,263 @@ BMAD expose un serveur MCP (Model Context Protocol) local — compatible avec to
 }
 ```
 
-**Tools disponibles** : `get_project_context`, `get_agent_memory`, `run_completion_contract`,  
-`get_workflow_status`, `list_sessions`, `get_failure_museum`, `spawn_subagent_task`
+**Tools exposés** : `get_project_context` · `get_agent_memory` · `run_completion_contract` · `get_workflow_status` · `list_sessions` · `get_failure_museum` · `spawn_subagent_task`
 
-Spécification complète : `framework/mcp/bmad-mcp-server.md`
+<br>
 
-## Structure du Kit
+## 🧪 Tests
+
+<table>
+<tr>
+<td>
+
+**1 875+ tests** couvrant l'intégralité du framework :
+
+```bash
+# Tous les tests
+python3 -m pytest tests/ -q --tb=short
+
+# Un fichier spécifique
+python3 -m pytest tests/test_dream.py -v
+
+# Smoke tests Bash (122 assertions)
+bash tests/smoke-test.sh
+```
+
+</td>
+<td>
+
+| Catégorie | Tests |
+|:----------|------:|
+| Cognition & Mémoire | 380+ |
+| Évolution & R&D | 350+ |
+| Résilience & Qualité | 280+ |
+| Architecture & Workflows | 250+ |
+| Coordination | 200+ |
+| Intégrations | 180+ |
+| Robustesse (fuzzing) | 38 |
+| **Total** | **1 875+** |
+
+</td>
+</tr>
+</table>
+
+<br>
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 📊 Grimoire vs. Alternatives
+
+<table>
+<tr>
+<th></th>
+<th>CrewAI</th>
+<th>AutoGen</th>
+<th>LangGraph</th>
+<th>Aider</th>
+<th>Cline</th>
+<th><b>Grimoire Kit</b></th>
+</tr>
+<tr><td>🏠 Local / IDE-native</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>🏢 Team of Teams</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>📄 Delivery Contracts</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🧠 Semantic Memory</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🌿 Session Branching</td><td>❌</td><td>❌</td><td>~</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🪃 Agent Orchestration</td><td>~</td><td>✅</td><td>✅</td><td>❌</td><td>✅</td><td>✅</td></tr>
+<tr><td>🔌 MCP Server</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🔁 Self-Improvement</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🧬 Agent Evolution</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🔀 Plan/Act/Think</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td></tr>
+<tr><td>🏛️ Failure Museum</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>🛡️ Anti-Fragile Score</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+</table>
+
+<br>
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 📁 Structure du Kit
 
 ```
 grimoire-kit/
-├── bmad-init.sh                    # Script d'init + session-branch subcommand
-├── project-context.tpl.yaml        # Template contexte projet
+├── 📜 bmad-init.sh                     # Script d'initialisation + session-branch
+├── 📋 project-context.tpl.yaml         # Template contexte projet
 │
-├── framework/                      # GENERIC — ne jamais modifier par projet
-│   ├── agent-base.md               # Protocole activation + CC + Plan/Act + [THINK]
-│   ├── cc-verify.sh                # Completion Contract verifier (multi-stack)
-│   ├── sil-collect.sh              # Self-Improvement Loop : collecteur de signaux
-│   ├── team-manifest.schema.yaml   # Schema standard de définition d'une team
-│   ├── delivery-contract.tpl.md    # Template contrat inter-teams
-│   ├── teams/                      # Teams prêtes à l'emploi
-│   │   ├── team-vision.yaml        # Team Vision — Product & Strategy
-│   │   ├── team-build.yaml         # Team Build — Engineering & Quality
-│   │   └── team-ops.yaml           # Team Ops — Infrastructure & Reliability
-│   ├── sessions/
-│   │   └── README.md               # Guide Session Branching
-│   ├── mcp/
-│   │   └── bmad-mcp-server.md      # Spec MCP Server BMAD local
-│   ├── memory/
-│   │   ├── maintenance.py
-│   │   ├── mem0-bridge.py
-│   │   ├── session-save.py
-│   │   ├── failure-museum.tpl.md   # Template Failure Museum
-│   │   └── contradiction-log.tpl.md
-│   └── workflows/
-│       ├── boomerang-orchestration.md   # Boomerang pattern SM→Dev→QA→SM
-│       ├── subagent-orchestration.md    # Protocol spawn sous-agents
-│       ├── state-checkpoint.md          # State persistence & resume
-│       ├── workflow-status.tpl.md       # Template status workflow
-│       └── incident-response.md
+├── 🔧 framework/                       # Moteur générique (ne pas modifier par projet)
+│   ├── agent-base.md                   # Protocole activation + CC + Plan/Act + [THINK]
+│   ├── cc-verify.sh                    # Completion Contract verifier (multi-stack)
+│   ├── sil-collect.sh                  # Self-Improvement Loop collector
+│   ├── teams/                          # Team manifests (Vision, Build, Ops)
+│   ├── tools/                          # 93 outils Python CLI
+│   ├── memory/                         # Système de mémoire à 4 niveaux
+│   ├── mcp/                            # MCP Server spec
+│   ├── sessions/                       # Session Branching
+│   ├── workflows/                      # Boomerang, orchestration, state checkpoint
+│   └── hooks/                          # Git hooks & lifecycle
 │
-├── archetypes/                     # Starter kits thématiques
-│   ├── meta/       # Atlas 🗺️, Sentinel 🔍, Mnemo 🧠
-│   ├── stack/      # Gopher🐹 Go, Pixel⚛️ TS, Serpent🐍 Py, Container🐋, Terra🌍, Kube⎈
-│   ├── infra-ops/  # Forge, Vault, Flow, Hawk, Helm, Phoenix, Probe
-│   └── minimal/    # Agent vierge + meta
+├── 🧩 archetypes/                      # 9 starter kits thématiques
+│   ├── minimal/                        # Point de départ universel
+│   ├── web-app/                        # Applications web
+│   ├── infra-ops/                      # Infrastructure & DevOps
+│   ├── stack/                          # Agents par techno (Go, Python, TS...)
+│   ├── meta/                           # Auto-amélioration du kit
+│   ├── creative-studio/                # Design & contenu
+│   ├── platform-engineering/           # Developer Experience
+│   ├── fix-loop/                       # Bug fixing rapide
+│   └── features/                       # Feature-driven development
 │
-└── .github/
-    └── prompts/
-        ├── team-vision/   # competitive-intelligence, user-interview, mvp-scoping
-        ├── team-build/    # tdd-cycle, adversarial-code-review, adr
-        └── team-ops/      # incident-runbook, security-audit
+├── 📚 docs/                            # Documentation complète
+├── 🧪 tests/                           # 1 875+ tests Python + smoke tests Bash
+└── 📦 src/                             # Package Python installable
 ```
 
-## Archétypes disponibles
+<br>
 
-| Archétype | Agents inclus | Pour qui |
-|-----------|---------------|----------|
-| **minimal** | Atlas + Sentinel + Mnemo + 1 agent vierge | Tout projet — point de départ |
-| **infra-ops** | + Forge, Vault, Flow, Hawk, Helm, Phoenix, Probe | Projets infrastructure/DevOps |
-| **web-app** | Atlas + Sentinel + Mnemo (+ agents stack auto) | Applications web — SPA + API + DB |
-| **stack** (auto) | Gopher, Pixel, Serpent, Container, Terra, Kube, Playbook | Déployés selon stack détecté |
+## 🧠 Système de Mémoire
 
-## Créer un nouvel agent
+Un système à **4 niveaux** pour ne jamais repartir de zéro :
 
-Voir [docs/creating-agents.md](docs/creating-agents.md) pour le guide complet.
+```mermaid
+graph LR
+    A["🔍 Mémoire<br>Sémantique"] --> B["📝 Learnings<br>par Agent"]
+    B --> C["📋 Contexte<br>Partagé"]
+    C --> D["🏛️ Failure<br>Museum"]
 
-1. Copier `archetypes/minimal/agents/custom-agent.tpl.md`
-2. Remplir la persona, les prompts, les règles
-3. Ajouter dans `agent-manifest.csv`
-4. Créer son fichier learnings dans `agent-learnings/`
-5. Si applicable, créer son dossier dans `.github/prompts/{team-name}/`
+    A -.- E["Qdrant / JSON"]
+    B -.- F["agent-learnings/"]
+    C -.- G["shared-context.md"]
+    D -.- H["failure-museum.md"]
 
-## ⚡ Outils de Performance & Évolution
+    style A fill:#1a1040,stroke:#a371f7,color:#fff
+    style B fill:#0d2818,stroke:#3fb950,color:#fff
+    style C fill:#2d1a02,stroke:#d29922,color:#fff
+    style D fill:#3d0d0d,stroke:#f85149,color:#fff
+```
 
-### Commandes de gestion du kit
+**Qualité automatisée** : détection de contradictions, consolidation des learnings, state checkpoints avec resume automatique.
+
+<br>
+
+## 🚀 Gestion du Kit
 
 ```bash
 # Version actuelle
 bash bmad-init.sh --version
 
-# Mise à jour depuis le dépôt upstream
+# Mise à jour depuis upstream
 bash bmad-init.sh upgrade              # met à jour framework/ et archetypes/
 bash bmad-init.sh upgrade --dry-run    # preview sans modification
-bash bmad-init.sh upgrade --force      # écrase même les fichiers modifiés localement
+
+# Completion Contract — vérifier avant "terminé"
+bash _bmad/_config/custom/cc-verify.sh
+
+# Self-Improvement Loop — analyser les patterns d'échec
+bash _bmad/_config/custom/sil-collect.sh
 ```
 
-### Outils CLI avancés
-
-Six outils CLI pour maintenir le kit en bonne santé sur la durée :
+<details>
+<summary><b>📖 Commandes avancées complètes</b></summary>
 
 ```bash
 # Bench — mesurer les scores de performance des agents
-bash bmad-init.sh bench --summary           # tableau de bord global
-bash bmad-init.sh bench --report            # détail par agent + tendance
-bash bmad-init.sh bench --improve           # génère bench-context.md pour Sentinel
+bash bmad-init.sh bench --summary
+bash bmad-init.sh bench --report
+bash bmad-init.sh bench --improve
 
 # Forge — générer des squelettes d'agents
 bash bmad-init.sh forge --from "migrations DB PostgreSQL"
-bash bmad-init.sh forge --from-gap          # depuis les lacunes détectées
-bash bmad-init.sh forge --install db-migrator
+bash bmad-init.sh forge --from-gap
 
 # Guard — budget de contexte LLM
-bash bmad-init.sh guard                     # tous les agents (exit 1=warn, 2=crit)
+bash bmad-init.sh guard
 bash bmad-init.sh guard --agent atlas --detail --model gpt-4o
-bash bmad-init.sh guard --suggest           # + recommandations de réduction
-bash bmad-init.sh guard --json              # sortie JSON (CI-compatible)
+bash bmad-init.sh guard --suggest
 
 # Evolve — DNA vivante
-bash bmad-init.sh evolve                    # proposer évolutions depuis BMAD_TRACE
-bash bmad-init.sh evolve --report           # rapport Markdown seul
-bash bmad-init.sh evolve --since 2026-01-01 # période spécifique
-bash bmad-init.sh evolve --apply            # appliquer le dernier patch (après review)
+bash bmad-init.sh evolve
+bash bmad-init.sh evolve --apply
 
-# Dream — consolidation hors-session et insights émergents
-bash bmad-init.sh dream                     # dream complet (toutes les sources)
-bash bmad-init.sh dream --since 2026-01-01  # depuis une date
-bash bmad-init.sh dream --agent dev         # focus un agent
-bash bmad-init.sh dream --validate          # valider les insights (no hallucination)
-bash bmad-init.sh dream --dry-run           # preview sans écrire
-bash bmad-init.sh dream --multi-project ../proj-a ../proj-b  # croiser les insights entre projets
+# Dream — consolidation hors-session
+bash bmad-init.sh dream
+bash bmad-init.sh dream --agent dev
+bash bmad-init.sh dream --multi-project ../proj-a ../proj-b
 
-# Consensus — protocole de consensus adversarial pour décisions critiques
+# Consensus — protocole adversarial
 bash bmad-init.sh consensus --proposal "Utiliser PostgreSQL pour le cache sessions"
-bash bmad-init.sh consensus --proposal-file proposal.md --threshold 0.75
-bash bmad-init.sh consensus --history       # voir les décisions passées
-bash bmad-init.sh consensus --stats         # statistiques de consensus
+bash bmad-init.sh consensus --history
 
-# Anti-Fragile Score — mesure la résilience adaptative
-bash bmad-init.sh antifragile                # score compact
-bash bmad-init.sh antifragile --detail       # rapport complet avec recommandations
-bash bmad-init.sh antifragile --trend        # tendance historique
-bash bmad-init.sh antifragile --since 2026-01-01  # depuis une date
-bash bmad-init.sh antifragile --multi-project ../proj-a ../proj-b  # comparer entre projets
+# Anti-Fragile Score
+bash bmad-init.sh antifragile
+bash bmad-init.sh antifragile --detail --trend
 
-# Reasoning Stream — flux de raisonnement structuré
-bash bmad-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis pourrait remplacer memcached"
-bash bmad-init.sh reasoning query --type DOUBT --status open
-bash bmad-init.sh reasoning analyze          # rapport d'analyse
-bash bmad-init.sh reasoning compact --before 2026-01-01  # archiver les anciennes entrées
-bash bmad-init.sh reasoning stats            # statistiques rapides
+# Reasoning Stream
+bash bmad-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis > memcached"
+bash bmad-init.sh reasoning analyze
 
-# Cross-Project Migration — pollinisation entre projets
-bash bmad-init.sh migrate export              # exporter un bundle
-bash bmad-init.sh migrate export --only learnings,rules --since 2026-01-01
-bash bmad-init.sh migrate inspect --bundle migration-bundle.json
+# Cross-Project Migration
+bash bmad-init.sh migrate export --only learnings,rules
 bash bmad-init.sh migrate import --bundle migration-bundle.json --dry-run
 
-# Agent Darwinism — sélection naturelle des agents
-bash bmad-init.sh darwinism evaluate           # évaluer la fitness
-bash bmad-init.sh darwinism leaderboard        # classement
-bash bmad-init.sh darwinism evolve             # actions évolutives
-bash bmad-init.sh darwinism history            # historique des générations
-bash bmad-init.sh darwinism lineage --agent dev # lignée d'un agent
+# Agent Darwinism
+bash bmad-init.sh darwinism evaluate
+bash bmad-init.sh darwinism leaderboard
+bash bmad-init.sh darwinism evolve
 
-# Stigmergy — coordination indirecte par phéromones
-bash bmad-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité" --agent dev
-bash bmad-init.sh stigmergy sense                # phéromones actives
-bash bmad-init.sh stigmergy amplify --id PH-xx --agent qa  # renforcer
-bash bmad-init.sh stigmergy landscape            # carte phéromonique
-bash bmad-init.sh stigmergy trails               # patterns émergents
-bash bmad-init.sh stigmergy evaporate            # nettoyer les signaux morts
-
-# Memory Lint — validation de cohérence mémoire
-bash bmad-init.sh memory-lint                    # vérifier la mémoire
-bash bmad-init.sh memory-lint --fix              # corriger automatiquement
-bash bmad-init.sh memory-lint --json             # sortie JSON
+# Stigmergy
+bash bmad-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité"
+bash bmad-init.sh stigmergy landscape
+bash bmad-init.sh stigmergy trails
 
 # NSO — Nervous System Orchestrator
-bash bmad-init.sh nso run                        # cycle complet (dream→stigmergy→antifragile→darwinism→lint)
-bash bmad-init.sh nso run --quick --json         # mode rapide, sortie JSON
-bash bmad-init.sh nso retro                      # rétrospective croisée
+bash bmad-init.sh nso run
+bash bmad-init.sh nso retro
 
-# Schema Validator — validation des fichiers YAML du kit
-bash bmad-init.sh schema-validate                # valider tous les fichiers
-bash bmad-init.sh schema-validate --type dna     # valider uniquement les DNA
-bash bmad-init.sh schema-validate --file path    # valider un fichier spécifique
-
-# Auto-Doc — synchronisation README ↔ code
-bash bmad-init.sh auto-doc check                 # détecter les drifts
-bash bmad-init.sh auto-doc sync                  # corriger automatiquement
-
-# Digital Twin — simulation d'impact
-python framework/tools/digital-twin.py --project-root . snapshot                              # capturer un cliché
-python framework/tools/digital-twin.py --project-root . simulate --change "remove agent:analyst" # simuler un changement
-python framework/tools/digital-twin.py --project-root . impact --target agent:dev              # analyser la criticité
-python framework/tools/digital-twin.py --project-root . scenario --name refactor --change "remove agent:old" --change "add agent:new"
-
-# Quantum Branch — timelines parallèles
-python framework/tools/quantum-branch.py --project-root . fork --name "experiment-1" --description "Test sans analyst"
-python framework/tools/quantum-branch.py --project-root . list                   # lister les branches
-python framework/tools/quantum-branch.py --project-root . compare --branches main,experiment-1
-python framework/tools/quantum-branch.py --project-root . merge --source experiment-1 --dry-run
-
-# Time-Travel — archéologie temporelle
-python framework/tools/time-travel.py --project-root . checkpoint --label "pre-refactor"
-python framework/tools/time-travel.py --project-root . history                   # historique des checkpoints
-python framework/tools/time-travel.py --project-root . replay --from cp-001 --to cp-003
-python framework/tools/time-travel.py --project-root . bisect --good cp-001 --bad cp-005 --test "python -m pytest"
-
-# CRISPR — édition chirurgicale de workflows
-python framework/tools/crispr.py --project-root . scan --workflow review-cycle    # scanner la structure
-python framework/tools/crispr.py --project-root . splice --workflow review-cycle --at seg-003 --insert "gate: approval" --position after
-python framework/tools/crispr.py --project-root . transplant --from review:seg-002 --to deploy:seg-001
-python framework/tools/crispr.py --project-root . validate --workflow review-cycle
-
-# Decision Log — blockchain de décisions
-python framework/tools/decision-log.py --project-root . log --title "Choix DB" --decision "PostgreSQL" --rationale "ACID, relationnelle" --scope architecture
-python framework/tools/decision-log.py --project-root . chain --limit 10         # dernières décisions
-python framework/tools/decision-log.py --project-root . verify                   # vérifier l'intégrité
-python framework/tools/decision-log.py --project-root . export --format markdown --output decisions.md
-
-# Mirror Agent — neurones miroirs
-python framework/tools/mirror-agent.py --project-root . observe --agent dev       # observer un agent
-python framework/tools/mirror-agent.py --project-root . learn --source dev        # apprendre ses patterns
-python framework/tools/mirror-agent.py --project-root . mirror --from dev --to qa # transférer les patterns
-python framework/tools/mirror-agent.py --project-root . diff --agents dev,qa,architect
-
-# Sensory Buffer — mémoire sensorielle
-python framework/tools/sensory-buffer.py --project-root . capture --agent dev --data '{"task": "implement login"}' --category context --importance 0.8
-python framework/tools/sensory-buffer.py --project-root . recall --agent dev      # rappeler le contexte actif
-python framework/tools/sensory-buffer.py --project-root . decay --agent dev       # état de décroissance
-python framework/tools/sensory-buffer.py --project-root . prioritize --agent dev --top 5
-python framework/tools/sensory-buffer.py --project-root . flush --agent dev --older-than 24h
-
-# R&D Innovation Engine v2.1 — reinforcement learning + closed-loop + anti-mutation
-python framework/tools/r-and-d.py --project-root . cycle                          # 1 cycle d'innovation
-python framework/tools/r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs avec RL
-python framework/tools/r-and-d.py --project-root . train --epochs 10 --auto-stop  # auto-stop si convergence
-python framework/tools/r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
-python framework/tools/r-and-d.py --project-root . harvest                        # récolte d'idées seule
-python framework/tools/r-and-d.py --project-root . seed                           # ensemencer les sources (incubator, stigmergy, mémoire)
-python framework/tools/r-and-d.py --project-root . health                         # santé du projet (closed-loop metrics)
-python framework/tools/r-and-d.py --project-root . prototype                      # générer des squelettes Python pour les gagnants
-python framework/tools/r-and-d.py --project-root . prototype --idea-id RND-0001-01 # prototype pour une idée spécifique
-python framework/tools/r-and-d.py --project-root . dashboard                      # tableau de bord markdown
-python framework/tools/r-and-d.py --project-root . status                         # état du moteur
-python framework/tools/r-and-d.py --project-root . tune --epsilon 0.3             # ajuster l'exploration
+# Digital Twin / Quantum Branch / Time-Travel / CRISPR / Decision Log
+# Mirror Agent / Sensory Buffer / R&D Engine
+# → Voir framework/tools/README.md pour la doc complète
 ```
 
-Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète.
+</details>
 
-## Système de mémoire
+<br>
 
-Le kit inclut un système de mémoire à 4 niveaux :
+## 📋 Prérequis
 
-1. **Mémoire sémantique** (`mem0-bridge.py`) — recherche vectorielle via Qdrant ou fallback JSON
-2. **Learnings par agent** (`agent-learnings/`) — apprentissages structurés par domaine
-3. **Contexte partagé** (`shared-context.md`) — source de vérité cross-agents
-4. **Failure Museum** (`failure-museum.md`) — erreurs passées pour ne pas les répéter
+| Requis | Version |
+|:-------|:--------|
+| Python | 3.12+ |
+| Git | 2.x+ |
+| BMAD Framework | v6.0+ |
 
-**Qualité automatisée :**
-- Détection de contradictions à chaque ajout mémoire → `contradiction-log.md`
-- Consolidation des learnings au démarrage de session
-- State checkpoints à chaque step de workflow → resume automatique si interruption
+| Optionnel | Pour |
+|:----------|:-----|
+| Node.js 18+ | MCP Server |
+| Qdrant | Recherche sémantique avancée |
+| Ollama | LLM local |
 
-**Self-Improvement Loop :**
-```bash
-bash _bmad/_config/custom/sil-collect.sh
-# → produit _bmad-output/sil-report-latest.md
-# → activer Sentinel [FA] pour proposer des améliorations concrètes
-```
+<br>
 
-## Comparaison avec les alternatives
+## 🤝 Contribuer
 
-| Feature | CrewAI | AutoGen | LangGraph | Aider | Cline | **BMAD v3** |
-|---------|--------|---------|-----------|-------|-------|-------------|
-| Local/IDE-native | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Team of Teams | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Completion Contract | ❌ | ❌ | ❌ | ~ | ~ | ✅ |
-| Delivery Contracts | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Session Branching | ❌ | ❌ | ~ | ❌ | ❌ | ✅ |
-| State Checkpoint/Resume | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Subagent Orchestration | ~ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| MCP Server | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Self-improvement | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Plan/Act Mode | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Extended Thinking [THINK] | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Failure Museum | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour les guidelines.
 
-## 🧪 Tests
+<br>
 
-Le kit inclut une suite de tests complète (1016+ tests) en deux catégories :
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-**Tests unitaires Python** (20 fichiers, 1016 tests) :
-```bash
-# Lancer tous les tests
-python3 -m unittest discover -s tests -v
+<br>
 
-# Un fichier spécifique
-python3 -m unittest tests.test_context_guard_advanced -v
-```
+<p align="center">
+  <sub>MIT License · Made with 🔮 by <a href="https://github.com/Guilhem-Bonnet">Guilhem Bonnet</a></sub>
+</p>
 
-| Fichier | Outil testé | Tests |
-|---------|-------------|-------|
-| `test_python_tools.py` | Tous les outils (base) | 48 |
-| `test_context_guard_advanced.py` | Context Guard avancé | 42 |
-| `test_maintenance_advanced.py` | Maintenance mémoire | 29 |
-| `test_agent_forge.py` | Agent Forge | 39 |
-| `test_agent_bench.py` | Agent Bench | 19 |
-| `test_dna_evolve.py` | DNA Evolve | 25 |
-| `test_session_save.py` | Session Save | 11 |
-| `test_gen_tests.py` | Gen Tests (scaffolding) | 32 |
-| `test_dream.py` | Dream Mode | 170 |
-| `test_adversarial_consensus.py` | Adversarial Consensus | 76 |
-| `test_antifragile_score.py` | Anti-Fragile Score | 76 |
-| `test_reasoning_stream.py` | Reasoning Stream | 56 |
-| `test_cross_migrate.py` | Cross-Project Migration | 59 |
-| `test_agent_darwinism.py` | Agent Darwinism | 62 |
-| `test_stigmergy.py` | Stigmergy | 96 |
-| `test_memory_lint.py` | Memory Lint | 33 |
-| `test_nso.py` | NSO Orchestrator | 43 |
-| `test_robustness.py` | Robustesse (fuzzing) | 38 |
-| `test_schema_validator.py` | Schema Validator | 28 |
-| `test_auto_doc.py` | Auto-Doc Sync | 34 |
-
-**Smoke tests Bash** (122 assertions) :
-```bash
-bash tests/smoke-test.sh
-```
-
-**CI** : les tests Python s'exécutent automatiquement dans le job `python-tests` du workflow CI.
-
-## Prérequis
-
-- Python 3.10+
-- Git
-- [BMAD Framework](https://github.com/bmadcode/BMAD-METHOD) v6.0+ installé
-- (Optionnel) Node.js 18+ pour le MCP Server
-- (Optionnel) Qdrant pour la recherche sémantique avancée
-
-## Licence
-
-MIT — utilisez, forkez, adaptez librement.
+<p align="center">
+  <a href="https://github.com/Guilhem-Bonnet/bmad-custom-kit/stargazers">
+    <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/bmad-custom-kit?style=social" alt="Stars">
+  </a>
+</p>
 

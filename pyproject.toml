@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bmad-kit"
+dynamic = ["version"]
+description = "Composable AI agent platform — personas, memory, workflows, and quality automation for any project."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "Guilhem Bonnet" }]
+keywords = ["ai", "agents", "llm", "workflow", "copilot", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "ruamel.yaml>=0.18",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+qdrant = ["qdrant-client>=1.9"]
+ollama = ["ollama>=0.3"]
+all = ["bmad-kit[mcp,qdrant,ollama]"]
+dev = [
+    "bmad-kit[all]",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+bmad = "bmad.cli.app:main"
+
+[project.urls]
+Homepage = "https://github.com/Guilhem-Bonnet/bmad-custom-kit"
+Repository = "https://github.com/Guilhem-Bonnet/bmad-custom-kit"
+Documentation = "https://github.com/Guilhem-Bonnet/bmad-custom-kit/tree/main/docs"
+
+[tool.hatch.version]
+path = "src/bmad/__version__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bmad"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/bmad/",
+    "archetypes/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --tb=short"
