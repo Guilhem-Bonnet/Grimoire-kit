@@ -594,3 +594,130 @@
 {"ts": "2026-03-06T23:25:51", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
 {"ts": "2026-03-06T23:25:51", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
 {"ts": "2026-03-06T23:25:51", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T00:08:12", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T00:08:12", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.8}
+{"ts": "2026-03-07T00:08:12", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 7.7}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "2fc4e6c568a576f3", "status": "ok", "duration_ms": 2010.5}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "2d64756b547eadb2", "status": "ok", "duration_ms": 19.9}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "030fd85e0c8b9564", "status": "ok", "duration_ms": 19.7}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 25.7}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 13.5}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "f16f3658826938f1", "status": "ok", "duration_ms": 10.1}
+{"ts": "2026-03-07T00:08:14", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "976167eec43b7b38", "status": "ok", "duration_ms": 10.0}
+{"ts": "2026-03-07T00:08:15", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.5}
+{"ts": "2026-03-07T00:08:15", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T00:08:15", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T11:02:05", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T11:02:05", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 9.8}
+{"ts": "2026-03-07T11:02:05", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 7.0}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "8aa3cc8a9fac85e6", "status": "ok", "duration_ms": 1492.5}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "2d64756b547eadb2", "status": "ok", "duration_ms": 21.6}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "030fd85e0c8b9564", "status": "ok", "duration_ms": 20.7}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 20.6}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 6.0}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "d510b52ce36dabe6", "status": "ok", "duration_ms": 6.7}
+{"ts": "2026-03-07T11:02:06", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "e612a3f23474bb52", "status": "ok", "duration_ms": 6.8}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.6}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 4.4}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 2.7}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.8}
+{"ts": "2026-03-07T11:04:06", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 7.6}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "95a5bc5f85caecbd", "status": "ok", "duration_ms": 903.7}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "bff8513482513c8c", "status": "ok", "duration_ms": 9.3}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "7b33f1a901816c43", "status": "ok", "duration_ms": 9.8}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 7.9}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "19af80e15ab159ff", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "91b7b56f4101a06a", "status": "ok", "duration_ms": 2.8}
+{"ts": "2026-03-07T11:04:07", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "153fbbc700422d2b", "status": "ok", "duration_ms": 1559.5}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "2d64756b547eadb2", "status": "ok", "duration_ms": 20.5}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "561445e27721e48a", "status": "ok", "duration_ms": 25.3}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 23.4}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 7.3}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "2be77db83c148179", "status": "ok", "duration_ms": 7.8}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "3950c541a92b386f", "status": "ok", "duration_ms": 6.6}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.5}
+{"ts": "2026-03-07T11:04:08", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T11:04:09", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T11:06:07", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T11:06:07", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.7}
+{"ts": "2026-03-07T11:06:07", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 7.9}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "a779cfbec2edcfff", "status": "ok", "duration_ms": 1460.8}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "2d64756b547eadb2", "status": "ok", "duration_ms": 21.1}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "27e44048bc617ce7", "status": "ok", "duration_ms": 20.2}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 28.4}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 6.2}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "a591efdd4368c27a", "status": "ok", "duration_ms": 6.1}
+{"ts": "2026-03-07T11:06:09", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "cd0e2304f3f0c414", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-07T14:21:52", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.9}
+{"ts": "2026-03-07T14:21:52", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 4.8}
+{"ts": "2026-03-07T14:21:52", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 2.5}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "57cade192f74e40e", "status": "ok", "duration_ms": 753.7}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "cb972bb4ae6d41b9", "status": "ok", "duration_ms": 7.9}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "c8fa37ef099646af", "status": "ok", "duration_ms": 7.0}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 9.8}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 7.3}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "d8c8e87c0ac8a438", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "016b9900b0619cd7", "status": "ok", "duration_ms": 2.9}
+{"ts": "2026-03-07T14:21:53", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:21:54", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.4}
+{"ts": "2026-03-07T14:21:54", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:21:55", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:23:53", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T14:23:53", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 4.6}
+{"ts": "2026-03-07T14:23:53", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "70d714232199ecb5", "status": "ok", "duration_ms": 732.7}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "cb972bb4ae6d41b9", "status": "ok", "duration_ms": 7.7}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "c8fa37ef099646af", "status": "ok", "duration_ms": 7.3}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 7.6}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 1.9}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "d2488cffd52a608a", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "8a779af9b19c8276", "status": "ok", "duration_ms": 2.7}
+{"ts": "2026-03-07T14:23:54", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:23:55", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.4}
+{"ts": "2026-03-07T14:23:55", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:23:56", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 4.6}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 2.7}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "1f3a36172c1f2e9a", "status": "ok", "duration_ms": 788.8}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "1ee70f3229a7e6d0", "status": "ok", "duration_ms": 7.5}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "c8fa37ef099646af", "status": "ok", "duration_ms": 7.5}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 7.1}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "134adedce300b2e6", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T14:25:55", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "c4f0260c26b2c7e6", "status": "ok", "duration_ms": 2.9}
+{"ts": "2026-03-07T14:25:56", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:25:56", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.5}
+{"ts": "2026-03-07T14:25:56", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:25:57", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:27:56", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 3.4}
+{"ts": "2026-03-07T14:27:56", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 5.9}
+{"ts": "2026-03-07T14:27:56", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 3.6}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "7d36b7b4eca60be3", "status": "ok", "duration_ms": 744.6}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "1ee70f3229a7e6d0", "status": "ok", "duration_ms": 7.4}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "c8fa37ef099646af", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 7.7}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 1.8}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "7800a8a62b7ef6f6", "status": "ok", "duration_ms": 2.1}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "f5894d92b43b05e5", "status": "ok", "duration_ms": 2.9}
+{"ts": "2026-03-07T14:27:57", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:27:58", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.4}
+{"ts": "2026-03-07T14:27:58", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:27:58", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:29:57", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.5}
+{"ts": "2026-03-07T14:29:57", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 4.2}
+{"ts": "2026-03-07T14:29:57", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 2.3}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "5bcc2e1fd149448e", "status": "ok", "duration_ms": 791.1}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "1ee70f3229a7e6d0", "status": "ok", "duration_ms": 7.5}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "260d9b940b9e96f1", "status": "ok", "duration_ms": 8.4}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 8.4}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "23c68c234fada027", "status": "ok", "duration_ms": 2.5}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "9457fab75f079884", "status": "ok", "duration_ms": 3.0}
+{"ts": "2026-03-07T14:29:58", "tool": "bmad_unknown", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:29:59", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.6}
+{"ts": "2026-03-07T14:29:59", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
+{"ts": "2026-03-07T14:29:59", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
