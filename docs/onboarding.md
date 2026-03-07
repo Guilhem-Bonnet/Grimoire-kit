@@ -1,12 +1,15 @@
-# Guide de Démarrage Progressif — Grimoire Kit
+<p align="right"><a href="../README.md">README</a></p>
 
-> **J1** → Première session en 10 minutes  
-> **S1** → Première semaine productive  
+# <img src="assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
+
+> **J1** → Première session en 10 minutes 
+> **S1** → Première semaine productive 
 > **M1** → Premier mois, maîtrise complète
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## J1 — Premier Jour (10 min)
+
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
 
 ### 1. Installation
 
@@ -29,7 +32,7 @@ bash path/to/bmad-custom-kit/bmad-init.sh \
 bash bmad-custom-kit/grimoire.sh doctor
 ```
 
-Attendu : tous les checks en ✅.
+Attendu : tous les checks en &#x2713;.
 
 ### 3. Première interaction
 
@@ -57,9 +60,9 @@ votre-projet/
 
 **C'est tout pour J1.** Vous avez un projet BMAD fonctionnel.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## S1 — Première Semaine
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> S1 — Première Semaine
 
 ### Jour 2-3 : Comprendre les agents
 
@@ -95,13 +98,13 @@ Le CC est la règle fondatrice : un agent qui dit "terminé" doit le prouver.
 Avant chaque "fait" :
 1. L'agent détecte le stack (Python/Go/TS/...)
 2. Lance les vérifications automatiques (tests, lint, build)
-3. Affiche `✅ CC PASS` ou `🔴 CC FAIL`
+3. Affiche `&#x2713; CC PASS` ou ` CC FAIL`
 
 Si CC FAIL → l'agent corrige automatiquement avant de rendre la main.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## M1 — Premier Mois
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> M1 — Premier Mois
 
 ### Semaine 2 : Mémoire et contexte
 
@@ -188,9 +191,9 @@ python3 framework/tools/nso.py --project-root . retro
 6.        Le NSO fait une rétrospective
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Aide rapide
+## <img src="assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
 
 | Besoin | Commande |
 |--------|---------|
@@ -200,6 +203,5 @@ python3 framework/tools/nso.py --project-root . retro
 | Qualité sortie | `python3 framework/tools/quality-score.py --project-root . score fichier.md` |
 | Recherche web | `python3 framework/tools/mcp-web-search.py --project-root . search "query"` |
 
----
 
 *Grimoire Kit — Documentation progressive. Pour les détails, voir `docs/`.*

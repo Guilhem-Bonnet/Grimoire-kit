@@ -1,6 +1,8 @@
-# Guide des Archétypes
+<p align="right"><a href="../README.md">README</a></p>
 
-## Qu'est-ce qu'un archétype ?
+# <img src="assets/icons/puzzle.svg" width="32" height="32" alt=""> Guide des Archétypes
+
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Qu'est-ce qu'un archétype ?
 
 Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA de comportements et de templates adapté à un type de projet spécifique. Chaque archétype déclare ses **traits** (règles comportementales), ses **constraints** (bloquants), ses **tools_required** et ses **acceptance_criteria** machine-lisibles.
 
@@ -18,21 +20,23 @@ bash bmad-init.sh validate --all
 bash bmad-init.sh doctor
 ```
 
-## Archétypes disponibles
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
 
 ### `minimal` — Archétype racine universel
 
 **Cas d'usage** : Tout type de projet — le strict nécessaire pour démarrer.
 
-**Traits DNA :** Plan/Act Mode `[PLAN]/[ACT]`, Extended Thinking `[THINK]`, Failure Museum, CC-aware  
+**Traits DNA :** Plan/Act Mode `[PLAN]/[ACT]`, Extended Thinking `[THINK]`, Failure Museum, CC-aware 
 **Tools requis :** bash, git (python3 recommandé)
 
 **Agents inclus :**
 | Agent | Icône | Rôle |
 |-------|-------|------|
-| Atlas (project-navigator) | 🗺️ | Navigation projet, registre des services, Repo Map `[RM]` |
-| Sentinel (agent-optimizer) | 🔍 | Audit qualité des agents, optimisation prompts, Self-Improvement Loop |
-| Mnemo (memory-keeper) | 🧠 | Mémoire Qdrant, contradictions, consolidation |
+| Atlas (project-navigator) | Navigation projet, registre des services, Repo Map `[RM]` |
+| Sentinel (agent-optimizer) | Audit qualité des agents, optimisation prompts, Self-Improvement Loop |
+| Mnemo (memory-keeper) | Mémoire Qdrant, contradictions, consolidation |
 
 **+ 1 template vierge** (`custom-agent.tpl.md`) pour créer vos propres agents.
 
@@ -43,13 +47,12 @@ bash bmad-init.sh doctor
 
 **Quand l'utiliser :** projets de tout type, base pour tous les autres archétypes.
 
----
 
 ### `web-app` — Full-Stack Web
 
 **Cas d'usage** : SPA + API REST, fullstack Next.js, backend headless.
 
-**Traits DNA :** TDD obligatoire, TypeScript strict, API Contract First, Accessibilité WCAG 2.1 AA  
+**Traits DNA :** TDD obligatoire, TypeScript strict, API Contract First, Accessibilité WCAG 2.1 AA 
 **Tools requis :** node, docker (recommandé), navigateur headless (E2E)
 
 **Acceptance Criteria notables :**
@@ -66,29 +69,28 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 # → agents stack : Gopher + Pixel + Container
 ```
 
----
 
 ### `infra-ops` — Infrastructure & DevOps
 
 **Cas d'usage** : Homelab, clusters K8s, IaC Terraform/Ansible, monitoring.
 
-**Traits DNA :** Infrastructure-as-Code, Plan-before-Apply, Security First, Backup-before-Change, Observability Mandatory  
+**Traits DNA :** Infrastructure-as-Code, Plan-before-Apply, Security First, Backup-before-Change, Observability Mandatory 
 **Tools requis :** terraform, docker, kubectl (optionnel), ansible (optionnel)
 
 **Agents inclus (3 meta + 7 spécialisés) :**
 
 | Agent | Icône | Rôle |
 |-------|-------|------|
-| Atlas | 🗺️ | Navigation & Mémoire projet |
-| Sentinel | 🔍 | Qualité & Optimisation agents |
-| Mnemo | 🧠 | Mémoire & Qualité connaissances |
-| Forge (ops-engineer) | 🔧 | Infrastructure & Provisioning |
-| Vault (security-hardener) | 🛡️ | Sécurité & Hardening (SOPS, TLS) |
-| Flow (pipeline-architect) | ⚡ | CI/CD & Automation |
-| Hawk (monitoring-specialist) | 📡 | Observabilité (Prometheus, Grafana) |
-| Helm (k8s-navigator) | ☸️ | Kubernetes & Orchestration |
-| Phoenix (backup-dr-specialist) | 🏰 | Backup & Disaster Recovery |
-| Probe (systems-debugger) | 🔬 | Systems Debugging |
+| Atlas | Navigation & Mémoire projet |
+| Sentinel | Qualité & Optimisation agents |
+| Mnemo | Mémoire & Qualité connaissances |
+| Forge (ops-engineer) | Infrastructure & Provisioning |
+| Vault (security-hardener) | Sécurité & Hardening (SOPS, TLS) |
+| Flow (pipeline-architect) | CI/CD & Automation |
+| Hawk (monitoring-specialist) | Observabilité (Prometheus, Grafana) |
+| Helm (k8s-navigator) | Kubernetes & Orchestration |
+| Phoenix (backup-dr-specialist) | Backup & Disaster Recovery |
+| Probe (systems-debugger) | Systems Debugging |
 
 **Acceptance Criteria notables :**
 - `terraform-plan-before-apply` — plan validé avant apply (**hard**)
@@ -96,28 +98,27 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 - `backup-snapshot-before-destructive` — snapshot avant migration (**hard**)
 - `monitoring-alert-on-new-service` — alerte sur chaque nouveau service (**soft**)
 
----
 
 ### `platform-engineering` — Ingénierie de Plateforme End-to-End
 
 **Cas d'usage** : Plateformes distribuées, backends scalables, microservices/modular monolith. De l'architecture au service observable en production.
 
-**Traits DNA :** Architecture First, Contract Driven, Observability by Design, Deploy Safely, Twelve-Factor, Resilience Patterns  
+**Traits DNA :** Architecture First, Contract Driven, Observability by Design, Deploy Safely, Twelve-Factor, Resilience Patterns 
 **Tools requis :** docker, kubectl (optionnel), terraform (optionnel), helm (optionnel)
 
 **Agents inclus (3 meta + 4 spécialisés) :**
 
 | Agent | Icône | Rôle |
 |-------|-------|------|
-| Atlas | 🗺️ | Navigation & Mémoire projet |
-| Sentinel | 🔍 | Qualité & Optimisation agents |
-| Mnemo | 🧠 | Mémoire & Qualité connaissances |
-| Archie (platform-architect) | 🏛️ | Architecture système, DDD, event-driven, C4 diagrams |
-| Stack (backend-engineer) | ⚙️ | Backend polyglotte, APIs, CQRS, event sourcing |
-| Guardian (reliability-engineer) | 🛡️ | SRE, SLO/SLI, observabilité, incident response |
-| Convoy (deploy-orchestrator) | 🚀 | Déploiement progressif, GitOps, pipelines CI/CD |
+| Atlas | Navigation & Mémoire projet |
+| Sentinel | Qualité & Optimisation agents |
+| Mnemo | Mémoire & Qualité connaissances |
+| Archie (platform-architect) | Architecture système, DDD, event-driven, C4 diagrams |
+| Stack (backend-engineer) | Backend polyglotte, APIs, CQRS, event sourcing |
+| Guardian (reliability-engineer) | SRE, SLO/SLI, observabilité, incident response |
+| Convoy (deploy-orchestrator) | Déploiement progressif, GitOps, pipelines CI/CD |
 
-**Combinable avec les agents stack/** : Terra 🌍, Kube ⎈, Container 🐋, Gopher 🐹, Pixel ⚛️, Serpent 🐍 selon le stack détecté.
+**Combinable avec les agents stack/** : Terra , Kube , Container , Gopher , Pixel , Serpent selon le stack détecté.
 
 **Acceptance Criteria notables :**
 - `architecture-documented` — chaque service documenté dans architecture.md (**soft**)
@@ -159,19 +160,18 @@ platform:
     gitops: "fluxcd"
 ```
 
----
 
 ### `fix-loop` — Boucle de Correction Certifiée
 
 **Cas d'usage** : Tout projet avec bugs récurrents — zéro "done" sans preuve d'exécution.
 
-**Traits DNA :** Proof of Execution, FER Isolation, Severity Adaptive S1/S2/S3, Never-Assume-Fixed  
+**Traits DNA :** Proof of Execution, FER Isolation, Severity Adaptive S1/S2/S3, Never-Assume-Fixed 
 **Tools requis :** bash, python3 (recommandé)
 
 **Agents inclus :**
 | Agent | Icône | Rôle |
 |-------|-------|------|
-| Loop (fix-loop-orchestrator) | 🔁 | Orchestrateur boucle fermée, FER, META-REVIEW |
+| Loop (fix-loop-orchestrator) | Orchestrateur boucle fermée, FER, META-REVIEW |
 
 **Acceptance Criteria notables :**
 - `fer-created-before-fix` — FER YAML créé avant d'écrire du code (**hard**)
@@ -183,7 +183,6 @@ platform:
 - **Sévérité** : S3 = 3 phases, S2 = 6, S1 = 9 phases obligatoires
 - **META-REVIEW** : auto-amélioration du workflow après cycle certifié
 
----
 
 ### `stack` — Modal Team Engine (7 experts spécialisés)
 
@@ -193,13 +192,13 @@ platform:
 
 | Agent | Icône | Stack | AC notables |
 |-------|-------|-------|-------------|
-| Gopher | 🐹 | `go.mod` | table-driven tests, error wrapping, no goroutine leak |
-| Pixel | ⚛️ | `package.json` + react/vue | no `any`, props typées, async error handling |
-| Serpent | 🐍 | `requirements.txt` / `pyproject.toml` | type hints, ruff clean, no blocking in async |
-| Container | 🐋 | `Dockerfile` / `docker-compose.yml` | multi-stage, non-root user, healthchecks |
-| Terra | 🌍 | `*.tf` | plan before apply, remote state, tfsec clean |
-| Kube | ⎈ | `k8s/`, `kind: Deployment` | resource limits, RBAC least-privilege, probes |
-| Playbook | 🎭 | `ansible/`, `playbook*.yml` | idempotence, vault for secrets, ansible-lint |
+| Gopher | `go.mod` | table-driven tests, error wrapping, no goroutine leak |
+| Pixel | `package.json` + react/vue | no `any`, props typées, async error handling |
+| Serpent | `requirements.txt` / `pyproject.toml` | type hints, ruff clean, no blocking in async |
+| Container | `Dockerfile` / `docker-compose.yml` | multi-stage, non-root user, healthchecks |
+| Terra | `*.tf` | plan before apply, remote state, tfsec clean |
+| Kube | `k8s/`, `kind: Deployment` | resource limits, RBAC least-privilege, probes |
+| Playbook | `ansible/`, `playbook*.yml` | idempotence, vault for secrets, ansible-lint |
 
 **Génération automatique de tests depuis les DNA :**
 ```bash
@@ -231,9 +230,9 @@ bash bmad-init.sh install --archetype stack/terraform
 bash bmad-init.sh install --archetype stack/ansible
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Accept Criteria & gen-tests.py (BM-27 + BM-29)
+## <img src="assets/icons/flask.svg" width="28" height="28" alt=""> Accept Criteria & gen-tests.py (BM-27 + BM-29)
 
 Chaque archétype déclare des `acceptance_criteria` dans son DNA. L'outil `gen-tests.py` les convertit en squelettes de tests dans le framework de votre choix.
 
@@ -252,9 +251,9 @@ python3 framework/tools/gen-tests.py \
 # Frameworks supportés : pytest | jest | bats | go-test | rspec | vitest
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## .agent-rules — Override DNA par dossier (BM-25)
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> .agent-rules — Override DNA par dossier (BM-25)
 
 Un fichier `.agent-rules` dans n'importe quel dossier surcharge localement le DNA global :
 
@@ -274,9 +273,9 @@ reminders:
 
 Référence : [framework/agent-rules.md](../framework/agent-rules.md)
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Créer un nouvel archétype
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 ```bash
 # Structure minimale
@@ -307,9 +306,9 @@ bash bmad-init.sh install --archetype mon-archetype
 
 Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.schema.yaml](../framework/archetype-dna.schema.yaml)
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Personnaliser un archétype installé
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype installé
 
 ### Étape 1 : Adapter les identités agents
 
@@ -348,9 +347,9 @@ echo 'rules: [{id: no-plaintext-secrets, description: "No secrets in yaml", enfo
   > src/config/.agent-rules
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Diagnostics
+## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> Diagnostics
 
 ```bash
 # Health check complet
@@ -378,9 +377,9 @@ bash bmad-init.sh evolve                 # proposer patch (revue humaine requise
 
 Voir [framework/tools/README.md](../framework/tools/README.md) pour la référence complète des outils.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Ressources complémentaires
+## <img src="assets/icons/rocket.svg" width="28" height="28" alt=""> Ressources complémentaires
 
 - [getting-started.md](getting-started.md) — Démarrage en 7 étapes
 - [memory-system.md](memory-system.md) — Mémoire Qdrant multi-collection
@@ -390,7 +389,6 @@ Voir [framework/tools/README.md](../framework/tools/README.md) pour la référen
 - [framework/context-router.md](../framework/context-router.md) — Gestion du budget contexte
 - [framework/agent-rules.md](../framework/agent-rules.md) — Override DNA par dossier
 
----
 
 ### `web-app`
 
@@ -423,7 +421,6 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 - Applications fullstack avec base de données
 - Projets avec frontend et backend séparés dans le même repo
 
----
 
 ### `infra-ops`
 
@@ -433,16 +430,16 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 
 | Agent | Icône | Rôle |
 |-------|-------|------|
-| Atlas | 🗺️ | Navigation & Mémoire projet |
-| Sentinel | 🔍 | Qualité & Optimisation agents |
-| Mnemo | 🧠 | Mémoire & Qualité connaissances |
-| Forge (ops-engineer) | 🔧 | Infrastructure & Provisioning (Terraform, Ansible, Docker) |
-| Vault (security-hardener) | 🛡️ | Sécurité & Hardening (SOPS, TLS, firewall) |
-| Flow (pipeline-architect) | ⚡ | CI/CD & Automation (GitHub Actions, Taskfile) |
-| Hawk (monitoring-specialist) | 📡 | Observabilité (Prometheus, Grafana, alerting) |
-| Helm (k8s-navigator) | ☸️ | Kubernetes & Orchestration (K3s, FluxCD) |
-| Phoenix (backup-dr-specialist) | 🏰 | Backup & Disaster Recovery |
-| Probe (systems-debugger) | 🔬 | Systems Debugging (kernel, perf, strace) |
+| Atlas | Navigation & Mémoire projet |
+| Sentinel | Qualité & Optimisation agents |
+| Mnemo | Mémoire & Qualité connaissances |
+| Forge (ops-engineer) | Infrastructure & Provisioning (Terraform, Ansible, Docker) |
+| Vault (security-hardener) | Sécurité & Hardening (SOPS, TLS, firewall) |
+| Flow (pipeline-architect) | CI/CD & Automation (GitHub Actions, Taskfile) |
+| Hawk (monitoring-specialist) | Observabilité (Prometheus, Grafana, alerting) |
+| Helm (k8s-navigator) | Kubernetes & Orchestration (K3s, FluxCD) |
+| Phoenix (backup-dr-specialist) | Backup & Disaster Recovery |
+| Probe (systems-debugger) | Systems Debugging (kernel, perf, strace) |
 
 **Quand l'utiliser :**
 - Homelab Proxmox avec LXC/VMs
@@ -450,9 +447,9 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 - Infrastructure as Code (Terraform, Ansible)
 - Stacks de monitoring (Prometheus/Grafana/Loki)
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Personnaliser un archétype
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype
 
 ### Étape 1 : Adapter les identités
 
@@ -489,7 +486,9 @@ Ce fichier est la source de vérité lue par tous les agents. Décrivez-y :
 - Services et où ils tournent
 - Conventions d'équipe
 
-## Créer un nouvel archétype
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 Pour contribuer un archétype au kit :
 
@@ -499,9 +498,9 @@ Pour contribuer un archétype au kit :
 4. Tester avec `bmad-init.sh --archetype mon-archetype`
 
 **Archétypes disponibles :**
-- `minimal` — Meta-agents (Atlas, Sentinel, Mnemo) + template vierge ✅
-- `infra-ops` — Infrastructure & DevOps (10 agents) ✅
-- `fix-loop` — Boucle de correction certifiée (Loop, workflow 9 phases) ✅
+- `minimal` — Meta-agents (Atlas, Sentinel, Mnemo) + template vierge &#x2713;
+- `infra-ops` — Infrastructure & DevOps (10 agents) &#x2713;
+- `fix-loop` — Boucle de correction certifiée (Loop, workflow 9 phases) &#x2713;
 
 **Archétypes envisagés :**
 - `web-app` — Frontend + Backend + DB (React, Next.js, Rails, Django)

@@ -1,6 +1,8 @@
-# Système de Mémoire — Guide complet
+<p align="right"><a href="../README.md">README</a></p>
 
-## Architecture
+# <img src="assets/icons/brain.svg" width="32" height="32" alt=""> Système de Mémoire — Guide complet
+
+## <img src="assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 Le système de mémoire BMAD Custom Kit repose sur 3 couches complémentaires :
 
@@ -17,7 +19,9 @@ Le système de mémoire BMAD Custom Kit repose sur 3 couches complémentaires :
 └─────────────────────────────────────────┘
 ```
 
-## Composants
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Composants
 
 ### 1. `mem0-bridge.py` — Mémoire sémantique
 
@@ -156,7 +160,9 @@ python session-save.py forge \
 
 Écrit `session-state.md` (état courant, écrasé à chaque session) et archive dans `session-summaries/` (historique complet).
 
-## Fichiers mémoire
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/brain.svg" width="28" height="28" alt=""> Fichiers mémoire
 
 | Fichier | Rôle | Qui écrit | Qui lit |
 |---------|------|-----------|---------|
@@ -169,7 +175,9 @@ python session-save.py forge \
 | `activity.jsonl` | Log d'activité détaillé | mem0-bridge.py | maintenance.py |
 | `agent-learnings/*.md` | Apprentissages par agent | Chaque agent | Mnemo |
 
-## Cercle vertueux
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/workflow.svg" width="28" height="28" alt=""> Cercle vertueux
 
 Le système de mémoire forme un **cercle vertueux** :
 
@@ -184,7 +192,9 @@ Agent utilise mémoire → meilleur contexte → meilleure action
 - **Score moyen** : qualité globale des résultats sémantiques
 - **Répartition agents** : couverture des domaines
 
-## Configuration via `project-context.yaml`
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/brain.svg" width="28" height="28" alt=""> Configuration via `project-context.yaml`
 
 Les scripts Python chargent automatiquement `project-context.yaml` pour :
 - `USER_ID` et `APP_ID` (mem0-bridge.py)
@@ -202,7 +212,9 @@ agents:
       keywords: "keyword1 keyword2 keyword3"
 ```
 
-## Automatisations
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Automatisations
 
 ### Au démarrage d'une session agent
 1. `health-check` → auto-prune si nécessaire

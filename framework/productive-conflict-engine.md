@@ -1,4 +1,6 @@
-# Productive Conflict Engine (PCE) — Débats Structurés pour Party Mode
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/cognition.svg" width="32" height="32" alt=""> Productive Conflict Engine (PCE) — Débats Structurés pour Party Mode
 
 > **BM-54** — Protocole de conflit productif pour transformer le party mode en machine à débat.
 >
@@ -9,9 +11,10 @@
 > **Principe** : Le désaccord structuré produit de meilleures décisions que le consensus facile.
 > Des techniques de débat formalisées forcent les perspectives divergentes et l'analyse critique.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Modes de Discussion
+
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Modes de Discussion
 
 Le facilitateur choisit le mode de discussion selon le sujet et l'objectif :
 
@@ -175,9 +178,9 @@ adversarial_review_party:
         - Proposer la synthèse optimale
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Divergence Score — Mesurer la Qualité du Débat
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Divergence Score — Mesurer la Qualité du Débat
 
 ### Calcul
 
@@ -229,9 +232,9 @@ facilitator_actions:
       - "Proposer : vote | escalade utilisateur | time-box et décision par défaut"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Mécanisme de Vote Structuré
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Mécanisme de Vote Structuré
 
 Pour les décisions où le débat ne converge pas :
 
@@ -271,9 +274,9 @@ vote_protocol:
        Tu as le dernier mot : [Accepter] · [Modifier] · [Relancer le débat]
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Rôles Dynamiques — Rotation Automatique
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Rôles Dynamiques — Rotation Automatique
 
 ```yaml
 dynamic_roles:
@@ -304,9 +307,9 @@ dynamic_roles:
     💥 Provocateur : {agent}
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Système de Réactions Inter-Agents
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Système de Réactions Inter-Agents
 
 Les agents peuvent réagir aux interventions des autres :
 
@@ -349,9 +352,9 @@ reaction_system:
     "{réaction substantielle}"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans le Party Mode Existant
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans le Party Mode Existant
 
 ### Modifications à `step-02-discussion-orchestration.md`
 
@@ -411,9 +414,9 @@ Si discussion circulaire → STOP + résumé + proposition
 - Challenges substantiels : {count}
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [PCE]            [MODE:selected]      mode=red_blue_team | topic="{sujet}"
@@ -427,9 +430,9 @@ Si discussion circulaire → STOP + résumé + proposition
 [timestamp] [PCE]            [SUMMARY:generated]   decisions=3 | unresolved=1 | ideas=5
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Références Croisées
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — mode party du SOG
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56) — mini-débats avec techniques PCE
@@ -438,6 +441,5 @@ Si discussion circulaire → STOP + résumé + proposition
 - Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements PCE persistés
 - Cross-Validation : [framework/cross-validation-trust.md](cross-validation-trust.md) (BM-52) — trust scoring post-débat
 
----
 
 *BM-54 Productive Conflict Engine | framework/productive-conflict-engine.md*

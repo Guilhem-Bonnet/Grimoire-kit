@@ -1,4 +1,6 @@
-# State Checkpoint & Resume Protocol
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/branch.svg" width="32" height="32" alt=""> State Checkpoint & Resume Protocol
 
 > **BM-06** — Persistence d'état entre sessions pour les workflows longs.
 >
@@ -7,9 +9,10 @@
 >
 > **Inspiré de** : LangGraph state persistence, Redis checkpointing.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Structure d'un State File
+
+## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Structure d'un State File
 
 Chaque run de workflow `workflow.xml` crée automatiquement :
 
@@ -60,9 +63,9 @@ _bmad-output/.runs/
 }
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Checkpoint ID (BM-26)
+## <img src="../../docs/assets/icons/branch.svg" width="28" height="28" alt=""> Checkpoint ID (BM-26)
 
 Chaque checkpoint est identifié par un `checkpoint_id` = `sha256(run_id + step + variables_json)[:6]`.
 
@@ -92,9 +95,9 @@ bmad-init.sh resume --list
 bmad-init.sh resume
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole de Checkpoint
+## <img src="../../docs/assets/icons/branch.svg" width="28" height="28" alt=""> Protocole de Checkpoint
 
 ### Quand créer un checkpoint ?
 
@@ -130,9 +133,9 @@ L'agent détecte automatiquement un run non-terminé si :
 5. Afficher : "▶️ Reprise du run {run_id} au step {resume_step}/{total_steps}"
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans `workflow.xml`
+## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Intégration dans `workflow.xml`
 
 Le workflow engine doit effectuer ces actions automatiquement :
 
@@ -159,9 +162,9 @@ Le workflow engine doit effectuer ces actions automatiquement :
 </checkpoint-close>
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Gestion des Branches de Session (BM-16)
+## <img src="../../docs/assets/icons/moon.svg" width="28" height="28" alt=""> Gestion des Branches de Session (BM-16)
 
 Les checkpoints sont scoped par session branch :
 
@@ -175,11 +178,11 @@ _bmad-output/.runs/feature-auth/dev-story-20260227-150000/state.json
 # On peut avoir deux runs du même workflow en parallèle sur des branches différentes
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Cleanup
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Cleanup
 
-Les runs complétés (`"status": "completed"`) sont conservés **7 jours** puis archivés dans `_bmad-output/.runs/archive/`.  
+Les runs complétés (`"status": "completed"`) sont conservés **7 jours** puis archivés dans `_bmad-output/.runs/archive/`. 
 Les runs failed sont conservés **30 jours** pour forensics.
 
 Nettoyage manuel :
@@ -191,6 +194,5 @@ ls -la _bmad-output/.runs/
 find _bmad-output/.runs -name "state.json" -mtime +7 -path "*/main/*" | xargs -I{} dirname {} | xargs rm -rf
 ```
 
----
 
 *BM-06 State Checkpoint & Resume Protocol | framework/workflows/state-checkpoint.md*

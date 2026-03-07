@@ -1,12 +1,14 @@
-# Grimoire Kit — Contributing Guide
+<p align="right"><a href="README.md">README</a></p>
 
-## Bienvenue
+# <img src="docs/assets/icons/handshake.svg" width="32" height="32" alt=""> Grimoire Kit — Contributing Guide
+
+## <img src="docs/assets/icons/handshake.svg" width="28" height="28" alt=""> Bienvenue
 
 Tu veux améliorer le kit ? Excellent. Voici comment fonctionne le processus.
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Structure du projet
+## <img src="docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet
 
 ```
 grimoire-kit/
@@ -38,9 +40,9 @@ grimoire-kit/
 └── docs/
 ```
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Règles fondamentales
+## <img src="docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles fondamentales
 
 ### 1. Tout agent doit respecter le format BMAD
 
@@ -110,17 +112,17 @@ Règles obligatoires pour tout outil dans `framework/tools/` :
 - Un wrapper `cmd_<nom>()` dans `bmad-init.sh`
 - Les options ajoutées dans `bmad-completion.zsh`
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Ajouter un outil CLI (framework/tools/*.py)
+## <img src="docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Ajouter un outil CLI (framework/tools/*.py)
 
 Les outils CLI s'intègrent dans le pipeline `bmad-init.sh` et VS Code.
 
 1. Créer `framework/tools/[nom].py` avec :
-   - `argparse` pour la CLI
-   - Type hints partout
-   - Stdlib uniquement
-   - Exit codes 0/1/2 (OK/warning/critical)
+ - `argparse` pour la CLI
+ - Type hints partout
+ - Stdlib uniquement
+ - Exit codes 0/1/2 (OK/warning/critical)
 
 2. Ajouter `cmd_[nom]()` dans `bmad-init.sh` :
 ```bash
@@ -147,27 +149,27 @@ fi
 
 6. Documenter dans `framework/tools/README.md`
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Ajouter un archétype
+## <img src="docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Ajouter un archétype
 
 1. Créer `archetypes/[nom]/` avec :
-   - `agents/` — au moins 1 agent `.md`
-   - `shared-context.tpl.md` — template contexte projet (optionnel mais recommandé)
-   - `README.md` — description, cas d'usage, agents inclus
+ - `agents/` — au moins 1 agent `.md`
+ - `shared-context.tpl.md` — template contexte projet (optionnel mais recommandé)
+ - `README.md` — description, cas d'usage, agents inclus
 
 2. Ajouter la détection dans `auto_select_archetype()` de `bmad-init.sh` si pertinent
 
 3. Documenter dans [docs/archetype-guide.md](docs/archetype-guide.md) avec :
-   - Cas d'usage
-   - Stack typiquement détecté
-   - Liste des agents et leur rôle
+ - Cas d'usage
+ - Stack typiquement détecté
+ - Liste des agents et leur rôle
 
 4. Mettre à jour le tableau dans [README.md](README.md)
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Ajouter un agent stack (Modal Team Engine)
+## <img src="docs/assets/icons/team.svg" width="28" height="28" alt=""> Ajouter un agent stack (Modal Team Engine)
 
 Les agents stack sont dans `archetypes/stack/agents/` et sont déployés automatiquement par `detect_stack()`.
 
@@ -184,20 +186,20 @@ Et dans `detect_stack()`, ajouter la détection :
 [[ -f "$dir/Cargo.toml" ]] && detected+=("rust")
 ```
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Modifier `framework/agent-base.md`
+## <img src="docs/assets/icons/team.svg" width="28" height="28" alt=""> Modifier `framework/agent-base.md`
 
-⚠️ **Attention** : ce fichier est chargé par TOUS les agents. Tout changement a un impact global.
+**Attention** **Attention** : ce fichier est chargé par TOUS les agents. Tout changement a un impact global.
 
 Avant de modifier :
 1. Identifier quel(s) agent(s) sont impactés
 2. Tester sur au moins 2 agents différents
 3. Documenter la modification dans le commit message
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Format des commits
+## <img src="docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format des commits
 
 ```
 type: description courte (max 72 chars)
@@ -217,9 +219,9 @@ feat: Rust archetype + detect_stack Cargo.toml
 - docs/archetype-guide.md: section Rust ajoutée
 ```
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Tester localement
+## <img src="docs/assets/icons/flask.svg" width="28" height="28" alt=""> Tester localement
 
 ### Tests automatisés
 
@@ -253,9 +255,9 @@ cat _bmad/_memory/shared-context.md
 cat .git/hooks/pre-commit
 ```
 
----
+<img src="docs/assets/divider.svg" width="100%" alt="">
 
-## Questions ?
+## <img src="docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Questions ?
 
 Ouvrir une issue sur GitHub avec le label approprié :
 - `bug` — quelque chose ne fonctionne pas

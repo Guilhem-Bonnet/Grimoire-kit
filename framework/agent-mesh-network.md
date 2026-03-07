@@ -1,4 +1,6 @@
-# Agent Mesh Network (AMN) — Réseau Maillé et Communication Peer-to-Peer
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent Mesh Network (AMN) — Réseau Maillé et Communication Peer-to-Peer
 
 > **BM-55** — Architecture de découverte de services et communication directe entre agents
 > sans passer systématiquement par l'orchestrateur.
@@ -15,9 +17,10 @@
 > `agent-caller.py` (A2A calls), ARG (BM-57) pour le graphe relationnel, et ELSS (BM-59) pour
 > l'observabilité.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -52,9 +55,9 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Service Registry — Découverte d'Agents
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Service Registry — Découverte d'Agents
 
 Fichier : `_bmad-output/.agent-registry.yaml`
 
@@ -122,9 +125,9 @@ registry:
       # ... (même structure)
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole d'Enregistrement
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Protocole d'Enregistrement
 
 ```yaml
 registration_protocol:
@@ -156,9 +159,9 @@ registration_protocol:
     action: "Marquer status=offline, notifier SOG"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Communication Peer-to-Peer (P2P)
+## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Communication Peer-to-Peer (P2P)
 
 ### Types de Messages P2P
 
@@ -248,9 +251,9 @@ governance_rules:
       - "Contourner une question bloquante QEC"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Découverte de Services
+## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Découverte de Services
 
 Un agent peut trouver le bon interlocuteur via le registry :
 
@@ -292,9 +295,9 @@ discovery_protocol:
         last_event: "2026-03-05T14:33:00Z"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Load Balancing
+## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Load Balancing
 
 Quand plusieurs agents sont éligibles :
 
@@ -314,9 +317,9 @@ load_balancing:
     - "Si expertise >> availability → notifier SOG du compromis"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Observabilité
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Observabilité
 
 Toute communication mesh est observable via ELSS :
 
@@ -348,9 +351,9 @@ observability:
     - "[MESH-AGENT dev]" : "Détail d'un agent : messages envoyés/reçus, latence"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [dev/Amelia]     [AMN:register]   status=online | cap=[impl,tdd,JWT-auth]
@@ -361,9 +364,9 @@ observability:
 [timestamp] [orchestrator]   [AMN:alert]      challenge-unresolved: dev↔architect after 2 rounds
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence Croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Message Bus : [framework/tools/message-bus.py](tools/message-bus.py) — transport P2P
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — worker lifecycle
@@ -373,6 +376,5 @@ observability:
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53)
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56)
 
----
 
 *BM-55 Agent Mesh Network | framework/agent-mesh-network.md*

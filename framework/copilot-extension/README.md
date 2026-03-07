@@ -1,8 +1,10 @@
-# BMAD Copilot Extension — `@bmad` — BM-23
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> BMAD Copilot Extension — `@bmad` — BM-23
 
 > Intégration native de BMAD dans GitHub Copilot Chat via l'API GitHub Copilot Extensions.
 
-## Concept
+## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
 
 L'extension `@bmad` permet d'activer les agents et workflows BMAD directement depuis l'interface Copilot Chat dans VS Code, sans quitter l'éditeur, sans copier-coller de contexte.
 
@@ -13,7 +15,9 @@ L'extension `@bmad` permet d'activer les agents et workflows BMAD directement de
 @bmad /session branch feature-auth
 ```
 
-## Architecture
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 VS Code Copilot Chat
@@ -32,7 +36,9 @@ BMAD MCP Server (local ou distant)
         └─ spawn_subagent_task()
 ```
 
-## Commandes disponibles
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes disponibles
 
 | Commande | Description |
 |---------|-------------|
@@ -50,7 +56,9 @@ BMAD MCP Server (local ou distant)
 | `@bmad /install archetype <id>` | Installer un archétype dans le projet courant |
 | `@bmad /help` | Afficher l'aide complète |
 
-## Structure du projet d'extension
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet d'extension
 
 ```
 bmad-copilot-extension/
@@ -74,7 +82,9 @@ bmad-copilot-extension/
 └── README.md
 ```
 
-## Manifest de l'extension (`agent.yml`)
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Manifest de l'extension (`agent.yml`)
 
 ```yaml
 name: BMAD
@@ -107,7 +117,9 @@ tools:
         required: true
 ```
 
-## Implémentation du handler (`copilot-handler.ts`)
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Implémentation du handler (`copilot-handler.ts`)
 
 ```typescript
 import { CopilotExtensionsAPI } from "@github/copilot-extensions";
@@ -147,7 +159,9 @@ export async function handleCopilotMessage(
 }
 ```
 
-## Installation (développement)
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Installation (développement)
 
 ```bash
 # Prérequis : Node.js 18+, compte GitHub Developer Program
@@ -167,7 +181,9 @@ npm run dev
 # Enregistrer l'extension dans GitHub Settings > Developer settings > Copilot Extensions
 ```
 
-## Roadmap
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Roadmap
 
 | Version | Features |
 |---------|---------|
@@ -176,7 +192,9 @@ npm run dev
 | v0.3 | `/repo-map`, `/think`, `/team start` |
 | v1.0 | `/install archetype`, publication GitHub Marketplace |
 
-## Dépendances avec d'autres BM
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> Dépendances avec d'autres BM
 
 - **BM-20 (MCP Server)** : prérequis — le MCP Server doit être opérationnel
 - **BM-05 (Repo Map)** : utilisé par `/repo-map`

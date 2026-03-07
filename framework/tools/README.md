@@ -1,10 +1,13 @@
-# framework/tools — Référence des outils CLI
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> framework/tools — Référence des outils CLI
 
 Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via `bmad-init.sh`.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Outils disponibles
+
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Outils disponibles
 
 | Fichier | Commande | Description |
 |---------|----------|-------------|
@@ -23,9 +26,9 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
 | `bmad-completion.zsh` | *(source)* | Autocomplétion zsh pour `bmad-init.sh` |
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `agent-bench.py` — Bench
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> `agent-bench.py` — Bench
 
 Mesure et suit les scores de performance des agents dans le temps.
 
@@ -39,9 +42,9 @@ bash bmad-init.sh bench --agent atlas       # agent spécifique
 
 **Sortie :** scores 0-100, tendance semaine, agents en dégradation → `_bmad-output/bench-sessions/`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `agent-forge.py` — Forge
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> `agent-forge.py` — Forge
 
 Génère des squelettes d'agents prêts à l'emploi depuis une description en langage naturel ou depuis les lacunes détectées dans BMAD_TRACE.
 
@@ -57,9 +60,9 @@ bash bmad-init.sh forge --install db-migrator
 
 **Sortie :** `_bmad-output/forge-proposals/agent-[tag].proposed.md`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `context-guard.py` — Guard
+## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> `context-guard.py` — Guard
 
 Mesure précisément le budget de contexte LLM consommé par chaque agent *avant la première question utilisateur*. Utile pour détecter les agents trop lourds et les optimiser.
 
@@ -75,7 +78,7 @@ bash bmad-init.sh guard --list-models            # modèles supportés
 bash bmad-init.sh guard --json                   # sortie JSON (CI-compatible)
 ```
 
-**Seuils par défaut :** < 40% ✅ OK — 40-70% ⚠️ WARNING — > 70% 🔴 CRITICAL
+**Seuils par défaut :** < 40% &#x2713; OK — 40-70% **Attention** WARNING — > 70% CRITICAL
 
 **Exit codes CI :** 0 = OK, 1 = warning, 2 = critical
 
@@ -92,9 +95,9 @@ bash bmad-init.sh guard --json                   # sortie JSON (CI-compatible)
 6. Failure Museum (`failure-museum.md`)
 7. BMAD_TRACE récent (200 dernières lignes)
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `dna-evolve.py` — Evolve
+## <img src="../../docs/assets/icons/dna.svg" width="28" height="28" alt=""> `dna-evolve.py` — Evolve
 
 Analyse l'usage réel du projet (BMAD_TRACE, fichiers de décisions, learnings agents) pour proposer des mutations à `archetype.dna.yaml`. Le gate humain est toujours conservé — `--apply` ne fait jamais une modification silencieuse.
 
@@ -117,9 +120,9 @@ bash bmad-init.sh evolve --dna path/custom.dna.yaml  # DNA source spécifique
 - `_bmad-output/dna-proposals/archetype.dna.patch.{date}.yaml`
 - `_bmad-output/dna-proposals/dna-evolution-report.{date}.md`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `dream.py` — Dream Mode
+## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `dream.py` — Dream Mode
 
 Simule une phase de "rêve" : les agents relisent learnings, decisions, trace, failure museum et shared-context, puis produisent des insights cross-domaine qu'aucun agent n'aurait formulés en session. Mode read-only : aucun fichier source n'est modifié.
 
@@ -143,9 +146,9 @@ bash bmad-init.sh dream --multi-project ../proj-a ../proj-b  # croiser entre pro
 
 **Sortie :** `_bmad-output/dream-journal.md` (avec auto-archive des précédents)
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `adversarial-consensus.py` — Consensus
+## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `adversarial-consensus.py` — Consensus
 
 Protocole BFT simplifié pour les décisions architecturales / techniques majeures. 3 votants (technique, business, risque) + 1 avocat du diable qui tente activement de casser la proposition.
 
@@ -158,15 +161,15 @@ bash bmad-init.sh consensus --stats         # statistiques agrégées
 bash bmad-init.sh consensus --json          # sortie JSON
 ```
 
-**3 perspectives :** technique (🔧), business (📊), risque (⚠️) + Devil's Advocate (😈)
+**3 perspectives :** technique (), business (), risque (**Attention**) + Devil's Advocate ()
 
 **Seuil de consensus :** 66% par défaut (2/3 des votants), ajustable via `--threshold`
 
 **Sortie :** rapport Markdown + historique JSON dans `_bmad-output/consensus-history.json`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `antifragile-score.py` — Anti-Fragile Score
+## <img src="../../docs/assets/icons/resilience.svg" width="28" height="28" alt=""> `antifragile-score.py` — Anti-Fragile Score
 
 Mesure comment le système apprend et s'améliore à partir de ses échecs. Croise Failure Museum, SIL signals, contradictions, learnings et decisions pour un score composite 0-100.
 
@@ -188,13 +191,13 @@ bash bmad-init.sh antifragile --multi-project ../proj-a ../proj-b  # comparer en
 - **Qualité des décisions** (10%) — taux de reversal
 - **Non-récurrence patterns** (15%) — diversité vs concentration des failures
 
-**Niveaux :** 🔴 FRAGILE (<30) | 🟡 ROBUST (30-60) | 🟢 ANTIFRAGILE (60-100)
+**Niveaux :** FRAGILE (<30) | ROBUST (30-60) | ANTIFRAGILE (60-100)
 
 **Sortie :** rapport Markdown + historique JSON dans `_bmad-output/antifragile-history.json`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `reasoning-stream.py` — Reasoning Stream
+## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `reasoning-stream.py` — Reasoning Stream
 
 Flux de raisonnement structuré pour capturer le POURQUOI des décisions. Enregistre hypothèses, doutes, assumptions et alternatives dans un stream JSONL avec analyse et compaction.
 
@@ -219,15 +222,15 @@ bash bmad-init.sh reasoning compact --dry-run  # preview
 bash bmad-init.sh reasoning resolve --timestamp 2026-01-15T10:30:00 --status validated
 ```
 
-**Types d'entrées :** 🔬 HYPOTHESIS | ❓ DOUBT | 🧠 REASONING | 📌 ASSUMPTION | 🔀 ALTERNATIVE
+**Types d'entrées :** HYPOTHESIS | ? DOUBT | REASONING | ASSUMPTION | ALTERNATIVE
 
-**Statuts :** ⏳ open | ✅ validated | ❌ invalidated | 🚫 abandoned
+**Statuts :** open | &#x2713; validated | &#x2717; invalidated | abandoned
 
 **Sortie :** stream JSONL dans `_bmad-output/reasoning-stream.jsonl`, compaction dans `reasoning-stream-compacted.md`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `bmad-completion.zsh` — Autocomplétion
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> `bmad-completion.zsh` — Autocomplétion
 
 Fournit l'autocomplétion zsh pour tous les subcommands et options de `bmad-init.sh`.
 
@@ -240,9 +243,9 @@ source ~/.zshrc
 
 **Subcommands complétés :** session-branch, install, resume, trace, doctor, validate, changelog, hooks, bench, forge, guard, evolve, dream, consensus, antifragile, reasoning, migrate, darwinism, stigmergy
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `cross-migrate.py` — Cross-Project Migration
+## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> `cross-migrate.py` — Cross-Project Migration
 
 Exporte et importe des artefacts BMAD entre projets : learnings, règles du Failure Museum, DNA patches, agents forgés, historique consensus, historique anti-fragile.
 
@@ -269,9 +272,9 @@ bash bmad-init.sh migrate import --bundle migration-bundle.json --dry-run
 
 **Sortie :** `_bmad-output/migration-bundle.json` (défaut)
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `agent-darwinism.py` — Agent Darwinism
+## <img src="../../docs/assets/icons/dna.svg" width="28" height="28" alt=""> `agent-darwinism.py` — Agent Darwinism
 
 Évalue la fitness des agents sur des générations successives et propose des actions évolutives : promotion, amélioration, hybridation, dépréciation.
 
@@ -302,15 +305,15 @@ bash bmad-init.sh darwinism lineage --agent dev
 - Résilience (0.10) — récupération après failures
 - Influence (0.10) — checkpoints, décisions collectives
 
-**Niveaux :** 🟢 ELITE (≥75) | 🟡 VIABLE (40-74) | 🟠 FRAGILE (20-39) | 🔴 OBSOLETE (<20)
+**Niveaux :** ELITE (≥75) | VIABLE (40-74) | FRAGILE (20-39) | OBSOLETE (<20)
 
-**Actions :** ⬆️ PROMOTE | 🔧 IMPROVE | 🧬 HYBRIDIZE | ⬇️ DEPRECATE | 👁️ OBSERVE
+**Actions :** ⬆ PROMOTE | IMPROVE | HYBRIDIZE | ⬇ DEPRECATE | OBSERVE
 
 **Sortie :** `_bmad-output/darwinism-history.json`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `stigmergy.py` — Coordination Stigmergique
+## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> `stigmergy.py` — Coordination Stigmergique
 
 Système de phéromones numériques : les agents déposent des signaux typés dans l'environnement, d'autres agents les captent et adaptent leur comportement. Coordination indirecte — l'environnement est le médium.
 
@@ -318,12 +321,12 @@ Système de phéromones numériques : les agents déposent des signaux typés da
 
 | Type | Icône | Description |
 |------|-------|-------------|
-| NEED | 🔵 | Besoin (review, expertise, clarification) |
-| ALERT | 🔴 | Danger (breaking change, dette technique, sécurité) |
-| OPPORTUNITY | 🟢 | Amélioration potentielle |
-| PROGRESS | 🟡 | Travail en cours |
-| COMPLETE | ✅ | Travail terminé, prêt pour la suite |
-| BLOCK | 🚧 | Bloqué, en attente de résolution |
+| NEED | Besoin (review, expertise, clarification) |
+| ALERT | Danger (breaking change, dette technique, sécurité) |
+| OPPORTUNITY | Amélioration potentielle |
+| PROGRESS | Travail en cours |
+| COMPLETE | &#x2713; | Travail terminé, prêt pour la suite |
+| BLOCK | Bloqué, en attente de résolution |
 
 ### Mécanique
 
@@ -360,17 +363,17 @@ bash bmad-init.sh stigmergy stats
 
 ### Patterns de coordination détectés
 
-- 🔥 **Hot-zone** — ≥3 signaux actifs dans la même zone
-- ❄️ **Cold-zone** — Zone précédemment active, désormais silencieuse
-- 🎯 **Convergence** — ≥2 agents différents sur la même zone
-- 🚧 **Bottleneck** — ≥2 BLOCK dans la même zone
-- 🔄 **Relay** — COMPLETE suivi de NEED/PROGRESS par un agent différent
+- **Hot-zone** — ≥3 signaux actifs dans la même zone
+- **Cold-zone** — Zone précédemment active, désormais silencieuse
+- **Convergence** — ≥2 agents différents sur la même zone
+- **Bottleneck** — ≥2 BLOCK dans la même zone
+- **Relay** — COMPLETE suivi de NEED/PROGRESS par un agent différent
 
 **Sortie :** `_bmad-output/pheromone-board.json`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## `r-and-d.py` — Innovation Engine v2.1
+## <img src="../../docs/assets/icons/flask.svg" width="28" height="28" alt=""> `r-and-d.py` — Innovation Engine v2.1
 
 Moteur d'innovation autonome avec reinforcement learning, **closed-loop reward** et **filtre anti-chaînes de mutations**.
 Exécute des cycles R&D (harvest → evaluate → challenge → simulate → select → converge),
@@ -448,9 +451,9 @@ convergence par rendement décroissant + oscillation detection.
 
 **Sortie :** `.bmad-rnd/` — policy, mémoire d'innovation, historique, prototypes, dashboard.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture commune
+## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture commune
 
 Tous les outils Python suivent le même pattern :
 

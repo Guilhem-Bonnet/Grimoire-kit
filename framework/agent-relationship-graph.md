@@ -1,4 +1,6 @@
-# Agent Relationship Graph (ARG) — Registre de Compétences et Relations Inter-Agents
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent Relationship Graph (ARG) — Registre de Compétences et Relations Inter-Agents
 
 > **BM-57** — Graphe de connaissance mutuelle entre agents : qui sait quoi, qui a travaillé
 > avec qui, et qui est le plus fiable pour quel type de tâche.
@@ -13,9 +15,10 @@
 > **Implémentation** : S'appuie sur `agent-worker.py` (KNOWN_AGENTS), `agent-caller.py`
 > (CALL_HISTORY), `swarm-consensus.py` (AGENT_WEIGHTS), et ELSS (BM-59) pour les événements.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -45,9 +48,9 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Structure du Graphe
+## <img src="../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du Graphe
 
 Fichier : `_bmad-output/.agent-graph.yaml`
 
@@ -194,9 +197,9 @@ agent_graph:
       suggestion: "Ajouter tech-writer comme observateur dans les cross-validations ADR"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Enrichissement Dynamique
+## <img src="../docs/assets/icons/dna.svg" width="28" height="28" alt=""> Enrichissement Dynamique
 
 Le graphe se met à jour automatiquement via les événements ELSS :
 
@@ -237,9 +240,9 @@ enrichment_rules:
     - update: "agents[{callee}].emergent_capabilities update si nouveau domaine"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Usage par l'Orchestrateur (SOG)
+## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Usage par l'Orchestrateur (SOG)
 
 Le SOG utilise le graphe pour améliorer le routage :
 
@@ -275,9 +278,9 @@ routing_enhancement:
     - "Si anti_pattern récurrent → alerter l'utilisateur"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Bootstrap — Initialisation du Graphe
+## <img src="../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Bootstrap — Initialisation du Graphe
 
 Pour un nouveau projet, le graphe est initialisé depuis les sources statiques :
 
@@ -298,9 +301,9 @@ bootstrap:
     5: "Marquer le graphe comme 'bootstrapped' — l'enrichissement dynamique prend le relais"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Commandes d'Introspection
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes d'Introspection
 
 L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
@@ -314,9 +317,9 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 - `[GRAPH-REBUILD]` — Reconstruire le graphe depuis l'historique des événements
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [orchestrator]   [ARG:bootstrap]   agents=8 | relationships=12 | source=static
@@ -326,9 +329,9 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 [timestamp] [orchestrator]   [ARG:route]       selected dev (score:0.87) over pm (score:0.62) for task
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence Croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Agent Manifest : `_bmad/_config/agent-manifest.csv` — source statique des capabilities
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — KNOWN_AGENTS
@@ -339,6 +342,5 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53)
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56)
 
----
 
 *BM-57 Agent Relationship Graph | framework/agent-relationship-graph.md*

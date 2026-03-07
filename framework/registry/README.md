@@ -1,12 +1,16 @@
-# Archétype Registry BMAD — BM-21
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Archétype Registry BMAD — BM-21
 
 > Index des archétypes disponibles et protocole d'installation à la demande.
 
-## Concept
+## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
 
 Le Registry permet d'installer des archétypes supplémentaires dans un projet existant sans réinitialiser. Équivalent de `npm install` mais pour les agents et workflows BMAD.
 
-## Archétypes disponibles
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
 
 ### Archétypes Built-in (locaux, dans ce kit)
 
@@ -33,7 +37,9 @@ bmad-init.sh install archetype ml-platform    # depuis registry communautaire
 bmad-init.sh install archetype data-pipeline  # depuis GitHub packages
 ```
 
-## Commandes `install`
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes `install`
 
 ### Installer un archétype
 
@@ -64,13 +70,17 @@ bmad-init.sh install --list
 bmad-init.sh install --inspect infra-ops
 ```
 
-## Format du manifest d'un archétype (`archetype.dna.yaml`)
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Format du manifest d'un archétype (`archetype.dna.yaml`)
 
 Chaque archétype déclare sa "DNA" — ses traits, contraintes et valeurs — dans un fichier `archetype.dna.yaml` à la racine de son répertoire.
 
 Voir le schéma complet : [framework/archetype-dna.schema.yaml](../archetype-dna.schema.yaml)
 
-## Protocole d'installation
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Protocole d'installation
 
 Lors d'un `install`, le script :
 
@@ -82,7 +92,9 @@ Lors d'un `install`, le script :
 6. **Prompts** → copiés dans `.github/prompts/{archetype}/` si existants
 7. Met à jour `project-context.yaml` → `installed_archetypes: [...]`
 
-## Registre local (`_bmad/_config/installed-archetypes.yaml`)
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Registre local (`_bmad/_config/installed-archetypes.yaml`)
 
 Créé automatiquement à l'init et mis à jour par chaque `install` :
 
@@ -100,7 +112,9 @@ installed:
     traits_applied: [tdd, hexagonal-architecture, cc-mandatory]
 ```
 
-## Versioning des archétypes
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Versioning des archétypes
 
 Structure du champ `version` dans `archetype.dna.yaml` : `MAJOR.MINOR.PATCH`
 
@@ -108,7 +122,9 @@ Structure du champ `version` dans `archetype.dna.yaml` : `MAJOR.MINOR.PATCH`
 - **MINOR** : nouveaux agents ou workflows ajoutés
 - **PATCH** : corrections, améliorations de prompts
 
-## Roadmap v2.0 — Registry Public
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Roadmap v2.0 — Registry Public
 
 ```
 Phase 1 (actuelle) : archétypes built-in locaux

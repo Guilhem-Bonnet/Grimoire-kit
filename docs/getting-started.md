@@ -1,12 +1,16 @@
-# Getting Started — Grimoire Kit
+<p align="right"><a href="../README.md">README</a></p>
 
-## Prérequis
+# <img src="assets/icons/bolt.svg" width="32" height="32" alt=""> Getting Started — Grimoire Kit
+
+## <img src="assets/icons/clipboard.svg" width="28" height="28" alt=""> Prérequis
 
 - [BMAD Framework](https://github.com/bmadcode/BMAD-METHOD) v6.0+ installé dans votre projet
 - Python 3.10+ (pour le système de mémoire)
 - Git (pour les hooks pre-commit)
 
-## Installation rapide
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> Installation rapide
 
 ```bash
 # 1. Cloner le kit
@@ -32,7 +36,9 @@ bash /chemin/vers/grimoire-kit/bmad-init.sh \
 # Adapter les agents dans _bmad/_config/custom/agents/
 ```
 
-## Structure créée
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure créée
 
 Après `bmad-init.sh`, votre projet contiendra :
 
@@ -64,7 +70,9 @@ mon-projet/
     └── sil-report-latest.md      ← Rapport Self-Improvement Loop (généré)
 ```
 
-## Premiers pas
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> Premiers pas
 
 ### 1. Éditer `project-context.yaml`
 
@@ -156,7 +164,9 @@ Chaque agent dans `_bmad/_config/custom/agents/` contient des `{{placeholders}}`
 python _bmad/_memory/maintenance.py health-check --force
 ```
 
-## Choix de l'archétype
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Choix de l'archétype
 
 | Archétype | Agents inclus | Cas d'usage |
 |-----------|---------------|-------------|
@@ -168,15 +178,17 @@ python _bmad/_memory/maintenance.py health-check --force
 
 | Stack détecté | Agent déployé | Persona |
 |---------------|--------------|--------|
-| `go.mod` | Gopher | 🐹 Expert Go |
-| `package.json` + react/vue | Pixel | ⚛️ Expert TypeScript/React |
-| `requirements.txt` | Serpent | 🐍 Expert Python |
-| `Dockerfile` | Container | 🐋 Expert Docker |
-| `*.tf` | Terra | 🌍 Expert Terraform |
-| `k8s/` ou `kind: Deployment` | Kube | ⎈ Expert K8s |
-| `ansible/` ou `playbook*.yml` | Playbook | 🎭 Expert Ansible |
+| `go.mod` | Gopher | Expert Go |
+| `package.json` + react/vue | Pixel | Expert TypeScript/React |
+| `requirements.txt` | Serpent | Expert Python |
+| `Dockerfile` | Container | Expert Docker |
+| `*.tf` | Terra | Expert Terraform |
+| `k8s/` ou `kind: Deployment` | Kube | Expert K8s |
+| `ansible/` ou `playbook*.yml` | Playbook | Expert Ansible |
 
-## Completion Contract
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/seal.svg" width="28" height="28" alt=""> Completion Contract
 
 Tous les agents intègrent le Completion Contract : ils ne peuvent pas dire "terminé" sans passer
 `cc-verify.sh`.
@@ -190,9 +202,11 @@ bash _bmad/_config/custom/cc-verify.sh --stack go
 bash _bmad/_config/custom/cc-verify.sh --stack k8s
 ```
 
-Sortie : `✅ CC PASS — [go, typescript, docker] — 2026-02-23 21:28`
+Sortie : `&#x2713; CC PASS — [go, typescript, docker] — 2026-02-23 21:28`
 
-## Self-Improvement Loop (optionnel)
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Self-Improvement Loop (optionnel)
 
 Après quelques semaines d'utilisation, analysez vos patterns d'échec :
 
@@ -206,7 +220,9 @@ bash _bmad/_config/custom/sil-collect.sh
 # Sentinel propose des règles à ajouter au framework
 ```
 
-## Outils de performance & évolution
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/chart.svg" width="28" height="28" alt=""> Outils de performance & évolution
 
 Après quelques semaines d'utilisation, quatre outils CLI vous aident à maintenir le kit performant.
 
@@ -243,7 +259,7 @@ bash bmad-init.sh guard --model gpt-4o           # fenetre GPT-4o (128K)
 bash bmad-init.sh guard --json                   # CI-compatible (exit 2 = critique)
 ```
 
-Seuils : < 40% ✅ OK — 40-70% ⚠️ WARNING — > 70% 🔴 CRITICAL
+Seuils : < 40% &#x2713; OK — 40-70% **Attention** WARNING — > 70% CRITICAL
 
 ### Evolve — DNA vivante
 
@@ -258,9 +274,11 @@ bash bmad-init.sh evolve --apply             # appliquer après votre review
 
 Sorties : `_bmad-output/dna-proposals/archetype.dna.patch.{date}.yaml` + rapport Markdown.
 
-> ⚠️ `--apply` ne modifie jamais la DNA sans votre accord explicite — le gate humain est toujours conservé.
+> **Attention** `--apply` ne modifie jamais la DNA sans votre accord explicite — le gate humain est toujours conservé.
 
-## Hooks pre-commit (optionnel)
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Hooks pre-commit (optionnel)
 
 Si votre projet utilise `pre-commit`, ajoutez dans `.pre-commit-config.yaml` :
 
@@ -276,7 +294,9 @@ Si votre projet utilise `pre-commit`, ajoutez dans `.pre-commit-config.yaml` :
       stages: [pre-commit]
 ```
 
-## Configuration VS Code
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Configuration VS Code
 
 Pour une expérience optimale avec les agents BMAD (pas de confirmations bloquantes,
 pas d'erreurs réseau, gestion des rate limits) :

@@ -1,4 +1,6 @@
-# Hybrid Parallelism Engine (HPE) — Orchestration Parallèle Adaptative
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/cognition.svg" width="32" height="32" alt=""> Hybrid Parallelism Engine (HPE) — Orchestration Parallèle Adaptative
 
 > **BM-58** — Moteur de parallélisme hybride qui combine exécution séquentielle, parallèle,
 > et opportuniste selon la nature des tâches et la disponibilité des agents.
@@ -16,9 +18,10 @@
 > le dispatch, ARG (BM-57) pour l'assignation, ELSS (BM-59) pour la coordination, et
 > `agent-worker.py` pour l'exécution isolée.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -53,9 +56,9 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## DAG de Tâches — Définition
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> DAG de Tâches — Définition
 
 ### Syntaxe YAML
 
@@ -146,9 +149,9 @@
       timeout_per_task_sec: 300
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Modes d'Exécution
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Modes d'Exécution
 
 ### Parallel (défaut pour tâches sans dépendances)
 
@@ -216,9 +219,9 @@ opportunistic_mode:
     # → Quand le scan codebase arrive, QA ajuste les tests techniques
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Chemin Critique — Optimisation
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Chemin Critique — Optimisation
 
 ```yaml
 critical_path:
@@ -245,9 +248,9 @@ critical_path:
       - "Tâche du critical path en HUP ROUGE → huddle d'urgence"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Gestion des Échecs
+## <img src="../docs/assets/icons/resilience.svg" width="28" height="28" alt=""> Gestion des Échecs
 
 ```yaml
 failure_handling:
@@ -286,9 +289,9 @@ failure_handling:
       - "Huddle de clarification si HUP ROUGE persistant"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Checkpoints et Reprise
+## <img src="../docs/assets/icons/branch.svg" width="28" height="28" alt=""> Checkpoints et Reprise
 
 ```yaml
 checkpoints:
@@ -316,9 +319,9 @@ checkpoints:
       5: "Revoir les tâches failed → retry ou skip"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Visualisation du DAG
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Visualisation du DAG
 
 L'utilisateur peut demander une vue du DAG :
 
@@ -351,9 +354,9 @@ Estimated remaining: ~120s
 Parallel workers: 1/5 active
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration avec les Protocoles Existants
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec les Protocoles Existants
 
 | Protocole | Utilisation dans HPE |
 |-----------|---------------------|
@@ -368,9 +371,9 @@ Parallel workers: 1/5 active
 | **SHP (BM-56)** | Huddle déclenché automatiquement sur critical path JAUNE/ROUGE |
 | **SOG (BM-53)** | HPE est un module interne du SOG |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [HPE]            [HPE:build-dag]   tasks=8 | layers=5 | critical_path=4
@@ -383,9 +386,9 @@ Parallel workers: 1/5 active
 [timestamp] [HPE]            [HPE:critical]    path_update: remaining=3 tasks | est=120s
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence Croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md) (BM-19)
 - Boomerang Orchestration : [framework/workflows/boomerang-orchestration.md](workflows/boomerang-orchestration.md) (BM-11)
@@ -395,6 +398,5 @@ Parallel workers: 1/5 active
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — MAX_PARALLEL_WORKERS
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53)
 
----
 
 *BM-58 Hybrid Parallelism Engine | framework/hybrid-parallelism-engine.md*

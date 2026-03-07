@@ -1,11 +1,14 @@
-# Completion Contract — Référence détaillée
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/seal.svg" width="32" height="32" alt=""> Completion Contract — Référence détaillée
 
 > Chargé on-demand par l'agent quand il doit vérifier du code.
 > Le protocole CC résumé est dans `agent-base.md`. Ce fichier contient le tableau complet et les exemples.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Tableau de vérification par stack
+
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Tableau de vérification par stack
 
 | Fichiers touchés | Vérifications obligatoires | Commande |
 |---|---|---|
@@ -17,9 +20,11 @@
 | `Dockerfile` / `docker-compose*.yml` | Build | `docker build . --no-cache` (ou `docker compose config`) |
 | `k8s/` / `Kind:` YAML | Dry-run | `kubectl apply --dry-run=server -f .` |
 | `*.sh` | Lint | `shellcheck *.sh` |
-| Markdown / config only | Aucune commande requise | ✅ direct |
+| Markdown / config only | Aucune commande requise | &#x2713; direct |
 
-## Exemples de sortie
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemples de sortie
 
 ### CC PASS
 ```
@@ -37,7 +42,9 @@
   [je corrige maintenant avant de rendre la main]
 ```
 
-## Exemples de commandes par stack
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Exemples de commandes par stack
 
 ```bash
 # Go
@@ -66,7 +73,9 @@ shellcheck *.sh
 ansible-lint && yamllint .
 ```
 
-## Script automatique
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Script automatique
 
 ```bash
 bash {project-root}/_bmad/_config/custom/cc-verify.sh

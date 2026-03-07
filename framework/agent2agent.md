@@ -1,4 +1,6 @@
-# Agent2Agent Protocol — Handoff Structuré Cross-Outils (BM-32)
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent2Agent Protocol — Handoff Structuré Cross-Outils (BM-32)
 
 > **BM-32** — Stub d'implémentation du protocole Agent2Agent (A2A) de Google (mars 2025).
 >
@@ -9,9 +11,10 @@
 > **Référence** : [Google Agent2Agent Protocol](https://google.github.io/A2A/) — standard ouvert
 > pour la communication inter-agents cross-plateformes.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -38,9 +41,9 @@
 └─────────────────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Format A2A Task Request (BMAD Profile)
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format A2A Task Request (BMAD Profile)
 
 ```json
 {
@@ -98,9 +101,9 @@
 }
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Format A2A Task Response (BMAD Profile)
+## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Format A2A Task Response (BMAD Profile)
 
 ```json
 {
@@ -140,9 +143,9 @@
 }
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Stub Python (`framework/tools/a2a-dispatcher.py`)
+## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Stub Python (`framework/tools/a2a-dispatcher.py`)
 
 ```python
 #!/usr/bin/env python3
@@ -195,9 +198,9 @@ if __name__ == "__main__":
     print(json.dumps(response, indent=2, ensure_ascii=False))
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole pour les agents BMAD
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole pour les agents BMAD
 
 Quand un agent souhaite déléguer à un autre outil :
 
@@ -224,22 +227,22 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
    [HANDOFF→{recipient.agent_id}@{recipient.tool}] "{task.title}"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Compatibilité Cross-Outils (Roadmap)
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Compatibilité Cross-Outils (Roadmap)
 
 | Outil | Statut | Mécanisme |
 |-------|--------|-----------|
-| BMAD local | ✅ Stub | Sous-process + contexte structuré |
-| VS Code Copilot MCP | 🔵 Prévu BM-31 | MCP sampling |
-| Cursor | 🔵 Roadmap | Cursor API (non public) |
-| Claude Desktop | 🔵 Roadmap | Claude Projects API |
-| OpenAI Assistants | 🔵 Roadmap | Assistants API v2 |
-| AutoGen | 🔵 Roadmap | AutoGen GroupChat protocol |
+| BMAD local | &#x2713; Stub | Sous-process + contexte structuré |
+| VS Code Copilot MCP | Prévu BM-31 | MCP sampling |
+| Cursor | Roadmap | Cursor API (non public) |
+| Claude Desktop | Roadmap | Claude Projects API |
+| OpenAI Assistants | Roadmap | Assistants API v2 |
+| AutoGen | Roadmap | AutoGen GroupChat protocol |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
 
 - MCP v2 Sampling : [framework/mcp/bmad-mcp-server.md](mcp/bmad-mcp-server.md)
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md)
@@ -248,6 +251,5 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — communication P2P interne (alternative locale au A2A cross-outils)
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — routage intelligent
 
----
 
 *BM-32 Agent2Agent Protocol Stub | framework/agent2agent.md*

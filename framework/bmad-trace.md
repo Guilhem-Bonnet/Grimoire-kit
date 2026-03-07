@@ -1,4 +1,6 @@
-# BMAD Trace — Audit Trail des Sessions (BM-28)
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/microscope.svg" width="32" height="32" alt=""> BMAD Trace — Audit Trail des Sessions (BM-28)
 
 > Chaque décision d'agent, chaque handoff, chaque `remember` Qdrant, chaque action critique
 > est loggé en append-only dans `BMAD_TRACE.md`. Résultat : **sessions rejouables**, 
@@ -6,9 +8,10 @@
 >
 > **Inspiré de** : OpenTelemetry traces, LangSmith traces, Anthropic Claude Projects audit log.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Format d'une entrée TRACE
+
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format d'une entrée TRACE
 
 ```
 [2026-02-27T14:32:01Z] [dev/Amelia]       [ACTION:implement]   story: US-042 | file: src/auth.ts
@@ -22,9 +25,9 @@
 [2026-02-27T14:35:31Z] [workflow-engine]  [CHECKPOINT]         id: a3f9b2 | step: 4/6 | status: running
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Structure du fichier `BMAD_TRACE.md`
+## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Structure du fichier `BMAD_TRACE.md`
 
 Localisé à la racine du projet BMAD : `_bmad-output/BMAD_TRACE.md`
 
@@ -40,9 +43,9 @@ Localisé à la racine du projet BMAD : `_bmad-output/BMAD_TRACE.md`
 ## Session suivante...
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Types d'événements
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Types d'événements
 
 | Type | Description | Généré par |
 |------|-------------|-----------|
@@ -89,9 +92,9 @@ Localisé à la racine du projet BMAD : `_bmad-output/BMAD_TRACE.md`
 | `ELSS:observe` | Observation reçue par un agent | ELSS (BM-59) |
 | `ELSS:conflict` | Conflit d'état partagé détecté | ELSS (BM-59) |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole d'écriture (pour les agents)
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole d'écriture (pour les agents)
 
 Les agents loguent les événements critiques via le format standardisé :
 
@@ -124,9 +127,9 @@ def bmad_trace(agent: str, event_type: str, payload: str):
         f.write(line)
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole de lecture (replay / forensics)
+## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Protocole de lecture (replay / forensics)
 
 ```bash
 # Voir toutes les actions d'un agent
@@ -148,9 +151,9 @@ tail -50 _bmad-output/BMAD_TRACE.md
 grep "Session abc123" _bmad-output/BMAD_TRACE.md -A 999 | head -200
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans `bmad-init.sh`
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans `bmad-init.sh`
 
 La commande `bmad-init.sh trace` permet de gérer le trace file :
 
@@ -174,9 +177,9 @@ bmad-init.sh trace --archive
 bmad-init.sh trace --reset --confirm
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans `mem0-bridge.py`
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans `mem0-bridge.py`
 
 Chaque `remember` et `recall` est automatiquement tracé :
 
@@ -188,9 +191,9 @@ bmad_trace("mem0-bridge", "REMEMBER", f"type: {memory_type} | agent: {agent_id} 
 bmad_trace("mem0-bridge", "RECALL", f"type: {memory_type} | query: \"{query[:60]}\" | results: {len(results)}")
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Utilisation enterprise
+## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Utilisation enterprise
 
 Le `BMAD_TRACE.md` est un artefact exploitable pour :
 - **Onboarding** : comprendre les décisions prises par les agents précédents
@@ -198,6 +201,5 @@ Le `BMAD_TRACE.md` est un artefact exploitable pour :
 - **Debugging** : identifier où un workflow a divergé du plan
 - **Métriques** : compter les handoffs, décisions, actions par sprint
 
----
 
 *BM-28 BMAD Trace Audit Trail | framework/bmad-trace.md*

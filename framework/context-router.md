@@ -1,16 +1,22 @@
-# Context Budget Router — BM-07
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/boomerang.svg" width="32" height="32" alt=""> Context Budget Router — BM-07
 
 > Système de gestion automatique du budget de contexte (tokens) pour les agents BMAD. Inspiré du Context Window Management de mem0/MemGPT.
 
-## Problème
+## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Problème
 
 Un agent qui charge tous ses fichiers mémoire + la codebase + l'historique dépasse rapidement la fenêtre de contexte disponible. Sans gestion explicite, l'agent truncate en silence, perd du contexte critique, et hallucine.
 
-## Solution : Priorité de chargement déclarée
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Solution : Priorité de chargement déclarée
 
 Chaque agent déclare un `context_budget` dans son fichier YAML de configuration. Le router choisit les fichiers à charger selon leur priorité et la capacité restante estimée.
 
-## Niveaux de priorité
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Niveaux de priorité
 
 | Niveau | Nom | Chargement | Contenu typique |
 |--------|-----|-----------|-----------------|
@@ -20,7 +26,9 @@ Chaque agent déclare un `context_budget` dans son fichier YAML de configuration
 | **P3** | LAZY | À la demande explicite | Archives, historiques longs, knowledge-digest |
 | **P4** | ON-REQUEST | Sur commande explicite | Fichiers volumineux, dépendances externes |
 
-## Configuration par agent
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Configuration par agent
 
 Ajouter dans le frontmatter de chaque agent :
 
@@ -46,7 +54,9 @@ context_budget:
 ---
 ```
 
-## Règles de chargement dans agent-base.md
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Règles de chargement dans agent-base.md
 
 Les agents base.md héritent déjà de ce protocole via la règle LAZY-LOAD existante. Le Context Budget Router formalise et étend cette règle :
 
@@ -59,7 +69,9 @@ CONTEXT BUDGET RULES :
 5. Si contexte sature → résumer les sections les moins récentes via [THINK] → stocker le résumé → décharger l'original
 ```
 
-## Agent Rules Resolution (BM-25)
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Agent Rules Resolution (BM-25)
 
 En P0 (avant tout autre chargement), l'agent résout la chaîne `.agent-rules` :
 
@@ -76,7 +88,9 @@ AGENT RULES RESOLUTION PROTOCOL (P0 — avant toute action) :
 
 Référence complète : [framework/agent-rules.md](agent-rules.md)
 
-## Estimation de tokens
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Estimation de tokens
 
 Règle approximative pour guidance des agents :
 
@@ -90,7 +104,9 @@ Règle approximative pour guidance des agents :
 | `failure-museum.md` | ~1 500 |
 | Story complète | ~500–1 000 |
 
-## Context Overflow Protocol
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Context Overflow Protocol
 
 Quand un agent détecte un dépassement potentiel :
 
@@ -108,7 +124,9 @@ Puis l'agent :
 3. Remplace la section originale par le résumé
 4. Continue avec le budget libéré
 
-## Intégration avec Session Branching
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec Session Branching
 
 Chaque branche de session a son propre budget indépendant. Le router ne charge **pas** les artefacts des autres branches sauf sur `[cherry-pick]` explicite.
 
@@ -124,7 +142,9 @@ Chaque branche de session a son propre budget indépendant. Le router ne charge 
 }
 ```
 
-## Configuration globale dans `project-context.yaml`
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Configuration globale dans `project-context.yaml`
 
 ```yaml
 context_budget:

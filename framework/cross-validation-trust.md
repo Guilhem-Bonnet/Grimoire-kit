@@ -1,4 +1,6 @@
-# Cross-Validation & Trust Layer (CVTL) — Vérification Croisée Multi-Agents
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/seal.svg" width="32" height="32" alt=""> Cross-Validation & Trust Layer (CVTL) — Vérification Croisée Multi-Agents
 
 > **BM-52** — Protocole de vérification croisée et scoring de confiance pour les outputs critiques.
 >
@@ -8,15 +10,16 @@
 > **Principe** : Les livrables critiques sont vérifiés par un second agent avant d'être
 > marqués comme fiables. Chaque output porte un score de confiance composite visible.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Quand Déclencher la Cross-Validation
+
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Quand Déclencher la Cross-Validation
 
 ### Déclencheurs Automatiques
 
 | Condition | Action |
 |-----------|--------|
-| Output flaggé 🟡 JAUNE par HUP | Cross-validation recommandée |
+| Output flaggé JAUNE par HUP | Cross-validation recommandée |
 | Décision d'architecture (ADR) | Cross-validation obligatoire |
 | Changement de stack/technologie | Cross-validation obligatoire |
 | Story > 8 story points | Cross-validation recommandée |
@@ -30,9 +33,9 @@ L'utilisateur ou l'orchestrateur peut demander une cross-validation à tout mome
 [CROSS-VALIDATE] ou "vérifie ça" ou "second avis"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Sélection du Validateur
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Sélection du Validateur
 
 ### Règle de Base
 
@@ -61,9 +64,9 @@ validator_selection:
         - "pm produit PRD → architect valide la faisabilité technique"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole de Cross-Validation
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Protocole de Cross-Validation
 
 ### Step 1 — Soumission
 
@@ -159,9 +162,9 @@ resolution_rules:
     trace: "[CVTL:rejected] reason={summary}"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Trust Score — Score de Confiance Composite
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Trust Score — Score de Confiance Composite
 
 ### Calcul
 
@@ -193,9 +196,9 @@ Chaque output validé affiche son trust score :
 | **50-69** | Confiance modérée | Review utilisateur recommandé |
 | **<50** | Confiance basse | Blocage → escalade utilisateur |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Adversarial Review Pattern
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Adversarial Review Pattern
 
 Pour les décisions les plus critiques, activer le mode **adversarial** :
 
@@ -229,9 +232,9 @@ adversarial_review:
         3. Verdict : GO / NO-GO / GO-WITH-CONDITIONS
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Rapport d'Intégrité de Session
+## <img src="../docs/assets/icons/moon.svg" width="28" height="28" alt=""> Rapport d'Intégrité de Session
 
 À la fin d'une session ou d'un workflow, l'orchestrateur peut générer un rapport :
 
@@ -259,9 +262,9 @@ adversarial_review:
 2. Tests unitaires couvrent 95% du module auth (vérifié: coverage report)
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans Subagent Orchestration
+## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Intégration dans Subagent Orchestration
 
 Nouvelle stratégie de merge dans `subagent-orchestration.md` :
 
@@ -275,9 +278,9 @@ merge:
   save_to: "_bmad-output/implementation-artifacts/{output}-validated.md"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [orchestrator]    [CVTL:requested]   producer=dev/Amelia | validator=qa/Quinn | type=code
@@ -287,9 +290,9 @@ merge:
 [timestamp] [orchestrator]    [CVTL:adversarial] trigger=irréversible | devil=architect | defender=dev
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Références Croisées
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — déclenche les validations
 - Honest Uncertainty : [framework/honest-uncertainty-protocol.md](honest-uncertainty-protocol.md) (BM-50) — confiance des validateurs
@@ -298,6 +301,5 @@ merge:
 - Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements CVTL persistés
 - Hybrid Parallelism : [framework/hybrid-parallelism-engine.md](hybrid-parallelism-engine.md) (BM-58) — mode cross-validate dans DAG
 
----
 
 *BM-52 Cross-Validation & Trust Layer | framework/cross-validation-trust.md*

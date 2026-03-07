@@ -1,4 +1,6 @@
-# Selective Huddle Protocol (SHP) — Concertation Ciblée On-Demand
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/team.svg" width="32" height="32" alt=""> Selective Huddle Protocol (SHP) — Concertation Ciblée On-Demand
 
 > **BM-56** — Mini sessions de discussion entre 2-4 agents sélectionnés par pertinence,
 > déclenchées automatiquement ou manuellement, sans overhead d'un party mode complet.
@@ -16,9 +18,10 @@
 > ARG (BM-57) pour la sélection optimale, PCE (BM-54) pour les techniques de débat,
 > et ELSS (BM-59) pour l'observabilité.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -55,9 +58,9 @@
 └────────────────────────────────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Déclencheurs Automatiques
+## <img src="../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Déclencheurs Automatiques
 
 Le système détecte les situations nécessitant un huddle :
 
@@ -112,9 +115,9 @@ auto_triggers:
     urgency: low
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Types de Huddle
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Types de Huddle
 
 ### Quick-Consult (2-3 agents, 3-5 échanges)
 
@@ -205,9 +208,9 @@ review:
       **Verdict** : {approve | approve_with_notes | challenge}
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Sélection des Participants
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Sélection des Participants
 
 ```yaml
 participant_selection:
@@ -239,9 +242,9 @@ participant_selection:
     command: "[HUDDLE topic WITH agent1,agent2] ou [HUDDLE topic WITHOUT agent3]"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Lifecycle d'un Huddle
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Lifecycle d'un Huddle
 
 ```yaml
 lifecycle:
@@ -282,9 +285,9 @@ lifecycle:
     hard_stop: "Au time-box expiré : SOG force la synthèse avec ce qui est disponible"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Commandes Utilisateur
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes Utilisateur
 
 ```markdown
 ## Commandes Huddle
@@ -295,9 +298,9 @@ lifecycle:
 - `[HUDDLE-HISTORY]` — Historique des huddles et leurs livrables
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration avec le Party Mode (PCE)
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec le Party Mode (PCE)
 
 ```yaml
 huddle_vs_party:
@@ -323,9 +326,9 @@ huddle_vs_party:
     | Overhead | Minimal | Significatif |
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [orchestrator]   [SHP:trigger]    auto | condition=cvtl_challenge | topic="auth pattern"
@@ -337,9 +340,9 @@ huddle_vs_party:
 [timestamp] [orchestrator]   [SHP:escalate]   huddle=h-003 → party-mode | reason="no convergence"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence Croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — découverte et P2P
 - Agent Relationship Graph : [framework/agent-relationship-graph.md](agent-relationship-graph.md) (BM-57) — sélection
@@ -348,6 +351,5 @@ huddle_vs_party:
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — supervision
 - Cross-Validation : [framework/cross-validation-trust.md](cross-validation-trust.md) (BM-52) — trigger CVTL
 
----
 
 *BM-56 Selective Huddle Protocol | framework/selective-huddle-protocol.md*

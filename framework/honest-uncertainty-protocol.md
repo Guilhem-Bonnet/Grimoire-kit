@@ -1,4 +1,6 @@
-# Honest Uncertainty Protocol (HUP) — Anti-Hallucination par Design
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Anti-Hallucination par Design
 
 > **BM-50** — Protocole de méta-cognition artificielle pour les agents BMAD.
 >
@@ -8,24 +10,25 @@
 > **Principe** : Chaque agent DOIT évaluer sa confiance AVANT et APRÈS chaque output significatif.
 > L'incertitude honnête est valorisée. L'hallucination confiante est le pire scénario.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Règle Fondamentale
+
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règle Fondamentale
 
 > **Un agent qui dit "je ne sais pas" avec précision est INFINIMENT plus utile
 > qu'un agent qui hallucine avec confiance.**
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Seuils de Confiance — Circuit Breaker Cognitif
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Seuils de Confiance — Circuit Breaker Cognitif
 
 Chaque agent évalue sa confiance sur une échelle à 3 niveaux avant de produire un output :
 
 | Niveau | Seuil | Indicateur | Action |
 |--------|-------|------------|--------|
-| 🟢 **VERT** | Confiance haute | Toutes les infos disponibles, raisonnement vérifiable, output testable | Exécution directe — résultat livré |
-| 🟡 **JAUNE** | Confiance moyenne | Infos partielles, hypothèses raisonnables, output probable mais incertain | Exécution avec flag `⚠️ INCERTAIN` + justification explicite des hypothèses |
-| 🔴 **ROUGE** | Confiance basse | Infos manquantes critiques, raisonnement spéculatif, output non vérifiable | **STOP** — Formulation structurée de l'incertitude → escalade via QEC |
+| **VERT** | Confiance haute | Toutes les infos disponibles, raisonnement vérifiable, output testable | Exécution directe — résultat livré |
+| **JAUNE** | Confiance moyenne | Infos partielles, hypothèses raisonnables, output probable mais incertain | Exécution avec flag `**Attention** INCERTAIN` + justification explicite des hypothèses |
+| **ROUGE** | Confiance basse | Infos manquantes critiques, raisonnement spéculatif, output non vérifiable | **STOP** — Formulation structurée de l'incertitude → escalade via QEC |
 
 ### Règle du Circuit Breaker
 
@@ -38,9 +41,9 @@ SI confiance == ROUGE :
   → Escalader via Question Escalation Chain
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Pre-flight Check — Avant Exécution
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Pre-flight Check — Avant Exécution
 
 Avant chaque tâche significative, l'agent effectue mentalement ce check :
 
@@ -74,9 +77,9 @@ preflight_check:
 - **Output non vérifiable + hypothèses** → ROUGE automatique
 - **Tout est disponible et testable** → VERT
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Post-flight Validation — Après Exécution
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Post-flight Validation — Après Exécution
 
 Après avoir produit un output significatif, l'agent effectue un self-check :
 
@@ -106,13 +109,13 @@ postflight_check:
 
 - **Fait inventé détecté** → Retirer immédiatement de l'output + escalader si impact
 - **Contradiction avec decisions-log** → Activer le Contradiction Resolution Protocol (agent-base.md)
-- **Confiance dégradée** → Ajouter le flag `⚠️ INCERTAIN` + justification
+- **Confiance dégradée** → Ajouter le flag `**Attention** INCERTAIN` + justification
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Uncertainty Report — Format Structuré
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Uncertainty Report — Format Structuré
 
-Quand un agent est en 🔴 ROUGE, il produit un rapport structuré (jamais une tentative de réponse) :
+Quand un agent est en ROUGE, il produit un rapport structuré (jamais une tentative de réponse) :
 
 ```yaml
 uncertainty_report:
@@ -162,29 +165,29 @@ uncertainty_report:
 | `complexity` | La tâche est trop complexe pour une seule passe | "L'optimisation nécessite un benchmark que je ne peux pas exécuter" |
 | `missing_data` | Des données/fichiers nécessaires manquent | "Le fichier `config.prod.yaml` n'existe pas dans le repo" |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Anti-Évitement — Le "Je Ne Sais Pas" N'est Pas une Échappatoire
+## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Anti-Évitement — Le "Je Ne Sais Pas" N'est Pas une Échappatoire
 
 > **Règle critique** : Le droit à l'incertitude ne peut JAMAIS servir d'excuse pour éviter une tâche gourmande.
 
 ### Obligations avant le droit au "je ne sais pas"
 
 1. **Effort documenté obligatoire** — L'agent DOIT prouver qu'il a tenté :
-   - Au moins 1 approche de raisonnement
-   - Identification du point précis de blocage
-   - Différenciation entre "je ne PEUX pas" et "je ne SAIS pas"
+ - Au moins 1 approche de raisonnement
+ - Identification du point précis de blocage
+ - Différenciation entre "je ne PEUX pas" et "je ne SAIS pas"
 
 2. **Spécificité obligatoire** — Interdit de dire :
-   - ❌ "Je ne suis pas sûr" (trop vague)
-   - ❌ "C'est compliqué" (pas un blocage)
-   - ❌ "Je préfère ne pas deviner" (évitement)
-   - ✅ "Il me manque X pour faire Y, j'ai tenté Z mais ça échoue parce que W"
+ - &#x2717; "Je ne suis pas sûr" (trop vague)
+ - &#x2717; "C'est compliqué" (pas un blocage)
+ - &#x2717; "Je préfère ne pas deviner" (évitement)
+ - &#x2713; "Il me manque X pour faire Y, j'ai tenté Z mais ça échoue parce que W"
 
 3. **Anti-pattern de fuite** — L'orchestrateur surveille :
-   - Agent qui escalade systématiquement sur les tâches longues mais jamais sur les courtes → **flag suspect**
-   - Agent qui produit des uncertainty reports sans `effort_spent` rempli → **rejet + forcer tentative**
-   - Agent qui escalade >3 fois sans résolution sur la même tâche → **changement d'agent**
+ - Agent qui escalade systématiquement sur les tâches longues mais jamais sur les courtes → **flag suspect**
+ - Agent qui produit des uncertainty reports sans `effort_spent` rempli → **rejet + forcer tentative**
+ - Agent qui escalade >3 fois sans résolution sur la même tâche → **changement d'agent**
 
 ### Détection de l'Évitement
 
@@ -209,9 +212,9 @@ evasion_detection:
       on_fail: "REJECT — Livrer le partiel d'abord"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans Agent-Base
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration dans Agent-Base
 
 Le HUP s'ajoute comme règle **P0 non-négociable** dans `agent-base.md` :
 
@@ -234,9 +237,9 @@ Le HUP s'ajoute comme règle **P0 non-négociable** dans `agent-base.md` :
 > Détails complets : voir `framework/honest-uncertainty-protocol.md` (charger à la demande).
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 Chaque événement HUP est loggé :
 
@@ -247,9 +250,9 @@ Chaque événement HUP est loggé :
 [timestamp] [agent/Name] [HUP:evasion-flag] pattern detected: 3/5 escalations on large tasks
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Exemples
+## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemples
 
 ### Exemple 1 — Agent Dev, confiance VERTE
 ```
@@ -302,9 +305,9 @@ uncertainty_report:
     estimated_unblock: "Fournir config.prod.yaml ou confirmer la copie de staging"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Références Croisées
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — supervision HUP
 - Question Escalation : [framework/question-escalation-chain.md](question-escalation-chain.md) (BM-51) — escalade des gaps bloquants
@@ -313,6 +316,5 @@ uncertainty_report:
 - Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements HUP persistés
 - Hybrid Parallelism : [framework/hybrid-parallelism-engine.md](hybrid-parallelism-engine.md) (BM-58) — HUP sur chaque tâche DAG
 
----
 
 *BM-50 Honest Uncertainty Protocol | framework/honest-uncertainty-protocol.md*

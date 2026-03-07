@@ -1,15 +1,19 @@
-# Exemple : Terraform-HouseServer
+<p align="right"><a href="../../README.md">README</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple : Terraform-HouseServer
 
 Ce dossier montre comment le BMAD Custom Kit est utilisé dans le projet d'origine [Terraform-HouseServer](https://github.com/Guilhem-Bonnet/Terraform-HouseServer).
 
-## Contexte
+## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
 
 - **Infrastructure** : Proxmox VE homelab avec 6 LXC + cluster K3s
 - **Stack** : Terraform, Ansible, Docker Compose, K3s, FluxCD
 - **Monitoring** : Prometheus, Grafana, Loki, Alertmanager
 - **Archétype** : `infra-ops` (10 agents)
 
-## `project-context.yaml`
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> `project-context.yaml`
 
 ```yaml
 project:
@@ -65,14 +69,18 @@ agents:
     # ... (voir le fichier complet du projet)
 ```
 
-## Ce qui a été personnalisé
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Ce qui a été personnalisé
 
 1. **Identités des agents** : Chaque `<identity>` mentionne les IPs, LXC IDs et services spécifiques
 2. **Exemples** : Tous les `<example>` utilisent des commandes réelles du projet
 3. **shared-context.md** : Topologie réseau complète avec tous les conteneurs et VMs
 4. **Pre-commit hook** : Intégré dans le pipeline `pre-commit` existant avec ansible-lint, tflint, etc.
 
-## Résultats
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Résultats
 
 - **10 agents** actifs avec mémoire sémantique partagée
 - **Health-check** automatique à chaque session (rate-limité 24h)

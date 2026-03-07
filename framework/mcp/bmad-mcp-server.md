@@ -1,4 +1,6 @@
-# BMAD MCP Server — Spécification
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/server.svg" width="32" height="32" alt=""> BMAD MCP Server — Spécification
 
 > **BM-20** — BMAD expose un serveur MCP (Model Context Protocol) local.
 >
@@ -8,9 +10,10 @@
 > **Standard** : Model Context Protocol v1 (Anthropic + Microsoft + GitHub, 2025)
 > **Transport** : stdio (par défaut) ou HTTP (optionnel pour multi-IDE simultané)
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -42,9 +45,9 @@
 └─────────────────────────────────────────────────┘
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Tools Exposés
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Tools Exposés
 
 ### `get_project_context`
 
@@ -67,7 +70,6 @@
 
 **Implémentation** : Lit `_bmad/_memory/shared-context.md` + `_bmad/_memory/project-context.yaml`, retourne JSON structuré.
 
----
 
 ### `get_agent_memory`
 
@@ -89,7 +91,6 @@
 
 **Implémentation** : Lit `_bmad/_memory/agent-learnings/{agent}.md`, appelle optionnellement `mem0-bridge.py query`.
 
----
 
 ### `run_completion_contract`
 
@@ -113,7 +114,6 @@
 
 **Implémentation** : Exécute `bash _bmad/_config/custom/cc-verify.sh`, parse stdout, retourne `{status: "PASS"|"FAIL", output: string, duration_ms: number}`.
 
----
 
 ### `get_workflow_status`
 
@@ -133,7 +133,6 @@
 
 **Implémentation** : Lit `_bmad-output/.runs/{branch}/{run_id}/state.json`.
 
----
 
 ### `list_sessions`
 
@@ -154,7 +153,6 @@
 }
 ```
 
----
 
 ### `get_failure_museum`
 
@@ -175,7 +173,6 @@
 }
 ```
 
----
 
 ### `spawn_subagent_task`
 
@@ -247,9 +244,9 @@ Recherche sémantique cross-collection avec filtres optionnels.
 }
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Installation & Lancement
+## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Installation & Lancement
 
 ```bash
 # 1. Installer les dépendances (Node.js ou Python)
@@ -275,9 +272,9 @@ node framework/mcp/server.js --test
 # → BMAD MCP Server v1.0 — 7 tools registered — Ready
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Implémentation Référence — `server.js`
+## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Implémentation Référence — `server.js`
 
 > Fichier à créer : `framework/mcp/server.js`
 > Stack : Node.js + `@modelcontextprotocol/sdk`
@@ -351,9 +348,9 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## MCP v2 — Sampling (BM-31)
+## <img src="../../docs/assets/icons/server.svg" width="28" height="28" alt=""> MCP v2 — Sampling (BM-31)
 
 > MCP v2 introduit la capability `sampling` : le serveur MCP peut demander au **client LLM**
 > d'effectuer un appel LLM imbriqué. Cela permet à BMAD de déléguer une sous-question
@@ -415,9 +412,9 @@ case "delegate_to_agent": {
 > **Note** : MCP sampling nécessite que le client LLM supporte la capability. Supporté par
 > Claude Desktop, Cursor (roadmap), VS Code MCP extension (roadmap).
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Roadmap
+## <img src="../../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Roadmap
 
 - [ ] **v1.0** — 9 tools core (get_context, get_memory, run_cc, get_status, list_sessions, get_museum, spawn_task, remember_structured, recall_structured)
 - [ ] **v1.1** — HTTP transport pour multi-IDE simultané
@@ -427,6 +424,5 @@ case "delegate_to_agent": {
 - [ ] **v2.1** — MCP Resources (expose les fichiers BMAD comme resources navigables dans l'IDE)
 - [ ] **v2.2** — Agent2Agent Protocol integration (BM-32)
 
----
 
 *BM-20 BMAD MCP Server Specification | framework/mcp/bmad-mcp-server.md*

@@ -1,33 +1,34 @@
----
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
 name: incident-response
 description: Workflow partagé de réponse aux incidents et génération de post-mortems structurés
 triggers:
-  - alerte critique résolue
-  - incident infra détecté
-  - incident sécurité détecté
----
+ - alerte critique résolue
+ - incident infra détecté
+ - incident sécurité détecté
 
 <!--
 TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
-  {{ops_agent}}        - Agent infrastructure/provisioning (ex: Forge)
-  {{security_agent}}   - Agent sécurité (ex: Vault)
-  {{monitoring_agent}} - Agent observabilité (ex: Hawk)
-  {{k8s_agent}}        - Agent kubernetes/orchestration (ex: Helm)
-  {{backup_agent}}     - Agent backup/DR (ex: Phoenix)
-  {{cicd_agent}}       - Agent CI/CD (ex: Flow)
-  {{debug_agent}}      - Agent debugging système (ex: Probe)
-  {{user_name}}        - Nom de l'utilisateur principal
+ {{ops_agent}} - Agent infrastructure/provisioning (ex: Forge)
+ {{security_agent}} - Agent sécurité (ex: Vault)
+ {{monitoring_agent}} - Agent observabilité (ex: Hawk)
+ {{k8s_agent}} - Agent kubernetes/orchestration (ex: Helm)
+ {{backup_agent}} - Agent backup/DR (ex: Phoenix)
+ {{cicd_agent}} - Agent CI/CD (ex: Flow)
+ {{debug_agent}} - Agent debugging système (ex: Probe)
+ {{user_name}} - Nom de l'utilisateur principal
 -->
 
-# Workflow Incident Response
+# <img src="../../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Workflow Incident Response
 
 **But :** Fournir un processus structuré de diagnostic et de post-mortem pour tout incident infra ou sécurité. Ce workflow est partagé entre tous les agents opérationnels.
 
 **Qui peut le déclencher :** Tout agent ({{ops_agent}}, {{security_agent}}, {{monitoring_agent}}, {{k8s_agent}}, {{backup_agent}}, {{cicd_agent}}) ou manuellement par l'utilisateur.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## VARIANTES
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> VARIANTES
 
 | Variante | Lead | Support | Quand |
 |----------|------|---------|-------|
@@ -35,9 +36,9 @@ TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
 | **Incident Sécurité** | {{security_agent}} | {{ops_agent}} (isolation), {{monitoring_agent}} (logs), {{k8s_agent}} (K8s RBAC) | Tentative d'intrusion, secret exposé, container compromis |
 | **Incident Données** | {{backup_agent}} | {{k8s_agent}} (Longhorn), {{ops_agent}} (Proxmox) | Perte de données, corruption, backup échoué |
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## ÉTAPE 1 : DÉTECTION & TRIAGE (5 min max)
+## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> ÉTAPE 1 : DÉTECTION & TRIAGE (5 min max)
 
 ### 1.1 Contexte initial
 
@@ -67,9 +68,9 @@ Recueillir immédiatement :
 - Composant monitoring (alertes fausses, TSDB) → **{{monitoring_agent}}** lead
 - Composant données (backup échoué, corruption) → **{{backup_agent}}** lead
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## ÉTAPE 2 : DIAGNOSTIC SYSTÉMATIQUE
+## <img src="../../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> ÉTAPE 2 : DIAGNOSTIC SYSTÉMATIQUE
 
 ### 2.1 Arbre de diagnostic
 
@@ -104,9 +105,9 @@ L'agent lead doit collecter et documenter :
 3. Valider : service restored, métriques normales
 4. Si fix temporaire : documenter la dette technique
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## ÉTAPE 3 : POST-MORTEM
+## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> ÉTAPE 3 : POST-MORTEM
 
 ### 3.1 Template post-mortem
 
@@ -166,9 +167,9 @@ services_impacted: [liste]
 4. Créer des requêtes inter-agents pour les actions préventives
 5. Si NFR violé (MTTD > 5min, RTO > 2h) → ajouter une alerte Hawk pour prévenir la récurrence
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## NOTES DE MODÉRATION
+## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> NOTES DE MODÉRATION
 
 - Ce workflow ne remplace pas les compétences des agents — il structure le processus
 - L'agent lead a autorité sur les décisions techniques pendant l'incident

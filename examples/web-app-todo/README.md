@@ -1,10 +1,13 @@
-# Exemple — Application Web (SPA + API Go + PostgreSQL)
+<p align="right"><a href="../../README.md">README</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple — Application Web (SPA + API Go + PostgreSQL)
 
 Démonstration de l'archétype `web-app` sur un projet concret : une application de gestion de tâches avec frontend React, API Go, et base PostgreSQL.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Stack détecté automatiquement
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Stack détecté automatiquement
 
 ```bash
 bash /chemin/vers/grimoire-kit/bmad-init.sh \
@@ -22,15 +25,15 @@ bash /chemin/vers/grimoire-kit/bmad-init.sh \
 ```
 
 Agents déployés automatiquement :
-- **Stack ⚡** (fullstack-dev) — feature end-to-end
-- **Pixel 🎨** (frontend-specialist) — composants React, accessibilité
-- **Gopher 🐹** (go-expert) — API Go, gestion des erreurs, tests
-- **Container 🐋** (docker-expert) — build, compose, optimisation image
-- **Atlas 🗺️** / **Sentinel 🔍** / **Mnemo 🧠** — agents meta universels
+- **Stack ** (fullstack-dev) — feature end-to-end
+- **Pixel ** (frontend-specialist) — composants React, accessibilité
+- **Gopher ** (go-expert) — API Go, gestion des erreurs, tests
+- **Container ** (docker-expert) — build, compose, optimisation image
+- **Atlas ** / **Sentinel ** / **Mnemo ** — agents meta universels
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Structure du projet type
+## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet type
 
 ```
 todo-app/
@@ -69,11 +72,11 @@ todo-app/
 └── docker-compose.yml
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Exemple d'utilisation des agents
+## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Exemple d'utilisation des agents
 
-### Feature end-to-end avec Stack ⚡
+### Feature end-to-end avec Stack 
 
 > "Ajoute la possibilité de filtrer les tâches par tag"
 
@@ -82,9 +85,9 @@ Stack raisonne :
 2. Backend : `GET /api/tasks?tag=...` + handler + test
 3. shared-context.md → API section mise à jour
 4. Frontend : `src/components/TagFilter.tsx` + `src/hooks/useTags.ts`
-5. `cc-verify.sh --changed-only` → `✅ CC PASS — [go, typescript]`
+5. `cc-verify.sh --changed-only` → `&#x2713; CC PASS — [go, typescript]`
 
-### Accessibilité avec Pixel 🎨
+### Accessibilité avec Pixel 
 
 > "Audit WCAG 2.1 AA sur le formulaire de création de tâche"
 
@@ -103,7 +106,7 @@ Stack raisonne :
    Fix : changer couleur #999 → #767676
 ```
 
-### Correction certifiée avec fix-loop 🔁
+### Correction certifiée avec fix-loop 
 
 > "L'API retourne 500 quand le titre dépasse 255 caractères"
 
@@ -114,11 +117,11 @@ Gopher → validation ajoutée + test de régression
 Loop [VALIDATOR] → tests passent
 Loop [CHALLENGER] → tente le cas limite (255, 256, 10000 chars)
 Loop [GATEKEEPER] → DoD validée mécaniquement
-Loop [REPORTER] → `✅ Fix validé — 2 itérations — pattern sauvegardé`
+Loop [REPORTER] → `&#x2713; Fix validé — 2 itérations — pattern sauvegardé`
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Completion Contract en action
+## <img src="../../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Completion Contract en action
 
 ```bash
 # Après avoir modifié des fichiers Go et TypeScript
@@ -145,9 +148,9 @@ git commit -m "feat: filtre par tag"
 [main abc1234] feat: filtre par tag
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## shared-context.md rempli
+## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> shared-context.md rempli
 
 Après installation, compléter `_bmad/_memory/shared-context.md` :
 

@@ -1,4 +1,6 @@
-# Question Escalation Chain (QEC) — Remontée Structurée des Incertitudes
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/lightbulb.svg" width="32" height="32" alt=""> Question Escalation Chain (QEC) — Remontée Structurée des Incertitudes
 
 > **BM-51** — Protocole de canalisation et agrégation des questions des sub-agents.
 >
@@ -10,9 +12,10 @@
 > trie, tente de résoudre par contexte, et ne dérange l'utilisateur qu'en dernier recours
 > avec un lot structuré.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture de la Chaîne
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture de la Chaîne
 
 ```
 Sub-Agent (bloqué)
@@ -57,9 +60,9 @@ Sub-Agent (bloqué)
 └─────────────────────────────────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Format d'une Question Escaladée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format d'une Question Escaladée
 
 Chaque question dans le buffer suit ce format :
 
@@ -88,9 +91,9 @@ escalated_question:
   resolution: null  # rempli quand résolu
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Phase 1 — Collecte et Classification
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Phase 1 — Collecte et Classification
 
 ### Réception
 
@@ -127,9 +130,9 @@ priority_rules:
     - type == ambiguity AND agent peut continuer avec hypothèse raisonnable
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Phase 2 — Auto-résolution par Contexte
+## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Phase 2 — Auto-résolution par Contexte
 
 Avant de déranger l'utilisateur, l'orchestrateur tente de résoudre chaque question :
 
@@ -179,9 +182,9 @@ POUR CHAQUE question dans le buffer :
     → Garder dans le buffer pour Phase 3
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Phase 3 — Présentation Groupée à l'Utilisateur
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Phase 3 — Présentation Groupée à l'Utilisateur
 
 ### Déclencheur de présentation
 
@@ -225,9 +228,9 @@ La présentation est déclenchée quand :
 - **Proposer des options** quand l'agent en a identifié → l'utilisateur peut juste dire "option A"
 - **Permettre le skip** pour les non-bloquantes → l'agent utilise son meilleur jugement (JAUNE)
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Redistribution des Réponses
+## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Redistribution des Réponses
 
 Quand l'utilisateur répond :
 
@@ -242,9 +245,9 @@ POUR CHAQUE réponse reçue :
   6. Logger dans BMAD_TRACE : [QEC:user-resolved] agent={id} question={summary}
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## QA History — Mémoire des Questions-Réponses
+## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> QA History — Mémoire des Questions-Réponses
 
 Fichier : `_bmad-output/.qa-history.yaml`
 
@@ -266,9 +269,9 @@ entries:
     used_by_auto_resolve: 3
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 ```
 [timestamp] [orchestrator]  [QEC:received]       from=dev/Amelia | type=missing_data | priority=blocking
@@ -278,9 +281,9 @@ entries:
 [timestamp] [orchestrator]  [QEC:redistributed]  q-id=q-dev-001 | to=dev/Amelia
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration dans les Workflows
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Intégration dans les Workflows
 
 ### Dans un step `orchestrate` (subagent-orchestration.md)
 
@@ -313,9 +316,9 @@ entries:
     auto_resolve_from: [shared-context.md, decisions-log.md]
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Références Croisées
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — héberge le Question Buffer
 - Honest Uncertainty : [framework/honest-uncertainty-protocol.md](honest-uncertainty-protocol.md) (BM-50) — source des escalades
@@ -324,6 +327,5 @@ entries:
 - Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements QEC persistés
 - Hybrid Parallelism : [framework/hybrid-parallelism-engine.md](hybrid-parallelism-engine.md) (BM-58) — agrégation questions parallèles
 
----
 
 *BM-51 Question Escalation Chain | framework/question-escalation-chain.md*

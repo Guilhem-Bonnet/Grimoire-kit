@@ -1,8 +1,10 @@
-# Taxonomie des workflows BMAD
+<p align="right"><a href="../README.md">README</a></p>
+
+# <img src="assets/icons/workflow.svg" width="32" height="32" alt=""> Taxonomie des workflows BMAD
 
 > **ADR-002** — Clarification des trois types d'exécution dans le Grimoire Kit.
 
-## Les trois catégories
+## <img src="assets/icons/workflow.svg" width="28" height="28" alt=""> Les trois catégories
 
 | Type | Format | Exécuteur | Exemple |
 |------|--------|-----------|---------|
@@ -10,7 +12,9 @@
 | **Pipeline** | Python (.py) | Exécution CPU directe (stdlib) | dream.py, stigmergy.py, r-and-d.py, session-lifecycle.py |
 | **Orchestration** | Python + workers | ThreadPoolExecutor CPU (PAS multi-LLM) | orchestrator.py mode concurrent-cpu |
 
-## Playbook (MD pour LLM)
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/workflow.svg" width="28" height="28" alt=""> Playbook (MD pour LLM)
 
 Un playbook est un document Markdown que le LLM charge et suit comme un guide. Il ne génère **aucune exécution programmatique** — c'est le LLM qui interprète les instructions et agit dans l'IDE.
 
@@ -21,7 +25,9 @@ Un playbook est un document Markdown que le LLM charge et suit comme un guide. I
 - Pas de parallélisme — une seule session LLM
 - Exemples : party-mode, brainstorming, elicitation, reviews
 
-## Pipeline (Python exécutable)
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/workflow.svg" width="28" height="28" alt=""> Pipeline (Python exécutable)
 
 Un pipeline est un script Python qui effectue des traitements locaux sans appel LLM. Il lit des fichiers, fait des calculs, écrit des résultats.
 
@@ -32,7 +38,9 @@ Un pipeline est un script Python qui effectue des traitements locaux sans appel 
 - Peut être lancé en background
 - Exemples : dream.py, stigmergy.py, rag-indexer.py, maintenance.py
 
-## Orchestration (multi-worker CPU)
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/boomerang.svg" width="28" height="28" alt=""> Orchestration (multi-worker CPU)
 
 L'orchestration coordonne plusieurs workers Python en parallèle via `ThreadPoolExecutor`. Ce n'est **PAS** du multi-LLM — c'est du parallélisme CPU local.
 
@@ -43,7 +51,9 @@ L'orchestration coordonne plusieurs workers Python en parallèle via `ThreadPool
 - Le LLM IDE reste la seule session active
 - Voir [ADR-001](adr-001-no-multi-llm.md) pour les détails
 
-## Diagramme
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/chart.svg" width="28" height="28" alt=""> Diagramme
 
 ```
 Utilisateur
@@ -55,7 +65,9 @@ Utilisateur
                             └── Peut lancer une ORCHESTRATION (ThreadPool workers)
 ```
 
-## Quand utiliser quoi ?
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Quand utiliser quoi ?
 
 | Besoin | Type | Pourquoi |
 |--------|------|----------|

@@ -1,6 +1,8 @@
-# Archétype fix-loop
+<p align="right"><a href="../../README.md">README</a></p>
 
-## Qu'est-ce que c'est ?
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Archétype fix-loop
+
+## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Qu'est-ce que c'est ?
 
 L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, éprouvé sur 86 cycles d'amélioration. Il garantit qu'aucun problème n'est déclaré résolu sans preuve d'exécution réelle.
 
@@ -10,7 +12,9 @@ L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, 
 - Votre équipe d'agents doit collaborer sur des corrections complexes (multi-contexte)
 - Vous avez besoin d'une mémoire des correctifs avec expiration (évite de retenter des solutions qui ont échoué)
 
-## Ce que ça apporte
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Ce que ça apporte
 
 | Fonctionnalité | Détail |
 |----------------|--------|
@@ -25,7 +29,9 @@ L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, 
 | **Guardrails destructifs** | Confirmation explicite avant toute commande à risque |
 | **Circuit-breaker** | Escalade humaine si max_iterations atteint — jamais de boucle infinie |
 
-## Fichiers inclus
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Fichiers inclus
 
 ```
 archetypes/fix-loop/
@@ -36,7 +42,9 @@ archetypes/fix-loop/
     └── workflow-closed-loop-fix.tpl.md         ← Workflow v2.6 universalisé
 ```
 
-## Installation dans votre projet
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Installation dans votre projet
 
 ```bash
 # Depuis la racine du kit
@@ -62,7 +70,9 @@ Puis remplacer les `{{placeholders}}` :
 
 Si vous n'avez pas d'agents ops/debug → laisser le mode SOLO (défaut, aucun placeholder requis).
 
-## Avec l'archétype infra-ops
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Avec l'archétype infra-ops
 
 L'archétype fix-loop est **complémentaire** à infra-ops. Combinaison recommandée :
 
@@ -74,7 +84,9 @@ Le fix-loop délègue automatiquement :
 - Problèmes Ansible/Terraform/Docker → **Forge** (ops-engineer)
 - Problèmes système/kernel/réseau → **Probe** (systems-debugger)
 
-## Comment ça marche en pratique
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Comment ça marche en pratique
 
 ```
 Guilhem : "Le playbook deploy-monitoring.yml plante sur le handler grafana"

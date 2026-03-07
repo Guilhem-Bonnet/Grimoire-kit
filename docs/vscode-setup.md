@@ -1,11 +1,14 @@
-# Configuration VS Code — BMAD Custom Kit
+<p align="right"><a href="../README.md">README</a></p>
+
+# <img src="assets/icons/wrench.svg" width="32" height="32" alt=""> Configuration VS Code — BMAD Custom Kit
 
 Guide de configuration optimale de VS Code pour travailler avec les agents BMAD
 sans interruptions ni confirmations intempestives.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Table des matières
+
+## <img src="assets/icons/clipboard.svg" width="28" height="28" alt=""> Table des matières
 
 1. [Configuration rapide (copier-coller)](#1-configuration-rapide)
 2. [Auto-approbation des outils agents](#2-auto-approbation-des-outils-agents)
@@ -16,9 +19,9 @@ sans interruptions ni confirmations intempestives.
 7. [Réseau et VPN](#7-réseau-et-vpn)
 8. [Référence des commandes à risque](#8-référence-des-commandes-à-risque)
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 1. Configuration rapide
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> 1. Configuration rapide
 
 Ajouter ces settings dans **User Settings** (`Ctrl+Shift+P` → `Preferences: Open User Settings (JSON)`) :
 
@@ -54,9 +57,9 @@ Ajouter ces settings dans **User Settings** (`Ctrl+Shift+P` → `Preferences: Op
 > (globaux). Les settings spécifiques au projet BMAD sont déjà dans
 > `.vscode/settings.json` du kit.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 2. Auto-approbation des outils agents
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 2. Auto-approbation des outils agents
 
 Par défaut, VS Code demande confirmation à **chaque** appel d'outil par un agent
 (lecture de fichier, recherche, édition, terminal). Pour les agents BMAD qui
@@ -86,9 +89,9 @@ VS Code retient ces choix par outil et par workspace.
 }
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 3. Commandes terminal
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> 3. Commandes terminal
 
 C'est ici que se concentrent la plupart des confirmations bloquantes. Les agents
 BMAD exécutent régulièrement des commandes : `ls`, `cat`, `grep`, `find`,
@@ -220,9 +223,9 @@ complète**, pas juste le premier mot :
 }
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 4. Fichiers et éditions
+## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 4. Fichiers et éditions
 
 ### Désactiver les confirmations de création/édition de fichiers
 
@@ -230,7 +233,7 @@ VS Code Copilot peut demander confirmation avant de créer ou modifier un fichie
 Pour laisser les agents travailler librement :
 
 - Dans Copilot Chat, quand l'agent propose une édition → cliquer **"Apply all"**
-  plutôt que fichier par fichier
+ plutôt que fichier par fichier
 - Pour les créations de fichiers, cliquer sur **"Always allow"** quand proposé
 
 ### Limiter le file watcher (performance)
@@ -251,9 +254,9 @@ lourds du file watcher réduit la charge :
 }
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 5. Modèles et rate limits
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> 5. Modèles et rate limits
 
 ### Le problème
 
@@ -293,9 +296,9 @@ Les quotas sont **par modèle**. Quand Claude est limité, GPT-4.1 est toujours
 disponible et vice versa. Utiliser le sélecteur de modèle en bas du chat Copilot
 pour basculer.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 6. Diff editor
+## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 6. Diff editor
 
 ### Algorithme arrêté trop tôt
 
@@ -314,9 +317,9 @@ Cause : VS Code coupe le calcul de diff après 5 secondes par défaut.
 
 > Ce setting est déjà inclus dans le `.vscode/settings.json` du kit.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 7. Réseau et VPN
+## <img src="assets/icons/network.svg" width="28" height="28" alt=""> 7. Réseau et VPN
 
 ### ERR_CONNECTION_CLOSED
 
@@ -375,9 +378,9 @@ Si vous êtes derrière un proxy d'entreprise :
 }
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## 8. Référence des commandes à risque
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> 8. Référence des commandes à risque
 
 Liste des commandes classées par niveau de risque. Cette référence aide à
 configurer le `chat.tools.terminal.autoApprove` en Option B/C.
@@ -456,9 +459,9 @@ Commandes destructives ou à effet irréversible.
 }
 ```
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Checklist de configuration
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Checklist de configuration
 
 - [ ] `chat.tools.terminal.autoApprove` configuré (Option A, B ou C)
 - [ ] `chat.agent.maxRequests` ≥ 200 (500 recommandé)
@@ -468,9 +471,9 @@ Commandes destructives ou à effet irréversible.
 - [ ] `files.watcherExclude` configuré pour les dossiers lourds BMAD
 - [ ] `search.exclude` configuré pour réduire le bruit dans les recherches
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Fichier complet de référence (User Settings)
+## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Fichier complet de référence (User Settings)
 
 <details>
 <summary>Cliquer pour déplier — settings.json complet recommandé</summary>

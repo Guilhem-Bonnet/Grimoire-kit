@@ -1,4 +1,6 @@
-# Event Log & Shared State (ELSS) — Journal d'Événements et État Partagé
+<p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
+
+# <img src="../docs/assets/icons/workflow.svg" width="32" height="32" alt=""> Event Log & Shared State (ELSS) — Journal d'Événements et État Partagé
 
 > **BM-59** — Bus d'événements persistant et état partagé observable pour la coordination multi-agents.
 >
@@ -13,9 +15,10 @@
 > **Implémentation** : S'appuie sur `framework/tools/message-bus.py` (InProcess/Redis/NATS)
 > pour le transport et `BMAD_TRACE.md` (BM-28) pour la persistance.
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Architecture
+
+## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌─────────┐  ┌─────────┐  ┌─────────┐
@@ -52,9 +55,9 @@
 └──────────┘  └──────────┘  └──────────┘
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Types d'Événements
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Types d'événements
 
 | Type | Description | Émetteur typique | Exemple payload |
 |------|------------|------------------|-----------------|
@@ -75,9 +78,9 @@
 | `dependency_found` | Dépendance externe découverte (optionnel) | Tout agent | `{dependency: "Redis 7+", reason: "pub-sub pattern"}` |
 | `state_checkpoint` | Snapshot d'état | Orchestrateur | `{checkpoint_id: "cp-003", step: "4/7"}` |
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Format du Event Log
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format du Event Log
 
 Fichier : `_bmad-output/.event-log.jsonl` (JSON Lines, append-only)
 
@@ -105,9 +108,9 @@ event_schema:
   visibility: "all | team | private"  # qui peut observer
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Shared State — État Reconstruit
+## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Shared State — État Reconstruit
 
 Fichier : `_bmad-output/.shared-state.yaml`
 
@@ -167,9 +170,9 @@ shared_state:
     questions_pending: 1
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole d'Émission
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Protocole d'Émission
 
 Chaque agent émet des événements via le message bus :
 
@@ -222,9 +225,9 @@ emit_protocol:
       → Logger dans BMAD_TRACE.md
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Protocole d'Observation
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Protocole d'Observation
 
 Chaque agent peut observer l'état partagé :
 
@@ -255,9 +258,9 @@ observe_protocol:
       action: "Si je peux aider → offrir expertise via huddle (SHP BM-56)"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## State Projection — Reconstruction
+## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> State Projection — Reconstruction
 
 Le projecteur reconstruit `.shared-state.yaml` depuis `.event-log.jsonl` :
 
@@ -312,9 +315,9 @@ projection_rules:
     - "Après un state_checkpoint"
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Garbage Collection et Rétention
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Garbage Collection et Rétention
 
 ```yaml
 retention_policy:
@@ -331,9 +334,9 @@ retention_policy:
     prune_questions: resolved_older_than_7_days
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
 
 Chaque événement est aussi loggé dans BMAD_TRACE.md :
 
@@ -344,9 +347,9 @@ Chaque événement est aussi loggé dans BMAD_TRACE.md :
 [timestamp] [orchestrator]   [ELSS:gc]        archived 500 events older than 30d
 ```
 
----
+<img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## Référence Croisée
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Message Bus : [framework/tools/message-bus.py](tools/message-bus.py) — transport des événements
 - BMAD Trace : [framework/bmad-trace.md](bmad-trace.md) — persistance audit trail
@@ -355,6 +358,5 @@ Chaque événement est aussi loggé dans BMAD_TRACE.md :
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55)
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56)
 
----
 
 *BM-59 Event Log & Shared State | framework/event-log-shared-state.md*

@@ -1,6 +1,8 @@
-# Créer un agent — Guide
+<p align="right"><a href="../README.md">README</a></p>
 
-## Voie rapide — Agent Forge (BM-52)
+# <img src="assets/icons/team.svg" width="32" height="32" alt=""> Créer un agent — Guide
+
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Voie rapide — Agent Forge (BM-52)
 
 `agent-forge.py` génère un scaffold rempli intelligemment depuis un besoin textuel ou des gaps détectés automatiquement.
 
@@ -30,7 +32,7 @@ forge --from "..."
   → Sentinel [AA] audit qualité
 ```
 
-> **Note :** Le scaffold couvre la structure, les outils, l'icône et les protocoles inter-agents.  
+> **Note :** Le scaffold couvre la structure, les outils, l'icône et les protocoles inter-agents. 
 > Les prompts métier (sections `[TODO]`) nécessitent votre connaissance du domaine.
 
 > **Conseil budget :** Après avoir installé un nouvel agent, vérifiez qu'il ne sature pas la fenêtre de contexte :
@@ -39,9 +41,9 @@ forge --from "..."
 > ```
 > Seuil recommandé : < 40% de la fenêtre du modèle cible.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Anatomie d'un agent BMAD Custom
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Anatomie d'un agent BMAD Custom
 
 Un agent est un fichier Markdown structuré avec des balises XML qui définissent sa personnalité, ses capacités et ses actions.
 
@@ -53,7 +55,9 @@ mon-agent.md
 └── Prompts (instructions détaillées par action)
 ```
 
-## Créer un agent de zéro
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Créer un agent de zéro
 
 ### 1. Copier le template
 
@@ -67,7 +71,7 @@ cp _bmad/_config/custom/agents/custom-agent.tpl.md \
 | Variable | Description | Exemple |
 |----------|-------------|---------|
 | `{{agent_name}}` | Nom affiché | "Gardien" |
-| `{{agent_icon}}` | Emoji | "🛡️" |
+| `{{agent_icon}}` | Emoji | "" |
 | `{{agent_tag}}` | Tag court (minuscule) | "gardien" |
 | `{{agent_role}}` | Rôle en une phrase | "Sécurité applicative" |
 | `{{domain}}` | Domaine d'expertise | "sécurité, authentification, RBAC" |
@@ -161,7 +165,9 @@ Créer le fichier learnings :
 echo "# Learnings — Gardien" > _bmad/_memory/agent-learnings/security-app.md
 ```
 
-## Clause "Use when"
+<img src="assets/divider.svg" width="100%" alt="">
+
+## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Clause "Use when"
 
 Chaque agent devrait inclure en en-tête une clause commentée `USE WHEN` qui guide le dispatch et aide l'utilisateur à choisir l'agent approprié.
 
@@ -192,9 +198,9 @@ DON'T USE WHEN:
 
 Cette clause est extraite automatiquement par `mem0-bridge.py dispatch` pour le routage contextuel.
 
----
+<img src="assets/divider.svg" width="100%" alt="">
 
-## Bonnes pratiques
+## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Bonnes pratiques
 
 ### Scope strict
 Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'est un signe qu'il faut fusionner ou clarifier les frontières.

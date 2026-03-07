@@ -1,4 +1,6 @@
-# Session Branching — Guide
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Session Branching — Guide
 
 > **BM-16** — Les sessions BMAD peuvent être branchées comme un repo Git.
 >
@@ -8,9 +10,10 @@
 > **Principe** : Chaque "branche de session" est un espace d'output isolé.
 > Merge = l'utilisateur compare et choisit le meilleur.
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Structure
+
+## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure
 
 ```
 _bmad-output/
@@ -30,9 +33,9 @@ _bmad-output/
         └── architecture-run-001/
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Créer une Branche de Session
+## <img src="../../docs/assets/icons/moon.svg" width="28" height="28" alt=""> Créer une Branche de Session
 
 ### Via `bmad-init.sh`
 
@@ -66,9 +69,9 @@ cat > _bmad-output/.runs/explore-graphql/branch.json << 'EOF'
 EOF
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Workflow d'Exploration Branché
+## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Workflow d'Exploration Branché
 
 Scénario typique : on veut comparer deux architectures avant de choisir.
 
@@ -90,9 +93,9 @@ main
         → Ferme explore-rest
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Commandes de Gestion (dans `bmad-init.sh`)
+## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes de Gestion (dans `bmad-init.sh`)
 
 ```bash
 # Liste toutes les branches
@@ -108,9 +111,9 @@ bmad-init.sh session-branch --archive explore-rest
 bmad-init.sh session-branch --cherry-pick explore-graphql "_bmad-output/.runs/explore-graphql/arch-graphql.md" "_bmad-output/planning-artifacts/architecture-final.md"
 ```
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Convention de Nommage
+## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Convention de Nommage
 
 ```
 {type}-{description-courte}
@@ -125,9 +128,9 @@ bmad-init.sh session-branch --cherry-pick explore-graphql "_bmad-output/.runs/ex
 | `sprint-3` | Travaux du sprint 3 (merge en fin de sprint) |
 | `poc-ai-search` | Proof of concept |
 
----
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## Intégration avec les Agents
+## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration avec les Agents
 
 Les agents reçoivent la branche active dans leur contexte et écrivent leurs outputs dans le bon répertoire :
 
@@ -139,6 +142,5 @@ runs_directory: "_bmad-output/.runs/explore-graphql/"
 
 L'agent préfixe tous ses outputs avec `{runs_directory}` au lieu de `_bmad-output/` directement.
 
----
 
 *BM-16 Session Branching Guide | framework/sessions/README.md*
