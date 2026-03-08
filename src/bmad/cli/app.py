@@ -512,3 +512,54 @@ def registry_search(
 
     console.print(tbl)
 
+
+# ── bmad upgrade ──────────────────────────────────────────────────────────────
+
+_upgrade_path_arg = typer.Argument(Path("."), help="Path to the v2 project.")
+_upgrade_dry_run_opt = typer.Option(False, "--dry-run", "-n", help="Show plan without applying.")
+
+
+@app.command("upgrade")
+def upgrade(
+    path: Path = _upgrade_path_arg,
+    dry_run: bool = _upgrade_dry_run_opt,
+) -> None:
+    """Migrate a v2 project to v3 structure."""
+    from bmad.cli.cmd_upgrade import (
+        detect_version,
+        execute_upgrade,
+        plan_upgrade,
+    )
+
+    target = path.resolve()
+    version = detect_version(target)
+
+    if version == "v3":
+        console.print("[green]Project is already v3 — nothing to do.[/green]")
+        return
+
+    if version == "unknown":
+        console.print("[red]No v2 project-context.yaml found at this path.[/red]")
+        raise typer.Exit(1)
+
+    plan = plan_upgrade(target)
+
+    if dry_run:
+        console.print("[bold]bmad upgrade --dry-run[/bold]\n")
+    else:
+        console.print("[bold]bmad upgrade[/bold]\n")
+
+    if plan.warnings:
+        for w in plan.warnings:
+            console.print(f"  [yellow]⚠ {w}[/yellow]")
+
+    completed = execute_upgrade(target, plan, dry_run=dry_run)
+    for desc in completed:
+        icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
+        console.print(f"  {icon}  {desc}")
+
+    if not completed and not plan.warnings:
+        console.print("  [green]Nothing to do.[/green]")
+
+    console.print(f"\n[bold]Migration {'planned' if dry_run else 'complete'}.[/bold]")
+
