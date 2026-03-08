@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -251,3 +252,88 @@ def status(
         console.print(f"  {icon} {d}/")
 
     console.print()
+
+
+# ── bmad add / remove ─────────────────────────────────────────────────────────
+
+def _load_yaml_rw(config_path: Path) -> tuple[Any, Any]:
+    """Load YAML preserving formatting (for round-trip editing)."""
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.preserve_quotes = True  # type: ignore[assignment]
+    with open(config_path, encoding="utf-8") as fh:
+        data = yaml.load(fh)
+    return yaml, data
+
+
+def _save_yaml_rw(yaml: Any, data: Any, config_path: Path) -> None:
+    """Write YAML back preserving formatting."""
+    with open(config_path, "w", encoding="utf-8") as fh:
+        yaml.dump(data, fh)
+
+
+def _find_config(path: Path) -> Path:
+    """Resolve and validate project-context.yaml."""
+    target = path.resolve()
+    config_path = target / "project-context.yaml"
+    if not config_path.is_file():
+        console.print("[red]Not a BMAD project[/red] — run [bold]bmad init[/bold] first.")
+        raise typer.Exit(1)
+    return config_path
+
+
+_add_agent_id = typer.Argument(..., help="Agent identifier to add.")
+_add_path_arg = typer.Argument(Path("."), help="Project root.")
+
+
+@app.command("add")
+def add_agent(
+    agent_id: str = _add_agent_id,
+    path: Path = _add_path_arg,
+) -> None:
+    """Add a custom agent to the project configuration."""
+    config_path = _find_config(path)
+    yaml, data = _load_yaml_rw(config_path)
+
+    agents = data.get("agents") or {}
+    custom: list[str] = agents.get("custom_agents") or []
+
+    if agent_id in custom:
+        console.print(f"[yellow]Agent '{agent_id}' already in project.[/yellow]")
+        raise typer.Exit(0)
+
+    custom.append(agent_id)
+    agents["custom_agents"] = custom
+    data["agents"] = agents
+    _save_yaml_rw(yaml, data, config_path)
+
+    console.print(f"[green]Added agent:[/green] {agent_id}")
+
+
+_rm_agent_id = typer.Argument(..., help="Agent identifier to remove.")
+_rm_path_arg = typer.Argument(Path("."), help="Project root.")
+
+
+@app.command("remove")
+def remove_agent(
+    agent_id: str = _rm_agent_id,
+    path: Path = _rm_path_arg,
+) -> None:
+    """Remove a custom agent from the project configuration."""
+    config_path = _find_config(path)
+    yaml, data = _load_yaml_rw(config_path)
+
+    agents = data.get("agents") or {}
+    custom: list[str] = agents.get("custom_agents") or []
+
+    if agent_id not in custom:
+        console.print(f"[yellow]Agent '{agent_id}' not in project.[/yellow]")
+        raise typer.Exit(1)
+
+    custom.remove(agent_id)
+    agents["custom_agents"] = custom
+    data["agents"] = agents
+    _save_yaml_rw(yaml, data, config_path)
+
+    console.print(f"[green]Removed agent:[/green] {agent_id}")

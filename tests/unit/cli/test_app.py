@@ -210,3 +210,73 @@ class TestStatus:
     def test_status_shows_version(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
         assert "bmad-kit" in result.output
+
+
+# ── Add / Remove ──────────────────────────────────────────────────────────────
+
+class TestAddRemove:
+    @pytest.fixture()
+    def project(self, tmp_path: Path) -> Path:
+        runner.invoke(app, ["init", str(tmp_path), "--name", "test-proj"])
+        return tmp_path
+
+    # ── add ──
+
+    def test_add_agent(self, project: Path) -> None:
+        result = runner.invoke(app, ["add", "my-agent", str(project)])
+        assert result.exit_code == 0
+        assert "Added agent" in result.output
+        content = (project / "project-context.yaml").read_text()
+        assert "my-agent" in content
+
+    def test_add_agent_duplicate(self, project: Path) -> None:
+        runner.invoke(app, ["add", "agent-x", str(project)])
+        result = runner.invoke(app, ["add", "agent-x", str(project)])
+        assert result.exit_code == 0
+        assert "already" in result.output
+
+    def test_add_multiple_agents(self, project: Path) -> None:
+        runner.invoke(app, ["add", "alpha", str(project)])
+        runner.invoke(app, ["add", "beta", str(project)])
+        content = (project / "project-context.yaml").read_text()
+        assert "alpha" in content
+        assert "beta" in content
+
+    def test_add_no_project(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["add", "agent-x", str(tmp_path)])
+        assert result.exit_code == 1
+
+    # ── remove ──
+
+    def test_remove_agent(self, project: Path) -> None:
+        runner.invoke(app, ["add", "to-remove", str(project)])
+        result = runner.invoke(app, ["remove", "to-remove", str(project)])
+        assert result.exit_code == 0
+        assert "Removed agent" in result.output
+        content = (project / "project-context.yaml").read_text()
+        assert "to-remove" not in content
+
+    def test_remove_nonexistent(self, project: Path) -> None:
+        result = runner.invoke(app, ["remove", "ghost", str(project)])
+        assert result.exit_code == 1
+        assert "not in project" in result.output
+
+    def test_remove_no_project(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["remove", "x", str(tmp_path)])
+        assert result.exit_code == 1
+
+    # ── roundtrip ──
+
+    def test_add_remove_roundtrip(self, project: Path) -> None:
+        runner.invoke(app, ["add", "temp", str(project)])
+        content_after_add = (project / "project-context.yaml").read_text()
+        assert "temp" in content_after_add
+
+        runner.invoke(app, ["remove", "temp", str(project)])
+        content_after_rm = (project / "project-context.yaml").read_text()
+        assert "temp" not in content_after_rm
+
+    def test_add_in_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert "add" in result.output
+        assert "remove" in result.output
