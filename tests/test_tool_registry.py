@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Tests pour tool-registry.py — Registry unifié des outils BMAD (BM-45 Story 6.1).
+Tests pour tool-registry.py — Registry unifié des outils Grimoire (BM-45 Story 6.1).
 
 Fonctions testées :
-  - BmadTool (to_mcp, to_anthropic, to_openai)
+  - GrimoireTool (to_mcp, to_anthropic, to_openai)
   - ToolParameter, ValidationResult, RegistryStats
   - ToolDiscoverer._inspect_python_tool(), _inspect_shell_tool(), _inspect_markdown_tool()
   - ToolRegistry (discover, get, filter_by_tag, export_all, validate_all, stats)
@@ -75,10 +75,10 @@ class TestToolParameter(unittest.TestCase):
         self.assertEqual(len(p.enum), 2)
 
 
-class TestBmadTool(unittest.TestCase):
+class TestGrimoireTool(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
-        self.tool = self.mod.BmadTool(
+        self.tool = self.mod.GrimoireTool(
             name="test-tool",
             description="A test tool",
             source_file="framework/tools/test-tool.py",
@@ -125,7 +125,7 @@ class TestBmadTool(unittest.TestCase):
         self.assertIsInstance(serialized, str)
 
     def test_no_required_params(self):
-        tool = self.mod.BmadTool(
+        tool = self.mod.GrimoireTool(
             name="simple", description="Simple tool", source_file="x.py",
             parameters=[self.mod.ToolParameter(name="opt", required=False)],
         )
@@ -133,7 +133,7 @@ class TestBmadTool(unittest.TestCase):
         self.assertNotIn("required", mcp.get("inputSchema", {}))
 
     def test_param_with_enum(self):
-        tool = self.mod.BmadTool(
+        tool = self.mod.GrimoireTool(
             name="format-tool", description="T", source_file="x.py",
             parameters=[self.mod.ToolParameter(
                 name="format", enum=["json", "yaml"], required=True,
@@ -143,7 +143,7 @@ class TestBmadTool(unittest.TestCase):
         self.assertIn("enum", mcp["inputSchema"]["properties"]["format"])
 
     def test_empty_parameters(self):
-        tool = self.mod.BmadTool(name="empty", description="T", source_file="x.py")
+        tool = self.mod.GrimoireTool(name="empty", description="T", source_file="x.py")
         mcp = tool.to_mcp()
         self.assertEqual(mcp["inputSchema"]["properties"], {})
 
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     def test_discover_markdown_tool(self):
         tool_file = self.tools_dir / "guide.md"
-        tool_file.write_text("# BMAD Usage Guide\n\nThis is a guide.\n")
+        tool_file.write_text("# Grimoire Usage Guide\n\nThis is a guide.\n")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(len(tools), 1)
@@ -332,7 +332,7 @@ class TestToolRegistry(unittest.TestCase):
 
 
 class TestToolRegistryOnRealProject(unittest.TestCase):
-    """Test registry on the actual bmad-custom-kit project."""
+    """Test registry on the actual grimoire-kit project."""
 
     def setUp(self):
         self.mod = _import_mod()
@@ -379,7 +379,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_list_command(self):
         r = self._run("--project-root", str(KIT_DIR), "list")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("BMAD Tool Registry", r.stdout)
+        self.assertIn("Grimoire Tool Registry", r.stdout)
 
     def test_stats_command(self):
         r = self._run("--project-root", str(KIT_DIR), "stats")

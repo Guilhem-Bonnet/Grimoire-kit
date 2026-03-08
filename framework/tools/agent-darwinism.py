@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-agent-darwinism.py — Sélection naturelle des agents BMAD.
+agent-darwinism.py — Sélection naturelle des agents Grimoire.
 ==========================================================
 
 Évalue la fitness des agents sur des générations successives et propose des
@@ -97,7 +97,7 @@ ACTION_ICONS = {
 
 @dataclass
 class RawAgentStats:
-    """Statistiques brutes d'un agent depuis BMAD_TRACE."""
+    """Statistiques brutes d'un agent depuis Grimoire_TRACE."""
     agent_id: str
     stories_touched: int = 0
     decisions_count: int = 0
@@ -236,7 +236,7 @@ class GenerationRecord:
         )
 
 
-# ── Parsing BMAD_TRACE (allégé — réutilise les patterns de bench) ─────────
+# ── Parsing Grimoire_TRACE (allégé — réutilise les patterns de bench) ─────────
 
 HEADER_RE = re.compile(
     r"^##\s+(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)\s*\|\s*([^\|]+)\s*\|\s*(.+)$"
@@ -261,7 +261,7 @@ FAILURE_CATEGORIZER = {
 
 def parse_trace_stats(trace_path: Path,
                       since: str | None = None) -> dict[str, RawAgentStats]:
-    """Parse BMAD_TRACE.md et retourne des stats par agent."""
+    """Parse Grimoire_TRACE.md et retourne des stats par agent."""
     agents: dict[str, RawAgentStats] = {}
 
     if not trace_path.exists():
@@ -355,7 +355,7 @@ def parse_trace_stats(trace_path: Path,
 
 def count_agent_learnings(project_root: Path) -> dict[str, int]:
     """Compte les learnings par agent dans agent-learnings/."""
-    learnings_dir = project_root / "_bmad" / "_memory" / "agent-learnings"
+    learnings_dir = project_root / "_grimoire" / "_memory" / "agent-learnings"
     counts: dict[str, int] = {}
     if not learnings_dir.exists():
         return counts
@@ -578,7 +578,7 @@ HISTORY_FILE = "darwinism-history.json"
 
 
 def _history_path(project_root: Path) -> Path:
-    return project_root / "_bmad-output" / HISTORY_FILE
+    return project_root / "_grimoire-output" / HISTORY_FILE
 
 
 def load_history(project_root: Path) -> list[GenerationRecord]:
@@ -885,13 +885,13 @@ def render_lineage(agent_id: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Agent Darwinism — sélection naturelle des agents",
+        description="Grimoire Agent Darwinism — sélection naturelle des agents",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
-    parser.add_argument("--trace", default="_bmad-output/BMAD_TRACE.md",
-                        help="Chemin vers BMAD_TRACE.md")
+                        help="Racine du projet Grimoire")
+    parser.add_argument("--trace", default="_grimoire-output/Grimoire_TRACE.md",
+                        help="Chemin vers Grimoire_TRACE.md")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 
@@ -930,7 +930,7 @@ def main():
     if args.command == "evaluate":
         scores = cmd_evaluate(project_root, trace_path, since=args.since)
         if not scores:
-            print("Aucun agent trouvé dans BMAD_TRACE.")
+            print("Aucun agent trouvé dans Grimoire_TRACE.")
             sys.exit(0)
 
         gen = scores[0].generation if scores else 0

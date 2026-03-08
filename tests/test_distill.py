@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour distill.py — distill.py — Réduction & Director's Cut BMAD.
+Tests pour distill.py — distill.py — Réduction & Director's Cut Grimoire.
 
 Fonctions testées :
   - analyze_document()
@@ -42,11 +42,11 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal pour les tests."""
-    (root / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal pour les tests."""
+    (root / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
     (root / "framework" / "tools").mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour cognitive-flywheel.py — Boucle d'auto-amélioration continue BMAD.
+Tests pour cognitive-flywheel.py — Boucle d'auto-amélioration continue Grimoire.
 
 Fonctions testées :
   - TraceEntry, Pattern, FlywheelScore, Correction, FlywheelReport (dataclasses)
@@ -41,14 +41,14 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     return root
 
 
 def _write_trace(root: Path, lines: list[str]) -> None:
-    """Write a fake BMAD_TRACE.md for testing."""
-    trace_path = root / "_bmad-output" / "BMAD_TRACE.md"
+    """Write a fake Grimoire_TRACE.md for testing."""
+    trace_path = root / "_grimoire-output" / "Grimoire_TRACE.md"
     trace_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -326,7 +326,7 @@ class TestScoreboard(unittest.TestCase):
                              occurrences=4, description="test pattern"),
         ]
         md = self.mod.render_scoreboard(score, patterns)
-        self.assertIn("BMAD Cognitive Flywheel", md)
+        self.assertIn("Grimoire Cognitive Flywheel", md)
         self.assertIn("B", md)
         self.assertIn("improving", md)
         self.assertIn("P-1", md)

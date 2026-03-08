@@ -35,19 +35,19 @@ class TestDreamCorruptedMemory(unittest.TestCase):
     def setUp(self):
         self.mod = _import("dream")
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir(parents=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_corrupted_json_returns_empty(self):
-        mem_path = self.tmpdir / "_bmad-output" / "dream-memory.json"
+        mem_path = self.tmpdir / "_grimoire-output" / "dream-memory.json"
         mem_path.write_text("{invalid json;;;", encoding="utf-8")
         memory = self.mod.load_dream_memory(self.tmpdir)
         self.assertEqual(memory, {})
 
     def test_empty_file_returns_empty(self):
-        mem_path = self.tmpdir / "_bmad-output" / "dream-memory.json"
+        mem_path = self.tmpdir / "_grimoire-output" / "dream-memory.json"
         mem_path.write_text("", encoding="utf-8")
         memory = self.mod.load_dream_memory(self.tmpdir)
         self.assertEqual(memory, {})
@@ -151,26 +151,26 @@ class TestStigmeryCorruptedBoard(unittest.TestCase):
     def setUp(self):
         self.mod = _import("stigmergy")
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir(parents=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_corrupted_json_returns_default_board(self):
-        path = self.tmpdir / "_bmad-output" / "pheromone-board.json"
+        path = self.tmpdir / "_grimoire-output" / "pheromone-board.json"
         path.write_text("not valid json {{{{", encoding="utf-8")
         board = self.mod.load_board(self.tmpdir)
         self.assertEqual(len(board.pheromones), 0)
         self.assertEqual(board.total_emitted, 0)
 
     def test_empty_file_returns_default(self):
-        path = self.tmpdir / "_bmad-output" / "pheromone-board.json"
+        path = self.tmpdir / "_grimoire-output" / "pheromone-board.json"
         path.write_text("", encoding="utf-8")
         board = self.mod.load_board(self.tmpdir)
         self.assertIsNotNone(board)
 
     def test_missing_fields_handled(self):
-        path = self.tmpdir / "_bmad-output" / "pheromone-board.json"
+        path = self.tmpdir / "_grimoire-output" / "pheromone-board.json"
         path.write_text('{"pheromones": [{}]}', encoding="utf-8")
         board = self.mod.load_board(self.tmpdir)
         self.assertEqual(len(board.pheromones), 1)
@@ -247,7 +247,7 @@ class TestMemoryLintRobustness(unittest.TestCase):
 
     def test_unreadable_file_skipped(self):
         """If a memory file is unreadable, lint doesn't crash."""
-        mem = self.tmpdir / "_bmad" / "_memory" / "agent-learnings"
+        mem = self.tmpdir / "_grimoire" / "_memory" / "agent-learnings"
         mem.mkdir(parents=True)
         # Create a directory with the name of a file (can't be read as text)
         (mem / "dev.md").mkdir()
@@ -257,7 +257,7 @@ class TestMemoryLintRobustness(unittest.TestCase):
 
     def test_empty_entries_no_crash(self):
         """Files with no parseable entries are skipped."""
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "decisions-log.md").write_text("# Decisions\n\nNo entries yet.\n",
                                               encoding="utf-8")
@@ -385,7 +385,7 @@ class TestNSORobustness(unittest.TestCase):
 
     def test_corrupted_dream_memory(self):
         """NSO handles corrupted dream-memory.json."""
-        out = self.tmpdir / "_bmad-output"
+        out = self.tmpdir / "_grimoire-output"
         out.mkdir(parents=True)
         (out / "dream-memory.json").write_text("CORRUPT", encoding="utf-8")
         report = self.mod.run_nso(self.tmpdir)
@@ -395,7 +395,7 @@ class TestNSORobustness(unittest.TestCase):
 
     def test_corrupted_pheromone_board(self):
         """NSO handles corrupted pheromone-board.json."""
-        out = self.tmpdir / "_bmad-output"
+        out = self.tmpdir / "_grimoire-output"
         out.mkdir(parents=True)
         (out / "pheromone-board.json").write_text("<<<BROKEN>>>",
                                                    encoding="utf-8")

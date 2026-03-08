@@ -1,6 +1,6 @@
 {
   // ════════════════════════════════════════════════════════════════════
-  // BMAD Custom Kit — VS Code settings
+  // Grimoire Custom Kit — VS Code settings
   // ════════════════════════════════════════════════════════════════════
 
   // ── Éditeur ─────────────────────────────────────────────────────────
@@ -22,19 +22,19 @@
     "**/.git": true,
     "**/__pycache__": true,
     "**/*.pyc": true,
-    "_bmad/_memory/*.json": true,
-    "_bmad/_memory/qdrant_cache": true
+    "_grimoire/_memory/*.json": true,
+    "_grimoire/_memory/qdrant_cache": true
   },
 
   // ── Exclusions de la recherche (grep/ripgrep) ────────────────────────
   // Réduire le volume indexé pour éviter les timeouts réseau Copilot
   "search.exclude": {
-    "_bmad-output/BMAD_TRACE.md": true,
-    "_bmad-output/.runs/": true,
-    "_bmad-output/pheromone-board.json": true,
-    "_bmad/_memory/": true,
-    "_bmad/tea/testarch/knowledge/": true,
-    "_bmad/tea/workflows/": true,
+    "_grimoire-output/Grimoire_TRACE.md": true,
+    "_grimoire-output/.runs/": true,
+    "_grimoire-output/pheromone-board.json": true,
+    "_grimoire/_memory/": true,
+    "_grimoire/tea/testarch/knowledge/": true,
+    "_grimoire/tea/workflows/": true,
     "**/node_modules": true,
     "**/.terraform": true,
     "**/.venv": true
@@ -99,7 +99,7 @@
   // Instructions via fichier .github/copilot-instructions.md (chargé automatiquement)
   "github.copilot.chat.reviewSelection.instructions": [
     {
-      "text": "Reviewer : Amelia (dev agent BMAD). Vérifier que le code respecte le DNA de l'archétype actif (acceptance_criteria + tools_required). Langue : Français."
+      "text": "Reviewer : Amelia (dev agent Grimoire). Vérifier que le code respecte le DNA de l'archétype actif (acceptance_criteria + tools_required). Langue : Français."
     }
   ],
 

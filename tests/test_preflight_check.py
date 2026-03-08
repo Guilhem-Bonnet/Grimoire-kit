@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Tests pour preflight-check.py — preflight-check.py — Vérification pré-exécution BMAD.
+Tests pour preflight-check.py — preflight-check.py — Vérification pré-exécution Grimoire.
 
 Fonctions testées :
-  - check_bmad_structure()
+  - check_grimoire_structure()
   - check_tools_available()
   - check_git_state()
   - check_memory_state()
@@ -44,11 +44,11 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal pour les tests."""
-    (root / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal pour les tests."""
+    (root / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
     (root / "framework" / "tools").mkdir(parents=True, exist_ok=True)
     return root
 
@@ -88,16 +88,16 @@ class TestProjectFunctions(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        # Minimal BMAD structure
-        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-        (self.tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+        # Minimal Grimoire structure
+        (self.tmpdir / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_check_bmad_structure_empty_project(self):
+    def test_check_grimoire_structure_empty_project(self):
         try:
-            result = self.mod.check_bmad_structure(self.tmpdir)
+            result = self.mod.check_grimoire_structure(self.tmpdir)
             self.assertIsNotNone(result)
         except (FileNotFoundError, SystemExit):
             pass  # Expected for empty project

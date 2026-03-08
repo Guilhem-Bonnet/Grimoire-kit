@@ -6,8 +6,8 @@ lourde — le modèle tourne sur le serveur Ollama).
 Stocke dans Qdrant (local fichier OU serveur distant).
 
 Variables d'environnement :
-  BMAD_OLLAMA_URL   — URL Ollama (défaut: http://localhost:11434)
-  BMAD_QDRANT_URL   — URL Qdrant serveur (si absent → qdrant local fichier)
+  Grimoire_OLLAMA_URL   — URL Ollama (défaut: http://localhost:11434)
+  Grimoire_QDRANT_URL   — URL Qdrant serveur (si absent → qdrant local fichier)
 
 Dépendances : qdrant-client
   pip install qdrant-client
@@ -58,7 +58,7 @@ def _ollama_embed(text: str, model: str, base_url: str, timeout: float = 10.0) -
         raise RuntimeError(
             f"Ollama inaccessible à {base_url}.\n"
             f"  → Vérifier que Ollama tourne : ollama serve\n"
-            f"  → Ou configurer BMAD_OLLAMA_URL"
+            f"  → Ou configurer Grimoire_OLLAMA_URL"
         ) from e
 
 
@@ -70,7 +70,7 @@ class OllamaBackend:
         ollama_url: str = "http://localhost:11434",
         qdrant_url: str = "",
         embedding_model: str = "nomic-embed-text",
-        collection: str = "bmad",
+        collection: str = "grimoire",
         timeout: float = 10.0,
     ):
         try:
@@ -82,7 +82,7 @@ class OllamaBackend:
             )
         from qdrant_client.models import Distance, VectorParams
 
-        self._ollama_url = os.environ.get("BMAD_OLLAMA_URL", ollama_url)
+        self._ollama_url = os.environ.get("Grimoire_OLLAMA_URL", ollama_url)
         self._model = embedding_model
         self._timeout = timeout
         self._collection = collection
@@ -90,7 +90,7 @@ class OllamaBackend:
 
         # Tester la connexion + récupérer la taille réelle du vecteur
         # (en encodant un texte test)
-        _qdrant_url = os.environ.get("BMAD_QDRANT_URL", qdrant_url)
+        _qdrant_url = os.environ.get("Grimoire_QDRANT_URL", qdrant_url)
         if _qdrant_url:
             self._client = QdrantClient(url=_qdrant_url, timeout=2.0)
         else:

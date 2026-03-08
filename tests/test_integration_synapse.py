@@ -60,7 +60,7 @@ class TestScenario1OrchestratorFlow(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
         self.root = Path(self._tmpdir)
-        (self.root / "_bmad-output" / "orchestrator-history").mkdir(parents=True)
+        (self.root / "_grimoire-output" / "orchestrator-history").mkdir(parents=True)
         synapse_trace.reset_global_tracer()
 
     def tearDown(self):
@@ -436,7 +436,7 @@ class TestMultiToolPipeline(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
         self.root = Path(self._tmpdir)
-        (self.root / "_bmad-output" / "orchestrator-history").mkdir(parents=True)
+        (self.root / "_grimoire-output" / "orchestrator-history").mkdir(parents=True)
         synapse_config.clear_config_cache()
         synapse_trace.reset_global_tracer()
         self.tracer = synapse_trace.SynapseTracer(self.root, dry_run=True)

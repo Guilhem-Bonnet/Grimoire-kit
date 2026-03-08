@@ -79,7 +79,7 @@ steps:
         - Titre (format "As a {user}, I want {goal} so that {benefit}")
         - Acceptance Criteria (ACs) mesurables et testables
         - Story points estimés
-        - Fichier story créé dans _bmad-output/implementation-artifacts/stories/
+        - Fichier story créé dans _grimoire-output/implementation-artifacts/stories/
       Retourner : stories: [{id, title, acs[], story_points, file_path}]
     output_key: stories
     checkpoint: true
@@ -91,7 +91,7 @@ steps:
     instruction: |
       Lire les stories {stories} et le contexte projet.
       Identifier les décisions architecturales nécessaires pour implémenter la feature.
-      Écrire un ADR dans _bmad-output/implementation-artifacts/adr-{feature_slug}.md.
+      Écrire un ADR dans _grimoire-output/implementation-artifacts/adr-{feature_slug}.md.
       Format ADR : Status | Context | Decision | Consequences.
       [THINK] si multiple options viables.
       Retourner : adr_path, key_decisions: []
@@ -155,7 +155,7 @@ steps:
       - Architecture : {architecture}
       - QA : {qa_report}
 
-      Produire un rapport de livraison dans _bmad-output/implementation-artifacts/boomerang-report-{date}.md.
+      Produire un rapport de livraison dans _grimoire-output/implementation-artifacts/boomerang-report-{date}.md.
 
       Si des gaps QA existent : créer des stories de correction et relancer les steps 3-5.
       Si QA PASS : marquer la feature comme livrée dans shared-context.md.
@@ -168,7 +168,7 @@ steps:
 outputs:
   - key: final_report
     description: "Rapport de livraison complet"
-    save_to: "_bmad-output/implementation-artifacts/boomerang-report-{date}.md"
+    save_to: "_grimoire-output/implementation-artifacts/boomerang-report-{date}.md"
   - key: stories
     description: "Stories créées et livrées"
   - key: architecture

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-early-warning.py — Système d'alerte précoce BMAD.
+early-warning.py — Système d'alerte précoce Grimoire.
 ====================================================
 
 Détecte les problèmes AVANT qu'ils ne deviennent des crises.
@@ -233,7 +233,7 @@ def measure_entropy(project_root: Path) -> Metric:
     score_components = []
 
     # 1. Nombre de fichiers mémoire vs taille
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
     if memory_dir.exists():
         memory_files = list(memory_dir.rglob("*"))
         file_count = len([f for f in memory_files if f.is_file()])
@@ -244,11 +244,11 @@ def measure_entropy(project_root: Path) -> Metric:
         score_components.append(file_entropy * 0.3)
         score_components.append(size_entropy * 0.2)
 
-    # 2. Diversité des types de fichiers dans _bmad
-    bmad_dir = project_root / "_bmad"
-    if bmad_dir.exists():
+    # 2. Diversité des types de fichiers dans _grimoire
+    grimoire_dir = project_root / "_grimoire"
+    if grimoire_dir.exists():
         extensions: Counter = Counter()
-        for f in bmad_dir.rglob("*"):
+        for f in grimoire_dir.rglob("*"):
             if f.is_file():
                 extensions[f.suffix] += 1
         if extensions:
@@ -349,7 +349,7 @@ def measure_stagnation(project_root: Path, commits: list[dict]) -> Metric:
     """Stagnation — pas de progression récente."""
     if not commits:
         # Fallback : vérifier mtime des fichiers mémoire
-        memory_dir = project_root / "_bmad" / "_memory"
+        memory_dir = project_root / "_grimoire" / "_memory"
         if memory_dir.exists():
             now = datetime.now().timestamp()
             most_recent = 0.0
@@ -391,12 +391,12 @@ def measure_drift(project_root: Path) -> Metric:
     """Divergence artefacts — drift entre design et implémentation."""
     # Heuristique : comparer les dates de modification des artefacts clés
     pairs = [
-        ("_bmad/_memory/shared-context.md", "_bmad/_memory/session-state.md"),
+        ("_grimoire/_memory/shared-context.md", "_grimoire/_memory/session-state.md"),
     ]
 
     # Trouver les paires PRD / stories
-    planning_dir = project_root / "_bmad-output" / "planning-artifacts"
-    impl_dir = project_root / "_bmad-output" / "implementation-artifacts"
+    planning_dir = project_root / "_grimoire-output" / "planning-artifacts"
+    impl_dir = project_root / "_grimoire-output" / "implementation-artifacts"
 
     if planning_dir.exists() and impl_dir.exists():
         for prd in planning_dir.glob("PRD-*.md"):
@@ -567,7 +567,7 @@ def build_report(project_root: Path, window_days: int = DEFAULT_WINDOW_DAYS) -> 
 
 def format_report(report: EarlyWarningReport) -> str:
     lines = [
-        "🦋 Early Warning System — BMAD",
+        "🦋 Early Warning System — Grimoire",
         f"   {report.overall_level}   Phase : {report.phase}",
         f"   Entropie : {report.entropy_score:.2f}/1.0",
         f"   Git : {'oui' if report.git_available else 'non'}",
@@ -707,7 +707,7 @@ def cmd_trends(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Early Warning System — Détection précoce de problèmes",
+        description="Grimoire Early Warning System — Détection précoce de problèmes",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

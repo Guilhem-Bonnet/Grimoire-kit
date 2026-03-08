@@ -84,7 +84,7 @@ Projet en production / HouseServer :
 
 Sans infrastructure :
   Backend JSON local (recherche mots-clés)
-  → Commande migration quand prêt : bmad-init.sh --memory ollama
+  → Commande migration quand prêt : grimoire-init.sh --memory ollama
 ```
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">
@@ -92,20 +92,20 @@ Sans infrastructure :
 ## <img src="../../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Variables d'environnement gérées
 
 ```bash
-BMAD_OLLAMA_URL=http://localhost:11434   # Serveur Ollama (prioritaire sur config)
-BMAD_QDRANT_URL=http://localhost:6333   # Serveur Qdrant (prioritaire sur config)
-BMAD_QDRANT_API_KEY=                    # Clé API (Qdrant Cloud)
+Grimoire_OLLAMA_URL=http://localhost:11434   # Serveur Ollama (prioritaire sur config)
+Grimoire_QDRANT_URL=http://localhost:6333   # Serveur Qdrant (prioritaire sur config)
+Grimoire_QDRANT_API_KEY=                    # Clé API (Qdrant Cloud)
 ```
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">
 
 ## <img src="../../../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Déploiement
 
-Ce fichier est déployé automatiquement par `bmad-init.sh` quand :
+Ce fichier est déployé automatiquement par `grimoire-init.sh` quand :
 - `--memory ollama` ou `--memory qdrant-server` est spécifié
 - `--memory auto` détecte Ollama ou un serveur Qdrant accessible
 
 Pour déployer manuellement dans votre projet :
 ```bash
-cp vectus.md .bmad/agents/vectus.md
+cp vectus.md .grimoire/agents/vectus.md
 ```

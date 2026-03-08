@@ -77,7 +77,7 @@ class TestAgentMetricsProperties(unittest.TestCase):
 
 
 class TestParseTrace(unittest.TestCase):
-    """Test parse_trace() — BMAD_TRACE parsing."""
+    """Test parse_trace() — Grimoire_TRACE parsing."""
 
     def setUp(self):
         self.bench = _import_bench()
@@ -87,7 +87,7 @@ class TestParseTrace(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_parse_empty_trace(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text("")
         session = self.bench.parse_trace(f)
         self.assertEqual(session.total_entries, 0)
@@ -98,7 +98,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertIsNone(session.period_start)
 
     def test_parse_basic_entries(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-15 14:30 | forge | STORY-001\n"
             "[GIT-COMMIT] feat: added monitoring stack\n"
@@ -125,7 +125,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertEqual(session.agents["hawk"].decisions_count, 1)
 
     def test_agent_filter(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-15 14:30 | forge | STORY-001\n"
             "[GIT-COMMIT] feat: added X\n"
@@ -139,7 +139,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertNotIn("hawk", session.agents)
 
     def test_since_filter(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2025-01-01 10:00 | dev | old-story\n"
             "[GIT-COMMIT] ancient commit\n"
@@ -152,7 +152,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertEqual(session.total_commits, 1)
 
     def test_story_cycle_times(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 10:00 | dev | STORY-X\n"
             "[GIT-COMMIT] started\n"
@@ -165,7 +165,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertAlmostEqual(session.story_cycle_times["STORY-X"], 2.0, places=0)
 
     def test_failure_categorization(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 | dev | S1\n"
             "[FAILURE] pytest error: test_login failed\n"
@@ -174,7 +174,7 @@ class TestParseTrace(unittest.TestCase):
         self.assertIn("test-failure", session.failure_patterns)
 
     def test_checkpoint_count(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 | dev | S1\n"
             "[CHECKPOINT] checkpoint_id: ckpt-001\n"

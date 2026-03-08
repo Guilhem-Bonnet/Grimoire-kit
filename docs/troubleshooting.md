@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/microscope.svg" width="32" height="32" alt=""> Troubleshooting — BMAD Custom Kit
+# <img src="assets/icons/microscope.svg" width="32" height="32" alt=""> Troubleshooting — Grimoire Custom Kit
 
 Solutions aux problèmes les plus fréquents.
 
@@ -13,7 +13,7 @@ Solutions aux problèmes les plus fréquents.
 
 **Diagnostic** :
 ```bash
-python3 _bmad/_memory/mem0-bridge.py status
+python3 _grimoire/_memory/mem0-bridge.py status
 ```
 
 **Causes et fixes** :
@@ -22,17 +22,17 @@ python3 _bmad/_memory/mem0-bridge.py status
 |-------|---------|-----|
 | `qdrant-client` non installé | `Qdrant lib: &#x2717;` | `pip install qdrant-client` |
 | `sentence-transformers` manquant | `Embeddings: &#x2717;` | `pip install sentence-transformers` |
-| Erreur init Qdrant | `init échoué` | Supprimer `_bmad/_memory/qdrant_data/` et relancer |
-| Toutes dépendances manquantes | Mode fallback JSON | `pip install -r _bmad/_memory/requirements.txt` |
+| Erreur init Qdrant | `init échoué` | Supprimer `_grimoire/_memory/qdrant_data/` et relancer |
+| Toutes dépendances manquantes | Mode fallback JSON | `pip install -r _grimoire/_memory/requirements.txt` |
 
 **Note importante** : le fallback JSON est **fonctionnel**. Les agents travaillent normalement — seule la qualité de la recherche sémantique est réduite (mots-clés vs embeddings). Tu peux travailler sans Qdrant.
 
 ```bash
 # Réinstaller toutes les dépendances
-pip install -r _bmad/_memory/requirements.txt
+pip install -r _grimoire/_memory/requirements.txt
 
 # Vérifier le résultat
-python3 _bmad/_memory/mem0-bridge.py status
+python3 _grimoire/_memory/mem0-bridge.py status
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -43,7 +43,7 @@ python3 _bmad/_memory/mem0-bridge.py status
 
 **Diagnostic** :
 ```bash
-bash _bmad/_config/custom/cc-verify.sh  # sans --stack
+bash _grimoire/_config/custom/cc-verify.sh  # sans --stack
 ```
 
 **Causes** :
@@ -56,9 +56,9 @@ bash _bmad/_config/custom/cc-verify.sh  # sans --stack
 
 **Forcer un stack** :
 ```bash
-bash _bmad/_config/custom/cc-verify.sh --stack go
-bash _bmad/_config/custom/cc-verify.sh --stack typescript
-bash _bmad/_config/custom/cc-verify.sh --stack go,docker
+bash _grimoire/_config/custom/cc-verify.sh --stack go
+bash _grimoire/_config/custom/cc-verify.sh --stack typescript
+bash _grimoire/_config/custom/cc-verify.sh --stack go,docker
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -97,20 +97,20 @@ chmod +x .git/hooks/pre-commit
 
 <img src="assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> 4. bmad-init.sh écrase mon installation existante
+## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> 4. grimoire-init.sh écrase mon installation existante
 
 **Symptôme** : Prompt `Continuer et écraser ? (y/N)` à chaque lancement
 
 **Fix** :
 ```bash
 # Option 1 — Confirmer manuellement
-bash bmad-init.sh --name "..." --user "..." # répondre 'y' au prompt
+bash grimoire-init.sh --name "..." --user "..." # répondre 'y' au prompt
 
 # Option 2 — Mode force (pas de prompt)
-bash bmad-init.sh --name "..." --user "..." --force
+bash grimoire-init.sh --name "..." --user "..." --force
 
 # Option 3 — Cibler un dossier différent
-bash bmad-init.sh --name "..." --user "..." --target /chemin/vers/projet
+bash grimoire-init.sh --name "..." --user "..." --target /chemin/vers/projet
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -123,17 +123,17 @@ bash bmad-init.sh --name "..." --user "..." --target /chemin/vers/projet
 
 ```
 Sources attendues (toutes vides sur un projet neuf) :
-- _bmad/_memory/decisions-log.md
-- _bmad/_memory/contradiction-log.md
-- _bmad/_memory/agent-learnings/*.md
-- _bmad/_memory/activity.jsonl
+- _grimoire/_memory/decisions-log.md
+- _grimoire/_memory/contradiction-log.md
+- _grimoire/_memory/agent-learnings/*.md
+- _grimoire/_memory/activity.jsonl
 ```
 
 **Quand utiliser le SIL** : après 2-3 semaines d'utilisation normale, quand les agents ont accumulé des learnings et que tu as noté des décisions.
 
 **Forcer la génération** (pour tester) :
 ```bash
-bash _bmad/_config/custom/sil-collect.sh --force-empty
+bash _grimoire/_config/custom/sil-collect.sh --force-empty
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -147,15 +147,15 @@ bash _bmad/_config/custom/sil-collect.sh --force-empty
 **Fix** :
 ```bash
 # 1. Compléter shared-context.md
-nano _bmad/_memory/shared-context.md
+nano _grimoire/_memory/shared-context.md
 # Remplir : stack, architecture, API, conventions, équipe
 
 # 2. Vérifier les learnings
-ls _bmad/_memory/agent-learnings/
+ls _grimoire/_memory/agent-learnings/
 # Des fichiers .md doivent exister pour chaque agent
 
 # 3. Tester la mémoire
-python3 _bmad/_memory/mem0-bridge.py search "nom du projet"
+python3 _grimoire/_memory/mem0-bridge.py search "nom du projet"
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -167,8 +167,8 @@ python3 _bmad/_memory/mem0-bridge.py search "nom du projet"
 **Diagnostic** :
 ```bash
 # Simuler la détection depuis la racine du projet
-source <(sed -n '/^detect_stack/,/^}/p' /chemin/vers/bmad-init.sh)
-source <(sed -n '/^auto_select_archetype/,/^}/p' /chemin/vers/bmad-init.sh)
+source <(sed -n '/^detect_stack/,/^}/p' /chemin/vers/grimoire-init.sh)
+source <(sed -n '/^auto_select_archetype/,/^}/p' /chemin/vers/grimoire-init.sh)
 stacks=$(detect_stack "$(pwd)")
 echo "Stacks : $stacks"
 echo "Archétype : $(auto_select_archetype "$stacks")"
@@ -181,7 +181,7 @@ echo "Archétype : $(auto_select_archetype "$stacks")"
 
 **Fix** : spécifier l'archétype manuellement :
 ```bash
-bash bmad-init.sh --name "..." --user "..." --archetype web-app
+bash grimoire-init.sh --name "..." --user "..." --archetype web-app
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -189,8 +189,8 @@ bash bmad-init.sh --name "..." --user "..." --archetype web-app
 ## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
 
 ```bash
-chmod +x _bmad/_config/custom/cc-verify.sh
-chmod +x _bmad/_config/custom/sil-collect.sh
+chmod +x _grimoire/_config/custom/cc-verify.sh
+chmod +x _grimoire/_config/custom/sil-collect.sh
 chmod +x .git/hooks/pre-commit
 ```
 
@@ -203,7 +203,7 @@ chmod +x .git/hooks/pre-commit
 python3 --version  # 3.10+ requis
 
 # Vérifier le path
-cd _bmad/_memory/ && python3 maintenance.py health-check
+cd _grimoire/_memory/ && python3 maintenance.py health-check
 
 # Vérifier les dépendances
 pip3 install -r requirements.txt
@@ -215,15 +215,15 @@ pip3 install -r requirements.txt
 
 ```bash
 # Vérifier depuis le bon répertoire (doit être la racine du kit ou du projet)
-bash bmad-init.sh guard --list-models    # doit lister les modèles connus
+bash grimoire-init.sh guard --list-models    # doit lister les modèles connus
 
 # Lancer avec le project-root explicite
 python3 framework/tools/context-guard.py --project-root /chemin/vers/projet
 ```
 
 `guard` cherche des agents dans : 
-- `_bmad/_config/custom/agents/` 
-- `_bmad/bmm/agents/` 
+- `_grimoire/_config/custom/agents/` 
+- `_grimoire/bmm/agents/` 
 - `archetypes/**/agents/` 
 
 Si aucun agent trouvé, vérifiez que `<activation` ou `NEVER break character` est présent dans les fichiers `.md`.
@@ -232,19 +232,19 @@ Si aucun agent trouvé, vérifiez que `<activation` ou `NEVER break character` e
 
 ## <img src="assets/icons/dna.svg" width="28" height="28" alt=""> 11. `evolve` génère 0 mutations
 
-C'est **normal** pour un projet neuf ou le repo kit lui-même (pas de BMAD_TRACE).
+C'est **normal** pour un projet neuf ou le repo kit lui-même (pas de Grimoire_TRACE).
 
 `dna-evolve.py` a besoin de données réelles pour proposer des mutations :
 
 ```bash
-# Vérifier que BMAD_TRACE existe avec du contenu
-wc -l BMAD_TRACE.md 2>/dev/null || echo "Pas de BMAD_TRACE dans ce répertoire"
+# Vérifier que Grimoire_TRACE existe avec du contenu
+wc -l Grimoire_TRACE.md 2>/dev/null || echo "Pas de Grimoire_TRACE dans ce répertoire"
 
 # Renseigner explicitement le fichier TRACE (si dans un sous-dossier)
-bash bmad-init.sh evolve --trace _bmad/_config/custom/BMAD_TRACE.md
+bash grimoire-init.sh evolve --trace _grimoire/_config/custom/Grimoire_TRACE.md
 
 # Forcer un rapport même sans données
-bash bmad-init.sh evolve --report
+bash grimoire-init.sh evolve --report
 ```
 
 Après quelques semaines d'usage réel (5+ interactions par agent), les mutations apparaîtront.
@@ -255,13 +255,13 @@ Après quelques semaines d'usage réel (5+ interactions par agent), les mutation
 
 ```bash
 # Vérifier la description (éviter les caractères spéciaux)
-bash bmad-init.sh forge --from "migrations base de donnees PostgreSQL"
+bash grimoire-init.sh forge --from "migrations base de donnees PostgreSQL"
 
 # Lister les proposals déjà générés pour éviter les doublons
-bash bmad-init.sh forge --list
+bash grimoire-init.sh forge --list
 
 # Installer manuellement un proposal spécifique
-bash bmad-init.sh forge --install db-migrator
+bash grimoire-init.sh forge --install db-migrator
 ```
 
 Les tags sont dérivés des 12 domaines prédéfinis (database, security, frontend, api, testing, data, devops, monitoring, networking, storage, documentation, performance). Si le domaine n'est pas reconnu, `forge` utilise `custom`.
@@ -272,16 +272,16 @@ Les tags sont dérivés des 12 domaines prédéfinis (database, security, fronte
 
 ```bash
 # Vérifier que des sessions existent
-ls _bmad-output/bench-sessions/ 2>/dev/null || echo "Aucune session bench"
+ls _grimoire-output/bench-sessions/ 2>/dev/null || echo "Aucune session bench"
 
-# Lancer bench depuis la racine du projet (là où _bmad-output/ existe)
-cd /chemin/vers/projet && bash /chemin/vers/kit/bmad-init.sh bench --summary
+# Lancer bench depuis la racine du projet (là où _grimoire-output/ existe)
+cd /chemin/vers/projet && bash /chemin/vers/kit/grimoire-init.sh bench --summary
 
 # Générer un premier rapport même sans données historiques
-bash bmad-init.sh bench --report
+bash grimoire-init.sh bench --report
 ```
 
-`bench` analyse les fichiers dans `_bmad-output/bench-sessions/`. Si ce dossier est vide, le rapport affichera "Données insuffisantes" — c'est normal pour une installation fraîche.
+`bench` analyse les fichiers dans `_grimoire-output/bench-sessions/`. Si ce dossier est vide, le rapport affichera "Données insuffisantes" — c'est normal pour une installation fraîche.
 
 <img src="assets/divider.svg" width="100%" alt="">
 
@@ -295,7 +295,7 @@ Ce message vient du provider (GitHub / OpenAI / Anthropic) quand le quota de req
 
 2. **Vérifier le budget contexte des agents** — des agents trop lourds consomment plus de tokens par requête :
    ```bash
-   bash bmad-init.sh guard --suggest
+   bash grimoire-init.sh guard --suggest
    ```
  Si un agent dépasse 30-40%, envisagez de réduire son `agent-base.md` ou ses learnings.
 
@@ -322,9 +322,9 @@ Ajouter dans User Settings pour basculer automatiquement sur GPT-4.1 quand le mo
 3. **Utiliser les outils CLI en attendant** — `guard`, `bench`, `evolve`, `forge` sont 100% locaux (Python stdlib) et ne consomment aucun quota :
    ```bash
    # Un rate limit ? Bon moment pour un diagnostic local
-   bash bmad-init.sh guard --json
-   bash bmad-init.sh evolve --report
-   bash bmad-init.sh doctor
+   bash grimoire-init.sh guard --json
+   bash grimoire-init.sh evolve --report
+   bash grimoire-init.sh doctor
    ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -433,9 +433,9 @@ nordvpn allowlist add app /usr/share/code/code
 
 Si le problème persiste :
 
-1. `python3 _bmad/_memory/mem0-bridge.py status` — état complet de la mémoire
-2. `bash _bmad/_config/custom/cc-verify.sh` — état du CC
-3. `bash bmad-init.sh doctor` — diagnostic global du kit
-4. `bash bmad-init.sh guard --json` — budget de contexte agents (JSON pour le partager)
+1. `python3 _grimoire/_memory/mem0-bridge.py status` — état complet de la mémoire
+2. `bash _grimoire/_config/custom/cc-verify.sh` — état du CC
+3. `bash grimoire-init.sh doctor` — diagnostic global du kit
+4. `bash grimoire-init.sh guard --json` — budget de contexte agents (JSON pour le partager)
 5. Consulter [docs/vscode-setup.md](vscode-setup.md) pour la configuration VS Code
 6. Ouvrir une issue sur GitHub avec la sortie de ces commandes

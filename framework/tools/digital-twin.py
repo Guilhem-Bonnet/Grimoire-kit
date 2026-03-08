@@ -7,7 +7,7 @@ de changements avant de les appliquer réellement. Game changer décisionnel.
 Usage:
     python digital-twin.py --project-root ./mon-projet snapshot
     python digital-twin.py --project-root ./mon-projet simulate --change "remove agent:analyst"
-    python digital-twin.py --project-root ./mon-projet diff --snapshot .bmad-twin/snap-001.json
+    python digital-twin.py --project-root ./mon-projet diff --snapshot .grimoire-twin/snap-001.json
     python digital-twin.py --project-root ./mon-projet impact --target agent:dev
     python digital-twin.py --project-root ./mon-projet scenario --file scenario.yaml
 """
@@ -155,7 +155,7 @@ def scan_project(root: Path) -> tuple[list[ProjectEntity], list[dict[str, str]]]
         dp = Path(dirpath)
         # Ignorer les dossiers non pertinents
         rel_dir = str(dp.relative_to(root))
-        if any(skip in rel_dir for skip in ("__pycache__", ".git", "node_modules", ".bmad-twin")):
+        if any(skip in rel_dir for skip in ("__pycache__", ".git", "node_modules", ".grimoire-twin")):
             continue
         for fname in filenames:
             fpath = dp / fname
@@ -220,7 +220,7 @@ def cmd_snapshot(root: Path, output_dir: Path | None, as_json: bool) -> dict[str
     snap.checksum = hashlib.sha256(snap_data.encode()).hexdigest()[:16]
 
     # Sauvegarde
-    save_dir = output_dir or root / ".bmad-twin"
+    save_dir = output_dir or root / ".grimoire-twin"
     save_dir.mkdir(parents=True, exist_ok=True)
     snap_file = save_dir / f"{snap_id}.json"
     snap_file.write_text(json.dumps(asdict(snap), indent=2, default=str), encoding="utf-8")
@@ -430,8 +430,8 @@ def cmd_diff(root: Path, snapshot_path: str, as_json: bool) -> dict[str, Any]:
     if not snap_file.is_absolute():
         snap_file = root / snap_file
     if not snap_file.exists():
-        # Chercher dans .bmad-twin
-        twin_dir = root / ".bmad-twin"
+        # Chercher dans .grimoire-twin
+        twin_dir = root / ".grimoire-twin"
         candidates = list(twin_dir.glob(f"*{snapshot_path}*")) if twin_dir.exists() else []
         if candidates:
             snap_file = candidates[0]

@@ -24,7 +24,7 @@ _spec.loader.exec_module(ft)
 @pytest.fixture
 def tmp_project(tmp_path):
     """Projet temp avec structure minimale."""
-    (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
     (tmp_path / "framework" / "tools").mkdir(parents=True)
     (tmp_path / "tests").mkdir(parents=True)
     # Create some test files
@@ -82,13 +82,13 @@ class TestMemoryFreshness:
         assert result.score == 0.3
 
     def test_empty_memory(self, tmp_path):
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         result = ft.measure_memory_freshness(tmp_path)
         assert result.score == 0.3
 
     def test_fresh_memory(self, tmp_project):
         # Write a file just now → should be very fresh
-        (tmp_project / "_bmad" / "_memory" / "test.md").write_text("# Fresh\n")
+        (tmp_project / "_grimoire" / "_memory" / "test.md").write_text("# Fresh\n")
         result = ft.measure_memory_freshness(tmp_project)
         assert result.score == 1.0
         assert "à jour" in result.detail
@@ -151,7 +151,7 @@ class TestHistory:
         assert len(history) == 3
 
     def test_prune_history(self, tmp_path):
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         path = tmp_path / ft.HISTORY_FILE
 
         # Write more than MAX entries

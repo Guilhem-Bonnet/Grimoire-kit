@@ -1,4 +1,4 @@
-"""Tests for bmad.memory.manager — MemoryManager unified API."""
+"""Tests for grimoire.memory.manager — MemoryManager unified API."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bmad.core.config import BmadConfig, MemoryConfig
-from bmad.core.exceptions import BmadMemoryError
-from bmad.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
-from bmad.memory.manager import MemoryManager, _create_backend, _resolve_auto
+from grimoire.core.config import GrimoireConfig, MemoryConfig
+from grimoire.core.exceptions import GrimoireMemoryError
+from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.manager import MemoryManager, _create_backend, _resolve_auto
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -30,10 +30,10 @@ def mock_backend() -> MagicMock:
     return b
 
 
-def _make_config(backend: str = "local", **overrides: str) -> BmadConfig:
-    """Build a minimal BmadConfig with given memory settings."""
+def _make_config(backend: str = "local", **overrides: str) -> GrimoireConfig:
+    """Build a minimal GrimoireConfig with given memory settings."""
     mem_data: dict[str, Any] = {"backend": backend, **overrides}
-    return BmadConfig.from_dict({
+    return GrimoireConfig.from_dict({
         "project": {"name": "test-project"},
         "memory": mem_data,
     })
@@ -110,7 +110,7 @@ class TestFromConfigLocal:
         mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
         assert mgr.backend is not None
         # Verify it's a LocalMemoryBackend
-        from bmad.memory.backends.local import LocalMemoryBackend
+        from grimoire.memory.backends.local import LocalMemoryBackend
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
 
@@ -125,7 +125,7 @@ class TestFromConfigLocal:
     def test_local_auto_resolves(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = _make_config("auto")
         mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
-        from bmad.memory.backends.local import LocalMemoryBackend
+        from grimoire.memory.backends.local import LocalMemoryBackend
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
 
@@ -133,10 +133,10 @@ class TestFromConfigLocal:
         monkeypatch.chdir(tmp_path)
         cfg = _make_config("local")
         mgr = MemoryManager.from_config(cfg)
-        from bmad.memory.backends.local import LocalMemoryBackend
+        from grimoire.memory.backends.local import LocalMemoryBackend
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
-        assert (tmp_path / "_bmad" / "_memory").is_dir()
+        assert (tmp_path / "_grimoire" / "_memory").is_dir()
 
 
 # ── error handling ────────────────────────────────────────────────────────────
@@ -151,22 +151,22 @@ class TestFromConfigErrors:
         mem = MemoryConfig(backend="unknown-xyz")
         object.__setattr__(cfg, "memory", mem)
 
-        with pytest.raises(BmadMemoryError, match="Unknown memory backend"):
+        with pytest.raises(GrimoireMemoryError, match="Unknown memory backend"):
             MemoryManager.from_config(cfg)
 
     def test_import_error_wrapped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Simulate missing qdrant-client → BmadMemoryError."""
+        """Simulate missing qdrant-client → GrimoireMemoryError."""
         monkeypatch.chdir(tmp_path)
 
-        from bmad.memory import manager as mgr_mod
+        from grimoire.memory import manager as mgr_mod
 
-        def _fake_create(config: BmadConfig, project_root: Path | None = None) -> MemoryBackend:
+        def _fake_create(config: GrimoireConfig, project_root: Path | None = None) -> MemoryBackend:
             raise ImportError("No module named 'qdrant_client'")
 
         monkeypatch.setattr(mgr_mod, "_create_backend", _fake_create)
         cfg = _make_config("qdrant-local")
 
-        with pytest.raises(BmadMemoryError, match="Missing dependency"):
+        with pytest.raises(GrimoireMemoryError, match="Missing dependency"):
             MemoryManager.from_config(cfg)
 
 
@@ -184,7 +184,7 @@ class TestCreateBackendBranches:
         mock_qdrant_mod.QdrantBackend.return_value = mock_backend_instance
 
         def _mock_import_qdrant(name: str, *args: object, **kwargs: object) -> object:
-            if name == "bmad.memory.backends.qdrant":
+            if name == "grimoire.memory.backends.qdrant":
                 return mock_qdrant_mod
             return _real_import(name, *args, **kwargs)
 
@@ -202,7 +202,7 @@ class TestCreateBackendBranches:
         mock_qdrant_mod.QdrantBackend.return_value = mock_backend_instance
 
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "bmad.memory.backends.qdrant":
+            if name == "grimoire.memory.backends.qdrant":
                 return mock_qdrant_mod
             return _real_import(name, *args, **kwargs)
 
@@ -221,7 +221,7 @@ class TestCreateBackendBranches:
         mock_ollama_mod.OllamaBackend.return_value = mock_backend_instance
 
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "bmad.memory.backends.ollama":
+            if name == "grimoire.memory.backends.ollama":
                 return mock_ollama_mod
             return _real_import(name, *args, **kwargs)
 
@@ -239,7 +239,7 @@ class TestCreateBackendBranches:
         mock_ollama_mod.OllamaBackend.return_value = MagicMock(spec=MemoryBackend)
 
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "bmad.memory.backends.ollama":
+            if name == "grimoire.memory.backends.ollama":
                 return mock_ollama_mod
             return _real_import(name, *args, **kwargs)
 
@@ -263,7 +263,7 @@ class TestCreateBackendBranches:
         mock_qdrant_mod.QdrantBackend.return_value = MagicMock(spec=MemoryBackend)
 
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "bmad.memory.backends.qdrant":
+            if name == "grimoire.memory.backends.qdrant":
                 return mock_qdrant_mod
             return _real_import(name, *args, **kwargs)
 

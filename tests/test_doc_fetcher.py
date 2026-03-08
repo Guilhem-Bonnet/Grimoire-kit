@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour doc-fetcher.py — Indexation de documentation externe BMAD.
+Tests pour doc-fetcher.py — Indexation de documentation externe Grimoire.
 
 Fonctions testées :
   - _validate_url()
@@ -45,8 +45,8 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -210,7 +210,7 @@ class TestDocIndexPersistence(unittest.TestCase):
         self.assertEqual(loaded.sources["python"].total_chunks, 10)
 
     def test_corrupted_index(self):
-        index_path = self.tmpdir / "_bmad-output" / ".doc-index.json"
+        index_path = self.tmpdir / "_grimoire-output" / ".doc-index.json"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text("{broken", encoding="utf-8")
         idx = self.mod.load_doc_index(self.tmpdir)
@@ -245,7 +245,7 @@ class TestSearchDocs(unittest.TestCase):
         self.mod.save_doc_index(self.tmpdir, idx)
 
         # Write cache file
-        cache_dir = self.tmpdir / "_bmad-output" / ".doc-cache" / "test-docs"
+        cache_dir = self.tmpdir / "_grimoire-output" / ".doc-cache" / "test-docs"
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f"{page.id}.md"
         cache_file.write_text(

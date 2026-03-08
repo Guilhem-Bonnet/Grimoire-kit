@@ -1,8 +1,8 @@
-name: BMAD SDK CI
+name: Grimoire SDK CI
 
 on:
   push:
-    branches: [main, "bmad/**"]
+    branches: [main, "grimoire/**"]
     paths:
       - "src/**"
       - "tests/unit/**"
@@ -50,7 +50,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Type check
-        run: mypy --strict src/bmad/
+        run: mypy --strict src/grimoire/
 
   test:
     name: "Tests (Python ${{ matrix.python-version }})"
@@ -98,7 +98,7 @@ jobs:
       - name: Verify wheel
         run: |
           pip install dist/*.whl
-          bmad --version
+          grimoire --version
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour context-summarizer.py — Résumé automatique du contexte ancien BMAD (BM-41 Story 3.1).
+Tests pour context-summarizer.py — Résumé automatique du contexte ancien Grimoire (BM-41 Story 3.1).
 
 Fonctions testées :
   - SectionParser.extract_date(), parse_date(), compute_age_days(), extract_tags(), parse_file()
@@ -263,7 +263,7 @@ class TestContextSummarizer(unittest.TestCase):
         if recent_date is None:
             recent_date = datetime.now().strftime("%Y-%m-%d")
 
-        memory_dir = self.tmpdir / "_bmad" / "_memory"
+        memory_dir = self.tmpdir / "_grimoire" / "_memory"
         memory_dir.mkdir(parents=True)
         decisions = memory_dir / "decisions-log.md"
         decisions.write_text(f"""# Decisions Log
@@ -394,7 +394,7 @@ This is a recent decision that should be kept.
         report = cs.summarize(dry_run=True)
         self.assertIsNotNone(report)
         # Should not create any files
-        archives = self.tmpdir / "_bmad" / "_memory" / "archives"
+        archives = self.tmpdir / "_grimoire" / "_memory" / "archives"
         if archives.exists():
             digest_files = list(archives.glob("digest-*.md"))
             self.assertEqual(len(digest_files), 0)
@@ -404,7 +404,7 @@ This is a recent decision that should be kept.
         cs = self.mod.ContextSummarizer(self.tmpdir, age_threshold_days=30)
         report = cs.summarize(dry_run=False)
         if report.digests_created > 0:
-            archives = self.tmpdir / "_bmad" / "_memory" / "archives"
+            archives = self.tmpdir / "_grimoire" / "_memory" / "archives"
             self.assertTrue(archives.exists())
             digest_files = list(archives.glob("digest-*.md"))
             self.assertGreater(len(digest_files), 0)
@@ -502,7 +502,7 @@ class TestAutoPrune(unittest.TestCase):
         self.mod = _import_mod()
         self.tmpdir = tempfile.mkdtemp()
         self.project_root = Path(self.tmpdir)
-        (self.project_root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.project_root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)

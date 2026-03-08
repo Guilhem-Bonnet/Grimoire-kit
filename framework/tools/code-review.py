@@ -551,7 +551,7 @@ def format_review(report: ReviewReport, as_json: bool = False) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Code Review — Revue de code automatisée BMAD",
+        description="Code Review — Revue de code automatisée Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

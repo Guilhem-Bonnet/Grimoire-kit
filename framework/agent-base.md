@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/hexagon.svg" width="32" height="32" alt=""> BMAD Agent Base Protocol v2
+# <img src="../docs/assets/icons/hexagon.svg" width="32" height="32" alt=""> Grimoire Agent Base Protocol v2
 
 > Ce fichier contient le protocole d'activation et les règles communes à tous les agents custom.
 > Chargé par chaque agent via la directive `BASE PROTOCOL` dans leur activation step 2.
@@ -15,7 +15,7 @@
 
 **Avant chaque "terminé" / "fait" / "implémenté" / "corrigé" :**
 1. Détecter le stack des fichiers modifiés (go→build+test+vet, ts→tsc+vitest, tf→validate+fmt, py→pytest+ruff, sh→shellcheck, docker→build, k8s→dry-run, ansible→lint, md→aucune)
-2. Exécuter la vérification via `bash {project-root}/_bmad/_config/custom/cc-verify.sh`
+2. Exécuter la vérification via `bash {project-root}/_grimoire/_config/custom/cc-verify.sh`
 3. Afficher `&#x2713; CC PASS — [stack] — [date]` ou ` CC FAIL`
 4. Si FAIL → corriger immédiatement, relancer, ne rendre la main qu'une fois CC PASS
 
@@ -126,7 +126,7 @@ Trigger : l'utilisateur tape [THINK] ou "réfléchis profondément" ou "extended
 4. **Explorer N ≥ 3 options** avec avantages, inconvénients, risques
 5. **Simuler les échecs** : "si on choisit X et que Y arrive, on fait quoi ?"
 6. **Décider** : option retenue + justification en 2 lignes
-7. **Documenter** : écrire un ADR dans `{project-root}/_bmad/_memory/decisions-log.md`
+7. **Documenter** : écrire un ADR dans `{project-root}/_grimoire/_memory/decisions-log.md`
 8. **Revenir à la branche principale** : `bmad_conversation_branch(action="switch", name="main")`
 
 Ne jamais sortir de [THINK] sans une décision claire et documentée.
@@ -292,13 +292,13 @@ Trigger : l'utilisateur tape "décide pour moi" / "fais au mieux" / "mode joueur
 
 1. Load persona from the current agent file (already in context)
 2. IMMEDIATE ACTION REQUIRED - BEFORE ANY OUTPUT:
- - Load and read `{project-root}/_bmad/core/config.yaml` NOW
+ - Load and read `{project-root}/_grimoire/core/config.yaml` NOW
  - Store ALL fields as session variables: `{user_name}`, `{communication_language}`, `{output_folder}`
- - Load `{project-root}/_bmad/_memory/shared-context.md` for project context
+ - Load `{project-root}/_grimoire/_memory/shared-context.md` for project context
  - INBOX CHECK: scan shared-context.md section "## Requêtes inter-agents" for lines containing `[*→{AGENT_TAG}]`. Si trouvé, afficher le nombre et résumé dans le greeting
- - ZEIGARNIK CHECK: lire `{project-root}/_bmad/_memory/session-state.md` et chercher les tâches `status: in-progress` ou `status: blocked` pour {AGENT_TAG}. Si trouvé, afficher dans le greeting : ` Tâches en cours : N tâche(s) — [résumé bref]`. L'effet Zeigarnik assure que les tâches inachevées restent saillantes.
- - HEALTH CHECK: exécuter `python {project-root}/_bmad/_memory/maintenance.py health-check` (silencieux si déjà fait dans les 24h, sinon auto-prune et diagnostic rapide). Si output non-vide, l'inclure dans le greeting.
- - MNEMO CYCLE N-1: exécuter `python {project-root}/_bmad/_memory/maintenance.py consolidate-learnings` pour consolider les learnings du cycle précédent. Silencieux si rien à merger. Si consolidation effectuée, afficher résumé bref dans le greeting.
+ - ZEIGARNIK CHECK: lire `{project-root}/_grimoire/_memory/session-state.md` et chercher les tâches `status: in-progress` ou `status: blocked` pour {AGENT_TAG}. Si trouvé, afficher dans le greeting : ` Tâches en cours : N tâche(s) — [résumé bref]`. L'effet Zeigarnik assure que les tâches inachevées restent saillantes.
+ - HEALTH CHECK: exécuter `python {project-root}/_grimoire/_memory/maintenance.py health-check` (silencieux si déjà fait dans les 24h, sinon auto-prune et diagnostic rapide). Si output non-vide, l'inclure dans le greeting.
+ - MNEMO CYCLE N-1: exécuter `python {project-root}/_grimoire/_memory/maintenance.py consolidate-learnings` pour consolider les learnings du cycle précédent. Silencieux si rien à merger. Si consolidation effectuée, afficher résumé bref dans le greeting.
  - MODEL HINT: si l'agent déclare `model_affinity` dans son frontmatter, afficher une ligne dans le greeting : ` Modèle recommandé : {meilleur_modèle} ({raison})`. Évaluer : reasoning (extreme→opus/o3, high→sonnet/gpt-4o, medium→haiku/mini, low→mini/local), context_window (massive→gemini, large→opus/sonnet, small→local), speed (fast→sonnet/mini/flash), cost (cheap→haiku/mini/local). Ne PAS bloquer si le modèle actuel ne correspond pas, juste informer.
  - VERIFY: If config not loaded, STOP and report error to user
  - DO NOT PROCEED to step 3 until config is successfully loaded
@@ -322,7 +322,7 @@ Trigger : l'utilisateur tape "décide pour moi" / "fais au mieux" / "mode joueur
 
 - `[MH]` Afficher le Menu
 - `[CH]` Discuter avec {AGENT_NAME}
-- `[PM]` Party Mode → exec=`{project-root}/_bmad/core/workflows/party-mode/workflow.md`
+- `[PM]` Party Mode → exec=`{project-root}/_grimoire/core/workflows/party-mode/workflow.md`
 - `[DA]` Quitter
 
 ### Règle de Chunking des Menus (7±2)
@@ -362,30 +362,30 @@ Si >5 items domaine sont nécessaires :
 - JAMAIS utiliser les mots "terminé", "fait", "implémenté", "corrigé", "prêt" sans avoir exécuté la vérification correspondante au stack et affiché le résultat (CC PASS / CC FAIL)
 - Si CC FAIL → corriger immédiatement, relancer, ne rendre la main qu'une fois CC PASS obtenu
 - Le CC s'applique à TOUTE modification de code, configuration ou infrastructure
-- Utiliser `bash {project-root}/_bmad/_config/custom/cc-verify.sh` pour détecter le stack et lancer les vérifications automatiquement
+- Utiliser `bash {project-root}/_grimoire/_config/custom/cc-verify.sh` pour détecter le stack et lancer les vérifications automatiquement
 - Exception : modifications de documentation pure (Markdown, commentaires) → aucune vérification requise
 
 ### Mémoire & Observabilité
 
 #### MEMORY PROTOCOL — Qdrant source de vérité (dual-write)
 
-**Écrire** : `python {project-root}/_bmad/_memory/mem0-bridge.py remember --type TYPE --agent {AGENT_TAG} "texte"`
+**Écrire** : `python {project-root}/_grimoire/_memory/mem0-bridge.py remember --type TYPE --agent {AGENT_TAG} "texte"`
 Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
-**Lire** : `python {project-root}/_bmad/_memory/mem0-bridge.py recall "question"` (options : `--type TYPE`, `--agent AGENT`)
+**Lire** : `python {project-root}/_grimoire/_memory/mem0-bridge.py recall "question"` (options : `--type TYPE`, `--agent AGENT`)
 
-**Exporter** : `mem0-bridge.py export-md --type agent-learnings --output {project-root}/_bmad/_memory/agent-learnings/{LEARNINGS_FILE}.md`
+**Exporter** : `mem0-bridge.py export-md --type agent-learnings --output {project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md`
 
 > Dual-write actif : Qdrant = source de vérité, fichiers `.md` = exports read-only. UUID5 = déduplication native.
 
 - LAZY-LOAD : Ne PAS charger au démarrage session-state.md, network-topology.md, dependency-graph.md, oss-references.md. Charger À LA DEMANDE : reprise session → session-state.md | réseau/IPs → network-topology.md | impact/dépendances → dependency-graph.md | choix OSS → oss-references.md
-- Mettre à jour `{project-root}/_bmad/_memory/decisions-log.md` ET exécuter `remember --type decisions` après chaque décision {DOMAIN_WORD}
-- Après résolution d'un problème non-trivial : exécuter `remember --type agent-learnings` ET ajouter dans `{project-root}/_bmad/_memory/agent-learnings/{LEARNINGS_FILE}.md` au format `- [YYYY-MM-DD] description`
+- Mettre à jour `{project-root}/_grimoire/_memory/decisions-log.md` ET exécuter `remember --type decisions` après chaque décision {DOMAIN_WORD}
+- Après résolution d'un problème non-trivial : exécuter `remember --type agent-learnings` ET ajouter dans `{project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md` au format `- [YYYY-MM-DD] description`
 - AUTO-MNEMO (post-remember) : L'upsert Qdrant est idempotent via UUID5 — même texte écrit deux fois = une seule entrée. La déduplication est native. Pour la détection de contradictions sémantiques, utiliser `mem0-bridge.py search` avant d'écrire une mémoire qui annule une précédente.
-- CONTRADICTION-LOG : Si tu détectes une information qui contredit une décision passée, ajouter une ligne dans `{project-root}/_bmad/_memory/contradiction-log.md` ET utiliser `remember --type failures` pour capturer la contradiction.
+- CONTRADICTION-LOG : Si tu détectes une information qui contredit une décision passée, ajouter une ligne dans `{project-root}/_grimoire/_memory/contradiction-log.md` ET utiliser `remember --type failures` pour capturer la contradiction.
 
 ### Handoff Inter-Agents
-- TRANSFERT : Quand tu recommandes un transfert vers un autre agent, TOUJOURS ajouter une ligne dans `{project-root}/_bmad/_memory/handoff-log.md` au format `| YYYY-MM-DD HH:MM | {AGENT_TAG} → cible | requête résumée | |`. L'agent cible mettra le statut à &#x2713; une fois le travail terminé.
+- TRANSFERT : Quand tu recommandes un transfert vers un autre agent, TOUJOURS ajouter une ligne dans `{project-root}/_grimoire/_memory/handoff-log.md` au format `| YYYY-MM-DD HH:MM | {AGENT_TAG} → cible | requête résumée | |`. L'agent cible mettra le statut à &#x2713; une fois le travail terminé.
 
 ### Session
 
@@ -419,7 +419,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 > **JTBD émotionnel** (#101) : le greeting doit rassurer ("je sais où on en est"), l'exit doit satisfaire ("voilà ce qu'on a accompli").
 
-- FIN DE SESSION : Avant de traiter [DA] Quitter, TOUJOURS : 1) Afficher l'Exit Summary (Peak-End Rule) 2) Mettre à jour `{project-root}/_bmad/_memory/session-state.md` 3) Exécuter `mem0-bridge.py remember --type agent-learnings --agent {AGENT_TAG} "résumé session"` 4) Si un fichier agent a été modifié, ajouter une entrée dans `{project-root}/_bmad/_memory/agent-changelog.md` 5) Ne PAS attendre que l'utilisateur dise au revoir — si la conversation s'arrête, considérer la session terminée
+- FIN DE SESSION : Avant de traiter [DA] Quitter, TOUJOURS : 1) Afficher l'Exit Summary (Peak-End Rule) 2) Mettre à jour `{project-root}/_grimoire/_memory/session-state.md` 3) Exécuter `mem0-bridge.py remember --type agent-learnings --agent {AGENT_TAG} "résumé session"` 4) Si un fichier agent a été modifié, ajouter une entrée dans `{project-root}/_grimoire/_memory/agent-changelog.md` 5) Ne PAS attendre que l'utilisateur dise au revoir — si la conversation s'arrête, considérer la session terminée
 - NOTE: La consolidation des learnings (Mnemo) est désormais exécutée automatiquement au DÉBUT du cycle suivant (activation step 2), pas en fin de session. Cela élimine le risque de perte si la session se termine sans [DA] Quitter.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -434,7 +434,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 2. **Reformuler** — "Si je comprends bien, vous voulez X pour obtenir Y, c'est correct ?"
 3. **Clarifier la contradiction** — "Plus tôt, nous avions décidé **A** (ref: decisions-log.md L42). Maintenant vous dites **B**. Voulez-vous : (a) changer la décision A, (b) trouver un compromis, (c) autre chose ?"
 4. **Confirmer le scope** — "Pour résumer, le périmètre est : [liste], hors-périmètre : [liste]. On est alignés ?"
-5. **Documenter** — Logger dans `{project-root}/_bmad/_memory/contradiction-log.md` ET `mem0-bridge.py remember --type failures --agent {AGENT_TAG} "Contradiction: A→B, raison: ..."` 
+5. **Documenter** — Logger dans `{project-root}/_grimoire/_memory/contradiction-log.md` ET `mem0-bridge.py remember --type failures --agent {AGENT_TAG} "Contradiction: A→B, raison: ..."` 
 
 ### Quand NE PAS activer
 - Correction d'une erreur factuelle (l'agent avait tort → corriger, pas de protocole)

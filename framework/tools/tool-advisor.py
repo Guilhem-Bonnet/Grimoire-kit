@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-tool-advisor.py — Recommandation proactive d'outils BMAD.
+tool-advisor.py — Recommandation proactive d'outils Grimoire.
 ============================================================
 
 Analyse le contexte projet (fichiers récents, erreurs, patterns de travail)
-et suggère les outils BMAD les plus pertinents. Aide les utilisateurs à
+et suggère les outils Grimoire les plus pertinents. Aide les utilisateurs à
 découvrir des outils qu'ils n'utilisent pas encore.
 
 Catégories de conseil :
@@ -34,7 +34,7 @@ from pathlib import Path
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 ADVISOR_VERSION = "1.0.0"
-USAGE_LOG = "_bmad-output/.router-stats.jsonl"
+USAGE_LOG = "_grimoire-output/.router-stats.jsonl"
 
 # Mappage contexte → outils pertinents
 CONTEXT_RULES: list[dict] = [
@@ -77,7 +77,7 @@ CONTEXT_RULES: list[dict] = [
     {
         "id": "CTX-007",
         "pattern": r"(?:agent|persona|workflow|orchestrat|dispatch)",
-        "tools": ["orchestrator.py", "tool-registry.py", "bmad-mcp-tools.py"],
+        "tools": ["orchestrator.py", "tool-registry.py", "grimoire-mcp-tools.py"],
         "reason": "Contexte agents/workflows — outils d'orchestration",
     },
     {
@@ -158,7 +158,7 @@ WORKFLOWS: list[dict] = [
 
 @dataclass
 class ToolSuggestion:
-    """Suggestion d'outil BMAD."""
+    """Suggestion d'outil Grimoire."""
     tool: str
     reason: str
     priority: str = "medium"  # high | medium | low
@@ -265,7 +265,7 @@ def build_advice(project_root: Path, context: str = "") -> AdvisorReport:
     # Si pas de contexte spécifique, suggérer les outils les plus utiles
     if not suggestions:
         core_tools = [
-            ("synapse-dashboard.py", "Vue d'ensemble de l'infrastructure BMAD"),
+            ("synapse-dashboard.py", "Vue d'ensemble de l'infrastructure Grimoire"),
             ("fitness-tracker.py", "Score de santé global du projet"),
             ("early-warning.py", "Détection précoce des problèmes"),
         ]
@@ -361,7 +361,7 @@ def render_suggestions(report: AdvisorReport) -> str:
 def render_workflows() -> str:
     """Rendu texte des workflows recommandés."""
     lines = [
-        "\n🔄 Workflows BMAD recommandés",
+        "\n🔄 Workflows Grimoire recommandés",
         "=" * 50,
         "",
     ]
@@ -381,7 +381,7 @@ def render_workflows() -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="tool-advisor",
-        description="BMAD Tool Advisor — Recommandation proactive d'outils",
+        description="Grimoire Tool Advisor — Recommandation proactive d'outils",
     )
     p.add_argument("--project-root", type=Path, default=Path("."))
     p.add_argument("--json", action="store_true", help="Sortie JSON")

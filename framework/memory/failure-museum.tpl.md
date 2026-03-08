@@ -79,5 +79,5 @@
 
 ---
 
-*Template BMAD Custom Kit — BM-03 Failure Museum | framework/memory/failure-museum.tpl.md*
+*Template Grimoire Custom Kit — BM-03 Failure Museum | framework/memory/failure-museum.tpl.md*
 *Initialisé le : {{init_date}} — Projet : {{project_name}}*

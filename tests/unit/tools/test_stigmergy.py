@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.stigmergy — Pheromone-based coordination board."""
+"""Tests for grimoire.tools.stigmergy — Pheromone-based coordination board."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.tools.stigmergy import (
+from grimoire.tools.stigmergy import (
     DEFAULT_HALF_LIFE_HOURS,
     MAX_INTENSITY,
     REINFORCEMENT_BOOST,
@@ -31,7 +31,7 @@ from bmad.tools.stigmergy import (
 
 @pytest.fixture()
 def root(tmp_path: Path) -> Path:
-    (tmp_path / "_bmad-output").mkdir()
+    (tmp_path / "_grimoire-output").mkdir()
     return tmp_path
 
 
@@ -133,7 +133,7 @@ class TestPersistence:
         assert loaded.total_emitted == 1
 
     def test_load_corrupted_json(self, root: Path) -> None:
-        (root / "_bmad-output" / "pheromone-board.json").write_text("{bad")
+        (root / "_grimoire-output" / "pheromone-board.json").write_text("{bad")
         b = load_board(root)
         assert len(b.pheromones) == 0
 
@@ -360,7 +360,7 @@ class TestStigmergyTool:
                          location="src/auth", text="review", emitter="dev")
         assert isinstance(board, PheromoneBoard)
         assert len(board.pheromones) == 1
-        assert (root / "_bmad-output" / "pheromone-board.json").exists()
+        assert (root / "_grimoire-output" / "pheromone-board.json").exists()
 
     def test_sense_action(self, stig: Stigmergy) -> None:
         stig.run(action="emit", ptype="NEED", text="help", emitter="dev")

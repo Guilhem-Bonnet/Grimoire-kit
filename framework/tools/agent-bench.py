@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-BMAD Agent Benchmark Engine — BM-51
+Grimoire Agent Benchmark Engine — BM-51
 ====================================
-Analyse BMAD_TRACE.md + mémoire Qdrant pour produire des métriques
+Analyse Grimoire_TRACE.md + mémoire Qdrant pour produire des métriques
 objectives de performance des agents.
 
 Usage:
@@ -30,7 +30,7 @@ _log = logging.getLogger("grimoire.agent_bench")
 
 @dataclass
 class TraceEntry:
-    """Une entrée parsée depuis BMAD_TRACE.md"""
+    """Une entrée parsée depuis Grimoire_TRACE.md"""
     timestamp: str
     agent: str
     story: str
@@ -92,10 +92,10 @@ class SessionMetrics:
     story_cycle_times: dict[str, float] = field(default_factory=dict)
 
 
-# ── Parser BMAD_TRACE ─────────────────────────────────────────────────────────
+# ── Parser Grimoire_TRACE ─────────────────────────────────────────────────────────
 
 def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | None = None) -> SessionMetrics:
-    """Parse BMAD_TRACE.md et retourne des métriques structurées."""
+    """Parse Grimoire_TRACE.md et retourne des métriques structurées."""
     if not trace_path.exists():
         return SessionMetrics(period_start=None, period_end=None)
 
@@ -257,12 +257,12 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
 
 # ── Lecture mémoire Qdrant (si accessible) ───────────────────────────────────
 
-def read_memory_stats(bmad_dir: Path) -> dict:
+def read_memory_stats(grimoire_dir: Path) -> dict:
     """Lit les statistiques de la mémoire locale si disponibles."""
     stats: dict = {}
 
     # Fichiers de learnings locaux (fallback sans Qdrant)
-    learnings_dir = bmad_dir / "_memory"
+    learnings_dir = grimoire_dir / "_memory"
     if learnings_dir.exists():
         for item in learnings_dir.glob("agent-learnings*.md"):
             try:
@@ -293,7 +293,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
     now = datetime.now(tz=UTC).date().isoformat()
 
     lines: list[str] = [
-        f"# BMAD Agent Benchmark Report — {now}",
+        f"# Grimoire Agent Benchmark Report — {now}",
         "",
         f"> Période : {session.period_start or 'all-time'} → {session.period_end}",
         f"> Entrées TRACE analysées : {session.total_entries}",
@@ -390,7 +390,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
         "",
         "---",
         f"*Généré par `framework/tools/agent-bench.py` le {now}*",
-        "*Pour amélioration Sentinel : `bash bmad-init.sh bench --improve`*",
+        "*Pour amélioration Sentinel : `bash grimoire-init.sh bench --improve`*",
     ]
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -411,7 +411,7 @@ def generate_bench_context(session: SessionMetrics, out: Path) -> None:
     lines = [
         f"# Bench Context pour Sentinel — {now}",
         "",
-        "> Fichier généré automatiquement par `bmad-init.sh bench --improve`.",
+        "> Fichier généré automatiquement par `grimoire-init.sh bench --improve`.",
         "> À passer directement en contexte à Sentinel [BR], commande : `bench-review`.",
         "",
         "## Résumé de la période",
@@ -520,7 +520,7 @@ def summary_line(session: SessionMetrics) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="BMAD Agent Benchmark — métriques de performance depuis BMAD_TRACE",
+        description="Grimoire Agent Benchmark — métriques de performance depuis Grimoire_TRACE",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--report", action="store_true", help="Générer le rapport Markdown complet")
@@ -530,18 +530,18 @@ def main() -> None:
     parser.add_argument("--agent", metavar="AGENT_ID", help="Filtrer sur un agent spécifique")
     parser.add_argument(
         "--trace", metavar="PATH",
-        default="_bmad-output/BMAD_TRACE.md",
-        help="Chemin vers BMAD_TRACE.md (défaut: _bmad-output/BMAD_TRACE.md)",
+        default="_grimoire-output/Grimoire_TRACE.md",
+        help="Chemin vers Grimoire_TRACE.md (défaut: _grimoire-output/Grimoire_TRACE.md)",
     )
     parser.add_argument(
         "--out", metavar="PATH",
-        default="_bmad-output/bench-reports/latest.md",
+        default="_grimoire-output/bench-reports/latest.md",
         help="Fichier de sortie du rapport",
     )
     parser.add_argument(
-        "--bmad-dir", metavar="PATH",
-        default="_bmad",
-        help="Répertoire _bmad (pour lecture mémoire)",
+        "--grimoire-dir", metavar="PATH",
+        default="_grimoire",
+        help="Répertoire _grimoire (pour lecture mémoire)",
     )
 
     args = parser.parse_args()
@@ -551,16 +551,16 @@ def main() -> None:
         sys.exit(0)
 
     trace_path = Path(args.trace)
-    bmad_dir = Path(args.bmad_dir)
+    grimoire_dir = Path(args.grimoire_dir)
     out_path = Path(args.out)
 
     if not trace_path.exists():
-        print(f"[WARN] BMAD_TRACE introuvable : {trace_path}", file=sys.stderr)
-        print("[INFO] Lancement avec données vides — exécutez des sessions BMAD pour alimenter le bench")
+        print(f"[WARN] Grimoire_TRACE introuvable : {trace_path}", file=sys.stderr)
+        print("[INFO] Lancement avec données vides — exécutez des sessions Grimoire pour alimenter le bench")
 
-    print(f"📊 Parsing BMAD_TRACE : {trace_path}")
+    print(f"📊 Parsing Grimoire_TRACE : {trace_path}")
     session = parse_trace(trace_path, since=args.since, agent_filter=args.agent)
-    memory_stats = read_memory_stats(bmad_dir)
+    memory_stats = read_memory_stats(grimoire_dir)
 
     print(f"   {session.total_entries} entrées analysées, {len(session.agents)} agents, {session.total_failures} failures")
 

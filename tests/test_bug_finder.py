@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour bug-finder.py — Détecteur de bugs logiques BMAD.
+Tests pour bug-finder.py — Détecteur de bugs logiques Grimoire.
 
 Fonctions testées :
   - scan_file()
@@ -44,9 +44,9 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal pour les tests."""
-    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal pour les tests."""
+    (root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     (root / "src").mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,4 +1,4 @@
-# BMAD Custom Kit — Project Context (source de vérité)
+# Grimoire Custom Kit — Project Context (source de vérité)
 # Guide complet des options : docs/getting-started.md
 
 project:
@@ -84,13 +84,13 @@ memory:
   # qdrant_url: "http://localhost:6333"  # si qdrant-server
   # ollama_url: "http://localhost:11434"  # si ollama
   # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # modèle d'embedding
-  # collection_prefix: "bmad"          # préfixe des collections Qdrant
+  # collection_prefix: "grimoire"          # préfixe des collections Qdrant
 
 agents:
   archetype: "minimal"
   custom_agents: []
 
-installed_archetypes: []               # Rempli par bmad-init.sh install
+installed_archetypes: []               # Rempli par grimoire-init.sh install
 
 # ── LLM Router (BM-40) — Route les requêtes vers le modèle optimal ──────────
 # Voir framework/tools/llm-router.py pour l'utilisation CLI
@@ -191,8 +191,8 @@ installed_archetypes: []               # Rempli par bmad-init.sh install
 #   max_chunk_tokens: 512              # Taille max d'un chunk en tokens
 #   qdrant_url: ""                     # Vide = mode fichier local
 #   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
-#   collection_prefix: "bmad"
-#   index_on_init: false               # Indexer au bmad up
+#   collection_prefix: "grimoire"
+#   index_on_init: false               # Indexer au grimoire up
 #   index_on_commit: false             # Indexer en hook pre-commit
 
 # models:                              # Multi-LLM routing (legacy format)
@@ -207,7 +207,7 @@ installed_archetypes: []               # Rempli par bmad-init.sh install
 #       tier: standard                 # code-focused, 192K window
 #       quota: unlimited
 #   routing_strategy: "balanced"       # cost-optimize | quality-max | balanced
-#   # NOTE: les modèles economy (haiku, gpt-4o-mini) sont déconseillés pour les agents BMAD
+#   # NOTE: les modèles economy (haiku, gpt-4o-mini) sont déconseillés pour les agents Grimoire
 #   # Le protocole agent-base.md est trop complexe pour ces modèles
 
 # context_guard:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour agent-darwinism.py — BMAD Agent Darwinism.
+Tests pour agent-darwinism.py — Grimoire Agent Darwinism.
 
 Fonctions testées :
   - parse_trace_stats()
@@ -37,15 +37,15 @@ def _import_dw():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _create_trace(root: Path, entries: list[str]):
-    """Créer un BMAD_TRACE.md avec les entrées données."""
-    out = root / "_bmad-output"
+    """Créer un Grimoire_TRACE.md avec les entrées données."""
+    out = root / "_grimoire-output"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "BMAD_TRACE.md").write_text("\n".join(entries), encoding="utf-8")
+    (out / "Grimoire_TRACE.md").write_text("\n".join(entries), encoding="utf-8")
 
 
 def _create_learnings(root: Path, data: dict[str, str]):
     """Créer des fichiers de learnings."""
-    ld = root / "_bmad" / "_memory" / "agent-learnings"
+    ld = root / "_grimoire" / "_memory" / "agent-learnings"
     ld.mkdir(parents=True, exist_ok=True)
     for name, content in data.items():
         (ld / name).write_text(content, encoding="utf-8")
@@ -500,7 +500,7 @@ class TestPersistence(BaseTest):
 class TestCommands(BaseTest):
     def _setup_project(self):
         dw = _import_dw()
-        trace_path = self.root / "_bmad-output" / "BMAD_TRACE.md"
+        trace_path = self.root / "_grimoire-output" / "Grimoire_TRACE.md"
         trace_path.parent.mkdir(parents=True, exist_ok=True)
         trace_path.write_text(
             "## 2026-01-15 10:00 | dev | STORY-001\n"

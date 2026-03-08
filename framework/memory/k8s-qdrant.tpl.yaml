@@ -1,5 +1,5 @@
 # K3s / Kubernetes — Qdrant pour HouseServer ou cluster K3s
-# Généré par : bmad-init.sh --memory qdrant-k8s
+# Généré par : grimoire-init.sh --memory qdrant-k8s
 #
 # Déploiement :
 #   kubectl apply -f k8s-qdrant.yaml
@@ -11,16 +11,16 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: bmad-memory
+  name: grimoire-memory
   labels:
-    app.kubernetes.io/part-of: bmad
+    app.kubernetes.io/part-of: grimoire
 
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: qdrant-storage
-  namespace: bmad-memory
+  namespace: grimoire-memory
 spec:
   # Utilise Longhorn si disponible (HouseServer), sinon default
   storageClassName: longhorn
@@ -35,10 +35,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qdrant
-  namespace: bmad-memory
+  namespace: grimoire-memory
   labels:
     app: qdrant
-    app.kubernetes.io/part-of: bmad
+    app.kubernetes.io/part-of: grimoire
 spec:
   replicas: 1
   selector:
@@ -92,7 +92,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qdrant
-  namespace: bmad-memory
+  namespace: grimoire-memory
   labels:
     app: qdrant
 spec:
@@ -114,7 +114,7 @@ spec:
 # kind: Ingress
 # metadata:
 #   name: qdrant-dashboard
-#   namespace: bmad-memory
+#   namespace: grimoire-memory
 #   annotations:
 #     traefik.ingress.kubernetes.io/router.entrypoints: websecure
 #     traefik.ingress.kubernetes.io/router.tls: "true"

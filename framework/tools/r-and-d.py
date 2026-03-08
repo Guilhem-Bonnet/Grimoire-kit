@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-r-and-d.py — Innovation Engine avec Reinforcement Learning BMAD.
+r-and-d.py — Innovation Engine avec Reinforcement Learning Grimoire.
 ==================================================================
 
 Moteur d'innovation autonome qui exécute des cycles de R&D et apprend
@@ -570,8 +570,8 @@ def cmd_seed(args: argparse.Namespace) -> int:
 def _generate_prototype(idea: Idea, project_root: Path) -> Path | None:
     """Génère un squelette Python pour une idée d'innovation.
 
-    Crée un fichier minimal mais fonctionnel dans .bmad-rnd/prototypes/
-    suivant le pattern BMAD : argparse, --project-root, --json, stdlib only.
+    Crée un fichier minimal mais fonctionnel dans .grimoire-rnd/prototypes/
+    suivant le pattern Grimoire : argparse, --project-root, --json, stdlib only.
     Retourne le chemin du fichier généré, ou None si non applicable.
     """
     if idea.domain not in ("tools", "meta", "testing", "integration"):
@@ -740,7 +740,7 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="BMAD R&D Innovation Engine — Reinforcement Learning",
+        description="Grimoire R&D Innovation Engine — Reinforcement Learning",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples :
@@ -755,7 +755,7 @@ Exemples :
 """,
     )
     parser.add_argument("--project-root", required=True,
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
     parser.add_argument("--json", action="store_true",
                         help="Sortie JSON")
 

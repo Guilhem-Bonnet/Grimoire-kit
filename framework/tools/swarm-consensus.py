@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swarm-consensus.py — Consensus en essaim BMAD.
+swarm-consensus.py — Consensus en essaim Grimoire.
 ================================================
 
 Mécanisme de prise de décision collective multi-agents :
@@ -195,7 +195,7 @@ def process_estimates(task: str, estimates_dict: dict[str, int],
 # ── History ──────────────────────────────────────────────────────────────────
 
 def load_history(project_root: Path) -> list[dict]:
-    logfile = project_root / "_bmad" / "_memory" / CONSENSUS_LOG
+    logfile = project_root / "_grimoire" / "_memory" / CONSENSUS_LOG
     if logfile.exists():
         try:
             return json.loads(logfile.read_text(encoding="utf-8"))
@@ -206,7 +206,7 @@ def load_history(project_root: Path) -> list[dict]:
 
 
 def save_entry(project_root: Path, entry: dict) -> None:
-    logfile = project_root / "_bmad" / "_memory" / CONSENSUS_LOG
+    logfile = project_root / "_grimoire" / "_memory" / CONSENSUS_LOG
     logfile.parent.mkdir(parents=True, exist_ok=True)
     history = load_history(project_root)
     entry["timestamp"] = datetime.now().isoformat()
@@ -354,7 +354,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Swarm Consensus — Décision collective multi-agents",
+        description="Grimoire Swarm Consensus — Décision collective multi-agents",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

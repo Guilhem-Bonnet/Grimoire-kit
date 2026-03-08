@@ -1,4 +1,4 @@
-"""Tests for ``bmad merge`` CLI command and cmd_merge module."""
+"""Tests for ``grimoire merge`` CLI command and cmd_merge module."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from bmad.cli.app import app
-from bmad.cli.cmd_merge import run_merge, run_undo
-from bmad.core.exceptions import BmadMergeError
+from grimoire.cli.app import app
+from grimoire.cli.cmd_merge import run_merge, run_undo
+from grimoire.core.exceptions import GrimoireMergeError
 
 runner = CliRunner()
 
@@ -21,8 +21,8 @@ runner = CliRunner()
 def source(tmp_path: Path) -> Path:
     d = tmp_path / "src"
     d.mkdir()
-    (d / "_bmad").mkdir()
-    (d / "_bmad" / "config.yaml").write_text("version: 3\n")
+    (d / "_grimoire").mkdir()
+    (d / "_grimoire" / "config.yaml").write_text("version: 3\n")
     (d / "hello.txt").write_text("hello\n")
     return d
 
@@ -70,7 +70,7 @@ class TestRunUndo:
         assert not (target / "hello.txt").exists()
 
     def test_undo_no_log(self, tmp_path: Path) -> None:
-        with pytest.raises(BmadMergeError, match="not found"):
+        with pytest.raises(GrimoireMergeError, match="not found"):
             run_undo(tmp_path)
 
 

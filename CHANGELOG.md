@@ -10,28 +10,28 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ### Réécriture complète — SDK Python pur
 
 Le projet passe de scripts shell/Python standalone à un **package Python installable**
-(`pip install bmad-kit`) avec architecture modulaire, API typée, et couverture de tests extensive.
+(`pip install grimoire-kit`) avec architecture modulaire, API typée, et couverture de tests extensive.
 
 #### Ajouté
 
-- **SDK Core** (`bmad.core`) — Modèles immutables (`@dataclass(frozen=True, slots=True)`),
-  `BmadConfig` pour le chargement de `project-context.yaml`, résolution de chemins,
-  système d'exceptions typées (`BmadConfigError`, `BmadProjectError`, `BmadRegistryError`)
-- **CLI complète** (`bmad.cli`) — 12 commandes Typer : `init`, `doctor`, `status`,
+- **SDK Core** (`grimoire.core`) — Modèles immutables (`@dataclass(frozen=True, slots=True)`),
+  `GrimoireConfig` pour le chargement de `project-context.yaml`, résolution de chemins,
+  système d'exceptions typées (`GrimoireConfigError`, `GrimoireProjectError`, `GrimoireRegistryError`)
+- **CLI complète** (`grimoire.cli`) — 12 commandes Typer : `init`, `doctor`, `status`,
   `add`, `remove`, `validate`, `up`, `upgrade`, `merge`, `registry list`, `registry search`
-- **MCP Server** (`bmad.mcp`) — Intégration Model Context Protocol avec 6 tools
+- **MCP Server** (`grimoire.mcp`) — Intégration Model Context Protocol avec 6 tools
   et 4 resources pour les IDE compatibles MCP
-- **Outils portés** (`bmad.tools`) — `harmony-check`, `preflight-check`, `memory-lint`
+- **Outils portés** (`grimoire.tools`) — `harmony-check`, `preflight-check`, `memory-lint`
   réécrits en modules Python avec API programmatique (`run()` / `RunResult`)
-- **Système de registre** (`bmad.registry`) — Résolution d'agents, workflows, tasks
+- **Système de registre** (`grimoire.registry`) — Résolution d'agents, workflows, tasks
   depuis les manifests CSV avec support multi-modules
-- **Système de mémoire** (`bmad.memory`) — Architecture à backends : fichier JSON,
+- **Système de mémoire** (`grimoire.memory`) — Architecture à backends : fichier JSON,
   Ollama (embeddings), Qdrant (vector store) avec interface `MemoryBackend` abstraite
 - **Archétypes** — 8 templates de projet : `web-app`, `creative-studio`, `fix-loop`,
   `infra-ops`, `meta`, `minimal`, `stack`, `features`
-- **Merge engine** (`bmad merge`) — Fusion intelligente de fichiers YAML/Markdown
+- **Merge engine** (`grimoire merge`) — Fusion intelligente de fichiers YAML/Markdown
   avec détection de conflits et dry-run
-- **Upgrade engine** (`bmad upgrade`) — Migration entre versions avec diff et backup
+- **Upgrade engine** (`grimoire upgrade`) — Migration entre versions avec diff et backup
 - **Documentation** — `getting-started.md`, `concepts.md`, `onboarding.md`,
   `memory-system.md`, `workflow-design-patterns.md`, `workflow-taxonomy.md`,
   `creating-agents.md`, `archetype-guide.md`, `vscode-setup.md`, `troubleshooting.md`
@@ -40,7 +40,7 @@ Le projet passe de scripts shell/Python standalone à un **package Python instal
 
 #### Modifié
 
-- **Entry points** — `bmad` (CLI) et `bmad-mcp` (serveur MCP) enregistrés
+- **Entry points** — `grimoire` (CLI) et `grimoire-mcp` (serveur MCP) enregistrés
   dans `pyproject.toml`
 - **Build** — Migration vers `hatchling` comme build backend
 - **URLs** — Repo renommé en `Grimoire-kit`
@@ -83,7 +83,7 @@ Le projet passe de scripts shell/Python standalone à un **package Python instal
 ### Ajouté — Cross-pollination depuis zav-sandbox (GSANE)
 
 - **cognitive-flywheel.py** (outil #47) — Boucle d'auto-amélioration continue :
- analyse BMAD_TRACE.md pour détecter les patterns récurrents (failures,
+ analyse Grimoire_TRACE.md pour détecter les patterns récurrents (failures,
  AC-FAIL), calcule un score de santé (A+ à D), génère des corrections
  automatiques avec système de gates (max 5 corrections, collision → escalade).
  6 commandes CLI : `analyze`, `report`, `apply`, `history`, `score`, `dashboard`
@@ -317,4 +317,4 @@ Le projet passe de scripts shell/Python standalone à un **package Python instal
 
 ### Ajouté
 
-- Initial commit — BMAD Custom Kit structure de base
+- Initial commit — Grimoire Custom Kit structure de base

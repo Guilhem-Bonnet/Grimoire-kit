@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nudge-engine.py — Moteur de suggestions contextuelles BMAD.
+nudge-engine.py — Moteur de suggestions contextuelles Grimoire.
 =============================================================
 
 Suggestions proactives intelligentes pour les agents :
@@ -42,7 +42,7 @@ from pathlib import Path
 NUDGE_VERSION = "1.0.0"
 
 # Sources de données
-MEMORY_DIRS = ["_bmad/_memory"]
+MEMORY_DIRS = ["_grimoire/_memory"]
 LEARNINGS_GLOB = "**/learnings*.md"
 DECISIONS_GLOB = "**/decisions*.md"
 FAILURE_GLOB = "**/failure-museum*.md"
@@ -501,7 +501,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Nudge Engine — Suggestions contextuelles intelligentes",
+        description="Grimoire Nudge Engine — Suggestions contextuelles intelligentes",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

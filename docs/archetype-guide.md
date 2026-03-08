@@ -8,16 +8,16 @@ Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA d
 
 ```bash
 # Installer un archétype dans un projet existant
-bash bmad-init.sh install --archetype web-app
-bash bmad-init.sh install --archetype stack/go
-bash bmad-init.sh install --list          # voir tous les disponibles
-bash bmad-init.sh install --inspect infra-ops  # détails avant install
+bash grimoire-init.sh install --archetype web-app
+bash grimoire-init.sh install --archetype stack/go
+bash grimoire-init.sh install --list          # voir tous les disponibles
+bash grimoire-init.sh install --inspect infra-ops  # détails avant install
 
 # Valider les fichiers DNA
-bash bmad-init.sh validate --all
+bash grimoire-init.sh validate --all
 
 # Diagnostiquer l'installation
-bash bmad-init.sh doctor
+bash grimoire-init.sh doctor
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -63,7 +63,7 @@ bash bmad-init.sh doctor
 
 **Détection automatique :**
 ```bash
-bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
+bash grimoire-init.sh --name "Mon App" --user "Guilhem" --auto
 # → stack détecté : go frontend docker
 # → archétype : web-app
 # → agents stack : Gopher + Pixel + Container
@@ -132,13 +132,13 @@ bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
 
 **Installation :**
 ```bash
-bash bmad-init.sh install --archetype platform-engineering
+bash grimoire-init.sh install --archetype platform-engineering
 
 # Combiné avec des stack agents
-bash bmad-init.sh install --archetype platform-engineering
-bash bmad-init.sh install --archetype stack/go
-bash bmad-init.sh install --archetype stack/docker
-bash bmad-init.sh install --archetype stack/k8s
+bash grimoire-init.sh install --archetype platform-engineering
+bash grimoire-init.sh install --archetype stack/go
+bash grimoire-init.sh install --archetype stack/docker
+bash grimoire-init.sh install --archetype stack/k8s
 ```
 
 **Section `project-context.yaml` dédiée :**
@@ -214,20 +214,20 @@ python3 framework/tools/gen-tests.py \
 
 **Déploiement automatique :**
 ```bash
-bash bmad-init.sh --name "Mon API" --user "Guilhem" --auto
+bash grimoire-init.sh --name "Mon API" --user "Guilhem" --auto
 # → stack détecté : go docker
 # → agents stack : Gopher 🐹 + Container 🐋
 ```
 
 **Installation manuelle d'un agent stack :**
 ```bash
-bash bmad-init.sh install --archetype stack/go
-bash bmad-init.sh install --archetype stack/typescript
-bash bmad-init.sh install --archetype stack/python
-bash bmad-init.sh install --archetype stack/docker
-bash bmad-init.sh install --archetype stack/k8s
-bash bmad-init.sh install --archetype stack/terraform
-bash bmad-init.sh install --archetype stack/ansible
+bash grimoire-init.sh install --archetype stack/go
+bash grimoire-init.sh install --archetype stack/typescript
+bash grimoire-init.sh install --archetype stack/python
+bash grimoire-init.sh install --archetype stack/docker
+bash grimoire-init.sh install --archetype stack/k8s
+bash grimoire-init.sh install --archetype stack/terraform
+bash grimoire-init.sh install --archetype stack/ansible
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -281,7 +281,7 @@ Référence : [framework/agent-rules.md](../framework/agent-rules.md)
 # Structure minimale
 mkdir -p archetypes/mon-archetype/agents/
 cat > archetypes/mon-archetype/archetype.dna.yaml << 'EOF'
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 id: mon-archetype
 name: "Mon Archétype"
 version: "1.0.0"
@@ -298,10 +298,10 @@ incompatible_with: []
 EOF
 
 # Valider le DNA
-bash bmad-init.sh validate --dna archetypes/mon-archetype/archetype.dna.yaml
+bash grimoire-init.sh validate --dna archetypes/mon-archetype/archetype.dna.yaml
 
 # Installer
-bash bmad-init.sh install --archetype mon-archetype
+bash grimoire-init.sh install --archetype mon-archetype
 ```
 
 Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.schema.yaml](../framework/archetype-dna.schema.yaml)
@@ -353,26 +353,26 @@ echo 'rules: [{id: no-plaintext-secrets, description: "No secrets in yaml", enfo
 
 ```bash
 # Health check complet
-bash bmad-init.sh doctor
+bash grimoire-init.sh doctor
 
 # Valider tous les DNA
-bash bmad-init.sh validate --all
+bash grimoire-init.sh validate --all
 
 # Générer CHANGELOG depuis les décisions agents
-bash bmad-init.sh changelog
+bash grimoire-init.sh changelog
 
 # Voir l'audit trail des actions
-bash bmad-init.sh trace --tail 50
-bash bmad-init.sh trace --type DECISION
+bash grimoire-init.sh trace --tail 50
+bash grimoire-init.sh trace --type DECISION
 
 # Budget de contexte LLM — vérifier que les agents ne saturent pas la fenêtre
-bash bmad-init.sh guard                  # tous les agents
-bash bmad-init.sh guard --suggest        # + recommandations de réduction
-bash bmad-init.sh guard --json           # sortie CI-compatible
+bash grimoire-init.sh guard                  # tous les agents
+bash grimoire-init.sh guard --suggest        # + recommandations de réduction
+bash grimoire-init.sh guard --json           # sortie CI-compatible
 
 # DNA évolutive — proposer des mutations depuis l'usage réel (après quelques semaines)
-bash bmad-init.sh evolve --report        # rapport sans modifier la DNA
-bash bmad-init.sh evolve                 # proposer patch (revue humaine requise avant --apply)
+bash grimoire-init.sh evolve --report        # rapport sans modifier la DNA
+bash grimoire-init.sh evolve                 # proposer patch (revue humaine requise avant --apply)
 ```
 
 Voir [framework/tools/README.md](../framework/tools/README.md) pour la référence complète des outils.
@@ -401,7 +401,7 @@ Voir [framework/tools/README.md](../framework/tools/README.md) pour la référen
 **Détection automatique :**
 ```bash
 # Exemple : projet Go + React
-bash bmad-init.sh --name "Mon App" --user "Guilhem" --auto
+bash grimoire-init.sh --name "Mon App" --user "Guilhem" --auto
 # → stack détecté : go frontend docker
 # → archétype auto : web-app
 # → agents stack déployés : Gopher + Pixel + Container
@@ -495,7 +495,7 @@ Pour contribuer un archétype au kit :
 1. Créer `archetypes/mon-archetype/agents/` avec les agents
 2. Créer `archetypes/mon-archetype/shared-context.tpl.md`
 3. Documenter dans ce guide
-4. Tester avec `bmad-init.sh --archetype mon-archetype`
+4. Tester avec `grimoire-init.sh --archetype mon-archetype`
 
 **Archétypes disponibles :**
 - `minimal` — Meta-agents (Atlas, Sentinel, Mnemo) + template vierge &#x2713;

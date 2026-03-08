@@ -188,7 +188,7 @@ class TestScanGapsFromTrace(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_finds_recurring_failures(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         lines = [
             "## 2026-01-01 | dev | story-1\n",
             "[FAILURE] db-migration failed\n",
@@ -201,7 +201,7 @@ class TestScanGapsFromTrace(unittest.TestCase):
         self.assertGreater(len(gaps), 0)
 
     def test_no_failures(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text("## 2026-01-01 | dev | story-1\nAll good here.\n")
         gaps = self.forge.scan_gaps_from_trace(f, known_agents=["dev"])
         self.assertEqual(len(gaps), 0)

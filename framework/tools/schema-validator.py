@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-schema-validator.py — Validateur structurel de configs BMAD.
+schema-validator.py — Validateur structurel de configs Grimoire.
 ==============================================================
 
 Valide les fichiers YAML du kit (archetype.dna.yaml, team manifests,
@@ -204,10 +204,10 @@ def validate_dna(path: Path, data: dict) -> list[ValidationIssue]:
 
     # Schema check
     schema = data.get("$schema", "")
-    if schema and "bmad-archetype-dna" not in str(schema):
+    if schema and "grimoire-archetype-dna" not in str(schema):
         _add(SEVERITY_WARNING, "$schema",
              f"Schema inattendu : {schema}",
-             "Attendu : bmad-archetype-dna/v1")
+             "Attendu : grimoire-archetype-dna/v1")
 
     # Required fields
     for fld in DNA_REQUIRED_FIELDS:
@@ -456,7 +456,7 @@ def validate_all(project_root: Path | str,
     """Valide tous les fichiers YAML du kit.
 
     Args:
-        project_root: racine du projet BMAD
+        project_root: racine du projet Grimoire
         file_type: 'dna', 'team', 'agent_dna' ou None pour tout
         single_file: chemin spécifique à valider
 
@@ -513,7 +513,7 @@ def render_report(report: ValidationReport) -> str:
     lines = [
         "",
         "╔══════════════════════════════════════════════════════════════╗",
-        "║        🏗️ Schema Validator — BMAD Configs                   ║",
+        "║        🏗️ Schema Validator — Grimoire Configs                   ║",
         "╚══════════════════════════════════════════════════════════════╝",
         "",
         f"  Fichiers vérifiés : {report.files_checked}",
@@ -578,11 +578,11 @@ def report_to_dict(report: ValidationReport) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Schema Validator — valide les configs YAML",
+        description="Grimoire Schema Validator — valide les configs YAML",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 

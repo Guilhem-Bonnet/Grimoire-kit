@@ -30,7 +30,7 @@ _log = logging.getLogger("grimoire.crispr")
 
 VERSION = "1.0.0"
 
-EDIT_LOG_DIR = ".bmad-crispr"
+EDIT_LOG_DIR = ".grimoire-crispr"
 
 # ── Modèle de données ──────────────────────────────────────────
 

@@ -1,8 +1,8 @@
-# Contributing — BMAD Kit v3
+# Contributing — Grimoire Kit v3
 
 ## Bienvenue
 
-Tu veux améliorer BMAD Kit ? Voici comment contribuer.
+Tu veux améliorer Grimoire Kit ? Voici comment contribuer.
 
 ## Prérequis
 
@@ -20,8 +20,8 @@ pip install -e ".[dev]"
 ## Structure du projet
 
 ```
-bmad-kit/
-├── src/bmad/
+grimoire-kit/
+├── src/grimoire/
 │   ├── core/           # Config, Project, Scanner, Merge, Validator
 │   ├── cli/            # CLI Typer (app.py, cmd_upgrade.py, cmd_merge.py)
 │   ├── tools/          # HarmonyCheck, PreflightCheck, MemoryLint, etc.
@@ -55,7 +55,7 @@ ruff check src/ tests/ --fix
 - **Type hints** sur toutes les fonctions publiques
 - **f-strings** (pas de `.format()` ni `%`)
 - **Imports** : `from __future__ import annotations` en premier
-- **Exceptions** : hériter de `BmadError` (voir `bmad.core.exceptions`)
+- **Exceptions** : hériter de `GrimoireError` (voir `bmad.core.exceptions`)
 
 ### Tests
 
@@ -70,7 +70,7 @@ ruff check src/ tests/ --fix
 type(scope): description courte
 
 Exemples:
-feat(cli): add bmad merge command
+feat(cli): add grimoire merge command
 fix(core): handle empty YAML gracefully
 test(tools): add HarmonyCheck edge cases
 docs: update getting-started for v3
@@ -80,15 +80,15 @@ Types : `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
 ## Ajouter un outil
 
-1. Créer `src/bmad/tools/mon_outil.py` avec une classe publique
-2. Exporter dans `src/bmad/tools/__init__.py`
+1. Créer `src/grimoire/tools/mon_outil.py` avec une classe publique
+2. Exporter dans `src/grimoire/tools/__init__.py`
 3. Créer `tests/unit/tools/test_mon_outil.py`
 4. Documenter dans `docs/sdk-guide.md`
 
 ## Ajouter une commande CLI
 
-1. Créer `src/bmad/cli/cmd_xxx.py` avec les fonctions métier
-2. Ajouter la commande dans `src/bmad/cli/app.py`
+1. Créer `src/grimoire/cli/cmd_xxx.py` avec les fonctions métier
+2. Ajouter la commande dans `src/grimoire/cli/app.py`
 3. Créer `tests/unit/cli/test_cmd_xxx.py`
 4. Documenter dans `docs/getting-started.md` (table CLI)
 

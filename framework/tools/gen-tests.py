@@ -323,7 +323,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Génère des squelettes de tests depuis les acceptance_criteria d'un DNA archétype BMAD",
+        description="Génère des squelettes de tests depuis les acceptance_criteria d'un DNA archétype Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples :

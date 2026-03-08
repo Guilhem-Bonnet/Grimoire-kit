@@ -78,7 +78,7 @@ ansible-lint && yamllint .
 ## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Script automatique
 
 ```bash
-bash {project-root}/_bmad/_config/custom/cc-verify.sh
+bash {project-root}/_grimoire/_config/custom/cc-verify.sh
 ```
 
 Détecte automatiquement le stack et lance les vérifications appropriées.

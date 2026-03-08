@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-web-browser.py — Navigateur web sandboxé pour agents BMAD.
+web-browser.py — Navigateur web sandboxé pour agents Grimoire.
 ============================================================
 
 Navigateur headless basé sur Playwright pour permettre aux agents
@@ -78,7 +78,7 @@ _BLOCKED_IP_PREFIXES = (
     "192.168.", "0.", "[::1]", "[fe80:",
 )
 
-_USER_AGENT = "BMAD-WebBrowser/1.0 (Grimoire-Kit)"
+_USER_AGENT = "Grimoire-WebBrowser/1.0 (Grimoire-Kit)"
 
 
 # ── URL Validation ────────────────────────────────────────────────────────────
@@ -795,7 +795,7 @@ def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
         prog="web-browser",
-        description="Navigateur web sandboxé pour agents BMAD",
+        description="Navigateur web sandboxé pour agents Grimoire",
     )
     parser.add_argument("--project-root", default=".", help="Racine du projet")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

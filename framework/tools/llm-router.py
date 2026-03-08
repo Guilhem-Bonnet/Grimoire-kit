@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llm-router.py — Routeur LLM intelligent BMAD (BM-40).
+llm-router.py — Routeur LLM intelligent Grimoire (BM-40).
 ============================================================
 
 Dirige chaque requête agent vers le modèle LLM optimal selon :
@@ -598,7 +598,7 @@ def load_config(project_root: Path) -> dict:
 
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
@@ -611,7 +611,7 @@ def _load_yaml_basic(project_root: Path) -> dict:
     """Parse basique YAML sans dépendances (pour llm_router seulement)."""
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             try:
@@ -629,7 +629,7 @@ def _load_yaml_basic(project_root: Path) -> dict:
 def build_router_from_config(project_root: Path) -> LLMRouter:
     """Construit un LLMRouter depuis la config du projet."""
     config = load_config(project_root)
-    stats_file = project_root / "_bmad-output" / ".router-stats.jsonl"
+    stats_file = project_root / "_grimoire-output" / ".router-stats.jsonl"
 
     models: list[ModelSpec] = []
     rules: list[RoutingRule] = []

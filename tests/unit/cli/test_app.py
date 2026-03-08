@@ -1,4 +1,4 @@
-"""Tests for bmad.cli.app — CLI commands."""
+"""Tests for grimoire.cli.app — CLI commands."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from bmad.cli.app import app
+from grimoire.cli.app import app
 
 runner = CliRunner()
 
@@ -19,7 +19,7 @@ class TestVersion:
     def test_version_flag(self) -> None:
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "bmad-kit" in result.output
+        assert "grimoire-kit" in result.output
 
     def test_help(self) -> None:
         result = runner.invoke(app, ["--help"])
@@ -42,8 +42,8 @@ class TestInit:
 
     def test_init_creates_dirs(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path)])
-        assert (tmp_path / "_bmad" / "_memory").is_dir()
-        assert (tmp_path / "_bmad-output").is_dir()
+        assert (tmp_path / "_grimoire" / "_memory").is_dir()
+        assert (tmp_path / "_grimoire-output").is_dir()
 
     def test_init_custom_name(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--name", "my-project"])
@@ -158,7 +158,7 @@ class TestDoctor:
         assert result.exit_code == 1
 
     def test_doctor_missing_dirs(self, tmp_path: Path) -> None:
-        # Config only, no _bmad dirs
+        # Config only, no _grimoire dirs
         (tmp_path / "project-context.yaml").write_text(
             "project:\n  name: test\n"
         )
@@ -172,7 +172,7 @@ class TestDoctor:
 
     def test_doctor_shows_version(self, healthy_project: Path) -> None:
         result = runner.invoke(app, ["doctor", str(healthy_project)])
-        assert "bmad-kit" in result.output
+        assert "grimoire-kit" in result.output
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ class TestStatus:
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
-        assert "_bmad" in result.output
+        assert "_grimoire" in result.output
 
     def test_status_no_project(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["status", str(tmp_path)])
@@ -210,7 +210,7 @@ class TestStatus:
 
     def test_status_shows_version(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
-        assert "bmad-kit" in result.output
+        assert "grimoire-kit" in result.output
 
 
 # ── Add / Remove ──────────────────────────────────────────────────────────────
@@ -323,9 +323,9 @@ class TestUp:
         (tmp_path / "project-context.yaml").write_text(
             'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
         )
-        (tmp_path / "_bmad").mkdir()
-        (tmp_path / "_bmad" / "_memory").mkdir()
-        (tmp_path / "_bmad-output").mkdir()
+        (tmp_path / "_grimoire").mkdir()
+        (tmp_path / "_grimoire" / "_memory").mkdir()
+        (tmp_path / "_grimoire-output").mkdir()
         return tmp_path
 
     def test_up_ok(self, project: Path) -> None:
@@ -339,9 +339,9 @@ class TestUp:
         )
         result = runner.invoke(app, ["up", str(tmp_path)])
         assert result.exit_code == 0
-        assert (tmp_path / "_bmad").is_dir()
-        assert (tmp_path / "_bmad" / "_memory").is_dir()
-        assert (tmp_path / "_bmad-output").is_dir()
+        assert (tmp_path / "_grimoire").is_dir()
+        assert (tmp_path / "_grimoire" / "_memory").is_dir()
+        assert (tmp_path / "_grimoire-output").is_dir()
 
     def test_up_dry_run(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text(
@@ -368,8 +368,8 @@ class TestStatusEdgeCases:
         (tmp_path / "project-context.yaml").write_text(
             'project:\n  name: "test"\n  stack:\n    - python\n    - react\n'
         )
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
-        (tmp_path / "_bmad-output").mkdir()
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire-output").mkdir()
         result = runner.invoke(app, ["status", str(tmp_path)])
         assert result.exit_code == 0
         assert "python" in result.output
@@ -378,8 +378,8 @@ class TestStatusEdgeCases:
         (tmp_path / "project-context.yaml").write_text(
             'project:\n  name: "test"\n  repos:\n    - name: "my-repo"\n      path: "."\n      default_branch: "main"\n'
         )
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
-        (tmp_path / "_bmad-output").mkdir()
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire-output").mkdir()
         result = runner.invoke(app, ["status", str(tmp_path)])
         assert result.exit_code == 0
         assert "my-repo" in result.output
@@ -395,7 +395,7 @@ class TestStatusEdgeCases:
 
 class TestRegistryList:
     def test_registry_list_no_project(self) -> None:
-        with patch("bmad.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
             result = runner.invoke(app, ["registry", "list"])
         assert result.exit_code == 1
 
@@ -403,8 +403,8 @@ class TestRegistryList:
         mock_reg = MagicMock()
         mock_reg.list_archetypes.return_value = []
         with (
-            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
-            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+            patch("grimoire.tools._common.find_project_root", return_value=tmp_path),
+            patch("grimoire.registry.local.LocalRegistry", return_value=mock_reg),
         ):
             result = runner.invoke(app, ["registry", "list"])
         assert result.exit_code == 0
@@ -417,8 +417,8 @@ class TestRegistryList:
         mock_reg.list_archetypes.return_value = ["web-app", "minimal"]
         mock_reg.inspect_archetype.return_value = mock_dna
         with (
-            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
-            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+            patch("grimoire.tools._common.find_project_root", return_value=tmp_path),
+            patch("grimoire.registry.local.LocalRegistry", return_value=mock_reg),
         ):
             result = runner.invoke(app, ["registry", "list"])
         assert result.exit_code == 0
@@ -431,7 +431,7 @@ class TestRegistrySearch:
         assert result.exit_code == 1
 
     def test_registry_search_no_project(self) -> None:
-        with patch("bmad.tools._common.find_project_root", side_effect=FileNotFoundError("no")):
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no")):
             result = runner.invoke(app, ["registry", "search", "analyst"])
         assert result.exit_code == 1
 
@@ -439,8 +439,8 @@ class TestRegistrySearch:
         mock_reg = MagicMock()
         mock_reg.search.return_value = []
         with (
-            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
-            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+            patch("grimoire.tools._common.find_project_root", return_value=tmp_path),
+            patch("grimoire.registry.local.LocalRegistry", return_value=mock_reg),
         ):
             result = runner.invoke(app, ["registry", "search", "nonexistent"])
         assert result.exit_code == 0
@@ -454,8 +454,8 @@ class TestRegistrySearch:
         mock_reg = MagicMock()
         mock_reg.search.return_value = [mock_item]
         with (
-            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
-            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+            patch("grimoire.tools._common.find_project_root", return_value=tmp_path),
+            patch("grimoire.registry.local.LocalRegistry", return_value=mock_reg),
         ):
             result = runner.invoke(app, ["registry", "search", "analyst"])
         assert result.exit_code == 0
@@ -467,13 +467,13 @@ class TestRegistrySearch:
 
 class TestUpgrade:
     def test_upgrade_already_v3(self, tmp_path: Path) -> None:
-        with patch("bmad.cli.cmd_upgrade.detect_version", return_value="v3"):
+        with patch("grimoire.cli.cmd_upgrade.detect_version", return_value="v3"):
             result = runner.invoke(app, ["upgrade", str(tmp_path)])
         assert result.exit_code == 0
         assert "already v3" in result.output
 
     def test_upgrade_unknown_version(self, tmp_path: Path) -> None:
-        with patch("bmad.cli.cmd_upgrade.detect_version", return_value="unknown"):
+        with patch("grimoire.cli.cmd_upgrade.detect_version", return_value="unknown"):
             result = runner.invoke(app, ["upgrade", str(tmp_path)])
         assert result.exit_code == 1
         assert "No v2" in result.output
@@ -482,9 +482,9 @@ class TestUpgrade:
         mock_plan = MagicMock()
         mock_plan.warnings = ["Warning: old config"]
         with (
-            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
-            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
-            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=["Create _bmad/", "Move agents/"]),
+            patch("grimoire.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("grimoire.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("grimoire.cli.cmd_upgrade.execute_upgrade", return_value=["Create _grimoire/", "Move agents/"]),
         ):
             result = runner.invoke(app, ["upgrade", "--dry-run", str(tmp_path)])
         assert result.exit_code == 0
@@ -494,9 +494,9 @@ class TestUpgrade:
         mock_plan = MagicMock()
         mock_plan.warnings = []
         with (
-            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
-            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
-            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=["Create _bmad/", "Move agents/"]),
+            patch("grimoire.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("grimoire.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("grimoire.cli.cmd_upgrade.execute_upgrade", return_value=["Create _grimoire/", "Move agents/"]),
         ):
             result = runner.invoke(app, ["upgrade", str(tmp_path)])
         assert result.exit_code == 0
@@ -506,9 +506,9 @@ class TestUpgrade:
         mock_plan = MagicMock()
         mock_plan.warnings = []
         with (
-            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
-            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
-            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=[]),
+            patch("grimoire.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("grimoire.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("grimoire.cli.cmd_upgrade.execute_upgrade", return_value=[]),
         ):
             result = runner.invoke(app, ["upgrade", str(tmp_path)])
         assert result.exit_code == 0

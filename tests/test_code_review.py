@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour code-review.py — Revue de code automatisée BMAD.
+Tests pour code-review.py — Revue de code automatisée Grimoire.
 
 Fonctions testées :
   - parse_diff_stat()

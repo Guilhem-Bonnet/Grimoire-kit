@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="deploy-orchestrator.agent.yaml" name="Convoy" title="Deploy Orchestrator" icon="🚀">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_bmad/_config/custom/agent-base.md with:
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base.md with:
           AGENT_TAG=convoy | AGENT_NAME=Convoy | LEARNINGS_FILE=deployment | DOMAIN_WORD=déploiement
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -60,7 +60,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DF or fuzzy match on dockerfile or container" action="#containerize">[DF] Containerize — Dockerfile + Compose pour un service</item>
     <item cmd="HM or fuzzy match on helm or chart" action="#helm-chart">[HM] Helm Chart — packager un service pour K8s</item>
     <item cmd="FF or fuzzy match on feature-flag" action="#feature-flags">[FF] Feature Flags — déploiement progressif par flag</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

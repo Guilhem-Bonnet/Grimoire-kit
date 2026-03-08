@@ -15,11 +15,11 @@
 
 ```bash
 # Cloner le kit dans votre projet
-git clone <url-grimoire-kit> bmad-custom-kit
+git clone <url-grimoire-kit> grimoire-kit
 
-# Initialiser BMAD dans votre projet
+# Initialiser Grimoire dans votre projet
 cd votre-projet
-bash path/to/bmad-custom-kit/bmad-init.sh \
+bash path/to/grimoire-kit/grimoire-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --archetype minimal
@@ -29,7 +29,7 @@ bash path/to/bmad-custom-kit/bmad-init.sh \
 
 ```bash
 # Le doctor vérifie tout
-bash bmad-custom-kit/grimoire.sh doctor
+bash grimoire-kit/grimoire.sh doctor
 ```
 
 Attendu : tous les checks en &#x2713;.
@@ -39,7 +39,7 @@ Attendu : tous les checks en &#x2713;.
 Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
 
 ```
-/bmad-master
+/grimoire-master
 ```
 
 L'agent BMad Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
@@ -48,17 +48,17 @@ L'agent BMad Master se présente avec un menu numéroté. Tapez le numéro d'une
 
 ```
 votre-projet/
-├── _bmad/                  # Cerveau du projet
+├── _grimoire/                  # Cerveau du projet
 │   ├── _config/            # Configuration des agents
 │   ├── _memory/            # Mémoire persistante
 │   └── bmm/                # Module méthodologie
-├── _bmad-output/           # Artefacts produits
+├── _grimoire-output/           # Artefacts produits
 │   ├── planning-artifacts/ # PRD, épics, brainstorms
 │   └── implementation-artifacts/
 └── project-context.yaml    # Identité du projet
 ```
 
-**C'est tout pour J1.** Vous avez un projet BMAD fonctionnel.
+**C'est tout pour J1.** Vous avez un projet Grimoire fonctionnel.
 
 <img src="assets/divider.svg" width="100%" alt="">
 
@@ -78,7 +78,7 @@ Les agents sont des personas spécialisées. Chacun a un domaine d'expertise :
 | QA (Quinn) | Qualité | Tests, couverture, E2E |
 | SM (Bob) | Agile | Sprint planning, backlog |
 
-**Astuce** : tapez `/bmad-` dans Copilot Chat pour voir tous les workflows disponibles.
+**Astuce** : tapez `/grimoire-` dans Copilot Chat pour voir tous les workflows disponibles.
 
 ### Jour 4-5 : Les modes Plan/Act
 
@@ -138,7 +138,7 @@ bash grimoire.sh doctor
 bash grimoire.sh tools
 
 # Qualité des artefacts
-python3 framework/tools/quality-score.py --project-root . batch _bmad-output/
+python3 framework/tools/quality-score.py --project-root . batch _grimoire-output/
 
 # Dépendances inter-outils
 python3 framework/tools/dep-check.py --project-root . graph
@@ -155,14 +155,14 @@ Les archétypes sont des configurations pré-packagées pour différents types d
 | infra-ops | DevOps/Infrastructure | Ops Engineer, SRE |
 | fix-loop | Debugging intensif | Bug Hunter, Analyzer |
 | features | Feature development | Tous agents de dev |
-| meta | Framework BMAD lui-même | Agent Optimizer, Art Director, Toolsmith |
+| meta | Framework Grimoire lui-même | Agent Optimizer, Art Director, Toolsmith |
 
 ```bash
 # Installer un archétype
-bash bmad-init.sh install --archetype web-app
+bash grimoire-init.sh install --archetype web-app
 
 # Lister les archétypes disponibles
-bash bmad-init.sh install --list
+bash grimoire-init.sh install --list
 ```
 
 ### Semaine 4 : NSO et Intelligence Layer
@@ -197,7 +197,7 @@ python3 framework/tools/nso.py --project-root . retro
 
 | Besoin | Commande |
 |--------|---------|
-| Aide BMAD | `/bmad-master` puis option aide |
+| Aide Grimoire | `/grimoire-master` puis option aide |
 | Diagnostic | `bash grimoire.sh doctor` |
 | État mémoire | `python3 framework/memory/maintenance.py status` |
 | Qualité sortie | `python3 framework/tools/quality-score.py --project-root . score fichier.md` |

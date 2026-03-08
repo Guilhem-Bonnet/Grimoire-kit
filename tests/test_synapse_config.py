@@ -39,7 +39,7 @@ class TestSynapseConfigDataClasses(unittest.TestCase):
     def test_trace_defaults(self):
         tc = mod.TraceConfig()
         self.assertTrue(tc.enabled)
-        self.assertEqual(tc.output, "_bmad-output/BMAD_TRACE.md")
+        self.assertEqual(tc.output, "_grimoire-output/Grimoire_TRACE.md")
         self.assertTrue(tc.include_tokens)
         self.assertEqual(tc.max_entries, 10000)
 
@@ -156,7 +156,7 @@ class TestLoadSynapseConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cfg = mod.load_synapse_config(td)
             self.assertTrue(cfg.enabled)
-            self.assertEqual(cfg.trace.output, "_bmad-output/BMAD_TRACE.md")
+            self.assertEqual(cfg.trace.output, "_grimoire-output/Grimoire_TRACE.md")
 
     def test_config_from_yaml_file(self):
         import tempfile
@@ -189,7 +189,7 @@ synapse:
             cfg2 = mod.load_synapse_config(td)
             self.assertIsNot(cfg1, cfg2)
 
-    def test_bmad_yaml_fallback(self):
+    def test_grimoire_yaml_fallback(self):
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             yaml_content = """
@@ -197,7 +197,7 @@ synapse:
   message_bus:
     backend: redis
 """
-            (Path(td) / "bmad.yaml").write_text(yaml_content, encoding="utf-8")
+            (Path(td) / "grimoire.yaml").write_text(yaml_content, encoding="utf-8")
             cfg = mod.load_synapse_config(td)
             self.assertEqual(cfg.message_bus.backend, "redis")
 
@@ -296,7 +296,7 @@ class TestTemplateGeneration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             mcp = mod.generate_mcp_config(Path(td))
             self.assertIn("mcpServers", mcp)
-            self.assertIn("bmad-synapse", mcp)
+            self.assertIn("grimoire-synapse", mcp)
 
 
 class TestMCPInterface(unittest.TestCase):

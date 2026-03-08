@@ -1,4 +1,4 @@
-"""Tests for bmad.tools._common — helpers and base class."""
+"""Tests for grimoire.tools._common — helpers and base class."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from bmad.tools._common import (
-    BmadTool,
+from grimoire.tools._common import (
+    GrimoireTool,
     _get_yaml_loader,
     estimate_tokens,
     find_project_root,
@@ -37,7 +37,7 @@ class TestFindProjectRoot:
 
     def test_defaults_to_cwd(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text("project:\n  name: cwd\n")
-        with patch("bmad.tools._common.Path.cwd", return_value=tmp_path):
+        with patch("grimoire.tools._common.Path.cwd", return_value=tmp_path):
             assert find_project_root() == tmp_path
 
 
@@ -90,7 +90,7 @@ class TestLoadYamlPyYamlFallback:
         """Exercise load_yaml through PyYAML backend."""
         from unittest.mock import MagicMock
 
-        import bmad.tools._common as mod
+        import grimoire.tools._common as mod
 
         f = tmp_path / "test.yaml"
         f.write_text("key: value\n")
@@ -106,7 +106,7 @@ class TestLoadYamlPyYamlFallback:
         """Exercise save_yaml through PyYAML backend."""
         from unittest.mock import MagicMock
 
-        import bmad.tools._common as mod
+        import grimoire.tools._common as mod
 
         f = tmp_path / "rt.yaml"
         mock_yaml = MagicMock()
@@ -141,15 +141,15 @@ class TestEstimateTokens:
         assert long == short * 10
 
 
-# ── BmadTool ABC ──────────────────────────────────────────────────────────────
+# ── GrimoireTool ABC ──────────────────────────────────────────────────────────────
 
-class TestBmadTool:
+class TestGrimoireTool:
     def test_cannot_instantiate_directly(self) -> None:
         with pytest.raises(TypeError):
-            BmadTool(Path("."))  # type: ignore[abstract]
+            GrimoireTool(Path("."))  # type: ignore[abstract]
 
     def test_subclass_works(self, tmp_path: Path) -> None:
-        class DummyTool(BmadTool):
+        class DummyTool(GrimoireTool):
             def run(self, **kwargs: object) -> str:
                 return f"ran in {self.project_root.name}"
 
@@ -158,7 +158,7 @@ class TestBmadTool:
         assert "ran in" in tool.run()
 
     def test_project_root_is_resolved(self) -> None:
-        class DummyTool(BmadTool):
+        class DummyTool(GrimoireTool):
             def run(self, **kwargs: object) -> None:
                 pass
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-antifragile-score.py — Score d'Anti-Fragilité du système BMAD.
+antifragile-score.py — Score d'Anti-Fragilité du système Grimoire.
 ===============================================================
 
 Mesure comment le système apprend et s'améliore à partir de ses échecs.
@@ -516,7 +516,7 @@ def score_pattern_recurrence(failures: dict, sil_signals: dict) -> DimensionScor
 def compute_antifragile_score(project_root: Path,
                               since: str | None = None) -> AntifragileResult:
     """Calcule le score d'anti-fragilité global."""
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
     timestamp = datetime.now().isoformat()
 
     # Collecter les données
@@ -579,7 +579,7 @@ def compute_antifragile_score(project_root: Path,
 
 def save_score(result: AntifragileResult, project_root: Path) -> Path:
     """Sauvegarde le score dans l'historique."""
-    output_dir = project_root / "_bmad-output"
+    output_dir = project_root / "_grimoire-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / HISTORY_FILE
 
@@ -608,7 +608,7 @@ def save_score(result: AntifragileResult, project_root: Path) -> Path:
 
 def load_history(project_root: Path) -> list[dict]:
     """Charge l'historique des scores."""
-    path = project_root / "_bmad-output" / HISTORY_FILE
+    path = project_root / "_grimoire-output" / HISTORY_FILE
     if not path.exists():
         return []
     try:
@@ -688,7 +688,7 @@ def render_report(result: AntifragileResult) -> str:
 def render_trend(history: list[dict]) -> str:
     """Génère un rapport de tendance."""
     if not history:
-        return "Aucun historique disponible. Lancez `bmad-init.sh antifragile` pour commencer."
+        return "Aucun historique disponible. Lancez `grimoire-init.sh antifragile` pour commencer."
 
     lines = [
         "## 📈 Tendance Anti-Fragilité",
@@ -726,10 +726,10 @@ def render_trend(history: list[dict]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Anti-Fragile Score — mesure la résilience adaptative du système",
+        description="Grimoire Anti-Fragile Score — mesure la résilience adaptative du système",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", default=".", help="Racine du projet BMAD")
+    parser.add_argument("--project-root", default=".", help="Racine du projet Grimoire")
     parser.add_argument("--since", default=None, help="Date début (YYYY-MM-DD)")
     parser.add_argument("--detail", action="store_true", help="Rapport détaillé")
     parser.add_argument("--trend", action="store_true", help="Tendance historique")
@@ -750,8 +750,8 @@ def main():
 
         results: list[tuple[str, AntifragileResult]] = []
         for proj in projects:
-            if not (proj / "_bmad" / "_memory").exists():
-                print(f"⚠️  {proj.name}: pas de mémoire BMAD — ignoré")
+            if not (proj / "_grimoire" / "_memory").exists():
+                print(f"⚠️  {proj.name}: pas de mémoire Grimoire — ignoré")
                 continue
             result = compute_antifragile_score(proj, args.since)
             results.append((proj.name, result))

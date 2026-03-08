@@ -1,4 +1,4 @@
-"""Tests for observatory.py — BMAD Observatory: Interactive Visual Dashboard."""
+"""Tests for observatory.py — Grimoire Observatory: Interactive Visual Dashboard."""
 from __future__ import annotations
 
 import importlib.util
@@ -21,7 +21,7 @@ _spec.loader.exec_module(obs)
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 SAMPLE_TRACE = """\
-# BMAD Trace — test
+# Grimoire Trace — test
 ## Session session-001 — 2026-03-06
 
 [2026-03-06T09:00:01Z] [orchestrator]    [SOG:routed]         intent="auth" | agents=[dev,qa] | mode=parallel
@@ -90,10 +90,10 @@ agent_graph:
 
 @pytest.fixture
 def tmp_project(tmp_path):
-    """Create a minimal project structure with BMAD data."""
-    out = tmp_path / "_bmad-output"
+    """Create a minimal project structure with Grimoire data."""
+    out = tmp_path / "_grimoire-output"
     out.mkdir()
-    (out / "BMAD_TRACE.md").write_text(SAMPLE_TRACE, encoding="utf-8")
+    (out / "Grimoire_TRACE.md").write_text(SAMPLE_TRACE, encoding="utf-8")
     (out / ".event-log.jsonl").write_text(
         "\n".join(json.dumps(e) for e in SAMPLE_EVENTS) + "\n",
         encoding="utf-8",
@@ -104,8 +104,8 @@ def tmp_project(tmp_path):
 
 @pytest.fixture
 def empty_project(tmp_path):
-    """Project with no BMAD data at all."""
-    (tmp_path / "_bmad-output").mkdir()
+    """Project with no Grimoire data at all."""
+    (tmp_path / "_grimoire-output").mkdir()
     return tmp_path
 
 
@@ -114,13 +114,13 @@ def empty_project(tmp_path):
 
 class TestParseTrace:
     def test_parses_entries(self, tmp_project):
-        path = tmp_project / "_bmad-output" / "BMAD_TRACE.md"
+        path = tmp_project / "_grimoire-output" / "Grimoire_TRACE.md"
         entries, sessions = obs.parse_trace(path)
         assert len(entries) == 12
         assert sessions == ["session-001", "session-002"]
 
     def test_first_entry_fields(self, tmp_project):
-        path = tmp_project / "_bmad-output" / "BMAD_TRACE.md"
+        path = tmp_project / "_grimoire-output" / "Grimoire_TRACE.md"
         entries, _ = obs.parse_trace(path)
         e = entries[0]
         assert e.agent == "orchestrator"
@@ -130,7 +130,7 @@ class TestParseTrace:
         assert e.timestamp == "2026-03-06T09:00:01Z"
 
     def test_session_boundary(self, tmp_project):
-        path = tmp_project / "_bmad-output" / "BMAD_TRACE.md"
+        path = tmp_project / "_grimoire-output" / "Grimoire_TRACE.md"
         entries, _ = obs.parse_trace(path)
         # Last 2 entries should be session-002
         assert entries[-1].session == "session-002"
@@ -144,12 +144,12 @@ class TestParseTrace:
 
 class TestParseEventLog:
     def test_parses_events(self, tmp_project):
-        path = tmp_project / "_bmad-output" / ".event-log.jsonl"
+        path = tmp_project / "_grimoire-output" / ".event-log.jsonl"
         events = obs.parse_event_log(path)
         assert len(events) == 5
 
     def test_event_fields(self, tmp_project):
-        path = tmp_project / "_bmad-output" / ".event-log.jsonl"
+        path = tmp_project / "_grimoire-output" / ".event-log.jsonl"
         events = obs.parse_event_log(path)
         e = events[0]
         assert e.id == "evt-001"
@@ -171,7 +171,7 @@ class TestParseEventLog:
 
 class TestParseAgentGraph:
     def test_parses_agents(self, tmp_project):
-        path = tmp_project / "_bmad-output" / ".agent-graph.yaml"
+        path = tmp_project / "_grimoire-output" / ".agent-graph.yaml"
         agents, rels = obs.parse_agent_graph(path)
         assert len(agents) == 2
         ids = {a.id for a in agents}
@@ -179,7 +179,7 @@ class TestParseAgentGraph:
         assert "qa" in ids
 
     def test_agent_details(self, tmp_project):
-        path = tmp_project / "_bmad-output" / ".agent-graph.yaml"
+        path = tmp_project / "_grimoire-output" / ".agent-graph.yaml"
         agents, _ = obs.parse_agent_graph(path)
         dev = next(a for a in agents if a.id == "dev")
         assert dev.persona == "Amelia"
@@ -187,7 +187,7 @@ class TestParseAgentGraph:
         assert dev.metrics.get("avg_trust_score") == 89
 
     def test_relationships(self, tmp_project):
-        path = tmp_project / "_bmad-output" / ".agent-graph.yaml"
+        path = tmp_project / "_grimoire-output" / ".agent-graph.yaml"
         _, rels = obs.parse_agent_graph(path)
         assert len(rels) == 2
         collab = next(r for r in rels if r.type == "collaboration")
@@ -299,7 +299,7 @@ class TestGenerateHtml:
         html = obs.generate_html(data)
         assert html.startswith("<!DOCTYPE html>")
         assert "</html>" in html
-        assert "BMAD Observatory" in html
+        assert "Grimoire Observatory" in html
 
     def test_data_embedded(self, tmp_project):
         data = obs.load_all(tmp_project)
@@ -313,7 +313,7 @@ class TestGenerateHtml:
     def test_no_placeholder_left(self, tmp_project):
         data = obs.load_all(tmp_project)
         html = obs.generate_html(data)
-        assert "__BMAD_DATA__" not in html
+        assert "__Grimoire_DATA__" not in html
         assert "__AUTO_REFRESH__" not in html
 
     def test_auto_refresh_off_by_default(self, tmp_project):
@@ -344,7 +344,7 @@ class TestGenerateHtml:
         data = obs.load_all(empty_project)
         html = obs.generate_html(data)
         assert "<!DOCTYPE html>" in html
-        assert "BMAD Observatory" in html
+        assert "Grimoire Observatory" in html
 
     def test_no_inline_onclick(self, tmp_project):
         """Ensure event delegation via data-item-idx, no fragile inline onclick."""
@@ -361,7 +361,7 @@ class TestCLIGenerate:
     def test_generate_creates_file(self, tmp_project):
         ret = obs.main(["--project-root", str(tmp_project), "generate"])
         assert ret == 0
-        out = tmp_project / "_bmad-output" / "observatory.html"
+        out = tmp_project / "_grimoire-output" / "observatory.html"
         assert out.exists()
         content = out.read_text(encoding="utf-8")
         assert "<!DOCTYPE html>" in content
@@ -369,7 +369,7 @@ class TestCLIGenerate:
     def test_generate_empty_project(self, empty_project):
         ret = obs.main(["--project-root", str(empty_project), "generate"])
         assert ret == 0
-        out = empty_project / "_bmad-output" / "observatory.html"
+        out = empty_project / "_grimoire-output" / "observatory.html"
         assert out.exists()
 
 

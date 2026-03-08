@@ -2,7 +2,7 @@
 
 <!-- ARCHETYPE: web-app — Template de shared-context pour applications web.
      Adaptez les sections à votre stack. Les agents déployés dépendent
-     du stack détecté par bmad-init.sh --auto (Gopher, Pixel, Serpent, Container...) -->
+     du stack détecté par grimoire-init.sh --auto (Gopher, Pixel, Serpent, Container...) -->
 
 > Ce fichier est chargé par tous les agents au démarrage.
 > Il est la source de vérité pour le contexte projet.
@@ -105,7 +105,7 @@
 
 ## Équipe d'Agents Custom
 
-> Complétez avec les agents réellement déployés par `bmad-init.sh --auto`
+> Complétez avec les agents réellement déployés par `grimoire-init.sh --auto`
 
 | Agent | Nom | Icône | Domaine |
 |-------|-----|-------|---------|

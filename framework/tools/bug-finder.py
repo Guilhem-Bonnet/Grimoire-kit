@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bug-finder.py — Détecteur de bugs logiques BMAD (au-delà du linting).
+bug-finder.py — Détecteur de bugs logiques Grimoire (au-delà du linting).
 ======================================================================
 
 Analyse statique par AST qui détecte des bugs **logiques** que les linters
@@ -530,7 +530,7 @@ def scan_directory(root: Path, target: Path | None = None,
 
     # Filtrer les exclusions
     exclude_dirs = {"node_modules", ".git", "__pycache__", ".pytest_cache",
-                    ".ruff_cache", ".venv", "venv", ".bmad-rnd", "_bmad-output"}
+                    ".ruff_cache", ".venv", "venv", ".bmad-rnd", "_grimoire-output"}
 
     for fpath in files:
         # Vérifier les exclusions
@@ -680,7 +680,7 @@ def format_report(report: ScanReport, as_json: bool = False) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Bug Finder — Détection de bugs logiques BMAD",
+        description="Bug Finder — Détection de bugs logiques Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

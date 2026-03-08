@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bias-toolkit.py — Catalogue de biais cognitifs BMAD.
+bias-toolkit.py — Catalogue de biais cognitifs Grimoire.
 =====================================================
 
 Toolkit pour exploiter les biais cognitifs de manière éthique dans
@@ -421,7 +421,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Bias Toolkit — Biais cognitifs éthiques",
+        description="Grimoire Bias Toolkit — Biais cognitifs éthiques",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

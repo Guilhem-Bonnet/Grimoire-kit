@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-synapse-trace.py — Middleware de traçabilité Synapse BMAD (BM-46 Story 7.2).
+synapse-trace.py — Middleware de traçabilité Synapse Grimoire (BM-46 Story 7.2).
 ============================================================
 
 Capture automatiquement chaque appel MCP et chaque opération inter-outils,
-puis les écrit dans ``_bmad-output/BMAD_TRACE.md`` au format structuré
+puis les écrit dans ``_grimoire-output/Grimoire_TRACE.md`` au format structuré
 compatible avec les parseurs existants (cognitive-flywheel, dream,
 workflow-adapt, memory-lint, dna-evolve).
 
@@ -24,7 +24,7 @@ Usage :
 Stdlib only.
 
 Références :
-  - BMAD_TRACE.md format: framework/bmad-trace.md
+  - Grimoire_TRACE.md format: framework/grimoire-trace.md
   - OpenTelemetry Python: https://opentelemetry.io/docs/languages/python/
 """
 
@@ -46,8 +46,8 @@ SYNAPSE_TRACE_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-TRACE_DIR = "_bmad-output"
-TRACE_FILE = "BMAD_TRACE.md"
+TRACE_DIR = "_grimoire-output"
+TRACE_FILE = "Grimoire_TRACE.md"
 SYNAPSE_TAG = "[SYNAPSE]"
 MAX_TRACE_ENTRIES = 10000
 
@@ -81,7 +81,7 @@ class TraceEntry:
         return cls(**{k: v for k, v in data.items() if k in valid})
 
     def to_markdown(self) -> str:
-        """Format Markdown compatible BMAD_TRACE.md."""
+        """Format Markdown compatible Grimoire_TRACE.md."""
         lines = [
             f"\n### [{self.timestamp}] {SYNAPSE_TAG} {self.tool}.{self.operation}",
             f"- **Agent** : {self.agent or 'system'}",
@@ -126,7 +126,7 @@ class SynapseTracer:
     """
     Traceur centralisé pour toutes les opérations Synapse.
 
-    Écrit en append dans BMAD_TRACE.md et maintient un index en mémoire
+    Écrit en append dans Grimoire_TRACE.md et maintient un index en mémoire
     pour les recherches rapides.
     """
 
@@ -163,14 +163,14 @@ class SynapseTracer:
             self._append_to_file(entry)
 
     def _append_to_file(self, entry: TraceEntry) -> None:
-        """Écrit l'entrée dans BMAD_TRACE.md."""
+        """Écrit l'entrée dans Grimoire_TRACE.md."""
         self._trace_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._trace_path, "a", encoding="utf-8") as f:
             f.write(entry.to_markdown())
 
     def load_from_file(self) -> int:
         """
-        Charge les entrées Synapse existantes depuis BMAD_TRACE.md.
+        Charge les entrées Synapse existantes depuis Grimoire_TRACE.md.
 
         Ne charge que les entrées qui contiennent le tag [SYNAPSE].
         Retourne le nombre d'entrées chargées.
@@ -438,10 +438,10 @@ def mcp_synapse_trace(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="synapse-trace",
-        description="Middleware de traçabilité Synapse BMAD",
+        description="Middleware de traçabilité Synapse Grimoire",
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
     parser.add_argument("--version", action="version", version=f"%(prog)s {SYNAPSE_TRACE_VERSION}")
 
     sub = parser.add_subparsers(dest="command")

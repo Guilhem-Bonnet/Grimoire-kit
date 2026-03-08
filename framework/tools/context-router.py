@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context-router.py — Routeur de contexte intelligent BMAD.
+context-router.py — Routeur de contexte intelligent Grimoire.
 ============================================================
 
 Analyse les fichiers qu'un agent DOIT charger, DEVRAIT charger, et PEUT
@@ -153,10 +153,10 @@ def estimate_tokens(filepath: Path) -> int:
 def find_agent_files(project_root: Path) -> list[Path]:
     """Trouve tous les fichiers agents dans le projet."""
     agents = []
-    custom_dir = project_root / "_bmad" / "_config" / "custom"
+    custom_dir = project_root / "_grimoire" / "_config" / "custom"
     if not custom_dir.exists():
         # Fallback : chercher dans les patterns courants
-        for pattern in ["_bmad/_config/agents/*.md", "_bmad/*/agents/*.md"]:
+        for pattern in ["_grimoire/_config/agents/*.md", "_grimoire/*/agents/*.md"]:
             agents.extend(project_root.glob(pattern))
     else:
         agents.extend(custom_dir.glob("*.md"))
@@ -182,8 +182,8 @@ def extract_agent_tag(agent_file: Path) -> str:
 def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry]:
     """Découvre et priorise les fichiers de contexte pour un agent."""
     entries: list[FileEntry] = []
-    memory_dir = project_root / "_bmad" / "_memory"
-    config_dir = project_root / "_bmad" / "_config" / "custom"
+    memory_dir = project_root / "_grimoire" / "_memory"
+    config_dir = project_root / "_grimoire" / "_config" / "custom"
 
     # ── P0 : ALWAYS ──────────────────────────────────────────────
     p0_files = [
@@ -542,12 +542,12 @@ def cmd_relevance(args: argparse.Namespace, project_root: Path) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Context Router — Routage intelligent du contexte agent",
+        description="Grimoire Context Router — Routage intelligent du contexte agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--project-root", type=str, default=".",
-        help="Racine du projet BMAD (défaut: .)",
+        help="Racine du projet Grimoire (défaut: .)",
     )
     parser.add_argument(
         "--model", type=str, default=DEFAULT_MODEL,
@@ -589,8 +589,8 @@ def main() -> int:
         return 0
 
     project_root = Path(args.project_root).resolve()
-    if not (project_root / "_bmad").exists():
-        print(f"❌ Pas de dossier _bmad dans {project_root}", file=sys.stderr)
+    if not (project_root / "_grimoire").exists():
+        print(f"❌ Pas de dossier _grimoire dans {project_root}", file=sys.stderr)
         return 1
 
     commands = {

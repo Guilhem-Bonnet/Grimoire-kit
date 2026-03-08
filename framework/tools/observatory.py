@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-observatory.py — BMAD Observatory: Interactive Visual Dashboard.
+observatory.py — Grimoire Observatory: Interactive Visual Dashboard.
 ================================================================
 
 Génère un dashboard HTML interactif *autoporté* (single-file, zero CDN)
-à partir des données BMAD : traces, event-log, agent-graph, shared-state.
+à partir des données Grimoire : traces, event-log, agent-graph, shared-state.
 
 Vues :
   1. **Timeline**    — Flux chronologique des échanges inter-agents (swimlanes)
   2. **DAG**         — Graphe de tâches parallèles/séquentielles (HPE status)
   3. **Agent Graph** — Réseau relationnel des agents (ARG BM-57)
-  4. **Trace Log**   — Tableau filtrable de toutes les entrées BMAD_TRACE
+  4. **Trace Log**   — Tableau filtrable de toutes les entrées Grimoire_TRACE
   5. **Metrics**     — KPIs : trust scores, throughput, parallélisme
 
 Modes :
-  generate  — Génère le fichier HTML dans _bmad-output/
+  generate  — Génère le fichier HTML dans _grimoire-output/
   serve     — Génère + lance un serveur local avec auto-reload
   export    — Exporte les données parsées en JSON
 
@@ -26,10 +26,10 @@ Usage :
 Stdlib only — aucune dépendance externe.
 
 Sources de données :
-  - _bmad-output/BMAD_TRACE.md          (BM-28)
-  - _bmad-output/.event-log.jsonl        (BM-59 ELSS)
-  - _bmad-output/.agent-graph.yaml       (BM-57 ARG)
-  - _bmad-output/.shared-state.yaml      (BM-59 ELSS)
+  - _grimoire-output/Grimoire_TRACE.md          (BM-28)
+  - _grimoire-output/.event-log.jsonl        (BM-59 ELSS)
+  - _grimoire-output/.agent-graph.yaml       (BM-57 ARG)
+  - _grimoire-output/.shared-state.yaml      (BM-59 ELSS)
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ OBSERVATORY_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-OUTPUT_DIR = "_bmad-output"
-TRACE_FILE = "BMAD_TRACE.md"
+OUTPUT_DIR = "_grimoire-output"
+TRACE_FILE = "Grimoire_TRACE.md"
 EVENT_LOG_FILE = ".event-log.jsonl"
 AGENT_GRAPH_FILE = ".agent-graph.yaml"
 SHARED_STATE_FILE = ".shared-state.yaml"
@@ -63,7 +63,7 @@ OBSERVATORY_HTML = "observatory.html"
 
 @dataclass
 class TraceEntry:
-    """Parsed entry from BMAD_TRACE.md."""
+    """Parsed entry from Grimoire_TRACE.md."""
     timestamp: str = ""
     agent: str = ""
     event_type: str = ""
@@ -121,7 +121,7 @@ class ObservatoryData:
 
 # ── Parsers ──────────────────────────────────────────────────────────────────
 
-# Regex for BMAD_TRACE.md line format:
+# Regex for Grimoire_TRACE.md line format:
 # [2026-02-27T14:32:01Z] [dev/Amelia]       [ACTION:implement]   story: US-042 ...
 _TRACE_RE = re.compile(
     r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)",
@@ -130,7 +130,7 @@ _SESSION_RE = re.compile(r"^## Session\s+(\S+)")
 
 
 def parse_trace(path: Path) -> tuple[list[TraceEntry], list[str]]:
-    """Parse BMAD_TRACE.md into structured entries."""
+    """Parse Grimoire_TRACE.md into structured entries."""
     entries: list[TraceEntry] = []
     sessions: list[str] = []
     current_session = "unknown"
@@ -198,7 +198,7 @@ def parse_event_log(path: Path) -> list[EventEntry]:
 
 
 def _parse_yaml_simple(text: str) -> dict:
-    """Minimal YAML parser for the subset used in BMAD (no external deps).
+    """Minimal YAML parser for the subset used in Grimoire (no external deps).
 
     Handles:
       - key: "value" / key: value / key: 123 / key: 0.5
@@ -391,7 +391,7 @@ def parse_shared_state(path: Path) -> dict:
 
 
 def load_all(project_root: Path) -> ObservatoryData:
-    """Load all BMAD data sources."""
+    """Load all Grimoire data sources."""
     out_dir = project_root / OUTPUT_DIR
 
     traces, sessions = parse_trace(out_dir / TRACE_FILE)
@@ -435,7 +435,7 @@ def data_to_json(data: ObservatoryData) -> str:
 def generate_html(data: ObservatoryData, *, auto_refresh: bool = False) -> str:
     """Generate the self-contained observatory HTML."""
     json_data = data_to_json(data)
-    html = _HTML_TEMPLATE.replace("__BMAD_DATA__", json_data)
+    html = _HTML_TEMPLATE.replace("__Grimoire_DATA__", json_data)
     # auto_refresh is handled by JS HEAD-check (preserves tab/scroll state)
     # No meta refresh tag — it would cause full reloads losing all state
     return html.replace("__AUTO_REFRESH__", "")
@@ -446,7 +446,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BMAD Observatory</title>
+<title>Grimoire Observatory</title>
 __AUTO_REFRESH__
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -626,7 +626,7 @@ main{flex:1;overflow-y:auto}
 <body>
 
 <header>
-  <h1>🔭 BMAD Observatory</h1>
+  <h1>🔭 Grimoire Observatory</h1>
   <div class="header-stats">
     <span>Traces: <span class="n" id="stat-traces">0</span></span>
     <span>Events: <span class="n" id="stat-events">0</span></span>
@@ -708,7 +708,7 @@ main{flex:1;overflow-y:auto}
 </div>
 
 <script>
-const DATA = __BMAD_DATA__;
+const DATA = __Grimoire_DATA__;
 const $ = (s,e) => (e||document).querySelector(s);
 const $$ = (s,e) => [...(e||document).querySelectorAll(s)];
 const esc = s => { const d=document.createElement('div');d.textContent=s;return d.innerHTML; };
@@ -1244,7 +1244,7 @@ function renderMetrics() {
   const chartsDiv = $('#metrics-charts');
   const cards = [];
 
-  cards.push({label:'Traces totales',value:DATA.traces.length,cls:DATA.traces.length>0?'good':'',detail:'BMAD_TRACE.md'});
+  cards.push({label:'Traces totales',value:DATA.traces.length,cls:DATA.traces.length>0?'good':'',detail:'Grimoire_TRACE.md'});
   cards.push({label:'Événements',value:DATA.events.length,cls:DATA.events.length>0?'good':'',detail:'.event-log.jsonl'});
   cards.push({label:'Agents actifs',value:DATA.agent_ids.length,cls:DATA.agent_ids.length>3?'good':'warn',detail:'Uniques dans traces + events'});
   cards.push({label:'Sessions',value:DATA.sessions.length,cls:'',detail:'Branches de session'});
@@ -1408,7 +1408,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             pass  # silent
 
     server = http.server.HTTPServer(("", port), QuietHandler)
-    print(f"🔭 BMAD Observatory serving at http://localhost:{port}/{OBSERVATORY_HTML}")
+    print(f"🔭 Grimoire Observatory serving at http://localhost:{port}/{OBSERVATORY_HTML}")
     print(f"   Auto-reload: watching {len(watch_files)} files every 2s")
     print("   Press Ctrl+C to stop")
     try:
@@ -1432,7 +1432,7 @@ def cmd_export(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="observatory",
-        description="BMAD Observatory — Interactive Visual Dashboard",
+        description="Grimoire Observatory — Interactive Visual Dashboard",
     )
     parser.add_argument("--project-root", default=".", help="Project root path")
     sub = parser.add_subparsers(dest="command")

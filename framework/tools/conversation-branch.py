@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-conversation-branch.py — Conversation Branching BMAD (BM-44 Story 5.1).
+conversation-branch.py — Conversation Branching Grimoire (BM-44 Story 5.1).
 ============================================================
 
 Étend le Session Branching (BM-16) avec le branching de contexte
@@ -25,7 +25,7 @@ Usage :
 Stdlib only.
 
 Références :
-  - BMAD Session Branching (BM-16): framework/sessions/README.md
+  - Grimoire Session Branching (BM-16): framework/sessions/README.md
   - Git branching model: https://nvie.com/posts/a-successful-git-branching-model/
   - Letta conversation branching: https://github.com/letta-ai/letta
 """
@@ -47,7 +47,7 @@ CONVERSATION_BRANCH_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-RUNS_DIR = "_bmad-output/.runs"
+RUNS_DIR = "_grimoire-output/.runs"
 DEFAULT_BRANCH = "main"
 BRANCH_MANIFEST = "branch.json"
 STATE_FILE = "state.json"
@@ -134,12 +134,12 @@ class BranchTree:
 
 class BranchManager:
     """
-    Gère les branches de conversation BMAD.
+    Gère les branches de conversation Grimoire.
 
     Structure des fichiers :
-      _bmad-output/.runs/{branch-name}/branch.json
-      _bmad-output/.runs/{branch-name}/state.json
-      _bmad-output/.runs/{branch-name}/*.md (artifacts)
+      _grimoire-output/.runs/{branch-name}/branch.json
+      _grimoire-output/.runs/{branch-name}/state.json
+      _grimoire-output/.runs/{branch-name}/*.md (artifacts)
     """
 
     def __init__(self, project_root: Path):
@@ -180,7 +180,7 @@ class BranchManager:
 
     def _compute_files_hash(self) -> str:
         """Hash des fichiers mémoire et contexte courants."""
-        memory_dir = self.project_root / "_bmad" / "_memory"
+        memory_dir = self.project_root / "_grimoire" / "_memory"
         files = []
         if memory_dir.exists():
             files = sorted(memory_dir.rglob("*.md"))
@@ -194,7 +194,7 @@ class BranchManager:
 
     def _discover_loaded_files(self) -> list[str]:
         """Liste les fichiers mémoire/contexte chargés."""
-        memory_dir = self.project_root / "_bmad" / "_memory"
+        memory_dir = self.project_root / "_grimoire" / "_memory"
         files = []
         if memory_dir.exists():
             for f in sorted(memory_dir.rglob("*.md"))[:50]:
@@ -513,7 +513,7 @@ def _print_info(info: BranchInfo) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Conversation Branching — Branches de conversation BMAD",
+        description="Conversation Branching — Branches de conversation Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

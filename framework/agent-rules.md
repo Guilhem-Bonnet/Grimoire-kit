@@ -16,7 +16,7 @@
 Créer un fichier `.agent-rules` dans n'importe quel dossier :
 
 ```yaml
-# .agent-rules — Override local des règles BMAD
+# .agent-rules — Override local des règles Grimoire
 # Scope : ce dossier et tous ses sous-dossiers
 # Héritage : s'ajoute (ou surcharge) les règles DNA de l'archétype actif
 

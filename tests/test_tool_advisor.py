@@ -1,4 +1,4 @@
-"""Tests for tool-advisor.py — Recommandation proactive d'outils BMAD."""
+"""Tests for tool-advisor.py — Recommandation proactive d'outils Grimoire."""
 from __future__ import annotations
 
 import importlib.util
@@ -36,7 +36,7 @@ def tmp_project(tmp_path):
 @pytest.fixture
 def project_with_usage(tmp_project):
     """Projet avec stats d'utilisation."""
-    (tmp_project / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    (tmp_project / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     stats = tmp_project / ta.USAGE_LOG
     stats.parent.mkdir(parents=True, exist_ok=True)
     with open(stats, "w", encoding="utf-8") as f:
@@ -481,7 +481,7 @@ class TestRender:
 
     def test_render_workflows(self):
         text = ta.render_workflows()
-        assert "Workflows BMAD" in text
+        assert "Workflows Grimoire" in text
         assert "Pre-release" in text
 
     def test_render_high_priority_icon(self):

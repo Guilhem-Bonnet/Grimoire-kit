@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour semantic-cache.py — Cache sémantique Qdrant BMAD (BM-41 Story 3.2).
+Tests pour semantic-cache.py — Cache sémantique Qdrant Grimoire (BM-41 Story 3.2).
 
 Fonctions testées :
   - CacheEntry (dataclass, is_expired, age_hours)
@@ -193,7 +193,7 @@ class TestSemanticCache(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)

@@ -28,7 +28,7 @@
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────┐       │
 │  │            SERVICE REGISTRY (discovery)               │       │
-│  │  _bmad-output/.agent-registry.yaml                    │       │
+│  │  _grimoire-output/.agent-registry.yaml                    │       │
 │  │                                                       │       │
 │  │  dev/Amelia  [online]  cap:[impl,tdd]  load:2/5      │       │
 │  │  qa/Quinn    [online]  cap:[test,sec]  load:1/5      │       │
@@ -59,7 +59,7 @@
 
 ## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Service Registry — Découverte d'Agents
 
-Fichier : `_bmad-output/.agent-registry.yaml`
+Fichier : `_grimoire-output/.agent-registry.yaml`
 
 ```yaml
 # Auto-maintained by mesh protocol — agents register/deregister on activation
@@ -353,7 +353,7 @@ observability:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [dev/Amelia]     [AMN:register]   status=online | cap=[impl,tdd,JWT-auth]

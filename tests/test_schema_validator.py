@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests pour schema-validator.py — Validateur structurel configs BMAD."""
+"""Tests pour schema-validator.py — Validateur structurel configs Grimoire."""
 
 import shutil
 import sys
@@ -41,7 +41,7 @@ class TestValidateDNA(unittest.TestCase):
 
     def test_valid_dna(self):
         dna = _write(self.tmpdir, "archetypes/test/archetype.dna.yaml", """\
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 id: test
 name: "Test"
 version: "1.0.0"
@@ -59,7 +59,7 @@ inherits: minimal
 
     def test_missing_required_fields(self):
         dna = _write(self.tmpdir, "archetypes/test/archetype.dna.yaml", """\
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 id: test
 """)
         data, err = self.mod._load_yaml(dna)

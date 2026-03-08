@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Custom Kit — Self-Improvement Loop : collecteur de signaux d'échec
+# Grimoire Custom Kit — Self-Improvement Loop : collecteur de signaux d'échec
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Usage :
@@ -8,7 +8,7 @@
 #   bash sil-collect.sh --since 30         # limiter aux 30 derniers jours
 #   bash sil-collect.sh --out /chemin      # répertoire de sortie custom
 #
-# Produit : _bmad-output/sil-report-latest.md
+# Produit : _grimoire-output/sil-report-latest.md
 #   Snapshot brut agrégé des signaux d'échec.
 #   À donner à Sentinel ([FA] Self-Improvement Loop) pour analyse.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -17,7 +17,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(pwd)"
 SINCE_DAYS=90
-OUTPUT_DIR="$PROJECT_ROOT/_bmad-output"
+OUTPUT_DIR="$PROJECT_ROOT/_grimoire-output"
 OUTPUT_FILE="$OUTPUT_DIR/sil-report-latest.md"
 DATE_NOW="$(date '+%Y-%m-%d %H:%M')"
 
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: sil-collect.sh [--since DAYS] [--out DIR]"
             echo "  --since N  : limiter aux N derniers jours (défaut: 90)"
-            echo "  --out DIR  : répertoire de sortie (défaut: _bmad-output/)"
+            echo "  --out DIR  : répertoire de sortie (défaut: _grimoire-output/)"
             exit 0
             ;;
         *) echo "Option inconnue: $1" >&2; exit 1 ;;
@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ─── Chemins mémoire ──────────────────────────────────────────────────────────
-MEMORY_DIR="$PROJECT_ROOT/_bmad/_memory"
+MEMORY_DIR="$PROJECT_ROOT/_grimoire/_memory"
 DECISIONS_LOG="$MEMORY_DIR/decisions-log.md"
 CONTRADICTION_LOG="$MEMORY_DIR/contradiction-log.md"
 HANDOFF_LOG="$MEMORY_DIR/handoff-log.md"
@@ -157,7 +157,7 @@ cat > "$OUTPUT_FILE" <<HEADER
 **Projet** : $PROJECT_ROOT
 
 > ⚠️ Ce fichier est un snapshot BRUT à analyser par Sentinel ([FA]).
-> Ne pas modifier manuellement. Re-générer via : \`bash _bmad/_config/custom/sil-collect.sh\`
+> Ne pas modifier manuellement. Re-générer via : \`bash _grimoire/_config/custom/sil-collect.sh\`
 
 ---
 

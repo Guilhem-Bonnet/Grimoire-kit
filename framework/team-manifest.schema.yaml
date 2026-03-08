@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Custom Kit — Team Manifest Schema
-# BM-15 : Standard de définition d'une team BMAD
+# Grimoire Custom Kit — Team Manifest Schema
+# BM-15 : Standard de définition d'une team Grimoire
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Usage : copier ce schema dans framework/teams/{team-name}.yaml
@@ -20,9 +20,9 @@ team:
   version: "1.0.0"
   description: ""                 # 1 phrase, ce que fait la team
 
-  # ─── Membres de la team (agents BMAD) ──────────────────────────────────────
+  # ─── Membres de la team (agents Grimoire) ──────────────────────────────────────
   agents:
-    - name: ""                    # id agent BMAD (ex: "pm", "analyst")
+    - name: ""                    # id agent Grimoire (ex: "pm", "analyst")
       role: ""                    # rôle dans la team (ex: "Lead", "Support")
       required: true              # si false, agent optionnel selon contexte
 
@@ -36,7 +36,7 @@ team:
     required:                     # artefacts requis AVANT que la team commence
       - name: ""                  # ex: "project-context.yaml"
         description: ""           # ce que contient cet input
-        path_pattern: ""          # ex: "_bmad-output/planning-artifacts/*.yaml"
+        path_pattern: ""          # ex: "_grimoire-output/planning-artifacts/*.yaml"
     optional:                     # artefacts enrichissants mais non bloquants
       - name: ""
         description: ""
@@ -46,7 +46,7 @@ team:
     deliverables:                 # artefacts que la team DOIT produire
       - name: ""                  # ex: "PRD validé"
         format: ""                # ex: "Markdown", "YAML", "JSON"
-        path_pattern: ""          # ex: "_bmad-output/planning-artifacts/PRD-*.md"
+        path_pattern: ""          # ex: "_grimoire-output/planning-artifacts/PRD-*.md"
         acceptance_criteria: ""   # condition pour que l'output soit accepté
     optional_deliverables:        # artefacts supplémentaires si temps disponible
       - name: ""
@@ -70,7 +70,7 @@ team:
 
   # ─── Contexte isolé de la team ────────────────────────────────────────────
   team_context:
-    directory: ""                 # ex: "_bmad-output/team-vision/"
+    directory: ""                 # ex: "_grimoire-output/team-vision/"
     files:
       - name: ""                  # ex: "team-context.md"
         description: ""           # contenu attendu

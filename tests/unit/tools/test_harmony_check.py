@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.harmony_check — HarmonyCheck tool."""
+"""Tests for grimoire.tools.harmony_check — HarmonyCheck tool."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.tools.harmony_check import (
+from grimoire.tools.harmony_check import (
     SEVERITY_HIGH,
     SEVERITY_LOW,
     SEVERITY_MEDIUM,
@@ -29,20 +29,20 @@ from bmad.tools.harmony_check import (
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
-    """Minimal BMAD project structure."""
+    """Minimal Grimoire project structure."""
     (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
-    (tmp_path / "_bmad" / "core" / "agents").mkdir(parents=True)
-    (tmp_path / "_bmad" / "core" / "workflows").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "core" / "workflows").mkdir(parents=True)
     (tmp_path / "framework" / "tools").mkdir(parents=True)
     (tmp_path / "tests").mkdir(parents=True)
     (tmp_path / "docs").mkdir(parents=True)
 
     # Agents
-    (tmp_path / "_bmad" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
-    (tmp_path / "_bmad" / "core" / "agents" / "architect.md").write_text("# Architect\nUses analyst.\n")
+    (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
+    (tmp_path / "_grimoire" / "core" / "agents" / "architect.md").write_text("# Architect\nUses analyst.\n")
 
     # Workflow referencing analyst
-    (tmp_path / "_bmad" / "core" / "workflows" / "plan.md").write_text("# Plan\nAgent: analyst\n")
+    (tmp_path / "_grimoire" / "core" / "workflows" / "plan.md").write_text("# Plan\nAgent: analyst\n")
 
     # Tool
     (tmp_path / "framework" / "tools" / "sample-tool.py").write_text("# tool\n")
@@ -146,21 +146,21 @@ class TestDetectOversized:
 
 class TestDetectManifestMismatch:
     def test_no_manifest(self, tmp_path: Path) -> None:
-        scan = ArchScan(agents=["_bmad/core/agents/analyst.md"])
+        scan = ArchScan(agents=["_grimoire/core/agents/analyst.md"])
         assert _detect_manifest_mismatch(scan, tmp_path) == []
 
     def test_matching_manifest(self, tmp_path: Path) -> None:
-        (tmp_path / "_bmad" / "_config").mkdir(parents=True)
-        (tmp_path / "_bmad" / "core" / "agents").mkdir(parents=True)
-        (tmp_path / "_bmad" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
-        manifest = tmp_path / "_bmad" / "_config" / "agent-manifest.csv"
+        (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
+        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
         manifest.write_text("name,title\nanalyst,Analyst\n")
-        scan = ArchScan(agents=["_bmad/core/agents/analyst.md"])
+        scan = ArchScan(agents=["_grimoire/core/agents/analyst.md"])
         assert _detect_manifest_mismatch(scan, tmp_path) == []
 
     def test_missing_agent_in_manifest(self, tmp_path: Path) -> None:
-        (tmp_path / "_bmad" / "_config").mkdir(parents=True)
-        manifest = tmp_path / "_bmad" / "_config" / "agent-manifest.csv"
+        (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
+        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
         manifest.write_text("name,title\nanalyst,Analyst\nghost-agent,Ghost\n")
         scan = ArchScan(agents=[])
         dissonances = _detect_manifest_mismatch(scan, tmp_path)
@@ -169,8 +169,8 @@ class TestDetectManifestMismatch:
         assert any("ghost-agent" in m for m in names)
 
     def test_header_rows_ignored(self, tmp_path: Path) -> None:
-        (tmp_path / "_bmad" / "_config").mkdir(parents=True)
-        manifest = tmp_path / "_bmad" / "_config" / "agent-manifest.csv"
+        (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
+        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
         manifest.write_text("name,title\n# comment line\n")
         scan = ArchScan(agents=[])
         assert _detect_manifest_mismatch(scan, tmp_path) == []
@@ -246,7 +246,7 @@ class TestScanProjectCrossRefs:
 
     def test_oserror_in_cross_ref_is_ignored(self, project: Path) -> None:
         """Unreadable files should not crash the scan."""
-        bad = project / "_bmad" / "core" / "agents" / "broken.md"
+        bad = project / "_grimoire" / "core" / "agents" / "broken.md"
         bad.write_text("# broken\n")
         bad.chmod(0o000)
         try:
@@ -375,8 +375,8 @@ class TestCli:
 
     def test_cli_with_dissonances(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """CLI output with dissonances shows icons and messages."""
-        (tmp_path / "_bmad" / "core" / "agents").mkdir(parents=True)
-        (tmp_path / "_bmad" / "core" / "agents" / "BadName.md").write_text("# BadName\n")
+        (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "core" / "agents" / "BadName.md").write_text("# BadName\n")
         monkeypatch.setattr("sys.argv", ["harmony_check", "--project-root", str(tmp_path)])
         assert _cli() == 0
         captured = capsys.readouterr()

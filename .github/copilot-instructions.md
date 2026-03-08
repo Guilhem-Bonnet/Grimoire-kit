@@ -5,18 +5,18 @@
 This repository is the **BMAD Custom Kit** — a framework for bootstrapping AI-assisted software projects with specialized agents, archetype-based DNA constraints, and structured memory.
 
 **Key directories:**
-- `bmad-init.sh` — main CLI: `session-branch`, `install`, `doctor`, `validate`, `changelog`, `hooks`, `trace`, `resume`, `bench`, `forge`, `guard`, `evolve`
+- `grimoire-init.sh` — main CLI: `session-branch`, `install`, `doctor`, `validate`, `changelog`, `hooks`, `trace`, `resume`, `bench`, `forge`, `guard`, `evolve`
 - `archetypes/` — project archetypes (minimal, web-app, infra-ops, fix-loop, stack)
-- `framework/` — DNA schema, hooks, tools (gen-tests.py, agent-bench.py, agent-forge.py, context-guard.py, dna-evolve.py, bmad-completion.zsh), agent-rules, context-router, MCP server, BMAD_TRACE
+- `framework/` — DNA schema, hooks, tools (gen-tests.py, agent-bench.py, agent-forge.py, context-guard.py, dna-evolve.py, grimoire-completion.zsh), agent-rules, context-router, MCP server, BMAD_TRACE
 - `_bmad/` — BMAD runtime (agents, workflows, memory)
 - `docs/` — human-readable documentation
 
 ## Code Style Rules
 
-### Shell (bmad-init.sh, framework/hooks/*.sh)
+### Shell (grimoire-init.sh, framework/hooks/*.sh)
 - Bash only (not POSIX sh) — use `[[ ]]`, `local`, heredocs, arrays
 - Always `set -euo pipefail` in standalone scripts (hooks)
-- Colors: `RED/GREEN/YELLOW/BLUE/NC` variables already defined in bmad-init.sh
+- Colors: `RED/GREEN/YELLOW/BLUE/NC` variables already defined in grimoire-init.sh
 - Functions: `cmd_<subcommand>()` pattern for subcommands
 - Error output: `error "message"` function (exits 1), `warn "msg"` (continues), `info "msg"` (neutral)
 - Always add `shift` at start of subcommand functions to remove subcommand arg
@@ -24,7 +24,7 @@ This repository is the **BMAD Custom Kit** — a framework for bootstrapping AI-
 
 ### YAML (*.dna.yaml)
 - Schema ref: `# yaml-language-server: $schema=../../framework/archetype-dna.schema.yaml`
-- Required fields: `$schema: bmad-archetype-dna/v1`, `id`, `name`, `version`, `description`, `archetype_type`
+- Required fields: `$schema: grimoire-archetype-dna/v1`, `id`, `name`, `version`, `description`, `archetype_type`
 - `acceptance_criteria[].blocking: true` = critique, `false` = soft warning
 - `tools_required[].required: true` = install vérifiée par `doctor`
 
@@ -76,6 +76,6 @@ Scopes: `init`, `hooks`, `dna`, `stack`, `docs`, `vscode`, `ci`, `memory`, `mcp`
 - ❌ Never add `--force` to git operations without explicit user confirmation
 - ❌ Never hardcode `/home/user/` paths — use `$HOME` or relative paths
 - ❌ Never generate Python without type hints in this project
-- ❌ Never create a `framework/tools/*.py` without a `cmd_<name>()` wrapper in `bmad-init.sh`
-- ❌ Never add a new `bmad-init.sh` subcommand without updating `bmad-completion.zsh`
+- ❌ Never create a `framework/tools/*.py` without a `cmd_<name>()` wrapper in `grimoire-init.sh`
+- ❌ Never add a new `grimoire-init.sh` subcommand without updating `grimoire-completion.zsh`
 - ❌ Never modify `guard` exit codes — 0/1/2 are CI-contract (0=OK, 1=warn, 2=critical)

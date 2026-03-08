@@ -2,7 +2,7 @@
 
 # <img src="../docs/assets/icons/boomerang.svg" width="32" height="32" alt=""> Context Budget Router — BM-07
 
-> Système de gestion automatique du budget de contexte (tokens) pour les agents BMAD. Inspiré du Context Window Management de mem0/MemGPT.
+> Système de gestion automatique du budget de contexte (tokens) pour les agents Grimoire. Inspiré du Context Window Management de mem0/MemGPT.
 
 ## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Problème
 
@@ -39,18 +39,18 @@ context_budget:
   strategy: "priority"
   max_tokens_estimate: 50000
   always_load:
-    - "{project-root}/_bmad/_config/custom/agent-base.md"
-    - "{project-root}/_bmad/_memory/shared-context.md"
+    - "{project-root}/_grimoire/_config/custom/agent-base.md"
+    - "{project-root}/_grimoire/_memory/shared-context.md"
   session_load:
-    - "{project-root}/_bmad/_memory/decisions-log.md"
-    - "{project-root}/_bmad/_memory/agent-learnings/go-backend.md"
-    - "{project-root}/_bmad/_memory/failure-museum.md"            # si > 2 semaines
+    - "{project-root}/_grimoire/_memory/decisions-log.md"
+    - "{project-root}/_grimoire/_memory/agent-learnings/go-backend.md"
+    - "{project-root}/_grimoire/_memory/failure-museum.md"            # si > 2 semaines
   task_load:
     - "{current_story_file}"
     - "{related_adrs}"
   lazy_load:
-    - "{project-root}/_bmad/_memory/knowledge-digest.md"
-    - "{project-root}/_bmad/_memory/archives/"
+    - "{project-root}/_grimoire/_memory/knowledge-digest.md"
+    - "{project-root}/_grimoire/_memory/archives/"
 ---
 ```
 

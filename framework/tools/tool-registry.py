@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-tool-registry.py — Registry unifié des outils BMAD (BM-45 Story 6.1).
+tool-registry.py — Registry unifié des outils Grimoire (BM-45 Story 6.1).
 ============================================================
 
-Registry qui expose les outils BMAD à la fois comme :
+Registry qui expose les outils Grimoire à la fois comme :
   - MCP tools (pour IDE — Copilot, Cursor, Windsurf)
   - Anthropic tool_use (pour Claude API directe)
   - OpenAI function_calling (pour OpenAI/Ollama/LiteLLM)
@@ -73,7 +73,7 @@ PYTHON_TO_JSON_TYPE = {
 
 @dataclass
 class ToolParameter:
-    """Un paramètre d'un outil BMAD."""
+    """Un paramètre d'un outil Grimoire."""
     name: str
     param_type: str = "string"
     description: str = ""
@@ -83,8 +83,8 @@ class ToolParameter:
 
 
 @dataclass
-class BmadTool:
-    """Représentation unifiée d'un outil BMAD."""
+class GrimoireTool:
+    """Représentation unifiée d'un outil Grimoire."""
     name: str
     description: str
     source_file: str
@@ -204,9 +204,9 @@ class ToolDiscoverer:
         self.project_root = project_root
         self.tools_dir = project_root / TOOLS_DIR
 
-    def discover_all(self) -> list[BmadTool]:
-        """Découvre tous les outils BMAD."""
-        tools: list[BmadTool] = []
+    def discover_all(self) -> list[GrimoireTool]:
+        """Découvre tous les outils Grimoire."""
+        tools: list[GrimoireTool] = []
 
         if not self.tools_dir.exists():
             return tools
@@ -227,7 +227,7 @@ class ToolDiscoverer:
 
         return tools
 
-    def _inspect_python_tool(self, filepath: Path) -> BmadTool | None:
+    def _inspect_python_tool(self, filepath: Path) -> GrimoireTool | None:
         """Inspecte un outil Python par analyse AST du module."""
         try:
             source = filepath.read_text(encoding="utf-8")
@@ -325,9 +325,9 @@ class ToolDiscoverer:
             tags.append("multi-agent")
 
         relative = str(filepath.relative_to(self.project_root))
-        return BmadTool(
+        return GrimoireTool(
             name=name,
-            description=description or f"BMAD tool: {name}",
+            description=description or f"Grimoire tool: {name}",
             source_file=relative,
             tool_type="cli",
             version=version,
@@ -336,7 +336,7 @@ class ToolDiscoverer:
             tags=tags,
         )
 
-    def _inspect_shell_tool(self, filepath: Path) -> BmadTool | None:
+    def _inspect_shell_tool(self, filepath: Path) -> GrimoireTool | None:
         """Inspecte un outil shell."""
         try:
             content = filepath.read_text(encoding="utf-8")
@@ -354,7 +354,7 @@ class ToolDiscoverer:
                 break
 
         relative = str(filepath.relative_to(self.project_root))
-        return BmadTool(
+        return GrimoireTool(
             name=name,
             description=description or f"Shell tool: {name}",
             source_file=relative,
@@ -362,7 +362,7 @@ class ToolDiscoverer:
             tags=["shell"],
         )
 
-    def _inspect_markdown_tool(self, filepath: Path) -> BmadTool | None:
+    def _inspect_markdown_tool(self, filepath: Path) -> GrimoireTool | None:
         """Inspecte un document Markdown comme 'tool' documentaire."""
         try:
             content = filepath.read_text(encoding="utf-8")
@@ -378,7 +378,7 @@ class ToolDiscoverer:
             description = h1_match.group(1).strip()
 
         relative = str(filepath.relative_to(self.project_root))
-        return BmadTool(
+        return GrimoireTool(
             name=name,
             description=description or f"Documentation: {name}",
             source_file=relative,
@@ -391,7 +391,7 @@ class ToolDiscoverer:
 
 class ToolRegistry:
     """
-    Registry unifié des outils BMAD.
+    Registry unifié des outils Grimoire.
 
     Fournit une vue unifiée de tous les outils avec export
     multi-format (MCP, Anthropic, OpenAI).
@@ -399,7 +399,7 @@ class ToolRegistry:
 
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self._tools: list[BmadTool] = []
+        self._tools: list[GrimoireTool] = []
         self._discovered = False
 
     def discover(self) -> int:
@@ -410,23 +410,23 @@ class ToolRegistry:
         return len(self._tools)
 
     @property
-    def tools(self) -> list[BmadTool]:
+    def tools(self) -> list[GrimoireTool]:
         if not self._discovered:
             self.discover()
         return self._tools
 
-    def get(self, name: str) -> BmadTool | None:
+    def get(self, name: str) -> GrimoireTool | None:
         """Récupère un outil par nom."""
         for tool in self.tools:
             if tool.name == name:
                 return tool
         return None
 
-    def filter_by_tag(self, tag: str) -> list[BmadTool]:
+    def filter_by_tag(self, tag: str) -> list[GrimoireTool]:
         """Filtre les outils par tag."""
         return [t for t in self.tools if tag in t.tags]
 
-    def filter_by_type(self, tool_type: str) -> list[BmadTool]:
+    def filter_by_type(self, tool_type: str) -> list[GrimoireTool]:
         """Filtre les outils par type."""
         return [t for t in self.tools if t.tool_type == tool_type]
 
@@ -451,7 +451,7 @@ class ToolRegistry:
             results.append(result)
         return results
 
-    def _validate_tool(self, tool: BmadTool) -> ValidationResult:
+    def _validate_tool(self, tool: GrimoireTool) -> ValidationResult:
         """Valide un outil individuel."""
         result = ValidationResult(tool_name=tool.name)
 
@@ -536,7 +536,7 @@ def load_registry_config(project_root: Path) -> dict:
     except ImportError:
         return {}
 
-    for candidate in [project_root / "project-context.yaml", project_root / "bmad.yaml"]:
+    for candidate in [project_root / "project-context.yaml", project_root / "grimoire.yaml"]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -546,8 +546,8 @@ def load_registry_config(project_root: Path) -> dict:
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
-def _print_tool_list(tools: list[BmadTool]) -> None:
-    print(f"\n  🔧 BMAD Tool Registry — {len(tools)} outils")
+def _print_tool_list(tools: list[GrimoireTool]) -> None:
+    print(f"\n  🔧 Grimoire Tool Registry — {len(tools)} outils")
     print(f"  {'─' * 70}")
 
     for tool in tools:
@@ -563,7 +563,7 @@ def _print_tool_list(tools: list[BmadTool]) -> None:
         print()
 
 
-def _print_tool_detail(tool: BmadTool) -> None:
+def _print_tool_detail(tool: GrimoireTool) -> None:
     print(f"\n  🔧 {tool.name}")
     print(f"  {'─' * 60}")
     print(f"  Description : {tool.description}")
@@ -618,7 +618,7 @@ def _print_stats(stats: RegistryStats) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Tool Registry — Registry unifié des outils BMAD",
+        description="Tool Registry — Registry unifié des outils Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

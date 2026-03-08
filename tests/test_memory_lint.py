@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour memory-lint.py — BMAD Memory Lint.
+Tests pour memory-lint.py — Grimoire Memory Lint.
 
 Fonctions testées :
   - collect_memory_files()
@@ -35,7 +35,7 @@ def _import_mod():
 def _setup_memory(root: Path, *, learnings=None, decisions=None,
                   trace=None, failures=None, contradictions=None):
     """Crée un arbre mémoire minimal."""
-    mem = root / "_bmad" / "_memory"
+    mem = root / "_grimoire" / "_memory"
     mem.mkdir(parents=True, exist_ok=True)
 
     if learnings:
@@ -48,9 +48,9 @@ def _setup_memory(root: Path, *, learnings=None, decisions=None,
         (mem / "decisions-log.md").write_text(decisions, encoding="utf-8")
 
     if trace:
-        out_dir = root / "_bmad-output"
+        out_dir = root / "_grimoire-output"
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "BMAD_TRACE.md").write_text(trace, encoding="utf-8")
+        (out_dir / "Grimoire_TRACE.md").write_text(trace, encoding="utf-8")
 
     if failures:
         (mem / "failure-museum.md").write_text(failures, encoding="utf-8")
@@ -200,7 +200,7 @@ class TestCheckOrphanDecisions(unittest.TestCase):
     def test_detects_orphan(self):
         files = [
             self.mod.MemoryFile(
-                path="BMAD_TRACE.md", kind="trace",
+                path="Grimoire_TRACE.md", kind="trace",
                 entries=[("2026-02-28",
                           "[dev] [DECISION] switch to new caching strategy")],
             ),
@@ -216,7 +216,7 @@ class TestCheckOrphanDecisions(unittest.TestCase):
     def test_no_orphan_when_matched(self):
         files = [
             self.mod.MemoryFile(
-                path="BMAD_TRACE.md", kind="trace",
+                path="Grimoire_TRACE.md", kind="trace",
                 entries=[("2026-02-28",
                           "[dev] [DECISION] chose caching strategy Redis")],
             ),
@@ -518,7 +518,7 @@ class TestCheckMemoryFreshness(unittest.TestCase):
         """Verify check_memory_freshness is called by lint_memory."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            mem = root / "_bmad" / "_memory" / "agent-learnings"
+            mem = root / "_grimoire" / "_memory" / "agent-learnings"
             mem.mkdir(parents=True, exist_ok=True)
             (mem / "dev.md").write_text(
                 "# Dev\n- [2020-01-01] ancient\n- [2020-02-01] old\n",

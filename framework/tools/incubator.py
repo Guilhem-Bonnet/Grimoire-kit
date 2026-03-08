@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-incubator.py — Incubation & Dormance BMAD.
+incubator.py — Incubation & Dormance Grimoire.
 ============================================
 
 Système de gestion du cycle de vie des idées, features et expérimentations :
@@ -104,7 +104,7 @@ class Idea:
 # ── Persistence ──────────────────────────────────────────────────────────────
 
 def _incubator_path(project_root: Path) -> Path:
-    return project_root / "_bmad" / "_memory" / INCUBATOR_FILE
+    return project_root / "_grimoire" / "_memory" / INCUBATOR_FILE
 
 
 def load_incubator(project_root: Path) -> list[Idea]:
@@ -209,7 +209,7 @@ def format_idea(idea: Idea) -> str:
 
 
 def format_status(ideas: list[Idea]) -> str:
-    lines = [f"🥚 Incubateur BMAD — {len(ideas)} idées\n"]
+    lines = [f"🥚 Incubateur Grimoire — {len(ideas)} idées\n"]
 
     status_counts = {}
     for idea in ideas:
@@ -354,7 +354,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Incubator — Gestion du cycle de vie des idées",
+        description="Grimoire Incubator — Gestion du cycle de vie des idées",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

@@ -1,4 +1,4 @@
-"""Tests for bmad.core.resolver — path and template resolution."""
+"""Tests for grimoire.core.resolver — path and template resolution."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from bmad.core.exceptions import BmadConfigError
-from bmad.core.resolver import PathResolver
+from grimoire.core.exceptions import GrimoireConfigError
+from grimoire.core.resolver import PathResolver
 
 
 @pytest.fixture()
@@ -35,7 +35,7 @@ class TestResolvePath:
         assert p == f
 
     def test_must_exist_missing(self, resolver: PathResolver) -> None:
-        with pytest.raises(BmadConfigError, match="Path does not exist"):
+        with pytest.raises(GrimoireConfigError, match="Path does not exist"):
             resolver.resolve_path("no-such-file.txt", must_exist=True)
 
     def test_root_property(self, resolver: PathResolver, tmp_path: Path) -> None:
@@ -59,7 +59,7 @@ class TestResolveTemplate:
         assert result == "Guilhem speaks Français"
 
     def test_unknown_variable_raises(self, resolver: PathResolver) -> None:
-        with pytest.raises(BmadConfigError, match="Unknown variable.*unknown"):
+        with pytest.raises(GrimoireConfigError, match="Unknown variable.*unknown"):
             resolver.resolve_template("{unknown}", {})
 
     def test_no_variables(self, resolver: PathResolver) -> None:

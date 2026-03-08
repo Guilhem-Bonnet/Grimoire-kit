@@ -1,4 +1,4 @@
-"""Tests for bmad.registry.agents — AgentRegistry + DNA loading."""
+"""Tests for grimoire.registry.agents — AgentRegistry + DNA loading."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from textwrap import dedent
 
 import pytest
 
-from bmad.core.exceptions import BmadAgentError, BmadRegistryError
-from bmad.registry.agents import AgentDef, AgentRegistry, ArchetypeDNA
+from grimoire.core.exceptions import GrimoireAgentError, GrimoireRegistryError
+from grimoire.registry.agents import AgentDef, AgentRegistry, ArchetypeDNA
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ def _make_archetype(root: Path, arch_id: str, agents: list[dict[str, str]]) -> P
         agent_lines.append(f'    description: "{a.get("description", name)}"')
 
     dna_content = (
-        f'$schema: "bmad-archetype-dna/v1"\n'
+        f'$schema: "grimoire-archetype-dna/v1"\n'
         f"id: {arch_id}\n"
         f'name: "{arch_id.title()}"\n'
         f'version: "1.0.0"\n'
@@ -82,7 +82,7 @@ class TestAgentDef:
 
     def test_load_persona_missing(self, tmp_path: Path) -> None:
         ad = AgentDef(id="ghost", path=tmp_path / "nope.md")
-        with pytest.raises(BmadAgentError, match="not found"):
+        with pytest.raises(GrimoireAgentError, match="not found"):
             ad.load_persona()
 
 
@@ -106,13 +106,13 @@ class TestArchetypeDNA:
             assert a.path.is_absolute()
 
     def test_missing_dna(self, tmp_path: Path) -> None:
-        with pytest.raises(BmadRegistryError, match="not found"):
+        with pytest.raises(GrimoireRegistryError, match="not found"):
             ArchetypeDNA.from_yaml(tmp_path / "nope.yaml")
 
     def test_invalid_dna(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.yaml"
         bad.write_text("not: a: valid: yaml: {{")
-        with pytest.raises(BmadRegistryError):
+        with pytest.raises(GrimoireRegistryError):
             ArchetypeDNA.from_yaml(bad)
 
     def test_tags_and_compat(self, kit_root: Path) -> None:
@@ -141,7 +141,7 @@ class TestAgentRegistry:
         assert dna1 is dna2
 
     def test_get_dna_not_found(self, registry: AgentRegistry) -> None:
-        with pytest.raises(BmadRegistryError, match="not found"):
+        with pytest.raises(GrimoireRegistryError, match="not found"):
             registry.get_dna("nonexistent")
 
     def test_get_agent(self, registry: AgentRegistry) -> None:
@@ -150,7 +150,7 @@ class TestAgentRegistry:
         assert agent.description == "Developer"
 
     def test_get_agent_not_found(self, registry: AgentRegistry) -> None:
-        with pytest.raises(BmadAgentError, match="not found"):
+        with pytest.raises(GrimoireAgentError, match="not found"):
             registry.get_agent("test-arch", "nonexistent-agent")
 
     def test_resolve_agents(self, registry: AgentRegistry) -> None:
@@ -159,7 +159,7 @@ class TestAgentRegistry:
         assert all(a.exists for a in agents)
 
     def test_resolve_agents_missing_required(self, tmp_path: Path) -> None:
-        """Test that missing required agents raise BmadAgentError."""
+        """Test that missing required agents raise GrimoireAgentError."""
         arch_dir = tmp_path / "archetypes" / "broken"
         arch_dir.mkdir(parents=True)
         dna = dedent("""\
@@ -174,7 +174,7 @@ class TestAgentRegistry:
         """)
         (arch_dir / "archetype.dna.yaml").write_text(dna)
         reg = AgentRegistry(tmp_path)
-        with pytest.raises(BmadAgentError, match="Required agents missing"):
+        with pytest.raises(GrimoireAgentError, match="Required agents missing"):
             reg.resolve_agents("broken")
 
     def test_empty_archetypes_dir(self, tmp_path: Path) -> None:

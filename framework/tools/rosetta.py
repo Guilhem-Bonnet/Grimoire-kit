@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rosetta.py — Glossaire cross-domain Rosetta Stone BMAD.
+rosetta.py — Glossaire cross-domain Rosetta Stone Grimoire.
 =========================================================
 
 Traduction automatique Business ↔ Tech ↔ UX.
@@ -453,7 +453,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve()
     glossary = build_glossary(project_root)
     md = export_markdown(glossary)
-    output = project_root / "_bmad-output" / "glossary-rosetta.md"
+    output = project_root / "_grimoire-output" / "glossary-rosetta.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(md, encoding="utf-8")
     print(f"📖 Glossaire exporté → {output}")
@@ -464,7 +464,7 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Rosetta Stone — Glossaire cross-domain",
+        description="Grimoire Rosetta Stone — Glossaire cross-domain",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

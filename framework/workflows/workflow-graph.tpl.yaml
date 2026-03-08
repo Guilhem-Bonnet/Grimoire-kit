@@ -6,14 +6,14 @@
 # Chaque workflow peut déclarer un graphe de tâches (DAG) avec dépendances,
 # statuts, outputs attendus — rendu human-friendly ET machine-parsable.
 #
-# Usage : copier dans _bmad-output/.runs/{run_id}/workflow-graph.yaml
+# Usage : copier dans _grimoire-output/.runs/{run_id}/workflow-graph.yaml
 # et mettre à jour les statuts en temps réel.
 
 # ── Identité du workflow ─────────────────────────────────────────────────────
 workflow:
   id: "dev-story-20260227-143022"       # run_id unique
   name: "Dev Story US-042 — Auth JWT"   # Nom lisible
-  workflow_path: "_bmad/bmm/workflows/4-implementation/dev-story/workflow.yaml"
+  workflow_path: "_grimoire/bmm/workflows/4-implementation/dev-story/workflow.yaml"
   session_branch: "main"
   started_at: "2026-02-27T14:30:00Z"
   completed_at: null
@@ -33,7 +33,7 @@ nodes:
     depends_on: []                      # Aucune dépendance — nœud racine
     outputs:
       - type: "artefact"
-        path: "_bmad-output/.runs/dev-story-20260227-143022/artefacts/step-01-analysis.md"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-01-analysis.md"
     checkpoint_id: "a1b2c3"            # sha256[:6] de l'état sauvegardé
 
   - id: "step-02"
@@ -72,7 +72,7 @@ nodes:
     depends_on: ["step-03"]            # Sequential — attend step-03
     outputs:
       - type: "test-report"
-        path: "_bmad-output/.runs/dev-story-20260227-143022/artefacts/step-04-test-report.md"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-04-test-report.md"
     checkpoint_id: null
 
   - id: "step-05"
@@ -85,7 +85,7 @@ nodes:
     depends_on: ["step-04"]
     outputs:
       - type: "review"
-        path: "_bmad-output/.runs/dev-story-20260227-143022/artefacts/step-05-review.md"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-05-review.md"
     checkpoint_id: null
 
   - id: "step-06-a"
@@ -99,7 +99,7 @@ nodes:
     parallel_group: "qa"               # Peut s'exécuter en parallèle avec step-06-b
     outputs:
       - type: "test-report"
-        path: "_bmad-output/.runs/dev-story-20260227-143022/artefacts/step-06a-e2e.md"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-06a-e2e.md"
     checkpoint_id: null
 
   - id: "step-06-b"
@@ -113,7 +113,7 @@ nodes:
     parallel_group: "qa"               # Même groupe = exécution parallèle possible
     outputs:
       - type: "security-report"
-        path: "_bmad-output/.runs/dev-story-20260227-143022/artefacts/step-06b-security.md"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-06b-security.md"
     checkpoint_id: null
 
   - id: "step-07"

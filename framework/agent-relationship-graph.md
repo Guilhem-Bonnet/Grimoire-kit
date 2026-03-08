@@ -23,7 +23,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │              AGENT RELATIONSHIP GRAPH (ARG)                   │
-│              _bmad-output/.agent-graph.yaml                   │
+│              _grimoire-output/.agent-graph.yaml                   │
 │                                                               │
 │  ┌─────────┐          collaborated(5)        ┌─────────┐    │
 │  │ dev/    ├─────────────────────────────────→│ qa/     │    │
@@ -52,7 +52,7 @@
 
 ## <img src="../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du Graphe
 
-Fichier : `_bmad-output/.agent-graph.yaml`
+Fichier : `_grimoire-output/.agent-graph.yaml`
 
 ```yaml
 # Auto-enriched from events and interactions — manual edits allowed for bootstrap
@@ -319,7 +319,7 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]   [ARG:bootstrap]   agents=8 | relationships=12 | source=static
@@ -333,7 +333,7 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
-- Agent Manifest : `_bmad/_config/agent-manifest.csv` — source statique des capabilities
+- Agent Manifest : `_grimoire/_config/agent-manifest.csv` — source statique des capabilities
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — KNOWN_AGENTS
 - Agent Caller : [framework/tools/agent-caller.py](tools/agent-caller.py) — CALL_HISTORY
 - Swarm Consensus : [framework/tools/swarm-consensus.py](tools/swarm-consensus.py) — AGENT_WEIGHTS

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-semantic-cache.py — Cache sémantique des réponses LLM BMAD (BM-41 Story 3.2).
+semantic-cache.py — Cache sémantique des réponses LLM Grimoire (BM-41 Story 3.2).
 ============================================================
 
 Cache sémantique basé sur Qdrant : si une requête similaire (cosine > 0.9)
@@ -52,7 +52,7 @@ SEMANTIC_CACHE_VERSION = "1.0.0"
 CHARS_PER_TOKEN = 4
 DEFAULT_SIMILARITY_THRESHOLD = 0.90
 CACHE_COLLECTION = "cache"
-STATS_FILE = "_bmad-output/.semantic-cache-stats.json"
+STATS_FILE = "_grimoire-output/.semantic-cache-stats.json"
 
 # TTL par type de requête (secondes)
 DEFAULT_TTLS: dict[str, int] = {
@@ -196,7 +196,7 @@ class SemanticCache:
         qdrant_path: str = "",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         ollama_url: str = "",
-        project_name: str = "bmad",
+        project_name: str = "grimoire",
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         ttls: dict[str, int] | None = None,
     ):
@@ -205,7 +205,7 @@ class SemanticCache:
         self.threshold = similarity_threshold
         self.ttls = ttls or DEFAULT_TTLS
         self._qdrant_url = qdrant_url
-        self._qdrant_path = qdrant_path or str(project_root / "_bmad-output" / ".qdrant_data")
+        self._qdrant_path = qdrant_path or str(project_root / "_grimoire-output" / ".qdrant_data")
         self._embedding_model = embedding_model
         self._ollama_url = ollama_url
         self._client = None
@@ -508,7 +508,7 @@ def load_cache_config(project_root: Path) -> dict:
     except ImportError:
         return {}
 
-    for candidate in [project_root / "project-context.yaml", project_root / "bmad.yaml"]:
+    for candidate in [project_root / "project-context.yaml", project_root / "grimoire.yaml"]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -521,10 +521,10 @@ def build_cache_from_config(project_root: Path) -> SemanticCache:
     config = load_cache_config(project_root)
     return SemanticCache(
         project_root=project_root,
-        qdrant_url=os.environ.get("BMAD_QDRANT_URL", config.get("qdrant_url", "")),
+        qdrant_url=os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", "")),
         embedding_model=config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"),
-        ollama_url=os.environ.get("BMAD_OLLAMA_URL", config.get("ollama_url", "")),
-        project_name=config.get("collection_prefix", "bmad"),
+        ollama_url=os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", "")),
+        project_name=config.get("collection_prefix", "grimoire"),
         similarity_threshold=config.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD),
     )
 
@@ -552,7 +552,7 @@ def _print_stats(stats: CacheStats) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Semantic Cache — Cache sémantique Qdrant pour les réponses LLM BMAD",
+        description="Semantic Cache — Cache sémantique Qdrant pour les réponses LLM Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

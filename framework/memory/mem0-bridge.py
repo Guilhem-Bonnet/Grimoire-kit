@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mem0 Bridge pour BMAD — Mémoire sémantique partagée entre agents.
+mem0 Bridge pour Grimoire — Mémoire sémantique partagée entre agents.
 
 Supporte 2 modes :
   - "local" (fallback) : Stockage JSON simple, recherche par mots-clés. Zéro dépendance.
@@ -46,8 +46,8 @@ logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
 # Configuration
-BMAD_ROOT = Path(__file__).parent.parent
-MEMORY_DIR = BMAD_ROOT / "_memory"
+Grimoire_ROOT = Path(__file__).parent.parent
+MEMORY_DIR = Grimoire_ROOT / "_memory"
 LOCAL_DB_PATH = MEMORY_DIR / "memories.json"
 ACTIVITY_LOG_PATH = MEMORY_DIR / "activity.jsonl"
 
@@ -60,7 +60,7 @@ def _load_project_context() -> dict:
         import yaml
     except ImportError:
         return {}
-    for parent in [BMAD_ROOT.parent, BMAD_ROOT.parent.parent]:
+    for parent in [Grimoire_ROOT.parent, Grimoire_ROOT.parent.parent]:
         ctx_file = parent / "project-context.yaml"
         if ctx_file.exists():
             with open(ctx_file, encoding="utf-8") as f:
@@ -74,8 +74,8 @@ def _get_config():
     user = ctx.get("user", {})
     project = ctx.get("project", {})
     user_id = user.get("name", "user").lower().replace(" ", "-")
-    project_name = project.get("name", "bmad-project").lower().replace(" ", "-")
-    return user_id, f"bmad-{project_name}"
+    project_name = project.get("name", "grimoire-project").lower().replace(" ", "-")
+    return user_id, f"grimoire-{project_name}"
 
 
 # Chargement au module-level
@@ -85,7 +85,7 @@ USER_ID, APP_ID = _get_config()
 def _load_agent_profiles() -> dict:
     """Charge les profils d'agents dynamiquement.
     1. Cherche dans project-context.yaml → agents.custom_agents
-    2. Sinon, scanne les fichiers agents dans _bmad/_config/custom/agents/
+    2. Sinon, scanne les fichiers agents dans _grimoire/_config/custom/agents/
     3. Fallback: profils meta par défaut
     """
     profiles = {}
@@ -129,7 +129,7 @@ def _load_agent_profiles() -> dict:
             }
 
     # Scanner les fichiers agents si le dossier existe
-    agents_dir = BMAD_ROOT / "_config" / "custom" / "agents"
+    agents_dir = Grimoire_ROOT / "_config" / "custom" / "agents"
     if agents_dir.exists():
         for f in agents_dir.glob("*.md"):
             name = f.stem
@@ -674,7 +674,7 @@ def cmd_export(args):
 
 
 def cmd_status(args):
-    print(f"🧠 mem0 Bridge — BMAD")
+    print(f"🧠 mem0 Bridge — Grimoire")
     print(f"   User: {USER_ID}")
     print(f"   App: {APP_ID}")
     print(f"   DB locale: {LOCAL_DB_PATH}")
@@ -699,12 +699,12 @@ def cmd_status(args):
             semantic_ok = True
         else:
             import os as _os
-            has_env = _os.environ.get("BMAD_OLLAMA_URL") or _os.environ.get("BMAD_QDRANT_URL")
+            has_env = _os.environ.get("Grimoire_OLLAMA_URL") or _os.environ.get("Grimoire_QDRANT_URL")
             if has_env:
                 print(f"   Sémantique: ⚠️  backend non disponible (voir logs ci-dessus)")
             else:
                 print(f"   Sémantique: ⚠️  non configuré")
-                print(f"              → Définir BMAD_OLLAMA_URL ou BMAD_QDRANT_URL")
+                print(f"              → Définir Grimoire_OLLAMA_URL ou Grimoire_QDRANT_URL")
                 print(f"              → Ou configurer memory: dans project-context.yaml")
             print(f"              → Mode fallback JSON actif automatiquement")
     except Exception as e:
@@ -714,7 +714,7 @@ def cmd_status(args):
     print(f"   Mode actif: {'🚀' if semantic_ok else '📁'} {mode}")
     if not semantic_ok:
         print(f"   ℹ️  Mode JSON fonctionnel — recherche sémantique non active.")
-        print(f"      → Activer : BMAD_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
+        print(f"      → Activer : Grimoire_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
 
     # Afficher les agents détectés
     print(f"\n   Agents configurés ({len(AGENT_PROFILES)}):")
@@ -997,7 +997,7 @@ def cmd_import_md(args):
 
 
 def cmd_init_collections(args):
-    """Initialise toutes les collections Qdrant (idempotent, appelé par bmad-init.sh)."""
+    """Initialise toutes les collections Qdrant (idempotent, appelé par grimoire-init.sh)."""
     try:
         sm = StructuredMemory()
         types = sm.init_collections()
@@ -1007,7 +1007,7 @@ def cmd_init_collections(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="mem0 Bridge — Mémoire partagée BMAD")
+    parser = argparse.ArgumentParser(description="mem0 Bridge — Mémoire partagée Grimoire")
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("add", help="Ajouter une mémoire")

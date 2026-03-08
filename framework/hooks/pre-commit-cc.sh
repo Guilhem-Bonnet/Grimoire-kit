@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Completion Contract — Git pre-commit hook
+# Grimoire Completion Contract — Git pre-commit hook
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Installé par bmad-init.sh dans .git/hooks/pre-commit
+# Installé par grimoire-init.sh dans .git/hooks/pre-commit
 # Vérifie le CC uniquement sur les fichiers stagés. Skip si cc-verify.sh absent.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-CC_SCRIPT="$PROJECT_ROOT/_bmad/_config/custom/cc-verify.sh"
+CC_SCRIPT="$PROJECT_ROOT/_grimoire/_config/custom/cc-verify.sh"
 
-# Skip si CC non installé (projet sans BMAD)
+# Skip si CC non installé (projet sans Grimoire)
 [[ -f "$CC_SCRIPT" ]] || exit 0
 
 # Extensions à surveiller
@@ -25,7 +25,7 @@ if ! echo "$STAGED" | grep -qE "\.(${WATCHABLE})$|^Dockerfile[^/]*$"; then
 fi
 
 echo ""
-echo "🔒 BMAD Completion Contract — vérification pre-commit..."
+echo "🔒 Grimoire Completion Contract — vérification pre-commit..."
 echo "   Fichiers stagés détectés : $(echo "$STAGED" | grep -cE "\.(${WATCHABLE})$|^Dockerfile" || true) fichier(s) vérifiable(s)"
 echo ""
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-session-lifecycle.py — Hooks de début et fin de session BMAD.
+session-lifecycle.py — Hooks de début et fin de session Grimoire.
 =============================================================
 
 Orchestre des actions automatiques au démarrage et à la clôture
@@ -39,9 +39,9 @@ SESSION_LIFECYCLE_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-LIFECYCLE_DIR = "_bmad-output/.session-lifecycle"
+LIFECYCLE_DIR = "_grimoire-output/.session-lifecycle"
 STATE_FILE = "current-session.json"
-SESSION_CHAIN_FILE = "_bmad/_memory/session-chain.jsonl"
+SESSION_CHAIN_FILE = "_grimoire/_memory/session-chain.jsonl"
 SESSION_CHAIN_MAX_ENTRIES = 50  # Keep last N summaries for context injection
 
 # ── Data Structures ──────────────────────────────────────────────────────────
@@ -411,7 +411,7 @@ def _print_result(result: LifecycleResult) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="session-lifecycle",
-        description="Hooks automatiques de début/fin de session BMAD",
+        description="Hooks automatiques de début/fin de session Grimoire",
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),
                         help="Racine du projet")

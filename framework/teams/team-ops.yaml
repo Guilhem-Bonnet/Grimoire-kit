@@ -23,11 +23,11 @@ team:
     required:
       - name: "Delivery Contract depuis Team Build"
         description: "Code validé + rapport QA + contrat signé"
-        path_pattern: "_bmad-output/contracts/build-to-ops-*.md"
+        path_pattern: "_grimoire-output/contracts/build-to-ops-*.md"
     optional:
       - name: "Architecture Decision Records"
         description: "Choix techniques de Team Build"
-        path_pattern: "_bmad-output/implementation-artifacts/architecture-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/architecture-*.md"
       - name: "SLA & Requirements non-fonctionnels"
         description: "Performance, disponibilité, sécurité définis dans le PRD"
 
@@ -43,7 +43,7 @@ team:
         acceptance_criteria: "Pipeline tourne sans erreur, tous les checks passent"
       - name: "Security Audit Report"
         format: "Markdown"
-        path_pattern: "_bmad-output/implementation-artifacts/security-audit-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/security-audit-*.md"
         acceptance_criteria: "0 vulnérabilité critique, vulnérabilités medium documentées avec plan mitigation"
       - name: "Monitoring & Alerting Config"
         format: "YAML/JSON/code"
@@ -51,7 +51,7 @@ team:
         acceptance_criteria: "Dashboards créés, alertes configurées pour les SLOs définis"
       - name: "Runbook Opérationnel"
         format: "Markdown"
-        path_pattern: "_bmad-output/implementation-artifacts/runbook-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/runbook-*.md"
         acceptance_criteria: "Procédures pour les incidents les plus probables documentées"
     optional_deliverables:
       - name: "Disaster Recovery Plan"
@@ -117,7 +117,7 @@ team:
         output: "runbook-{project}-v{n}.md"
 
   team_context:
-    directory: "_bmad-output/team-ops/"
+    directory: "_grimoire-output/team-ops/"
     files:
       - name: "team-context.md"
         description: "Topologie infra, services déployés, URLs, secrets locations"

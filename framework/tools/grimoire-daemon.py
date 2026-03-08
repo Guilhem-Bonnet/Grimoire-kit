@@ -14,7 +14,7 @@ Usage :
   python3 grimoire-daemon.py --project-root . run-once
   python3 grimoire-daemon.py --project-root . status
 
-Le daemon écrit un fichier PID et un état dans _bmad/_memory/daemon/.
+Le daemon écrit un fichier PID et un état dans _grimoire/_memory/daemon/.
 Sous forme de boucle Python, pas un vrai démon Unix (pas de fork/double-fork).
 
 Stdlib only.
@@ -37,12 +37,12 @@ from pathlib import Path
 _log = logging.getLogger("grimoire.daemon")
 
 DAEMON_VERSION = "1.3.0"
-DAEMON_DIR = "_bmad/_memory/daemon"
+DAEMON_DIR = "_grimoire/_memory/daemon"
 PID_FILE = "grimoire-daemon.pid"
 STATE_FILE = "daemon-state.json"
 LOG_FILE = "daemon.log"
 DEFAULT_INTERVAL = 600  # 10 minutes
-MEMORY_BRIDGE_SOURCE = "_bmad/_memory"
+MEMORY_BRIDGE_SOURCE = "_grimoire/_memory"
 MEMORY_BRIDGE_TARGET = ".github/memories/repo"
 
 # ── Data Model ───────────────────────────────────────────────────────────────
@@ -166,10 +166,10 @@ def _run_tool(root: Path, tool_name: str, args: list[str]) -> TaskResult:
 
 
 def _run_memory_bridge(root: Path) -> TaskResult:
-    """Synchronise _bmad/_memory/ → .github/memories/repo/ (one-way bridge).
+    """Synchronise _grimoire/_memory/ → .github/memories/repo/ (one-way bridge).
 
     Copie les fichiers .md et .json (pas .jsonl — trop volumineux) depuis la
-    mémoire BMAD vers le dossier que VS Code Copilot consulte nativement.
+    mémoire Grimoire vers le dossier que VS Code Copilot consulte nativement.
     Seuls les fichiers modifiés sont copiés (compare mtime).
     """
     start = time.monotonic()
@@ -179,7 +179,7 @@ def _run_memory_bridge(root: Path) -> TaskResult:
     if not source.exists():
         return TaskResult(name="memory-bridge", status="skipped",
                           duration_s=round(time.monotonic() - start, 3),
-                          message="Source _bmad/_memory/ absent")
+                          message="Source _grimoire/_memory/ absent")
     try:
         target.mkdir(parents=True, exist_ok=True)
         synced = 0
@@ -212,7 +212,7 @@ def _run_evolve_cycle(root: Path) -> TaskResult:
     3. Logue les résultats dans le JSONL d'évolution
     """
     start = time.monotonic()
-    evolve_log = root / "_bmad" / "_memory" / "evolve-cycle.jsonl"
+    evolve_log = root / "_grimoire" / "_memory" / "evolve-cycle.jsonl"
 
     # 1. Fitness check
     fitness_tool = root / "framework" / "tools" / "fitness-tracker.py"

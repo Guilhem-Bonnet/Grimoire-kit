@@ -1,31 +1,31 @@
 repos:
-  # ── BMAD Completion Contract ────────────────────────────────────────────────
+  # ── Grimoire Completion Contract ────────────────────────────────────────────────
   - repo: local
     hooks:
-      - id: bmad-pre-commit-cc
-        name: "🔒 BMAD — Completion Contract"
+      - id: grimoire-pre-commit-cc
+        name: "🔒 Grimoire — Completion Contract"
         entry: bash framework/hooks/pre-commit-cc.sh
         language: system
         pass_filenames: false
         stages: [pre-commit]
         types_or: [go, ts, tsx, python, shell]
 
-      - id: bmad-mnemo-consolidate
-        name: "🧠 BMAD — Mnemo consolidation mémoire"
+      - id: grimoire-mnemo-consolidate
+        name: "🧠 Grimoire — Mnemo consolidation mémoire"
         entry: bash framework/hooks/mnemo-consolidate.sh
         language: system
         always_run: true
         pass_filenames: false
         stages: [pre-commit]
 
-      - id: bmad-commit-msg
-        name: "📝 BMAD — Commit message validation"
+      - id: grimoire-commit-msg
+        name: "📝 Grimoire — Commit message validation"
         entry: bash framework/hooks/commit-msg.sh
         language: system
         stages: [commit-msg]
 
-      - id: bmad-post-commit-trace
-        name: "📋 BMAD — TRACE audit trail"
+      - id: grimoire-post-commit-trace
+        name: "📋 Grimoire — TRACE audit trail"
         entry: bash framework/hooks/post-commit.sh
         language: system
         always_run: true
@@ -37,12 +37,12 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        exclude: "(_bmad-output/|framework/prompt-templates/)"
+        exclude: "(_grimoire-output/|framework/prompt-templates/)"
       - id: end-of-file-fixer
-        exclude: "(_bmad-output/|_bmad/_memory/)"
+        exclude: "(_grimoire-output/|_grimoire/_memory/)"
       - id: check-yaml
         args: [--allow-multiple-documents]
-        exclude: "_bmad/_memory/"
+        exclude: "_grimoire/_memory/"
       - id: check-merge-conflict
       - id: detect-private-key
         exclude: "docs/|examples/"
@@ -72,4 +72,4 @@ repos:
     hooks:
       - id: yamllint
         args: [-d, "{extends: relaxed, rules: {line-length: {max: 120}}}"]
-        exclude: "_bmad/_memory/|_bmad-output/"
+        exclude: "_grimoire/_memory/|_grimoire-output/"

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-synapse-config.py — Configuration centralisée Synapse BMAD (BM-46 Story 7.5).
+synapse-config.py — Configuration centralisée Synapse Grimoire (BM-46 Story 7.5).
 ============================================================
 
 Point d'entrée unique pour la configuration de tous les outils Synapse.
 Charge et valide les paramètres depuis la section ``synapse:`` de
-``project-context.yaml`` (ou ``bmad.yaml``).
+``project-context.yaml`` (ou ``grimoire.yaml``).
 
 Modes :
   show      — Affiche la configuration active (JSON pretty)
@@ -49,7 +49,7 @@ class TraceConfig:
     """Configuration du tracing Synapse."""
 
     enabled: bool = True
-    output: str = "_bmad-output/BMAD_TRACE.md"
+    output: str = "_grimoire-output/Grimoire_TRACE.md"
     include_tokens: bool = True
     include_duration: bool = True
     max_entries: int = 10000
@@ -311,7 +311,7 @@ def load_synapse_config(project_root: str | Path) -> SynapseConfig:
     """
     Point d'entrée unique pour charger la configuration Synapse.
 
-    Cherche la section ``synapse:`` dans project-context.yaml ou bmad.yaml.
+    Cherche la section ``synapse:`` dans project-context.yaml ou grimoire.yaml.
     Retourne les defaults si aucune config trouvée (graceful degradation).
     Les résultats sont cachés par project_root.
     """
@@ -323,7 +323,7 @@ def load_synapse_config(project_root: str | Path) -> SynapseConfig:
 
     config = SynapseConfig()
 
-    for candidate in [root / "project-context.yaml", root / "bmad.yaml"]:
+    for candidate in [root / "project-context.yaml", root / "grimoire.yaml"]:
         if candidate.exists():
             try:
                 text = candidate.read_text(encoding="utf-8")
@@ -437,7 +437,7 @@ synapse:
 
   trace:
     enabled: true
-    output: _bmad-output/BMAD_TRACE.md
+    output: _grimoire-output/Grimoire_TRACE.md
     include_tokens: true
     include_duration: true
     max_entries: 10000
@@ -482,11 +482,11 @@ synapse:
 MCP_CONFIG_TEMPLATE = """\
 {
   "mcpServers": {
-    "bmad-synapse": {
+    "grimoire-synapse": {
       "command": "python3",
-      "args": ["{tools_dir}/bmad-mcp-tools.py"],
+      "args": ["{tools_dir}/grimoire-mcp-tools.py"],
       "env": {
-        "BMAD_PROJECT_ROOT": "{project_root}"
+        "Grimoire_PROJECT_ROOT": "{project_root}"
       }
     }
   }
@@ -552,10 +552,10 @@ def mcp_synapse_config(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="synapse-config",
-        description="Configuration centralisée Synapse BMAD",
+        description="Configuration centralisée Synapse Grimoire",
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
     parser.add_argument("--version", action="version", version=f"%(prog)s {SYNAPSE_CONFIG_VERSION}")
 
     sub = parser.add_subparsers(dest="command")

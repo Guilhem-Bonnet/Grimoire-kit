@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-grimoire-log.py — Logging structuré partagé pour tous les outils BMAD.
+grimoire-log.py — Logging structuré partagé pour tous les outils Grimoire.
 ======================================================================
 
 Configure un logger hiérarchique ``grimoire.*`` qui écrit dans
-``_bmad-output/.logs/grimoire.log`` (rotation automatique à 2 Mo,
+``_grimoire-output/.logs/grimoire.log`` (rotation automatique à 2 Mo,
 5 backups).
 
 Chaque outil utilise ``import logging`` + ``_log = logging.getLogger(__name__)``.
@@ -39,7 +39,7 @@ GRIMOIRE_LOG_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-LOG_DIR = "_bmad-output/.logs"
+LOG_DIR = "_grimoire-output/.logs"
 LOG_FILE = "grimoire.log"
 JSON_LOG_FILE = "grimoire.jsonl"
 MAX_BYTES = 2 * 1024 * 1024  # 2 MB
@@ -79,7 +79,7 @@ def setup(project_root: Path | str | None = None, level: str = DEFAULT_LEVEL) ->
 
     Args:
         project_root: Racine du projet (pour localiser le dossier de logs).
-                       Si None, détecte via $BMAD_PROJECT_ROOT ou cwd.
+                       Si None, détecte via $Grimoire_PROJECT_ROOT ou cwd.
         level: Niveau de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL).
 
     Returns:
@@ -93,7 +93,7 @@ def setup(project_root: Path | str | None = None, level: str = DEFAULT_LEVEL) ->
 
     # Resolve project root
     if project_root is None:
-        project_root = Path(os.environ.get("BMAD_PROJECT_ROOT", "."))
+        project_root = Path(os.environ.get("Grimoire_PROJECT_ROOT", "."))
     project_root = Path(project_root)
 
     log_dir = project_root / LOG_DIR
@@ -320,7 +320,7 @@ def mcp_grimoire_log(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="grimoire-log",
-        description="Grimoire Log — logging structuré partagé BMAD",
+        description="Grimoire Log — logging structuré partagé Grimoire",
     )
     p.add_argument("--project-root", type=Path, default=Path("."))
     p.add_argument("--version", action="version",

@@ -1,4 +1,4 @@
-"""Tests pour web-browser.py — Navigateur web sandboxé BMAD."""
+"""Tests pour web-browser.py — Navigateur web sandboxé Grimoire."""
 from __future__ import annotations
 
 import importlib.util

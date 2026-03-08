@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mycelium.py — Réseau Mycelium BMAD.
+mycelium.py — Réseau Mycelium Grimoire.
 =====================================
 
 Système de partage et migration de patterns entre projets,
@@ -212,7 +212,7 @@ def import_patterns(project_root: Path, source: Path) -> int:
                 if ptype_dir.name == "agent-config":
                     dest_dir = project_root / "framework" / "agents"
                 elif ptype_dir.name == "memory":
-                    dest_dir = project_root / "_bmad" / "_memory" / "imported"
+                    dest_dir = project_root / "_grimoire" / "_memory" / "imported"
 
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest = dest_dir / fpath.name
@@ -260,7 +260,7 @@ def match_projects(project_root: Path, other_root: Path) -> list[MatchResult]:
 # ── Catalog ──────────────────────────────────────────────────────────────────
 
 def update_catalog(project_root: Path, patterns: list[Pattern]) -> Path:
-    catalog_path = project_root / "_bmad" / "_memory" / PATTERN_CATALOG
+    catalog_path = project_root / "_grimoire" / "_memory" / PATTERN_CATALOG
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "updated_at": datetime.now().isoformat(),
@@ -365,7 +365,7 @@ def cmd_catalog(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Mycelium — Réseau de patterns inter-projets",
+        description="Grimoire Mycelium — Réseau de patterns inter-projets",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

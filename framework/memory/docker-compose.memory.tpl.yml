@@ -1,5 +1,5 @@
-# Docker Compose — Qdrant pour développement local BMAD
-# Généré par : bmad-init.sh --memory qdrant-docker
+# Docker Compose — Qdrant pour développement local Grimoire
+# Généré par : grimoire-init.sh --memory qdrant-docker
 #
 # Usage :
 #   docker compose -f docker-compose.memory.yml up -d
@@ -10,11 +10,11 @@
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: bmad-qdrant
+    container_name: grimoire-qdrant
     restart: unless-stopped
     ports:
-      - "${BMAD_QDRANT_PORT:-6333}:6333"
-      - "${BMAD_QDRANT_GRPC_PORT:-6334}:6334"
+      - "${Grimoire_QDRANT_PORT:-6333}:6333"
+      - "${Grimoire_QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
@@ -28,4 +28,4 @@ services:
 
 volumes:
   qdrant_storage:
-    name: bmad-qdrant-storage
+    name: grimoire-qdrant-storage

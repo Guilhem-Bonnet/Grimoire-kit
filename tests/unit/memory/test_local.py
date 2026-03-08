@@ -1,4 +1,4 @@
-"""Tests for bmad.memory.backends.local — LocalMemoryBackend."""
+"""Tests for grimoire.memory.backends.local — LocalMemoryBackend."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from bmad.memory.backends.base import BackendStatus, MemoryEntry
-from bmad.memory.backends.local import LocalMemoryBackend
+from grimoire.memory.backends.base import BackendStatus, MemoryEntry
+from grimoire.memory.backends.local import LocalMemoryBackend
 
 
 @pytest.fixture()

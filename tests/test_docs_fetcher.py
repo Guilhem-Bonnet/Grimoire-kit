@@ -1,4 +1,4 @@
-"""Tests for docs-fetcher.py — Indexation de documentation externe BMAD."""
+"""Tests for docs-fetcher.py — Indexation de documentation externe Grimoire."""
 from __future__ import annotations
 
 import importlib.util
@@ -25,7 +25,7 @@ _spec.loader.exec_module(df)
 
 @pytest.fixture
 def tmp_project(tmp_path):
-    (tmp_path / "_bmad-output").mkdir(parents=True)
+    (tmp_path / "_grimoire-output").mkdir(parents=True)
     return tmp_path
 
 

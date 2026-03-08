@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Completion Contract Verifier — cc-verify.sh
+# Grimoire Completion Contract Verifier — cc-verify.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Détecte automatiquement le(s) stack(s) du projet et lance les vérifications
@@ -43,7 +43,7 @@ done
 cd "$ROOT_DIR"
 
 echo ""
-echo -e "${BOLD}${CYAN}🔒 BMAD Completion Contract Verifier${NC}"
+echo -e "${BOLD}${CYAN}🔒 Grimoire Completion Contract Verifier${NC}"
 echo -e "${CYAN}────────────────────────────────────────${NC}"
 echo -e "  Projet : ${GREEN}$(basename "$ROOT_DIR")${NC}"
 echo -e "  Date   : ${GREEN}$TIMESTAMP${NC}"

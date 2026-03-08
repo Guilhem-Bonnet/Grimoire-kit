@@ -36,10 +36,10 @@ class TestResolveAgentLoads(unittest.TestCase):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
         # Créer la structure minimale
-        agents_dir = self.tmpdir / "_bmad/_config/custom/agents"
+        agents_dir = self.tmpdir / "_grimoire/_config/custom/agents"
         agents_dir.mkdir(parents=True)
         (self.tmpdir / "framework").mkdir(parents=True)
-        (self.tmpdir / "_bmad/_memory").mkdir(parents=True)
+        (self.tmpdir / "_grimoire/_memory").mkdir(parents=True)
 
         # Agent file
         self.agent_path = agents_dir / "test-agent.md"
@@ -72,14 +72,14 @@ class TestResolveAgentLoads(unittest.TestCase):
 
     def test_loads_memory_files(self):
         # Créer un fichier mémoire agent-spécifique
-        mem = self.tmpdir / "_bmad/_memory/test-agent-learnings.md"
+        mem = self.tmpdir / "_grimoire/_memory/test-agent-learnings.md"
         mem.write_text("- learned something\n- learned another\n")
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         mem_loads = [item for item in loads if item.role == "memory"]
         self.assertGreaterEqual(len(mem_loads), 1)
 
     def test_loads_failure_museum(self):
-        museum = self.tmpdir / "_bmad/_memory/failure-museum.md"
+        museum = self.tmpdir / "_grimoire/_memory/failure-museum.md"
         museum.write_text("# Failure Museum\n## Error 1\n- description\n")
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         mem_loads = [item for item in loads if item.role == "memory" and "failure" in str(item.path)]
@@ -87,9 +87,9 @@ class TestResolveAgentLoads(unittest.TestCase):
 
     def test_trace_partial_load(self):
         # Créer un gros TRACE (300 lines)
-        trace_dir = self.tmpdir / "_bmad-output"
+        trace_dir = self.tmpdir / "_grimoire-output"
         trace_dir.mkdir(parents=True)
-        trace = trace_dir / "BMAD_TRACE.md"
+        trace = trace_dir / "Grimoire_TRACE.md"
         trace.write_text("\n".join(f"Line {i}" for i in range(300)))
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         trace_loads = [item for item in loads if item.role == "trace"]
@@ -112,10 +112,10 @@ class TestComputeBudget(unittest.TestCase):
     def setUp(self):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
-        agents_dir = self.tmpdir / "_bmad/_config/custom/agents"
+        agents_dir = self.tmpdir / "_grimoire/_config/custom/agents"
         agents_dir.mkdir(parents=True)
         (self.tmpdir / "framework").mkdir(parents=True)
-        (self.tmpdir / "_bmad/_memory").mkdir(parents=True)
+        (self.tmpdir / "_grimoire/_memory").mkdir(parents=True)
 
         self.agent_path = agents_dir / "atlas.md"
         self.agent_path.write_text("# Atlas Agent\n<activation critical='MANDATORY'>\nNEVER break character\n" * 100)
@@ -169,7 +169,7 @@ class TestFindAgents(unittest.TestCase):
     def setUp(self):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.custom_dir = self.tmpdir / "_bmad/_config/custom/agents"
+        self.custom_dir = self.tmpdir / "_grimoire/_config/custom/agents"
         self.custom_dir.mkdir(parents=True)
 
     def tearDown(self):
@@ -418,7 +418,7 @@ class TestScoreModelExtended(unittest.TestCase):
         self.cg = _import_cg()
 
     def test_economy_penalty(self):
-        """Economy models should be penalized for BMAD agents."""
+        """Economy models should be penalized for Grimoire agents."""
         profile = self.cg.MODEL_PROFILES["llama3"]
         affinity = self.cg.ModelAffinity(reasoning="medium", context_window="small",
                                           speed="fast", cost="cheap")

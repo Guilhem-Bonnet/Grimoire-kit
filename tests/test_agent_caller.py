@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour agent-caller.py — Agent-to-Agent Tool Calling BMAD (BM-45 Story 6.2).
+Tests pour agent-caller.py — Agent-to-Agent Tool Calling Grimoire (BM-45 Story 6.2).
 
 Fonctions testées :
   - AgentCallRequest, AgentCallResponse, AgentToolSpec
@@ -166,13 +166,13 @@ class TestTraceWriter(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_write_creates_file(self):
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
         writer = self.mod.TraceWriter(self.tmpdir)
         writer.write("dev", "TOOL:call", "test payload")
         self.assertTrue(writer.trace_file.exists())
 
     def test_write_appends(self):
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
         writer = self.mod.TraceWriter(self.tmpdir)
         writer.write("dev", "TOOL:call", "first")
         writer.write("architect", "TOOL:result", "second")
@@ -182,7 +182,7 @@ class TestTraceWriter(unittest.TestCase):
         self.assertEqual(content.count("\n"), 2)
 
     def test_write_format(self):
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
         writer = self.mod.TraceWriter(self.tmpdir)
         writer.write("dev", "ACTION", "did something")
         content = writer.trace_file.read_text()
@@ -196,7 +196,7 @@ class TestCallHistoryManager(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -268,7 +268,7 @@ class TestAgentCaller(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir()
+        (self.tmpdir / "_grimoire-output").mkdir()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -322,8 +322,8 @@ class TestAgentCaller(unittest.TestCase):
             from_agent="dev", to_agent="architect", task="Review"
         )
         caller.call(req)
-        # Trace is at _bmad-output/BMAD_TRACE.md
-        actual_trace = self.tmpdir / "_bmad-output" / "BMAD_TRACE.md"
+        # Trace is at _grimoire-output/Grimoire_TRACE.md
+        actual_trace = self.tmpdir / "_grimoire-output" / "Grimoire_TRACE.md"
         self.assertTrue(actual_trace.exists())
         content = actual_trace.read_text()
         self.assertIn("TOOL:call", content)
@@ -437,8 +437,8 @@ class TestCLIIntegration(unittest.TestCase):
 
     def test_call_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create _bmad-output for trace
-            Path(tmpdir, "_bmad-output").mkdir()
+            # Create _grimoire-output for trace
+            Path(tmpdir, "_grimoire-output").mkdir()
             r = self._run(
                 "--project-root", tmpdir,
                 "call", "--from", "dev", "--to", "architect",
@@ -449,7 +449,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def test_call_json_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            Path(tmpdir, "_bmad-output").mkdir()
+            Path(tmpdir, "_grimoire-output").mkdir()
             r = self._run(
                 "--project-root", tmpdir,
                 "call", "--from", "dev", "--to", "qa",

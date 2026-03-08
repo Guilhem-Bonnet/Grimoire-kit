@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-procedural-memory.py — Procedural Memory Layer 4 for BMAD agents (D10).
+procedural-memory.py — Procedural Memory Layer 4 for Grimoire agents (D10).
 ═══════════════════════════════════════════════════════════════════
 
 Index des patterns par type de tâche. Permet aux agents de retrouver
 les approches qui ont fonctionné pour des tâches similaires.
 
-Stockage : _bmad/_memory/procedural/
+Stockage : _grimoire/_memory/procedural/
   - patterns.json — Index des patterns
   - Chaque pattern : {task_type, pattern, success_count, last_used, tags}
 
@@ -42,7 +42,7 @@ PROCEDURAL_MEMORY_VERSION = "1.0.0"
 # ── Storage ──────────────────────────────────────────────────────
 
 def _patterns_file(project_root: Path) -> Path:
-    return project_root / "_bmad" / "_memory" / "procedural" / "patterns.json"
+    return project_root / "_grimoire" / "_memory" / "procedural" / "patterns.json"
 
 
 def _load_patterns(project_root: Path) -> list[dict[str, Any]]:
@@ -257,7 +257,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BMAD Procedural Memory")
+    parser = argparse.ArgumentParser(description="Grimoire Procedural Memory")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

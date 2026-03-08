@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour rag-retriever.py — Retrieval sémantique BMAD (BM-42 Story 2.3).
+Tests pour rag-retriever.py — Retrieval sémantique Grimoire (BM-42 Story 2.3).
 
 Fonctions testées :
   - RetrievedChunk (final_score, estimated_tokens)
@@ -316,7 +316,7 @@ class TestFileBasedFallback(unittest.TestCase):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
         # Create mock memory dir structure
-        memory_dir = self.tmpdir / "_bmad" / "_memory"
+        memory_dir = self.tmpdir / "_grimoire" / "_memory"
         memory_dir.mkdir(parents=True)
         (memory_dir / "decisions-log.md").write_text(
             "# Decisions Log\n\n"

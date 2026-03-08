@@ -3,7 +3,7 @@
 rnd_harvest.py — R&D Innovation Engine : phase de récolte.
 ═══════════════════════════════════════════════════════════════════
 
-Fonctions de récolte d'idées depuis les outils BMAD, générateurs
+Fonctions de récolte d'idées depuis les outils Grimoire, générateurs
 synthétiques (concept blending), mutations, et analyse de gaps.
 
 Stdlib only — aucune dépendance externe.

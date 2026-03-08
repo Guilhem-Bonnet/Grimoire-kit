@@ -1,8 +1,8 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/wrench.svg" width="32" height="32" alt=""> Configuration VS Code — BMAD Custom Kit
+# <img src="assets/icons/wrench.svg" width="32" height="32" alt=""> Configuration VS Code — Grimoire Custom Kit
 
-Guide de configuration optimale de VS Code pour travailler avec les agents BMAD
+Guide de configuration optimale de VS Code pour travailler avec les agents Grimoire
 sans interruptions ni confirmations intempestives.
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -54,7 +54,7 @@ Ajouter ces settings dans **User Settings** (`Ctrl+Shift+P` → `Preferences: Op
 ```
 
 > **Workspace vs User** : Les settings ci-dessus vont dans les **User Settings**
-> (globaux). Les settings spécifiques au projet BMAD sont déjà dans
+> (globaux). Les settings spécifiques au projet Grimoire sont déjà dans
 > `.vscode/settings.json` du kit.
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -62,7 +62,7 @@ Ajouter ces settings dans **User Settings** (`Ctrl+Shift+P` → `Preferences: Op
 ## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 2. Auto-approbation des outils agents
 
 Par défaut, VS Code demande confirmation à **chaque** appel d'outil par un agent
-(lecture de fichier, recherche, édition, terminal). Pour les agents BMAD qui
+(lecture de fichier, recherche, édition, terminal). Pour les agents Grimoire qui
 enchaînent 20-50 appels par workflow, c'est inutilisable.
 
 ### Approuver tous les outils automatiquement
@@ -94,7 +94,7 @@ VS Code retient ces choix par outil et par workspace.
 ## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> 3. Commandes terminal
 
 C'est ici que se concentrent la plupart des confirmations bloquantes. Les agents
-BMAD exécutent régulièrement des commandes : `ls`, `cat`, `grep`, `find`,
+Grimoire exécutent régulièrement des commandes : `ls`, `cat`, `grep`, `find`,
 `python3`, `git`, `bash`, etc.
 
 ### Option A : Tout approuver (recommandé en solo)
@@ -159,7 +159,7 @@ les commandes de lecture :
     "git show": true,
     "git status": true,
 
-    // ── Exécution Python/Node (agents BMAD) ──
+    // ── Exécution Python/Node (agents Grimoire) ──
     "python3": true,
     "python": true,
     "node": true,
@@ -238,14 +238,14 @@ Pour laisser les agents travailler librement :
 
 ### Limiter le file watcher (performance)
 
-Les agents BMAD génèrent beaucoup de fichiers temporaires. Exclure les dossiers
+Les agents Grimoire génèrent beaucoup de fichiers temporaires. Exclure les dossiers
 lourds du file watcher réduit la charge :
 
 ```jsonc
 {
   "files.watcherExclude": {
-    "_bmad/_memory/qdrant_data/**": true,
-    "_bmad-output/.runs/**": true,
+    "_grimoire/_memory/qdrant_data/**": true,
+    "_grimoire-output/.runs/**": true,
     "**/node_modules/**": true,
     "**/.terraform/**": true,
     "**/.venv/**": true,
@@ -262,7 +262,7 @@ lourds du file watcher réduit la charge :
 
 Les modèles premium (Claude Sonnet 4, o4-mini, etc.) ont des quotas
 de requêtes par minute/heure imposés par GitHub. Chaque appel d'outil d'un agent
-= 1 requête. Un workflow BMAD complet peut consommer 30-80 requêtes.
+= 1 requête. Un workflow Grimoire complet peut consommer 30-80 requêtes.
 
 Message typique :
 > Sorry, you have exhausted this model's rate limit. Please wait a moment before
@@ -288,7 +288,7 @@ GPT-4.1 (qui a des quotas beaucoup plus généreux).
 | Ne pas attacher `@workspace` entier | Moins de tokens consommés par requête |
 | Utiliser GPT-4.1 pour les tâches courantes | Quasi illimité, réserver les modèles premium pour le complexe |
 | Garder les `copilot-instructions.md` concis | Envoyé à **chaque** requête — chaque Ko compte |
-| Réduire le budget contexte des agents | `bash bmad-init.sh guard --suggest` pour voir les agents trop lourds |
+| Réduire le budget contexte des agents | `bash grimoire-init.sh guard --suggest` pour voir les agents trop lourds |
 
 ### Switcher de modèle manuellement
 
@@ -398,14 +398,14 @@ Commandes en lecture seule, aucune modification du système.
 | `git status`, `git log`, `git diff` | État du repo |
 | `stat`, `du`, `df`, `date` | Métadonnées système |
 
-### Niveau 2 — Modéré (approuver pour les agents BMAD)
+### Niveau 2 — Modéré (approuver pour les agents Grimoire)
 
 Commandes qui modifient des fichiers dans le workspace, mais de manière
 attendue et réversible.
 
 | Commande | Usage agent | Risque |
 |----------|-------------|--------|
-| `python3`, `node`, `bash` | Exécuter scripts BMAD | Dépend du script |
+| `python3`, `node`, `bash` | Exécuter scripts Grimoire | Dépend du script |
 | `git add`, `git commit` | Sauvegarder le travail | Réversible (`git reset`) |
 | `git push` | Publier | Réversible (`git revert`) |
 | `pip install` | Installer dépendances | Non destructif |
@@ -468,7 +468,7 @@ Commandes destructives ou à effet irréversible.
 - [ ] `diffEditor.maxComputationTime` à 0
 - [ ] `chat.models.fallback.enabled` à true
 - [ ] VPN configuré sur un serveur proche ou split-tunnel activé
-- [ ] `files.watcherExclude` configuré pour les dossiers lourds BMAD
+- [ ] `files.watcherExclude` configuré pour les dossiers lourds Grimoire
 - [ ] `search.exclude` configuré pour réduire le bruit dans les recherches
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -481,7 +481,7 @@ Commandes destructives ou à effet irréversible.
 ```jsonc
 {
   // ══════════════════════════════════════════════════════════════════════
-  // User Settings — Optimisé pour BMAD Custom Kit
+  // User Settings — Optimisé pour Grimoire Custom Kit
   // ══════════════════════════════════════════════════════════════════════
 
   // ── Copilot ───────────────────────────────────────────────────────────

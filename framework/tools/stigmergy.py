@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stigmergy.py — Coordination stigmergique entre agents BMAD.
+stigmergy.py — Coordination stigmergique entre agents Grimoire.
 =============================================================
 
 Système de phéromones numériques : les agents déposent des signaux typés
@@ -185,7 +185,7 @@ class TrailPattern:
 # ── Persistence ───────────────────────────────────────────────────────────────
 
 def _board_path(project_root: Path) -> Path:
-    return project_root / "_bmad-output" / PHEROMONE_FILE
+    return project_root / "_grimoire-output" / PHEROMONE_FILE
 
 
 def load_board(project_root: Path) -> PheromoneBoard:
@@ -627,11 +627,11 @@ def _intensity_bar(intensity: float, width: int = 10) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Stigmergy — coordination par phéromones numériques",
+        description="Grimoire Stigmergy — coordination par phéromones numériques",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 

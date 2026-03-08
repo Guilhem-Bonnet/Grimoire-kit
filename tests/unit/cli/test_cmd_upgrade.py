@@ -1,4 +1,4 @@
-"""Tests for bmad.cli.cmd_upgrade — v2 → v3 migration."""
+"""Tests for grimoire.cli.cmd_upgrade — v2 → v3 migration."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.cli.cmd_upgrade import (
+from grimoire.cli.cmd_upgrade import (
     UpgradeAction,
     UpgradePlan,
     detect_version,
@@ -23,8 +23,8 @@ def v2_project(tmp_path: Path) -> Path:
     (tmp_path / "project-context.yaml").write_text(
         "project: my-project\ncommunication_language: Français\n"
     )
-    (tmp_path / "_bmad/_memory").mkdir(parents=True)
-    (tmp_path / "_bmad/_memory/shared-context.md").write_text("# Context\n")
+    (tmp_path / "_grimoire/_memory").mkdir(parents=True)
+    (tmp_path / "_grimoire/_memory/shared-context.md").write_text("# Context\n")
     return tmp_path
 
 
@@ -32,9 +32,9 @@ def v2_project(tmp_path: Path) -> Path:
 def v3_project(tmp_path: Path) -> Path:
     """A minimal v3 project structure."""
     (tmp_path / "project-context.yaml").write_text(
-        "bmad:\n  version: '3.0'\nproject:\n  name: test\n"
+        "grimoire:\n  version: '3.0'\nproject:\n  name: test\n"
     )
-    (tmp_path / "_bmad/_config/agents").mkdir(parents=True)
+    (tmp_path / "_grimoire/_config/agents").mkdir(parents=True)
     return tmp_path
 
 
@@ -102,30 +102,30 @@ class TestExecuteUpgrade:
         assert len(completed) > 0
         # v2 config should NOT have been modified
         text = (v2_project / "project-context.yaml").read_text()
-        assert "bmad" not in text or "version" not in text
+        assert "grimoire" not in text or "version" not in text
 
     def test_execute_creates_v3_section(self, v2_project: Path) -> None:
         plan = plan_upgrade(v2_project)
         execute_upgrade(v2_project, plan, dry_run=False)
         # Now should detect as v3
-        from bmad.tools._common import load_yaml
+        from grimoire.tools._common import load_yaml
         data = load_yaml(v2_project / "project-context.yaml")
-        assert "bmad" in data
-        assert data["bmad"]["version"] == "3.0"
+        assert "grimoire" in data
+        assert data["grimoire"]["version"] == "3.0"
 
     def test_execute_creates_directories(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text("project: test\n")
         plan = plan_upgrade(tmp_path)
         execute_upgrade(tmp_path, plan, dry_run=False)
-        assert (tmp_path / "_bmad").is_dir()
-        assert (tmp_path / "_bmad-output").is_dir()
+        assert (tmp_path / "_grimoire").is_dir()
+        assert (tmp_path / "_grimoire-output").is_dir()
 
     def test_preserves_memory(self, v2_project: Path) -> None:
         plan = plan_upgrade(v2_project)
         execute_upgrade(v2_project, plan, dry_run=False)
         # Memory file should still exist
-        assert (v2_project / "_bmad/_memory/shared-context.md").exists()
-        assert (v2_project / "_bmad/_memory/shared-context.md").read_text() == "# Context\n"
+        assert (v2_project / "_grimoire/_memory/shared-context.md").exists()
+        assert (v2_project / "_grimoire/_memory/shared-context.md").read_text() == "# Context\n"
 
     def test_migrated_passes_detect_v3(self, v2_project: Path) -> None:
         plan = plan_upgrade(v2_project)

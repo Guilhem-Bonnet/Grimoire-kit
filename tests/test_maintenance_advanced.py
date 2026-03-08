@@ -433,7 +433,7 @@ class TestExportReadable(_MaintenanceTestBase):
         with patch("sys.stdout", captured):
             self.maint.export_readable()
         output = captured.getvalue()
-        self.assertIn("Export mémoire BMAD", output)
+        self.assertIn("Export mémoire Grimoire", output)
         self.assertIn("2 entrées", output)
         self.assertIn("Use type hints", output)
         self.assertIn("[1]", output)

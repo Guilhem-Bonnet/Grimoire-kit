@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BMAD Memory Maintenance — Archivage, pruning et health-check automatique.
+Grimoire Memory Maintenance — Archivage, pruning et health-check automatique.
 
 Usage:
     python maintenance.py status                     # État complet de la mémoire
@@ -41,7 +41,7 @@ def _load_project_context() -> dict:
         import yaml
     except ImportError:
         return {}
-    # Remonter depuis _bmad/_memory/ jusqu'à la racine projet
+    # Remonter depuis _grimoire/_memory/ jusqu'à la racine projet
     for parent in [MEMORY_DIR.parent.parent, MEMORY_DIR.parent.parent.parent]:
         ctx_file = parent / "project-context.yaml"
         if ctx_file.exists():
@@ -91,7 +91,7 @@ def save_memories(memories: list[dict]) -> None:
 def status():
     """Affiche l'état de la mémoire."""
     memories = load_memories()
-    print(f"📊 État de la mémoire BMAD")
+    print(f"📊 État de la mémoire Grimoire")
     print(f"   Entrées mémoire : {len(memories)}")
     print(f"   Fichier          : {MEMORIES_FILE}")
     print(f"   Taille           : {MEMORIES_FILE.stat().st_size if MEMORIES_FILE.exists() else 0} octets")
@@ -203,7 +203,7 @@ def compact():
 def export_readable():
     """Exporte la mémoire en format lisible."""
     memories = load_memories()
-    print(f"# Export mémoire BMAD — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"# Export mémoire Grimoire — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"# {len(memories)} entrées\n")
     for i, m in enumerate(memories, 1):
         agent = m.get("agent", "?")
@@ -387,7 +387,7 @@ def prune_activity(days: int = 90):
 
 def prune_all():
     """Exécute tous les prunings avec les valeurs par défaut."""
-    print("🧹 Pruning complet de la mémoire BMAD\n")
+    print("🧹 Pruning complet de la mémoire Grimoire\n")
 
     print("─── 1. Mémoires JSON (compact) ───")
     compact()

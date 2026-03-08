@@ -1,6 +1,6 @@
-# Getting Started — BMAD Kit v3
+# Getting Started — Grimoire Kit v3
 
-> Ce guide vous accompagne de l'installation à votre premier projet BMAD.
+> Ce guide vous accompagne de l'installation à votre premier projet Grimoire.
 
 ## Prérequis
 
@@ -12,19 +12,19 @@
 
 ```bash
 # Via pip
-pip install bmad-kit
+pip install grimoire-kit
 
 # Avec le support MCP (Model Context Protocol)
-pip install bmad-kit[mcp]
+pip install grimoire-kit[mcp]
 
 # Toutes les extensions (MCP + Qdrant + Ollama)
-pip install bmad-kit[all]
+pip install grimoire-kit[all]
 ```
 
 Vérifiez l'installation :
 
 ```bash
-bmad --version
+grimoire --version
 ```
 
 ## Créer un projet
@@ -32,7 +32,7 @@ bmad --version
 ### Nouveau projet
 
 ```bash
-bmad init mon-projet --archetype web-app
+grimoire init mon-projet --archetype web-app
 cd mon-projet
 ```
 
@@ -42,7 +42,7 @@ Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `creative-studio`, 
 
 ```bash
 cd votre-projet/
-bmad init . --name "Mon Projet"
+grimoire init . --name "Mon Projet"
 ```
 
 ## Structure générée
@@ -50,7 +50,7 @@ bmad init . --name "Mon Projet"
 ```
 mon-projet/
 ├── project-context.yaml          # Configuration centralisée
-├── _bmad/
+├── _grimoire/
 │   ├── _config/
 │   │   ├── agents/               # Références agents installés
 │   │   ├── manifest.yaml         # Manifeste du projet
@@ -70,23 +70,23 @@ mon-projet/
 
 | Commande | Description |
 |----------|-------------|
-| `bmad init <path>` | Initialiser un projet |
-| `bmad doctor` | Vérifier la santé du projet |
-| `bmad status` | Afficher l'état du projet |
-| `bmad add <agent>` | Ajouter un agent |
-| `bmad remove <agent>` | Retirer un agent |
-| `bmad validate` | Valider `project-context.yaml` |
-| `bmad up` | Déployer les agents configurés |
-| `bmad merge <source>` | Fusionner des fichiers BMAD |
-| `bmad merge --undo` | Annuler le dernier merge |
-| `bmad upgrade` | Migrer un projet v2 → v3 |
-| `bmad registry list` | Lister les agents disponibles |
-| `bmad registry search <q>` | Chercher un agent |
+| `grimoire init <path>` | Initialiser un projet |
+| `grimoire doctor` | Vérifier la santé du projet |
+| `grimoire status` | Afficher l'état du projet |
+| `grimoire add <agent>` | Ajouter un agent |
+| `grimoire remove <agent>` | Retirer un agent |
+| `grimoire validate` | Valider `project-context.yaml` |
+| `grimoire up` | Déployer les agents configurés |
+| `grimoire merge <source>` | Fusionner des fichiers Grimoire |
+| `grimoire merge --undo` | Annuler le dernier merge |
+| `grimoire upgrade` | Migrer un projet v2 → v3 |
+| `grimoire registry list` | Lister les agents disponibles |
+| `grimoire registry search <q>` | Chercher un agent |
 
 ## Vérifier votre projet
 
 ```bash
-bmad doctor
+grimoire doctor
 ```
 
 Sortie attendue :
@@ -94,7 +94,7 @@ Sortie attendue :
 ```
 ✔ project-context.yaml found
 ✔ YAML valid
-✔ _bmad directory exists
+✔ _grimoire directory exists
 ✔ At least one agent configured
 ✔ Memory directory exists
 ```
@@ -102,11 +102,11 @@ Sortie attendue :
 ## Utiliser le SDK Python
 
 ```python
-from bmad.core.config import BmadConfig
-from bmad.core.project import BmadProject
+from grimoire.core.config import GrimoireConfig
+from grimoire.core.project import GrimoireProject
 
-config = BmadConfig.from_yaml("project-context.yaml")
-project = BmadProject(config)
+config = GrimoireConfig.from_yaml("project-context.yaml")
+project = GrimoireProject(config)
 
 # Lister les agents
 for agent in project.status().agents:
@@ -115,10 +115,10 @@ for agent in project.status().agents:
 
 ## Serveur MCP
 
-Si vous avez installé `bmad-kit[mcp]` :
+Si vous avez installé `grimoire-kit[mcp]` :
 
 ```bash
-bmad-mcp
+grimoire-mcp
 ```
 
 Configurez dans VS Code (`.vscode/mcp.json`) :
@@ -126,8 +126,8 @@ Configurez dans VS Code (`.vscode/mcp.json`) :
 ```json
 {
   "servers": {
-    "bmad": {
-      "command": "bmad-mcp"
+    "grimoire": {
+      "command": "grimoire-mcp"
     }
   }
 }
@@ -135,21 +135,21 @@ Configurez dans VS Code (`.vscode/mcp.json`) :
 
 ## Auto-complétion shell
 
-BMAD Kit supporte l'auto-complétion pour Bash, Zsh et Fish :
+Grimoire Kit supporte l'auto-complétion pour Bash, Zsh et Fish :
 
 ```bash
 # Installer l'auto-complétion pour votre shell
-bmad --install-completion
+grimoire --install-completion
 
 # Afficher le script sans l'installer
-bmad --show-completion
+grimoire --show-completion
 ```
 
-Après installation, redémarrez votre terminal. Tapez `bmad <TAB>` pour voir les commandes disponibles.
+Après installation, redémarrez votre terminal. Tapez `grimoire <TAB>` pour voir les commandes disponibles.
 
 ## Prochaines étapes
 
-- [Référence YAML](bmad-yaml-reference.md) — schéma complet de `project-context.yaml`
+- [Référence YAML](grimoire-yaml-reference.md) — schéma complet de `project-context.yaml`
 - [Guide SDK](sdk-guide.md) — utilisation du SDK Python
 - [Intégration MCP](mcp-integration.md) — serveur MCP pour Copilot
 - [Migration v2 → v3](migration-v2-v3.md) — migrer un projet existant

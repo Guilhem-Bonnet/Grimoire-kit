@@ -321,7 +321,7 @@ class TestRetroCollectors(unittest.TestCase):
         self.assertEqual(items, [])
 
     def test_collect_learnings_with_data(self):
-        ldir = self.tmpdir / "_bmad" / "_memory" / "agent-learnings"
+        ldir = self.tmpdir / "_grimoire" / "_memory" / "agent-learnings"
         ldir.mkdir(parents=True)
         (ldir / "agent-dev.md").write_text(
             "# Dev\n2026-01-01 This works great for testing\n"
@@ -338,7 +338,7 @@ class TestRetroCollectors(unittest.TestCase):
         self.assertEqual(items, [])
 
     def test_collect_failures_with_museum(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "failure-museum.md").write_text(
             "# Failure Museum\n"
@@ -391,7 +391,7 @@ class TestRunRetro(unittest.TestCase):
 
     def test_retro_limits_to_10(self):
         # Créer beaucoup de learnings
-        ldir = self.tmpdir / "_bmad" / "_memory" / "agent-learnings"
+        ldir = self.tmpdir / "_grimoire" / "_memory" / "agent-learnings"
         ldir.mkdir(parents=True)
         lines = "\n".join(
             f"2026-01-{i:02d} Learning number {i} with enough text to pass"

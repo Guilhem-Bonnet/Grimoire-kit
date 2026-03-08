@@ -1,44 +1,44 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
-# BMAD — Git pre-push hook
+# Grimoire — Git pre-push hook
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Déclenché avant git push.
 # Lit remote/branch depuis stdin : <local_ref> <local_sha> <remote_ref> <remote_sha>
 #
 # Comportement :
-#   1. Vérifie la syntaxe bash de bmad-init.sh si modifié
+#   1. Vérifie la syntaxe bash de grimoire-init.sh si modifié
 #   2. Lance validate --all (léger — python inline, <2s)
-#   3. Vérifie que BMAD_TRACE.md n'est pas vide si _bmad-output/ a des commits
-#   4. Skip si BMAD_SKIP_PUSH_CHECK=1 (CI/CD ou urgence)
+#   3. Vérifie que Grimoire_TRACE.md n'est pas vide si _grimoire-output/ a des commits
+#   4. Skip si Grimoire_SKIP_PUSH_CHECK=1 (CI/CD ou urgence)
 #
-# Installation via : bmad-init.sh hooks --install
+# Installation via : grimoire-init.sh hooks --install
 # ══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
 
 # Bypass d'urgence
-[[ "${BMAD_SKIP_PUSH_CHECK:-0}" == "1" ]] && exit 0
+[[ "${Grimoire_SKIP_PUSH_CHECK:-0}" == "1" ]] && exit 0
 
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-INIT_SCRIPT="$GIT_ROOT/bmad-init.sh"
+INIT_SCRIPT="$GIT_ROOT/grimoire-init.sh"
 
-[[ -d "$GIT_ROOT/_bmad" ]] || exit 0
+[[ -d "$GIT_ROOT/_grimoire" ]] || exit 0
 
 ERRORS=0
 
 echo ""
-echo "🚀 BMAD pre-push checks..."
+echo "🚀 Grimoire pre-push checks..."
 
-# ── 1. Syntaxe bash sur bmad-init.sh si modifié ───────────────────────────────
+# ── 1. Syntaxe bash sur grimoire-init.sh si modifié ───────────────────────────────
 if [[ -f "$INIT_SCRIPT" ]]; then
-    # Vérifier si bmad-init.sh est dans les commits à pousser
-    MODIFIED=$(git diff --name-only origin/HEAD HEAD 2>/dev/null | grep -F "bmad-init.sh" || true)
-    if [[ -n "$MODIFIED" ]] || git diff --cached --name-only 2>/dev/null | grep -qF "bmad-init.sh"; then
+    # Vérifier si grimoire-init.sh est dans les commits à pousser
+    MODIFIED=$(git diff --name-only origin/HEAD HEAD 2>/dev/null | grep -F "grimoire-init.sh" || true)
+    if [[ -n "$MODIFIED" ]] || git diff --cached --name-only 2>/dev/null | grep -qF "grimoire-init.sh"; then
         if bash -n "$INIT_SCRIPT" 2>&1; then
-            echo "   ✓ bmad-init.sh — syntaxe bash OK"
+            echo "   ✓ grimoire-init.sh — syntaxe bash OK"
         else
-            echo "   ✗ bmad-init.sh — ERREUR de syntaxe bash !"
+            echo "   ✗ grimoire-init.sh — ERREUR de syntaxe bash !"
             ERRORS=$((ERRORS + 1))
         fi
     fi
@@ -61,13 +61,13 @@ fi
 
 # ── 3. Résumé ─────────────────────────────────────────────────────────────────
 if [[ $ERRORS -eq 0 ]]; then
-    echo "   ✅ Tous les checks BMAD passent — push autorisé"
+    echo "   ✅ Tous les checks Grimoire passent — push autorisé"
     echo ""
     exit 0
 else
     echo ""
     echo "   🚫 $ERRORS check(s) échoué(s) — push bloqué"
-    echo "   Pour bypasser : BMAD_SKIP_PUSH_CHECK=1 git push"
+    echo "   Pour bypasser : Grimoire_SKIP_PUSH_CHECK=1 git push"
     echo ""
     exit 1
 fi

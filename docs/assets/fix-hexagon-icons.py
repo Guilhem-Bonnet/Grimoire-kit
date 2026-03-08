@@ -64,7 +64,7 @@ FIXES = [
     ("Structure du Graphe", "folder-tree"),
     ("Enrichissement Dynamique", "dna"),
     ("Bootstrap", "bolt"),
-    # framework/bmad-trace
+    # framework/grimoire-trace
     ("Types d'événements", "workflow"),
     ("Protocole de lecture", "microscope"),
     ("Utilisation enterprise", "rocket"),

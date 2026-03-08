@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour rag-indexer.py — Pipeline RAG d'indexation BMAD → Qdrant (BM-42).
+Tests pour rag-indexer.py — Pipeline RAG d'indexation Grimoire → Qdrant (BM-42).
 
 Fonctions testées :
   - ChunkingStrategy.chunk_markdown()

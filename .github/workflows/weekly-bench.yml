@@ -1,4 +1,4 @@
-name: BMAD Weekly Benchmark
+name: Grimoire Weekly Benchmark
 
 on:
   # ── Planification hebdomadaire (chaque lundi à 6h UTC) ──────────────────────
@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   bench:
-    name: "BMAD Agent Benchmark"
+    name: "Grimoire Agent Benchmark"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -55,36 +55,36 @@ jobs:
           [[ -n "$SINCE" ]] && ARGS="$ARGS --since $SINCE"
           [[ -n "$AGENT" ]] && ARGS="$ARGS --agent $AGENT"
 
-          mkdir -p _bmad-output/bench-reports
+          mkdir -p _grimoire-output/bench-reports
 
           python3 framework/tools/agent-bench.py \
             $ARGS \
-            --out _bmad-output/bench-reports/latest.md \
-            --trace _bmad-output/BMAD_TRACE.md \
+            --out _grimoire-output/bench-reports/latest.md \
+            --trace _grimoire-output/Grimoire_TRACE.md \
             2>&1 | tee bench-output.txt
 
           # Copie historisée avec date
           DATE=$(date +%Y-%m-%d)
-          cp _bmad-output/bench-reports/latest.md "_bmad-output/bench-reports/${DATE}.md"
+          cp _grimoire-output/bench-reports/latest.md "_grimoire-output/bench-reports/${DATE}.md"
 
           # Extraire le nombre de failures pour metric
-          FAILURES=$(grep -oE "Total failures.*\| [0-9]+" _bmad-output/bench-reports/latest.md | grep -oE "[0-9]+$" || echo "0")
+          FAILURES=$(grep -oE "Total failures.*\| [0-9]+" _grimoire-output/bench-reports/latest.md | grep -oE "[0-9]+$" || echo "0")
           echo "failures=$FAILURES" >> $GITHUB_OUTPUT
           echo "report_date=$DATE" >> $GITHUB_OUTPUT
 
       # ── Publier dans GitHub Step Summary ─────────────────────────────────
       - name: Publish to Step Summary
         run: |
-          echo "## 📊 BMAD Agent Benchmark — ${{ steps.bench.outputs.report_date }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Grimoire Agent Benchmark — ${{ steps.bench.outputs.report_date }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          cat _bmad-output/bench-reports/latest.md >> $GITHUB_STEP_SUMMARY
+          cat _grimoire-output/bench-reports/latest.md >> $GITHUB_STEP_SUMMARY
 
       # ── Commit le rapport dans le repo ────────────────────────────────────
       - name: Commit bench report
         run: |
-          git config user.name "BMAD Bench Bot"
-          git config user.email "bmad-bench-bot@github-actions"
-          git add _bmad-output/bench-reports/
+          git config user.name "Grimoire Bench Bot"
+          git config user.email "grimoire-bench-bot@github-actions"
+          git add _grimoire-output/bench-reports/
           git diff --staged --quiet && echo "No changes" && exit 0
           git commit -m "chore(bench): rapport hebdomadaire ${{ steps.bench.outputs.report_date }}"
           git push
@@ -102,7 +102,7 @@ jobs:
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              labels: 'bmad-bench-alert',
+              labels: 'grimoire-bench-alert',
               state: 'open',
             });
 
@@ -114,14 +114,14 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `⚠️ BMAD Bench Alert — ${failures} failures détectés (${date})`,
-              body: `## Alerte Benchmark BMAD\n\n` +
+              title: `⚠️ Grimoire Bench Alert — ${failures} failures détectés (${date})`,
+              body: `## Alerte Benchmark Grimoire\n\n` +
                     `Le rapport hebdomadaire du ${date} détecte **${failures} failures**` +
-                    ` dans BMAD_TRACE.md, ce qui dépasse le seuil d'alerte (10).\n\n` +
+                    ` dans Grimoire_TRACE.md, ce qui dépasse le seuil d'alerte (10).\n\n` +
                     `**Actions recommandées :**\n` +
-                    `1. Consulter \`_bmad-output/bench-reports/${date}.md\`\n` +
-                    `2. Lancer \`bash bmad-init.sh bench --improve\`\n` +
+                    `1. Consulter \`_grimoire-output/bench-reports/${date}.md\`\n` +
+                    `2. Lancer \`bash grimoire-init.sh bench --improve\`\n` +
                     `3. Passer \`bench-context.md\` à Sentinel > \`bench-review\`\n\n` +
-                    `---\n*Créée automatiquement par BMAD Weekly Benchmark*`,
-              labels: ['bmad-bench-alert', 'agent-quality'],
+                    `---\n*Créée automatiquement par Grimoire Weekly Benchmark*`,
+              labels: ['grimoire-bench-alert', 'agent-quality'],
             });

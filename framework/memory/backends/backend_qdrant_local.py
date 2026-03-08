@@ -30,7 +30,7 @@ class QdrantLocalBackend:
     def __init__(
         self,
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        collection: str = "bmad",
+        collection: str = "grimoire",
         qdrant_path: str | None = None,
     ):
         try:

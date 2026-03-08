@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-BMAD Agent Forge — BM-52
+Grimoire Agent Forge — BM-52
 =========================
-Génère un scaffold d'agent BMAD rempli intelligemment depuis :
+Génère un scaffold d'agent Grimoire rempli intelligemment depuis :
   - une description textuelle de besoin
   - des requêtes inter-agents non résolues (shared-context.md)
-  - des patterns de failure sans agent propriétaire (BMAD_TRACE.md)
+  - des patterns de failure sans agent propriétaire (Grimoire_TRACE.md)
 
 Le résultat est un .proposed.md à réviser, PAS un agent activé directement.
-Chaîne : agent-forge → review humain → bmad-init.sh forge --install → Sentinel audit
+Chaîne : agent-forge → review humain → grimoire-init.sh forge --install → Sentinel audit
 
 Usage:
     python3 agent-forge.py --from "je veux un agent pour les migrations DB"
     python3 agent-forge.py --from-gap --shared-context path/to/shared-context.md
-    python3 agent-forge.py --from-trace --trace _bmad-output/BMAD_TRACE.md
+    python3 agent-forge.py --from-trace --trace _grimoire-output/Grimoire_TRACE.md
     python3 agent-forge.py --list-proposals
-    python3 agent-forge.py --install agent-db-migrator  (appelé par bmad-init.sh)
+    python3 agent-forge.py --install agent-db-migrator  (appelé par grimoire-init.sh)
 """
 
 from __future__ import annotations
@@ -380,7 +380,7 @@ def scan_gaps_from_shared_context(shared_context_path: Path) -> list[GapRequest]
 
 def scan_gaps_from_trace(trace_path: Path, known_agents: list[str]) -> list[str]:
     """
-    Scanne BMAD_TRACE.md pour des patterns de failure récurrents
+    Scanne Grimoire_TRACE.md pour des patterns de failure récurrents
     qui ne correspondent à aucun agent connu.
     Retourne une liste de descriptions de besoins détectés.
     """
@@ -485,7 +485,7 @@ def read_active_dna(archetypes_dir: Path) -> list[str]:
 AGENT_TEMPLATE = '''<!-- ARCHETYPE: {archetype} — Agent généré par agent-forge.py / BM-52
      SOURCE: {source} — {need_description}
      Réviser TOUS les placeholders [TODO] avant installation.
-     Installer via : bash bmad-init.sh forge --install {agent_tag}
+     Installer via : bash grimoire-init.sh forge --install {agent_tag}
      Valider via   : Sentinel [AA] Audit Agent
 -->
 ---
@@ -499,7 +499,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
 <agent id="{agent_tag}.agent.yaml" name="{agent_name}" title="{agent_role}" icon="{agent_icon}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {{{{project-root}}}}/_bmad/_config/custom/agent-base.md with:
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {{{{project-root}}}}/_grimoire/_config/custom/agent-base.md with:
           AGENT_TAG={agent_tag} | AGENT_NAME={agent_name} | LEARNINGS_FILE={agent_tag} | DOMAIN_WORD={domain_word}
       </step>
       <step n="3">Remember: user\'s name is {{{{user_name}}}}</step>
@@ -536,7 +536,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
   <menu>
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec {agent_name}</item>
-{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 
@@ -686,7 +686,7 @@ def build_proposals_from_trace_gaps(
     project_context: dict,
     existing_agents: list[str],
 ) -> list[AgentProposal]:
-    """Construit des proposals depuis des gaps détectés dans BMAD_TRACE."""
+    """Construit des proposals depuis des gaps détectés dans Grimoire_TRACE."""
     proposals = []
     for gap_description in trace_gaps:
         proposal = build_proposal_from_description(
@@ -718,7 +718,7 @@ def install_proposal(
 ) -> None:
     """
     Déplace un .proposed.md vers le répertoire des agents et met à jour le manifest.
-    Appelé par bmad-init.sh forge --install.
+    Appelé par grimoire-init.sh forge --install.
     """
     # Chercher le fichier proposal
     candidates = list(proposals_dir.glob(f"*{proposal_name}*.proposed.md"))
@@ -752,7 +752,7 @@ def install_proposal(
     print()
     print("   Étapes suivantes :")
     print("   1. Réviser les [TODO] dans le fichier agent")
-    print("   2. Ajouter dans _bmad/_config/agent-manifest.csv")
+    print("   2. Ajouter dans _grimoire/_config/agent-manifest.csv")
     print("   3. Lancer Sentinel [AA] pour l\'audit qualité")
     print("   4. Tester l\'agent en session Copilot Chat")
 
@@ -787,20 +787,20 @@ def list_proposals(proposals_dir: Path) -> None:
         print(f"  📄 {p.name}")
         print(f"     Source : {source} — {desc}")
         print()
-    print("  → Installer : bash bmad-init.sh forge --install <nom-agent>")
+    print("  → Installer : bash grimoire-init.sh forge --install <nom-agent>")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="BMAD Agent Forge — génère des scaffolds d\'agents depuis des besoins détectés",
+        description="Grimoire Agent Forge — génère des scaffolds d\'agents depuis des besoins détectés",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples :
   python3 agent-forge.py --from "je veux un agent pour les migrations de base de données"
-  python3 agent-forge.py --from-gap --shared-context _bmad/_memory/shared-context.md
-  python3 agent-forge.py --from-trace --trace _bmad-output/BMAD_TRACE.md
+  python3 agent-forge.py --from-gap --shared-context _grimoire/_memory/shared-context.md
+  python3 agent-forge.py --from-trace --trace _grimoire-output/Grimoire_TRACE.md
   python3 agent-forge.py --list
   python3 agent-forge.py --install db-migrator
         """,
@@ -812,27 +812,27 @@ Exemples :
     mode_group.add_argument("--from-gap", action="store_true",
                             help="Générer depuis les gaps inter-agents dans shared-context.md")
     mode_group.add_argument("--from-trace", action="store_true",
-                            help="Générer depuis les failure patterns sans agent dans BMAD_TRACE")
+                            help="Générer depuis les failure patterns sans agent dans Grimoire_TRACE")
     mode_group.add_argument("--list", action="store_true",
                             help="Lister les proposals en attente")
     mode_group.add_argument("--install", metavar="AGENT_NAME",
                             help="Installer un proposal dans le répertoire des agents")
 
     parser.add_argument("--shared-context", metavar="PATH",
-                        default="_bmad/_memory/shared-context.md")
+                        default="_grimoire/_memory/shared-context.md")
     parser.add_argument("--trace", metavar="PATH",
-                        default="_bmad-output/BMAD_TRACE.md")
+                        default="_grimoire-output/Grimoire_TRACE.md")
     parser.add_argument("--project-context", metavar="PATH",
                         default="project-context.yaml")
     parser.add_argument("--agents-dir", metavar="PATH",
-                        default="_bmad/_config/custom/agents")
+                        default="_grimoire/_config/custom/agents")
     parser.add_argument("--out-dir", metavar="PATH",
-                        default="_bmad-output/forge-proposals")
+                        default="_grimoire-output/forge-proposals")
     parser.add_argument("--archetype", metavar="ARCHETYPE",
                         default="custom",
                         help="Archétype de référence pour l\'agent (défaut: custom)")
     parser.add_argument("--manifest", metavar="PATH",
-                        default="_bmad/_config/agent-manifest.csv")
+                        default="_grimoire/_config/agent-manifest.csv")
 
     args = parser.parse_args()
 
@@ -887,7 +887,7 @@ Exemples :
             print("ℹ️  Aucun pattern de failure récurrent sans agent propriétaire détecté")
             return
         proposals = build_proposals_from_trace_gaps(trace_gaps, project_context, existing_agents)
-        print(f"🔍 {len(trace_gaps)} gap(s) détecté(s) dans BMAD_TRACE")
+        print(f"🔍 {len(trace_gaps)} gap(s) détecté(s) dans Grimoire_TRACE")
 
     # ── Sauvegarder les proposals ──────────────────────────────────────────
     if not proposals:
@@ -919,7 +919,7 @@ Exemples :
     print("  2. Remplir les prompts avec la logique métier réelle")
     if proposal.existing_overlap:
         print("  3. ⚠️  Résoudre les overlaps détectés avant installation")
-    print(f"  {3 if proposal.existing_overlap else '3'}. bash bmad-init.sh forge --install <nom-agent>")
+    print(f"  {3 if proposal.existing_overlap else '3'}. bash grimoire-init.sh forge --install <nom-agent>")
     print("  4. Sentinel [AA] pour l'audit qualité")
 
 

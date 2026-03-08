@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour llm-router.py — Routeur LLM intelligent BMAD (BM-40).
+Tests pour llm-router.py — Routeur LLM intelligent Grimoire (BM-40).
 
 Fonctions testées :
   - TaskClassifier.classify()

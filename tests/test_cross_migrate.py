@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour cross-migrate.py — BMAD Cross-Project Migration.
+Tests pour cross-migrate.py — Grimoire Cross-Project Migration.
 
 Fonctions testées :
   - export_learnings()
@@ -41,9 +41,9 @@ def _create_project_tree(root: Path, learnings=None, failures=None,
                          consensus=None, antifragile=None,
                          project_context=None):
     """Créer un arbre projet minimal pour les tests."""
-    mem = root / "_bmad" / "_memory"
+    mem = root / "_grimoire" / "_memory"
     mem.mkdir(parents=True, exist_ok=True)
-    out = root / "_bmad-output"
+    out = root / "_grimoire-output"
     out.mkdir(parents=True, exist_ok=True)
 
     if learnings:
@@ -139,7 +139,7 @@ class TestBundleManifest(BaseTest):
         cm = _import_cm()
         m = cm.BundleManifest()
         self.assertEqual(m.version, "1.0.0")
-        self.assertEqual(m.magic, "bmad-bundle")
+        self.assertEqual(m.magic, "grimoire-bundle")
         self.assertEqual(m.artifact_types, [])
 
     def test_total_items(self):
@@ -155,7 +155,7 @@ class TestMigrationBundle(BaseTest):
         cm = _import_cm()
         b = cm.MigrationBundle(manifest=cm.BundleManifest())
         d = b.to_dict()
-        self.assertEqual(d["manifest"]["magic"], "bmad-bundle")
+        self.assertEqual(d["manifest"]["magic"], "grimoire-bundle")
         self.assertEqual(d["learnings"], [])
         self.assertEqual(d["rules"], [])
 
@@ -328,7 +328,7 @@ class TestExportConsensus(BaseTest):
 
     def test_invalid_json(self):
         cm = _import_cm()
-        out = self.root / "_bmad-output"
+        out = self.root / "_grimoire-output"
         out.mkdir(parents=True, exist_ok=True)
         (out / "consensus-history.json").write_text("not json")
         self.assertEqual(cm.export_consensus(self.root), [])
@@ -445,7 +445,7 @@ class TestImportBundle(BaseTest):
         self.assertEqual(result.learnings_imported, 2)
 
         # Verify files created
-        dev_file = self.root / "_bmad" / "_memory" / "agent-learnings" / "dev.md"
+        dev_file = self.root / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         self.assertTrue(dev_file.exists())
         content = dev_file.read_text()
         self.assertIn("migré", content)
@@ -476,13 +476,13 @@ class TestImportBundle(BaseTest):
         )
         result = cm.import_bundle(bundle, self.root)
         self.assertEqual(result.rules_imported, 1)
-        rules_path = self.root / "_bmad" / "_memory" / "migrated-rules.md"
+        rules_path = self.root / "_grimoire" / "_memory" / "migrated-rules.md"
         self.assertTrue(rules_path.exists())
 
     def test_import_rules_dedup(self):
         cm = _import_cm()
         # Pre-create rules file
-        mem = self.root / "_bmad" / "_memory"
+        mem = self.root / "_grimoire" / "_memory"
         mem.mkdir(parents=True, exist_ok=True)
         (mem / "migrated-rules.md").write_text(
             "- [2026-01-01] [CC-FAIL] Règle: Always test\n")
@@ -503,13 +503,13 @@ class TestImportBundle(BaseTest):
         )
         result = cm.import_bundle(bundle, self.root)
         self.assertEqual(result.dna_patches_imported, 1)
-        target = self.root / "_bmad-output" / "dna-proposals" / "migrated" / "p1.yaml"
+        target = self.root / "_grimoire-output" / "dna-proposals" / "migrated" / "p1.yaml"
         self.assertTrue(target.exists())
 
     def test_import_dna_patches_conflict(self):
         cm = _import_cm()
         # Pre-create the file
-        d = self.root / "_bmad-output" / "dna-proposals" / "migrated"
+        d = self.root / "_grimoire-output" / "dna-proposals" / "migrated"
         d.mkdir(parents=True, exist_ok=True)
         (d / "p1.yaml").write_text("existing")
 
@@ -574,7 +574,7 @@ class TestImportBundle(BaseTest):
         self.assertEqual(result.rules_imported, 1)
 
         # But nothing written to disk
-        dev_file = self.root / "_bmad" / "_memory" / "agent-learnings" / "dev.md"
+        dev_file = self.root / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         self.assertFalse(dev_file.exists())
 
     def test_import_result_total(self):
@@ -592,7 +592,7 @@ class TestRender(BaseTest):
         bundle = cm.MigrationBundle(manifest=cm.BundleManifest(
             source_project="test", export_date="2026-01-01T00:00"))
         text = cm.render_inspect(bundle)
-        self.assertIn("BMAD Migration Bundle", text)
+        self.assertIn("Grimoire Migration Bundle", text)
         self.assertIn("test", text)
 
     def test_render_inspect_with_data(self):

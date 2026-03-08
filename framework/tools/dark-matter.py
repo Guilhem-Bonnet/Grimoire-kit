@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dark-matter.py — Détecteur de matière noire BMAD.
+dark-matter.py — Détecteur de matière noire Grimoire.
 ====================================================
 
 Détecte le savoir tribal, les conventions non-écrites, et les hypothèses
@@ -177,14 +177,14 @@ def detect_naming_conventions(project_root: Path) -> list[DarkMatterItem]:
     """Détecte les conventions de nommage implicites."""
     items = []
 
-    # Analyser les patterns de nommage dans _bmad
-    bmad_dir = project_root / "_bmad"
-    if not bmad_dir.exists():
+    # Analyser les patterns de nommage dans _grimoire
+    grimoire_dir = project_root / "_grimoire"
+    if not grimoire_dir.exists():
         return items
 
     # Collecter les patterns de nommage
     patterns: dict[str, list[str]] = defaultdict(list)
-    for fpath in bmad_dir.rglob("*.md"):
+    for fpath in grimoire_dir.rglob("*.md"):
         name = fpath.stem
         # Détecter le pattern (UPPER-, kebab-, snake_, etc.)
         if re.match(r'^[A-Z]+-', name):
@@ -202,14 +202,14 @@ def detect_naming_conventions(project_root: Path) -> list[DarkMatterItem]:
             dark_type=DarkType.CONVENTION,
             title="Conventions de nommage mixtes",
             description=f"Détecté {len(patterns)} patterns différents : {', '.join(patterns.keys())}",
-            location="_bmad/",
+            location="_grimoire/",
             confidence=0.8,
             recommendation="Documenter la convention de nommage dans le README ou CONTRIBUTING",
         ))
 
     # Vérifier les prefixes de fichiers
     prefixes = Counter()
-    for fpath in (project_root / "_bmad-output").rglob("*.md") if (project_root / "_bmad-output").exists() else []:
+    for fpath in (project_root / "_grimoire-output").rglob("*.md") if (project_root / "_grimoire-output").exists() else []:
         prefix = fpath.stem.split("-")[0].upper()
         if len(prefix) >= 2:
             prefixes[prefix] += 1
@@ -233,7 +233,7 @@ def detect_naming_conventions(project_root: Path) -> list[DarkMatterItem]:
             dark_type=DarkType.CONVENTION,
             title=f"Prefixes de fichier non documentés : {', '.join(undocumented_prefixes[:5])}",
             description="Ces prefixes sont utilisés mais non expliqués dans la doc",
-            location="_bmad-output/",
+            location="_grimoire-output/",
             confidence=0.7,
             recommendation="Ajouter une section 'Conventions de nommage' dans le README",
         ))
@@ -510,7 +510,7 @@ def cmd_document(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve()
     report = build_full_report(project_root)
     md = generate_documentation(report)
-    output = project_root / "_bmad-output" / "dark-matter-report.md"
+    output = project_root / "_grimoire-output" / "dark-matter-report.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(md, encoding="utf-8")
     print(f"📄 Rapport généré → {output}")
@@ -521,7 +521,7 @@ def cmd_document(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Dark Matter Detector — Savoir tribal et conventions implicites",
+        description="Grimoire Dark Matter Detector — Savoir tribal et conventions implicites",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

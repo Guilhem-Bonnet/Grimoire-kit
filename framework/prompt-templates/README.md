@@ -1,6 +1,6 @@
 # Prompt Templates Registry
 
-Templates réutilisables pour les prompts agents BMAD.
+Templates réutilisables pour les prompts agents Grimoire.
 Chaque template utilise des variables `{{var}}` à substituer par l'agent.
 
 ## Index

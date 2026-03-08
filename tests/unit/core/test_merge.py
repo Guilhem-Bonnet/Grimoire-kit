@@ -1,4 +1,4 @@
-"""Tests for bmad.core.merge — non-destructive merge engine."""
+"""Tests for grimoire.core.merge — non-destructive merge engine."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from bmad.core.exceptions import BmadMergeError
-from bmad.core.merge import MergeEngine
+from grimoire.core.exceptions import GrimoireMergeError
+from grimoire.core.merge import MergeEngine
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -17,10 +17,10 @@ from bmad.core.merge import MergeEngine
 def source(tmp_path: Path) -> Path:
     d = tmp_path / "source"
     d.mkdir()
-    (d / "_bmad").mkdir()
-    (d / "_bmad" / "config.yaml").write_text("config: true\n")
-    (d / "_bmad" / "agents").mkdir()
-    (d / "_bmad" / "agents" / "architect.md").write_text("# Architect\n")
+    (d / "_grimoire").mkdir()
+    (d / "_grimoire" / "config.yaml").write_text("config: true\n")
+    (d / "_grimoire" / "agents").mkdir()
+    (d / "_grimoire" / "agents" / "architect.md").write_text("# Architect\n")
     (d / ".github").mkdir()
     (d / ".github" / "copilot-instructions.md").write_text("# Instructions\n")
     (d / "new-file.txt").write_text("new content\n")
@@ -49,11 +49,11 @@ class TestConstruction:
         assert e.target == target
 
     def test_source_missing(self, tmp_path: Path, target: Path) -> None:
-        with pytest.raises(BmadMergeError, match="Source"):
+        with pytest.raises(GrimoireMergeError, match="Source"):
             MergeEngine(tmp_path / "nope", target)
 
     def test_target_missing(self, source: Path, tmp_path: Path) -> None:
-        with pytest.raises(BmadMergeError, match="Target"):
+        with pytest.raises(GrimoireMergeError, match="Target"):
             MergeEngine(source, tmp_path / "nope")
 
 
@@ -84,7 +84,7 @@ class TestAnalyze:
 
     def test_directories_to_create(self, engine: MergeEngine) -> None:
         plan = engine.analyze()
-        # _bmad, _bmad/agents, .github should need creation
+        # _grimoire, _grimoire/agents, .github should need creation
         assert len(plan.directories_to_create) >= 1
 
     def test_no_modification(self, engine: MergeEngine, target: Path) -> None:
@@ -104,12 +104,12 @@ class TestExecute:
         result = engine.execute(plan)
         assert len(result.files_created) >= 3
         assert (target / "new-file.txt").is_file()
-        assert (target / "_bmad" / "config.yaml").is_file()
+        assert (target / "_grimoire" / "config.yaml").is_file()
 
     def test_creates_directories(self, engine: MergeEngine, target: Path) -> None:
         plan = engine.analyze()
         engine.execute(plan)
-        assert (target / "_bmad" / "agents").is_dir()
+        assert (target / "_grimoire" / "agents").is_dir()
 
     def test_skips_conflicts(self, engine: MergeEngine, target: Path) -> None:
         (target / "new-file.txt").write_text("keep me\n")
@@ -159,7 +159,7 @@ class TestUndo:
         assert not result.log_path.exists()
 
     def test_undo_missing_log(self, tmp_path: Path) -> None:
-        with pytest.raises(BmadMergeError, match="not found"):
+        with pytest.raises(GrimoireMergeError, match="not found"):
             MergeEngine.undo(tmp_path / "nope.json")
 
     def test_undo_ignores_already_deleted(self, engine: MergeEngine, target: Path) -> None:

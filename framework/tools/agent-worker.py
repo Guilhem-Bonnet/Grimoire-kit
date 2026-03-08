@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-agent-worker.py — Agent Worker Process BMAD (BM-43 Story 4.2).
+agent-worker.py — Agent Worker Process Grimoire (BM-43 Story 4.2).
 ============================================================
 
-Chaque agent BMAD peut tourner comme un worker isolé avec son propre
+Chaque agent Grimoire peut tourner comme un worker isolé avec son propre
 LLM, recevant des tâches via le message bus et produisant des résultats
 validés par les delivery contracts.
 
 Le worker :
-  - Charge sa persona depuis _bmad/_config/agents/
+  - Charge sa persona depuis _grimoire/_config/agents/
   - Se connecte au message bus
   - Écoute les messages entrants
   - Utilise le LLM Router pour sélectionner son modèle
@@ -56,7 +56,7 @@ AGENT_WORKER_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-WORKERS_DIR = "_bmad-output/.workers"
+WORKERS_DIR = "_grimoire-output/.workers"
 MAX_PARALLEL_WORKERS = 5
 HEALTHCHECK_INTERVAL = 60  # seconds
 WORKER_TIMEOUT = 3600  # 1 hour
@@ -236,9 +236,9 @@ def _load_llm_router():
 
 class AgentWorkerManager:
     """
-    Gère les workers d'agents BMAD.
+    Gère les workers d'agents Grimoire.
 
-    Chaque worker a un manifest dans _bmad-output/.workers/<worker-id>.json
+    Chaque worker a un manifest dans _grimoire-output/.workers/<worker-id>.json
     """
 
     def __init__(self, project_root: Path, max_parallel: int = MAX_PARALLEL_WORKERS):
@@ -534,7 +534,7 @@ def _print_workers(wl: WorkerList) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Agent Worker — Workers isolés pour agents BMAD",
+        description="Agent Worker — Workers isolés pour agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

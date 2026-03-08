@@ -31,10 +31,10 @@ class TestVersion(unittest.TestCase):
 
 class TestKeywordExtraction(unittest.TestCase):
     def test_basic(self):
-        kw = rai._extract_keywords("Comment créer un agent BMAD ?")
+        kw = rai._extract_keywords("Comment créer un agent Grimoire ?")
         self.assertIn("créer", kw)
         self.assertIn("agent", kw)
-        self.assertIn("bmad", kw)
+        self.assertIn("grimoire", kw)
         self.assertNotIn("comment", kw)  # stop word
 
     def test_english_stop_words(self):
@@ -104,7 +104,7 @@ class TestFileBasedInject(unittest.TestCase):
         docs = Path(self.tmpdir) / "docs"
         docs.mkdir()
         (docs / "agents.md").write_text(
-            "# Agents\n\nLes agents BMAD sont des personas spécialisées.\n\n"
+            "# Agents\n\nLes agents Grimoire sont des personas spécialisées.\n\n"
             "## Agent Architecture\n\nChaque agent a un rôle unique et des compétences.\n"
         )
         (docs / "workflows.md").write_text(

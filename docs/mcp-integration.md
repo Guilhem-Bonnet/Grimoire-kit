@@ -1,21 +1,21 @@
-# Intégration MCP — BMAD Kit v3
+# Intégration MCP — Grimoire Kit v3
 
-> Exposer les outils BMAD via le Model Context Protocol pour Copilot, Claude Desktop, et tout client MCP.
+> Exposer les outils Grimoire via le Model Context Protocol pour Copilot, Claude Desktop, et tout client MCP.
 
 ## Prérequis
 
 ```bash
-pip install bmad-kit[mcp]
+pip install grimoire-kit[mcp]
 ```
 
 ## Démarrage rapide
 
 ```bash
 # Lancer le serveur MCP
-bmad-mcp
+grimoire-mcp
 
 # Ou directement via Python
-python -m bmad.mcp.server
+python -m grimoire.mcp.server
 ```
 
 ## Configuration VS Code
@@ -25,8 +25,8 @@ Créez `.vscode/mcp.json` à la racine de votre projet :
 ```json
 {
   "servers": {
-    "bmad": {
-      "command": "bmad-mcp"
+    "grimoire": {
+      "command": "grimoire-mcp"
     }
   }
 }
@@ -37,9 +37,9 @@ Ou avec un chemin Python explicite :
 ```json
 {
   "servers": {
-    "bmad": {
+    "grimoire": {
       "command": "python",
-      "args": ["-m", "bmad.mcp.server"],
+      "args": ["-m", "grimoire.mcp.server"],
       "cwd": "${workspaceFolder}"
     }
   }
@@ -53,9 +53,9 @@ Dans `claude_desktop_config.json` :
 ```json
 {
   "mcpServers": {
-    "bmad": {
+    "grimoire": {
       "command": "python",
-      "args": ["-m", "bmad.mcp.server"],
+      "args": ["-m", "grimoire.mcp.server"],
       "cwd": "/chemin/vers/projet"
     }
   }
@@ -99,21 +99,21 @@ Dans Copilot Chat ou Claude, les outils sont appelés automatiquement quand le L
 └──────────┬──────────┘
            │ MCP Protocol (stdio)
 ┌──────────▼──────────┐
-│  bmad-mcp server    │  ← FastMCP
-│  (bmad.mcp.server)  │
+│  grimoire-mcp server    │  ← FastMCP
+│  (grimoire.mcp.server)  │
 └──────────┬──────────┘
            │
 ┌──────────▼──────────┐
-│  BMAD SDK           │
+│  Grimoire SDK           │
 │  config / project   │
 │  tools / memory     │
 └─────────────────────┘
 ```
 
-Le serveur MCP est un pont entre le protocole MCP (stdin/stdout JSON-RPC) et le SDK Python BMAD.
+Le serveur MCP est un pont entre le protocole MCP (stdin/stdout JSON-RPC) et le SDK Python Grimoire.
 
 ## Voir aussi
 
 - [Guide SDK](sdk-guide.md)
-- [Référence YAML](bmad-yaml-reference.md)
+- [Référence YAML](grimoire-yaml-reference.md)
 - [Getting Started](getting-started.md)

@@ -416,7 +416,7 @@ Si discussion circulaire → STOP + résumé + proposition
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [PCE]            [MODE:selected]      mode=red_blue_team | topic="{sujet}"

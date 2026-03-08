@@ -29,7 +29,7 @@ team:
     required:
       - name: "project-context.yaml"
         description: "Contexte projet : nom, stack, utilisateurs cibles, contraintes"
-        path_pattern: "_bmad/_memory/project-context.yaml"
+        path_pattern: "_grimoire/_memory/project-context.yaml"
     optional:
       - name: "competitive-data"
         description: "Données marché existantes, analyses concurrentes"
@@ -40,15 +40,15 @@ team:
     deliverables:
       - name: "PRD validé"
         format: "Markdown"
-        path_pattern: "_bmad-output/planning-artifacts/PRD-*.md"
+        path_pattern: "_grimoire-output/planning-artifacts/PRD-*.md"
         acceptance_criteria: "Toutes les sections PRD remplies, user stories avec ACs, priorités définies"
       - name: "UX Specs"
         format: "Markdown"
-        path_pattern: "_bmad-output/planning-artifacts/UX-specs-*.md"
+        path_pattern: "_grimoire-output/planning-artifacts/UX-specs-*.md"
         acceptance_criteria: "User journeys complets, composants UI listés, états d'erreur définis"
       - name: "Delivery Contract vers Team Build"
         format: "Markdown"
-        path_pattern: "_bmad-output/contracts/vision-to-build-*.md"
+        path_pattern: "_grimoire-output/contracts/vision-to-build-*.md"
         acceptance_criteria: "Tous les deliverables cochés, contrat signé par PM"
     optional_deliverables:
       - name: "Market Research Report"
@@ -74,7 +74,7 @@ team:
           - "Recherche concurrentielle (3-5 concurrents)"
           - "Définir les personas utilisateurs (2-3 max)"
           - "Identifier les Jobs-to-be-Done"
-        output: "discovery-notes.md dans _bmad-output/team-vision/"
+        output: "discovery-notes.md dans _grimoire-output/team-vision/"
       - phase: 2
         name: "PRD Creation"
         agents_active: ["pm", "analyst"]
@@ -104,7 +104,7 @@ team:
         output: "contracts/vision-to-build-{date}.md"
 
   team_context:
-    directory: "_bmad-output/team-vision/"
+    directory: "_grimoire-output/team-vision/"
     files:
       - name: "team-context.md"
         description: "Résumé du contexte discovery : personas, JTBD, insights marché"

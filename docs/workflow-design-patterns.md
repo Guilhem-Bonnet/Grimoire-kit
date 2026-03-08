@@ -3,7 +3,7 @@
 # <img src="assets/icons/workflow.svg" width="32" height="32" alt=""> Patterns de Design — Workflows Agentiques
 
 > Patterns extraits de 86 fixes appliqués au workflow `closed-loop-fix` v2.6.
-> Ces patterns sont universels et s'appliquent à tout workflow d'agent BMAD.
+> Ces patterns sont universels et s'appliquent à tout workflow d'agent Grimoire.
 
 <img src="assets/divider.svg" width="100%" alt="">
 

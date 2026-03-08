@@ -31,7 +31,7 @@ from pathlib import Path
 
 VERSION = "1.0.0"
 
-INTEGRITY_DIR = "_bmad-output/.agent-integrity"
+INTEGRITY_DIR = "_grimoire-output/.agent-integrity"
 SNAPSHOT_FILE = "checksums.json"
 
 # Patterns de fichiers agents à surveiller

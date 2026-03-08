@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-preflight-check.py — Vérification pré-exécution BMAD.
+preflight-check.py — Vérification pré-exécution Grimoire.
 ========================================================
 
 Scanne l'environnement avant qu'un agent commence une tâche/story.
@@ -98,13 +98,13 @@ class PreflightReport:
 
 # ── Checks ───────────────────────────────────────────────────────────────────
 
-def check_bmad_structure(project_root: Path) -> list[Check]:
-    """Vérifie la structure BMAD minimale."""
+def check_grimoire_structure(project_root: Path) -> list[Check]:
+    """Vérifie la structure Grimoire minimale."""
     checks = []
     required = [
-        ("_bmad", "Dossier _bmad"),
-        ("_bmad/_config", "Dossier config"),
-        ("_bmad/_memory", "Dossier mémoire"),
+        ("_grimoire", "Dossier _grimoire"),
+        ("_grimoire/_config", "Dossier config"),
+        ("_grimoire/_memory", "Dossier mémoire"),
     ]
 
     for path_str, label in required:
@@ -113,17 +113,17 @@ def check_bmad_structure(project_root: Path) -> list[Check]:
                 name="structure",
                 severity=Severity.BLOCKER,
                 message=f"{label} manquant : {path_str}",
-                fix_hint="Exécuter bmad-init.sh pour initialiser le projet",
+                fix_hint="Exécuter grimoire-init.sh pour initialiser le projet",
             ))
 
     # Fichiers critiques
     critical_files = [
-        ("_bmad/_memory/shared-context.md", "Shared context"),
+        ("_grimoire/_memory/shared-context.md", "Shared context"),
     ]
-    custom_dir = project_root / "_bmad" / "_config" / "custom"
+    custom_dir = project_root / "_grimoire" / "_config" / "custom"
     if custom_dir.exists():
         critical_files.append(
-            ("_bmad/_config/custom/agent-base.md", "Agent base protocol")
+            ("_grimoire/_config/custom/agent-base.md", "Agent base protocol")
         )
 
     for path_str, label in critical_files:
@@ -133,7 +133,7 @@ def check_bmad_structure(project_root: Path) -> list[Check]:
                 name="critical-file",
                 severity=Severity.WARNING,
                 message=f"{label} manquant : {path_str}",
-                fix_hint="Créer le fichier via bmad-init.sh ou manuellement",
+                fix_hint="Créer le fichier via grimoire-init.sh ou manuellement",
             ))
         elif fpath.stat().st_size == 0:
             checks.append(Check(
@@ -161,7 +161,7 @@ def check_tools_available(project_root: Path) -> list[Check]:
             ))
 
     # Outils du DNA actif (si archetype-dna.yaml existe)
-    dna_files = list(project_root.glob("_bmad/**/archetype.dna.yaml"))
+    dna_files = list(project_root.glob("_grimoire/**/archetype.dna.yaml"))
     for dna in dna_files:
         try:
             content = dna.read_text(encoding="utf-8")
@@ -220,18 +220,18 @@ def check_git_state(project_root: Path) -> list[Check]:
                 fix_hint="Résoudre les conflits avant de continuer",
             ))
 
-        # Vérifier les modifications non committées dans _bmad
+        # Vérifier les modifications non committées dans _grimoire
         result = subprocess.run(
-            ["git", "status", "--porcelain", "--", "_bmad/"],
+            ["git", "status", "--porcelain", "--", "_grimoire/"],
             capture_output=True, text=True, cwd=project_root, timeout=10,
         )
         if result.stdout.strip():
             lines = result.stdout.strip().split("\n")
             checks.append(Check(
-                name="uncommitted-bmad",
+                name="uncommitted-grimoire",
                 severity=Severity.WARNING,
-                message=f"{len(lines)} modification(s) non committée(s) dans _bmad/",
-                fix_hint="git add _bmad/ && git commit -m 'chore: update bmad config'",
+                message=f"{len(lines)} modification(s) non committée(s) dans _grimoire/",
+                fix_hint="git add _grimoire/ && git commit -m 'chore: update grimoire config'",
             ))
     except (subprocess.TimeoutExpired, FileNotFoundError):
         checks.append(Check(
@@ -246,7 +246,7 @@ def check_git_state(project_root: Path) -> list[Check]:
 def check_memory_state(project_root: Path) -> list[Check]:
     """Vérifie l'état de la mémoire."""
     checks = []
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
 
     if not memory_dir.exists():
         return checks
@@ -355,7 +355,7 @@ def check_story_readiness(project_root: Path, story_path: str) -> list[Check]:
 def check_wuwei(project_root: Path, agent: str) -> list[Check]:
     """Vérifie si l'agent est en mode flow (wuwei) — ne pas interrompre."""
     checks = []
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
     session_state = memory_dir / "session-state.md"
 
     if session_state.exists():
@@ -390,7 +390,7 @@ def run_all_checks(
     """Exécute toutes les vérifications."""
     report = PreflightReport(agent=agent, story=story)
 
-    report.checks.extend(check_bmad_structure(project_root))
+    report.checks.extend(check_grimoire_structure(project_root))
     report.checks.extend(check_tools_available(project_root))
     report.checks.extend(check_git_state(project_root))
     report.checks.extend(check_memory_state(project_root))
@@ -407,7 +407,7 @@ def run_all_checks(
 def format_report(report: PreflightReport) -> str:
     """Formate le rapport pour affichage terminal."""
     lines = [
-        "✈️  Pre-flight Check — BMAD",
+        "✈️  Pre-flight Check — Grimoire",
         f"   {report.go_nogo}",
     ]
     if report.agent:
@@ -449,7 +449,7 @@ def format_report(report: PreflightReport) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Pre-flight Check — Vérification pré-exécution",
+        description="Grimoire Pre-flight Check — Vérification pré-exécution",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--agent", type=str, help="Agent cible")

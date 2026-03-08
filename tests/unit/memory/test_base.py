@@ -1,4 +1,4 @@
-"""Tests for bmad.memory.backends.base — ABC + data models."""
+"""Tests for grimoire.memory.backends.base — ABC + data models."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from bmad.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 
 # ── MemoryEntry ───────────────────────────────────────────────────────────────
 

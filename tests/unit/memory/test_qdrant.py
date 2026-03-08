@@ -1,4 +1,4 @@
-"""Tests for bmad.memory.backends.qdrant — QdrantBackend.
+"""Tests for grimoire.memory.backends.qdrant — QdrantBackend.
 
 All external dependencies (qdrant_client, sentence_transformers) are fully mocked.
 """
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bmad.memory.backends.base import BackendStatus, MemoryEntry
+from grimoire.memory.backends.base import BackendStatus, MemoryEntry
 
 # ── Mock infrastructure ───────────────────────────────────────────────────────
 
@@ -55,14 +55,14 @@ def qdrant_env(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
         monkeypatch.setitem(sys.modules, name, mod)
 
     # Clear any cached import of the backend module
-    monkeypatch.delitem(sys.modules, "bmad.memory.backends.qdrant", raising=False)
+    monkeypatch.delitem(sys.modules, "grimoire.memory.backends.qdrant", raising=False)
 
     return mock_client, mock_encoder
 
 
 def _make_backend(qdrant_env: tuple[MagicMock, MagicMock]) -> Any:
     """Import and instantiate QdrantBackend with mocked deps."""
-    from bmad.memory.backends.qdrant import QdrantBackend
+    from grimoire.memory.backends.qdrant import QdrantBackend
 
     return QdrantBackend(qdrant_path="/tmp/test_qdrant")
 
@@ -79,7 +79,7 @@ class TestQdrantBackendConstruct:
     def test_skips_create_when_collection_exists(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
         client, _ = qdrant_env
         coll = MagicMock()
-        coll.name = "bmad"
+        coll.name = "grimoire"
         client.get_collections.return_value.collections = [coll]
         _make_backend(qdrant_env)
         client.create_collection.assert_not_called()
@@ -222,7 +222,7 @@ class TestQdrantBackendConsolidate:
 class TestQdrantBackendImportError:
     def test_missing_qdrant_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify clear error when qdrant-client is not installed."""
-        monkeypatch.delitem(sys.modules, "bmad.memory.backends.qdrant", raising=False)
+        monkeypatch.delitem(sys.modules, "grimoire.memory.backends.qdrant", raising=False)
 
         import builtins
 
@@ -234,9 +234,9 @@ class TestQdrantBackendImportError:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
-        monkeypatch.delitem(sys.modules, "bmad.memory.backends.qdrant", raising=False)
+        monkeypatch.delitem(sys.modules, "grimoire.memory.backends.qdrant", raising=False)
 
-        from bmad.memory.backends.qdrant import QdrantBackend
+        from grimoire.memory.backends.qdrant import QdrantBackend
 
         with pytest.raises(ImportError, match="qdrant-client"):
             QdrantBackend(qdrant_path="/tmp/x")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BMAD Custom Kit — Tests unitaires Python
+Grimoire Custom Kit — Tests unitaires Python
 
 Teste les fonctions pures des outils Python du framework :
   - context-guard.py : estimation tokens, formatage, scoring modèles

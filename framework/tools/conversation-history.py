@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-conversation-history.py — Conversation History Vectorization BMAD (BM-44 Story 5.4).
+conversation-history.py — Conversation History Vectorization Grimoire (BM-44 Story 5.4).
 ============================================================
 
 Vectorise automatiquement l'historique conversationnel dans Qdrant
@@ -50,7 +50,7 @@ CONVERSATION_HISTORY_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-HISTORY_DIR = "_bmad-output/.conversation-history"
+HISTORY_DIR = "_grimoire-output/.conversation-history"
 INDEX_FILE = "conversations.json"
 COLLECTION_PREFIX = "conversations"
 MAX_CONVERSATIONS = 50
@@ -158,7 +158,7 @@ class EmbeddingProvider:
 class QdrantHistoryBackend:
     """Backend Qdrant pour le stockage vectoriel des conversations."""
 
-    def __init__(self, project_name: str = "bmad", qdrant_path: str = ""):
+    def __init__(self, project_name: str = "grimoire", qdrant_path: str = ""):
         self._client = None
         self._available = False
         self._collection = f"{project_name}-{COLLECTION_PREFIX}"
@@ -329,7 +329,7 @@ class JSONHistoryBackend:
 
 class ConversationHistoryManager:
     """
-    Gère l'historique conversationnel BMAD.
+    Gère l'historique conversationnel Grimoire.
 
     Utilise Qdrant si disponible, sinon fallback JSON.
     """
@@ -337,7 +337,7 @@ class ConversationHistoryManager:
     def __init__(
         self,
         project_root: Path,
-        project_name: str = "bmad",
+        project_name: str = "grimoire",
         qdrant_path: str = "",
     ):
         self.project_root = project_root
@@ -485,7 +485,7 @@ def mcp_conversation_history(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Conversation History — Historique conversationnel vectorisé BMAD",
+        description="Conversation History — Historique conversationnel vectorisé Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

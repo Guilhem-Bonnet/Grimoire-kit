@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre BMAD Custom Kit
+# <img src="assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre Grimoire Custom Kit
 
 > Ce guide explique **tous les concepts** du kit avec des analogies simples.
 > Lisez-le avant de plonger dans le code — tout deviendra limpide.
@@ -10,11 +10,11 @@
 
 ## <img src="assets/icons/grimoire.svg" width="28" height="28" alt=""> Vue d'ensemble en 30 secondes
 
-BMAD Custom Kit transforme votre IDE en **entreprise virtuelle** peuplée d'agents IA spécialisés.
+Grimoire Custom Kit transforme votre IDE en **entreprise virtuelle** peuplée d'agents IA spécialisés.
 
 ```
 Votre projet
-    └── _bmad/                  ← "Les bureaux" de votre entreprise virtuelle
+    └── _grimoire/                  ← "Les bureaux" de votre entreprise virtuelle
          ├── agents/            ← Les employés (chacun son rôle)
          ├── workflows/         ← Les processus métier
          ├── _memory/           ← La mémoire collective
@@ -262,7 +262,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 ```
 grimoire-kit/
 │
-├── bmad-init.sh                 ← Point d'entrée : installe et configure tout
+├── grimoire-init.sh                 ← Point d'entrée : installe et configure tout
 ├── project-context.tpl.yaml     ← Template : identité du projet
 │
 ├── framework/                   ← Le "système d'exploitation" (jamais modifié par projet)
@@ -289,7 +289,7 @@ grimoire-kit/
 ```
 votre-projet/
 ├── votre-code/
-├── _bmad/                       ← Créé par bmad-init.sh
+├── _grimoire/                       ← Créé par grimoire-init.sh
 │   ├── _config/
 │   │   └── custom/
 │   │       ├── agents/          ← Vos agents (copiés depuis les archétypes)
@@ -348,7 +348,7 @@ votre-projet/
 | **NSO** | Nervous System Orchestrator — cycle complet de maintenance |
 | **MCP** | Model Context Protocol — standard d'interop IDE |
 | **ADR** | Architecture Decision Record — décision documentée |
-| **BMAD_TRACE** | Variable d'environnement pour tracer l'exécution |
+| **Grimoire_TRACE** | Variable d'environnement pour tracer l'exécution |
 | **Archétype** | Pack d'agents pré-configuré pour un type de projet |
 | **Persona** | Identité et style de communication d'un agent |
 | **Delivery Contract** | Artefact contractuel entre 2 teams |
@@ -372,7 +372,7 @@ votre-projet/
 | **Health snapshot** | Capture des métriques projet (outils, tests, harmony, antifragile) |
 | **Mutation** | Transformation d'une idée gagnante (transposition, escalade, inverse) |
 | **Mutation depth** | Profondeur de chaîne — mutations de mutations pénalisées progressivement |
-| **Multi-projet** | Comparer ou croiser les données entre plusieurs projets BMAD |
+| **Multi-projet** | Comparer ou croiser les données entre plusieurs projets Grimoire |
 | **Gap-analysis** | Détection automatique des manques réels (tests, docs, dépendances) |
 | **GO threshold** | Seuil de score minimum (0.60) pour qu'une idée passe le challenge |
 | **Prototype** | Squelette Python auto-généré pour implémenter une idée gagnante |

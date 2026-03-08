@@ -2,7 +2,7 @@
 
 # <img src="../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Anti-Hallucination par Design
 
-> **BM-50** — Protocole de méta-cognition artificielle pour les agents BMAD.
+> **BM-50** — Protocole de méta-cognition artificielle pour les agents Grimoire.
 >
 > **Problème résolu** : Un LLM ne sait pas ce qu'il ne sait pas. Sans garde-fous explicites,
 > il génère des réponses plausibles mais fausses (hallucinations) plutôt que d'admettre son incertitude.
@@ -239,7 +239,7 @@ Le HUP s'ajoute comme règle **P0 non-négociable** dans `agent-base.md` :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 Chaque événement HUP est loggé :
 

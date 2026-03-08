@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour auto-index.py — Auto-indexation RAG BMAD.
+Tests pour auto-index.py — Auto-indexation RAG Grimoire.
 
 Fonctions testées :
   - _hash_file()
@@ -44,9 +44,9 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal."""
-    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal."""
+    (root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     (root / "src").mkdir(parents=True, exist_ok=True)
     return root
 
@@ -140,7 +140,7 @@ class TestIndexPersistence(unittest.TestCase):
         self.assertEqual(loaded.total_indexed, 1)
 
     def test_corrupted_index_returns_empty(self):
-        index_path = self.tmpdir / "_bmad-output" / ".auto-index-hashes.json"
+        index_path = self.tmpdir / "_grimoire-output" / ".auto-index-hashes.json"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text("not json", encoding="utf-8")
         state = self.mod.load_index(self.tmpdir)
@@ -284,7 +284,7 @@ class TestGitHook(unittest.TestCase):
         hook = self.tmpdir / ".git" / "hooks" / "post-commit"
         self.assertTrue(hook.exists())
         content = hook.read_text()
-        self.assertIn("BMAD-AUTO-INDEX", content)
+        self.assertIn("Grimoire-AUTO-INDEX", content)
 
     def test_install_idempotent(self):
         self.mod.install_hook(self.tmpdir)

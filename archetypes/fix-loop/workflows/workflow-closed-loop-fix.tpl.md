@@ -49,17 +49,17 @@ Tu peux aussi déléguer le rôle **Fixer** à l'agent expert du domaine (voir s
 
 ## INITIALISATION
 
-1. Charger `{project-root}/_bmad/core/config.yaml` → stocker `{user_name}`, `{communication_language}`
-2. Charger `{project-root}/_bmad/_memory/shared-context.md` → contexte projet + section `## Configuration Loop` → récupérer `max_iterations` si présent
-3. Charger `{project-root}/_bmad/_memory/agent-learnings/fix-loop-patterns.md` si existant → stocker les patterns en session
-4. Charger `{project-root}/_bmad/_memory/dependency-graph.md` → disponible pour surface_impact auto-discovery
-5. Générer un **FER session ID** unique : `fer-{YYYY-MM-DD}-{HH-MM-SS}` → utiliser pour nommer `{project-root}/_bmad/_memory/fer-{session-id}.yaml`.
+1. Charger `{project-root}/_grimoire/core/config.yaml` → stocker `{user_name}`, `{communication_language}`
+2. Charger `{project-root}/_grimoire/_memory/shared-context.md` → contexte projet + section `## Configuration Loop` → récupérer `max_iterations` si présent
+3. Charger `{project-root}/_grimoire/_memory/agent-learnings/fix-loop-patterns.md` si existant → stocker les patterns en session
+4. Charger `{project-root}/_grimoire/_memory/dependency-graph.md` → disponible pour surface_impact auto-discovery
+5. Générer un **FER session ID** unique : `fer-{YYYY-MM-DD}-{HH-MM-SS}` → utiliser pour nommer `{project-root}/_grimoire/_memory/fer-{session-id}.yaml`.
    Enregistrer immédiatement `session_start` comme horodatage ISO 8601 courant dans le FER.
    Enregistrer `phase_timestamps.pre_intake` au démarrage de la Phase 0.
-   Vérifier que le dossier `{project-root}/_bmad/_memory/agent-learnings/meta-review/` existe ; le créer si absent.
-   Vérifier que `{project-root}/_bmad/_memory/decisions-log.md` existe ; si absent → créer avec en-tête `# Decisions Log`.
-   Vérifier que `{project-root}/_bmad/_memory/handoff-log.md` existe ; si absent → créer avec en-tête `# Handoff Log`.
-6. Lister tous les fichiers `fer-*.yaml` (hors `.escalated` et `.abandoned`) dans `_bmad/_memory/` :
+   Vérifier que le dossier `{project-root}/_grimoire/_memory/agent-learnings/meta-review/` existe ; le créer si absent.
+   Vérifier que `{project-root}/_grimoire/_memory/decisions-log.md` existe ; si absent → créer avec en-tête `# Decisions Log`.
+   Vérifier que `{project-root}/_grimoire/_memory/handoff-log.md` existe ; si absent → créer avec en-tête `# Handoff Log`.
+6. Lister tous les fichiers `fer-*.yaml` (hors `.escalated` et `.abandoned`) dans `_grimoire/_memory/` :
    - **Si 0 trouvé** → initialiser le FER ci-dessous
    - **Si 1 trouvé** → afficher :
      ```
@@ -344,7 +344,7 @@ Si context_type correspond à un agent expert ET fix complexe :
 | `ui` | {{ux_agent_name}} ({{ux_agent_tag}}) |
 
 Mode SOLO (défaut) : l'Orchestrateur joue lui-même le Fixer.
-Mode DÉLÉGATION : écrire dans `{project-root}/_bmad/_memory/handoff-log.md` avec contexte + DoD complète → attendre réponse expert → reprendre Phase 4 avec `fix_applied` reçu.
+Mode DÉLÉGATION : écrire dans `{project-root}/_grimoire/_memory/handoff-log.md` avec contexte + DoD complète → attendre réponse expert → reprendre Phase 4 avec `fix_applied` reçu.
 
 Si Party Mode avec experts présents → DÉLÉGATION préférée. Challenger et Gatekeeper = toujours l'Orchestrateur.
 
@@ -737,7 +737,7 @@ Alimentation automatique `fix-loop-patterns.md` : si `iteration > 1`, copier `it
    ```
    Si `iteration > 1` → ajouter une clé `iteration_history` dans le pattern avec le contenu de `iteration_lessons[]`.
    *(Les fixes S3 ne sont pas enregistrés dans les patterns — trop faible valeur, risque de dilution.)*
-2. `python {project-root}/_bmad/_memory/mem0-bridge.py add fix-loop "[résumé]"` — si disponible.
+2. `python {project-root}/_grimoire/_memory/mem0-bridge.py add fix-loop "[résumé]"` — si disponible.
    > **Non-bloquant :** si le script échoue ou timeout (>10s), ne pas interrompre le rapport.
    > Loguer un warning dans `shared-context.md` : `- [ ] [loop→user] mem0 indisponible — pattern non persisté | session=[session-id] | [timestamp]` et continuer.
 3. Si `iteration > 1` → `decisions-log.md` : synthèse des échecs (extraire de `iteration_lessons[]`)
@@ -769,7 +769,7 @@ Enregistrer `phase_timestamps.meta_review` au début de cette phase.
 
 ### 8.1 Chargement du contexte historique
 
-Lire les 5 derniers fichiers dans `{project-root}/_bmad/_memory/agent-learnings/meta-review/workflow-improvement-proposal-*.yaml` (triés par date DESC, si existants).
+Lire les 5 derniers fichiers dans `{project-root}/_grimoire/_memory/agent-learnings/meta-review/workflow-improvement-proposal-*.yaml` (triés par date DESC, si existants).
 Extraire les propositions avec statut `accepted` / `refused` / `deferred` pour :
 - Éviter de proposer ce qui a déjà été refusé
 - Mentionner si une proposition similaire est en attente (`deferred`)
@@ -799,7 +799,7 @@ Chaque proposition est classée par type d'impact :
 
 ### 8.4 Output — Fichier de proposition
 
-Écrire dans `{project-root}/_bmad/_memory/agent-learnings/meta-review/workflow-improvement-proposal-{session-id}.yaml` :
+Écrire dans `{project-root}/_grimoire/_memory/agent-learnings/meta-review/workflow-improvement-proposal-{session-id}.yaml` :
 
 ```yaml
 # Workflow Improvement Proposal — généré par Phase 8 META-REVIEW

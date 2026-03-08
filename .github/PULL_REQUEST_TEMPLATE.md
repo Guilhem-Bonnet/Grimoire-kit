@@ -27,17 +27,17 @@ Closes # <!-- ou BM-XX -->
 ## Checklist
 
 ### Obligatoire
-- [ ] `bash -n bmad-init.sh` passe (si bmad-init.sh modifié)
-- [ ] `bash bmad-init.sh validate --all` passe (si DNA modifié)
-- [ ] `bash bmad-init.sh doctor` ne montre pas de nouvelles erreurs
+- [ ] `bash -n grimoire-init.sh` passe (si grimoire-init.sh modifié)
+- [ ] `bash grimoire-init.sh validate --all` passe (si DNA modifié)
+- [ ] `bash grimoire-init.sh doctor` ne montre pas de nouvelles erreurs
 
 ### Si archétype / DNA modifié
 - [ ] `acceptance_criteria` renseignés avec `test_command` pour chaque AC `blocking: true`
 - [ ] `tools_required` listés avec `command` vérifiable
-- [ ] DNA testé avec `bash bmad-init.sh install --archetype <id>`
+- [ ] DNA testé avec `bash grimoire-init.sh install --archetype <id>`
 
 ### Si hook git modifié
-- [ ] Hook testé manuellement (installer avec `bash bmad-init.sh hooks --install --hook <name>`)
+- [ ] Hook testé manuellement (installer avec `bash grimoire-init.sh hooks --install --hook <name>`)
 - [ ] Hook ne bloque jamais le commit sur erreur inattendue (exit 0 garanti pour hooks non-bloquants)
 - [ ] Commentaire d'en-tête présent (format standard des autres hooks)
 

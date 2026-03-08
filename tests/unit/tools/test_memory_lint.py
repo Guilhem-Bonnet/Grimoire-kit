@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.memory_lint — MemoryLint tool."""
+"""Tests for grimoire.tools.memory_lint — MemoryLint tool."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.tools.memory_lint import (
+from grimoire.tools.memory_lint import (
     LintIssue,
     LintReport,
     MemoryFile,
@@ -31,8 +31,8 @@ from bmad.tools.memory_lint import (
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
     (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
-    (tmp_path / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True)
-    (tmp_path / "_bmad-output").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True)
+    (tmp_path / "_grimoire-output").mkdir(parents=True)
     return tmp_path
 
 
@@ -168,28 +168,28 @@ class TestCollectMemoryFiles:
         assert files == []
 
     def test_finds_learnings(self, project: Path) -> None:
-        learn = project / "_bmad" / "_memory" / "agent-learnings" / "dev.md"
+        learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         learn.write_text("# Dev Learnings\n- [2024-06-01] Learned TDD\n")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "learnings"
 
     def test_finds_decisions(self, project: Path) -> None:
-        dec = project / "_bmad" / "_memory" / "decisions-log.md"
+        dec = project / "_grimoire" / "_memory" / "decisions-log.md"
         dec.write_text("# Decisions\n- [2024-01-01] Use Python 3.12\n")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "decisions"
 
     def test_finds_trace(self, project: Path) -> None:
-        trace = project / "_bmad-output" / "BMAD_TRACE.md"
+        trace = project / "_grimoire-output" / "Grimoire_TRACE.md"
         trace.write_text("[2024-03-01 10:00] [INFO] [analyst] Hello\n")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "trace"
 
     def test_finds_jsonl(self, project: Path) -> None:
-        cc = project / "_bmad" / "_memory" / "cc-feedback.jsonl"
+        cc = project / "_grimoire" / "_memory" / "cc-feedback.jsonl"
         cc.write_text('{"timestamp":"2024-01-01","title":"Feedback"}\n')
         files = collect_memory_files(project)
         assert len(files) == 1
@@ -358,7 +358,7 @@ class TestMemoryLint:
         assert len(report.issues) == 0
 
     def test_with_learnings(self, project: Path) -> None:
-        learn = project / "_bmad" / "_memory" / "agent-learnings" / "dev.md"
+        learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         learn.write_text("# Dev\n- [2024-06-01] Learned TDD patterns\n")
         ml = MemoryLint(project)
         report = ml.run()
@@ -367,9 +367,9 @@ class TestMemoryLint:
 
     def test_issues_sorted(self, project: Path) -> None:
         # Create files that produce both errors and warnings
-        learn = project / "_bmad" / "_memory" / "agent-learnings" / "dev.md"
+        learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         learn.write_text("# Dev\n- [2024-01-01] TDD approach adopted and validated for backend\n")
-        dec = project / "_bmad" / "_memory" / "decisions-log.md"
+        dec = project / "_grimoire" / "_memory" / "decisions-log.md"
         dec.write_text("# Dec\n- [2024-01-02] TDD approach rejected and abandoned for backend\n")
         ml = MemoryLint(project)
         report = ml.run()

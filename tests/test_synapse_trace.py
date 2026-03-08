@@ -141,7 +141,7 @@ class TestSynapseTracer(unittest.TestCase):
 
     def test_trace_path(self):
         tracer = mod.SynapseTracer(self.root)
-        self.assertIn("BMAD_TRACE.md", str(tracer.trace_path))
+        self.assertIn("Grimoire_TRACE.md", str(tracer.trace_path))
 
     def test_record_dry_run(self):
         tracer = mod.SynapseTracer(self.root, dry_run=True)
@@ -314,7 +314,7 @@ class TestClear(unittest.TestCase):
         self.assertEqual(len(tracer.entries), 0)
 
     def test_clear_preserves_non_synapse(self):
-        trace_path = self.root / "_bmad-output" / "BMAD_TRACE.md"
+        trace_path = self.root / "_grimoire-output" / "Grimoire_TRACE.md"
         trace_path.parent.mkdir(parents=True)
         existing = "### [2025-01-01] Some other trace\n- detail: value\n"
         trace_path.write_text(existing, encoding="utf-8")

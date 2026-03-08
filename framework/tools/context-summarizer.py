@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context-summarizer.py — Résumé automatique du contexte ancien BMAD (BM-41 Story 3.1).
+context-summarizer.py — Résumé automatique du contexte ancien Grimoire (BM-41 Story 3.1).
 ============================================================
 
 Résume automatiquement les sections anciennes du contexte (decisions-log > 30j,
@@ -49,8 +49,8 @@ CHARS_PER_TOKEN = 4
 DEFAULT_AGE_THRESHOLD_DAYS = 30
 DEFAULT_MAX_SUMMARY_TOKENS = 500
 DEFAULT_LEARNINGS_AGE_DAYS = 60
-ARCHIVES_DIR = "_bmad/_memory/archives"
-MEMORY_DIR = "_bmad/_memory"
+ARCHIVES_DIR = "_grimoire/_memory/archives"
+MEMORY_DIR = "_grimoire/_memory"
 
 # Sections à préserver intégralement même si anciennes
 DEFAULT_PRESERVE_TAGS = ["critical", "architecture", "security", "breaking"]
@@ -537,7 +537,7 @@ def load_summarizer_config(project_root: Path) -> dict:
 
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
@@ -727,7 +727,7 @@ def _print_preview(sections: list[Section]) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="Context Summarizer — Résumé automatique du contexte ancien BMAD",
+        description="Context Summarizer — Résumé automatique du contexte ancien Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

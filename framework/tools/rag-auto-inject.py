@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rag-auto-inject.py — Automatic RAG context injection for BMAD agents (D11).
+rag-auto-inject.py — Automatic RAG context injection for Grimoire agents (D11).
 ═══════════════════════════════════════════════════════════════════
 
 Hook qui injecte automatiquement du contexte RAG pertinent dans les
@@ -39,7 +39,7 @@ RAG_AUTO_INJECT_VERSION = "1.0.0"
 # Default knowledge directories to search (relative to project root)
 _KNOWLEDGE_DIRS = [
     "docs",
-    "_bmad/_memory",
+    "_grimoire/_memory",
     "framework",
 ]
 
@@ -293,7 +293,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BMAD RAG Auto-Inject")
+    parser = argparse.ArgumentParser(description="Grimoire RAG Auto-Inject")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

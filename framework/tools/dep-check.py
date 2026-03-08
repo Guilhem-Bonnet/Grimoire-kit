@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dep-check.py — Dependency graph & validation for BMAD tools.
+dep-check.py — Dependency graph & validation for Grimoire tools.
 ═══════════════════════════════════════════════════════════════════
 
 Analyse les dépendances inter-outils en scannant :
@@ -264,7 +264,7 @@ def cmd_cycles(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="BMAD Tool Dependency Checker")
+        description="Grimoire Tool Dependency Checker")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

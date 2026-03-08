@@ -275,7 +275,7 @@ lifecycle:
     4: "Mettre à jour ARG : relationships enrichies"
     5: "Si décision prise → émettre événement decision dans ELSS"
     6: "Fermer le canal message-bus"
-    7: "Logger le résumé dans BMAD_TRACE"
+    7: "Logger le résumé dans Grimoire_TRACE"
 
   # Time-box
   time_limits:
@@ -328,7 +328,7 @@ huddle_vs_party:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]   [SHP:trigger]    auto | condition=cvtl_challenge | topic="auth pattern"

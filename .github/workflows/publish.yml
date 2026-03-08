@@ -30,7 +30,7 @@ jobs:
       - name: Verify wheel installs
         run: |
           pip install dist/*.whl
-          bmad --version
+          grimoire --version
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -61,8 +61,8 @@ jobs:
       - name: Install and test
         run: |
           pip install dist/*.whl
-          bmad --version
-          python -c "from bmad.core.config import BmadConfig; print('SDK OK')"
+          grimoire --version
+          python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
 
   publish-testpypi:
     name: "Publish to TestPyPI"
@@ -136,7 +136,7 @@ jobs:
             ## Installation
 
             ```bash
-            pip install bmad-kit==${{ github.ref_name }}
+            pip install grimoire-kit==${{ github.ref_name }}
             ```
           files: dist/*
           generate_release_notes: true

@@ -451,7 +451,7 @@ def run_consensus(proposal: str, project_root: Path,
 
 def save_result(result: ConsensusResult, project_root: Path) -> Path:
     """Sauvegarde le résultat dans l'historique."""
-    output_dir = project_root / "_bmad-output"
+    output_dir = project_root / "_grimoire-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     history_path = output_dir / HISTORY_FILE
 
@@ -483,7 +483,7 @@ def save_result(result: ConsensusResult, project_root: Path) -> Path:
 
 def load_history(project_root: Path) -> list[dict]:
     """Charge l'historique des décisions."""
-    path = project_root / "_bmad-output" / HISTORY_FILE
+    path = project_root / "_grimoire-output" / HISTORY_FILE
     if not path.exists():
         return []
     try:
@@ -620,10 +620,10 @@ def render_stats(history: list[dict]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Adversarial Consensus Protocol — décisions critiques validées par consensus BFT",
+        description="Grimoire Adversarial Consensus Protocol — décisions critiques validées par consensus BFT",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", default=".", help="Racine du projet BMAD")
+    parser.add_argument("--project-root", default=".", help="Racine du projet Grimoire")
     parser.add_argument("--proposal", default=None, help="Proposition à évaluer (texte)")
     parser.add_argument("--proposal-file", default=None, help="Fichier contenant la proposition")
     parser.add_argument("--threshold", type=float, default=CONSENSUS_THRESHOLD,

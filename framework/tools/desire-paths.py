@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-desire-paths.py — Analyse des "chemins de désir" BMAD.
+desire-paths.py — Analyse des "chemins de désir" Grimoire.
 ========================================================
 
 Comme les sentiers tracés par les piétons qui ignorent les allées pavées,
@@ -14,7 +14,7 @@ Analyse :
   5. Quels items de menu sont utilisés vs quels sont au menu
 
 Sources de données :
-  - BMAD_TRACE logs (si disponibles)
+  - Grimoire_TRACE logs (si disponibles)
   - Git log (activité fichiers)
   - Contenu fichiers mémoire (patterns d'usage)
   - Structure des fichiers (timestamp mtime heuristique)
@@ -152,7 +152,7 @@ def analyze_agents(project_root: Path, use_git: bool) -> list[DesireEntry]:
 
     # Agents définis (dans les archétypes)
     designed_agents: set[str] = set()
-    for md_file in project_root.glob("_bmad/**/agents/*.md"):
+    for md_file in project_root.glob("_grimoire/**/agents/*.md"):
         designed_agents.add(md_file.stem)
 
     # Agents dans les archetypes
@@ -161,7 +161,7 @@ def analyze_agents(project_root: Path, use_git: bool) -> list[DesireEntry]:
 
     # Agents référencés dans la mémoire
     used_agents: Counter = Counter()
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
     if memory_dir.exists():
         for md in memory_dir.rglob("*.md"):
             try:
@@ -176,7 +176,7 @@ def analyze_agents(project_root: Path, use_git: bool) -> list[DesireEntry]:
 
     # Git activity
     if use_git:
-        _git_file_activity(project_root, "_bmad/**/agents/")
+        _git_file_activity(project_root, "_grimoire/**/agents/")
 
     # Construire les entrées
     all_agents = designed_agents | set(used_agents.keys())
@@ -204,9 +204,9 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
 
     # Workflows définis
     designed_wf: set[str] = set()
-    for wf in project_root.glob("_bmad/**/workflows/**/*.yaml"):
+    for wf in project_root.glob("_grimoire/**/workflows/**/*.yaml"):
         designed_wf.add(wf.stem)
-    for wf in project_root.glob("_bmad/**/workflows/**/*.md"):
+    for wf in project_root.glob("_grimoire/**/workflows/**/*.md"):
         if wf.name != "README.md":
             designed_wf.add(wf.stem)
     for wf in project_root.glob("**/framework/workflows/**/*.yaml"):
@@ -217,8 +217,8 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
 
     # Traces d'exécution
     used_wf: Counter = Counter()
-    # Chercher dans les traces BMAD
-    for trace_file in project_root.glob("_bmad/_memory/**/trace*.md"):
+    # Chercher dans les traces Grimoire
+    for trace_file in project_root.glob("_grimoire/_memory/**/trace*.md"):
         try:
             content = trace_file.read_text(encoding="utf-8")
             for wf_name in designed_wf:
@@ -230,7 +230,7 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
             # Silent exception — add logging when investigating issues
 
     # Chercher dans session-state et shared-context
-    for md in project_root.glob("_bmad/_memory/*.md"):
+    for md in project_root.glob("_grimoire/_memory/*.md"):
         try:
             content = md.read_text(encoding="utf-8")
             for wf_name in designed_wf:
@@ -269,7 +269,7 @@ def analyze_tools(project_root: Path, use_git: bool) -> list[DesireEntry]:
     used_tools: Counter = Counter()
     # Chercher dans les agents, workflows, mémoire
     search_dirs = [
-        project_root / "_bmad",
+        project_root / "_grimoire",
         project_root / "docs",
     ]
     for search_dir in search_dirs:
@@ -514,7 +514,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Desire Paths — Analyse design vs usage réel",
+        description="Grimoire Desire Paths — Analyse design vs usage réel",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

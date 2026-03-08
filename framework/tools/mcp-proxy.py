@@ -3,10 +3,10 @@
 mcp-proxy.py — MCP Proxy for routing to external MCP servers (D14).
 ═══════════════════════════════════════════════════════════════════
 
-Routeur MCP qui permet aux agents BMAD d'accéder à des serveurs MCP
+Routeur MCP qui permet aux agents Grimoire d'accéder à des serveurs MCP
 externes (Godot, Figma, Browser, etc.) via une interface unifiée.
 
-Configuration : _bmad/_config/mcp-servers.yaml
+Configuration : _grimoire/_config/mcp-servers.yaml
   servers:
     - name: browser
       command: npx @anthropic/mcp-browser
@@ -63,7 +63,7 @@ _DEFAULT_CONFIG = {
 # ── Config ───────────────────────────────────────────────────────
 
 def _config_path(project_root: Path) -> Path:
-    return project_root / "_bmad" / "_config" / "mcp-servers.json"
+    return project_root / "_grimoire" / "_config" / "mcp-servers.json"
 
 
 def _load_config(project_root: Path) -> dict[str, Any]:
@@ -209,7 +209,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BMAD MCP Proxy")
+    parser = argparse.ArgumentParser(description="Grimoire MCP Proxy")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

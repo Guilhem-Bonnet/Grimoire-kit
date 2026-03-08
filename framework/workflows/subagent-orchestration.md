@@ -2,7 +2,7 @@
 
 # <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol
 
-> **BM-19** — Architecture native pour spawner des sous-agents en parallèle depuis un workflow BMAD.
+> **BM-19** — Architecture native pour spawner des sous-agents en parallèle depuis un workflow Grimoire.
 >
 > Inspiré de Claude's tool_use, MetaGPT SOP, et Roo-Code Boomerang Tasks.
 >
@@ -24,20 +24,20 @@
     - agent: "dev"
       task: "Analyse le répertoire src/ pour les problèmes de sécurité (OWASP Top 10). Retourne une liste structurée : [{file, line, severity, description}]"
       context:
-        - "_bmad/_memory/shared-context.md"
-        - "_bmad-output/implementation-artifacts/architecture-*.md"
+        - "_grimoire/_memory/shared-context.md"
+        - "_grimoire-output/implementation-artifacts/architecture-*.md"
       output_key: "security_findings"
 
     - agent: "qa"
       task: "Analyse la couverture de tests dans src/. Identifie les fichiers sans tests et les branches non couvertes. Retourne : [{file, coverage_pct, missing_tests}]"
       context:
-        - "_bmad/_memory/shared-context.md"
+        - "_grimoire/_memory/shared-context.md"
       output_key: "coverage_findings"
 
   merge:
     strategy: "summarize"           # summarize | concat | first-wins | vote
     merged_output_key: "analysis_report"
-    save_to: "_bmad-output/implementation-artifacts/analysis-report-{date}.md"
+    save_to: "_grimoire-output/implementation-artifacts/analysis-report-{date}.md"
 ```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
@@ -88,7 +88,7 @@ spawn:
     output_key: arch_violations
 merge:
   strategy: summarize
-  save_to: "_bmad-output/implementation-artifacts/full-review-{date}.md"
+  save_to: "_grimoire-output/implementation-artifacts/full-review-{date}.md"
 ```
 
 ### Pattern 2 — Validation Croisée
@@ -106,7 +106,7 @@ spawn:
     output_key: product_impact
 merge:
   strategy: vote
-  save_to: "_bmad-output/planning-artifacts/adr-rest-vs-graphql.md"
+  save_to: "_grimoire-output/planning-artifacts/adr-rest-vs-graphql.md"
 ```
 
 ### Pattern 3 — Boomerang Tasks (hiérarchique)
@@ -155,7 +155,7 @@ merge:
   validator_agent: architect
   trust_threshold: 70              # score minimum pour accepter
   on_below_threshold: escalate_to_user
-  save_to: "_bmad-output/implementation-artifacts/auth-validated.md"
+  save_to: "_grimoire-output/implementation-artifacts/auth-validated.md"
 ```
 
 > Référence complète : `framework/cross-validation-trust.md` (BM-52)
@@ -178,7 +178,7 @@ on_escalation:
   auto_resolve_sources:
     - shared-context.md
     - decisions-log.md
-    - _bmad-output/.qa-history.yaml
+    - _grimoire-output/.qa-history.yaml
   max_questions_per_lot: 7         # chunking 7±2
 ```
 

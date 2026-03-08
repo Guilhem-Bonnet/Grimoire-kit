@@ -155,7 +155,7 @@ class TestSectionCollectors(unittest.TestCase):
         self.assertEqual(result.name, "mcp")
 
     def test_collect_mcp_has_tools(self):
-        """MCP section should find tools since bmad-mcp-tools.py exists."""
+        """MCP section should find tools since grimoire-mcp-tools.py exists."""
         result = dash._collect_mcp(KIT_DIR)
         if result.status == "ok":
             self.assertIn("tools", result.data)

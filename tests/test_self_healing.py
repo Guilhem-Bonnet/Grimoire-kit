@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour self-healing.py — self-healing.py — Auto-réparation des workflows BMAD.
+Tests pour self-healing.py — self-healing.py — Auto-réparation des workflows Grimoire.
 
 Fonctions testées :
   - diagnose_error()
@@ -47,11 +47,11 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal pour les tests."""
-    (root / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal pour les tests."""
+    (root / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
     (root / "framework" / "tools").mkdir(parents=True, exist_ok=True)
     return root
 
@@ -97,9 +97,9 @@ class TestProjectFunctions(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        # Minimal BMAD structure
-        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-        (self.tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+        # Minimal Grimoire structure
+        (self.tmpdir / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -227,7 +227,7 @@ class TestSuggestImprovements(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -237,7 +237,7 @@ class TestSuggestImprovements(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_recurrent_pattern_detected(self):
-        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        log_file = self.tmpdir / "_grimoire" / "_memory" / self.mod.HEALING_LOG
         records = [
             {"timestamp": f"2025-01-0{i}T00:00:00", "error": "file not found: x.md",
              "rule_id": "HE-001", "strategy": "CREATE", "success": True, "detail": "ok"}
@@ -251,7 +251,7 @@ class TestSuggestImprovements(unittest.TestCase):
         self.assertIn("recurrent_pattern", types)
 
     def test_automation_candidate_detected(self):
-        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        log_file = self.tmpdir / "_grimoire" / "_memory" / self.mod.HEALING_LOG
         records = [
             {"timestamp": "2025-01-01T00:00:00", "error": "merge conflict",
              "rule_id": "HE-002", "strategy": "ROLLBACK", "success": False, "detail": "manual"},
@@ -266,7 +266,7 @@ class TestSuggestImprovements(unittest.TestCase):
         self.assertIn("automation_candidate", types)
 
     def test_low_heal_rate_detected(self):
-        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        log_file = self.tmpdir / "_grimoire" / "_memory" / self.mod.HEALING_LOG
         records = [
             {"timestamp": f"2025-01-{i:02d}T00:00:00", "error": f"error {i}",
              "rule_id": "HE-999", "strategy": "ESCALATE", "success": False, "detail": "nope"}
@@ -280,7 +280,7 @@ class TestSuggestImprovements(unittest.TestCase):
         self.assertIn("low_heal_rate", types)
 
     def test_suggestion_fields(self):
-        log_file = self.tmpdir / "_bmad" / "_memory" / self.mod.HEALING_LOG
+        log_file = self.tmpdir / "_grimoire" / "_memory" / self.mod.HEALING_LOG
         records = [
             {"timestamp": f"2025-01-0{i}T00:00:00", "error": "file not found: x.md",
              "rule_id": "HE-001", "strategy": "CREATE", "success": True, "detail": "ok"}
@@ -299,7 +299,7 @@ class TestMCPInterface(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)

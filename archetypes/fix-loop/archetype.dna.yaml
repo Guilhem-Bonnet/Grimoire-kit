@@ -1,4 +1,4 @@
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 
 id: fix-loop
 name: "Fix Loop"

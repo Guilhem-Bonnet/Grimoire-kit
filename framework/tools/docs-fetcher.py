@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-docs-fetcher.py — Indexation de documentation externe BMAD.
+docs-fetcher.py — Indexation de documentation externe Grimoire.
 =============================================================
 
 Télécharge, parse et stocke de la documentation externe pour
@@ -10,7 +10,7 @@ avec chunking adaptatif et intégration native rag-indexer.
 Fonctionnement :
   1. Télécharge une page ou un site de docs (HTML → Markdown)
   2. Chunk le contenu (respecte la structure heading)
-  3. Stocke dans ``_bmad-output/.docs-cache/`` avec metadata
+  3. Stocke dans ``_grimoire-output/.docs-cache/`` avec metadata
   4. Optionnel : pousse dans l'index RAG Qdrant via rag-indexer
 
 Sources supportées :
@@ -56,8 +56,8 @@ _log = logging.getLogger("grimoire.docs_fetcher")
 
 DOCS_FETCHER_VERSION = "1.0.0"
 
-CACHE_DIR = "_bmad-output/.docs-cache"
-INDEX_FILE = "_bmad-output/.docs-index.json"
+CACHE_DIR = "_grimoire-output/.docs-cache"
+INDEX_FILE = "_grimoire-output/.docs-index.json"
 MAX_PAGE_SIZE = 5 * 1024 * 1024  # 5 Mo
 MAX_PAGES_PER_SITEMAP = 50
 RATE_LIMIT_DELAY = 1.0  # secondes entre requêtes
@@ -320,7 +320,7 @@ def fetch_url(url: str, timeout: int = REQUEST_TIMEOUT) -> tuple[str, str]:
 
     try:
         import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "BMAD-DocsFetcher/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Grimoire-DocsFetcher/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             if resp.length and resp.length > MAX_PAGE_SIZE:
                 return "", f"Page trop volumineuse ({resp.length} bytes > {MAX_PAGE_SIZE})"

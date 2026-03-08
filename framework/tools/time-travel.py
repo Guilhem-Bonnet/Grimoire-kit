@@ -28,7 +28,7 @@ from typing import Any
 
 VERSION = "1.0.0"
 
-CHECKPOINT_DIR = ".bmad-checkpoints"
+CHECKPOINT_DIR = ".grimoire-checkpoints"
 META_FILE = "checkpoint-meta.json"
 TRACKED_DIRS = ("framework", "archetypes", "docs")
 TRACKED_EXTS = {".py", ".md", ".yaml", ".yml", ".xml", ".json", ".sh"}

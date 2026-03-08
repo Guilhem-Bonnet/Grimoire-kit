@@ -13,7 +13,7 @@
 > sans couplage direct avec les autres.
 >
 > **Implémentation** : S'appuie sur `framework/tools/message-bus.py` (InProcess/Redis/NATS)
-> pour le transport et `BMAD_TRACE.md` (BM-28) pour la persistance.
+> pour le transport et `Grimoire_TRACE.md` (BM-28) pour la persistance.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -33,7 +33,7 @@
 │  InProcess → Redis → NATS (scalable)   │
 ├────────────────────────────────────────┤
 │         EVENT LOG (append-only)        │
-│  _bmad-output/.event-log.jsonl         │
+│  _grimoire-output/.event-log.jsonl         │
 │  ┌─ event_001 ─────────────────────┐  │
 │  │ agent: dev/Amelia               │  │
 │  │ type: decision                  │  │
@@ -45,7 +45,7 @@
 │       STATE PROJECTOR (read model)     │
 │  Reconstruit l'état courant depuis     │
 │  le log d'événements                   │
-│  → _bmad-output/.shared-state.yaml    │
+│  → _grimoire-output/.shared-state.yaml    │
 └────────────────────────────────────────┘
      │subscribe    │subscribe    │subscribe
      ▼             ▼             ▼
@@ -82,7 +82,7 @@
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format du Event Log
 
-Fichier : `_bmad-output/.event-log.jsonl` (JSON Lines, append-only)
+Fichier : `_grimoire-output/.event-log.jsonl` (JSON Lines, append-only)
 
 ```jsonl
 {"id":"evt-a3f9b201","ts":"2026-03-05T14:32:01Z","agent":"dev/Amelia","type":"decision","payload":{"topic":"auth","choice":"JWT stateless","rationale":"scalabilité horizontale"},"trace_id":"session-001","seq":1}
@@ -99,7 +99,7 @@ event_schema:
   agent: "{agent_id}/{persona}"   # émetteur
   type: "{event_type}"            # voir table des types
   payload: {}                     # données spécifiques au type
-  trace_id: "{session_trace_id}"  # lien avec BMAD_TRACE
+  trace_id: "{session_trace_id}"  # lien avec Grimoire_TRACE
   seq: integer                    # numéro de séquence global
   
   # Optionnel
@@ -112,7 +112,7 @@ event_schema:
 
 ## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Shared State — État Reconstruit
 
-Fichier : `_bmad-output/.shared-state.yaml`
+Fichier : `_grimoire-output/.shared-state.yaml`
 
 L'état partagé est **projeté** depuis le log d'événements (event sourcing pattern).
 Il n'est JAMAIS modifié directement — seulement reconstruit.
@@ -222,7 +222,7 @@ emit_protocol:
     fallback: |
       Si message-bus non disponible :
       → Append direct au fichier .event-log.jsonl
-      → Logger dans BMAD_TRACE.md
+      → Logger dans Grimoire_TRACE.md
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -235,7 +235,7 @@ Chaque agent peut observer l'état partagé :
 observe_protocol:
   # Lecture de l'état courant
   read_state:
-    method: "Charger _bmad-output/.shared-state.yaml"
+    method: "Charger _grimoire-output/.shared-state.yaml"
     frequency: "Au début de chaque tâche + après chaque subscription reçue"
     cache: "Valide 30 secondes — rechargement lazy après événement reçu"
   
@@ -324,7 +324,7 @@ retention_policy:
   event_log:
     max_events: 10000
     max_age_days: 30
-    archive_strategy: "Archiver dans _bmad-output/.event-log-archive/{date}.jsonl"
+    archive_strategy: "Archiver dans _grimoire-output/.event-log-archive/{date}.jsonl"
   
   shared_state:
     rebuild_on_archive: true  # reconstruire après archivage
@@ -336,9 +336,9 @@ retention_policy:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
-Chaque événement est aussi loggé dans BMAD_TRACE.md :
+Chaque événement est aussi loggé dans Grimoire_TRACE.md :
 
 ```
 [timestamp] [agent/Name]     [ELSS:emit]      type=decision | topic="auth approach"
@@ -352,9 +352,9 @@ Chaque événement est aussi loggé dans BMAD_TRACE.md :
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Message Bus : [framework/tools/message-bus.py](tools/message-bus.py) — transport des événements
-- BMAD Trace : [framework/bmad-trace.md](bmad-trace.md) — persistance audit trail
+- Grimoire Trace : [framework/grimoire-trace.md](grimoire-trace.md) — persistance audit trail
 - State Checkpoint : `framework/workflows/state-checkpoint.md` (BM-06)
-- Shared Context : `_bmad/_memory/shared-context.md` — enrichi par les projections ELSS
+- Shared Context : `_grimoire/_memory/shared-context.md` — enrichi par les projections ELSS
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55)
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56)
 

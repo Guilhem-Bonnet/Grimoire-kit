@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dream.py — BMAD Dream Mode : consolidation hors-session et insights émergents.
+dream.py — Grimoire Dream Mode : consolidation hors-session et insights émergents.
 ==============================================================================
 
 Simule une phase de "rêve" : les agents relisent learnings, decisions, trace,
@@ -8,7 +8,7 @@ failure museum et shared-context, puis produisent des insights cross-domaine
 qu'aucun agent n'aurait formulés en session.
 
 Mode read-only : aucun fichier n'est modifié. Les insights sont écrits dans
-_bmad-output/dream-journal.md pour review humain.
+_grimoire-output/dream-journal.md pour review humain.
 
 Usage :
   python3 dream.py --project-root .                   # Dream complet
@@ -74,7 +74,7 @@ def collect_sources(project_root: Path, since: str | None = None,
                     agent_filter: str | None = None) -> list[DreamSource]:
     """Collecte toutes les sources de mémoire du projet."""
     sources: list[DreamSource] = []
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
 
     # 1. Learnings
     learnings_dir = memory_dir / "agent-learnings"
@@ -103,13 +103,13 @@ def collect_sources(project_root: Path, since: str | None = None,
                 dates=[e[0] for e in entries],
             ))
 
-    # 3. BMAD_TRACE
-    trace_file = project_root / "_bmad-output" / "BMAD_TRACE.md"
+    # 3. Grimoire_TRACE
+    trace_file = project_root / "_grimoire-output" / "Grimoire_TRACE.md"
     if trace_file.exists():
         entries = _parse_trace_entries(trace_file, since, agent_filter)
         if entries:
             sources.append(DreamSource(
-                name="BMAD_TRACE.md",
+                name="Grimoire_TRACE.md",
                 kind="trace",
                 entries=[e[1] for e in entries],
                 dates=[e[0] for e in entries],
@@ -239,7 +239,7 @@ def _parse_markdown_entries(path: Path, since: str | None = None) -> list[tuple[
 
 def _parse_trace_entries(path: Path, since: str | None = None,
                          agent_filter: str | None = None) -> list[tuple[str, str]]:
-    """Parse BMAD_TRACE.md pour les entrées pertinentes."""
+    """Parse Grimoire_TRACE.md pour les entrées pertinentes."""
     try:
         content = path.read_text(encoding="utf-8")
     except OSError:
@@ -290,7 +290,7 @@ def _parse_pheromone_board(project_root: Path,
     Filtre les phéromones émises par dream-mode pour éviter l'auto-référence,
     sauf celles qui ont été amplifiées (= feedback humain/agent).
     """
-    board_path = project_root / "_bmad-output" / "pheromone-board.json"
+    board_path = project_root / "_grimoire-output" / "pheromone-board.json"
     if not board_path.exists():
         return []
     try:
@@ -368,7 +368,7 @@ def _extract_keywords(text: str) -> set[str]:
 # Agents connus pour l'attribution automatique
 _KNOWN_AGENTS = frozenset({
     "dev", "architect", "pm", "qa", "sm", "analyst",
-    "tech-writer", "ux-designer", "bmad-master",
+    "tech-writer", "ux-designer", "grimoire-master",
 })
 
 _AGENT_PATTERN = re.compile(r'\[([a-z][a-z0-9_-]*)\]', re.IGNORECASE)
@@ -843,7 +843,7 @@ DREAM_TIMESTAMP_FILE = "dream-last-run"
 
 def save_last_dream_timestamp(project_root: Path) -> None:
     """Sauvegarde le timestamp du dernier dream pour le mode incrémental."""
-    ts_dir = project_root / "_bmad" / "_memory"
+    ts_dir = project_root / "_grimoire" / "_memory"
     ts_dir.mkdir(parents=True, exist_ok=True)
     ts_file = ts_dir / DREAM_TIMESTAMP_FILE
     ts_file.write_text(datetime.now().strftime("%Y-%m-%d"), encoding="utf-8")
@@ -851,7 +851,7 @@ def save_last_dream_timestamp(project_root: Path) -> None:
 
 def read_last_dream_timestamp(project_root: Path) -> str | None:
     """Lit le timestamp du dernier dream. Retourne None si aucun."""
-    ts_file = project_root / "_bmad" / "_memory" / DREAM_TIMESTAMP_FILE
+    ts_file = project_root / "_grimoire" / "_memory" / DREAM_TIMESTAMP_FILE
     if not ts_file.exists():
         return None
     try:
@@ -932,7 +932,7 @@ def _insight_signature(insight: DreamInsight) -> str:
 
 def load_dream_memory(project_root: Path) -> dict:
     """Charge dream-memory.json. Retourne {} si inexistant."""
-    mem_path = project_root / "_bmad-output" / DREAM_MEMORY_FILE
+    mem_path = project_root / "_grimoire-output" / DREAM_MEMORY_FILE
     if not mem_path.exists():
         return {}
     try:
@@ -943,7 +943,7 @@ def load_dream_memory(project_root: Path) -> dict:
 
 def save_dream_memory(project_root: Path, memory: dict) -> None:
     """Sauvegarde dream-memory.json."""
-    mem_path = project_root / "_bmad-output" / DREAM_MEMORY_FILE
+    mem_path = project_root / "_grimoire-output" / DREAM_MEMORY_FILE
     mem_path.parent.mkdir(parents=True, exist_ok=True)
     mem_path.write_text(json.dumps(memory, indent=2, ensure_ascii=False),
                         encoding="utf-8")
@@ -1018,7 +1018,7 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
     total_entries = sum(len(s.entries) for s in sources)
 
     lines = [
-        f"# 🌙 BMAD Dream Journal — {now}",
+        f"# 🌙 Grimoire Dream Journal — {now}",
         "",
         f"> Consolidation hors-session — {len(sources)} sources, {total_entries} entrées analysées",
     ]
@@ -1094,8 +1094,8 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
 
 
 def write_journal(content: str, project_root: Path, dry_run: bool = False) -> Path:
-    """Écrit le journal dans _bmad-output/dream-journal.md."""
-    output_dir = project_root / "_bmad-output"
+    """Écrit le journal dans _grimoire-output/dream-journal.md."""
+    output_dir = project_root / "_grimoire-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     journal_path = output_dir / "dream-journal.md"
 
@@ -1119,10 +1119,10 @@ def write_journal(content: str, project_root: Path, dry_run: bool = False) -> Pa
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Dream Mode — consolidation hors-session et insights émergents",
+        description="Grimoire Dream Mode — consolidation hors-session et insights émergents",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", default=".", help="Racine du projet BMAD")
+    parser.add_argument("--project-root", default=".", help="Racine du projet Grimoire")
     parser.add_argument("--since", default=None,
                         help="Date début (YYYY-MM-DD) ou 'auto' pour depuis le dernier dream")
     parser.add_argument("--agent", default=None, help="Filtrer par agent")
@@ -1155,8 +1155,8 @@ def main():
             since = read_last_dream_timestamp(project_root)
 
         for proj in projects:
-            if not (proj / "_bmad" / "_memory").exists():
-                print(f"⚠️  {proj.name}: pas de mémoire BMAD — ignoré")
+            if not (proj / "_grimoire" / "_memory").exists():
+                print(f"⚠️  {proj.name}: pas de mémoire Grimoire — ignoré")
                 continue
             sources = collect_sources(proj, since, args.agent)
             if not sources:

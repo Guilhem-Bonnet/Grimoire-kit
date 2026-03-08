@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nso.py — Nervous System Orchestrator BMAD.
+nso.py — Nervous System Orchestrator Grimoire.
 ============================================
 
 Méta-outil qui orchestre l'ensemble du système nerveux en une seule commande :
@@ -273,7 +273,7 @@ def _run_darwinism(project_root: Path | str,
 
     try:
         # Darwinism needs a trace file path
-        trace_path = project_root / "_bmad-output" / "BMAD_TRACE.md"
+        trace_path = project_root / "_grimoire-output" / "Grimoire_TRACE.md"
         scores = mod.cmd_evaluate(project_root, trace_path,
                                   since=since, save=False)
         if not scores:
@@ -355,7 +355,7 @@ def run_nso(project_root: Path | str, since: str | None = None,
     """Exécute toutes les phases du Nervous System Orchestrator.
 
     Args:
-        project_root: racine du projet BMAD (str ou Path)
+        project_root: racine du projet Grimoire (str ou Path)
         since: filtre temporel (YYYY-MM-DD ou 'auto')
         quick: mode rapide pour le dream
         emit: émettre les résultats vers stigmergy
@@ -485,7 +485,7 @@ def _collect_retro_learnings(project_root: Path,
                              since: str | None = None) -> list[RetroItem]:
     """Collecte les learnings récents → went_well."""
     items: list[RetroItem] = []
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
 
     # Agent learnings
     learnings_dir = memory_dir / "agent-learnings"
@@ -515,7 +515,7 @@ def _collect_retro_failures(project_root: Path,
                             since: str | None = None) -> list[RetroItem]:
     """Collecte les failures récents → problems."""
     items: list[RetroItem] = []
-    museum = project_root / "_bmad" / "_memory" / "failure-museum.md"
+    museum = project_root / "_grimoire" / "_memory" / "failure-museum.md"
     if not museum.is_file():
         return items
 
@@ -737,11 +737,11 @@ def retro_to_dict(report: RetroReport) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Nervous System Orchestrator — orchestre tout le système nerveux",
+        description="Grimoire Nervous System Orchestrator — orchestre tout le système nerveux",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 

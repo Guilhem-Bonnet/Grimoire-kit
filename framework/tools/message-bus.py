@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-message-bus.py — Couche d'abstraction Message Bus BMAD (BM-43 Story 4.1).
+message-bus.py — Couche d'abstraction Message Bus Grimoire (BM-43 Story 4.1).
 ============================================================
 
 Couche de communication inter-agents avec backends pluggables :
@@ -141,7 +141,7 @@ class MessageBus(ABC):
     Interface abstraite pour les backends de message bus.
 
     Implémente les patterns request-reply, pub-sub et broadcast
-    pour la communication inter-agents BMAD.
+    pour la communication inter-agents Grimoire.
     """
 
     @abstractmethod
@@ -327,7 +327,7 @@ class RedisBus(MessageBus):
     Connection: redis://localhost:6379 par défaut
     """
 
-    def __init__(self, url: str = "redis://localhost:6379", prefix: str = "bmad"):
+    def __init__(self, url: str = "redis://localhost:6379", prefix: str = "grimoire"):
         self._url = url
         self._prefix = prefix
         self._redis = None
@@ -452,7 +452,7 @@ class NATSBus(MessageBus):
     Statut : STUB — implémentation async nécessaire
     """
 
-    def __init__(self, url: str = "nats://localhost:4222", prefix: str = "bmad"):
+    def __init__(self, url: str = "nats://localhost:4222", prefix: str = "grimoire"):
         self._url = url
         self._prefix = prefix
         self._available = False
@@ -519,13 +519,13 @@ def create_bus(backend: str = "in-process", **kwargs) -> MessageBus:
 
 
 def load_bus_config(project_root: Path) -> dict:
-    """Charge la config bus depuis project-context.yaml ou bmad.yaml."""
+    """Charge la config bus depuis project-context.yaml ou grimoire.yaml."""
     try:
         import yaml
     except ImportError:
         return {}
 
-    for candidate in [project_root / "project-context.yaml", project_root / "bmad.yaml"]:
+    for candidate in [project_root / "project-context.yaml", project_root / "grimoire.yaml"]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -600,7 +600,7 @@ def _print_stats(stats: BusStats) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Message Bus — Communication inter-agents BMAD",
+        description="Message Bus — Communication inter-agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--backend", choices=sorted(BACKENDS.keys()), default="in-process",

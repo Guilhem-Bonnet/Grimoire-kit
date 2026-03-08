@@ -17,7 +17,7 @@
 Chaque run de workflow `workflow.xml` crée automatiquement :
 
 ```
-_bmad-output/.runs/
+_grimoire-output/.runs/
 └── {workflow-name}-{timestamp}/
     ├── state.json          ← Checkpoint machine-readable
     ├── workflow-status.md  ← Status human-readable (BM-02)
@@ -86,13 +86,13 @@ def make_checkpoint_id(run_id: str, step: int, variables: dict) -> str:
 
 ```bash
 # Reprendre un workflow depuis un checkpoint précis
-bmad-init.sh resume --checkpoint a3f9b2
+grimoire-init.sh resume --checkpoint a3f9b2
 
 # Lister tous les checkpoints disponibles
-bmad-init.sh resume --list
+grimoire-init.sh resume --list
 
 # Reprendre le dernier run non-terminé (sans checkpoint_id)
-bmad-init.sh resume
+grimoire-init.sh resume
 ```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
@@ -126,7 +126,7 @@ L'agent détecte automatiquement un run non-terminé si :
 **Procédure de reprise :**
 
 ```
-1. Lire _bmad-output/.runs/{run_id}/state.json
+1. Lire _grimoire-output/.runs/{run_id}/state.json
 2. Restaurer session_variables dans la session courante
 3. Charger les artefacts produits (pour contexte)
 4. Reprendre à l'étape steps_completed[-1] + 1
@@ -170,10 +170,10 @@ Les checkpoints sont scoped par session branch :
 
 ```bash
 # Branch par défaut : main
-_bmad-output/.runs/main/dev-story-20260227-143022/state.json
+_grimoire-output/.runs/main/dev-story-20260227-143022/state.json
 
 # Branch feature
-_bmad-output/.runs/feature-auth/dev-story-20260227-150000/state.json
+_grimoire-output/.runs/feature-auth/dev-story-20260227-150000/state.json
 
 # On peut avoir deux runs du même workflow en parallèle sur des branches différentes
 ```
@@ -182,16 +182,16 @@ _bmad-output/.runs/feature-auth/dev-story-20260227-150000/state.json
 
 ## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Cleanup
 
-Les runs complétés (`"status": "completed"`) sont conservés **7 jours** puis archivés dans `_bmad-output/.runs/archive/`. 
+Les runs complétés (`"status": "completed"`) sont conservés **7 jours** puis archivés dans `_grimoire-output/.runs/archive/`. 
 Les runs failed sont conservés **30 jours** pour forensics.
 
 Nettoyage manuel :
 ```bash
 # Lister tous les runs
-ls -la _bmad-output/.runs/
+ls -la _grimoire-output/.runs/
 
 # Nettoyer les runs complétés > 7 jours
-find _bmad-output/.runs -name "state.json" -mtime +7 -path "*/main/*" | xargs -I{} dirname {} | xargs rm -rf
+find _grimoire-output/.runs -name "state.json" -mtime +7 -path "*/main/*" | xargs -I{} dirname {} | xargs rm -rf
 ```
 
 

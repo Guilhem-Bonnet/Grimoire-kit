@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-cross-migrate.py — Migration cross-projet pour BMAD.
+cross-migrate.py — Migration cross-projet pour Grimoire.
 =====================================================
 
-Exporte et importe des artefacts BMAD entre projets :
+Exporte et importe des artefacts Grimoire entre projets :
   - Learnings d'agents (agent-learnings/*.md)
   - Règles issues du Failure Museum (failure-museum.md → règles instaurées)
   - DNA patches (dna-proposals/)
@@ -13,7 +13,7 @@ Exporte et importe des artefacts BMAD entre projets :
 
 Concept : un projet mature peut polliniser un projet neuf avec ses
 apprentissages. Le système filtre, anonymise et empaquette les artefacts
-dans un bundle portable (.bmad-bundle.json).
+dans un bundle portable (.grimoire-bundle.json).
 
 Usage :
   python3 cross-migrate.py --project-root . export --output bundle.json
@@ -41,7 +41,7 @@ _log = logging.getLogger("grimoire.cross_migrate")
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 BUNDLE_VERSION = "1.0.0"
-BUNDLE_MAGIC = "bmad-bundle"
+BUNDLE_MAGIC = "grimoire-bundle"
 
 ARTIFACT_TYPES = {
     "learnings",
@@ -193,7 +193,7 @@ def _parse_date_from_line(line: str) -> str:
 def export_learnings(project_root: Path,
                      since: str | None = None) -> list[ExportedLearning]:
     """Exporte les learnings de tous les agents."""
-    learnings_dir = project_root / "_bmad" / "_memory" / "agent-learnings"
+    learnings_dir = project_root / "_grimoire" / "_memory" / "agent-learnings"
     results = []
 
     if not learnings_dir.exists():
@@ -224,7 +224,7 @@ def export_learnings(project_root: Path,
 def export_rules(project_root: Path,
                  since: str | None = None) -> list[ExportedRule]:
     """Exporte les règles instaurées depuis le Failure Museum."""
-    fm_path = project_root / "_bmad" / "_memory" / "failure-museum.md"
+    fm_path = project_root / "_grimoire" / "_memory" / "failure-museum.md"
     if not fm_path.exists():
         return []
 
@@ -283,7 +283,7 @@ def export_rules(project_root: Path,
 
 def export_dna_patches(project_root: Path) -> list[dict]:
     """Exporte les DNA patches proposés."""
-    proposals_dir = project_root / "_bmad-output" / "dna-proposals"
+    proposals_dir = project_root / "_grimoire-output" / "dna-proposals"
     results = []
 
     if not proposals_dir.exists():
@@ -301,7 +301,7 @@ def export_dna_patches(project_root: Path) -> list[dict]:
 
 def export_agents(project_root: Path) -> list[dict]:
     """Exporte les agents forgés (proposals)."""
-    proposals_dir = project_root / "_bmad-output" / "forge-proposals"
+    proposals_dir = project_root / "_grimoire-output" / "forge-proposals"
     results = []
 
     if not proposals_dir.exists():
@@ -319,7 +319,7 @@ def export_agents(project_root: Path) -> list[dict]:
 
 def export_consensus(project_root: Path) -> list[dict]:
     """Exporte l'historique du consensus."""
-    path = project_root / "_bmad-output" / "consensus-history.json"
+    path = project_root / "_grimoire-output" / "consensus-history.json"
     if not path.exists():
         return []
     try:
@@ -331,7 +331,7 @@ def export_consensus(project_root: Path) -> list[dict]:
 
 def export_antifragile(project_root: Path) -> list[dict]:
     """Exporte l'historique anti-fragile."""
-    path = project_root / "_bmad-output" / "antifragile-history.json"
+    path = project_root / "_grimoire-output" / "antifragile-history.json"
     if not path.exists():
         return []
     try:
@@ -408,7 +408,7 @@ def load_bundle(bundle_path: Path) -> MigrationBundle:
     data = json.loads(content)
 
     if data.get("manifest", {}).get("magic") != BUNDLE_MAGIC:
-        raise ValueError("Ce fichier n'est pas un bundle BMAD valide")
+        raise ValueError("Ce fichier n'est pas un bundle Grimoire valide")
 
     return MigrationBundle.from_dict(data)
 
@@ -444,8 +444,8 @@ def import_bundle(bundle: MigrationBundle, project_root: Path,
                   dry_run: bool = False) -> ImportResult:
     """Importe un bundle dans le projet cible."""
     result = ImportResult()
-    memory_dir = project_root / "_bmad" / "_memory"
-    output_dir = project_root / "_bmad-output"
+    memory_dir = project_root / "_grimoire" / "_memory"
+    output_dir = project_root / "_grimoire-output"
 
     # Import learnings
     if bundle.learnings:
@@ -603,7 +603,7 @@ def render_inspect(bundle: MigrationBundle) -> str:
     """Affiche le contenu d'un bundle."""
     m = bundle.manifest
     lines = [
-        "# 📦 BMAD Migration Bundle",
+        "# 📦 Grimoire Migration Bundle",
         "",
         f"> **Source** : {m.source_project}",
         f"> **Date export** : {m.export_date[:10]}",
@@ -727,17 +727,17 @@ def render_diff(bundle: MigrationBundle, project_root: Path) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Cross-Project Migration — export/import d'artefacts",
+        description="Grimoire Cross-Project Migration — export/import d'artefacts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 
     # export
     exp = sub.add_parser("export", help="Exporter un bundle")
-    exp.add_argument("--output", default="_bmad-output/migration-bundle.json",
+    exp.add_argument("--output", default="_grimoire-output/migration-bundle.json",
                      help="Fichier de sortie")
     exp.add_argument("--only", default=None,
                      help="Types à exporter (comma-sep)")

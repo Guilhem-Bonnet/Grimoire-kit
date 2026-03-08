@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rag-retriever.py — Retrieval sémantique BMAD au runtime agent (BM-42 Story 2.3).
+rag-retriever.py — Retrieval sémantique Grimoire au runtime agent (BM-42 Story 2.3).
 ============================================================
 
 Enrichit automatiquement le contexte agent avant chaque réponse en
@@ -225,7 +225,7 @@ class RAGRetriever:
         qdrant_path: str = "",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         ollama_url: str = "",
-        project_name: str = "bmad",
+        project_name: str = "grimoire",
         max_chunks: int = DEFAULT_MAX_CHUNKS,
         min_score: float = DEFAULT_MIN_SCORE,
         max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
@@ -239,7 +239,7 @@ class RAGRetriever:
 
         # Init Qdrant + embedding (lazy — only on first use)
         self._qdrant_url = qdrant_url
-        self._qdrant_path = qdrant_path or str(project_root / "_bmad-output" / ".qdrant_data")
+        self._qdrant_path = qdrant_path or str(project_root / "_grimoire-output" / ".qdrant_data")
         self._embedding_model = embedding_model
         self._ollama_url = ollama_url
         self._client = None
@@ -449,7 +449,7 @@ class RAGRetriever:
         if not report.embedding_available:
             report.errors.append(
                 "Embedding model non disponible — "
-                "pip install sentence-transformers ou configurer BMAD_OLLAMA_URL"
+                "pip install sentence-transformers ou configurer Grimoire_OLLAMA_URL"
             )
 
         # Check collections
@@ -504,9 +504,9 @@ def file_based_fallback(
 
     # Chercher dans les fichiers mémoire et docs
     search_dirs = [
-        project_root / "_bmad" / "_memory",
+        project_root / "_grimoire" / "_memory",
         project_root / "docs",
-        project_root / "_bmad-output" / "planning-artifacts",
+        project_root / "_grimoire-output" / "planning-artifacts",
     ]
 
     scored_chunks: list[tuple[float, RetrievedChunk]] = []
@@ -574,7 +574,7 @@ def load_retriever_config(project_root: Path) -> dict:
 
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
@@ -589,10 +589,10 @@ def build_retriever_from_config(project_root: Path) -> RAGRetriever:
 
     return RAGRetriever(
         project_root=project_root,
-        qdrant_url=os.environ.get("BMAD_QDRANT_URL", config.get("qdrant_url", "")),
+        qdrant_url=os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", "")),
         embedding_model=config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"),
-        ollama_url=os.environ.get("BMAD_OLLAMA_URL", config.get("ollama_url", "")),
-        project_name=config.get("collection_prefix", "bmad"),
+        ollama_url=os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", "")),
+        project_name=config.get("collection_prefix", "grimoire"),
         max_chunks=config.get("max_chunks", DEFAULT_MAX_CHUNKS),
         min_score=config.get("min_score", DEFAULT_MIN_SCORE),
         max_context_tokens=config.get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS),
@@ -673,7 +673,7 @@ def _print_augmented(aug: AugmentedPrompt) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="RAG Retriever — Retrieval sémantique BMAD pour enrichir le contexte agent",
+        description="RAG Retriever — Retrieval sémantique Grimoire pour enrichir le contexte agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

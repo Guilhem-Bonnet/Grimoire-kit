@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BMAD Session Saver — Persiste l'état de session dans session-state.md.
+Grimoire Session Saver — Persiste l'état de session dans session-state.md.
 
 Usage:
     python session-save.py <agent_tag> [--work "description"] [--files "f1,f2"] [--next "recommandation"]
@@ -50,14 +50,14 @@ def _get_project_name() -> str:
     try:
         import yaml
     except ImportError:
-        return "BMAD Project"
+        return "Grimoire Project"
     for parent in [MEMORY_DIR.parent.parent, MEMORY_DIR.parent.parent.parent]:
         ctx_file = parent / "project-context.yaml"
         if ctx_file.exists():
             with open(ctx_file, encoding="utf-8") as f:
                 ctx = yaml.safe_load(f) or {}
-                return ctx.get("project", {}).get("name", "BMAD Project")
-    return "BMAD Project"
+                return ctx.get("project", {}).get("name", "Grimoire Project")
+    return "Grimoire Project"
 
 
 def save_session(
@@ -137,7 +137,7 @@ def save_session(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BMAD Session Saver")
+    parser = argparse.ArgumentParser(description="Grimoire Session Saver")
     parser.add_argument("agent", help=f"Tag de l'agent ({', '.join(sorted(VALID_AGENTS))})")
     parser.add_argument("--work", type=str, default="", help="Description du travail (séparé par |)")
     parser.add_argument("--files", type=str, default="", help="Fichiers modifiés (séparé par ,)")

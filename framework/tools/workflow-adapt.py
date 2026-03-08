@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-workflow-adapt.py — Plasticité synaptique BMAD.
+workflow-adapt.py — Plasticité synaptique Grimoire.
 ================================================
 
-Analyse les traces d'exécution (BMAD_TRACE) pour détecter les patterns
+Analyse les traces d'exécution (Grimoire_TRACE) pour détecter les patterns
 d'utilisation réels et proposer des adaptations automatiques des workflows :
 
   - Détection des étapes systématiquement sautées (dead code workflow)
@@ -42,7 +42,7 @@ _log = logging.getLogger("grimoire.workflow_adapt")
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 VERSION = "1.0.0"
-TRACE_DIR_DEFAULT = ".bmad-trace"
+TRACE_DIR_DEFAULT = ".grimoire-trace"
 ADAPT_HISTORY = "workflow-adapt-history.json"
 
 ADAPTATION_TYPES = {
@@ -98,15 +98,15 @@ class AdaptReport:
 # ── Trace Parser ─────────────────────────────────────────────────────────────
 
 def _find_trace_files(project_root: Path) -> list[Path]:
-    """Cherche les fichiers de trace (.bmad-trace/, ou patterns connus)."""
+    """Cherche les fichiers de trace (.grimoire-trace/, ou patterns connus)."""
     traces = []
     trace_dir = project_root / TRACE_DIR_DEFAULT
     if trace_dir.exists():
         traces.extend(trace_dir.rglob("*.json"))
         traces.extend(trace_dir.rglob("*.log"))
 
-    # Aussi chercher dans _bmad/_memory
-    mem_dir = project_root / "_bmad" / "_memory"
+    # Aussi chercher dans _grimoire/_memory
+    mem_dir = project_root / "_grimoire" / "_memory"
     if mem_dir.exists():
         for f in mem_dir.rglob("*trace*"):
             traces.append(f)
@@ -184,8 +184,8 @@ def _synthesize_workflow_files(project_root: Path) -> list[WorkflowStats]:
     stats = []
     workflow_dirs = [
         project_root / "framework" / "workflows",
-        project_root / "_bmad" / "bmm" / "workflows",
-        project_root / "_bmad" / "core" / "workflows",
+        project_root / "_grimoire" / "bmm" / "workflows",
+        project_root / "_grimoire" / "core" / "workflows",
     ]
     for wdir in workflow_dirs:
         if not wdir.exists():
@@ -289,7 +289,7 @@ def detect_from_workflow_structure(project_root: Path) -> list[Adaptation]:
     adaptations = []
     workflow_dirs = [
         project_root / "framework" / "workflows",
-        project_root / "_bmad" / "bmm" / "workflows",
+        project_root / "_grimoire" / "bmm" / "workflows",
     ]
     for wdir in workflow_dirs:
         if not wdir.exists():
@@ -330,7 +330,7 @@ def build_adapt_report(project_root: Path) -> AdaptReport:
 # ── Persistence ──────────────────────────────────────────────────────────────
 
 def save_history(project_root: Path, report: AdaptReport) -> Path:
-    out = project_root / "_bmad" / "_memory" / ADAPT_HISTORY
+    out = project_root / "_grimoire" / "_memory" / ADAPT_HISTORY
     out.parent.mkdir(parents=True, exist_ok=True)
     history = []
     if out.exists():
@@ -477,7 +477,7 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Plasticité synaptique — Workflows adaptatifs",
+        description="Grimoire Plasticité synaptique — Workflows adaptatifs",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

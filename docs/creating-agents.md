@@ -8,25 +8,25 @@
 
 ```bash
 # Depuis une description textuelle
-bash bmad-init.sh forge --from "je veux un agent pour les migrations de base de données"
+bash grimoire-init.sh forge --from "je veux un agent pour les migrations de base de données"
 
 # Depuis les requêtes inter-agents non résolues (shared-context.md)
-bash bmad-init.sh forge --from-gap
+bash grimoire-init.sh forge --from-gap
 
-# Depuis les failures BMAD_TRACE sans agent propriétaire
-bash bmad-init.sh forge --from-trace
+# Depuis les failures Grimoire_TRACE sans agent propriétaire
+bash grimoire-init.sh forge --from-trace
 
 # Lister les proposals en attente de review
-bash bmad-init.sh forge --list
+bash grimoire-init.sh forge --list
 
 # Installer après review du [TODO]
-bash bmad-init.sh forge --install db-migrator
+bash grimoire-init.sh forge --install db-migrator
 ```
 
 **Pipeline :**
 ```
 forge --from "..."
-  → _bmad-output/forge-proposals/agent-[tag].proposed.md
+  → _grimoire-output/forge-proposals/agent-[tag].proposed.md
   → [ Réviser les [TODO] : identité, prompts métier ]
   → forge --install [tag]
   → Sentinel [AA] audit qualité
@@ -37,13 +37,13 @@ forge --from "..."
 
 > **Conseil budget :** Après avoir installé un nouvel agent, vérifiez qu'il ne sature pas la fenêtre de contexte :
 > ```bash
-> bash bmad-init.sh guard --agent [id-de-votre-agent] --detail --suggest
+> bash grimoire-init.sh guard --agent [id-de-votre-agent] --detail --suggest
 > ```
 > Seuil recommandé : < 40% de la fenêtre du modèle cible.
 
 <img src="assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Anatomie d'un agent BMAD Custom
+## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Anatomie d'un agent Grimoire Custom
 
 Un agent est un fichier Markdown structuré avec des balises XML qui définissent sa personnalité, ses capacités et ses actions.
 
@@ -62,8 +62,8 @@ mon-agent.md
 ### 1. Copier le template
 
 ```bash
-cp _bmad/_config/custom/agents/custom-agent.tpl.md \
-   _bmad/_config/custom/agents/mon-nouvel-agent.md
+cp _grimoire/_config/custom/agents/custom-agent.tpl.md \
+   _grimoire/_config/custom/agents/mon-nouvel-agent.md
 ```
 
 ### 2. Remplir les variables
@@ -101,7 +101,7 @@ model_affinity:
 | **speed** | Boucles rapides fix→test, CI | Décisions stratégiques, audits |
 | **cost** | Tâches critiques, sécurité | Tâches répétitives, consolidation |
 
-Vérifiez la recommandation : `bash bmad-init.sh guard --recommend-models`
+Vérifiez la recommandation : `bash grimoire-init.sh guard --recommend-models`
 
 ### 3. Écrire l'identité
 
@@ -147,13 +147,13 @@ Vérifier que le endpoint /api/auth/login :
 
 ### 5. Enregistrer l'agent
 
-Ajouter dans `_bmad/_config/agent-manifest.csv` :
+Ajouter dans `_grimoire/_config/agent-manifest.csv` :
 
 ```csv
-"mon-nouvel-agent","Gardien","Sécurité Applicative","🛡️","security-app","custom","_bmad/_config/custom/agents/mon-nouvel-agent.md"
+"mon-nouvel-agent","Gardien","Sécurité Applicative","🛡️","security-app","custom","_grimoire/_config/custom/agents/mon-nouvel-agent.md"
 ```
 
-Ajouter dans `_bmad/_memory/shared-context.md` (table équipe) :
+Ajouter dans `_grimoire/_memory/shared-context.md` (table équipe) :
 
 ```markdown
 | mon-nouvel-agent | Gardien | 🛡️ | Sécurité applicative |
@@ -162,7 +162,7 @@ Ajouter dans `_bmad/_memory/shared-context.md` (table équipe) :
 Créer le fichier learnings :
 
 ```bash
-echo "# Learnings — Gardien" > _bmad/_memory/agent-learnings/security-app.md
+echo "# Learnings — Gardien" > _grimoire/_memory/agent-learnings/security-app.md
 ```
 
 <img src="assets/divider.svg" width="100%" alt="">
@@ -224,8 +224,8 @@ agents:
 
 ```bash
 # Vérifier la cohérence
-python _bmad/_memory/maintenance.py context-drift
+python _grimoire/_memory/maintenance.py context-drift
 
 # Tester le dispatch
-python _bmad/_memory/mem0-bridge.py dispatch "vérifier la sécurité des endpoints API"
+python _grimoire/_memory/mem0-bridge.py dispatch "vérifier la sécurité des endpoints API"
 ```

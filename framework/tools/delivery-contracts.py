@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-delivery-contracts.py — Delivery Contracts inter-agents BMAD (BM-43 Story 4.4).
+delivery-contracts.py — Delivery Contracts inter-agents Grimoire (BM-43 Story 4.4).
 ============================================================
 
 Formalise les interfaces entre agents avec des contrats typés :
@@ -26,7 +26,7 @@ Usage :
 Stdlib only.
 
 Références :
-  - BMAD Delivery Contract template: framework/delivery-contract.tpl.md
+  - Grimoire Delivery Contract template: framework/delivery-contract.tpl.md
   - JSON Schema: https://json-schema.org/
   - Pydantic: https://docs.pydantic.dev/
 """
@@ -649,7 +649,7 @@ def mcp_list_contracts() -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Delivery Contracts — Contrats typés inter-agents BMAD",
+        description="Delivery Contracts — Contrats typés inter-agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=None,

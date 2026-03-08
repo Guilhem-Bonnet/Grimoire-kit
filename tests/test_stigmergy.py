@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour stigmergy.py — Coordination stigmergique BMAD.
+Tests pour stigmergy.py — Coordination stigmergique Grimoire.
 
 Fonctions testées :
   - Pheromone / PheromoneBoard / TrailPattern dataclasses
@@ -37,7 +37,7 @@ def _import_st():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_root(tmpdir: Path) -> Path:
-    (tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    (tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     return tmpdir
 
 
@@ -182,7 +182,7 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(len(b2.pheromones), 1)
 
     def test_load_corrupt_json(self):
-        path = self.root / "_bmad-output" / "pheromone-board.json"
+        path = self.root / "_grimoire-output" / "pheromone-board.json"
         path.write_text("{invalid}", encoding="utf-8")
         b = self.st.load_board(self.root)
         self.assertEqual(b.pheromones, [])
@@ -191,13 +191,13 @@ class TestPersistence(unittest.TestCase):
         root = self.tmpdir / "new-project"
         b = self.st.PheromoneBoard()
         self.st.save_board(root, b)
-        self.assertTrue((root / "_bmad-output" / "pheromone-board.json").exists())
+        self.assertTrue((root / "_grimoire-output" / "pheromone-board.json").exists())
 
     def test_json_structure(self):
         b = self.st.PheromoneBoard()
         self.st.emit_pheromone(b, "ALERT", "loc", "msg", "dev")
         self.st.save_board(self.root, b)
-        path = self.root / "_bmad-output" / "pheromone-board.json"
+        path = self.root / "_grimoire-output" / "pheromone-board.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         self.assertIn("version", data)
         self.assertIn("pheromones", data)

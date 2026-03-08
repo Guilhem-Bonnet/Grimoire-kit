@@ -4,7 +4,7 @@
 
 > **BM-32** — Stub d'implémentation du protocole Agent2Agent (A2A) de Google (mars 2025).
 >
-> **Objectif** : Permettre à un agent BMAD de déléguer une tâche à un agent dans un autre
+> **Objectif** : Permettre à un agent Grimoire de déléguer une tâche à un agent dans un autre
 > outil (Cursor, Claude Desktop, VS Code Copilot, OpenAI Assistants) avec un contexte
 > structuré et récupérer la réponse de façon standardisée.
 >
@@ -18,17 +18,17 @@
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Agent BMAD (émetteur)                          │
+│  Agent Grimoire (émetteur)                          │
 │  ex: sm/Bob dans VS Code Copilot                │
 └──────────────────┬──────────────────────────────┘
                    │  A2A Task Request (JSON)
                    ▼
 ┌─────────────────────────────────────────────────┐
-│  BMAD A2A Dispatcher                           │
+│  Grimoire A2A Dispatcher                           │
 │  framework/tools/a2a-dispatcher.py             │
 │                                                  │
 │  Routes vers :                                   │
-│  ├── bmad-local      (autre agent BMAD local)   │
+│  ├── grimoire-local      (autre agent Grimoire local)   │
 │  ├── cursor-agent    (via Cursor API)            │
 │  ├── claude-desktop  (via Claude Projects)       │
 │  ├── openai-agent    (via OpenAI Assistants API) │
@@ -37,18 +37,18 @@
                    │  A2A Task Response (JSON)
                    ▼
 ┌─────────────────────────────────────────────────┐
-│  Agent BMAD (récepteur) — résultat intégré      │
+│  Agent Grimoire (récepteur) — résultat intégré      │
 └─────────────────────────────────────────────────┘
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format A2A Task Request (BMAD Profile)
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format A2A Task Request (Grimoire Profile)
 
 ```json
 {
   "a2a_version": "1.0",
-  "task_id": "bmad-task-20260227-143022-abc123",
+  "task_id": "grimoire-task-20260227-143022-abc123",
   "sender": {
     "agent_id": "sm/Bob",
     "tool": "github-copilot",
@@ -57,7 +57,7 @@
   },
   "recipient": {
     "agent_id": "architect/Winston",
-    "tool": "bmad-local",
+    "tool": "grimoire-local",
     "capabilities_required": ["architecture-review", "adr-creation"]
   },
   "task": {
@@ -103,15 +103,15 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Format A2A Task Response (BMAD Profile)
+## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Format A2A Task Response (Grimoire Profile)
 
 ```json
 {
   "a2a_version": "1.0",
-  "task_id": "bmad-task-20260227-143022-abc123",
+  "task_id": "grimoire-task-20260227-143022-abc123",
   "responder": {
     "agent_id": "architect/Winston",
-    "tool": "bmad-local",
+    "tool": "grimoire-local",
     "completed_at": "2026-02-27T14:45:22Z"
   },
   "status": "completed",
@@ -139,7 +139,7 @@
       "content": "ADR-042 : JWT stateless + refresh token rotation. Blacklist optionnelle."
     }
   ],
-  "trace_id": "bmad-task-20260227-143022-abc123"
+  "trace_id": "grimoire-task-20260227-143022-abc123"
 }
 ```
 
@@ -150,12 +150,12 @@
 ```python
 #!/usr/bin/env python3
 """
-a2a-dispatcher.py — BMAD Agent2Agent Protocol Dispatcher (BM-32)
+a2a-dispatcher.py — Grimoire Agent2Agent Protocol Dispatcher (BM-32)
 Route les A2A Task Requests vers l'agent/outil destinataire.
 
 Statut : STUB — implémentation complète nécessite HTTP + auth
 Routes implémentées :
-  ✅ bmad-local   (sous-process Python)
+  ✅ grimoire-local   (sous-process Python)
   🔵 mcp-agent    (via MCP sampling — BM-31)
   🔵 cursor-agent (nécessite Cursor API — non disponible publiquement)
   🔵 openai-agent (nécessite OpenAI Assistants API key)
@@ -163,20 +163,20 @@ Routes implémentées :
 import json, sys, subprocess
 
 def dispatch(task_request: dict) -> dict:
-    recipient_tool = task_request.get("recipient", {}).get("tool", "bmad-local")
+    recipient_tool = task_request.get("recipient", {}).get("tool", "grimoire-local")
     
-    if recipient_tool == "bmad-local":
+    if recipient_tool == "grimoire-local":
         return dispatch_local(task_request)
     elif recipient_tool == "mcp-agent":
         return dispatch_via_mcp(task_request)
     else:
         return {
             "status": "error",
-            "error": f"Tool '{recipient_tool}' non encore supporté. Supportés: bmad-local, mcp-agent"
+            "error": f"Tool '{recipient_tool}' non encore supporté. Supportés: grimoire-local, mcp-agent"
         }
 
 def dispatch_local(task: dict) -> dict:
-    """Délégation vers un agent BMAD local via contexte structuré."""
+    """Délégation vers un agent Grimoire local via contexte structuré."""
     recipient = task["recipient"]["agent_id"]
     context = json.dumps(task["task"]["context"], indent=2)
     # En pratique : formater le prompt et l'envoyer au LLM avec le persona de l'agent
@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole pour les agents BMAD
+## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole pour les agents Grimoire
 
 Quand un agent souhaite déléguer à un autre outil :
 
@@ -223,7 +223,7 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
    - memory_written[] → confirmer que decisions/learnings ont été mémorisés
    - result → utiliser le résultat structuré pour continuer le workflow
 
-4. Logger dans BMAD_TRACE.md :
+4. Logger dans Grimoire_TRACE.md :
    [HANDOFF→{recipient.agent_id}@{recipient.tool}] "{task.title}"
 ```
 
@@ -233,7 +233,7 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 
 | Outil | Statut | Mécanisme |
 |-------|--------|-----------|
-| BMAD local | &#x2713; Stub | Sous-process + contexte structuré |
+| Grimoire local | &#x2713; Stub | Sous-process + contexte structuré |
 | VS Code Copilot MCP | Prévu BM-31 | MCP sampling |
 | Cursor | Roadmap | Cursor API (non public) |
 | Claude Desktop | Roadmap | Claude Projects API |
@@ -244,10 +244,10 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
 
-- MCP v2 Sampling : [framework/mcp/bmad-mcp-server.md](mcp/bmad-mcp-server.md)
+- MCP v2 Sampling : [framework/mcp/grimoire-mcp-server.md](mcp/grimoire-mcp-server.md)
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md)
 - Boomerang : [framework/workflows/boomerang-orchestration.md](workflows/boomerang-orchestration.md)
-- BMAD Trace : [framework/bmad-trace.md](bmad-trace.md)
+- Grimoire Trace : [framework/grimoire-trace.md](grimoire-trace.md)
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — communication P2P interne (alternative locale au A2A cross-outils)
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — routage intelligent
 

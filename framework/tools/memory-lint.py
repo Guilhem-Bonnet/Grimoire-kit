@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-memory-lint.py — Linter de cohérence mémoire BMAD.
+memory-lint.py — Linter de cohérence mémoire Grimoire.
 =====================================================
 
 Valide la cohérence croisée des fichiers mémoire du projet :
@@ -80,7 +80,7 @@ class LintIssue:
 @dataclass
 class MemoryFile:
     """Un fichier mémoire parsé."""
-    path: str              # chemin relatif depuis _bmad/_memory
+    path: str              # chemin relatif depuis _grimoire/_memory
     kind: str              # learnings | decisions | trace | failure-museum | shared-context | contradictions | cc-feedback | flywheel
     entries: list[tuple[str, str]] = field(default_factory=list)  # (date, text)
 
@@ -134,7 +134,7 @@ def _parse_markdown_entries(path: Path) -> list[tuple[str, str]]:
 
 
 def _parse_trace_entries(path: Path) -> list[tuple[str, str]]:
-    """Parse BMAD_TRACE.md en (date, text)."""
+    """Parse Grimoire_TRACE.md en (date, text)."""
     try:
         content = path.read_text(encoding="utf-8")
     except OSError:
@@ -175,7 +175,7 @@ def _parse_jsonl_entries(path: Path) -> list[tuple[str, str]]:
 def collect_memory_files(project_root: Path) -> list[MemoryFile]:
     """Collecte tous les fichiers mémoire du projet."""
     files: list[MemoryFile] = []
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
 
     # Learnings
     learnings_dir = memory_dir / "agent-learnings"
@@ -198,13 +198,13 @@ def collect_memory_files(project_root: Path) -> list[MemoryFile]:
                 entries=entries,
             ))
 
-    # BMAD_TRACE
-    trace_file = project_root / "_bmad-output" / "BMAD_TRACE.md"
+    # Grimoire_TRACE
+    trace_file = project_root / "_grimoire-output" / "Grimoire_TRACE.md"
     if trace_file.exists():
         entries = _parse_trace_entries(trace_file)
         if entries:
             files.append(MemoryFile(
-                path="BMAD_TRACE.md", kind="trace",
+                path="Grimoire_TRACE.md", kind="trace",
                 entries=entries,
             ))
 
@@ -394,7 +394,7 @@ def check_duplicates(files: list[MemoryFile]) -> list[LintIssue]:
 def check_orphan_decisions(files: list[MemoryFile]) -> list[LintIssue]:
     """Détecte les décisions référencées dans trace mais absentes du decisions-log.
 
-    Une décision orpheline = BMAD_TRACE contient [DECISION] mais aucune entrée
+    Une décision orpheline = Grimoire_TRACE contient [DECISION] mais aucune entrée
     similaire dans decisions-log.md.
     """
     issues: list[LintIssue] = []
@@ -429,12 +429,12 @@ def check_orphan_decisions(files: list[MemoryFile]) -> list[LintIssue]:
                 issue_id=_next_id(),
                 severity=SEVERITY_WARNING,
                 category="orphan",
-                title=f"Décision orpheline dans BMAD_TRACE [{date}]",
+                title=f"Décision orpheline dans Grimoire_TRACE [{date}]",
                 description=(
                     "Une décision enregistrée dans la trace n'a pas "
                     "d'entrée correspondante dans decisions-log.md"
                 ),
-                files=["BMAD_TRACE.md", "decisions-log.md"],
+                files=["Grimoire_TRACE.md", "decisions-log.md"],
                 entries=[trace_text[:150]],
                 fix_suggestion=(
                     "Ajouter cette décision dans decisions-log.md pour "
@@ -700,7 +700,7 @@ CATEGORY_ICONS = {
 def render_report(report: LintReport, show_fix: bool = False) -> str:
     """Rend le rapport en texte formaté."""
     lines = [
-        "🔍 BMAD Memory Lint Report",
+        "🔍 Grimoire Memory Lint Report",
         f"   Fichiers scannés : {report.files_scanned}",
         f"   Entrées analysées : {report.entries_scanned}",
         "",
@@ -765,11 +765,11 @@ def report_to_dict(report: LintReport) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Memory Lint — vérification de cohérence mémoire",
+        description="Grimoire Memory Lint — vérification de cohérence mémoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
     parser.add_argument("--json", action="store_true",
                         help="Sortie JSON")
     parser.add_argument("--fix", action="store_true",

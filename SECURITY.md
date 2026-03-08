@@ -31,9 +31,9 @@ Instead, report it privately:
 ### Scope
 
 This policy covers:
-- The Python SDK (`src/bmad/`)
-- The MCP server (`src/bmad/mcp/`)
-- The shell scripts (`bmad-init.sh`, `framework/`)
+- The Python SDK (`src/grimoire/`)
+- The MCP server (`src/grimoire/mcp/`)
+- The shell scripts (`grimoire-init.sh`, `framework/`)
 - Agent persona files that could influence tool execution
 
 ### MCP-specific considerations

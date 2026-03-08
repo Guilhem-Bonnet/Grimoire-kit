@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dashboard.py — Bioluminescence Dashboard BMAD.
+dashboard.py — Bioluminescence Dashboard Grimoire.
 ================================================
 
 Dashboard complet en Markdown + Mermaid montrant l'état de santé,
@@ -282,7 +282,7 @@ def format_full_dashboard(project_root: Path) -> str:
     activity = _git_activity(project_root)
 
     lines = [
-        "# 🌟 Dashboard BMAD — Bioluminescence",
+        "# 🌟 Dashboard Grimoire — Bioluminescence",
         "",
         f"> Généré le {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
@@ -402,7 +402,7 @@ def cmd_full(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Bioluminescence Dashboard",
+        description="Grimoire Bioluminescence Dashboard",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

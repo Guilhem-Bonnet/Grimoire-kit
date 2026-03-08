@@ -22,7 +22,7 @@ Sections :
 Usage :
   python3 synapse-dashboard.py --project-root .
   python3 synapse-dashboard.py --project-root . --format json
-  python3 synapse-dashboard.py --project-root . --output _bmad-output/bench-reports/synapse-dashboard.md
+  python3 synapse-dashboard.py --project-root . --output _grimoire-output/bench-reports/synapse-dashboard.md
   python3 synapse-dashboard.py --project-root . --section router,cache,budget
 
 Stdlib only — importe les outils Synapse par importlib.
@@ -494,9 +494,9 @@ def _collect_registry(project_root: Path) -> SectionResult:
 def _collect_mcp(project_root: Path) -> SectionResult:
     """Section MCP Server — outils exposés."""
     start = time.monotonic()
-    mod = _import_tool("bmad-mcp-tools.py", "bmad_mcp_dash")
+    mod = _import_tool("grimoire-mcp-tools.py", "bmad_mcp_dash")
     if not mod:
-        return SectionResult(name="mcp", status="unavailable", error="bmad-mcp-tools.py introuvable")
+        return SectionResult(name="mcp", status="unavailable", error="grimoire-mcp-tools.py introuvable")
 
     try:
         discover_fn = getattr(mod, "discover_synapse_tools", None)
@@ -515,7 +515,7 @@ def _collect_mcp(project_root: Path) -> SectionResult:
             all_tools = []
             lines.append("_Auto-discovery non disponible._")
 
-        version = getattr(mod, "BMAD_MCP_TOOLS_VERSION", "?")
+        version = getattr(mod, "Grimoire_MCP_TOOLS_VERSION", "?")
         lines.append(f"- **Version** : {version}")
 
         if all_tools:
@@ -639,7 +639,7 @@ def mcp_synapse_dashboard(
     Dashboard unifié Synapse Intelligence Layer.
 
     Args:
-        project_root: Racine du projet BMAD.
+        project_root: Racine du projet Grimoire.
         sections: Sections à inclure (virgule-séparées). Vide = toutes.
         output_format: 'markdown' ou 'json'.
 
@@ -674,7 +674,7 @@ def main():
         description="Synapse Intelligence Dashboard",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", default=".", help="Racine du projet BMAD")
+    parser.add_argument("--project-root", default=".", help="Racine du projet Grimoire")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown", help="Format de sortie")
     parser.add_argument("--section", default="", help="Sections à inclure (virgule-séparées)")
     parser.add_argument("--output", default="", help="Fichier de sortie (optionnel)")

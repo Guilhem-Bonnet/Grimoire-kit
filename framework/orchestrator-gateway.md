@@ -284,7 +284,7 @@ session_knowledge_graph:
 | **Subagent (BM-19)** | SOG utilise l'orchestration subagent pour le dispatch parallèle |
 | **Boomerang (BM-11)** | SOG peut déclencher un boomerang pour les tâches multi-step |
 | **A2A (BM-32)** | SOG peut dispatcher vers des agents externes via A2A |
-| **BMAD Trace (BM-28)** | SOG logge chaque étape dans la trace |
+| **Grimoire Trace (BM-28)** | SOG logge chaque étape dans la trace |
 | **State Checkpoint (BM-06)** | SOG crée des checkpoints pour les orchestrations longues |
 | **AMN (BM-55)** | SOG surveille le mesh P2P, intervient en cas de challenge non résolu, agent offline |
 | **SHP (BM-56)** | SOG déclenche et supervise les huddles sélectifs, arbitre si non-convergence |
@@ -319,7 +319,7 @@ Le Party Mode (EPIC 5) est un mode spécial de SOG où :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [SOG]            [INTENT:analyzed]    primary="{intent}" | shadows={count} | complexity={level}

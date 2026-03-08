@@ -3,7 +3,7 @@
 > **BM-02** — Fichier mis à jour automatiquement après chaque step de workflow.
 > Lisible à tout moment pour connaître l'état exact de l'exécution.
 >
-> Emplacement : `_bmad-output/.runs/{{run_id}}/workflow-status.md`
+> Emplacement : `_grimoire-output/.runs/{{run_id}}/workflow-status.md`
 > Format machine-readable ET human-readable.
 
 ---
@@ -66,7 +66,7 @@
 Si interrompu, reprendre avec :
 
 ```
-État sauvegardé dans : _bmad-output/.runs/{{run_id}}/state.json
+État sauvegardé dans : _grimoire-output/.runs/{{run_id}}/state.json
 Step de reprise      : {{resume_step}}
 Variables disponibles: voir state.json → session_variables
 ```
@@ -75,4 +75,4 @@ Variables disponibles: voir state.json → session_variables
 
 ---
 
-*Template BMAD Custom Kit — BM-02 Workflow Status | framework/workflows/workflow-status.tpl.md*
+*Template Grimoire Custom Kit — BM-02 Workflow Status | framework/workflows/workflow-status.tpl.md*

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-orchestrator.py — Orchestrateur hybride BMAD (BM-43 Story 4.3).
+orchestrator.py — Orchestrateur hybride Grimoire (BM-43 Story 4.3).
 ============================================================
 
 L'orchestrateur décide dynamiquement du mode d'exécution selon le type
@@ -52,7 +52,7 @@ ORCHESTRATOR_VERSION = "1.1.0"
 
 VALID_MODES = frozenset({"simulated", "sequential", "concurrent-cpu"})
 
-HISTORY_DIR = "_bmad-output/.orchestrator"
+HISTORY_DIR = "_grimoire-output/.orchestrator"
 HISTORY_FILE = "history.jsonl"
 MAX_HISTORY = 100
 
@@ -213,7 +213,7 @@ def _load_module(name: str, filename: str):
 
 class Orchestrator:
     """
-    Orchestrateur hybride BMAD.
+    Orchestrateur hybride Grimoire.
 
     Décide du mode d'exécution, construit le plan, et coordonne
     l'exécution des agents via le message bus.
@@ -597,7 +597,7 @@ def _print_result(result: ExecutionResult) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Orchestrator — Orchestrateur hybride multi-agent BMAD",
+        description="Orchestrator — Orchestrateur hybride multi-agent Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

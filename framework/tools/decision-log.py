@@ -24,7 +24,7 @@ from typing import Any
 
 VERSION = "1.0.0"
 
-DECISION_DIR = ".bmad-decisions"
+DECISION_DIR = ".grimoire-decisions"
 CHAIN_FILE = "decision-chain.jsonl"
 
 # ── Modèle de données ──────────────────────────────────────────

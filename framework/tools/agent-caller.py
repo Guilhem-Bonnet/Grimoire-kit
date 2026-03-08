@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-agent-caller.py — Agent-to-Agent Tool Calling BMAD (BM-45 Story 6.2).
+agent-caller.py — Agent-to-Agent Tool Calling Grimoire (BM-45 Story 6.2).
 ============================================================
 
 Permet à un agent d'appeler un autre agent comme un "tool" via function calling.
 Le caller spécifie l'agent cible, la tâche et le contexte. Le LLM Router
 sélectionne le modèle pour l'agent cible. Le résultat est validé contre le
-delivery contract et tracé dans BMAD_TRACE.md.
+delivery contract et tracé dans Grimoire_TRACE.md.
 
 Modes :
   call    — Appelle un agent avec une tâche
@@ -50,8 +50,8 @@ AGENT_CALLER_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-TRACE_FILE = "_bmad-output/BMAD_TRACE.md"
-CALL_HISTORY_FILE = "_bmad-output/.agent-call-history.json"
+TRACE_FILE = "_grimoire-output/Grimoire_TRACE.md"
+CALL_HISTORY_FILE = "_grimoire-output/.agent-call-history.json"
 DEFAULT_TIMEOUT = 120  # seconds
 MAX_RETRIES = 3
 
@@ -201,7 +201,7 @@ class AgentToolSpec:
 # ── Trace Integration ──────────────────────────────────────────────────────
 
 class TraceWriter:
-    """Écrit les traces d'appels dans BMAD_TRACE.md."""
+    """Écrit les traces d'appels dans Grimoire_TRACE.md."""
 
     def __init__(self, project_root: Path):
         self.trace_file = project_root / TRACE_FILE
@@ -302,7 +302,7 @@ class AgentCaller:
     3. Sélectionner le modèle via LLM Router
     4. Exécuter l'appel (simulé — pas de vrai LLM call en standalone)
     5. Valider la réponse contre le delivery contract
-    6. Tracer dans BMAD_TRACE + historique
+    6. Tracer dans Grimoire_TRACE + historique
     """
 
     def __init__(
@@ -338,8 +338,8 @@ class AgentCaller:
 
         # Augment with actual agent files
         agents_dirs = [
-            self.project_root / "_bmad" / "bmm" / "agents",
-            self.project_root / "_bmad" / "core" / "agents",
+            self.project_root / "_grimoire" / "bmm" / "agents",
+            self.project_root / "_grimoire" / "core" / "agents",
         ]
 
         for agents_dir in agents_dirs:
@@ -523,7 +523,7 @@ def load_caller_config(project_root: Path) -> dict:
     except ImportError:
         return {}
 
-    for candidate in [project_root / "project-context.yaml", project_root / "bmad.yaml"]:
+    for candidate in [project_root / "project-context.yaml", project_root / "grimoire.yaml"]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -580,7 +580,7 @@ def _print_schema(spec: AgentToolSpec) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Agent Caller — Agent-to-Agent Tool Calling BMAD",
+        description="Agent Caller — Agent-to-Agent Tool Calling Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

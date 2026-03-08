@@ -1,11 +1,11 @@
 ---
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Custom Kit — Delivery Contract Inter-Teams
+# Grimoire Custom Kit — Delivery Contract Inter-Teams
 # BM-18 : Contrat de handoff entre deux teams
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Usage : copier ce template, remplir les champs, committer dans :
-#   _bmad-output/contracts/{from_team}-to-{to_team}-{date}.md
+#   _grimoire-output/contracts/{from_team}-to-{to_team}-{date}.md
 #
 # RÈGLE : Aucune team ne commence sans un Delivery Contract signé et complet.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -145,4 +145,4 @@ Questions ouvertes: ___________________
 
 ---
 
-*Template BMAD Custom Kit — BM-18 Delivery Contract | framework/delivery-contract.tpl.md*
+*Template Grimoire Custom Kit — BM-18 Delivery Contract | framework/delivery-contract.tpl.md*

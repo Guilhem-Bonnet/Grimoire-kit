@@ -111,7 +111,7 @@ L'agent lead doit collecter et documenter :
 
 ### 3.1 Template post-mortem
 
-Générer automatiquement dans `{project-root}/_bmad-output/implementation-artifacts/postmortems/` :
+Générer automatiquement dans `{project-root}/_grimoire-output/implementation-artifacts/postmortems/` :
 
 ```markdown
 ---
@@ -162,8 +162,8 @@ services_impacted: [liste]
 ### 3.2 Actions post-incident
 
 1. Écrire le post-mortem dans le dossier dédié
-2. Ajouter les learnings dans `_bmad/_memory/agent-learnings/` (fichier de l'agent lead)
-3. Mettre à jour `_bmad/_memory/shared-context.md` si l'architecture a changé
+2. Ajouter les learnings dans `_grimoire/_memory/agent-learnings/` (fichier de l'agent lead)
+3. Mettre à jour `_grimoire/_memory/shared-context.md` si l'architecture a changé
 4. Créer des requêtes inter-agents pour les actions préventives
 5. Si NFR violé (MTTD > 5min, RTO > 2h) → ajouter une alerte Hawk pour prévenir la récurrence
 

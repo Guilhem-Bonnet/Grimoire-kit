@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context-merge.py — Context Merge et Diff BMAD (BM-44 Story 5.2).
+context-merge.py — Context Merge et Diff Grimoire (BM-44 Story 5.2).
 ============================================================
 
 Compare et fusionne le contexte de deux branches de conversation.
@@ -48,8 +48,8 @@ CONTEXT_MERGE_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-RUNS_DIR = "_bmad-output/.runs"
-MERGE_LOG_FILE = "_bmad/_memory/merge-log.md"
+RUNS_DIR = "_grimoire-output/.runs"
+MERGE_LOG_FILE = "_grimoire/_memory/merge-log.md"
 DEFAULT_BRANCH = "main"
 
 
@@ -518,7 +518,7 @@ def mcp_context_merge(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Context Merge — Diff et merge de branches de conversation BMAD",
+        description="Context Merge — Diff et merge de branches de conversation Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

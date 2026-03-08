@@ -1,4 +1,4 @@
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 
 id: minimal
 name: "Minimal"
@@ -21,7 +21,7 @@ traits:
     agents_affected: "*"
   - name: failure-museum
     description: "Consulter le Failure Museum avant les décisions critiques"
-    rule: "LAZY-LOAD _bmad/_memory/failure-museum.md si le projet est actif depuis > 2 semaines avant toute décision majeure."
+    rule: "LAZY-LOAD _grimoire/_memory/failure-museum.md si le projet est actif depuis > 2 semaines avant toute décision majeure."
     agents_affected: "*"
   - name: cc-aware
     description: "Conscience du Completion Contract"
@@ -51,7 +51,7 @@ values:
 
 tools_required:
   - name: bash
-    description: "Interpréteur shell pour les scripts BMAD, cc-verify.sh"
+    description: "Interpréteur shell pour les scripts Grimoire, cc-verify.sh"
     required: true
     check_command: "which bash"
   - name: git

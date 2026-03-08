@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BMAD DNA Evolution Engine — BM-56
+Grimoire DNA Evolution Engine — BM-56
 ===================================
 La DNA d'un archétype est définie à l'init et reste statique.
 Ce tool analyse ce que le projet a réellement livré et proposé
@@ -11,14 +11,14 @@ Philosophie :
   DNA évoluée  = ce que le projet *est vraiment* en ce moment
 
 Sources analysées :
-  1. BMAD_TRACE.md — outils réellement exécutés, agents actifs, patterns
+  1. Grimoire_TRACE.md — outils réellement exécutés, agents actifs, patterns
   2. decisions-log.md — décisions architecturales récurrentes
   3. agent-learnings-*.md — apprentissages cumulés par les agents
   4. archetype.dna.yaml courant — pour calculer le diff
 
 Sorties :
-  _bmad-output/dna-proposals/archetype.dna.patch.yaml  (propositions diff)
-  _bmad-output/dna-proposals/dna-evolution-report.md   (rapport lisible)
+  _grimoire-output/dna-proposals/archetype.dna.patch.yaml  (propositions diff)
+  _grimoire-output/dna-proposals/dna-evolution-report.md   (rapport lisible)
 
 Usage:
     python3 dna-evolve.py                               # Analyser + proposer
@@ -128,7 +128,7 @@ def parse_dna(dna_path: Path) -> DNASnapshot:
     return snap
 
 
-# ── Analyse BMAD_TRACE ────────────────────────────────────────────────────────
+# ── Analyse Grimoire_TRACE ────────────────────────────────────────────────────────
 
 # Commandes/outils courants à détecter dans le TRACE
 KNOWN_TOOLS_PATTERNS = {
@@ -205,7 +205,7 @@ def analyze_trace(
     since: str | None = None,
 ) -> tuple[dict[str, ObservedTool], list[ObservedPattern]]:
     """
-    Analyse BMAD_TRACE.md et retourne :
+    Analyse Grimoire_TRACE.md et retourne :
     - Outils observés avec fréquences
     - Patterns comportementaux
     """
@@ -380,7 +380,7 @@ def generate_mutations(
             target_section="tools_required",
             item_id=tool_name,
             description=f"{tool_name} — utilisé {tool_data.count}x par [{agents_str}]",
-            rationale=f"Observé {tool_data.count} fois dans BMAD_TRACE "
+            rationale=f"Observé {tool_data.count} fois dans Grimoire_TRACE "
                       f"(dernière utilisation: {tool_data.last_seen or 'récent'}). "
                       f"Non déclaré dans la DNA — rend l'install implicite.",
             evidence_count=tool_data.count,
@@ -416,7 +416,7 @@ def generate_mutations(
                       "ADRs obligatoires pour les décisions architecturales",
                       "Toute décision ayant un impact >1 semaine produit un ADR dans decisions-log.md"),
         "checkpoint-heavy": ("checkpoint-dense", "traits",
-                             "Checkpoints BMAD denses pour longues sessions",
+                             "Checkpoints Grimoire denses pour longues sessions",
                              "Sessions longues → checkpoint toutes les 90 minutes ou après chaque étape majeure"),
         "failure-recovery": ("retry-protocol", "constraints",
                              "Protocole de retry obligatoire sur les failures",
@@ -466,7 +466,7 @@ def generate_mutations(
 # ── Génération des fichiers de sortie ─────────────────────────────────────────
 
 PATCH_HEADER = """\
-# BMAD DNA Evolution Patch — Généré par dna-evolve.py / BM-56
+# Grimoire DNA Evolution Patch — Généré par dna-evolve.py / BM-56
 # Source DNA : {dna_path}
 # Archétype  : {archetype_id} v{version}
 # Généré le  : {date}
@@ -652,7 +652,7 @@ def apply_patch(patch_path: Path, dna: DNASnapshot) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="BMAD DNA Evolution Engine — fait évoluer la DNA d'un archétype depuis l'usage réel",
+        description="Grimoire DNA Evolution Engine — fait évoluer la DNA d'un archétype depuis l'usage réel",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples :
@@ -667,13 +667,13 @@ Exemples :
     parser.add_argument("--dna", metavar="PATH",
                         help="Chemin vers archetype.dna.yaml (auto-détection si absent)")
     parser.add_argument("--trace", metavar="PATH",
-                        default="_bmad-output/BMAD_TRACE.md")
+                        default="_grimoire-output/Grimoire_TRACE.md")
     parser.add_argument("--decisions", metavar="PATH",
-                        default="_bmad/_memory/decisions-log.md")
+                        default="_grimoire/_memory/decisions-log.md")
     parser.add_argument("--memory-dir", metavar="PATH",
-                        default="_bmad/_memory")
+                        default="_grimoire/_memory")
     parser.add_argument("--out-dir", metavar="PATH",
-                        default="_bmad-output/dna-proposals")
+                        default="_grimoire-output/dna-proposals")
     parser.add_argument("--project-root", metavar="PATH", default=".")
     parser.add_argument("--since", metavar="YYYY-MM-DD",
                         help="Analyser seulement depuis cette date")

@@ -1,4 +1,4 @@
-"""Tests for bmad.core.config — BmadConfig dataclasses."""
+"""Tests for grimoire.core.config — GrimoireConfig dataclasses."""
 
 from __future__ import annotations
 
@@ -7,15 +7,15 @@ from typing import Any
 
 import pytest
 
-from bmad.core.config import (
+from grimoire.core.config import (
     AgentsConfig,
-    BmadConfig,
+    GrimoireConfig,
     MemoryConfig,
     ProjectConfig,
     RepoConfig,
     UserConfig,
 )
-from bmad.core.exceptions import BmadConfigError
+from grimoire.core.exceptions import GrimoireConfigError
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -118,7 +118,7 @@ class TestUserConfig:
         assert uc.skill_level == "intermediate"
 
     def test_invalid_skill_level(self) -> None:
-        with pytest.raises(BmadConfigError, match="Invalid skill_level"):
+        with pytest.raises(GrimoireConfigError, match="Invalid skill_level"):
             UserConfig.from_dict({"skill_level": "god-mode"})
 
 
@@ -137,10 +137,10 @@ class TestMemoryConfig:
     def test_defaults(self) -> None:
         mc = MemoryConfig.from_dict({})
         assert mc.backend == "auto"
-        assert mc.collection_prefix == "bmad"
+        assert mc.collection_prefix == "grimoire"
 
     def test_invalid_backend(self) -> None:
-        with pytest.raises(BmadConfigError, match="Invalid memory backend"):
+        with pytest.raises(GrimoireConfigError, match="Invalid memory backend"):
             MemoryConfig.from_dict({"backend": "redis"})
 
     @pytest.mark.parametrize("backend", ["auto", "local", "qdrant-local", "qdrant-server", "ollama"])
@@ -163,11 +163,11 @@ class TestAgentsConfig:
         assert ac.custom_agents == ()
 
 
-# ── BmadConfig — from_dict ───────────────────────────────────────────────────
+# ── GrimoireConfig — from_dict ───────────────────────────────────────────────────
 
-class TestBmadConfigFromDict:
+class TestGrimoireConfigFromDict:
     def test_minimal(self) -> None:
-        cfg = BmadConfig.from_dict(_minimal_dict())
+        cfg = GrimoireConfig.from_dict(_minimal_dict())
         assert cfg.project.name == "test-project"
         assert cfg.user.skill_level == "intermediate"
         assert cfg.memory.backend == "auto"
@@ -176,7 +176,7 @@ class TestBmadConfigFromDict:
         assert cfg.extra == {}
 
     def test_full(self) -> None:
-        cfg = BmadConfig.from_dict({
+        cfg = GrimoireConfig.from_dict({
             "project": {"name": "full", "type": "game", "stack": ["unity"]},
             "user": {"name": "Charlie", "skill_level": "beginner"},
             "memory": {"backend": "qdrant-server", "qdrant_url": "http://localhost:6333"},
@@ -192,7 +192,7 @@ class TestBmadConfigFromDict:
         assert "llm_router" in cfg.extra
 
     def test_extra_fields_preserved(self) -> None:
-        cfg = BmadConfig.from_dict({
+        cfg = GrimoireConfig.from_dict({
             **_minimal_dict(),
             "llm_router": {"enabled": True},
             "rag": {"max_chunks": 5},
@@ -201,28 +201,28 @@ class TestBmadConfigFromDict:
         assert set(cfg.extra.keys()) == {"llm_router", "rag", "platform"}
 
     def test_missing_project_raises(self) -> None:
-        with pytest.raises(BmadConfigError, match="project.*section"):
-            BmadConfig.from_dict({})
+        with pytest.raises(GrimoireConfigError, match="project.*section"):
+            GrimoireConfig.from_dict({})
 
     def test_missing_project_name_raises(self) -> None:
-        with pytest.raises(BmadConfigError, match="project.*name"):
-            BmadConfig.from_dict({"project": {}})
+        with pytest.raises(GrimoireConfigError, match="project.*name"):
+            GrimoireConfig.from_dict({"project": {}})
 
     def test_non_dict_raises(self) -> None:
-        with pytest.raises(BmadConfigError, match="mapping"):
-            BmadConfig.from_dict("not a dict")  # type: ignore[arg-type]
+        with pytest.raises(GrimoireConfigError, match="mapping"):
+            GrimoireConfig.from_dict("not a dict")  # type: ignore[arg-type]
 
     def test_frozen(self) -> None:
-        cfg = BmadConfig.from_dict(_minimal_dict())
+        cfg = GrimoireConfig.from_dict(_minimal_dict())
         with pytest.raises(AttributeError):
             cfg.project = ProjectConfig(name="hacked")  # type: ignore[misc]
 
 
-# ── BmadConfig — from_yaml ──────────────────────────────────────────────────
+# ── GrimoireConfig — from_yaml ──────────────────────────────────────────────────
 
-class TestBmadConfigFromYaml:
+class TestGrimoireConfigFromYaml:
     def test_load(self, tmp_yaml: Path) -> None:
-        cfg = BmadConfig.from_yaml(tmp_yaml)
+        cfg = GrimoireConfig.from_yaml(tmp_yaml)
         assert cfg.project.name == "fixture-project"
         assert cfg.project.type == "webapp"
         assert cfg.project.stack == ("python", "react")
@@ -233,29 +233,29 @@ class TestBmadConfigFromYaml:
         assert cfg.installed_archetypes == ("web-app", "minimal")
 
     def test_file_not_found(self, tmp_path: Path) -> None:
-        with pytest.raises(BmadConfigError, match="not found"):
-            BmadConfig.from_yaml(tmp_path / "nope.yaml")
+        with pytest.raises(GrimoireConfigError, match="not found"):
+            GrimoireConfig.from_yaml(tmp_path / "nope.yaml")
 
     def test_empty_file(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty.yaml"
         empty.write_text("")
-        with pytest.raises(BmadConfigError, match="empty"):
-            BmadConfig.from_yaml(empty)
+        with pytest.raises(GrimoireConfigError, match="empty"):
+            GrimoireConfig.from_yaml(empty)
 
     def test_invalid_yaml(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.yaml"
         bad.write_text("{{{{not yaml")
-        with pytest.raises(BmadConfigError, match="Cannot parse"):
-            BmadConfig.from_yaml(bad)
+        with pytest.raises(GrimoireConfigError, match="Cannot parse"):
+            GrimoireConfig.from_yaml(bad)
 
 
-# ── BmadConfig — find_and_load ───────────────────────────────────────────────
+# ── GrimoireConfig — find_and_load ───────────────────────────────────────────────
 
-class TestBmadConfigFindAndLoad:
+class TestGrimoireConfigFindAndLoad:
     def test_finds_in_current_dir(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "project-context.yaml"
         cfg_file.write_text("project:\n  name: found-here\n")
-        cfg = BmadConfig.find_and_load(tmp_path)
+        cfg = GrimoireConfig.find_and_load(tmp_path)
         assert cfg.project.name == "found-here"
 
     def test_finds_in_parent(self, tmp_path: Path) -> None:
@@ -263,14 +263,14 @@ class TestBmadConfigFindAndLoad:
         cfg_file.write_text("project:\n  name: parent-found\n")
         child = tmp_path / "src" / "deep"
         child.mkdir(parents=True)
-        cfg = BmadConfig.find_and_load(child)
+        cfg = GrimoireConfig.find_and_load(child)
         assert cfg.project.name == "parent-found"
 
     def test_not_found_raises(self, tmp_path: Path) -> None:
         isolated = tmp_path / "nowhere"
         isolated.mkdir()
-        with pytest.raises(BmadConfigError, match="No.*project-context.yaml"):
-            BmadConfig.find_and_load(isolated)
+        with pytest.raises(GrimoireConfigError, match="No.*project-context.yaml"):
+            GrimoireConfig.find_and_load(isolated)
 
 
 # ── Live project-context.yaml ────────────────────────────────────────────────
@@ -290,5 +290,5 @@ class TestLiveConfig:
     def test_real_config_loads(self, real_config_path: Path | None) -> None:
         if real_config_path is None:
             pytest.skip("No project-context.yaml found in tree")
-        cfg = BmadConfig.from_yaml(real_config_path)
+        cfg = GrimoireConfig.from_yaml(real_config_path)
         assert cfg.project.name

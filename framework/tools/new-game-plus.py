@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-new-game-plus.py — New Game+ BMAD.
+new-game-plus.py — New Game+ Grimoire.
 ====================================
 
 Création d'un nouveau projet à partir d'un projet existant, en important
@@ -345,7 +345,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD New Game+ — Nouveau projet depuis l'existant",
+        description="Grimoire New Game+ — Nouveau projet depuis l'existant",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--source-project", default=".", help="Projet source")

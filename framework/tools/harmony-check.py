@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-harmony-check.py — Architecture Harmony Check BMAD.
+harmony-check.py — Architecture Harmony Check Grimoire.
 =====================================================
 
-Détecte les dissonances architecturales dans un projet BMAD :
+Détecte les dissonances architecturales dans un projet Grimoire :
 
   1. `scan`      — Scanner le projet pour détecter les patterns
   2. `check`     — Vérifier l'harmonie architecturale
@@ -500,7 +500,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Architecture Harmony Check",
+        description="Grimoire Architecture Harmony Check",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

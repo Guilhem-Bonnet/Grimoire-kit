@@ -26,7 +26,7 @@ from typing import Any
 
 VERSION = "1.0.0"
 
-MIRROR_DIR = ".bmad-mirror"
+MIRROR_DIR = ".grimoire-mirror"
 PATTERNS_FILE = "learned-patterns.json"
 
 # ── Modèle de données ──────────────────────────────────────────

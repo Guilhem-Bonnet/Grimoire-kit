@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Cognitive Flywheel — Boucle d'auto-amélioration continue.
 
-Analyse les sessions accumulées (BMAD_TRACE, mémoire, décisions) pour
+Analyse les sessions accumulées (Grimoire_TRACE, mémoire, décisions) pour
 extraire des patterns récurrents, scorer la santé du projet, et proposer
 des corrections automatiques priorisées par sévérité.
 
 Inspiré par le Cognitive Flywheel de GSANE (zav-sandbox) — adapté
-pour l'écosystème BMAD avec intégration des 48 outils existants.
+pour l'écosystème Grimoire avec intégration des 48 outils existants.
 
 Usage:
     python cognitive-flywheel.py --project-root . analyze
@@ -35,7 +35,7 @@ VERSION = "1.0.0"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-FLYWHEEL_DIR = "_bmad/_memory"
+FLYWHEEL_DIR = "_grimoire/_memory"
 REPORT_FILE = "flywheel-report.json"
 HISTORY_FILE = "flywheel-history.jsonl"
 SCOREBOARD_FILE = "flywheel-scoreboard.md"
@@ -54,7 +54,7 @@ SEVERITIES = ("low", "medium", "high")
 
 @dataclass
 class TraceEntry:
-    """Parsed entry from BMAD_TRACE.md."""
+    """Parsed entry from Grimoire_TRACE.md."""
 
     timestamp: str = ""
     agent: str = ""
@@ -188,7 +188,7 @@ def append_history(root: Path, entry: dict) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-# ── BMAD_TRACE parser ────────────────────────────────────────────────────────
+# ── Grimoire_TRACE parser ────────────────────────────────────────────────────────
 
 # Match lines like: [2026-03-01T10:00:00Z] [agent:dev] [GIT-COMMIT] story:US-01 — content
 TRACE_RE = re.compile(
@@ -198,8 +198,8 @@ TRACE_RE = re.compile(
 
 
 def parse_trace(root: Path, since: str | None = None) -> list[TraceEntry]:
-    """Parse BMAD_TRACE.md into structured entries."""
-    trace_path = root / "_bmad-output" / "BMAD_TRACE.md"
+    """Parse Grimoire_TRACE.md into structured entries."""
+    trace_path = root / "_grimoire-output" / "Grimoire_TRACE.md"
     if not trace_path.exists():
         return []
 
@@ -475,7 +475,7 @@ def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
     """Render a markdown scoreboard."""
     trend_icon = {"improving": "📈", "stable": "➡️", "degrading": "📉"}.get(score.trend, "❓")
     lines = [
-        "# BMAD Cognitive Flywheel — Scoreboard",
+        "# Grimoire Cognitive Flywheel — Scoreboard",
         "",
         f"> Cycle: {score.cycle_id} | {score.timestamp[:10]}",
         "",
@@ -529,7 +529,7 @@ def cmd_analyze(root: Path, args: argparse.Namespace) -> int:
     entries = parse_trace(root, since=since)
 
     if not entries:
-        print("⚠️  Aucune entrée BMAD_TRACE trouvée — rien à analyser.")
+        print("⚠️  Aucune entrée Grimoire_TRACE trouvée — rien à analyser.")
         return 0
 
     patterns = extract_patterns(entries)
@@ -720,7 +720,7 @@ def cmd_dashboard(root: Path, args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cognitive-flywheel",
-        description="Cognitive Flywheel — Boucle d'auto-amélioration continue BMAD",
+        description="Cognitive Flywheel — Boucle d'auto-amélioration continue Grimoire",
     )
     p.add_argument("--project-root", type=Path, default=Path("."), help="Racine du projet")
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")

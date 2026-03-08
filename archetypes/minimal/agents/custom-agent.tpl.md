@@ -1,9 +1,9 @@
-<- ui.store.ts: mode dark/light persisté via zustand persist + localStorage (clé ARCHETYPE: minimal — Template d'agent BMAD XML strict v2.0.
+<- ui.store.ts: mode dark/light persisté via zustand persist + localStorage (clé ARCHETYPE: minimal — Template d'agent Grimoire XML strict v2.0.
      Remplacez tous les {{placeholders}} via votre project-context.yaml.
      Voir docs/creating-agents.md pour le guide complet.
 
      USE WHEN: nouveau projet, domaine non couvert par infra-ops, agent métier custom.
-     Compatible BMAD Core 6.0+. Structure canonique validée par Sentinel.
+     Compatible Grimoire Core 6.0+. Structure canonique validée par Sentinel.
 -->
 ---
 name: "{{agent_tag}}"
@@ -21,7 +21,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="{{agent_tag}}.agent.yaml" name="{{agent_name}}" title="{{agent_role}}" icon="{{agent_icon}}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_bmad/_config/custom/agent-base.md with:
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base.md with:
           AGENT_TAG={{agent_tag}} | AGENT_NAME={{agent_name}} | LEARNINGS_FILE={{learnings_file}} | DOMAIN_WORD={{domain_word}}
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -66,7 +66,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="AA or fuzzy match on {{menu_keyword_1}}" action="#prompt-1">[AA] {{menu_item_1}}</item>
     <item cmd="BB or fuzzy match on {{menu_keyword_2}}" action="#prompt-2">[BB] {{menu_item_2}}</item>
     <item cmd="CC or fuzzy match on {{menu_keyword_3}}" action="#prompt-3">[CC] {{menu_item_3}}</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_bmad/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

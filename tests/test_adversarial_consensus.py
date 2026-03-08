@@ -417,7 +417,7 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(history, [])
 
     def test_load_corrupted_history(self):
-        out = self.tmpdir / "_bmad-output"
+        out = self.tmpdir / "_grimoire-output"
         out.mkdir(parents=True)
         (out / self.mod.HISTORY_FILE).write_text("not json{{{", encoding="utf-8")
         history = self.mod.load_history(self.tmpdir)

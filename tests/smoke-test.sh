@@ -3,7 +3,7 @@
 # BMAD Custom Kit — Smoke Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Teste bmad-init.sh dans un tmpdir vierge pour vérifier que l'installation
+# Teste grimoire-init.sh dans un tmpdir vierge pour vérifier que l'installation
 # produit la structure attendue et que les sous-commandes fonctionnent.
 #
 # Usage:
@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 KIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BMAD_INIT="$KIT_DIR/bmad-init.sh"
+BMAD_INIT="$KIT_DIR/grimoire-init.sh"
 PASSED=0
 FAILED=0
 TOTAL=0
@@ -95,7 +95,7 @@ assert_exit_code() {
 # ─── Setup tmpdir ────────────────────────────────────────────────────────────
 setup_tmpdir() {
     local name="$1"
-    TMPDIR_TEST="$(mktemp -d "/tmp/bmad-smoke-${name}-XXXXXX")"
+    TMPDIR_TEST="$(mktemp -d "/tmp/grimoire-smoke-${name}-XXXXXX")"
     # Initialiser un repo git (nécessaire pour les hooks)
     git init -q "$TMPDIR_TEST"
     cd "$TMPDIR_TEST"
@@ -327,7 +327,7 @@ scenario_python_tools() {
     done
 
     # Bash syntax check
-    for sh in "$KIT_DIR"/bmad-init.sh "$KIT_DIR"/framework/hooks/*.sh "$KIT_DIR"/framework/cc-verify.sh "$KIT_DIR"/framework/sil-collect.sh; do
+    for sh in "$KIT_DIR"/grimoire-init.sh "$KIT_DIR"/framework/hooks/*.sh "$KIT_DIR"/framework/cc-verify.sh "$KIT_DIR"/framework/sil-collect.sh; do
         [[ -f "$sh" ]] || continue
         local name
         name="$(basename "$sh")"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fitness-tracker.py — Suivi de la fitness globale du projet BMAD.
+fitness-tracker.py — Suivi de la fitness globale du projet Grimoire.
 =================================================================
 
 Agrège les métriques de santé du projet (antifragile score, early-warning,
@@ -34,7 +34,7 @@ from pathlib import Path
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 FITNESS_VERSION = "1.0.0"
-HISTORY_FILE = "_bmad/_memory/fitness-history.jsonl"
+HISTORY_FILE = "_grimoire/_memory/fitness-history.jsonl"
 MAX_HISTORY = 500
 
 # Seuils de fitness
@@ -85,7 +85,7 @@ class FitnessSnapshot:
 # ── Dynamic Imports ──────────────────────────────────────────────────────────
 
 def _import_tool(tool_name: str, module_name: str):
-    """Import dynamique d'un outil BMAD (stdlib only)."""
+    """Import dynamique d'un outil Grimoire (stdlib only)."""
     tools_dir = Path(__file__).resolve().parent
     tool_path = tools_dir / tool_name
     if not tool_path.exists():
@@ -232,13 +232,13 @@ def measure_test_health(project_root: Path) -> DimensionResult:
 
 
 def measure_memory_freshness(project_root: Path) -> DimensionResult:
-    """Fraîcheur de la mémoire — fichiers modifiés récemment dans _bmad/_memory/."""
-    memory_dir = project_root / "_bmad" / "_memory"
+    """Fraîcheur de la mémoire — fichiers modifiés récemment dans _grimoire/_memory/."""
+    memory_dir = project_root / "_grimoire" / "_memory"
     if not memory_dir.exists():
         return DimensionResult(
             name="memory_fresh", score=0.3, weight=WEIGHTS["memory_fresh"],
             weighted=0.3 * WEIGHTS["memory_fresh"],
-            detail="Dossier _bmad/_memory/ absent",
+            detail="Dossier _grimoire/_memory/ absent",
         )
 
     now = datetime.now().timestamp()

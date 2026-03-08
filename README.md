@@ -64,7 +64,7 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
     Votre Projet
          │
     ┌────┴────┐
-    │  _bmad/ │  ← "Les bureaux" de votre
+    │  _grimoire/ │  ← "Les bureaux" de votre
     │         │     entreprise virtuelle
     ├─────────┤
     │ agents/ │  ← Les employés spécialisés
@@ -88,21 +88,21 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 ```bash
 # Installation via pip (v3)
-pip install bmad-kit
+pip install grimoire-kit
 
 # Initialiser un nouveau projet
-bmad init mon-projet --archetype web-app
+grimoire init mon-projet --archetype web-app
 
 # Depuis un projet existant
 cd votre-projet/
-bmad init . --name "Mon Projet"
+grimoire init . --name "Mon Projet"
 
 # Vérifier la santé du projet
-bmad doctor
+grimoire doctor
 
 # Migrer un projet v2 → v3
-bmad upgrade --dry-run   # aperçu
-bmad upgrade             # exécuter
+grimoire upgrade --dry-run   # aperçu
+grimoire upgrade             # exécuter
 ```
 
 <details>
@@ -259,7 +259,7 @@ Consolidation **hors-session** : croise mémoire, trace, décisions et failure m
 
 ### <img src="docs/assets/icons/plug.svg" width="24" height="24" alt=""> MCP Server
 
-Expose BMAD comme serveur MCP local. Compatible **Cursor, Cline, Claude Desktop** et tout IDE MCP.
+Expose Grimoire comme serveur MCP local. Compatible **Cursor, Cline, Claude Desktop** et tout IDE MCP.
 
 </td>
 <td align="center">
@@ -307,31 +307,31 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 Le SDK v3 expose **toute la puissance de Grimoire** en tant que package Python installable :
 
 ```bash
-pip install bmad-kit
+pip install grimoire-kit
 ```
 
 ### CLI
 
 | Commande | Description |
 |:---------|:-----------|
-| `bmad init [path]` | Initialiser un projet BMAD |
-| `bmad doctor` | Vérifier la santé du projet |
-| `bmad status` | Afficher l'état courant |
-| `bmad up` | Réconcilier l'état avec la config |
-| `bmad add <agent>` | Ajouter un agent |
-| `bmad remove <agent>` | Retirer un agent |
-| `bmad validate` | Valider la config YAML |
-| `bmad merge <source>` | Fusionner des fichiers BMAD |
-| `bmad merge --undo` | Annuler le dernier merge |
-| `bmad upgrade` | Migrer un projet v2 → v3 |
-| `bmad registry list` | Lister les archétypes disponibles |
-| `bmad registry search <q>` | Chercher un agent |
+| `grimoire init [path]` | Initialiser un projet Grimoire |
+| `grimoire doctor` | Vérifier la santé du projet |
+| `grimoire status` | Afficher l'état courant |
+| `grimoire up` | Réconcilier l'état avec la config |
+| `grimoire add <agent>` | Ajouter un agent |
+| `grimoire remove <agent>` | Retirer un agent |
+| `grimoire validate` | Valider la config YAML |
+| `grimoire merge <source>` | Fusionner des fichiers Grimoire |
+| `grimoire merge --undo` | Annuler le dernier merge |
+| `grimoire upgrade` | Migrer un projet v2 → v3 |
+| `grimoire registry list` | Lister les archétypes disponibles |
+| `grimoire registry search <q>` | Chercher un agent |
 
 ### SDK — Outils programmatiques
 
 ```python
 from pathlib import Path
-from bmad.tools import (
+from grimoire.tools import (
     HarmonyCheck, PreflightCheck, MemoryLint,
     ContextRouter, ContextGuard, Stigmergy, AgentForge,
 )
@@ -344,8 +344,8 @@ print(report.status)  # GO / GO-WITH-WARNINGS / NO-GO
 ### MCP Server
 
 ```bash
-bmad-mcp                    # Démarrer le serveur MCP
-bmad-mcp --transport sse    # Mode SSE pour IDE distants
+grimoire-mcp                    # Démarrer le serveur MCP
+grimoire-mcp --transport sse    # Mode SSE pour IDE distants
 ```
 
 8 outils exposés : `init`, `doctor`, `status`, `harmony_check`, `preflight`, `memory_lint`, `context_route`, `stigmergy_sense`.
@@ -449,10 +449,10 @@ Auto-détection stack
 
 ```bash
 # Déployer un archétype
-bash bmad-init.sh --archetype infra-ops
+bash grimoire-init.sh --archetype infra-ops
 
 # Mode auto : détecte le stack → choisit les bons agents
-bash bmad-init.sh --auto
+bash grimoire-init.sh --auto
 ```
 
 <br>
@@ -563,7 +563,7 @@ bash bmad-init.sh --auto
 
 | Outil | Description |
 |:------|:-----------|
-| `bmad-mcp-tools.py` | Serveur MCP BMAD |
+| `grimoire-mcp-tools.py` | Serveur MCP Grimoire |
 | `mcp-proxy.py` | Proxy MCP multi-server |
 | `cross-migrate.py` | Migration cross-projet |
 | `auto-doc.py` | Synchronisation README ↔ code |
@@ -594,10 +594,10 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 // Claude Desktop / Cursor / Cline
 {
   "mcpServers": {
-    "bmad": {
+    "grimoire": {
       "command": "node",
       "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
-      "env": { "BMAD_PROJECT_ROOT": "/votre-projet" }
+      "env": { "Grimoire_PROJECT_ROOT": "/votre-projet" }
     }
   }
 }
@@ -686,7 +686,7 @@ bash tests/smoke-test.sh
 
 ```
 grimoire-kit/
-├── bmad-init.sh                     # Script d'initialisation + session-branch
+├── grimoire-init.sh                     # Script d'initialisation + session-branch
 ├── project-context.tpl.yaml         # Template contexte projet
 │
 ├── framework/                       # Moteur générique (ne pas modifier par projet)
@@ -748,17 +748,17 @@ graph LR
 
 ```bash
 # Version actuelle
-bash bmad-init.sh --version
+bash grimoire-init.sh --version
 
 # Mise à jour depuis upstream
-bash bmad-init.sh upgrade              # met à jour framework/ et archetypes/
-bash bmad-init.sh upgrade --dry-run    # preview sans modification
+bash grimoire-init.sh upgrade              # met à jour framework/ et archetypes/
+bash grimoire-init.sh upgrade --dry-run    # preview sans modification
 
 # Completion Contract — vérifier avant "terminé"
-bash _bmad/_config/custom/cc-verify.sh
+bash _grimoire/_config/custom/cc-verify.sh
 
 # Self-Improvement Loop — analyser les patterns d'échec
-bash _bmad/_config/custom/sil-collect.sh
+bash _grimoire/_config/custom/sil-collect.sh
 ```
 
 <details>
@@ -766,57 +766,57 @@ bash _bmad/_config/custom/sil-collect.sh
 
 ```bash
 # Bench — mesurer les scores de performance des agents
-bash bmad-init.sh bench --summary
-bash bmad-init.sh bench --report
-bash bmad-init.sh bench --improve
+bash grimoire-init.sh bench --summary
+bash grimoire-init.sh bench --report
+bash grimoire-init.sh bench --improve
 
 # Forge — générer des squelettes d'agents
-bash bmad-init.sh forge --from "migrations DB PostgreSQL"
-bash bmad-init.sh forge --from-gap
+bash grimoire-init.sh forge --from "migrations DB PostgreSQL"
+bash grimoire-init.sh forge --from-gap
 
 # Guard — budget de contexte LLM
-bash bmad-init.sh guard
-bash bmad-init.sh guard --agent atlas --detail --model gpt-4o
-bash bmad-init.sh guard --suggest
+bash grimoire-init.sh guard
+bash grimoire-init.sh guard --agent atlas --detail --model gpt-4o
+bash grimoire-init.sh guard --suggest
 
 # Evolve — DNA vivante
-bash bmad-init.sh evolve
-bash bmad-init.sh evolve --apply
+bash grimoire-init.sh evolve
+bash grimoire-init.sh evolve --apply
 
 # Dream — consolidation hors-session
-bash bmad-init.sh dream
-bash bmad-init.sh dream --agent dev
-bash bmad-init.sh dream --multi-project ../proj-a ../proj-b
+bash grimoire-init.sh dream
+bash grimoire-init.sh dream --agent dev
+bash grimoire-init.sh dream --multi-project ../proj-a ../proj-b
 
 # Consensus — protocole adversarial
-bash bmad-init.sh consensus --proposal "Utiliser PostgreSQL pour le cache sessions"
-bash bmad-init.sh consensus --history
+bash grimoire-init.sh consensus --proposal "Utiliser PostgreSQL pour le cache sessions"
+bash grimoire-init.sh consensus --history
 
 # Anti-Fragile Score
-bash bmad-init.sh antifragile
-bash bmad-init.sh antifragile --detail --trend
+bash grimoire-init.sh antifragile
+bash grimoire-init.sh antifragile --detail --trend
 
 # Reasoning Stream
-bash bmad-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis > memcached"
-bash bmad-init.sh reasoning analyze
+bash grimoire-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis > memcached"
+bash grimoire-init.sh reasoning analyze
 
 # Cross-Project Migration
-bash bmad-init.sh migrate export --only learnings,rules
-bash bmad-init.sh migrate import --bundle migration-bundle.json --dry-run
+bash grimoire-init.sh migrate export --only learnings,rules
+bash grimoire-init.sh migrate import --bundle migration-bundle.json --dry-run
 
 # Agent Darwinism
-bash bmad-init.sh darwinism evaluate
-bash bmad-init.sh darwinism leaderboard
-bash bmad-init.sh darwinism evolve
+bash grimoire-init.sh darwinism evaluate
+bash grimoire-init.sh darwinism leaderboard
+bash grimoire-init.sh darwinism evolve
 
 # Stigmergy
-bash bmad-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité"
-bash bmad-init.sh stigmergy landscape
-bash bmad-init.sh stigmergy trails
+bash grimoire-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité"
+bash grimoire-init.sh stigmergy landscape
+bash grimoire-init.sh stigmergy trails
 
 # NSO — Nervous System Orchestrator
-bash bmad-init.sh nso run
-bash bmad-init.sh nso retro
+bash grimoire-init.sh nso run
+bash grimoire-init.sh nso retro
 
 # Digital Twin / Quantum Branch / Time-Travel / CRISPR / Decision Log
 # Mirror Agent / Sensory Buffer / R&D Engine
@@ -833,7 +833,7 @@ bash bmad-init.sh nso retro
 |:-------|:--------|
 | Python | 3.12+ |
 | Git | 2.x+ |
-| BMAD Framework | v6.0+ |
+| Grimoire Framework | v6.0+ |
 
 | Optionnel | Pour |
 |:----------|:-----|

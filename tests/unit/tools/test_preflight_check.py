@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.preflight_check — PreflightCheck tool."""
+"""Tests for grimoire.tools.preflight_check — PreflightCheck tool."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bmad.tools.preflight_check import CheckItem, PreflightCheck, PreflightReport
+from grimoire.tools.preflight_check import CheckItem, PreflightCheck, PreflightReport
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
-    """Minimal BMAD project."""
+    """Minimal Grimoire project."""
     (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
-    (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
     (tmp_path / ".git").mkdir()
     return tmp_path
 
@@ -92,7 +92,7 @@ class TestStructureChecks:
         blockers = [c for c in report.checks if c.name == "structure"]
         assert len(blockers) == 0
 
-    def test_missing_bmad_dir(self, bare_project: Path) -> None:
+    def test_missing_grimoire_dir(self, bare_project: Path) -> None:
         pc = PreflightCheck(bare_project)
         report = pc.run()
         assert report.go_nogo == "NO-GO"
@@ -100,7 +100,7 @@ class TestStructureChecks:
         assert len(struct) >= 1
 
     def test_missing_config(self, tmp_path: Path) -> None:
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         pc = PreflightCheck(tmp_path)
         report = pc.run()
         config_checks = [c for c in report.checks if c.name == "config"]
@@ -132,7 +132,7 @@ class TestToolChecks:
 class TestGitChecks:
     def test_no_git_dir(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n")
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         pc = PreflightCheck(tmp_path)
         report = pc.run()
         git_checks = [c for c in report.checks if c.name == "git"]
@@ -140,8 +140,8 @@ class TestGitChecks:
         assert git_checks[0].severity == "info"
 
     def test_git_with_uncommitted(self, project: Path) -> None:
-        # Create uncommitted file in _bmad
-        (project / "_bmad" / "new-file.md").write_text("new")
+        # Create uncommitted file in _grimoire
+        (project / "_grimoire" / "new-file.md").write_text("new")
         pc = PreflightCheck(project)
         report = pc.run()
         # May or may not detect depending on real git state
@@ -173,7 +173,7 @@ class TestGitChecks:
         assert "2 file(s)" in conflicts[0].message
 
     def test_uncommitted_changes_detected(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Simulate uncommitted _bmad/ changes."""
+        """Simulate uncommitted _grimoire/ changes."""
         call_count = 0
 
         def _mock_run(*args: object, **kwargs: object) -> MagicMock:
@@ -183,7 +183,7 @@ class TestGitChecks:
             if call_count == 1:
                 result.stdout = ""  # No conflicts
             else:
-                result.stdout = "M _bmad/config.yaml\nM _bmad/agents/analyst.md\n"
+                result.stdout = "M _grimoire/config.yaml\nM _grimoire/agents/analyst.md\n"
             return result
 
         monkeypatch.setattr(subprocess, "run", _mock_run)
@@ -218,7 +218,7 @@ class TestMemoryChecks:
 
     def test_stale_session_detected(self, project: Path) -> None:
         """Session file older than 1 week should produce info check."""
-        session = project / "_bmad" / "_memory" / "session-state.md"
+        session = project / "_grimoire" / "_memory" / "session-state.md"
         session.write_text("# Session state\n")
         # Set mtime to 10 days ago
         import os
@@ -233,7 +233,7 @@ class TestMemoryChecks:
 
     def test_fresh_session_no_warning(self, project: Path) -> None:
         """Recent session file should not trigger stale warning."""
-        session = project / "_bmad" / "_memory" / "session-state.md"
+        session = project / "_grimoire" / "_memory" / "session-state.md"
         session.write_text("# Fresh session\n")
         pc = PreflightCheck(project)
         report = pc.run()
@@ -241,7 +241,7 @@ class TestMemoryChecks:
         assert len(stale) == 0
 
     def test_contradiction_entries(self, project: Path) -> None:
-        contradictions = project / "_bmad" / "_memory" / "contradiction-log.md"
+        contradictions = project / "_grimoire" / "_memory" / "contradiction-log.md"
         contradictions.write_text("# Log\n- [ ] unresolved issue one\n- [ ] unresolved issue two\n")
         pc = PreflightCheck(project)
         report = pc.run()

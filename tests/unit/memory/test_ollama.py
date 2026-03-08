@@ -1,4 +1,4 @@
-"""Tests for bmad.memory.backends.ollama — OllamaBackend.
+"""Tests for grimoire.memory.backends.ollama — OllamaBackend.
 
 All external dependencies (qdrant_client, ollama HTTP) are fully mocked.
 """
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bmad.memory.backends.base import BackendStatus, MemoryEntry
+from grimoire.memory.backends.base import BackendStatus, MemoryEntry
 
 _FAKE_VECTOR = [0.1] * 768
 
@@ -43,7 +43,7 @@ def ollama_env(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
     # Patch ollama_embed to avoid real HTTP calls
     monkeypatch.setattr(
-        "bmad.memory.backends.ollama.ollama_embed",
+        "grimoire.memory.backends.ollama.ollama_embed",
         lambda text, model, url, **kw: list(_FAKE_VECTOR),
     )
 
@@ -52,7 +52,7 @@ def ollama_env(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 def _make_backend(ollama_env: MagicMock) -> Any:
     """Import and instantiate OllamaBackend with mocked deps."""
-    from bmad.memory.backends.ollama import OllamaBackend
+    from grimoire.memory.backends.ollama import OllamaBackend
 
     return OllamaBackend(qdrant_path="/tmp/test_qdrant_ollama")
 
@@ -67,7 +67,7 @@ class TestOllamaBackendConstruct:
 
     def test_skips_create_when_exists(self, ollama_env: MagicMock) -> None:
         coll = MagicMock()
-        coll.name = "bmad"
+        coll.name = "grimoire"
         ollama_env.get_collections.return_value.collections = [coll]
         _make_backend(ollama_env)
         ollama_env.create_collection.assert_not_called()
@@ -179,8 +179,8 @@ class TestOllamaEmbed:
     """Test the ollama_embed helper function."""
 
     def test_ollama_embed_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delitem(sys.modules, "bmad.memory.backends.ollama", raising=False)
-        from bmad.memory.backends.ollama import ollama_embed
+        monkeypatch.delitem(sys.modules, "grimoire.memory.backends.ollama", raising=False)
+        from grimoire.memory.backends.ollama import ollama_embed
 
         response_data = json.dumps({"embedding": [0.1, 0.2, 0.3]}).encode()
         mock_resp = MagicMock()
@@ -196,11 +196,11 @@ class TestOllamaEmbed:
         assert result == [0.1, 0.2, 0.3]
 
     def test_ollama_embed_http_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delitem(sys.modules, "bmad.memory.backends.ollama", raising=False)
+        monkeypatch.delitem(sys.modules, "grimoire.memory.backends.ollama", raising=False)
         import urllib.error
         import urllib.request
 
-        from bmad.memory.backends.ollama import ollama_embed
+        from grimoire.memory.backends.ollama import ollama_embed
 
         monkeypatch.setattr(
             urllib.request,
@@ -212,11 +212,11 @@ class TestOllamaEmbed:
             ollama_embed("test", "bad-model", "http://localhost:11434")
 
     def test_ollama_embed_url_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delitem(sys.modules, "bmad.memory.backends.ollama", raising=False)
+        monkeypatch.delitem(sys.modules, "grimoire.memory.backends.ollama", raising=False)
         import urllib.error
         import urllib.request
 
-        from bmad.memory.backends.ollama import ollama_embed
+        from grimoire.memory.backends.ollama import ollama_embed
 
         monkeypatch.setattr(
             urllib.request,

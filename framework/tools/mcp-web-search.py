@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mcp-web-search.py — MCP-compatible web search tool for BMAD agents.
+mcp-web-search.py — MCP-compatible web search tool for Grimoire agents.
 ═══════════════════════════════════════════════════════════════════
 
 Recherche web via des API publiques (DuckDuckGo HTML, ou URL API
@@ -15,7 +15,7 @@ MCP interface :
   mcp_web_search(query, max_results=5) → list[{title, url, snippet}]
 
 Usage :
-  python3 mcp-web-search.py --project-root . search "BMAD methodology"
+  python3 mcp-web-search.py --project-root . search "Grimoire methodology"
   python3 mcp-web-search.py --project-root . search "Python dataclass" --max-results 3
 
 Stdlib only — aucune dépendance externe.
@@ -36,7 +36,7 @@ MCP_WEB_SEARCH_VERSION = "1.0.0"
 
 # DuckDuckGo HTML search (no API key needed)
 _DDG_URL = "https://html.duckduckgo.com/html/"
-_USER_AGENT = "BMAD-WebSearch/1.0 (stdlib; no external deps)"
+_USER_AGENT = "Grimoire-WebSearch/1.0 (stdlib; no external deps)"
 _TIMEOUT = 10  # seconds
 
 
@@ -194,7 +194,7 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="BMAD Web Search Tool")
+        description="Grimoire Web Search Tool")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

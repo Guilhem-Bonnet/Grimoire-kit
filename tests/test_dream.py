@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour dream.py — BMAD Dream Mode.
+Tests pour dream.py — Grimoire Dream Mode.
 
 Fonctions testées :
   - collect_sources()
@@ -43,7 +43,7 @@ def _create_memory_tree(root: Path, learnings=None, decisions=None,
                         trace=None, failures=None, shared=None,
                         contradictions=None):
     """Créer un arbre mémoire minimal pour les tests."""
-    mem = root / "_bmad" / "_memory"
+    mem = root / "_grimoire" / "_memory"
     mem.mkdir(parents=True, exist_ok=True)
 
     if learnings:
@@ -65,9 +65,9 @@ def _create_memory_tree(root: Path, learnings=None, decisions=None,
         (mem / "contradiction-log.md").write_text(contradictions, encoding="utf-8")
 
     if trace:
-        out = root / "_bmad-output"
+        out = root / "_grimoire-output"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "BMAD_TRACE.md").write_text(trace, encoding="utf-8")
+        (out / "Grimoire_TRACE.md").write_text(trace, encoding="utf-8")
 
 
 # ── Test DreamSource / DreamInsight ───────────────────────────────────────────
@@ -163,7 +163,7 @@ class TestParseTraceEntries(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_parses_standard_trace(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "[2025-06-01 10:00] [DECISION] [architect] Chose microservices arch\n"
             "[2025-06-01 10:05] [INFO] [dev] Starting implementation\n"
@@ -804,9 +804,9 @@ class TestWriteJournal(unittest.TestCase):
         self.mod.write_journal("First", self.tmpdir)
         # Write second — should archive first
         self.mod.write_journal("Second", self.tmpdir)
-        journal_path = self.tmpdir / "_bmad-output" / "dream-journal.md"
+        journal_path = self.tmpdir / "_grimoire-output" / "dream-journal.md"
         self.assertEqual(journal_path.read_text(encoding="utf-8"), "Second")
-        archives = list((self.tmpdir / "_bmad-output" / "dream-archives").glob("*.md"))
+        archives = list((self.tmpdir / "_grimoire-output" / "dream-archives").glob("*.md"))
         self.assertEqual(len(archives), 1)
 
     def test_dry_run_no_write(self, ):
@@ -823,7 +823,7 @@ class TestParsePheromoneBoard(unittest.TestCase):
     def setUp(self):
         self.mod = _import_dream()
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.board_dir = self.tmpdir / "_bmad-output"
+        self.board_dir = self.tmpdir / "_grimoire-output"
         self.board_dir.mkdir(parents=True)
 
     def tearDown(self):
@@ -985,10 +985,10 @@ class TestDreamTimestamp(unittest.TestCase):
     def test_creates_directory(self):
         deep = self.tmpdir / "sub" / "project"
         self.mod.save_last_dream_timestamp(deep)
-        self.assertTrue((deep / "_bmad" / "_memory" / "dream-last-run").exists())
+        self.assertTrue((deep / "_grimoire" / "_memory" / "dream-last-run").exists())
 
     def test_corrupted_file_returns_none(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "dream-last-run").write_text("corrupted", encoding="utf-8")
         result = self.mod.read_last_dream_timestamp(self.tmpdir)
@@ -1207,8 +1207,8 @@ class TestEmitToStigmergy(unittest.TestCase):
     def setUp(self):
         self.mod = _import_dream()
         self.tmpdir = Path(tempfile.mkdtemp())
-        # Créer le dossier _bmad-output pour le board stigmergy
-        (self.tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+        # Créer le dossier _grimoire-output pour le board stigmergy
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -1249,7 +1249,7 @@ class TestEmitToStigmergy(unittest.TestCase):
         ]
         self.mod.emit_to_stigmergy(insights, self.tmpdir)
         # Verify board file was created
-        board_file = self.tmpdir / "_bmad-output" / "pheromone-board.json"
+        board_file = self.tmpdir / "_grimoire-output" / "pheromone-board.json"
         self.assertTrue(board_file.exists())
 
     def test_pheromone_has_dream_prefix(self):
@@ -1311,7 +1311,7 @@ class TestEmitToStigmergy(unittest.TestCase):
         for category, expected_type in self.mod._INSIGHT_TO_PHEROMONE.items():
             # Fresh tmpdir per iteration to avoid accumulated state
             cat_dir = Path(tempfile.mkdtemp())
-            (cat_dir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+            (cat_dir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
             try:
                 insights = [
                     self.mod.DreamInsight(
@@ -1649,7 +1649,7 @@ class TestDreamMemoryPersistence(unittest.TestCase):
     def setUp(self):
         self.mod = _import_dream()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -1666,7 +1666,7 @@ class TestDreamMemoryPersistence(unittest.TestCase):
         self.assertIn("sig1", loaded["insights"])
 
     def test_corrupted_file_returns_empty(self):
-        mem_path = self.tmpdir / "_bmad-output" / self.mod.DREAM_MEMORY_FILE
+        mem_path = self.tmpdir / "_grimoire-output" / self.mod.DREAM_MEMORY_FILE
         mem_path.write_text("not json!", encoding="utf-8")
         mem = self.mod.load_dream_memory(self.tmpdir)
         self.assertEqual(mem, {})
@@ -1847,7 +1847,7 @@ class TestExtractAgents(unittest.TestCase):
 
     def test_known_agents_contains_expected(self):
         for agent in ("dev", "architect", "pm", "qa", "sm", "analyst",
-                       "tech-writer", "ux-designer", "bmad-master"):
+                       "tech-writer", "ux-designer", "grimoire-master"):
             self.assertIn(agent, self.mod._KNOWN_AGENTS)
 
     def test_extract_bracket_pattern(self):

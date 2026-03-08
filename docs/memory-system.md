@@ -4,7 +4,7 @@
 
 ## <img src="assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
-Le système de mémoire BMAD Custom Kit repose sur 3 couches complémentaires :
+Le système de mémoire Grimoire Custom Kit repose sur 3 couches complémentaires :
 
 ```
 ┌─────────────────────────────────────────┐
@@ -83,12 +83,12 @@ python mem0-bridge.py recall "terraform" --agent forge --limit 10
 
 # Exporter une collection en Markdown
 python mem0-bridge.py export-md --type agent-learnings \
-    --output _bmad/_memory/agent-learnings/forge.md
+    --output _grimoire/_memory/agent-learnings/forge.md
 
 # Importer un .md existant dans Qdrant
-python mem0-bridge.py import-md _bmad/_memory/decisions-log.md --type decisions
+python mem0-bridge.py import-md _grimoire/_memory/decisions-log.md --type decisions
 
-# Initialiser toutes les collections (idémpotent, exécuté auto par bmad-init.sh)
+# Initialiser toutes les collections (idémpotent, exécuté auto par grimoire-init.sh)
 python mem0-bridge.py init-collections
 ```
 

@@ -275,12 +275,12 @@ merge:
   validator_agent: "qa"         # agent qui valide
   trust_threshold: 70           # score minimum pour accepter
   on_below_threshold: "escalate_to_user"  # ou "retry" ou "challenge"
-  save_to: "_bmad-output/implementation-artifacts/{output}-validated.md"
+  save_to: "_grimoire-output/implementation-artifacts/{output}-validated.md"
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]    [CVTL:requested]   producer=dev/Amelia | validator=qa/Quinn | type=code

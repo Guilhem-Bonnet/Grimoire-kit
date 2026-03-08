@@ -1,8 +1,8 @@
-"""Tests for bmad.core.validator — config schema validation."""
+"""Tests for grimoire.core.validator — config schema validation."""
 
 from __future__ import annotations
 
-from bmad.core.validator import ValidationError, validate_config
+from grimoire.core.validator import ValidationError, validate_config
 
 
 def _minimal() -> dict:

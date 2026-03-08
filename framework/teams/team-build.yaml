@@ -32,24 +32,24 @@ team:
     required:
       - name: "Delivery Contract depuis Team Vision"
         description: "PRD validé + UX Specs + contrat signé"
-        path_pattern: "_bmad-output/contracts/vision-to-build-*.md"
+        path_pattern: "_grimoire-output/contracts/vision-to-build-*.md"
       - name: "PRD validé"
         description: "Requirements complets avec ACs"
-        path_pattern: "_bmad-output/planning-artifacts/PRD-*.md"
+        path_pattern: "_grimoire-output/planning-artifacts/PRD-*.md"
     optional:
       - name: "UX Specs"
         description: "User journeys et composants UI"
-        path_pattern: "_bmad-output/planning-artifacts/UX-specs-*.md"
+        path_pattern: "_grimoire-output/planning-artifacts/UX-specs-*.md"
 
   outputs:
     deliverables:
       - name: "Architecture Decision Records"
         format: "Markdown"
-        path_pattern: "_bmad-output/implementation-artifacts/architecture-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/architecture-*.md"
         acceptance_criteria: "Tous les choix techniques justifiés, trade-offs documentés"
       - name: "Sprint Plan"
         format: "Markdown"
-        path_pattern: "_bmad-output/implementation-artifacts/sprint-plan-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/sprint-plan-*.md"
         acceptance_criteria: "Epics + Stories avec ACs, story points estimés, sprint 1 prêt"
       - name: "Code implémenté"
         format: "Code source"
@@ -57,11 +57,11 @@ team:
         acceptance_criteria: "Tous les tests passent (CC PASS), coverage ≥ 80% si applicable"
       - name: "Rapport QA"
         format: "Markdown"
-        path_pattern: "_bmad-output/implementation-artifacts/qa-report-*.md"
+        path_pattern: "_grimoire-output/implementation-artifacts/qa-report-*.md"
         acceptance_criteria: "0 test failing, tous les ACs couverts par tests"
       - name: "Delivery Contract vers Team Ops"
         format: "Markdown"
-        path_pattern: "_bmad-output/contracts/build-to-ops-*.md"
+        path_pattern: "_grimoire-output/contracts/build-to-ops-*.md"
         acceptance_criteria: "Code review passée, CC PASS confirmé, doc à jour"
     optional_deliverables:
       - name: "Documentation technique"
@@ -98,7 +98,7 @@ team:
           - "Créer les User Stories avec ACs mesurables"
           - "Estimer story points"
           - "Construire Sprint 1 (MVP ou slice vertical)"
-          - "Créer les fichiers story dans _bmad-output/implementation-artifacts/stories/"
+          - "Créer les fichiers story dans _grimoire-output/implementation-artifacts/stories/"
         output: "sprint-plan-{project}-sprint{n}.md"
       - phase: 3
         name: "Implementation TDD"
@@ -130,7 +130,7 @@ team:
         output: "contracts/build-to-ops-{date}.md"
 
   team_context:
-    directory: "_bmad-output/team-build/"
+    directory: "_grimoire-output/team-build/"
     files:
       - name: "team-context.md"
         description: "Résumé technique : ADRs, patterns choisis, dépendances clés"

@@ -5,7 +5,7 @@ auto-index.py — Auto-indexation RAG sur fichiers modifiés.
 
 Surveille les changements (git ou polling) et déclenche automatiquement
 l'indexation RAG incrémentale. Comparable au "Codebase Indexing" natif
-de Cursor, mais intégré au pipeline BMAD.
+de Cursor, mais intégré au pipeline Grimoire.
 
 Modes :
   hook      — Installe un git hook post-commit pour auto-index
@@ -44,8 +44,8 @@ _log = logging.getLogger("grimoire.auto_index")
 
 AUTO_INDEX_VERSION = "1.0.0"
 
-HASH_INDEX_FILE = "_bmad-output/.auto-index-hashes.json"
-HOOK_MARKER = "# BMAD-AUTO-INDEX"
+HASH_INDEX_FILE = "_grimoire-output/.auto-index-hashes.json"
+HOOK_MARKER = "# Grimoire-AUTO-INDEX"
 WATCH_INTERVAL = 5.0  # sec
 
 # Patterns à inclure (ceux qu'on veut indexer)
@@ -57,7 +57,7 @@ INDEXABLE_EXTENSIONS = {
 # Dossiers exclus
 EXCLUDE_DIRS = frozenset({
     "node_modules", ".git", "__pycache__", ".pytest_cache",
-    ".ruff_cache", ".venv", "venv", ".bmad-rnd",
+    ".ruff_cache", ".venv", "venv", ".grimoire-rnd",
 })
 
 # Hook script content
@@ -306,8 +306,8 @@ def _trigger_rag_index(project_root: Path, quiet: bool = False) -> bool:
     """Tente de déclencher le rag-indexer en mode incrémental."""
     rag_indexer = project_root / "framework" / "tools" / "rag-indexer.py"
     if not rag_indexer.exists():
-        # Chercher dans bmad-custom-kit s'il existe
-        alt = project_root.parent / "bmad-custom-kit" / "framework" / "tools" / "rag-indexer.py"
+        # Chercher dans grimoire-kit s'il existe
+        alt = project_root.parent / "grimoire-kit" / "framework" / "tools" / "rag-indexer.py"
         if alt.exists():
             rag_indexer = alt
         else:
@@ -388,9 +388,9 @@ def uninstall_hook(project_root: Path) -> tuple[bool, str]:
 
     content = hook_file.read_text(encoding="utf-8")
     if HOOK_MARKER not in content:
-        return True, "Hook BMAD non trouvé dans post-commit"
+        return True, "Hook Grimoire non trouvé dans post-commit"
 
-    # Retirer le bloc BMAD
+    # Retirer le bloc Grimoire
     lines = content.splitlines()
     new_lines: list[str] = []
     skip = False
@@ -410,7 +410,7 @@ def uninstall_hook(project_root: Path) -> tuple[bool, str]:
     else:
         hook_file.unlink()
 
-    return True, "Hook BMAD désinstallé"
+    return True, "Hook Grimoire désinstallé"
 
 
 # ── Watch Mode ────────────────────────────────────────────────────────────────
@@ -489,7 +489,7 @@ def show_status(project_root: Path, as_json: bool = False) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Auto-Index — Indexation RAG automatique BMAD",
+        description="Auto-Index — Indexation RAG automatique Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

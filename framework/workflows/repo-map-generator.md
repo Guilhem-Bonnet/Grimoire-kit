@@ -33,23 +33,23 @@ by_file = collections.defaultdict(list)
 for t in tags:
     by_file[t['path']].append({'name': t['name'], 'kind': t.get('kind','?'), 'line': t.get('line',0)})
 print(json.dumps(dict(by_file), indent=2))
-" > _bmad-output/repo-map.json
+" > _grimoire-output/repo-map.json
 ```
 
 ### Stratégie 2 — `find` + `grep` (sans dépendances)
 
 ```bash
 # Génère une arborescence annotée sans ctags
-find . \( -path "./.git" -o -path "./node_modules" -o -path "./_bmad-output" \) -prune \
+find . \( -path "./.git" -o -path "./node_modules" -o -path "./_grimoire-output" \) -prune \
        -o -type f \( -name "*.go" -o -name "*.ts" -o -name "*.py" -o -name "*.tf" -o -name "*.md" \) \
-       -print > /tmp/bmad-files.txt
+       -print > /tmp/grimoire-files.txt
 
 # Fonctions/classes exportées par fichier
 while IFS= read -r f; do
   echo "### $f"
   grep -E "^(func |class |def |export (function|class|const)|variable \"[A-Z])" "$f" 2>/dev/null | head -20
   echo ""
-done < /tmp/bmad-files.txt > _bmad-output/repo-map.md
+done < /tmp/grimoire-files.txt > _grimoire-output/repo-map.md
 ```
 
 ### Stratégie 3 — Tree-sitter (précision maximale, opt-in)
@@ -57,8 +57,8 @@ done < /tmp/bmad-files.txt > _bmad-output/repo-map.md
 ```bash
 # Nécessite tree-sitter CLI + grammaires installées
 # npm install -g tree-sitter-cli
-# Usage via script bmad-tree-sitter-map.js (inclus dans framework/mcp/)
-node framework/mcp/bmad-tree-sitter-map.js --output _bmad-output/repo-map.json
+# Usage via script grimoire-tree-sitter-map.js (inclus dans framework/mcp/)
+node framework/mcp/grimoire-tree-sitter-map.js --output _grimoire-output/repo-map.json
 ```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
@@ -112,7 +112,7 @@ Chaque agent qui a besoin de naviguer le code peut appeler :
 [→Atlas][RM] : demande de Repo Map à jour
 ```
 
-Atlas répond avec le chemin `_bmad-output/repo-map.md` ou le régénère si obsolète.
+Atlas répond avec le chemin `_grimoire-output/repo-map.md` ou le régénère si obsolète.
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
@@ -123,8 +123,8 @@ Ajouter dans `.git/hooks/post-commit` (optionnel) :
 ```bash
 #!/usr/bin/env bash
 # Invalider la Repo Map après chaque commit
-if [[ -f "_bmad-output/repo-map.md" ]]; then
-    echo "<!-- STALE: regenerate with Atlas [RM] -->" >> "_bmad-output/repo-map.md"
+if [[ -f "_grimoire-output/repo-map.md" ]]; then
+    echo "<!-- STALE: regenerate with Atlas [RM] -->" >> "_grimoire-output/repo-map.md"
 fi
 ```
 
@@ -138,8 +138,8 @@ repo_map:
   strategy: "ctags"          # ctags | find | tree-sitter
   max_symbols_per_file: 30
   languages: [go, typescript, python, terraform]
-  exclude_dirs: [node_modules, .git, vendor, dist, _bmad-output]
-  output: "_bmad-output/repo-map.md"
+  exclude_dirs: [node_modules, .git, vendor, dist, _grimoire-output]
+  output: "_grimoire-output/repo-map.md"
   stale_after_hours: 24
 ```
 

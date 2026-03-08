@@ -26,7 +26,7 @@ _spec.loader.exec_module(daemon)
 @pytest.fixture
 def tmp_project(tmp_path):
     """Crée un projet temp avec structure minimale."""
-    (tmp_path / "_bmad" / "_memory" / "daemon").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_memory" / "daemon").mkdir(parents=True)
     (tmp_path / "framework" / "tools").mkdir(parents=True)
     return tmp_path
 
@@ -132,7 +132,7 @@ class TestMCP:
 
 class TestMemoryBridge:
     def test_bridge_no_source(self, tmp_path):
-        # tmp_path frais sans _bmad/_memory/
+        # tmp_path frais sans _grimoire/_memory/
         result = daemon._run_memory_bridge(tmp_path)
         assert result.name == "memory-bridge"
         assert result.status == "skipped"
@@ -252,7 +252,7 @@ class TestAutoEvolve:
             'print(json.dumps({"fitness_score": 72, "level": "HEALTHY"}))\n',
         )
         daemon._run_evolve_cycle(tmp_project)
-        log_path = tmp_project / "_bmad" / "_memory" / "evolve-cycle.jsonl"
+        log_path = tmp_project / "_grimoire" / "_memory" / "evolve-cycle.jsonl"
         assert log_path.exists()
 
         lines = log_path.read_text().strip().splitlines()

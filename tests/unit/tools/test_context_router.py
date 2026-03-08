@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.context_router — ContextRouter tool."""
+"""Tests for grimoire.tools.context_router — ContextRouter tool."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.tools.context_router import (
+from grimoire.tools.context_router import (
     DEFAULT_MODEL,
     MODEL_WINDOWS,
     ContextRouter,
@@ -22,30 +22,30 @@ from bmad.tools.context_router import (
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
-    """BMAD project with agent files and memory."""
+    """Grimoire project with agent files and memory."""
     (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
-    (tmp_path / "_bmad" / "_config" / "agents").mkdir(parents=True)
-    (tmp_path / "_bmad" / "_config" / "custom").mkdir(parents=True)
-    (tmp_path / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_config" / "agents").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_config" / "custom").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True)
 
     # Agent base
-    (tmp_path / "_bmad" / "_config" / "custom" / "agent-base.md").write_text(
+    (tmp_path / "_grimoire" / "_config" / "custom" / "agent-base.md").write_text(
         "# Agent Base Protocol\nRules here.\n"
     )
     # Agent file
-    (tmp_path / "_bmad" / "_config" / "agents" / "analyst.md").write_text(
+    (tmp_path / "_grimoire" / "_config" / "agents" / "analyst.md").write_text(
         "# Analyst\nname: analyst\nAnalysis agent.\n"
     )
     # Session context
-    (tmp_path / "_bmad" / "_memory" / "shared-context.md").write_text(
+    (tmp_path / "_grimoire" / "_memory" / "shared-context.md").write_text(
         "# Shared Context\n- Project uses Python 3.12\n"
     )
     # Decisions
-    (tmp_path / "_bmad" / "_memory" / "decisions-log.md").write_text(
+    (tmp_path / "_grimoire" / "_memory" / "decisions-log.md").write_text(
         "# Decisions\n- [2024-01-01] Use Python\n"
     )
     # Agent learnings
-    (tmp_path / "_bmad" / "_memory" / "agent-learnings" / "analyst.md").write_text(
+    (tmp_path / "_grimoire" / "_memory" / "agent-learnings" / "analyst.md").write_text(
         "# Analyst Learnings\n- [2024-01-01] Analysis patterns\n"
     )
     return tmp_path
@@ -141,12 +141,12 @@ class TestDiscoverContextFiles:
         assert any("learnings" in k.lower() for k in kinds)
 
     def test_empty_project(self, tmp_path: Path) -> None:
-        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         entries = discover_context_files(tmp_path, "analyst")
         assert entries == []
 
     def test_discovers_archives(self, project: Path) -> None:
-        arch = project / "_bmad" / "_memory" / "archives"
+        arch = project / "_grimoire" / "_memory" / "archives"
         arch.mkdir()
         (arch / "old-decisions.md").write_text("# Archived\n")
         entries = discover_context_files(project, "analyst")

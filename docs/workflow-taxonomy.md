@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/workflow.svg" width="32" height="32" alt=""> Taxonomie des workflows BMAD
+# <img src="assets/icons/workflow.svg" width="32" height="32" alt=""> Taxonomie des workflows Grimoire
 
 > **ADR-002** — Clarification des trois types d'exécution dans le Grimoire Kit.
 

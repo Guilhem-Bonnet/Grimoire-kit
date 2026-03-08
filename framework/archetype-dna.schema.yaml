@@ -3,7 +3,7 @@
 # Ce schéma définit la structure attendue.
 # Héritage : tous les archétypes héritent implicitement de "minimal"
 
-$schema: "bmad-archetype-dna/v1"
+$schema: "grimoire-archetype-dna/v1"
 
 # ── Identité ──────────────────────────────────────────────────────────────────
 id: string                          # Identifiant unique : "infra-ops", "web-app", "fix-loop"
@@ -83,7 +83,7 @@ compatible_with: [string]           # Autres archétypes compatibles pour co-ins
 incompatible_with: [string]         # Archétypes mutuellement exclusifs
 requires: [string]                  # Archétypes prérequis
 
-# ── Auto-détection (pour --auto dans bmad-init.sh) ───────────────────────────
+# ── Auto-détection (pour --auto dans grimoire-init.sh) ───────────────────────────
 auto_detect:
   files: [string]                   # Patterns de fichiers qui déclenchent la sélection
   directories: [string]             # Patterns de répertoires

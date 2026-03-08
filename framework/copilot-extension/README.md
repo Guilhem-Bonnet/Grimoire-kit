@@ -1,18 +1,18 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> BMAD Copilot Extension — `@bmad` — BM-23
+# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Grimoire Copilot Extension — `@grimoire` — BM-23
 
-> Intégration native de BMAD dans GitHub Copilot Chat via l'API GitHub Copilot Extensions.
+> Intégration native de Grimoire dans GitHub Copilot Chat via l'API GitHub Copilot Extensions.
 
 ## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
 
-L'extension `@bmad` permet d'activer les agents et workflows BMAD directement depuis l'interface Copilot Chat dans VS Code, sans quitter l'éditeur, sans copier-coller de contexte.
+L'extension `@grimoire` permet d'activer les agents et workflows Grimoire directement depuis l'interface Copilot Chat dans VS Code, sans quitter l'éditeur, sans copier-coller de contexte.
 
 ```
-@bmad /activate atlas
-@bmad /status
-@bmad /run workflow boomerang-feature.yaml
-@bmad /session branch feature-auth
+@grimoire /activate atlas
+@grimoire /status
+@grimoire /run workflow boomerang-feature.yaml
+@grimoire /session branch feature-auth
 ```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
@@ -22,13 +22,13 @@ L'extension `@bmad` permet d'activer les agents et workflows BMAD directement de
 ```
 VS Code Copilot Chat
         │
-        │ @bmad /command
+        │ @grimoire /command
         ▼
 GitHub Copilot Extensions API
         │
         │ Webhook POST /api/copilot-extension
         ▼
-BMAD MCP Server (local ou distant)
+Grimoire MCP Server (local ou distant)
         │
         ├─ get_project_context()
         ├─ get_agent_memory()
@@ -42,26 +42,26 @@ BMAD MCP Server (local ou distant)
 
 | Commande | Description |
 |---------|-------------|
-| `@bmad /activate <agent>` | Activer un agent spécifique avec son contexte projet |
-| `@bmad /status` | État du projet courant (workflow en cours, session active) |
-| `@bmad /run workflow <file>` | Démarrer un workflow YAML via le workflow engine |
-| `@bmad /session branch <name>` | Créer une nouvelle branche de session |
-| `@bmad /session list` | Lister les branches de session actives |
-| `@bmad /memory show` | Afficher le contenu de la mémoire partagée |
-| `@bmad /memory update` | Déclencher une mise à jour mémoire via Atlas |
-| `@bmad /team <team-id> start` | Démarrer un pipeline Team of Teams |
-| `@bmad /repo-map` | Générer/afficher la Repo Map |
-| `@bmad /think <question>` | Activer le mode Extended Thinking [THINK] |
-| `@bmad /failure-museum` | Consulter le Failure Museum du projet |
-| `@bmad /install archetype <id>` | Installer un archétype dans le projet courant |
-| `@bmad /help` | Afficher l'aide complète |
+| `@grimoire /activate <agent>` | Activer un agent spécifique avec son contexte projet |
+| `@grimoire /status` | État du projet courant (workflow en cours, session active) |
+| `@grimoire /run workflow <file>` | Démarrer un workflow YAML via le workflow engine |
+| `@grimoire /session branch <name>` | Créer une nouvelle branche de session |
+| `@grimoire /session list` | Lister les branches de session actives |
+| `@grimoire /memory show` | Afficher le contenu de la mémoire partagée |
+| `@grimoire /memory update` | Déclencher une mise à jour mémoire via Atlas |
+| `@grimoire /team <team-id> start` | Démarrer un pipeline Team of Teams |
+| `@grimoire /repo-map` | Générer/afficher la Repo Map |
+| `@grimoire /think <question>` | Activer le mode Extended Thinking [THINK] |
+| `@grimoire /failure-museum` | Consulter le Failure Museum du projet |
+| `@grimoire /install archetype <id>` | Installer un archétype dans le projet courant |
+| `@grimoire /help` | Afficher l'aide complète |
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 ## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet d'extension
 
 ```
-bmad-copilot-extension/
+grimoire-copilot-extension/
 ├── package.json
 ├── server.ts               # Point d'entrée Express
 ├── src/
@@ -74,7 +74,7 @@ bmad-copilot-extension/
 │   │   ├── memory.ts
 │   │   ├── team.ts
 │   │   └── repo-map.ts
-│   ├── mcp-client.ts       # Client vers BMAD MCP Server
+│   ├── mcp-client.ts       # Client vers Grimoire MCP Server
 │   └── context-builder.ts  # Construction du contexte projet
 ├── .github/
 │   └── copilot-extension/
@@ -87,8 +87,8 @@ bmad-copilot-extension/
 ## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Manifest de l'extension (`agent.yml`)
 
 ```yaml
-name: BMAD
-description: "BMAD Agent Framework — activate agents, run workflows, manage sessions"
+name: Grimoire
+description: "Grimoire Agent Framework — activate agents, run workflows, manage sessions"
 homepage: https://github.com/grimoire-kit
 capabilities:
   - chat
@@ -96,7 +96,7 @@ capabilities:
   - tools
 tools:
   - name: activate_agent
-    description: "Activate a BMAD agent with full project context"
+    description: "Activate a Grimoire agent with full project context"
     parameters:
       - name: agent_id
         type: string
@@ -104,13 +104,13 @@ tools:
   - name: get_project_status
     description: "Get current workflow and session status"
   - name: run_workflow
-    description: "Execute a BMAD YAML workflow"
+    description: "Execute a Grimoire YAML workflow"
     parameters:
       - name: workflow_file
         type: string
         required: true
   - name: query_memory
-    description: "Query the BMAD memory system"
+    description: "Query the Grimoire memory system"
     parameters:
       - name: query
         type: string
@@ -154,7 +154,7 @@ export async function handleCopilotMessage(
     }
 
     default:
-      return `Commande inconnue: ${cmd}. Try @bmad /help`;
+      return `Commande inconnue: ${cmd}. Try @grimoire /help`;
   }
 }
 ```
@@ -168,11 +168,11 @@ export async function handleCopilotMessage(
 npm install -g @github/copilot-extensions-cli
 
 # Créer le projet extension
-copilot-extension init bmad-copilot-extension
+copilot-extension init grimoire-copilot-extension
 
 # Configurer le webhook vers le MCP Server local
 # Dans .env :
-BMAD_MCP_HOST=http://localhost:3001
+Grimoire_MCP_HOST=http://localhost:3001
 GITHUB_TOKEN=ghp_...
 
 # Démarrer en mode dev

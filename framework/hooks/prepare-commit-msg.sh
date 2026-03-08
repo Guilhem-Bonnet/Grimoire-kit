@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
-# BMAD — Git prepare-commit-msg hook
+# Grimoire — Git prepare-commit-msg hook
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Déclenché avant l'ouverture de l'éditeur de commit.
@@ -10,10 +10,10 @@
 #   - Injecte en bas du message (section commentaires) :
 #     → Agent actif depuis state.json (ex: "Amelia [dev]")
 #     → Checkpoint_id court actif (ex: "ckpt:a3f2b1c4")
-#     → Branche courante si session-branch BMAD
+#     → Branche courante si session-branch Grimoire
 #   - Ne modifie jamais les rebase/squash/merge automatiques
 #
-# Installation via : bmad-init.sh hooks --install
+# Installation via : grimoire-init.sh hooks --install
 # ══════════════════════════════════════════════════════════════════════════════
 
 set -uo pipefail  # pas -e : enrichissement du message, ne doit pas bloquer
@@ -27,16 +27,16 @@ case "$COMMIT_SOURCE" in
 esac
 
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-MEMORY_DIR="$GIT_ROOT/_bmad/_memory"
+MEMORY_DIR="$GIT_ROOT/_grimoire/_memory"
 STATE_FILE="$MEMORY_DIR/state.json"
 
-[[ -d "$GIT_ROOT/_bmad" ]] || exit 0
+[[ -d "$GIT_ROOT/_grimoire" ]] || exit 0
 
-# ── Lire l'état BMAD ─────────────────────────────────────────────────────────
-BMAD_CONTEXT=""
+# ── Lire l'état Grimoire ─────────────────────────────────────────────────────────
+Grimoire_CONTEXT=""
 
 if [[ -f "$STATE_FILE" ]] && command -v python3 &>/dev/null; then
-    BMAD_CONTEXT=$(python3 - "$STATE_FILE" <<'PYEOF'
+    Grimoire_CONTEXT=$(python3 - "$STATE_FILE" <<'PYEOF'
 import json, sys
 
 try:
@@ -70,13 +70,13 @@ PYEOF
 )
 fi
 
-# ── Ajouter le contexte BMAD en commentaire ───────────────────────────────────
-if [[ -n "$BMAD_CONTEXT" ]]; then
+# ── Ajouter le contexte Grimoire en commentaire ───────────────────────────────────
+if [[ -n "$Grimoire_CONTEXT" ]]; then
     # Ajouter après les lignes existantes, avant les commentaires git
     {
         cat "$COMMIT_MSG_FILE"
         echo ""
-        echo "# BMAD: $BMAD_CONTEXT"
+        echo "# Grimoire: $Grimoire_CONTEXT"
     } > "${COMMIT_MSG_FILE}.tmp" && mv "${COMMIT_MSG_FILE}.tmp" "$COMMIT_MSG_FILE"
 fi
 

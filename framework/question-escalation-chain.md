@@ -149,7 +149,7 @@ auto_resolution_sources:
     description: "Décisions passées qui pourraient répondre à la question"
   
   # 3. Historique QA (questions-réponses précédentes)
-  - source: "_bmad-output/.qa-history.yaml"
+  - source: "_grimoire-output/.qa-history.yaml"
     description: "Questions déjà posées et réponses de l'utilisateur"
   
   # 4. Contexte de la conversation en cours
@@ -171,7 +171,7 @@ POUR CHAQUE question dans le buffer :
     → Marquer status = "auto_resolved"
     → Remplir resolution avec la réponse + source citée
     → Redistribuer immédiatement à l'agent
-    → Logger dans BMAD_TRACE : [HUP:auto-resolved]
+    → Logger dans Grimoire_TRACE : [HUP:auto-resolved]
   
   SI réponse trouvée mais confiance < 80% :
     → Garder dans le buffer
@@ -242,14 +242,14 @@ POUR CHAQUE réponse reçue :
      "Réponse à ta question Q{id} : {réponse}. Tu peux continuer ta tâche."
   4. Ajouter au QA History pour référence future
   5. Si la réponse enrichit le contexte général → mettre à jour shared-context.md
-  6. Logger dans BMAD_TRACE : [QEC:user-resolved] agent={id} question={summary}
+  6. Logger dans Grimoire_TRACE : [QEC:user-resolved] agent={id} question={summary}
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 ## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> QA History — Mémoire des Questions-Réponses
 
-Fichier : `_bmad-output/.qa-history.yaml`
+Fichier : `_grimoire-output/.qa-history.yaml`
 
 ```yaml
 # QA History — Auto-generated, do not edit manually
@@ -271,7 +271,7 @@ entries:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]  [QEC:received]       from=dev/Amelia | type=missing_data | priority=blocking

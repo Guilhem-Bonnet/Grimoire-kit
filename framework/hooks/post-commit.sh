@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
-# BMAD — Git post-commit hook
+# Grimoire — Git post-commit hook
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Déclenché APRÈS chaque commit réussi.
 # Ne reçoit pas de paramètres.
 #
 # Comportement :
-#   1. Append une entrée [GIT-COMMIT] dans BMAD_TRACE.md avec :
+#   1. Append une entrée [GIT-COMMIT] dans Grimoire_TRACE.md avec :
 #      - Hash court du commit
 #      - Message du commit
 #      - Fichiers modifiés (liste)
@@ -15,18 +15,18 @@
 #      - Branche courante
 #   2. Ne bloque jamais (exit 0 garanti)
 #
-# Installation via : bmad-init.sh hooks --install
+# Installation via : grimoire-init.sh hooks --install
 # ══════════════════════════════════════════════════════════════════════════════
 
 set -uo pipefail  # pas -e : hook post-commit ne doit jamais bloquer
 
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-BMAD_DIR="$GIT_ROOT/_bmad"
+Grimoire_DIR="$GIT_ROOT/_grimoire"
 
-[[ -d "$BMAD_DIR" ]] || exit 0
+[[ -d "$Grimoire_DIR" ]] || exit 0
 
-TRACE_FILE="$GIT_ROOT/_bmad-output/BMAD_TRACE.md"
-STATE_FILE="$BMAD_DIR/_memory/state.json"
+TRACE_FILE="$GIT_ROOT/_grimoire-output/Grimoire_TRACE.md"
+STATE_FILE="$Grimoire_DIR/_memory/state.json"
 
 # Informations du commit
 COMMIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
@@ -67,7 +67,7 @@ mkdir -p "$(dirname "$TRACE_FILE")"
 
 # Initialiser le fichier s'il n'existe pas
 if [[ ! -f "$TRACE_FILE" ]]; then
-    echo "# BMAD_TRACE — Audit Trail" > "$TRACE_FILE"
+    echo "# Grimoire_TRACE — Audit Trail" > "$TRACE_FILE"
     echo "" >> "$TRACE_FILE"
     echo "> Généré automatiquement — ne pas éditer manuellement" >> "$TRACE_FILE"
     echo "" >> "$TRACE_FILE"
@@ -78,16 +78,16 @@ echo "$TRACE_ENTRY" >> "$TRACE_FILE"
 
 # ── Dream auto-trigger ───────────────────────────────────────────────────────
 # Lancer un dream --quick --emit --since auto quand des fichiers mémoire changent.
-# Le compteur ne s'incrémente que si le commit touche _bmad/_memory/ ou _bmad-output/
+# Le compteur ne s'incrémente que si le commit touche _grimoire/_memory/ ou _grimoire-output/
 # → pas de dream inutile sur un commit qui ne change que du code source.
-DREAM_INTERVAL="${BMAD_DREAM_INTERVAL:-10}"
-DREAM_COUNTER_FILE="$BMAD_DIR/_memory/dream-trigger-count"
+DREAM_INTERVAL="${Grimoire_DREAM_INTERVAL:-10}"
+DREAM_COUNTER_FILE="$Grimoire_DIR/_memory/dream-trigger-count"
 DREAM_SCRIPT="$GIT_ROOT/framework/tools/dream.py"
 
 if [[ -f "$DREAM_SCRIPT" ]] && command -v python3 &>/dev/null; then
     # Smart trigger : ne compter que les commits qui touchent la mémoire
     MEMORY_CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD 2>/dev/null \
-        | grep -cE '^_bmad/(_memory|_config)|^_bmad-output/' || true)
+        | grep -cE '^_grimoire/(_memory|_config)|^_grimoire-output/' || true)
 
     if [[ "$MEMORY_CHANGED" -gt 0 ]]; then
         # Lire ou initialiser le compteur

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour memory-sync.py — Synchronisation bidirectionnelle mémoire BMAD ↔ Qdrant (BM-42 Story 2.4).
+Tests pour memory-sync.py — Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant (BM-42 Story 2.4).
 
 Fonctions testées :
   - MemoryEntry (uid déterministe, fields)
@@ -60,7 +60,7 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(len(parts), 3)
 
     def test_memory_dir_constant(self):
-        self.assertEqual(self.mod.MEMORY_DIR, "_bmad/_memory")
+        self.assertEqual(self.mod.MEMORY_DIR, "_grimoire/_memory")
 
     def test_sync_state_file(self):
         self.assertIn(".memory-sync-state.json", self.mod.SYNC_STATE_FILE)
@@ -326,7 +326,7 @@ class TestMemoryParserParseFile(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.memory_dir = self.tmpdir / "_bmad" / "_memory"
+        self.memory_dir = self.tmpdir / "_grimoire" / "_memory"
         self.memory_dir.mkdir(parents=True)
 
     def tearDown(self):
@@ -461,7 +461,7 @@ class TestMemorySyncer(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.memory_dir = self.tmpdir / "_bmad" / "_memory"
+        self.memory_dir = self.tmpdir / "_grimoire" / "_memory"
         self.memory_dir.mkdir(parents=True)
 
     def tearDown(self):
@@ -469,7 +469,7 @@ class TestMemorySyncer(unittest.TestCase):
 
     def test_init_defaults(self):
         syncer = self.mod.MemorySyncer(project_root=self.tmpdir)
-        self.assertEqual(syncer.project_name, "bmad")
+        self.assertEqual(syncer.project_name, "grimoire")
         self.assertEqual(syncer.memory_dir, self.memory_dir)
 
     def test_discover_empty(self):
@@ -601,7 +601,7 @@ class TestConfigLoading(unittest.TestCase):
     def test_build_syncer_defaults(self):
         syncer = self.mod.build_syncer_from_config(self.tmpdir)
         self.assertIsInstance(syncer, self.mod.MemorySyncer)
-        self.assertEqual(syncer.project_name, "bmad")
+        self.assertEqual(syncer.project_name, "grimoire")
 
 
 # ── CLI Integration ──────────────────────────────────────────────────────────
@@ -633,7 +633,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def test_diff_command_runs(self):
         tmpdir = tempfile.mkdtemp()
-        memory_dir = Path(tmpdir) / "_bmad" / "_memory"
+        memory_dir = Path(tmpdir) / "_grimoire" / "_memory"
         memory_dir.mkdir(parents=True)
         try:
             result = subprocess.run(

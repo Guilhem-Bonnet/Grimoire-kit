@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-distill.py — Réduction & Director's Cut BMAD.
+distill.py — Réduction & Director's Cut Grimoire.
 ===============================================
 
 Templates de condensation et modes de verbosité pour tous les outputs :
@@ -275,7 +275,7 @@ def transform_document(content: str, template_id: str) -> str:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_modes() -> str:
-    lines = ["📐 Modes de verbosité BMAD\n"]
+    lines = ["📐 Modes de verbosité Grimoire\n"]
     for mode, config in VERBOSITY_MODES.items():
         lines.append(f"   [{mode}] {config['description']}")
         lines.append(f"      Max sentences: {config['max_sentences']}")
@@ -363,7 +363,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Distill — Réduction & Director's Cut",
+        description="Grimoire Distill — Réduction & Director's Cut",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

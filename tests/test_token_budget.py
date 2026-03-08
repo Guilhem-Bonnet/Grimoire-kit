@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour token-budget.py — Enforcement budget token BMAD (BM-41 Story 3.3).
+Tests pour token-budget.py — Enforcement budget token Grimoire (BM-41 Story 3.3).
 
 Fonctions testées :
   - PriorityBucket, BudgetStatus, EnforcementAction, EnforcementReport
@@ -278,7 +278,7 @@ class TestUsageHistory(unittest.TestCase):
         self.mod = _import_mod()
         self.tmpdir = tempfile.mkdtemp()
         self.project_root = Path(self.tmpdir)
-        (self.project_root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.project_root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -287,7 +287,7 @@ class TestUsageHistory(unittest.TestCase):
         self.assertEqual(self.mod.TOKEN_BUDGET_VERSION, "1.2.0")
 
     def test_token_usage_log_constant(self):
-        self.assertEqual(self.mod.TOKEN_USAGE_LOG, "_bmad/_memory/token-usage.jsonl")
+        self.assertEqual(self.mod.TOKEN_USAGE_LOG, "_grimoire/_memory/token-usage.jsonl")
 
     def test_token_usage_max_entries_constant(self):
         self.assertEqual(self.mod.TOKEN_USAGE_MAX_ENTRIES, 1000)

@@ -1,4 +1,4 @@
-"""Tests for bmad.registry.local — LocalRegistry catalog."""
+"""Tests for grimoire.registry.local — LocalRegistry catalog."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from bmad.core.exceptions import BmadRegistryError
-from bmad.registry.local import LocalRegistry
+from grimoire.core.exceptions import GrimoireRegistryError
+from grimoire.registry.local import LocalRegistry
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ class TestGet:
         assert item.id == "agent-a"
 
     def test_not_found(self, registry: LocalRegistry) -> None:
-        with pytest.raises(BmadRegistryError, match="not found"):
+        with pytest.raises(GrimoireRegistryError, match="not found"):
             registry.get("nonexistent")
 
 
@@ -137,7 +137,7 @@ class TestInspectArchetype:
         assert len(dna.agents) == 2
 
     def test_inspect_not_found(self, registry: LocalRegistry) -> None:
-        with pytest.raises(BmadRegistryError):
+        with pytest.raises(GrimoireRegistryError):
             registry.inspect_archetype("nonexistent")
 
 

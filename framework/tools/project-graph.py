@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-project-graph.py — Graphe du projet BMAD.
+project-graph.py — Graphe du projet Grimoire.
 ==========================================
 
 Construit et analyse le graphe de connexions entre tous les éléments
@@ -375,7 +375,7 @@ def cmd_mermaid(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Project Graph — Visualisation du graphe de projet",
+        description="Grimoire Project Graph — Visualisation du graphe de projet",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

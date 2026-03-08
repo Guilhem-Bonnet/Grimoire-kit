@@ -40,7 +40,7 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    (root / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -150,7 +150,7 @@ class TestMarkdown(unittest.TestCase):
                                  fix="f", rule_added="rule")
             self.mod.save_failure(tmpdir, f)
             self.mod.sync_markdown(tmpdir)
-            md_path = tmpdir / "_bmad" / "_memory" / "failure-museum.md"
+            md_path = tmpdir / "_grimoire" / "_memory" / "failure-museum.md"
             self.assertTrue(md_path.exists())
             content = md_path.read_text(encoding="utf-8")
             self.assertIn("FM-001", content)

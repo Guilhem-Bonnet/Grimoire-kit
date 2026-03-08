@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-BMAD Context Budget Guard — BM-55
+Grimoire Context Budget Guard — BM-55
 ===================================
 Scanne tous les fichiers qu'un agent va charger au démarrage et estime
 le budget de contexte consommé avant même la première question utilisateur.
 
-Problème résolu : Un agent BMAD charge silencieusement 8-15 fichiers
+Problème résolu : Un agent Grimoire charge silencieusement 8-15 fichiers
 (agent.md, agent-base.md, shared-context.md, mémoire, TRACE récent…).
 Sur un projet actif, ça peut atteindre 60-80K tokens — la fenêtre d'un
 modèle 128K est déjà à moitié utilisée au démarrage.
@@ -114,7 +114,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
     "copilot":           ModelProfile("copilot",           "high",    "large",   "fast",    "standard", 200_000),
 }
 
-# Modèles NON recommandés pour agents BMAD (protocole trop complexe pour economy tier)
+# Modèles NON recommandés pour agents Grimoire (protocole trop complexe pour economy tier)
 # Ces modèles restent dans le catalogue pour --list-models mais sont pénalisés dans --recommend-models
 ECONOMY_PENALTY_MODELS = {"claude-haiku", "gpt-4o-mini", "gemini-2.0-flash", "llama3", "codestral", "mistral", "qwen2.5"}
 
@@ -196,7 +196,7 @@ def resolve_agent_loads(
 ) -> list[FileLoad]:
     """
     Reconstruit la liste des fichiers qu'un agent va charger.
-    Basé sur la convention d'activation BMAD (steps 1-2 + contexte projet).
+    Basé sur la convention d'activation Grimoire (steps 1-2 + contexte projet).
     """
     loads: list[FileLoad] = []
 
@@ -205,7 +205,7 @@ def resolve_agent_loads(
 
     # 2. agent-base.md (BASE PROTOCOL — step 2 d'activation)
     base_paths = [
-        project_root / "_bmad/_config/custom/agent-base.md",
+        project_root / "_grimoire/_config/custom/agent-base.md",
         project_root / "framework/agent-base.md",
     ]
     for bp in base_paths:
@@ -214,7 +214,7 @@ def resolve_agent_loads(
             break
 
     # 3. shared-context.md (chargé en step 2 via BASE PROTOCOL)
-    shared_ctx = project_root / "_bmad/_memory/shared-context.md"
+    shared_ctx = project_root / "_grimoire/_memory/shared-context.md"
     loads.append(FileLoad(path=shared_ctx, role="memory"))
 
     # 4. project-context.yaml
@@ -224,20 +224,20 @@ def resolve_agent_loads(
     # 5. Fichiers mémoire agent-spécifiques
     agent_id = agent_path.stem
     memory_candidates = [
-        project_root / f"_bmad/_memory/{agent_id}-learnings.md",
-        project_root / f"_bmad/_memory/agent-learnings-{agent_id}.md",
+        project_root / f"_grimoire/_memory/{agent_id}-learnings.md",
+        project_root / f"_grimoire/_memory/agent-learnings-{agent_id}.md",
     ]
     for mc in memory_candidates:
         if mc.exists():
             loads.append(FileLoad(path=mc, role="memory"))
 
     # 6. Failure museum (LAZY-LOAD — toujours potentiellement chargé)
-    failure_museum = project_root / "_bmad/_memory/failure-museum.md"
+    failure_museum = project_root / "_grimoire/_memory/failure-museum.md"
     if failure_museum.exists():
         loads.append(FileLoad(path=failure_museum, role="memory"))
 
-    # 7. BMAD_TRACE (dernières N entrées — approximé par les 200 dernières lignes)
-    trace_path = project_root / "_bmad-output/BMAD_TRACE.md"
+    # 7. Grimoire_TRACE (dernières N entrées — approximé par les 200 dernières lignes)
+    trace_path = project_root / "_grimoire-output/Grimoire_TRACE.md"
     if trace_path.exists():
         # Simuler le chargement des 200 dernières lignes du TRACE
         try:
@@ -284,11 +284,11 @@ def compute_budget(
 # ── Détection des agents ──────────────────────────────────────────────────────
 
 def find_agents(project_root: Path) -> list[Path]:
-    """Liste tous les fichiers agents BMAD dans le projet."""
+    """Liste tous les fichiers agents Grimoire dans le projet."""
     agents = []
     search_dirs = [
-        project_root / "_bmad/_config/custom/agents",
-        project_root / "_bmad/bmm/agents",
+        project_root / "_grimoire/_config/custom/agents",
+        project_root / "_grimoire/bmm/agents",
         project_root / "archetypes",
     ]
     for d in search_dirs:
@@ -298,7 +298,7 @@ def find_agents(project_root: Path) -> list[Path]:
             # Exclure les templates et proposals
             if any(x in f.name for x in ["tpl.", "proposed.", "template.", "README"]):
                 continue
-            # Vérifier que c'est un vrai agent (contient activation BMAD)
+            # Vérifier que c'est un vrai agent (contient activation Grimoire)
             try:
                 content = f.read_text(encoding="utf-8", errors="replace")[:500]
                 if "<activation" in content or 'NEVER break character' in content:
@@ -313,7 +313,7 @@ def find_agents(project_root: Path) -> list[Path]:
 
 CONSOLIDATION_RULES = {
     "trace": (
-        "BMAD_TRACE est volumineux",
+        "Grimoire_TRACE est volumineux",
         "Mnemo [CH] → consolidation TRACE (garder les 50 dernières entrées)"
     ),
     "memory": (
@@ -518,7 +518,7 @@ def do_optimize(
 
     # Affichage
     print()
-    print(f"  BMAD Context Optimizer  ·  modèle: {model}  ·  fenêtre: {fmt_tokens(window)} tokens")
+    print(f"  Grimoire Context Optimizer  ·  modèle: {model}  ·  fenêtre: {fmt_tokens(window)} tokens")
     print(f"  {agent_count} agents analysés  ·  {len(seen_files)} fichiers uniques")
     print()
 
@@ -666,10 +666,10 @@ def score_model_for_agent(
     if reasoning_surplus >= 2 and has_tier >= 3:
         score -= 10  # gaspillage flagrant
 
-    # Pénalité modèles economy — le protocole agent-base.md BMAD est trop complexe
+    # Pénalité modèles economy — le protocole agent-base.md Grimoire est trop complexe
     # pour les modèles economy (Haiku, GPT-4o-mini, etc.) → forte pénalité
     if profile.id in ECONOMY_PENALTY_MODELS:
-        score -= 30  # déconseillé pour tout agent BMAD
+        score -= 30  # déconseillé pour tout agent Grimoire
 
     return max(0, min(100, score))
 
@@ -799,7 +799,7 @@ def do_recommend_models(
     # Affichage
     print()
     source = "project-context.yaml" if user_models else "tous les modèles connus"
-    print(f"  BMAD Model Recommender  ·  source: {source}")
+    print(f"  Grimoire Model Recommender  ·  source: {source}")
     print(f"  {len(recs)} agents avec model_affinity / {len(agents)} agents total")
     print()
 
@@ -958,7 +958,7 @@ def print_summary_table(budgets: list[AgentBudget]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="BMAD Context Budget Guard — estime le budget de contexte LLM par agent",
+        description="Grimoire Context Budget Guard — estime le budget de contexte LLM par agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples :
@@ -984,7 +984,7 @@ Exemples :
     parser.add_argument("--suggest", action="store_true",
                         help="Afficher des recommandations de réduction")
     parser.add_argument("--project-root", metavar="PATH", default=".",
-                        help="Racine du projet BMAD (défaut: répertoire courant)")
+                        help="Racine du projet Grimoire (défaut: répertoire courant)")
     parser.add_argument("--json", action="store_true",
                         help="Sortie JSON pour intégration CI")
     parser.add_argument("--list-models", action="store_true",
@@ -1032,9 +1032,9 @@ Exemples :
     else:
         agent_paths = find_agents(project_root)
         if not agent_paths:
-            print("ℹ️  Aucun agent BMAD trouvé dans ce projet.")
+            print("ℹ️  Aucun agent Grimoire trouvé dans ce projet.")
             print(f"   Projet root : {project_root}")
-            print("   Initialisez avec : bash bmad-init.sh --name ...")
+            print("   Initialisez avec : bash grimoire-init.sh --name ...")
             return
 
     # Calculer les budgets
@@ -1075,7 +1075,7 @@ Exemples :
 
     # Affichage console
     print()
-    print(f"  BMAD Context Budget Guard  ·  modèle: {args.model}  "
+    print(f"  Grimoire Context Budget Guard  ·  modèle: {args.model}  "
           f"·  fenêtre: {fmt_tokens(MODEL_WINDOWS.get(args.model, 0))} tokens")
     print()
     print(f"  {'Agent':<32} {'Budget consommé':<24} {'  %':>6}  {'Tokens':>8}")

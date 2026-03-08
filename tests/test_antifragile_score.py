@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour antifragile-score.py — Score d'Anti-Fragilité BMAD.
+Tests pour antifragile-score.py — Score d'Anti-Fragilité Grimoire.
 
 Fonctions testées :
   - _count_entries()
@@ -54,7 +54,7 @@ def _import_module():
 def _create_memory_tree(root, failures=None, contradictions=None,
                         decisions=None, learnings=None):
     """Créer un arbre mémoire minimal."""
-    mem = root / "_bmad" / "_memory"
+    mem = root / "_grimoire" / "_memory"
     mem.mkdir(parents=True, exist_ok=True)
 
     if failures:
@@ -71,7 +71,7 @@ def _create_memory_tree(root, failures=None, contradictions=None,
             (ld / name).write_text(content, encoding="utf-8")
 
     # Output dir
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
     return mem
 
 
@@ -289,13 +289,13 @@ class TestCountSilSignals(unittest.TestCase):
         shutil.rmtree(self.tmpdir)
 
     def test_empty_memory(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         r = self.mod._count_sil_signals(mem)
         self.assertTrue(all(v == 0 for v in r.values()))
 
     def test_detects_cc_fail(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "decisions-log.md").write_text(
             "- [2026-01-01] Terminé sans vérif\n"
@@ -306,7 +306,7 @@ class TestCountSilSignals(unittest.TestCase):
         self.assertGreater(r["cc_fail"], 0)
 
     def test_detects_guardrail(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "decisions-log.md").write_text(
             "- [2026-01-01] Fichier écrasé overwrite config\n",
@@ -316,7 +316,7 @@ class TestCountSilSignals(unittest.TestCase):
         self.assertGreater(r["guardrail_miss"], 0)
 
     def test_scans_learnings(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         ld = mem / "agent-learnings"
         ld.mkdir(parents=True)
         (ld / "dev.md").write_text(
@@ -338,14 +338,14 @@ class TestCountLearnings(unittest.TestCase):
         shutil.rmtree(self.tmpdir)
 
     def test_empty(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         r = self.mod._count_learnings(mem)
         self.assertEqual(r["total"], 0)
         self.assertEqual(r["agents"], {})
 
     def test_counts_by_agent(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         ld = mem / "agent-learnings"
         ld.mkdir(parents=True)
         (ld / "dev.md").write_text(
@@ -360,7 +360,7 @@ class TestCountLearnings(unittest.TestCase):
         self.assertEqual(r["agents"]["qa"], 1)
 
     def test_since_filter(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         ld = mem / "agent-learnings"
         ld.mkdir(parents=True)
         (ld / "dev.md").write_text(
@@ -383,14 +383,14 @@ class TestCountDecisions(unittest.TestCase):
         shutil.rmtree(self.tmpdir)
 
     def test_empty(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         r = self.mod._count_decisions(mem)
         self.assertEqual(r["total"], 0)
         self.assertEqual(r["reversals"], 0)
 
     def test_counts_decisions_and_reversals(self):
-        mem = self.tmpdir / "_bmad" / "_memory"
+        mem = self.tmpdir / "_grimoire" / "_memory"
         mem.mkdir(parents=True)
         (mem / "decisions-log.md").write_text(
             "- [2026-01-01] Chose React\n"
@@ -707,7 +707,7 @@ class TestPersistence(unittest.TestCase):
     def setUp(self):
         self.mod = _import_module()
         self.tmpdir = Path(tempfile.mkdtemp())
-        (self.tmpdir / "_bmad-output").mkdir(parents=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
@@ -742,7 +742,7 @@ class TestPersistence(unittest.TestCase):
         self.assertTrue(path.exists())
 
     def test_corrupted_history(self):
-        hist_file = self.tmpdir / "_bmad-output" / self.mod.HISTORY_FILE
+        hist_file = self.tmpdir / "_grimoire-output" / self.mod.HISTORY_FILE
         hist_file.write_text("not json", encoding="utf-8")
         history = self.mod.load_history(self.tmpdir)
         self.assertEqual(history, [])

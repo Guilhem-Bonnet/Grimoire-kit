@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-doc-fetcher.py — Indexation de documentation externe pour RAG BMAD.
+doc-fetcher.py — Indexation de documentation externe pour RAG Grimoire.
 =====================================================================
 
 Comparable au `@docs` de Cursor : indexe des sites de documentation
@@ -57,9 +57,9 @@ _log = logging.getLogger("grimoire.doc_fetcher")
 
 DOC_FETCHER_VERSION = "1.0.0"
 
-DOCS_CACHE_DIR = "_bmad-output/.doc-cache"
-DOCS_INDEX_FILE = "_bmad-output/.doc-index.json"
-_USER_AGENT = "BMAD-DocFetcher/1.0 (stdlib; documentation indexer)"
+DOCS_CACHE_DIR = "_grimoire-output/.doc-cache"
+DOCS_INDEX_FILE = "_grimoire-output/.doc-index.json"
+_USER_AGENT = "Grimoire-DocFetcher/1.0 (stdlib; documentation indexer)"
 _TIMEOUT = 15  # seconds
 _MAX_PAGE_SIZE = 500_000  # 500 KB max par page
 _MAX_PAGES_PER_SOURCE = 50  # Limite de pages par source
@@ -544,7 +544,7 @@ def load_docs_config(project_root: Path) -> list[dict]:
     """Charge la config des docs externes depuis project-context.yaml."""
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if not candidate.exists():
             continue
@@ -589,7 +589,7 @@ def load_docs_config(project_root: Path) -> list[dict]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Doc Fetcher — Indexation de documentation externe BMAD",
+        description="Doc Fetcher — Indexation de documentation externe Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

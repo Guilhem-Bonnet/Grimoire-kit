@@ -28,7 +28,7 @@ _log = logging.getLogger("grimoire.sensory_buffer")
 
 VERSION = "1.0.0"
 
-BUFFER_DIR = ".bmad-sensory"
+BUFFER_DIR = ".grimoire-sensory"
 
 # ── Modèle de données ──────────────────────────────────────────
 

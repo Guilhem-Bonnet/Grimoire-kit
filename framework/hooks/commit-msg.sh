@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
-# BMAD — Git commit-msg hook
+# Grimoire — Git commit-msg hook
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Déclenché après saisie du message de commit.
@@ -10,13 +10,13 @@
 #   - Valide le format Conventional Commits (optionnel, configurable)
 #   - Bloque : messages trop courts (<10 chars hors commentaires)
 #   - Warn  : pas de type CC mais message valide → avertissement non-bloquant
-#   - Le mode strict s'active avec BMAD_CC_STRICT=1 (défaut: souple)
+#   - Le mode strict s'active avec Grimoire_CC_STRICT=1 (défaut: souple)
 #
 # Configuration dans project-context.yaml :
 #   commit_convention: conventional  # ou: free (défaut)
 #   commit_min_length: 10
 #
-# Installation via : bmad-init.sh hooks --install
+# Installation via : grimoire-init.sh hooks --install
 # ══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -24,7 +24,7 @@ set -euo pipefail
 COMMIT_MSG_FILE="$1"
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
-[[ -d "$GIT_ROOT/_bmad" ]] || exit 0
+[[ -d "$GIT_ROOT/_grimoire" ]] || exit 0
 
 # Lire le message (sans les commentaires)
 MSG=$(grep -v '^#' "$COMMIT_MSG_FILE" | sed '/^[[:space:]]*$/d' | head -1)
@@ -33,7 +33,7 @@ MSG=$(grep -v '^#' "$COMMIT_MSG_FILE" | sed '/^[[:space:]]*$/d' | head -1)
 MIN_LEN=10
 if [[ ${#MSG} -lt $MIN_LEN ]]; then
     echo ""
-    echo "🚫 BMAD commit-msg : message trop court (${#MSG} chars, min ${MIN_LEN})"
+    echo "🚫 Grimoire commit-msg : message trop court (${#MSG} chars, min ${MIN_LEN})"
     echo "   Message : \"$MSG\""
     echo ""
     exit 1
@@ -65,10 +65,10 @@ fi
 CC_TYPES="feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert"
 CC_PATTERN="^(${CC_TYPES})(\([a-zA-Z0-9_-]+\))?(!)?: .{1,}"
 
-if [[ "$CONVENTION" == "conventional" ]] || [[ "${BMAD_CC_STRICT:-0}" == "1" ]]; then
+if [[ "$CONVENTION" == "conventional" ]] || [[ "${Grimoire_CC_STRICT:-0}" == "1" ]]; then
     if ! echo "$MSG" | grep -qE "$CC_PATTERN"; then
         echo ""
-        echo "🚫 BMAD commit-msg : format Conventional Commits requis"
+        echo "🚫 Grimoire commit-msg : format Conventional Commits requis"
         echo "   Message : \"$MSG\""
         echo "   Format  : <type>(<scope>): <description>"
         echo "   Types   : feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert"
@@ -81,7 +81,7 @@ if [[ "$CONVENTION" == "conventional" ]] || [[ "${BMAD_CC_STRICT:-0}" == "1" ]];
 else
     # Mode souple : juste un avertissement
     if ! echo "$MSG" | grep -qE "$CC_PATTERN"; then
-        echo "💡 BMAD: message hors format CC — pensez à prefixer avec feat:/fix:/chore: etc."
+        echo "💡 Grimoire: message hors format CC — pensez à prefixer avec feat:/fix:/chore: etc."
     fi
 fi
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-rag-indexer.py — Pipeline RAG d'indexation BMAD → Qdrant (BM-42).
+rag-indexer.py — Pipeline RAG d'indexation Grimoire → Qdrant (BM-42).
 ============================================================
 
-Indexe tous les artifacts BMAD (agents, mémoire, docs, PRDs, ADRs, code)
+Indexe tous les artifacts Grimoire (agents, mémoire, docs, PRDs, ADRs, code)
 dans Qdrant avec metadata typée pour retrieval sémantique au runtime agent.
 
 Modes :
@@ -93,10 +93,10 @@ def _validate_url(url: str, *, allow_localhost: bool = True) -> str:
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_VECTOR_SIZE = 384
-DEFAULT_QDRANT_PATH = "_bmad-output/.qdrant_data"
+DEFAULT_QDRANT_PATH = "_grimoire-output/.qdrant_data"
 DEFAULT_MAX_CHUNK_TOKENS = 512
 CHARS_PER_TOKEN = 4
-HASH_INDEX_FILE = "_bmad-output/.rag-index-hashes.json"
+HASH_INDEX_FILE = "_grimoire-output/.rag-index-hashes.json"
 
 # Collection names (prefixed by project name at runtime)
 COLLECTION_AGENTS = "agents"
@@ -110,20 +110,20 @@ ALL_COLLECTIONS = [COLLECTION_AGENTS, COLLECTION_MEMORY, COLLECTION_DOCS, COLLEC
 # File discovery patterns per collection
 DISCOVERY_PATTERNS: dict[str, list[str]] = {
     COLLECTION_AGENTS: [
-        "_bmad/*/agents/*.md",
-        "_bmad/*/agents/**/*.md",
-        "_bmad/_config/custom/*.md",
+        "_grimoire/*/agents/*.md",
+        "_grimoire/*/agents/**/*.md",
+        "_grimoire/_config/custom/*.md",
     ],
     COLLECTION_MEMORY: [
-        "_bmad/_memory/*.md",
-        "_bmad/_memory/**/*.md",
-        "_bmad/_memory/*.json",
-        "_bmad/_memory/*.jsonl",
+        "_grimoire/_memory/*.md",
+        "_grimoire/_memory/**/*.md",
+        "_grimoire/_memory/*.json",
+        "_grimoire/_memory/*.jsonl",
     ],
     COLLECTION_DOCS: [
         "docs/**/*.md",
-        "_bmad-output/planning-artifacts/*.md",
-        "_bmad-output/implementation-artifacts/*.md",
+        "_grimoire-output/planning-artifacts/*.md",
+        "_grimoire-output/implementation-artifacts/*.md",
         "framework/*.md",
         "framework/**/*.md",
         "*.md",
@@ -139,7 +139,7 @@ DISCOVERY_PATTERNS: dict[str, list[str]] = {
 # Excluded patterns (always)
 EXCLUDE_PATTERNS: list[str] = [
     "node_modules", ".git", "__pycache__", ".pytest_cache",
-    ".ruff_cache", ".venv", "venv", ".bmad-rnd",
+    ".ruff_cache", ".venv", "venv", ".grimoire-rnd",
 ]
 
 # Vector sizes for known models
@@ -510,7 +510,7 @@ class EmbeddingProvider:
         raise ImportError(
             "Aucun provider d'embedding disponible.\n"
             "Installer : pip install sentence-transformers\n"
-            "Ou configurer BMAD_OLLAMA_URL pour utiliser Ollama."
+            "Ou configurer Grimoire_OLLAMA_URL pour utiliser Ollama."
         )
 
     @property
@@ -549,7 +549,7 @@ class EmbeddingProvider:
 # ── RAG Indexer ──────────────────────────────────────────────────────────────
 
 class RAGIndexer:
-    """Pipeline d'indexation BMAD → Qdrant."""
+    """Pipeline d'indexation Grimoire → Qdrant."""
 
     def __init__(
         self,
@@ -558,7 +558,7 @@ class RAGIndexer:
         qdrant_path: str = "",
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         ollama_url: str = "",
-        project_name: str = "bmad",
+        project_name: str = "grimoire",
         max_chunk_tokens: int = DEFAULT_MAX_CHUNK_TOKENS,
     ):
         self.project_root = project_root
@@ -877,7 +877,7 @@ def load_rag_config(project_root: Path) -> dict:
 
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
@@ -891,10 +891,10 @@ def build_indexer_from_config(project_root: Path) -> RAGIndexer:
     """Construit un RAGIndexer depuis la config du projet."""
     config = load_rag_config(project_root)
 
-    qdrant_url = os.environ.get("BMAD_QDRANT_URL", config.get("qdrant_url", ""))
-    ollama_url = os.environ.get("BMAD_OLLAMA_URL", config.get("ollama_url", ""))
+    qdrant_url = os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", ""))
+    ollama_url = os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", ""))
     embedding_model = config.get("embedding_model", DEFAULT_EMBEDDING_MODEL)
-    project_name = config.get("collection_prefix", "bmad")
+    project_name = config.get("collection_prefix", "grimoire")
     max_tokens = config.get("max_chunk_tokens", DEFAULT_MAX_CHUNK_TOKENS)
 
     return RAGIndexer(
@@ -952,7 +952,7 @@ def _print_search_results(results: list[SearchResult]) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="RAG Indexer — Pipeline d'indexation BMAD → Qdrant",
+        description="RAG Indexer — Pipeline d'indexation Grimoire → Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

@@ -27,7 +27,7 @@ from typing import Any
 
 VERSION = "1.0.0"
 
-BRANCH_DIR = ".bmad-branches"
+BRANCH_DIR = ".grimoire-branches"
 BRANCH_META = "branch-meta.json"
 SNAP_DIRS = ("framework", "archetypes", "docs")
 SNAP_EXTS = {".py", ".md", ".yaml", ".yml", ".xml", ".json", ".sh"}

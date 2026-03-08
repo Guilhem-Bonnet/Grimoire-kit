@@ -97,7 +97,7 @@ class TestAnalyzeTrace(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_detects_tools(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 | forge | S1\n"
             "Running terraform plan\n"
@@ -112,7 +112,7 @@ class TestAnalyzeTrace(unittest.TestCase):
         self.assertEqual(tools["docker"].count, 2)
 
     def test_detects_behavioral_patterns(self):
-        f = self.tmpdir / "BMAD_TRACE.md"
+        f = self.tmpdir / "Grimoire_TRACE.md"
         # Write enough "[CHECKPOINT]" entries to trigger pattern detection (≥3)
         lines = []
         for i in range(5):

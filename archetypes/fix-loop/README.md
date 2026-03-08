@@ -48,14 +48,14 @@ archetypes/fix-loop/
 
 ```bash
 # Depuis la racine du kit
-./bmad-init.sh --archetype fix-loop --name "Mon Projet" --user "Alice"
+./grimoire-init.sh --archetype fix-loop --name "Mon Projet" --user "Alice"
 
 # Ou manuellement :
 cp archetypes/fix-loop/agents/fix-loop-orchestrator.tpl.md \
-   [projet]/_bmad/_config/custom/agents/fix-loop-orchestrator.md
+   [projet]/_grimoire/_config/custom/agents/fix-loop-orchestrator.md
 
 cp archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md \
-   [projet]/_bmad/bmb/workflows/fix-loop/workflow-closed-loop-fix.md
+   [projet]/_grimoire/bmb/workflows/fix-loop/workflow-closed-loop-fix.md
 ```
 
 Puis remplacer les `{{placeholders}}` :
@@ -77,7 +77,7 @@ Si vous n'avez pas d'agents ops/debug → laisser le mode SOLO (défaut, aucun p
 L'archétype fix-loop est **complémentaire** à infra-ops. Combinaison recommandée :
 
 ```bash
-./bmad-init.sh --archetype infra-ops --add-module fix-loop --name "Infra Prod"
+./grimoire-init.sh --archetype infra-ops --add-module fix-loop --name "Infra Prod"
 ```
 
 Le fix-loop délègue automatiquement :

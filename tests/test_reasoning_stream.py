@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour reasoning-stream.py — Flux de raisonnement structuré BMAD.
+Tests pour reasoning-stream.py — Flux de raisonnement structuré Grimoire.
 
 Fonctions testées :
   - ReasoningEntry (to_dict / from_dict)
@@ -137,19 +137,19 @@ class TestLogEntry(unittest.TestCase):
         self.mod.log_entry(e1, self.tmpdir)
         self.mod.log_entry(e2, self.tmpdir)
 
-        path = self.tmpdir / "_bmad-output" / "reasoning-stream.jsonl"
+        path = self.tmpdir / "_grimoire-output" / "reasoning-stream.jsonl"
         lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
         self.assertEqual(len(lines), 2)
 
     def test_creates_output_dir(self):
         e = _make_entry(self.mod)
         self.mod.log_entry(e, self.tmpdir)
-        self.assertTrue((self.tmpdir / "_bmad-output").exists())
+        self.assertTrue((self.tmpdir / "_grimoire-output").exists())
 
     def test_entry_is_valid_json(self):
         e = _make_entry(self.mod)
         self.mod.log_entry(e, self.tmpdir)
-        path = self.tmpdir / "_bmad-output" / "reasoning-stream.jsonl"
+        path = self.tmpdir / "_grimoire-output" / "reasoning-stream.jsonl"
         data = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual(data["agent"], "dev")
 
@@ -222,7 +222,7 @@ class TestReadStream(unittest.TestCase):
         self.assertEqual(len(result), 3)
 
     def test_handles_corrupt_lines(self):
-        path = self.tmpdir / "_bmad-output" / "reasoning-stream.jsonl"
+        path = self.tmpdir / "_grimoire-output" / "reasoning-stream.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "not json\n"
@@ -463,7 +463,7 @@ class TestCompactStream(unittest.TestCase):
         self.assertEqual(remaining[0].text, "new reasoning")
 
         # Vérifier le fichier compact
-        compact_path = self.tmpdir / "_bmad-output" / "reasoning-stream-compacted.md"
+        compact_path = self.tmpdir / "_grimoire-output" / "reasoning-stream-compacted.md"
         self.assertTrue(compact_path.exists())
         content = compact_path.read_text(encoding="utf-8")
         self.assertIn("Compaction", content)

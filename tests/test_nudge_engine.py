@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests pour nudge-engine.py — nudge-engine.py — Moteur de suggestions contextuelles BMAD.
+Tests pour nudge-engine.py — nudge-engine.py — Moteur de suggestions contextuelles Grimoire.
 
 Fonctions testées :
   - parse_markdown_entries()
@@ -47,11 +47,11 @@ def _import_mod():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_project(root: Path) -> Path:
-    """Créer un projet BMAD minimal pour les tests."""
-    (root / "_bmad" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad-output").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / "_bmad" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
+    """Créer un projet Grimoire minimal pour les tests."""
+    (root / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "_grimoire" / "bmm" / "workflows").mkdir(parents=True, exist_ok=True)
     (root / "framework" / "tools").mkdir(parents=True, exist_ok=True)
     return root
 
@@ -118,9 +118,9 @@ class TestProjectFunctions(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
-        # Minimal BMAD structure
-        (self.tmpdir / "_bmad" / "_memory").mkdir(parents=True, exist_ok=True)
-        (self.tmpdir / "_bmad-output").mkdir(parents=True, exist_ok=True)
+        # Minimal Grimoire structure
+        (self.tmpdir / "_grimoire" / "_memory").mkdir(parents=True, exist_ok=True)
+        (self.tmpdir / "_grimoire-output").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)

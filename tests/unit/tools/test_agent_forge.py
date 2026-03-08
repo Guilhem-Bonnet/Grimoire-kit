@@ -1,4 +1,4 @@
-"""Tests for bmad.tools.agent_forge — Agent scaffold generator."""
+"""Tests for grimoire.tools.agent_forge — Agent scaffold generator."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.tools.agent_forge import (
+from grimoire.tools.agent_forge import (
     DOMAIN_TAXONOMY,
     AgentForge,
     AgentProposal,
@@ -21,8 +21,8 @@ from bmad.tools.agent_forge import (
 
 @pytest.fixture()
 def root(tmp_path: Path) -> Path:
-    (tmp_path / "_bmad/_config/agents").mkdir(parents=True)
-    (tmp_path / "_bmad/core/agents").mkdir(parents=True)
+    (tmp_path / "_grimoire/_config/agents").mkdir(parents=True)
+    (tmp_path / "_grimoire/core/agents").mkdir(parents=True)
     return tmp_path
 
 
@@ -129,14 +129,14 @@ class TestExtractAgentName:
 
 class TestFindExistingAgents:
     def test_finds_agents(self, root: Path) -> None:
-        (root / "_bmad/_config/agents/analyst.md").write_text("# Analyst")
-        (root / "_bmad/core/agents/dev.md").write_text("# Dev")
+        (root / "_grimoire/_config/agents/analyst.md").write_text("# Analyst")
+        (root / "_grimoire/core/agents/dev.md").write_text("# Dev")
         agents = find_existing_agents(root)
         assert "analyst" in agents
         assert "dev" in agents
 
     def test_excludes_templates(self, root: Path) -> None:
-        (root / "_bmad/_config/agents/template-base.md").write_text("tpl")
+        (root / "_grimoire/_config/agents/template-base.md").write_text("tpl")
         agents = find_existing_agents(root)
         assert "template-base" not in agents
 
@@ -202,7 +202,7 @@ class TestAgentForgeTool:
         assert proposal.domain_key == "custom"
 
     def test_run_detects_overlap(self, root: Path) -> None:
-        (root / "_bmad/_config/agents/database-admin.md").write_text("# DB Admin")
+        (root / "_grimoire/_config/agents/database-admin.md").write_text("# DB Admin")
         forge = AgentForge(root)
         proposal = forge.run(description="Handle database operations and migrations")
         assert len(proposal.overlap) > 0

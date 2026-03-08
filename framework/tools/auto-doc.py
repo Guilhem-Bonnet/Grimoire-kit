@@ -416,11 +416,11 @@ def report_to_dict(report: DocReport, changes: int = 0) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Auto-Doc Sync — synchronise README avec le code",
+        description="Grimoire Auto-Doc Sync — synchronise README avec le code",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", default=".",
-                        help="Racine du projet BMAD")
+                        help="Racine du projet Grimoire")
 
     sub = parser.add_subparsers(dest="command", help="Commande")
 

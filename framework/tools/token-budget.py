@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-token-budget.py — Enforcement automatique du budget token BMAD (BM-41 Story 3.3).
+token-budget.py — Enforcement automatique du budget token Grimoire (BM-41 Story 3.3).
 ============================================================
 
 Étend le Context Router (BM-07) avec un enforcement actif du budget token:
@@ -54,7 +54,7 @@ CRITICAL_THRESHOLD = 0.80
 EMERGENCY_THRESHOLD = 0.95
 
 # Usage history tracking
-TOKEN_USAGE_LOG = "_bmad/_memory/token-usage.jsonl"
+TOKEN_USAGE_LOG = "_grimoire/_memory/token-usage.jsonl"
 TOKEN_USAGE_MAX_ENTRIES = 1000
 
 # Priority names for display
@@ -327,10 +327,10 @@ class TokenBudgetEnforcer:
 
         # Fallback: scan memory / agent files manually
         for pattern, prio in [
-            ("_bmad/_memory/*.md", 1),
-            ("_bmad/_memory/agent-learnings/*.md", 1),
+            ("_grimoire/_memory/*.md", 1),
+            ("_grimoire/_memory/agent-learnings/*.md", 1),
             ("docs/*.md", 3),
-            ("_bmad-output/planning-artifacts/*.md", 3),
+            ("_grimoire-output/planning-artifacts/*.md", 3),
         ]:
             for f in sorted(self.project_root.glob(pattern)):
                 try:
@@ -627,7 +627,7 @@ def mcp_context_budget(project_root: str, model: str = "", agent: str = "") -> d
     """
     MCP tool `bmad_context_budget` — retourne le statut budget token.
 
-    Appelable depuis bmad-mcp-tools.py.
+    Appelable depuis grimoire-mcp-tools.py.
     """
     root = Path(project_root).resolve()
     enforcer = TokenBudgetEnforcer(
@@ -650,7 +650,7 @@ def load_budget_config(project_root: Path) -> dict:
     except ImportError:
         return {}
 
-    for candidate in [project_root / "project-context.yaml", project_root / "bmad.yaml"]:
+    for candidate in [project_root / "project-context.yaml", project_root / "grimoire.yaml"]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -743,7 +743,7 @@ def _print_enforcement(report: EnforcementReport) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Token Budget Enforcer — Enforcement automatique du budget token BMAD",
+        description="Token Budget Enforcer — Enforcement automatique du budget token Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

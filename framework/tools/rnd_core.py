@@ -27,7 +27,7 @@ VERSION = "2.1.0"
 
 # ── Constantes ────────────────────────────────────────────────────
 
-RND_DIR = ".bmad-rnd"
+RND_DIR = ".grimoire-rnd"
 MEMORY_FILE = "innovation-memory.json"
 POLICY_FILE = "policy.json"
 HISTORY_DIR = "cycle-history"

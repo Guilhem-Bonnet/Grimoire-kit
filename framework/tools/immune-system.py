@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-immune-system.py — Système immunitaire BMAD.
+immune-system.py — Système immunitaire Grimoire.
 ===============================================
 
 Double couche de protection :
@@ -126,9 +126,9 @@ INNATE_RULES = [
         "extensions": [".py", ".ts", ".js", ".yaml"],
         "fix": "Restreindre CORS aux origines autorisées",
     },
-    # BMAD-specific
+    # Grimoire-specific
     {
-        "id": "BMAD-001",
+        "id": "Grimoire-001",
         "name": "Fichier mémoire sans protection",
         "severity": Severity.MEDIUM,
         "pattern": r'\.write_text\s*\(.*(?:shared[-_]context|session[-_]state)',
@@ -136,7 +136,7 @@ INNATE_RULES = [
         "fix": "Valider les données avant écriture dans la mémoire partagée",
     },
     {
-        "id": "BMAD-002",
+        "id": "Grimoire-002",
         "name": "Exécution de code non sandboxé",
         "severity": Severity.HIGH,
         "pattern": r'(?:exec|eval)\s*\(',
@@ -245,7 +245,7 @@ def scan_innate(project_root: Path, target: str = "") -> tuple[list[Finding], in
 
     # Dossiers à exclure
     exclude = {".git", "node_modules", "__pycache__", ".venv", "venv",
-               "_bmad-output", ".mypy_cache"}
+               "_grimoire-output", ".mypy_cache"}
 
     for scan_dir in scan_dirs:
         for fpath in scan_dir.rglob("*"):
@@ -287,7 +287,7 @@ def scan_innate(project_root: Path, target: str = "") -> tuple[list[Finding], in
 
 def load_antibodies(project_root: Path) -> list[Antibody]:
     """Charge les anticorps adaptatifs."""
-    ab_file = project_root / "_bmad" / "_memory" / ANTIBODY_FILE
+    ab_file = project_root / "_grimoire" / "_memory" / ANTIBODY_FILE
     if not ab_file.exists():
         return []
     try:
@@ -311,7 +311,7 @@ def load_antibodies(project_root: Path) -> list[Antibody]:
 
 def save_antibodies(project_root: Path, antibodies: list[Antibody]):
     """Sauvegarde les anticorps adaptatifs."""
-    ab_file = project_root / "_bmad" / "_memory" / ANTIBODY_FILE
+    ab_file = project_root / "_grimoire" / "_memory" / ANTIBODY_FILE
     ab_file.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "version": IMMUNE_VERSION,
@@ -379,7 +379,7 @@ def scan_adaptive(project_root: Path, target: str = "") -> tuple[list[Finding], 
 
 def format_report(report: ImmuneReport) -> str:
     lines = [
-        "🛡️ Système Immunitaire BMAD — Rapport",
+        "🛡️ Système Immunitaire Grimoire — Rapport",
         f"   Score de santé : {report.health_score}/100",
         f"   Fichiers scannés : {report.files_scanned}",
         f"   Règles innées : {report.innate_checks} | Anticorps : {report.adaptive_checks}",
@@ -516,7 +516,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Immune System — Détection de vulnérabilités multiniveau",
+        description="Grimoire Immune System — Détection de vulnérabilités multiniveau",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

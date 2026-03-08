@@ -1,16 +1,16 @@
 {
   // ════════════════════════════════════════════════════════════════════
-  // BMAD Custom Kit — VS Code Tasks
+  // Grimoire Custom Kit — VS Code Tasks
   // Accès : Ctrl+Shift+P → "Tasks: Run Task"
   // ════════════════════════════════════════════════════════════════════
   "version": "2.0.0",
   "tasks": [
 
-    // ── Groupe : BMAD Diagnostics ─────────────────────────────────────
+    // ── Groupe : Grimoire Diagnostics ─────────────────────────────────────
     {
-      "label": "BMAD: Doctor",
+      "label": "Grimoire: Doctor",
       "type": "shell",
-      "command": "bash bmad-init.sh doctor",
+      "command": "bash grimoire-init.sh doctor",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -20,9 +20,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Doctor --fix",
+      "label": "Grimoire: Doctor --fix",
       "type": "shell",
-      "command": "bash bmad-init.sh doctor --fix",
+      "command": "bash grimoire-init.sh doctor --fix",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -32,9 +32,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Validate DNA (tous les archetypes)",
+      "label": "Grimoire: Validate DNA (tous les archetypes)",
       "type": "shell",
-      "command": "bash bmad-init.sh validate --all",
+      "command": "bash grimoire-init.sh validate --all",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -44,9 +44,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Validate DNA (fichier courant)",
+      "label": "Grimoire: Validate DNA (fichier courant)",
       "type": "shell",
-      "command": "bash bmad-init.sh validate --dna ${relativeFile}",
+      "command": "bash grimoire-init.sh validate --dna ${relativeFile}",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -56,11 +56,11 @@
       "problemMatcher": []
     },
 
-    // ── Groupe : BMAD Setup ───────────────────────────────────────────
+    // ── Groupe : Grimoire Setup ───────────────────────────────────────────
     {
-      "label": "BMAD: Install hooks",
+      "label": "Grimoire: Install hooks",
       "type": "shell",
-      "command": "bash bmad-init.sh hooks --install",
+      "command": "bash grimoire-init.sh hooks --install",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -70,9 +70,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Hooks status",
+      "label": "Grimoire: Hooks status",
       "type": "shell",
-      "command": "bash bmad-init.sh hooks --status",
+      "command": "bash grimoire-init.sh hooks --status",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -81,9 +81,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Install archetype",
+      "label": "Grimoire: Install archetype",
       "type": "shell",
-      "command": "bash bmad-init.sh install --archetype ${input:archetypeId}",
+      "command": "bash grimoire-init.sh install --archetype ${input:archetypeId}",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -93,11 +93,11 @@
       "problemMatcher": []
     },
 
-    // ── Groupe : BMAD Session ─────────────────────────────────────────
+    // ── Groupe : Grimoire Session ─────────────────────────────────────────
     {
-      "label": "BMAD: Nouvelle session-branch",
+      "label": "Grimoire: Nouvelle session-branch",
       "type": "shell",
-      "command": "bash bmad-init.sh session-branch --name ${input:sessionName}",
+      "command": "bash grimoire-init.sh session-branch --name ${input:sessionName}",
       "group": "none",
       "presentation": {
         "reveal": "always",
@@ -107,9 +107,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Resume checkpoint",
+      "label": "Grimoire: Resume checkpoint",
       "type": "shell",
-      "command": "bash bmad-init.sh resume --checkpoint ${input:checkpointId}",
+      "command": "bash grimoire-init.sh resume --checkpoint ${input:checkpointId}",
       "group": "none",
       "presentation": {
         "reveal": "always",
@@ -118,11 +118,11 @@
       "problemMatcher": []
     },
 
-    // ── Groupe : BMAD Audit ───────────────────────────────────────────
+    // ── Groupe : Grimoire Audit ───────────────────────────────────────────
     {
-      "label": "BMAD: Trace (50 dernières entrées)",
+      "label": "Grimoire: Trace (50 dernières entrées)",
       "type": "shell",
-      "command": "bash bmad-init.sh trace --tail 50",
+      "command": "bash grimoire-init.sh trace --tail 50",
       "group": "none",
       "presentation": {
         "reveal": "always",
@@ -131,9 +131,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Changelog",
+      "label": "Grimoire: Changelog",
       "type": "shell",
-      "command": "bash bmad-init.sh changelog",
+      "command": "bash grimoire-init.sh changelog",
       "group": "none",
       "presentation": {
         "reveal": "always",
@@ -145,9 +145,9 @@
 
     // ── Groupe : Benchmark ────────────────────────────────────────────
     {
-      "label": "BMAD: Bench summary",
+      "label": "Grimoire: Bench summary",
       "type": "shell",
-      "command": "bash bmad-init.sh bench --summary",
+      "command": "bash grimoire-init.sh bench --summary",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -157,9 +157,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Bench report complet",
+      "label": "Grimoire: Bench report complet",
       "type": "shell",
-      "command": "bash bmad-init.sh bench --report",
+      "command": "bash grimoire-init.sh bench --report",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -169,9 +169,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Bench --improve (génère bench-context.md pour Sentinel)",
+      "label": "Grimoire: Bench --improve (génère bench-context.md pour Sentinel)",
       "type": "shell",
-      "command": "bash bmad-init.sh bench --improve",
+      "command": "bash grimoire-init.sh bench --improve",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -183,7 +183,7 @@
 
     // ── Groupe : Gen Tests ────────────────────────────────────────────
     {
-      "label": "BMAD: Gen tests (archetype courant)",
+      "label": "Grimoire: Gen tests (archetype courant)",
       "type": "shell",
       "command": "python3 framework/tools/gen-tests.py --dna ${input:dnaFile} --out tests/",
       "group": "test",
@@ -197,9 +197,9 @@
 
     // ── Groupe : Context Budget Guard (BM-55) ───────────────────────────
     {
-      "label": "BMAD: Guard — budget contexte (tous agents)",
+      "label": "Grimoire: Guard — budget contexte (tous agents)",
       "type": "shell",
-      "command": "bash bmad-init.sh guard --suggest",
+      "command": "bash grimoire-init.sh guard --suggest",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -209,9 +209,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Guard — agent spécifique",
+      "label": "Grimoire: Guard — agent spécifique",
       "type": "shell",
-      "command": "bash bmad-init.sh guard --agent '${input:agentId}' --detail",
+      "command": "bash grimoire-init.sh guard --agent '${input:agentId}' --detail",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -223,9 +223,9 @@
 
     // ── Groupe : DNA Evolution Engine (BM-56) ────────────────────────────
     {
-      "label": "BMAD: Evolve — proposer des évolutions DNA",
+      "label": "Grimoire: Evolve — proposer des évolutions DNA",
       "type": "shell",
-      "command": "bash bmad-init.sh evolve",
+      "command": "bash grimoire-init.sh evolve",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -235,9 +235,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Evolve — rapport seul (sans patch)",
+      "label": "Grimoire: Evolve — rapport seul (sans patch)",
       "type": "shell",
-      "command": "bash bmad-init.sh evolve --report",
+      "command": "bash grimoire-init.sh evolve --report",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -247,9 +247,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Evolve — appliquer le dernier patch DNA",
+      "label": "Grimoire: Evolve — appliquer le dernier patch DNA",
       "type": "shell",
-      "command": "bash bmad-init.sh evolve --apply",
+      "command": "bash grimoire-init.sh evolve --apply",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -260,9 +260,9 @@
 
     // ── Groupe : Agent Forge (BM-52) ────────────────────────────────
     {
-      "label": "BMAD: Forge agent (depuis description)",
+      "label": "Grimoire: Forge agent (depuis description)",
       "type": "shell",
-      "command": "bash bmad-init.sh forge --from '${input:agentDescription}'",
+      "command": "bash grimoire-init.sh forge --from '${input:agentDescription}'",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -272,9 +272,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Forge --from-gap (inter-agents)",
+      "label": "Grimoire: Forge --from-gap (inter-agents)",
       "type": "shell",
-      "command": "bash bmad-init.sh forge --from-gap",
+      "command": "bash grimoire-init.sh forge --from-gap",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -284,9 +284,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Forge --from-trace (failures sans agent)",
+      "label": "Grimoire: Forge --from-trace (failures sans agent)",
       "type": "shell",
-      "command": "bash bmad-init.sh forge --from-trace",
+      "command": "bash grimoire-init.sh forge --from-trace",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -296,9 +296,9 @@
       "problemMatcher": []
     },
     {
-      "label": "BMAD: Forge --list proposals",
+      "label": "Grimoire: Forge --list proposals",
       "type": "shell",
-      "command": "bash bmad-init.sh forge --list",
+      "command": "bash grimoire-init.sh forge --list",
       "group": "build",
       "presentation": {
         "reveal": "always",
@@ -307,11 +307,11 @@
       "problemMatcher": []
     },
 
-    // ── Groupe : Validation bmad-init.sh ─────────────────────────────
+    // ── Groupe : Validation grimoire-init.sh ─────────────────────────────
     {
-      "label": "BMAD: Vérification syntaxe bash",
+      "label": "Grimoire: Vérification syntaxe bash",
       "type": "shell",
-      "command": "bash -n bmad-init.sh && echo '✅ OK'",
+      "command": "bash -n grimoire-init.sh && echo '✅ OK'",
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -320,7 +320,7 @@
       "problemMatcher": [
         {
           "pattern": {
-            "regexp": "bmad-init\\.sh: line (\\d+): (.*)",
+            "regexp": "grimoire-init\\.sh: line (\\d+): (.*)",
             "file": 0,
             "line": 1,
             "message": 2
@@ -340,7 +340,7 @@
     {
       "id": "sessionName",
       "type": "promptString",
-      "description": "Nom de la session BMAD (ex: feature-auth, bug-fix-login)",
+      "description": "Nom de la session Grimoire (ex: feature-auth, bug-fix-login)",
       "default": "feature-dev"
     },
     {

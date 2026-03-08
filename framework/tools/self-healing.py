@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-self-healing.py — Auto-réparation des workflows BMAD.
+self-healing.py — Auto-réparation des workflows Grimoire.
 =======================================================
 
 Quand un workflow échoue, ce système tente de réparer avant d'escalader :
@@ -97,7 +97,7 @@ PLAYBOOK = [
         "actions": [
             "Vérifier les permissions du fichier (ls -la)",
             "Si script : ajouter le bit d'exécution (chmod +x)",
-            "Si dossier _bmad : vérifier que l'utilisateur a les droits",
+            "Si dossier _grimoire : vérifier que l'utilisateur a les droits",
         ],
         "auto_heal": True,
     },
@@ -142,7 +142,7 @@ PLAYBOOK = [
             "Identifier l'outil manquant",
             "Vérifier si un équivalent est disponible (which, command -v)",
             "Proposer l'installation via le gestionnaire de paquets",
-            "Si outil BMAD : vérifier que le PATH inclut framework/tools/",
+            "Si outil Grimoire : vérifier que le PATH inclut framework/tools/",
         ],
         "auto_heal": False,
     },
@@ -185,7 +185,7 @@ PLAYBOOK = [
         "description": "Espace disque insuffisant",
         "actions": [
             "Vérifier l'espace disque (df -h)",
-            "Nettoyer les caches BMAD (_bmad-output/test-artifacts/)",
+            "Nettoyer les caches Grimoire (_grimoire-output/test-artifacts/)",
             "Nettoyer les fichiers temporaires (git gc, __pycache__)",
         ],
         "auto_heal": False,
@@ -345,7 +345,7 @@ def attempt_heal(project_root: Path, diagnosis: Diagnosis) -> Diagnosis:
 
 def load_history(project_root: Path) -> list[HealingRecord]:
     """Charge l'historique des guérisons."""
-    log_file = project_root / "_bmad" / "_memory" / HEALING_LOG
+    log_file = project_root / "_grimoire" / "_memory" / HEALING_LOG
     if not log_file.exists():
         return []
     try:
@@ -369,7 +369,7 @@ def save_to_history(project_root: Path, diagnosis: Diagnosis):
         detail=diagnosis.heal_result,
     ))
 
-    log_file = project_root / "_bmad" / "_memory" / HEALING_LOG
+    log_file = project_root / "_grimoire" / "_memory" / HEALING_LOG
     log_file.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "version": SELF_HEALING_VERSION,
@@ -638,7 +638,7 @@ def mcp_self_healing(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Self-Healing — Auto-réparation des workflows",
+        description="Grimoire Self-Healing — Auto-réparation des workflows",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

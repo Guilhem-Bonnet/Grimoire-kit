@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-crescendo.py — Onboarding progressif BMAD.
+crescendo.py — Onboarding progressif Grimoire.
 ============================================
 
 Système d'onboarding adaptatif qui ajuste la complexité en fonction
@@ -133,7 +133,7 @@ def assess_project(project_root: Path) -> AssessmentResult:
     checks["M04"] = len(workflows) > 0
 
     # M05 — mémoire
-    memory = project_root / "_bmad" / "_memory"
+    memory = project_root / "_grimoire" / "_memory"
     mem_files = list(memory.rglob("*.md")) if memory.exists() else []
     checks["M05"] = len(mem_files) > 0
 
@@ -197,7 +197,7 @@ def assess_project(project_root: Path) -> AssessmentResult:
 GUIDANCE_BY_LEVEL: dict[str, list[GuidanceItem]] = {
     "L0": [
         GuidanceItem("Initialise ton projet", "Crée un project-context.yaml",
-                      "C'est la carte d'identité de ton projet", "bmad-init.sh"),
+                      "C'est la carte d'identité de ton projet", "grimoire-init.sh"),
         GuidanceItem("Découvre les agents", "Active un agent et explore son menu",
                       "Chaque agent a une personnalité et des compétences uniques"),
         GuidanceItem("Lis la doc", "Parcours getting-started.md",
@@ -285,7 +285,7 @@ def format_guidance(level: str, items: list[GuidanceItem]) -> str:
 
 
 def format_milestones() -> str:
-    lines = ["🏁 Jalons de progression BMAD\n"]
+    lines = ["🏁 Jalons de progression Grimoire\n"]
     for level, info in LEVELS.items():
         lines.append(f"  {info['emoji']} {level} — {info['name']}")
         for m in MILESTONES:
@@ -366,7 +366,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Crescendo — Onboarding progressif",
+        description="Grimoire Crescendo — Onboarding progressif",
     )
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--json", action="store_true")

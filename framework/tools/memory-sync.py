@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-memory-sync.py — Synchronisation bidirectionnelle mémoire BMAD ↔ Qdrant (BM-42 Story 2.4).
+memory-sync.py — Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant (BM-42 Story 2.4).
 ============================================================
 
 Après chaque session agent, vectorise automatiquement les nouvelles
@@ -17,7 +17,7 @@ Modes :
 Usage :
   python3 memory-sync.py --project-root . push
   python3 memory-sync.py --project-root . push --file decisions-log.md
-  python3 memory-sync.py --project-root . pull --collection memory --output _bmad/_memory/
+  python3 memory-sync.py --project-root . pull --collection memory --output _grimoire/_memory/
   python3 memory-sync.py --project-root . diff
   python3 memory-sync.py --project-root . hook --agent dev
   python3 memory-sync.py --project-root . dedup --threshold 0.85
@@ -53,8 +53,8 @@ MEMORY_SYNC_VERSION = "1.0.0"
 # ── Constants ────────────────────────────────────────────────────────────────
 
 CHARS_PER_TOKEN = 4
-MEMORY_DIR = "_bmad/_memory"
-SYNC_STATE_FILE = "_bmad-output/.memory-sync-state.json"
+MEMORY_DIR = "_grimoire/_memory"
+SYNC_STATE_FILE = "_grimoire-output/.memory-sync-state.json"
 
 # Fichiers mémoire trackés pour le push automatique
 TRACKED_FILES: dict[str, str] = {
@@ -332,7 +332,7 @@ class SyncStateManager:
 # ── Memory Syncer ────────────────────────────────────────────────────────────
 
 class MemorySyncer:
-    """Synchronisation bidirectionnelle mémoire BMAD ↔ Qdrant."""
+    """Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant."""
 
     def __init__(
         self,
@@ -341,7 +341,7 @@ class MemorySyncer:
         qdrant_path: str = "",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         ollama_url: str = "",
-        project_name: str = "bmad",
+        project_name: str = "grimoire",
     ):
         self.project_root = project_root
         self.project_name = project_name
@@ -352,7 +352,7 @@ class MemorySyncer:
 
         # Qdrant + embedding (via rag-indexer)
         self._qdrant_url = qdrant_url
-        self._qdrant_path = qdrant_path or str(project_root / "_bmad-output" / ".qdrant_data")
+        self._qdrant_path = qdrant_path or str(project_root / "_grimoire-output" / ".qdrant_data")
         self._embedding_model = embedding_model
         self._ollama_url = ollama_url
         self._indexer = None
@@ -670,7 +670,7 @@ def load_sync_config(project_root: Path) -> dict:
 
     for candidate in [
         project_root / "project-context.yaml",
-        project_root / "bmad.yaml",
+        project_root / "grimoire.yaml",
     ]:
         if candidate.exists():
             with open(candidate, encoding="utf-8") as f:
@@ -685,10 +685,10 @@ def build_syncer_from_config(project_root: Path) -> MemorySyncer:
 
     return MemorySyncer(
         project_root=project_root,
-        qdrant_url=os.environ.get("BMAD_QDRANT_URL", config.get("qdrant_url", "")),
+        qdrant_url=os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", "")),
         embedding_model=config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"),
-        ollama_url=os.environ.get("BMAD_OLLAMA_URL", config.get("ollama_url", "")),
-        project_name=config.get("collection_prefix", "bmad"),
+        ollama_url=os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", "")),
+        project_name=config.get("collection_prefix", "grimoire"),
     )
 
 
@@ -744,7 +744,7 @@ def _print_diff(diffs: list[DiffEntry]) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="Memory Sync — Synchronisation bidirectionnelle mémoire BMAD ↔ Qdrant",
+        description="Memory Sync — Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

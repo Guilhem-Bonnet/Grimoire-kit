@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-background-tasks.py — Background Agent Tasks BMAD (BM-44 Story 5.3).
+background-tasks.py — Background Agent Tasks Grimoire (BM-44 Story 5.3).
 ============================================================
 
 Permet à des agents de travailler en arrière-plan (analyse,
 consolidation, veille) pendant que l'utilisateur interagit
 avec d'autres agents.
 
-Les tâches background écrivent dans _bmad-output/.background/<task-id>/
+Les tâches background écrivent dans _grimoire-output/.background/<task-id>/
 et notifient quand elles sont terminées.
 
 Modes :
@@ -54,7 +54,7 @@ BACKGROUND_TASKS_VERSION = "1.0.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-BACKGROUND_DIR = "_bmad-output/.background"
+BACKGROUND_DIR = "_grimoire-output/.background"
 MAX_CONCURRENT_TASKS = 2
 TASK_TIMEOUT_SECONDS = 3600  # 1 hour default
 HEARTBEAT_INTERVAL = 30  # seconds
@@ -185,9 +185,9 @@ class TaskList:
 
 class BackgroundTaskManager:
     """
-    Gère les tâches background BMAD.
+    Gère les tâches background Grimoire.
 
-    Chaque tâche a son propre répertoire dans _bmad-output/.background/<task-id>/
+    Chaque tâche a son propre répertoire dans _grimoire-output/.background/<task-id>/
     avec un manifest.json, un result.md et des logs.
     """
 
@@ -557,7 +557,7 @@ def _print_task_list(task_list: TaskList) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Background Tasks — Tâches agents en arrière-plan BMAD",
+        description="Background Tasks — Tâches agents en arrière-plan Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."),

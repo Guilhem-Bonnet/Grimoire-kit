@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-reasoning-stream.py — Flux de raisonnement structuré pour BMAD.
+reasoning-stream.py — Flux de raisonnement structuré pour Grimoire.
 ================================================================
 
-Extension du BMAD_TRACE avec des types hypothesis/doubt/reasoning/assumption.
+Extension du Grimoire_TRACE avec des types hypothesis/doubt/reasoning/assumption.
 Capture le POURQUOI des décisions, pas seulement le QUOI. Permet l'analyse
 des chaînes de raisonnement, la détection des doutes non résolus et des
 hypothèses non validées.
@@ -110,12 +110,12 @@ class StreamAnalysis:
 
 def _get_stream_path(project_root: Path) -> Path:
     """Retourne le chemin du fichier stream."""
-    return project_root / "_bmad-output" / STREAM_FILE
+    return project_root / "_grimoire-output" / STREAM_FILE
 
 
 def log_entry(entry: ReasoningEntry, project_root: Path) -> Path:
     """Ajoute une entrée au flux de raisonnement."""
-    output_dir = project_root / "_bmad-output"
+    output_dir = project_root / "_grimoire-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / STREAM_FILE
 
@@ -343,7 +343,7 @@ def compact_stream(project_root: Path,
         }
 
     # Écrire le résumé
-    output_dir = project_root / "_bmad-output"
+    output_dir = project_root / "_grimoire-output"
     compact_path = output_dir / COMPACT_FILE
 
     # Append au fichier compact existant
@@ -536,10 +536,10 @@ def render_stats(entries: list[ReasoningEntry]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BMAD Reasoning Stream — flux de raisonnement structuré",
+        description="Grimoire Reasoning Stream — flux de raisonnement structuré",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", default=".", help="Racine du projet BMAD")
+    parser.add_argument("--project-root", default=".", help="Racine du projet Grimoire")
 
     subparsers = parser.add_subparsers(dest="command", help="Commande")
 

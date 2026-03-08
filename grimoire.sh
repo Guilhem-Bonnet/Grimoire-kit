@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# grimoire — CLI unifiée pour le Grimoire Kit BMAD
+# grimoire — CLI unifiée pour le Grimoire Kit Grimoire
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Point d'entrée unique pour toutes les commandes du framework.
@@ -13,7 +13,7 @@
 #   grimoire lifecycle pre     # Hooks pré-session
 #   grimoire lifecycle post    # Hooks post-session
 #   grimoire integrity check   # Vérification intégrité agents
-#   grimoire init [...]        # Initialiser un projet (proxy bmad-init.sh)
+#   grimoire init [...]        # Initialiser un projet (proxy grimoire-init.sh)
 #   grimoire help              # Aide
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -53,7 +53,7 @@ MEMORY_DIR="${PROJECT_ROOT}/framework/memory"
 
 cmd_help() {
     cat <<EOF
-${CYAN}${BOLD}grimoire${NC} v${VERSION} — CLI du Grimoire Kit BMAD
+${CYAN}${BOLD}grimoire${NC} v${VERSION} — CLI du Grimoire Kit Grimoire
 
 ${BOLD}Commandes:${NC}
   ${GREEN}doctor${NC}           Diagnostic complet du projet
@@ -62,7 +62,7 @@ ${BOLD}Commandes:${NC}
   ${GREEN}lifecycle${NC} <pre|post|status>  Hooks de session
   ${GREEN}integrity${NC} <snapshot|verify>  Intégrité des fichiers agents
   ${GREEN}health${NC}           Health-check mémoire
-  ${GREEN}init${NC}             Initialiser un projet (proxy bmad-init.sh)
+  ${GREEN}init${NC}             Initialiser un projet (proxy grimoire-init.sh)
   ${GREEN}version${NC}          Version du kit
   ${GREEN}help${NC}             Cette aide
 
@@ -261,7 +261,7 @@ cmd_health() {
 }
 
 cmd_init() {
-    bash "${SCRIPT_DIR}/bmad-init.sh" "$@"
+    bash "${SCRIPT_DIR}/grimoire-init.sh" "$@"
 }
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────

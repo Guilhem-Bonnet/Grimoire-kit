@@ -306,7 +306,7 @@ checkpoints:
         failed: ["{task_ids échouées}"]
       outputs: "{tous les output_keys disponibles}"
       timestamp: "{iso_datetime}"
-    save_to: "_bmad-output/.hpe-checkpoint-{step_id}.yaml"
+    save_to: "_grimoire-output/.hpe-checkpoint-{step_id}.yaml"
   
   # Reprendre depuis un checkpoint
   resume:
@@ -373,7 +373,7 @@ Parallel workers: 1/5 active
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration BMAD Trace
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
 
 ```
 [timestamp] [HPE]            [HPE:build-dag]   tasks=8 | layers=5 | critical_path=4

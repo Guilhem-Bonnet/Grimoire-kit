@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Mnemo — Pre-commit hook pour consolidation mémoire
+# Grimoire Mnemo — Pre-commit hook pour consolidation mémoire
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Ce hook exécute la consolidation des learnings et la vérification de drift
@@ -27,13 +27,13 @@ set -euo pipefail
 # Trouver la racine du workspace (remonter depuis le repo git)
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-# Le dossier _bmad peut être à la racine du repo ou un niveau au-dessus
-if [[ -d "$GIT_ROOT/_bmad/_memory" ]]; then
-    MEMORY_DIR="$GIT_ROOT/_bmad/_memory"
-elif [[ -d "$GIT_ROOT/../_bmad/_memory" ]]; then
-    MEMORY_DIR="$GIT_ROOT/../_bmad/_memory"
+# Le dossier _grimoire peut être à la racine du repo ou un niveau au-dessus
+if [[ -d "$GIT_ROOT/_grimoire/_memory" ]]; then
+    MEMORY_DIR="$GIT_ROOT/_grimoire/_memory"
+elif [[ -d "$GIT_ROOT/../_grimoire/_memory" ]]; then
+    MEMORY_DIR="$GIT_ROOT/../_grimoire/_memory"
 else
-    # Pas de _bmad trouvé — silencieux
+    # Pas de _grimoire trouvé — silencieux
     exit 0
 fi
 

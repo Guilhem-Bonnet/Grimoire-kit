@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-semantic-chain.py — Chaîne du froid sémantique BMAD.
+semantic-chain.py — Chaîne du froid sémantique Grimoire.
 ======================================================
 
 Garantit que l'information ne se dégrade jamais au fil de la chaîne :
@@ -222,8 +222,8 @@ def discover_artifacts(project_root: Path) -> dict[str, list[Path]]:
     """Découvre les artefacts par type."""
     found: dict[str, list[Path]] = defaultdict(list)
 
-    # Chercher dans _bmad-output d'abord
-    output_dir = project_root / "_bmad-output"
+    # Chercher dans _grimoire-output d'abord
+    output_dir = project_root / "_grimoire-output"
     if output_dir.exists():
         for md in output_dir.rglob("*.md"):
             name = md.name.upper()
@@ -505,7 +505,7 @@ def cmd_impact(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Semantic Chain — Chaîne du froid sémantique",
+        description="Grimoire Semantic Chain — Chaîne du froid sémantique",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

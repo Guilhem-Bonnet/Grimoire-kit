@@ -1,21 +1,21 @@
-# Guide SDK Python — BMAD Kit v3
+# Guide SDK Python — Grimoire Kit v3
 
-> Utiliser BMAD Kit comme bibliothèque Python dans vos scripts et outils.
+> Utiliser Grimoire Kit comme bibliothèque Python dans vos scripts et outils.
 
 ## Installation
 
 ```bash
-pip install bmad-kit
+pip install grimoire-kit
 ```
 
 ## Configuration
 
 ```python
 from pathlib import Path
-from bmad.core.config import BmadConfig
+from grimoire.core.config import GrimoireConfig
 
 # Charger depuis un fichier YAML
-config = BmadConfig.from_yaml(Path("project-context.yaml"))
+config = GrimoireConfig.from_yaml(Path("project-context.yaml"))
 
 # Accéder aux sections typées
 print(config.project.name)       # str
@@ -28,9 +28,9 @@ print(config.agents.archetype)   # "minimal" | "web-app" | ...
 ## Projet
 
 ```python
-from bmad.core.project import BmadProject
+from grimoire.core.project import GrimoireProject
 
-project = BmadProject(config)
+project = GrimoireProject(config)
 status = project.status()
 
 # Agents installés
@@ -46,19 +46,19 @@ print(ctx.stack)
 ## Résolution de chemins
 
 ```python
-from bmad.core.resolver import PathResolver
+from grimoire.core.resolver import PathResolver
 
 resolver = PathResolver(project_root=Path("."))
-print(resolver.bmad_dir)         # _bmad/
-print(resolver.config_dir)       # _bmad/_config/
-print(resolver.memory_dir)       # _bmad/_memory/
-print(resolver.agents_dir)       # _bmad/_config/agents/
+print(resolver.bmad_dir)         # _grimoire/
+print(resolver.config_dir)       # _grimoire/_config/
+print(resolver.memory_dir)       # _grimoire/_memory/
+print(resolver.agents_dir)       # _grimoire/_config/agents/
 ```
 
 ## Détection de stack
 
 ```python
-from bmad.core.scanner import StackScanner
+from grimoire.core.scanner import StackScanner
 
 scanner = StackScanner(Path("."))
 result = scanner.scan()
@@ -71,7 +71,7 @@ for detection in result.detections:
 ## Validation
 
 ```python
-from bmad.core.validator import validate_config
+from grimoire.core.validator import validate_config
 
 errors = validate_config(config)
 if errors:
@@ -86,7 +86,7 @@ else:
 Tous les outils sont disponibles comme classes Python :
 
 ```python
-from bmad.tools import (
+from grimoire.tools import (
     AgentForge,
     ContextGuard,
     ContextRouter,
@@ -122,7 +122,7 @@ print(f"Agent recommandé: {result.agent_id}")
 
 # Context Guard — vérification du budget contexte
 cg = ContextGuard(max_tokens=8000)
-result = cg.check(Path("_bmad/_config/agents/architect.md"))
+result = cg.check(Path("_grimoire/_config/agents/architect.md"))
 print(f"Tokens: {result.token_count} / {cg.max_tokens}")
 
 # Stigmergy — signaux inter-agents
@@ -142,7 +142,7 @@ skeleton = af.generate(
 ## Merge Engine
 
 ```python
-from bmad.core.merge import MergeEngine
+from grimoire.core.merge import MergeEngine
 
 engine = MergeEngine(source=Path("template"), target=Path("my-project"))
 
@@ -171,7 +171,7 @@ MergeEngine.undo(result.log_path)
 ## Registre local
 
 ```python
-from bmad.registry.local import LocalRegistry
+from grimoire.registry.local import LocalRegistry
 
 registry = LocalRegistry(Path("archetypes"))
 
@@ -186,7 +186,7 @@ results = registry.search("kubernetes")
 ## Mémoire
 
 ```python
-from bmad.memory.manager import MemoryManager
+from grimoire.memory.manager import MemoryManager
 
 mm = MemoryManager(config)
 
@@ -201,24 +201,24 @@ for r in results:
 
 ## Exceptions
 
-Toutes les exceptions héritent de `BmadError` :
+Toutes les exceptions héritent de `GrimoireError` :
 
 ```python
-from bmad.core.exceptions import (
-    BmadError,          # Base
-    BmadConfigError,    # Configuration invalide
-    BmadProjectError,   # Structure projet invalide
-    BmadAgentError,     # Erreur agent
-    BmadToolError,      # Erreur outil
-    BmadMergeError,     # Erreur merge
-    BmadRegistryError,  # Erreur registre
-    BmadMemoryError,    # Erreur mémoire
-    BmadValidationError,# Erreur validation
+from grimoire.core.exceptions import (
+    GrimoireError,          # Base
+    GrimoireConfigError,    # Configuration invalide
+    GrimoireProjectError,   # Structure projet invalide
+    GrimoireAgentError,     # Erreur agent
+    GrimoireToolError,      # Erreur outil
+    GrimoireMergeError,     # Erreur merge
+    GrimoireRegistryError,  # Erreur registre
+    GrimoireMemoryError,    # Erreur mémoire
+    GrimoireValidationError,# Erreur validation
 )
 ```
 
 ## Voir aussi
 
-- [Référence YAML](bmad-yaml-reference.md)
+- [Référence YAML](grimoire-yaml-reference.md)
 - [Intégration MCP](mcp-integration.md)
 - [Getting Started](getting-started.md)

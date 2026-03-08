@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-oracle.py — Oracle Introspectif BMAD.
+oracle.py — Oracle Introspectif Grimoire.
 ========================================
 
 CTO virtuel qui analyse le projet de manière holistique et produit :
@@ -230,7 +230,7 @@ def analyze_swot(project_root: Path) -> SWOT:
 
     # ── OPPORTUNITIES ──
     # Mémoire collective
-    memory_dir = project_root / "_bmad" / "_memory"
+    memory_dir = project_root / "_grimoire" / "_memory"
     if memory_dir.exists():
         mem_files = list(memory_dir.rglob("*.md"))
         swot.opportunities.append(SWOTItem(
@@ -360,7 +360,7 @@ def analyze_maturity(project_root: Path) -> list[MaturityDimension]:
                                         f"{len(tools)} outils CLI"))
 
     # 4. Mémoire / Apprentissage
-    memory = project_root / "_bmad" / "_memory"
+    memory = project_root / "_grimoire" / "_memory"
     mem_files = list(memory.rglob("*.md")) if memory.exists() else []
     mem_score = min(100, len(mem_files) * 12)
     dimensions.append(MaturityDimension("Mémoire", mem_score,
@@ -466,7 +466,7 @@ def format_maturity(dimensions: list[MaturityDimension], score: int, level: str)
 
 def format_full_report(report: OracleReport) -> str:
     lines = [
-        "🔮 Oracle Introspectif — Rapport Complet BMAD",
+        "🔮 Oracle Introspectif — Rapport Complet Grimoire",
         f"   Maturité globale : {report.maturity_score}/100  {report.maturity_level}",
         "",
         format_swot(report.swot),
@@ -584,7 +584,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BMAD Oracle — Analyse stratégique introspective",
+        description="Grimoire Oracle — Analyse stratégique introspective",
     )
     parser.add_argument("--project-root", type=str, default=".")
     parser.add_argument("--json", action="store_true", help="Sortie JSON")

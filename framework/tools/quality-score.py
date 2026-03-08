@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-quality-score.py — Runtime Quality Scoring for BMAD agents (D7).
+quality-score.py — Runtime Quality Scoring for Grimoire agents (D7).
 ═══════════════════════════════════════════════════════════════════
 
 Évalue la qualité des sorties d'agents sur plusieurs dimensions :
@@ -16,7 +16,7 @@ Modes :
 
 Usage :
   python3 quality-score.py --project-root . score path/to/output.md
-  python3 quality-score.py --project-root . batch _bmad-output/planning-artifacts/
+  python3 quality-score.py --project-root . batch _grimoire-output/planning-artifacts/
   python3 quality-score.py --project-root . threshold path/to/output.md --min 70
 
 MCP interface :
@@ -337,7 +337,7 @@ def _display_score(result: dict[str, Any]) -> None:
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BMAD Quality Scoring")
+    parser = argparse.ArgumentParser(description="Grimoire Quality Scoring")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--json", action="store_true")
 

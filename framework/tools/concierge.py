@@ -3,7 +3,7 @@
 concierge.py — Triage et routage intelligent des requêtes utilisateur.
 ======================================================================
 
-Analyse une requête en langage naturel et suggère l'agent BMAD le
+Analyse une requête en langage naturel et suggère l'agent Grimoire le
 plus adapté, avec un score de confiance.
 
 Usage :
@@ -382,7 +382,7 @@ def mcp_concierge_agents(project_root: str) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="concierge",
-        description="Concierge — Triage et routage intelligent BMAD",
+        description="Concierge — Triage et routage intelligent Grimoire",
     )
     p.add_argument("--project-root", type=Path, default=Path("."))
     p.add_argument("--json", action="store_true")

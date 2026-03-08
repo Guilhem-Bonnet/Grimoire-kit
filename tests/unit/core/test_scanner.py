@@ -1,4 +1,4 @@
-"""Tests for bmad.core.scanner — automatic stack detection."""
+"""Tests for grimoire.core.scanner — automatic stack detection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from bmad.core.scanner import StackScanner
+from grimoire.core.scanner import StackScanner
 
 
 @pytest.fixture()

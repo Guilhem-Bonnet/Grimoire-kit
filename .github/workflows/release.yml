@@ -1,4 +1,4 @@
-name: BMAD Release
+name: Grimoire Release
 
 on:
   push:
@@ -32,14 +32,14 @@ jobs:
         run: pip install pyyaml
 
       - name: Validate DNA avant release
-        run: bash bmad-init.sh validate --all
+        run: bash grimoire-init.sh validate --all
 
-      - name: Générer CHANGELOG depuis BMAD_TRACE
+      - name: Générer CHANGELOG depuis Grimoire_TRACE
         id: changelog
         run: |
-          # Générer le changelog si BMAD_TRACE existe
-          if [[ -f "_bmad-output/BMAD_TRACE.md" ]]; then
-            bash bmad-init.sh changelog --output RELEASE_NOTES.md
+          # Générer le changelog si Grimoire_TRACE existe
+          if [[ -f "_grimoire-output/Grimoire_TRACE.md" ]]; then
+            bash grimoire-init.sh changelog --output RELEASE_NOTES.md
             echo "has_trace=true" >> $GITHUB_OUTPUT
           else
             # Changelog depuis git log
@@ -63,7 +63,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name || inputs.tag }}
-          name: "BMAD Custom Kit ${{ github.ref_name || inputs.tag }}"
+          name: "Grimoire Custom Kit ${{ github.ref_name || inputs.tag }}"
           body_path: RELEASE_NOTES.md
           body: |
             ## Stats
@@ -77,13 +77,13 @@ jobs:
             ## Installation rapide
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/Guilhem-Bonnet/grimoire-kit/${{ github.ref_name || inputs.tag }}/bmad-init.sh -o bmad-init.sh
-            bash bmad-init.sh doctor
-            bash bmad-init.sh install --archetype minimal
+            curl -fsSL https://raw.githubusercontent.com/Guilhem-Bonnet/grimoire-kit/${{ github.ref_name || inputs.tag }}/grimoire-init.sh -o grimoire-init.sh
+            bash grimoire-init.sh doctor
+            bash grimoire-init.sh install --archetype minimal
             ```
           draft: false
           prerelease: ${{ contains(github.ref_name || inputs.tag, '-rc') || contains(github.ref_name || inputs.tag, '-beta') || contains(github.ref_name || inputs.tag, '-alpha') }}
           generate_release_notes: true
           files: |
-            bmad-init.sh
+            grimoire-init.sh
             framework/archetype-dna.schema.yaml
