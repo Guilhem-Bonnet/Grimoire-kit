@@ -5,6 +5,53 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [3.0.0] — 2026-03-05
+
+### Réécriture complète — SDK Python pur
+
+Le projet passe de scripts shell/Python standalone à un **package Python installable**
+(`pip install bmad-kit`) avec architecture modulaire, API typée, et couverture de tests extensive.
+
+#### Ajouté
+
+- **SDK Core** (`bmad.core`) — Modèles immutables (`@dataclass(frozen=True, slots=True)`),
+  `BmadConfig` pour le chargement de `project-context.yaml`, résolution de chemins,
+  système d'exceptions typées (`BmadConfigError`, `BmadProjectError`, `BmadRegistryError`)
+- **CLI complète** (`bmad.cli`) — 12 commandes Typer : `init`, `doctor`, `status`,
+  `add`, `remove`, `validate`, `up`, `upgrade`, `merge`, `registry list`, `registry search`
+- **MCP Server** (`bmad.mcp`) — Intégration Model Context Protocol avec 6 tools
+  et 4 resources pour les IDE compatibles MCP
+- **Outils portés** (`bmad.tools`) — `harmony-check`, `preflight-check`, `memory-lint`
+  réécrits en modules Python avec API programmatique (`run()` / `RunResult`)
+- **Système de registre** (`bmad.registry`) — Résolution d'agents, workflows, tasks
+  depuis les manifests CSV avec support multi-modules
+- **Système de mémoire** (`bmad.memory`) — Architecture à backends : fichier JSON,
+  Ollama (embeddings), Qdrant (vector store) avec interface `MemoryBackend` abstraite
+- **Archétypes** — 8 templates de projet : `web-app`, `creative-studio`, `fix-loop`,
+  `infra-ops`, `meta`, `minimal`, `stack`, `features`
+- **Merge engine** (`bmad merge`) — Fusion intelligente de fichiers YAML/Markdown
+  avec détection de conflits et dry-run
+- **Upgrade engine** (`bmad upgrade`) — Migration entre versions avec diff et backup
+- **Documentation** — `getting-started.md`, `concepts.md`, `onboarding.md`,
+  `memory-system.md`, `workflow-design-patterns.md`, `workflow-taxonomy.md`,
+  `creating-agents.md`, `archetype-guide.md`, `vscode-setup.md`, `troubleshooting.md`
+- **CI / Qualité** — 694 tests unitaires, 96% couverture, ruff lint, mypy strict,
+  `py.typed` marker
+
+#### Modifié
+
+- **Entry points** — `bmad` (CLI) et `bmad-mcp` (serveur MCP) enregistrés
+  dans `pyproject.toml`
+- **Build** — Migration vers `hatchling` comme build backend
+- **URLs** — Repo renommé en `Grimoire-kit`
+
+#### Supprimé
+
+- Scripts shell standalone (remplacés par le SDK Python)
+- Dépendance à `bash` pour l'exécution des outils
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [2.4.1] — 2026-03-03
 
 ### Corrigé — Bug hunt (3 fichiers, 10 corrections)

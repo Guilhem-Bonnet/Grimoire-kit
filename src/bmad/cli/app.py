@@ -632,3 +632,10 @@ def merge(
     total = len(result.files_created) + len(result.files_skipped)
     console.print(f"\n[bold]{total} file(s) processed.[/bold]")
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def cli() -> None:
+    """Typer entry point for ``bmad`` console script."""
+    app()
+

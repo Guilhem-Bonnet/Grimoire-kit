@@ -41,12 +41,13 @@ dev = [
 ]
 
 [project.scripts]
-bmad = "bmad.cli.app:main"
+bmad = "bmad.cli.app:cli"
+bmad-mcp = "bmad.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/Guilhem-Bonnet/bmad-custom-kit"
-Repository = "https://github.com/Guilhem-Bonnet/bmad-custom-kit"
-Documentation = "https://github.com/Guilhem-Bonnet/bmad-custom-kit/tree/main/docs"
+Homepage = "https://github.com/Guilhem-Bonnet/Grimoire-kit"
+Repository = "https://github.com/Guilhem-Bonnet/Grimoire-kit"
+Documentation = "https://github.com/Guilhem-Bonnet/Grimoire-kit/tree/main/docs"
 
 [tool.hatch.version]
 path = "src/bmad/__version__.py"
