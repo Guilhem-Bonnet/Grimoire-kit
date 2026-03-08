@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.0.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-630+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-643+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-93-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
 </p>
@@ -321,6 +321,8 @@ pip install bmad-kit
 | `bmad add <agent>` | Ajouter un agent |
 | `bmad remove <agent>` | Retirer un agent |
 | `bmad validate` | Valider la config YAML |
+| `bmad merge <source>` | Fusionner des fichiers BMAD |
+| `bmad merge --undo` | Annuler le dernier merge |
 | `bmad upgrade` | Migrer un projet v2 → v3 |
 | `bmad registry list` | Lister les archétypes disponibles |
 | `bmad registry search <q>` | Chercher un agent |
