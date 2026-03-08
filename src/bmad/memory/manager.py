@@ -5,8 +5,8 @@ Usage::
     from bmad.memory.manager import MemoryManager
     from bmad.core.config import BmadConfig
 
-    cfg = BmadConfig.from_yaml(Path("bmad.yaml"))
-    mgr = MemoryManager.from_config(cfg)
+    cfg = BmadConfig.from_yaml(Path("project-context.yaml"))
+    mgr = MemoryManager.from_config(cfg, project_root=Path("."))
     mgr.store("important fact")
     results = mgr.search("important")
 """
@@ -41,16 +41,25 @@ def _resolve_auto(config: BmadConfig) -> str:
     return _BACKEND_LOCAL
 
 
-def _create_backend(config: BmadConfig) -> MemoryBackend:
-    """Instantiate the right backend from config."""
+def _create_backend(config: BmadConfig, project_root: Path | None = None) -> MemoryBackend:
+    """Instantiate the right backend from config.
+
+    Parameters
+    ----------
+    config :
+        Validated BMAD configuration.
+    project_root :
+        Explicit project root. When ``None``, falls back to cwd (legacy
+        behaviour) but this is discouraged — always pass a root.
+    """
     mem = config.memory
     backend_id = mem.backend if mem.backend != _BACKEND_AUTO else _resolve_auto(config)
+    root = (project_root or Path(".")).resolve()
 
     if backend_id == _BACKEND_LOCAL:
         from bmad.memory.backends.local import LocalMemoryBackend
 
-        # Default path: <project-root>/_bmad/_memory/memories.json
-        memory_dir = Path("_bmad/_memory")
+        memory_dir = root / "_bmad" / "_memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         return LocalMemoryBackend(memory_dir / f"{mem.collection_prefix}.json")
 
@@ -98,10 +107,19 @@ class MemoryManager:
         self._backend = backend
 
     @classmethod
-    def from_config(cls, config: BmadConfig) -> MemoryManager:
-        """Auto-create the right backend from project config."""
+    def from_config(cls, config: BmadConfig, *, project_root: Path | None = None) -> MemoryManager:
+        """Auto-create the right backend from project config.
+
+        Parameters
+        ----------
+        config :
+            Validated BMAD configuration.
+        project_root :
+            Explicit project root directory.  Strongly recommended so
+            that the local backend writes to the correct location.
+        """
         try:
-            backend = _create_backend(config)
+            backend = _create_backend(config, project_root)
         except ImportError as exc:
             raise BmadMemoryError(
                 f"Missing dependency for memory backend '{config.memory.backend}': {exc}"

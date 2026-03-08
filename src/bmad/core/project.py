@@ -152,8 +152,8 @@ class BmadProject:
         """List agents deployed in this project."""
         agents: list[AgentInfo] = []
 
-        # Scan _bmad/agents/ (or legacy _bmad/_config/agents/)
-        for agents_dir_name in ("agents", "_config/agents"):
+        # Scan _bmad/agents/, legacy _bmad/_config/agents/, and _bmad/_config/custom/agents/
+        for agents_dir_name in ("agents", "_config/agents", "_config/custom/agents"):
             agents_dir = self.bmad_dir / agents_dir_name
             if agents_dir.is_dir():
                 for f in sorted(agents_dir.iterdir()):

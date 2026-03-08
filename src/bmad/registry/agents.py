@@ -7,7 +7,7 @@ Usage::
 
     from bmad.registry.agents import AgentRegistry
 
-    reg = AgentRegistry(kit_root=Path("bmad-custom-kit"))
+    reg = AgentRegistry(kit_root=Path("."))
     agent = reg.get_agent("minimal", "project-navigator")
     print(agent.description)
 """

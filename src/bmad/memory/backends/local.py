@@ -6,7 +6,9 @@ Stores memories as JSON in a file.  Search uses keyword matching.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -43,8 +45,21 @@ class LocalMemoryBackend(MemoryBackend):
                 self._data = []
 
     def _save(self) -> None:
-        with open(self._file, "w", encoding="utf-8") as fh:
-            json.dump(self._data, fh, ensure_ascii=False, indent=2)
+        # Atomic write: write to temp file then rename to avoid corruption.
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._file.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(self._data, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self._file)
+        except BaseException:
+            # Clean up temp file on any failure.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     # ── Contract ──────────────────────────────────────────────────────────
 

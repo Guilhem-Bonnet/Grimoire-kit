@@ -1,7 +1,7 @@
 """``bmad upgrade`` — migrate a v2 project to v3 structure.
 
 Detects a v2 project by the presence of ``project-context.yaml`` without
-a ``bmad.yaml`` (v3 config). Generates ``bmad.yaml`` from the v2 config,
+v3 markers. Generates the v3 config from the v2 config,
 ensures the v3 directory layout, and preserves all memory files.
 """
 

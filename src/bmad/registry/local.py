@@ -7,7 +7,7 @@ Usage::
 
     from bmad.registry.local import LocalRegistry
 
-    reg = LocalRegistry(kit_root=Path("bmad-custom-kit"))
+    reg = LocalRegistry(kit_root=Path("."))
     for item in reg.list_agents():
         print(f"{item.id} — {item.archetype}")
     results = reg.search("kubernetes")
