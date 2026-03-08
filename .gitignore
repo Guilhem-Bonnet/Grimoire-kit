@@ -52,13 +52,13 @@ htmlcov/
 .ruff_cache/
 
 # Runtime data
-.bmad-rnd/
+.grimoire-rnd/
 nohup.out
-_bmad-output/.qdrant_data/
-_bmad-output/.workers/
-_bmad-output/.background/
-_bmad-output/.runs/
-_bmad-output/.orchestrator/
-_bmad-output/.semantic-cache-stats.json
-.bmad-memory/
-.bmad-twin/
+_grimoire-output/.qdrant_data/
+_grimoire-output/.workers/
+_grimoire-output/.background/
+_grimoire-output/.runs/
+_grimoire-output/.orchestrator/
+_grimoire-output/.semantic-cache-stats.json
+.grimoire-memory/
+.grimoire-twin/
