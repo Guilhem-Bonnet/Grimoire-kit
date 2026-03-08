@@ -11,7 +11,7 @@ from rich.table import Table
 
 from bmad.__version__ import __version__
 from bmad.core.config import BmadConfig
-from bmad.core.exceptions import BmadConfigError
+from bmad.core.exceptions import BmadConfigError, BmadProjectError
 
 app = typer.Typer(
     name="bmad",
@@ -337,3 +337,178 @@ def remove_agent(
     _save_yaml_rw(yaml, data, config_path)
 
     console.print(f"[green]Removed agent:[/green] {agent_id}")
+
+
+# ── bmad validate ─────────────────────────────────────────────────────────────
+
+_validate_path_arg = typer.Argument(Path("."), help="Project root to validate.")
+
+
+@app.command("validate")
+def validate(
+    path: Path = _validate_path_arg,
+) -> None:
+    """Validate project-context.yaml against the BMAD schema."""
+    from bmad.core.validator import validate_config
+    from bmad.tools._common import load_yaml
+
+    target = path.resolve()
+    config_path = target / "project-context.yaml"
+
+    if not config_path.is_file():
+        console.print("[red]No project-context.yaml found.[/red]")
+        raise typer.Exit(1)
+
+    data = load_yaml(config_path)
+    errors = validate_config(data, project_root=target)
+
+    if not errors:
+        console.print("[green]project-context.yaml is valid.[/green]")
+        raise typer.Exit(0)
+
+    console.print(f"[red]Found {len(errors)} validation error(s):[/red]\n")
+    for err in errors:
+        console.print(f"  [red]•[/red] {err}")
+    raise typer.Exit(1)
+
+
+# ── bmad up ───────────────────────────────────────────────────────────────────
+
+_up_path_arg = typer.Argument(Path("."), help="Project root.")
+_up_dry_run_opt = typer.Option(False, "--dry-run", help="Show plan without applying.")
+
+
+@app.command("up")
+def up(
+    path: Path = _up_path_arg,
+    dry_run: bool = _up_dry_run_opt,
+) -> None:
+    """Reconcile the project state with project-context.yaml."""
+    from bmad.core.project import BmadProject
+
+    target = path.resolve()
+    try:
+        project = BmadProject(target)
+    except BmadProjectError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+
+    cfg = project.config
+    status = project.status()
+
+    if dry_run:
+        console.print("[bold]bmad up --dry-run[/bold]\n")
+    else:
+        console.print("[bold]bmad up[/bold]\n")
+
+    actions: list[str] = []
+
+    # Ensure standard directories exist
+    for d in ("_bmad", "_bmad/_memory", "_bmad-output"):
+        dp = target / d
+        if not dp.is_dir():
+            actions.append(f"Create directory: {d}/")
+            if not dry_run:
+                dp.mkdir(parents=True, exist_ok=True)
+
+    # Ensure agents dir exists
+    agents_dir = target / "_bmad" / "agents"
+    if not agents_dir.is_dir():
+        actions.append("Create directory: _bmad/agents/")
+        if not dry_run:
+            agents_dir.mkdir(parents=True, exist_ok=True)
+
+    # Summary
+    if actions:
+        for a in actions:
+            icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
+            console.print(f"  {icon}  {a}")
+    else:
+        console.print("  [green]Everything up to date.[/green]")
+
+    # Health summary
+    console.print(f"\n[bold]Project:[/bold] {cfg.project.name}")
+    console.print(f"  Archetype: {cfg.agents.archetype}")
+    console.print(f"  Memory: {cfg.memory.backend}")
+    console.print(f"  Agents: {status.agents_count}")
+
+    if status.directories_missing:
+        missing = ", ".join(status.directories_missing)
+        console.print(f"\n[yellow]Missing dirs (after up):[/yellow] {missing}")
+
+
+# ── bmad registry ─────────────────────────────────────────────────────────────
+
+registry_app = typer.Typer(help="Browse the agent registry.")
+app.add_typer(registry_app, name="registry")
+
+_reg_query_arg = typer.Argument(None, help="Search query.")
+
+
+@registry_app.command("list")
+def registry_list() -> None:
+    """List all available archetypes and agents."""
+    from bmad.registry.local import LocalRegistry
+    from bmad.tools._common import find_project_root
+
+    try:
+        root = find_project_root()
+    except FileNotFoundError:
+        console.print("[red]Not in a BMAD project — cannot locate kit root.[/red]")
+        raise typer.Exit(1) from None
+
+    reg = LocalRegistry(root)
+    archs = reg.list_archetypes()
+    if not archs:
+        console.print("[yellow]No archetypes found.[/yellow]")
+        return
+
+    tbl = Table(title="Available Archetypes")
+    tbl.add_column("Archetype", style="bold")
+    tbl.add_column("Agents", justify="right")
+
+    for arch_id in archs:
+        try:
+            dna = reg.inspect_archetype(arch_id)
+            tbl.add_row(arch_id, str(len(dna.agents)))
+        except Exception:
+            tbl.add_row(arch_id, "?")
+
+    console.print(tbl)
+
+
+@registry_app.command("search")
+def registry_search(
+    query: str = _reg_query_arg,  # type: ignore[assignment]
+) -> None:
+    """Search agents by keyword."""
+    from bmad.registry.local import LocalRegistry
+    from bmad.tools._common import find_project_root
+
+    if not query:
+        console.print("[red]Please provide a search query.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        root = find_project_root()
+    except FileNotFoundError:
+        console.print("[red]Not in a BMAD project.[/red]")
+        raise typer.Exit(1) from None
+
+    reg = LocalRegistry(root)
+    results = reg.search(query)
+
+    if not results:
+        console.print(f"[yellow]No agents matching '{query}'.[/yellow]")
+        return
+
+    tbl = Table(title=f"Search: {query}")
+    tbl.add_column("Agent", style="bold")
+    tbl.add_column("Archetype")
+    tbl.add_column("Description")
+
+    for item in results:
+        tbl.add_row(item.id, item.archetype, item.description or "—")
+
+    console.print(tbl)
+

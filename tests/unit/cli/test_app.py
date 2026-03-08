@@ -280,3 +280,80 @@ class TestAddRemove:
         result = runner.invoke(app, ["--help"])
         assert "add" in result.output
         assert "remove" in result.output
+
+
+# ── Validate ──────────────────────────────────────────────────────────────────
+
+
+class TestValidate:
+    @pytest.fixture()
+    def project(self, tmp_path: Path) -> Path:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\nuser:\n  skill_level: "expert"\n'
+        )
+        return tmp_path
+
+    def test_valid(self, project: Path) -> None:
+        result = runner.invoke(app, ["validate", str(project)])
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    def test_invalid(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text("user:\n  skill_level: 'god'\n")
+        result = runner.invoke(app, ["validate", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "error" in result.output.lower()
+
+    def test_no_config(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["validate", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_in_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert "validate" in result.output
+
+
+# ── Up ────────────────────────────────────────────────────────────────────────
+
+
+class TestUp:
+    @pytest.fixture()
+    def project(self, tmp_path: Path) -> Path:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        (tmp_path / "_bmad").mkdir()
+        (tmp_path / "_bmad" / "_memory").mkdir()
+        (tmp_path / "_bmad-output").mkdir()
+        return tmp_path
+
+    def test_up_ok(self, project: Path) -> None:
+        result = runner.invoke(app, ["up", str(project)])
+        assert result.exit_code == 0
+        assert "test" in result.output
+
+    def test_up_creates_missing_dirs(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        result = runner.invoke(app, ["up", str(tmp_path)])
+        assert result.exit_code == 0
+        assert (tmp_path / "_bmad").is_dir()
+        assert (tmp_path / "_bmad" / "_memory").is_dir()
+        assert (tmp_path / "_bmad-output").is_dir()
+
+    def test_up_dry_run(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        result = runner.invoke(app, ["up", "--dry-run", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "plan" in result.output.lower() or "dry-run" in result.output.lower()
+
+    def test_up_no_project(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["up", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_in_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert "up" in result.output
