@@ -721,3 +721,43 @@
 {"ts": "2026-03-07T14:29:59", "tool": "bmad_synapse_config", "args_keys": ["project_root"], "result_hash": "e6a7d829959df18c", "status": "ok", "duration_ms": 0.6}
 {"ts": "2026-03-07T14:29:59", "tool": "bmad_totally_fake_tool", "args_keys": [], "result_hash": "", "status": "unknown_tool", "duration_ms": 0.0}
 {"ts": "2026-03-07T14:29:59", "tool": "bmad_route_request", "args_keys": ["prompt"], "result_hash": "", "status": "rejected", "duration_ms": 0.0}
+{"ts": "2026-03-07T20:43:08", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.6}
+{"ts": "2026-03-07T20:43:08", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-07T20:43:08", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "45b0fdcc6079831d", "status": "ok", "duration_ms": 6.1}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "d126e375b03f4fbe", "status": "ok", "duration_ms": 1059.3}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "2d64756b547eadb2", "status": "ok", "duration_ms": 21.3}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "27e44048bc617ce7", "status": "ok", "duration_ms": 20.4}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 20.4}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 6.6}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "0fd5bd960094e5c6", "status": "ok", "duration_ms": 7.6}
+{"ts": "2026-03-07T20:43:09", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "8e19894c9981c22a", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-07T20:45:09", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.6}
+{"ts": "2026-03-07T20:45:09", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.7}
+{"ts": "2026-03-07T20:45:09", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 5.7}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "efc7216452e31b46", "status": "ok", "duration_ms": 1054.0}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "70d9e4b3fc3e9944", "status": "ok", "duration_ms": 23.9}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "0ac9970e31047d06", "status": "ok", "duration_ms": 23.2}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 23.3}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 6.5}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "e256c220571d336b", "status": "ok", "duration_ms": 8.3}
+{"ts": "2026-03-07T20:45:10", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "c587da96a33d2787", "status": "ok", "duration_ms": 8.0}
+{"ts": "2026-03-08T14:07:33", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.6}
+{"ts": "2026-03-08T14:07:33", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 8.1}
+{"ts": "2026-03-08T14:07:33", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "45b0fdcc6079831d", "status": "ok", "duration_ms": 6.9}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "9f8b3a02bea6b6db", "status": "ok", "duration_ms": 1146.7}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "0a6fd00cc907d43b", "status": "ok", "duration_ms": 29.7}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "561445e27721e48a", "status": "ok", "duration_ms": 25.2}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 21.8}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 11.1}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "38e9ac00f040f5c6", "status": "ok", "duration_ms": 6.5}
+{"ts": "2026-03-08T14:07:34", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "17d215c1efef766e", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-08T14:09:39", "tool": "bmad_classify_task", "args_keys": ["prompt"], "result_hash": "4cb12640a2de5a38", "status": "ok", "duration_ms": 2.4}
+{"ts": "2026-03-08T14:09:39", "tool": "bmad_memory_diff", "args_keys": [], "result_hash": "4f53cda18c2baa0c", "status": "ok", "duration_ms": 7.2}
+{"ts": "2026-03-08T14:09:39", "tool": "bmad_memory_push", "args_keys": [], "result_hash": "592b32f687b15c36", "status": "ok", "duration_ms": 5.6}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_rag_augment", "args_keys": ["prompt"], "result_hash": "07a6e5c85e8ae7aa", "status": "ok", "duration_ms": 953.4}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_rag_search", "args_keys": ["query"], "result_hash": "796902e5e85cadd5", "status": "ok", "duration_ms": 19.1}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_rag_search", "args_keys": ["agent", "query"], "result_hash": "030fd85e0c8b9564", "status": "ok", "duration_ms": 18.9}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_rag_status", "args_keys": [], "result_hash": "8c775b3f8a27605d", "status": "ok", "duration_ms": 27.1}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_route_request", "args_keys": ["agent", "prompt"], "result_hash": "e44acdb35830cf2b", "status": "ok", "duration_ms": 8.3}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_router_stats", "args_keys": [], "result_hash": "80866d464960e30b", "status": "ok", "duration_ms": 8.2}
+{"ts": "2026-03-08T14:09:40", "tool": "bmad_router_stats", "args_keys": ["recommend"], "result_hash": "52237ad10516d9eb", "status": "ok", "duration_ms": 6.3}
