@@ -31,7 +31,7 @@ jobs:
     name: "BMAD Agent Benchmark"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Tout l'historique pour calculer cycle times
 
