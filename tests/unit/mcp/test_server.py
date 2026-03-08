@@ -8,9 +8,12 @@ from pathlib import Path
 import pytest
 
 from bmad.mcp.server import (
+    bmad_add_agent,
     bmad_agent_list,
     bmad_config,
     bmad_harmony_check,
+    bmad_memory_search,
+    bmad_memory_store,
     bmad_project_context,
     bmad_status,
     mcp,
@@ -147,3 +150,71 @@ class TestConfig:
         result = bmad_config(str(tmp_path))
         data = json.loads(result)
         assert "error" in data
+
+
+# ── bmad_memory_store ─────────────────────────────────────────────────────────
+
+class TestMemoryStore:
+    def test_store_returns_entry(self, project: Path) -> None:
+        result = bmad_memory_store("important fact", project_path=str(project))
+        data = json.loads(result)
+        assert data["text"] == "important fact"
+        assert data["id"]
+        assert data["user_id"] == "global"
+
+    def test_store_with_user_id(self, project: Path) -> None:
+        result = bmad_memory_store("user fact", user_id="alice", project_path=str(project))
+        data = json.loads(result)
+        assert data["user_id"] == "alice"
+
+    def test_store_no_project(self, tmp_path: Path) -> None:
+        result = bmad_memory_store("nope", project_path=str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data
+
+
+# ── bmad_memory_search ────────────────────────────────────────────────────────
+
+class TestMemorySearch:
+    def test_search_finds_stored(self, project: Path) -> None:
+        bmad_memory_store("python is the best language", project_path=str(project))
+        result = bmad_memory_search("python", project_path=str(project))
+        data = json.loads(result)
+        assert data["count"] >= 1
+        assert any("python" in r["text"].lower() for r in data["results"])
+
+    def test_search_empty(self, project: Path) -> None:
+        result = bmad_memory_search("nonexistent-xyz", project_path=str(project))
+        data = json.loads(result)
+        assert data["count"] == 0
+
+    def test_search_no_project(self, tmp_path: Path) -> None:
+        result = bmad_memory_search("query", project_path=str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data
+
+
+# ── bmad_add_agent ────────────────────────────────────────────────────────────
+
+class TestAddAgent:
+    def test_add_agent(self, project: Path) -> None:
+        result = bmad_add_agent("my-custom-agent", project_path=str(project))
+        data = json.loads(result)
+        assert data["status"] == "added"
+        assert data["agent_id"] == "my-custom-agent"
+
+    def test_add_agent_duplicate(self, project: Path) -> None:
+        bmad_add_agent("dup-agent", project_path=str(project))
+        result = bmad_add_agent("dup-agent", project_path=str(project))
+        data = json.loads(result)
+        assert data["status"] == "already_present"
+
+    def test_add_agent_no_project(self, tmp_path: Path) -> None:
+        result = bmad_add_agent("nope", project_path=str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data
+
+    def test_add_agent_persists(self, project: Path) -> None:
+        bmad_add_agent("persisted-agent", project_path=str(project))
+        content = (project / "project-context.yaml").read_text()
+        assert "persisted-agent" in content

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "cf6ba1fa-972a-4791-9b28-00477e375c3c",
+    "text": "important fact",
+    "user_id": "global",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:13"
+  },
+  {
+    "id": "a004a2f2-f1b2-496e-9aec-8d1dc2f8c693",
+    "text": "user fact",
+    "user_id": "alice",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:13"
+  },
+  {
+    "id": "19f7d742-86e9-426e-8817-6ce85969faec",
+    "text": "python is the best language",
+    "user_id": "global",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:13"
+  },
+  {
+    "id": "1462b6f3-5e70-4c34-84af-27a96e0ae8a0",
+    "text": "important fact",
+    "user_id": "global",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:22"
+  },
+  {
+    "id": "083bbcb2-b4b4-43ab-a2c0-f1c5a01e7e7e",
+    "text": "user fact",
+    "user_id": "alice",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:22"
+  },
+  {
+    "id": "2bc106c3-5702-4b02-b979-4b3e75fa9bbc",
+    "text": "python is the best language",
+    "user_id": "global",
+    "metadata": {},
+    "created_at": "2026-03-07T20:13:22"
+  }
+]

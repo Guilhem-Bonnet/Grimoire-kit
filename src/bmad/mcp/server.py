@@ -202,6 +202,92 @@ def bmad_config(project_path: str = ".") -> str:
         return json.dumps({"error": str(exc)})
 
 
+@mcp.tool()
+def bmad_memory_store(text: str, user_id: str = "", project_path: str = ".") -> str:
+    """Store a memory entry in the project's configured memory backend.
+
+    Args:
+        text: The text to remember.
+        user_id: Optional user ID to scope the memory.
+        project_path: Path to project root (default: current directory).
+    """
+    from bmad.memory.manager import MemoryManager
+
+    target = Path(project_path).resolve()
+    try:
+        cfg = BmadConfig.find_and_load(target)
+        mgr = MemoryManager.from_config(cfg)
+        entry = mgr.store(text, user_id=user_id)
+        return json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
+    except BmadError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def bmad_memory_search(query: str, user_id: str = "", limit: int = 5, project_path: str = ".") -> str:
+    """Search project memories by keyword or semantic similarity.
+
+    Args:
+        query: Search query text.
+        user_id: Optional user ID to filter results.
+        limit: Maximum number of results (default: 5).
+        project_path: Path to project root (default: current directory).
+    """
+    from bmad.memory.manager import MemoryManager
+
+    target = Path(project_path).resolve()
+    try:
+        cfg = BmadConfig.find_and_load(target)
+        mgr = MemoryManager.from_config(cfg)
+        entries = mgr.search(query, user_id=user_id, limit=limit)
+        return json.dumps({
+            "query": query,
+            "results": [e.to_dict() for e in entries],
+            "count": len(entries),
+        }, indent=2, ensure_ascii=False)
+    except BmadError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def bmad_add_agent(agent_id: str, project_path: str = ".") -> str:
+    """Add a custom agent to the project configuration.
+
+    Args:
+        agent_id: The agent identifier to add.
+        project_path: Path to project root (default: current directory).
+    """
+    target = Path(project_path).resolve()
+    config_path = target / "project-context.yaml"
+    if not config_path.is_file():
+        return json.dumps({"error": "No project-context.yaml found"})
+
+    try:
+        from ruamel.yaml import YAML
+
+        yaml = YAML()
+        yaml.preserve_quotes = True  # type: ignore[assignment]
+        with open(config_path, encoding="utf-8") as fh:
+            data = yaml.load(fh)
+
+        agents = data.get("agents") or {}
+        custom: list[str] = agents.get("custom_agents") or []
+
+        if agent_id in custom:
+            return json.dumps({"status": "already_present", "agent_id": agent_id})
+
+        custom.append(agent_id)
+        agents["custom_agents"] = custom
+        data["agents"] = agents
+
+        with open(config_path, "w", encoding="utf-8") as fh:
+            yaml.dump(data, fh)
+
+        return json.dumps({"status": "added", "agent_id": agent_id})
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _find_kit_root(start: Path) -> Path | None:
