@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from bmad.mcp.server import (
+    _find_kit_root,
     bmad_add_agent,
     bmad_agent_list,
     bmad_config,
@@ -95,6 +96,18 @@ class TestStatus:
         data = json.loads(result)
         assert data["passed"] < data["total"]
 
+    def test_invalid_config(self, tmp_path: Path) -> None:
+        # Config exists but is invalid YAML structure (missing required fields)
+        (tmp_path / "project-context.yaml").write_text("not_a_valid: config\n")
+        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_bmad-output").mkdir()
+        result = bmad_status(str(tmp_path))
+        data = json.loads(result)
+        # config_exists should be True, config_valid should be False
+        checks_map = {c["name"]: c for c in data["checks"]}
+        assert checks_map["config_exists"]["ok"]
+        assert not checks_map["config_valid"]["ok"]
+
 
 # ── bmad_agent_list ───────────────────────────────────────────────────────────
 
@@ -120,6 +133,11 @@ class TestAgentList:
         data = json.loads(result)
         # Should get error or empty list (no archetypes/ dir)
         assert "error" in data or data.get("total", 0) == 0
+
+    def test_invalid_project(self, tmp_path: Path) -> None:
+        result = bmad_agent_list(str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data
 
 
 # ── bmad_harmony_check ────────────────────────────────────────────────────────
@@ -147,6 +165,12 @@ class TestConfig:
         assert data["project"]["name"] == "test-mcp"
 
     def test_missing(self, tmp_path: Path) -> None:
+        result = bmad_config(str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data
+
+    def test_malformed_yaml(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(": :\n  invalid yaml:: {{{\n")
         result = bmad_config(str(tmp_path))
         data = json.loads(result)
         assert "error" in data
@@ -218,3 +242,23 @@ class TestAddAgent:
         bmad_add_agent("persisted-agent", project_path=str(project))
         content = (project / "project-context.yaml").read_text()
         assert "persisted-agent" in content
+
+
+# ── _find_kit_root ────────────────────────────────────────────────────────────
+
+class TestFindKitRoot:
+    def test_finds_archetypes(self, tmp_path: Path) -> None:
+        (tmp_path / "archetypes").mkdir()
+        result = _find_kit_root(tmp_path)
+        assert result == tmp_path.resolve()
+
+    def test_walks_up(self, tmp_path: Path) -> None:
+        (tmp_path / "archetypes").mkdir()
+        sub = tmp_path / "sub" / "deep"
+        sub.mkdir(parents=True)
+        result = _find_kit_root(sub)
+        assert result == tmp_path.resolve()
+
+    def test_returns_none(self, tmp_path: Path) -> None:
+        result = _find_kit_root(tmp_path)
+        assert result is None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -105,9 +106,8 @@ class TestResolveAuto:
 
 class TestFromConfigLocal:
     def test_creates_local_backend(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
         cfg = _make_config("local")
-        mgr = MemoryManager.from_config(cfg)
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
         assert mgr.backend is not None
         # Verify it's a LocalMemoryBackend
         from bmad.memory.backends.local import LocalMemoryBackend
@@ -115,21 +115,28 @@ class TestFromConfigLocal:
         assert isinstance(mgr.backend, LocalMemoryBackend)
 
     def test_local_store_and_search(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
         cfg = _make_config("local")
-        mgr = MemoryManager.from_config(cfg)
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
         mgr.store("python is great")
         results = mgr.search("python")
         assert len(results) == 1
         assert "python" in results[0].text.lower()
 
     def test_local_auto_resolves(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
         cfg = _make_config("auto")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        from bmad.memory.backends.local import LocalMemoryBackend
+
+        assert isinstance(mgr.backend, LocalMemoryBackend)
+
+    def test_falls_back_to_cwd_when_no_project_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        cfg = _make_config("local")
         mgr = MemoryManager.from_config(cfg)
         from bmad.memory.backends.local import LocalMemoryBackend
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
+        assert (tmp_path / "_bmad" / "_memory").is_dir()
 
 
 # ── error handling ────────────────────────────────────────────────────────────
@@ -153,7 +160,7 @@ class TestFromConfigErrors:
 
         from bmad.memory import manager as mgr_mod
 
-        def _fake_create(config: BmadConfig) -> MemoryBackend:
+        def _fake_create(config: BmadConfig, project_root: Path | None = None) -> MemoryBackend:
             raise ImportError("No module named 'qdrant_client'")
 
         monkeypatch.setattr(mgr_mod, "_create_backend", _fake_create)
@@ -164,6 +171,8 @@ class TestFromConfigErrors:
 
 
 # ── _create_backend branches ─────────────────────────────────────────────────
+
+_real_import = builtins.__import__
 
 class TestCreateBackendBranches:
     def test_qdrant_local_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,7 +186,7 @@ class TestCreateBackendBranches:
         def _mock_import_qdrant(name: str, *args: object, **kwargs: object) -> object:
             if name == "bmad.memory.backends.qdrant":
                 return mock_qdrant_mod
-            return __import__(name, *args, **kwargs)
+            return _real_import(name, *args, **kwargs)
 
         cfg = _make_config("qdrant-local")
         monkeypatch.setattr("builtins.__import__", _mock_import_qdrant)
@@ -195,7 +204,7 @@ class TestCreateBackendBranches:
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "bmad.memory.backends.qdrant":
                 return mock_qdrant_mod
-            return __import__(name, *args, **kwargs)
+            return _real_import(name, *args, **kwargs)
 
         cfg = _make_config("qdrant-server", qdrant_url="http://qdrant:6333")
         monkeypatch.setattr("builtins.__import__", _mock_import)
@@ -214,7 +223,7 @@ class TestCreateBackendBranches:
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "bmad.memory.backends.ollama":
                 return mock_ollama_mod
-            return __import__(name, *args, **kwargs)
+            return _real_import(name, *args, **kwargs)
 
         cfg = _make_config("ollama", ollama_url="http://gpu:11434")
         monkeypatch.setattr("builtins.__import__", _mock_import)
@@ -232,7 +241,7 @@ class TestCreateBackendBranches:
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "bmad.memory.backends.ollama":
                 return mock_ollama_mod
-            return __import__(name, *args, **kwargs)
+            return _real_import(name, *args, **kwargs)
 
         cfg = _make_config(
             "ollama",
@@ -256,7 +265,7 @@ class TestCreateBackendBranches:
         def _mock_import(name: str, *args: object, **kwargs: object) -> object:
             if name == "bmad.memory.backends.qdrant":
                 return mock_qdrant_mod
-            return __import__(name, *args, **kwargs)
+            return _real_import(name, *args, **kwargs)
 
         cfg = _make_config("qdrant-local", embedding_model="all-MiniLM-L6-v2")
         monkeypatch.setattr("builtins.__import__", _mock_import)
