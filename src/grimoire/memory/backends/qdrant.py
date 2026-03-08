@@ -43,7 +43,7 @@ def _require_qdrant() -> Any:
 def _require_sentence_transformers() -> Any:
     """Import and return SentenceTransformer, raising a clear error if missing."""
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
+        from sentence_transformers import SentenceTransformer
 
         return SentenceTransformer
     except ImportError:

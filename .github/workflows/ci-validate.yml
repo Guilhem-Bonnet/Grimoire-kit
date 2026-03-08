@@ -81,6 +81,7 @@ jobs:
           ignore_paths: >-
             framework/hooks/post-checkout.sh
             framework/hooks/post-commit.sh
+            framework/tools/grimoire-completion.zsh
             _grimoire
 
   # ── 4. YAML lint ──────────────────────────────────────────────────────────
@@ -126,9 +127,11 @@ jobs:
           # Vérifier qu'il n'y a pas d'erreurs críticas non-Qdrant
           CRIT=$(grep -c "✗\|FAIL\|ERROR" doctor-output.txt || true)
           QDRANT=$(grep -c "Qdrant\|qdrant" doctor-output.txt || true)
-          REAL_ERRORS=$((CRIT - QDRANT))
-          echo "Erreurs critiques (hors Qdrant) : $REAL_ERRORS"
-          if [[ $REAL_ERRORS -gt 2 ]]; then
+          # En CI, _grimoire/_config/ et _grimoire-output/ n'existent pas (repo SDK, pas projet initialisé)
+          CI_EXPECTED=$(grep -c "_grimoire/_config/\|_grimoire-output/\|project-context.yaml" doctor-output.txt || true)
+          REAL_ERRORS=$((CRIT - QDRANT - CI_EXPECTED))
+          echo "Erreurs critiques (hors Qdrant, hors CI-expected) : $REAL_ERRORS"
+          if [[ $REAL_ERRORS -gt 0 ]]; then
             echo "❌ Trop d'erreurs critiques détectées (hors Qdrant)"
             cat doctor-output.txt
             exit 1

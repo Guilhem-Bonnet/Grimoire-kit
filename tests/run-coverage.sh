@@ -8,7 +8,6 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-ROOT="$PWD"
 
 # ── Intelligence Layer test files ──────────────────────────────────────────
 
