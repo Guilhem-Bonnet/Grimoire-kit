@@ -12,7 +12,7 @@ requires-python = ">=3.12"
 authors = [{ name = "Guilhem Bonnet" }]
 keywords = ["ai", "agents", "llm", "workflow", "copilot", "mcp"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
-qdrant = ["qdrant-client>=1.9"]
+qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0"]
 ollama = ["ollama>=0.3"]
 all = ["bmad-kit[mcp,qdrant,ollama]"]
 dev = [
