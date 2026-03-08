@@ -5,9 +5,9 @@
 </picture>
 
 <p align="center">
-  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-2.4.1-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.0.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-1875+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-630+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-93-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
 </p>
@@ -87,27 +87,33 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 ## <img src="docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Quick Start
 
 ```bash
-# 1. Cloner le kit
-git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
+# Installation via pip (v3)
+pip install bmad-kit
 
-# 2. (Optionnel) Installer le package Python
+# Initialiser un nouveau projet
+bmad init mon-projet --archetype web-app
+
+# Depuis un projet existant
+cd votre-projet/
+bmad init . --name "Mon Projet"
+
+# Vérifier la santé du projet
+bmad doctor
+
+# Migrer un projet v2 → v3
+bmad upgrade --dry-run   # aperçu
+bmad upgrade             # exécuter
+```
+
+<details>
+<summary><b>Installation classique (clone)</b></summary>
+
+```bash
+git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
 cd Grimoire-kit/
 pip install -e ".[dev]"
-
-# 3. Initialiser dans votre projet
-cd votre-projet/
-bash /chemin/vers/Grimoire-kit/bmad-init.sh \
-  --name "Mon Projet" \
-  --user "Votre Nom" \
-  --lang "Français" \
-  --archetype web-app
-
-# 4. OU mode auto — détecte le stack → déploie les bons agents
-bash /chemin/vers/Grimoire-kit/bmad-init.sh \
-  --name "Mon Projet" \
-  --user "Votre Nom" \
-  --auto
 ```
+</details>
 
 > **Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
 
@@ -289,6 +295,58 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 | **Dashboard** | Santé, entropie Shannon, Pareto Gini, activité git — en un coup d'œil |
 
 </details>
+
+<br>
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
+<br>
+
+## 🐍 SDK Python (v3)
+
+Le SDK v3 expose **toute la puissance de Grimoire** en tant que package Python installable :
+
+```bash
+pip install bmad-kit
+```
+
+### CLI
+
+| Commande | Description |
+|:---------|:-----------|
+| `bmad init [path]` | Initialiser un projet BMAD |
+| `bmad doctor` | Vérifier la santé du projet |
+| `bmad status` | Afficher l'état courant |
+| `bmad up` | Réconcilier l'état avec la config |
+| `bmad add <agent>` | Ajouter un agent |
+| `bmad remove <agent>` | Retirer un agent |
+| `bmad validate` | Valider la config YAML |
+| `bmad upgrade` | Migrer un projet v2 → v3 |
+| `bmad registry list` | Lister les archétypes disponibles |
+| `bmad registry search <q>` | Chercher un agent |
+
+### SDK — Outils programmatiques
+
+```python
+from pathlib import Path
+from bmad.tools import (
+    HarmonyCheck, PreflightCheck, MemoryLint,
+    ContextRouter, ContextGuard, Stigmergy, AgentForge,
+)
+
+root = Path(".")
+report = PreflightCheck(root).run()
+print(report.status)  # GO / GO-WITH-WARNINGS / NO-GO
+```
+
+### MCP Server
+
+```bash
+bmad-mcp                    # Démarrer le serveur MCP
+bmad-mcp --transport sse    # Mode SSE pour IDE distants
+```
+
+8 outils exposés : `init`, `doctor`, `status`, `harmony_check`, `preflight`, `memory_lint`, `context_route`, `stigmergy_sense`.
 
 <br>
 
