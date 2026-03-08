@@ -5,12 +5,12 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
-## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [3.0.0] — 2026-03-05
+## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [3.0.0] — 2026-03-08
 
-### Réécriture complète — SDK Python pur
+### Réécriture complète — SDK Python pur + Indépendance totale
 
-Le projet passe de scripts shell/Python standalone à un **package Python installable**
-(`pip install grimoire-kit`) avec architecture modulaire, API typée, et couverture de tests extensive.
+Le projet prend son indépendance sous le nom **Grimoire Kit** avec un **package Python installable**
+(`pip install grimoire-kit`), architecture modulaire, API typée, et couverture de tests extensive.
 
 #### Ajouté
 
@@ -40,15 +40,20 @@ Le projet passe de scripts shell/Python standalone à un **package Python instal
 
 #### Modifié
 
+- **Rebranding complet** — Toutes les références `bmad` renommées en `grimoire` dans le code source,
+  tests, documentation, CI, shell scripts, et noms de répertoires (`_bmad/` → `_grimoire/`)
 - **Entry points** — `grimoire` (CLI) et `grimoire-mcp` (serveur MCP) enregistrés
   dans `pyproject.toml`
 - **Build** — Migration vers `hatchling` comme build backend
 - **URLs** — Repo renommé en `Grimoire-kit`
+- **MemoryManager** — Paramètre `project_root` explicite (déterministe, plus de `os.getcwd()`)
+- **Atomic writes** — `LocalMemoryBackend._save()` utilise `tempfile` + `os.replace`
 
 #### Supprimé
 
 - Scripts shell standalone (remplacés par le SDK Python)
 - Dépendance à `bash` pour l'exécution des outils
+- Toute dépendance au package npm `bmad-method`
 
 <img src="docs/assets/divider.svg" width="100%" alt="">
 
