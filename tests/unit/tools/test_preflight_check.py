@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -146,6 +148,63 @@ class TestGitChecks:
         # Just verify it doesn't crash
         assert isinstance(report.go_nogo, str)
 
+    def test_merge_conflicts_detected(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Simulate git merge conflict output."""
+        call_count = 0
+
+        def _mock_run(*args: object, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                # First call: git diff --diff-filter=U → conflicts
+                result.stdout = "src/conflict.py\nsrc/other.py\n"
+            else:
+                # Second call: git status --porcelain
+                result.stdout = ""
+            return result
+
+        monkeypatch.setattr(subprocess, "run", _mock_run)
+        pc = PreflightCheck(project)
+        report = pc.run()
+        conflicts = [c for c in report.checks if c.name == "merge-conflict"]
+        assert len(conflicts) == 1
+        assert conflicts[0].severity == "blocker"
+        assert "2 file(s)" in conflicts[0].message
+
+    def test_uncommitted_changes_detected(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Simulate uncommitted _bmad/ changes."""
+        call_count = 0
+
+        def _mock_run(*args: object, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.stdout = ""  # No conflicts
+            else:
+                result.stdout = "M _bmad/config.yaml\nM _bmad/agents/analyst.md\n"
+            return result
+
+        monkeypatch.setattr(subprocess, "run", _mock_run)
+        pc = PreflightCheck(project)
+        report = pc.run()
+        uncommitted = [c for c in report.checks if c.name == "uncommitted"]
+        assert len(uncommitted) == 1
+        assert uncommitted[0].severity == "warning"
+
+    def test_git_timeout_handled(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Git timeout should produce info-level check, not crash."""
+        def _timeout(*args: object, **kwargs: object) -> None:
+            raise subprocess.TimeoutExpired("git", 10)
+
+        monkeypatch.setattr(subprocess, "run", _timeout)
+        pc = PreflightCheck(project)
+        report = pc.run()
+        errors = [c for c in report.checks if c.name == "git-error"]
+        assert len(errors) == 1
+        assert errors[0].severity == "info"
+
 
 # ── Memory Checks ────────────────────────────────────────────────────────────
 
@@ -156,6 +215,30 @@ class TestMemoryChecks:
         mem = [c for c in report.checks if c.name in ("stale-session", "contradictions")]
         # No memory files → no issues
         assert len(mem) == 0
+
+    def test_stale_session_detected(self, project: Path) -> None:
+        """Session file older than 1 week should produce info check."""
+        session = project / "_bmad" / "_memory" / "session-state.md"
+        session.write_text("# Session state\n")
+        # Set mtime to 10 days ago
+        import os
+        old_time = (datetime.now() - timedelta(days=10)).timestamp()
+        os.utime(session, (old_time, old_time))
+
+        pc = PreflightCheck(project)
+        report = pc.run()
+        stale = [c for c in report.checks if c.name == "stale-session"]
+        assert len(stale) == 1
+        assert stale[0].severity == "info"
+
+    def test_fresh_session_no_warning(self, project: Path) -> None:
+        """Recent session file should not trigger stale warning."""
+        session = project / "_bmad" / "_memory" / "session-state.md"
+        session.write_text("# Fresh session\n")
+        pc = PreflightCheck(project)
+        report = pc.run()
+        stale = [c for c in report.checks if c.name == "stale-session"]
+        assert len(stale) == 0
 
     def test_contradiction_entries(self, project: Path) -> None:
         contradictions = project / "_bmad" / "_memory" / "contradiction-log.md"

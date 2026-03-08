@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from bmad.tools._common import BmadTool, estimate_tokens, find_project_root, load_yaml, save_yaml
+from bmad.tools._common import (
+    BmadTool,
+    _get_yaml_loader,
+    estimate_tokens,
+    find_project_root,
+    load_yaml,
+    save_yaml,
+)
 
 # ── find_project_root ─────────────────────────────────────────────────────────
 
@@ -68,6 +75,50 @@ class TestSaveYaml:
         save_yaml({"langue": "Français"}, f)
         text = f.read_text(encoding="utf-8")
         assert "Fran" in text
+
+
+# ── _get_yaml_loader fallback ─────────────────────────────────────────────────
+
+class TestGetYamlLoader:
+    def test_returns_ruamel_by_default(self) -> None:
+        loader, backend = _get_yaml_loader()
+        assert backend == "ruamel"
+
+
+class TestLoadYamlPyYamlFallback:
+    def test_load_via_pyyaml_backend(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise load_yaml through PyYAML backend."""
+        from unittest.mock import MagicMock
+
+        import bmad.tools._common as mod
+
+        f = tmp_path / "test.yaml"
+        f.write_text("key: value\n")
+
+        mock_yaml = MagicMock()
+        mock_yaml.safe_load.return_value = {"key": "value"}
+        monkeypatch.setattr(mod, "_get_yaml_loader", lambda: (mock_yaml, "pyyaml"))
+        data = mod.load_yaml(f)
+        assert data["key"] == "value"
+        mock_yaml.safe_load.assert_called_once()
+
+    def test_save_via_pyyaml_backend(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise save_yaml through PyYAML backend."""
+        from unittest.mock import MagicMock
+
+        import bmad.tools._common as mod
+
+        f = tmp_path / "rt.yaml"
+        mock_yaml = MagicMock()
+        monkeypatch.setattr(mod, "_get_yaml_loader", lambda: (mock_yaml, "pyyaml"))
+        mod.save_yaml({"items": [1, 2, 3]}, f)
+        mock_yaml.dump.assert_called_once()
+
+    def test_load_invalid_yaml_raises(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.yaml"
+        f.write_text(":\n  :\n    - [\n")
+        with pytest.raises(OSError, match="Cannot parse YAML"):
+            load_yaml(f)
 
 
 # ── estimate_tokens ───────────────────────────────────────────────────────────

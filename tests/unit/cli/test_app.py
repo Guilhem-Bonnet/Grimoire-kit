@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -357,3 +358,158 @@ class TestUp:
     def test_in_help(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert "up" in result.output
+
+
+# ── Status – edge cases ──────────────────────────────────────────────────────
+
+
+class TestStatusEdgeCases:
+    def test_status_shows_stack(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\n  stack:\n    - python\n    - react\n'
+        )
+        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_bmad-output").mkdir()
+        result = runner.invoke(app, ["status", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "python" in result.output
+
+    def test_status_shows_repos(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\n  repos:\n    - name: "my-repo"\n      path: "."\n      default_branch: "main"\n'
+        )
+        (tmp_path / "_bmad" / "_memory").mkdir(parents=True)
+        (tmp_path / "_bmad-output").mkdir()
+        result = runner.invoke(app, ["status", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "my-repo" in result.output
+
+    def test_status_config_error(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text("not:\n  valid: config\n")
+        result = runner.invoke(app, ["status", str(tmp_path)])
+        assert result.exit_code == 1
+
+
+# ── Registry ──────────────────────────────────────────────────────────────────
+
+
+class TestRegistryList:
+    def test_registry_list_no_project(self) -> None:
+        with patch("bmad.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
+            result = runner.invoke(app, ["registry", "list"])
+        assert result.exit_code == 1
+
+    def test_registry_list_no_archetypes(self, tmp_path: Path) -> None:
+        mock_reg = MagicMock()
+        mock_reg.list_archetypes.return_value = []
+        with (
+            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
+            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+        ):
+            result = runner.invoke(app, ["registry", "list"])
+        assert result.exit_code == 0
+        assert "No archetypes" in result.output
+
+    def test_registry_list_with_archetypes(self, tmp_path: Path) -> None:
+        mock_dna = MagicMock()
+        mock_dna.agents = ["analyst", "architect"]
+        mock_reg = MagicMock()
+        mock_reg.list_archetypes.return_value = ["web-app", "minimal"]
+        mock_reg.inspect_archetype.return_value = mock_dna
+        with (
+            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
+            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+        ):
+            result = runner.invoke(app, ["registry", "list"])
+        assert result.exit_code == 0
+        assert "web-app" in result.output
+
+
+class TestRegistrySearch:
+    def test_registry_search_no_query(self) -> None:
+        result = runner.invoke(app, ["registry", "search"])
+        assert result.exit_code == 1
+
+    def test_registry_search_no_project(self) -> None:
+        with patch("bmad.tools._common.find_project_root", side_effect=FileNotFoundError("no")):
+            result = runner.invoke(app, ["registry", "search", "analyst"])
+        assert result.exit_code == 1
+
+    def test_registry_search_no_results(self, tmp_path: Path) -> None:
+        mock_reg = MagicMock()
+        mock_reg.search.return_value = []
+        with (
+            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
+            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+        ):
+            result = runner.invoke(app, ["registry", "search", "nonexistent"])
+        assert result.exit_code == 0
+        assert "No agents" in result.output
+
+    def test_registry_search_with_results(self, tmp_path: Path) -> None:
+        mock_item = MagicMock()
+        mock_item.id = "analyst"
+        mock_item.archetype = "web-app"
+        mock_item.description = "Business analyst"
+        mock_reg = MagicMock()
+        mock_reg.search.return_value = [mock_item]
+        with (
+            patch("bmad.tools._common.find_project_root", return_value=tmp_path),
+            patch("bmad.registry.local.LocalRegistry", return_value=mock_reg),
+        ):
+            result = runner.invoke(app, ["registry", "search", "analyst"])
+        assert result.exit_code == 0
+        assert "analyst" in result.output
+
+
+# ── Upgrade ───────────────────────────────────────────────────────────────────
+
+
+class TestUpgrade:
+    def test_upgrade_already_v3(self, tmp_path: Path) -> None:
+        with patch("bmad.cli.cmd_upgrade.detect_version", return_value="v3"):
+            result = runner.invoke(app, ["upgrade", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "already v3" in result.output
+
+    def test_upgrade_unknown_version(self, tmp_path: Path) -> None:
+        with patch("bmad.cli.cmd_upgrade.detect_version", return_value="unknown"):
+            result = runner.invoke(app, ["upgrade", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "No v2" in result.output
+
+    def test_upgrade_v2_dry_run(self, tmp_path: Path) -> None:
+        mock_plan = MagicMock()
+        mock_plan.warnings = ["Warning: old config"]
+        with (
+            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=["Create _bmad/", "Move agents/"]),
+        ):
+            result = runner.invoke(app, ["upgrade", "--dry-run", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "plan" in result.output.lower()
+
+    def test_upgrade_v2_execute(self, tmp_path: Path) -> None:
+        mock_plan = MagicMock()
+        mock_plan.warnings = []
+        with (
+            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=["Create _bmad/", "Move agents/"]),
+        ):
+            result = runner.invoke(app, ["upgrade", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "done" in result.output.lower()
+
+    def test_upgrade_nothing_to_do(self, tmp_path: Path) -> None:
+        mock_plan = MagicMock()
+        mock_plan.warnings = []
+        with (
+            patch("bmad.cli.cmd_upgrade.detect_version", return_value="v2"),
+            patch("bmad.cli.cmd_upgrade.plan_upgrade", return_value=mock_plan),
+            patch("bmad.cli.cmd_upgrade.execute_upgrade", return_value=[]),
+        ):
+            result = runner.invoke(app, ["upgrade", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "Nothing to do" in result.output

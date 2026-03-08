@@ -11,7 +11,7 @@ import pytest
 from bmad.core.config import BmadConfig, MemoryConfig
 from bmad.core.exceptions import BmadMemoryError
 from bmad.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
-from bmad.memory.manager import MemoryManager, _resolve_auto
+from bmad.memory.manager import MemoryManager, _create_backend, _resolve_auto
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -161,3 +161,105 @@ class TestFromConfigErrors:
 
         with pytest.raises(BmadMemoryError, match="Missing dependency"):
             MemoryManager.from_config(cfg)
+
+
+# ── _create_backend branches ─────────────────────────────────────────────────
+
+class TestCreateBackendBranches:
+    def test_qdrant_local_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise _create_backend qdrant-local path with mock."""
+        from unittest.mock import MagicMock
+
+        mock_qdrant_mod = MagicMock()
+        mock_backend_instance = MagicMock(spec=MemoryBackend)
+        mock_qdrant_mod.QdrantBackend.return_value = mock_backend_instance
+
+        def _mock_import_qdrant(name: str, *args: object, **kwargs: object) -> object:
+            if name == "bmad.memory.backends.qdrant":
+                return mock_qdrant_mod
+            return __import__(name, *args, **kwargs)
+
+        cfg = _make_config("qdrant-local")
+        monkeypatch.setattr("builtins.__import__", _mock_import_qdrant)
+        _create_backend(cfg)
+        mock_qdrant_mod.QdrantBackend.assert_called_once()
+
+    def test_qdrant_server_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise _create_backend qdrant-server path with mock."""
+        from unittest.mock import MagicMock
+
+        mock_qdrant_mod = MagicMock()
+        mock_backend_instance = MagicMock(spec=MemoryBackend)
+        mock_qdrant_mod.QdrantBackend.return_value = mock_backend_instance
+
+        def _mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "bmad.memory.backends.qdrant":
+                return mock_qdrant_mod
+            return __import__(name, *args, **kwargs)
+
+        cfg = _make_config("qdrant-server", qdrant_url="http://qdrant:6333")
+        monkeypatch.setattr("builtins.__import__", _mock_import)
+        _create_backend(cfg)
+        call_kwargs = mock_qdrant_mod.QdrantBackend.call_args
+        assert call_kwargs.kwargs.get("qdrant_url") == "http://qdrant:6333"
+
+    def test_ollama_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise _create_backend ollama path with mock."""
+        from unittest.mock import MagicMock
+
+        mock_ollama_mod = MagicMock()
+        mock_backend_instance = MagicMock(spec=MemoryBackend)
+        mock_ollama_mod.OllamaBackend.return_value = mock_backend_instance
+
+        def _mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "bmad.memory.backends.ollama":
+                return mock_ollama_mod
+            return __import__(name, *args, **kwargs)
+
+        cfg = _make_config("ollama", ollama_url="http://gpu:11434")
+        monkeypatch.setattr("builtins.__import__", _mock_import)
+        _create_backend(cfg)
+        call_kwargs = mock_ollama_mod.OllamaBackend.call_args
+        assert call_kwargs.kwargs.get("ollama_url") == "http://gpu:11434"
+
+    def test_ollama_with_all_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ollama backend with qdrant_url and embedding_model."""
+        from unittest.mock import MagicMock
+
+        mock_ollama_mod = MagicMock()
+        mock_ollama_mod.OllamaBackend.return_value = MagicMock(spec=MemoryBackend)
+
+        def _mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "bmad.memory.backends.ollama":
+                return mock_ollama_mod
+            return __import__(name, *args, **kwargs)
+
+        cfg = _make_config(
+            "ollama",
+            ollama_url="http://gpu:11434",
+            qdrant_url="http://qdrant:6333",
+            embedding_model="nomic-embed-text",
+        )
+        monkeypatch.setattr("builtins.__import__", _mock_import)
+        _create_backend(cfg)
+        call_kwargs = mock_ollama_mod.OllamaBackend.call_args
+        assert call_kwargs.kwargs.get("qdrant_url") == "http://qdrant:6333"
+        assert call_kwargs.kwargs.get("embedding_model") == "nomic-embed-text"
+
+    def test_qdrant_local_with_embedding_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Qdrant-local with explicit embedding_model."""
+        from unittest.mock import MagicMock
+
+        mock_qdrant_mod = MagicMock()
+        mock_qdrant_mod.QdrantBackend.return_value = MagicMock(spec=MemoryBackend)
+
+        def _mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "bmad.memory.backends.qdrant":
+                return mock_qdrant_mod
+            return __import__(name, *args, **kwargs)
+
+        cfg = _make_config("qdrant-local", embedding_model="all-MiniLM-L6-v2")
+        monkeypatch.setattr("builtins.__import__", _mock_import)
+        _create_backend(cfg)
+        call_kwargs = mock_qdrant_mod.QdrantBackend.call_args
+        assert call_kwargs.kwargs.get("embedding_model") == "all-MiniLM-L6-v2"
