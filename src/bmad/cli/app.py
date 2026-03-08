@@ -57,19 +57,27 @@ user:
   skill_level: "intermediate"
 
 memory:
-  backend: "auto"
+  backend: "{backend}"
 
 agents:
-  archetype: "minimal"
+  archetype: "{archetype}"
   custom_agents: []
 
 installed_archetypes: []
 """
 
+_KNOWN_ARCHETYPES = frozenset({
+    "minimal", "web-app", "creative-studio", "fix-loop",
+    "infra-ops", "meta", "stack", "features", "platform-engineering",
+})
+
+_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
 
 _init_path_arg = typer.Argument(Path("."), help="Project directory to initialise.")
 _init_name_opt = typer.Option("", help="Project name (default: directory name).")
 _init_force_opt = typer.Option(False, "--force", "-f", help="Overwrite existing config.")
+_init_archetype_opt = typer.Option("minimal", "--archetype", "-a", help="Agent archetype to use.")
+_init_backend_opt = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama).")
 
 
 @app.command()
@@ -77,6 +85,8 @@ def init(
     path: Path = _init_path_arg,
     name: str = _init_name_opt,
     force: bool = _init_force_opt,
+    archetype: str = _init_archetype_opt,
+    backend: str = _init_backend_opt,
 ) -> None:
     """Initialise a BMAD project (creates project-context.yaml)."""
     target = path.resolve()
@@ -88,8 +98,20 @@ def init(
         console.print("Use --force to overwrite.")
         raise typer.Exit(1)
 
+    # Validate archetype
+    if archetype not in _KNOWN_ARCHETYPES:
+        console.print(f"[red]Unknown archetype:[/red] {archetype}")
+        console.print(f"Available: {', '.join(sorted(_KNOWN_ARCHETYPES))}")
+        raise typer.Exit(1)
+
+    # Validate backend
+    if backend not in _KNOWN_BACKENDS:
+        console.print(f"[red]Unknown backend:[/red] {backend}")
+        console.print(f"Available: {', '.join(sorted(_KNOWN_BACKENDS))}")
+        raise typer.Exit(1)
+
     project_name = name or target.name
-    config_file.write_text(_TEMPLATE_YAML.format(name=project_name))
+    config_file.write_text(_TEMPLATE_YAML.format(name=project_name, archetype=archetype, backend=backend))
 
     # Create standard directories
     for d in ("_bmad/_memory", "_bmad-output"):

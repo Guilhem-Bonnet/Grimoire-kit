@@ -68,6 +68,69 @@ class TestInit:
         assert result.exit_code == 0
         assert (deep / "project-context.yaml").is_file()
 
+    # ── Archetype option ──
+
+    def test_init_default_archetype(self, tmp_path: Path) -> None:
+        runner.invoke(app, ["init", str(tmp_path)])
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'archetype: "minimal"' in content
+
+    def test_init_web_app_archetype(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "web-app"])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'archetype: "web-app"' in content
+
+    def test_init_short_archetype_flag(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "-a", "infra-ops"])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'archetype: "infra-ops"' in content
+
+    def test_init_invalid_archetype(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "nonexistent"])
+        assert result.exit_code == 1
+        assert "Unknown archetype" in result.output
+
+    # ── Backend option ──
+
+    def test_init_default_backend(self, tmp_path: Path) -> None:
+        runner.invoke(app, ["init", str(tmp_path)])
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'backend: "auto"' in content
+
+    def test_init_local_backend(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'backend: "local"' in content
+
+    def test_init_short_backend_flag(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "-b", "ollama"])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'backend: "ollama"' in content
+
+    def test_init_invalid_backend(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "--backend", "nope"])
+        assert result.exit_code == 1
+        assert "Unknown backend" in result.output
+
+    # ── Combined options ──
+
+    def test_init_combined_options(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, [
+            "init", str(tmp_path),
+            "--name", "my-project",
+            "--archetype", "creative-studio",
+            "--backend", "qdrant-local",
+        ])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert "my-project" in content
+        assert 'archetype: "creative-studio"' in content
+        assert 'backend: "qdrant-local"' in content
+
 
 # ── Doctor ────────────────────────────────────────────────────────────────────
 
