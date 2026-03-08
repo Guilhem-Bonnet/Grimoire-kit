@@ -78,10 +78,10 @@ jobs:
           severity: warning
           scandir: "."
           additional_files: "grimoire-init.sh"
+          ignore_names: "*.zsh"
           ignore_paths: >-
             framework/hooks/post-checkout.sh
             framework/hooks/post-commit.sh
-            framework/tools/grimoire-completion.zsh
             _grimoire
 
   # ── 4. YAML lint ──────────────────────────────────────────────────────────
