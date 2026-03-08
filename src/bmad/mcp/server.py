@@ -266,7 +266,7 @@ def bmad_add_agent(agent_id: str, project_path: str = ".") -> str:
         from ruamel.yaml import YAML
 
         yaml = YAML()
-        yaml.preserve_quotes = True  # type: ignore[assignment]
+        yaml.preserve_quotes = True
         with open(config_path, encoding="utf-8") as fh:
             data = yaml.load(fh)
 

@@ -31,7 +31,7 @@ _DEFAULT_COLLECTION = "bmad"
 def _require_qdrant() -> Any:
     """Import and return qdrant_client, raising a clear error if missing."""
     try:
-        import qdrant_client  # type: ignore[import-untyped]
+        import qdrant_client
 
         return qdrant_client
     except ImportError:
@@ -43,7 +43,7 @@ def _require_qdrant() -> Any:
 def _require_sentence_transformers() -> Any:
     """Import and return SentenceTransformer, raising a clear error if missing."""
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
 
         return SentenceTransformer
     except ImportError:
@@ -81,7 +81,7 @@ class QdrantBackend(MemoryBackend):
         qdrant_client = _require_qdrant()
         sentence_transformer_cls = _require_sentence_transformers()
 
-        from qdrant_client.models import Distance, VectorParams  # type: ignore[import-untyped]
+        from qdrant_client.models import Distance, VectorParams
 
         self._collection = collection
         self._embedding_model_name = embedding_model
@@ -124,7 +124,7 @@ class QdrantBackend(MemoryBackend):
     # ── Contract ──────────────────────────────────────────────────────────
 
     def store(self, text: str, *, user_id: str = "", metadata: dict[str, Any] | None = None) -> MemoryEntry:
-        from qdrant_client.models import PointStruct  # type: ignore[import-untyped]
+        from qdrant_client.models import PointStruct
 
         vector = self._embed(text)
         entry_id = str(uuid.uuid4())
@@ -160,7 +160,7 @@ class QdrantBackend(MemoryBackend):
         )
 
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue  # type: ignore[import-untyped]
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         vector = self._embed(query)
         flt = None
@@ -185,7 +185,7 @@ class QdrantBackend(MemoryBackend):
         ]
 
     def get_all(self, *, user_id: str = "") -> list[MemoryEntry]:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue  # type: ignore[import-untyped]
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         flt = None
         if user_id:

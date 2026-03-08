@@ -261,7 +261,7 @@ def _load_yaml_rw(config_path: Path) -> tuple[Any, Any]:
     from ruamel.yaml import YAML
 
     yaml = YAML()
-    yaml.preserve_quotes = True  # type: ignore[assignment]
+    yaml.preserve_quotes = True
     with open(config_path, encoding="utf-8") as fh:
         data = yaml.load(fh)
     return yaml, data
@@ -479,7 +479,7 @@ def registry_list() -> None:
 
 @registry_app.command("search")
 def registry_search(
-    query: str = _reg_query_arg,  # type: ignore[assignment]
+    query: str = _reg_query_arg,
 ) -> None:
     """Search agents by keyword."""
     from bmad.registry.local import LocalRegistry
