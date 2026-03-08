@@ -133,6 +133,20 @@ Configurez dans VS Code (`.vscode/mcp.json`) :
 }
 ```
 
+## Auto-complétion shell
+
+BMAD Kit supporte l'auto-complétion pour Bash, Zsh et Fish :
+
+```bash
+# Installer l'auto-complétion pour votre shell
+bmad --install-completion
+
+# Afficher le script sans l'installer
+bmad --show-completion
+```
+
+Après installation, redémarrez votre terminal. Tapez `bmad <TAB>` pour voir les commandes disponibles.
+
 ## Prochaines étapes
 
 - [Référence YAML](bmad-yaml-reference.md) — schéma complet de `project-context.yaml`
