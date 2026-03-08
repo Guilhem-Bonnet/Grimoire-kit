@@ -563,3 +563,72 @@ def upgrade(
 
     console.print(f"\n[bold]Migration {'planned' if dry_run else 'complete'}.[/bold]")
 
+
+# ── bmad merge ────────────────────────────────────────────────────────────────
+
+_merge_from_arg = typer.Argument(..., help="Source directory to merge from.")
+_merge_target_opt = typer.Option(Path("."), "--target", "-t", help="Target project directory.")
+_merge_dry_run_opt = typer.Option(False, "--dry-run", "-n", help="Show plan without merging.")
+_merge_force_opt = typer.Option(False, "--force", "-f", help="Overwrite conflicting files.")
+
+
+@app.command("merge")
+def merge(
+    source: Path = _merge_from_arg,
+    target: Path = _merge_target_opt,
+    dry_run: bool = _merge_dry_run_opt,
+    force: bool = _merge_force_opt,
+    undo: bool = typer.Option(False, "--undo", help="Undo the last merge in the target."),
+) -> None:
+    """Merge BMAD files from a source into a project."""
+    from bmad.cli.cmd_merge import run_merge, run_undo
+    from bmad.core.exceptions import BmadMergeError
+
+    resolved_target = target.resolve()
+
+    if undo:
+        try:
+            deleted = run_undo(resolved_target)
+        except BmadMergeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from None
+
+        if deleted:
+            for f in deleted:
+                console.print(f"  [red]deleted[/red]  {f}")
+            console.print(f"\n[bold]Undo complete — {len(deleted)} file(s) removed.[/bold]")
+        else:
+            console.print("[yellow]Nothing to undo.[/yellow]")
+        return
+
+    resolved_source = source.resolve()
+
+    try:
+        plan, result = run_merge(
+            resolved_source, resolved_target, dry_run=dry_run, force=force,
+        )
+    except BmadMergeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+
+    label = "bmad merge --dry-run" if dry_run else "bmad merge"
+    console.print(f"[bold]{label}[/bold]\n")
+
+    if plan.warnings:
+        for w in plan.warnings:
+            console.print(f"  [yellow]⚠ {w}[/yellow]")
+
+    for f in result.files_created:
+        icon = "[cyan]plan[/cyan]" if dry_run else "[green]created[/green]"
+        console.print(f"  {icon}  {f}")
+
+    for f in result.files_skipped:
+        console.print(f"  [yellow]skipped[/yellow]  {f}")
+
+    for d in result.directories_created:
+        icon = "[cyan]plan[/cyan]" if dry_run else "[green]mkdir[/green]"
+        console.print(f"  {icon}  {d}/")
+
+    total = len(result.files_created) + len(result.files_skipped)
+    console.print(f"\n[bold]{total} file(s) processed.[/bold]")
+
