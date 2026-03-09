@@ -132,7 +132,12 @@ class AgentRegistry:
 
     def __init__(self, kit_root: Path) -> None:
         self._kit_root = kit_root.resolve()
-        self._archetypes_dir = self._kit_root / "archetypes"
+        local_archetypes = self._kit_root / "archetypes"
+        if local_archetypes.is_dir():
+            self._archetypes_dir = local_archetypes
+        else:
+            from grimoire.archetypes import bundled_path
+            self._archetypes_dir = bundled_path()
         self._cache: dict[str, ArchetypeDNA] = {}
 
     @property
