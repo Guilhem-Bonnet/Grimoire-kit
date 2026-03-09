@@ -69,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build, test]
     environment: testpypi
+    # TestPyPI is optional — don't block PyPI publish if it fails
+    continue-on-error: true
     steps:
       - name: Download dist
         uses: actions/download-artifact@v8
@@ -84,7 +86,7 @@ jobs:
   publish-pypi:
     name: "Publish to PyPI"
     runs-on: ubuntu-latest
-    needs: [build, test, publish-testpypi]
+    needs: [build, test]
     environment: pypi
     steps:
       - name: Download dist
