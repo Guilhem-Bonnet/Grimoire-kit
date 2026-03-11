@@ -134,6 +134,34 @@ for e in errors:
     print(f"{e.field}: {e.message}")
 ```
 
+## Synchronisation avec `grimoire setup`
+
+Les valeurs de la section `user` (et `project.name`) servent de source de vérité.
+La commande `grimoire setup` propage ces valeurs dans tous les fichiers de configuration du projet :
+
+| Fichier cible | Champs synchronisés |
+|---------------|--------------------|
+| `_bmad/bmm/config.yaml` | `project_name`, `user_name`, `communication_language`, `document_output_language`, `user_skill_level` |
+| `_bmad/{core,cis,tea,bmb}/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
+| `_bmad/_memory/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
+| `.github/copilot-instructions.md` | Project, User, Communication Language, Document Output Language, User Skill Level |
+
+```bash
+# Appliquer la synchronisation
+grimoire setup
+
+# Audit sans modification (exit 1 si désynchronisé)
+grimoire setup --check
+
+# Passer des valeurs directement
+grimoire setup --user "Alice" --lang "English" --skill-level beginner
+
+# Sortie JSON (CI/CD)
+grimoire setup --check --json
+```
+
+> **Bonne pratique** : après toute modification de `project-context.yaml`, lancer `grimoire setup` pour propager les changements.
+
 ## Voir aussi
 
 - [Getting Started](getting-started.md)

@@ -633,6 +633,93 @@ def merge(
     console.print(f"\n[bold]{total} file(s) processed.[/bold]")
 
 
+# ── grimoire setup ──────────────────────────────────────────────────────────────
+
+_setup_path_arg = typer.Argument(Path("."), help="Project root.")
+_setup_check_opt = typer.Option(False, "--check", help="Audit only — no changes.")
+_setup_sync_opt = typer.Option(False, "--sync", help="Sync from project-context.yaml.")
+_setup_json_opt = typer.Option(False, "--json", help="JSON output.")
+_setup_user_opt = typer.Option(None, "--user", help="User name.")
+_setup_lang_opt = typer.Option(None, "--lang", help="Communication language.")
+_setup_doc_lang_opt = typer.Option(None, "--doc-lang", help="Document language.")
+_setup_skill_opt = typer.Option(None, "--skill-level", help="Skill level (beginner/intermediate/expert).")
+
+
+@app.command("setup")
+def setup(
+    path: Path = _setup_path_arg,
+    check_only: bool = _setup_check_opt,
+    sync: bool = _setup_sync_opt,
+    json_out: bool = _setup_json_opt,
+    user: str | None = _setup_user_opt,
+    lang: str | None = _setup_lang_opt,
+    doc_lang: str | None = _setup_doc_lang_opt,
+    skill_level: str | None = _setup_skill_opt,
+) -> None:
+    """Sync user config (name, language, skill) across all BMAD config files."""
+    import json
+
+    from grimoire.cli.cmd_setup import SetupResult, apply, check, load_user_values
+
+    target = path.resolve()
+    pcy = target / "project-context.yaml"
+
+    if not pcy.is_file():
+        console.print("[red]project-context.yaml not found[/red] — run [bold]grimoire init[/bold] first.")
+        raise typer.Exit(1)
+
+    current = load_user_values(pcy)
+
+    # Apply CLI overrides if any
+    has_override = any([user, lang, doc_lang, skill_level])
+    if has_override:
+        current.user_name = user or current.user_name
+        current.communication_language = lang or current.communication_language
+        current.document_output_language = doc_lang or current.document_output_language
+        current.user_skill_level = skill_level or current.user_skill_level
+
+    def _print_result(result: SetupResult) -> None:
+        if json_out:
+            data = {
+                "synced": result.is_synced,
+                "diffs": [{"file": d.file, "key": d.key, "current": d.current, "expected": d.expected} for d in result.diffs],
+                "updated": result.updated_files,
+                "skipped": result.skipped_files,
+                "errors": result.errors,
+            }
+            typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
+            return
+        if result.updated_files:
+            console.print("\n[green]Updated:[/green]")
+            for f in result.updated_files:
+                console.print(f"  • {f}")
+        if result.skipped_files:
+            console.print("\n[yellow]Skipped (not found):[/yellow]")
+            for f in result.skipped_files:
+                console.print(f"  • {f}")
+        if result.diffs:
+            console.print("\n[red]Remaining diffs:[/red]")
+            for d in result.diffs:
+                console.print(f"  • {d.file} → {d.key}: '{d.current}' ≠ '{d.expected}'")
+        elif not result.errors:
+            console.print("[green]All config files are in sync.[/green]")
+
+    if check_only:
+        result = check(target, current)
+        _print_result(result)
+        raise typer.Exit(0 if result.is_synced else 1)
+
+    if sync or has_override:
+        result = apply(target, current)
+        _print_result(result)
+        raise typer.Exit(0 if not result.errors else 1)
+
+    # Default: sync (same as --sync)
+    result = apply(target, current)
+    _print_result(result)
+    raise typer.Exit(0 if not result.errors else 1)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def cli() -> None:

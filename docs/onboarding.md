@@ -25,7 +25,19 @@ bash path/to/grimoire-kit/grimoire-init.sh \
   --archetype minimal
 ```
 
-### 2. Vérifier l'installation
+### 2. Configurer votre identité
+
+```bash
+# Propager votre nom et langue dans tous les fichiers config
+bash grimoire-kit/grimoire.sh setup --user "Votre Nom" --lang "Français"
+
+# Ou via pip si installé
+grimoire setup --user "Votre Nom" --lang "Français"
+```
+
+Cette commande synchronise `project-context.yaml` vers les configs BMAD et les instructions Copilot.
+
+### 3. Vérifier l'installation
 
 ```bash
 # Le doctor vérifie tout
@@ -34,7 +46,7 @@ bash grimoire-kit/grimoire.sh doctor
 
 Attendu : tous les checks en &#x2713;.
 
-### 3. Première interaction
+### 4. Première interaction
 
 Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
 
@@ -44,7 +56,7 @@ Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
 
 L'agent BMad Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
 
-### 4. Structure à connaître
+### 5. Structure à connaître
 
 ```
 votre-projet/
@@ -199,6 +211,7 @@ python3 framework/tools/nso.py --project-root . retro
 |--------|---------|
 | Aide Grimoire | `/grimoire-master` puis option aide |
 | Diagnostic | `bash grimoire.sh doctor` |
+| Sync config | `grimoire setup --check` |
 | État mémoire | `python3 framework/memory/maintenance.py status` |
 | Qualité sortie | `python3 framework/tools/quality-score.py --project-root . score fichier.md` |
 | Recherche web | `python3 framework/tools/mcp-web-search.py --project-root . search "query"` |

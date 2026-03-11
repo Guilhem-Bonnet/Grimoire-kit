@@ -61,6 +61,7 @@ ${BOLD}Commandes:${NC}
   ${GREEN}lifecycle${NC} <pre|post|status>  Hooks de session
   ${GREEN}integrity${NC} <snapshot|verify>  Intégrité des fichiers agents
   ${GREEN}health${NC}           Health-check mémoire
+  ${GREEN}setup${NC}            Configurer les valeurs utilisateur du projet
   ${GREEN}init${NC}             Initialiser un projet (proxy grimoire-init.sh)
   ${GREEN}version${NC}          Version du kit
   ${GREEN}help${NC}             Cette aide
@@ -70,6 +71,9 @@ ${BOLD}Exemples:${NC}
   grimoire tools --tier core
   grimoire lifecycle pre
   grimoire integrity verify
+  grimoire setup --check
+  grimoire setup --sync
+  grimoire setup --user "Alice" --lang "EN"
 EOF
 }
 
@@ -259,6 +263,10 @@ cmd_health() {
     python3 "${MEMORY_DIR}/maintenance.py" health-check "$@"
 }
 
+cmd_setup() {
+    python3 "${TOOLS_DIR}/grimoire-setup.py" --project-root "${PROJECT_ROOT}" "$@"
+}
+
 cmd_init() {
     bash "${SCRIPT_DIR}/grimoire-init.sh" "$@"
 }
@@ -276,6 +284,7 @@ main() {
         lifecycle)  cmd_lifecycle "$@" ;;
         integrity)  cmd_integrity "$@" ;;
         health)     cmd_health "$@" ;;
+        setup)      cmd_setup "$@" ;;
         init)       cmd_init "$@" ;;
         version|-v|--version)  cmd_version ;;
         help|-h|--help)        cmd_help ;;

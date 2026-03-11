@@ -71,6 +71,8 @@ mon-projet/
 | Commande | Description |
 |----------|-------------|
 | `grimoire init <path>` | Initialiser un projet |
+| `grimoire setup` | Synchroniser la config utilisateur |
+| `grimoire setup --check` | Auditer la synchronisation (CI-friendly) |
 | `grimoire doctor` | Vérifier la santé du projet |
 | `grimoire status` | Afficher l'état du projet |
 | `grimoire add <agent>` | Ajouter un agent |
@@ -82,6 +84,26 @@ mon-projet/
 | `grimoire upgrade` | Migrer un projet v2 → v3 |
 | `grimoire registry list` | Lister les agents disponibles |
 | `grimoire registry search <q>` | Chercher un agent |
+
+## Configurer votre identité
+
+Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration du projet (configs BMAD, instructions Copilot).
+
+```bash
+# Synchroniser depuis project-context.yaml
+grimoire setup
+
+# Ou spécifier directement
+grimoire setup --user "Alice" --lang "English" --skill-level intermediate
+
+# Vérifier la synchronisation (utile en CI)
+grimoire setup --check
+```
+
+**Source de vérité** : `project-context.yaml` (section `user`). La commande `setup` propage les valeurs vers :
+
+- `_bmad/*/config.yaml` — configuration des modules BMAD
+- `.github/copilot-instructions.md` — instructions injectées dans Copilot Chat
 
 ## Vérifier votre projet
 
