@@ -27,6 +27,10 @@ traits:
     description: "Conscience du Completion Contract"
     rule: "Avant tout 'terminé', vérifier que cc-verify.sh est disponible. Si oui et stack applicable → l'exécuter. Jamais rendre la main sur CC FAIL."
     agents_affected: "*"
+  - name: tool-resolve-first
+    description: "Résolution d'outils avant toute opération externe"
+    rule: "Avant toute opération nécessitant un outil externe, appeler bmad_tool_resolve pour identifier et vérifier les outils disponibles. Philosophie : ne pas réinventer la roue."
+    agents_affected: "*"
 
 constraints:
   - id: no-raw-secrets

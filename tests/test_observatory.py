@@ -331,8 +331,51 @@ class TestGenerateHtml:
     def test_all_views_present(self, tmp_project):
         data = obs.load_all(tmp_project)
         html = obs.generate_html(data)
-        for view in ["timeline", "swimlane", "dag", "graph", "tracelog", "metrics"]:
+        for view in ["overview", "timeline", "swimlane", "dag", "graph", "tracelog", "metrics"]:
             assert f'id="view-{view}"' in html, f"Missing view: {view}"
+
+    def test_overview_is_default_tab(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        # Overview view should have the 'active' class
+        assert 'id="view-overview"' in html
+        # Overview tab should appear before other tabs
+        ov_pos = html.index('data-view="overview"')
+        tl_pos = html.index('data-view="timeline"')
+        assert ov_pos < tl_pos
+
+    def test_global_search_present(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        assert 'id="global-q"' in html
+        assert "global-search" in html
+
+    def test_export_button_present(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        assert 'id="btn-export"' in html
+
+    def test_tooltip_element_present(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        assert 'id="obs-tooltip"' in html
+        assert "obs-tooltip" in html
+
+    def test_force_directed_graph_code(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        # Force-directed simulation references
+        assert "REPULSION" in html
+        assert "ATTRACTION" in html
+        assert "simulate" in html
+        assert "mousedown" in html  # drag support
+
+    def test_overview_render_function(self, tmp_project):
+        data = obs.load_all(tmp_project)
+        html = obs.generate_html(data)
+        assert "renderOverview" in html
+        assert "ov-grid" in html
+        assert "ov-workload" in html
 
     def test_tab_keyboard_shortcuts(self, tmp_project):
         data = obs.load_all(tmp_project)
@@ -387,3 +430,68 @@ class TestCLINoCommand:
     def test_no_command_shows_help(self, capsys):
         ret = obs.main([])
         assert ret == 0
+
+
+# ── Directory & Trace Detection Tests ────────────────────────────────────────
+
+
+class TestFindOutputDir:
+    def test_prefers_dir_with_trace(self, tmp_path):
+        """When both dirs exist, prefer the one with actual trace data."""
+        go = tmp_path / "_grimoire-output"
+        go.mkdir()
+        bo = tmp_path / "_bmad-output"
+        bo.mkdir()
+        (bo / "BMAD_TRACE.md").write_text("# trace\n")
+        assert obs._find_output_dir(tmp_path) == bo
+
+    def test_prefers_grimoire_trace_naming(self, tmp_path):
+        go = tmp_path / "_grimoire-output"
+        go.mkdir()
+        (go / "Grimoire_TRACE.md").write_text("# trace\n")
+        assert obs._find_output_dir(tmp_path) == go
+
+    def test_fallback_to_existing_dir(self, tmp_path):
+        """If no trace data, falls back to first existing dir."""
+        go = tmp_path / "_grimoire-output"
+        go.mkdir()
+        assert obs._find_output_dir(tmp_path) == go
+
+    def test_default_when_neither_exists(self, tmp_path):
+        result = obs._find_output_dir(tmp_path)
+        assert result == tmp_path / "_grimoire-output"
+
+
+class TestFindTrace:
+    def test_finds_grimoire_trace(self, tmp_path):
+        (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n")
+        assert obs._find_trace(tmp_path) == tmp_path / "Grimoire_TRACE.md"
+
+    def test_finds_bmad_trace(self, tmp_path):
+        (tmp_path / "BMAD_TRACE.md").write_text("# trace\n")
+        assert obs._find_trace(tmp_path) == tmp_path / "BMAD_TRACE.md"
+
+    def test_prefers_grimoire_naming(self, tmp_path):
+        (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n")
+        (tmp_path / "BMAD_TRACE.md").write_text("# trace\n")
+        assert obs._find_trace(tmp_path) == tmp_path / "Grimoire_TRACE.md"
+
+    def test_fallback_when_neither_exists(self, tmp_path):
+        result = obs._find_trace(tmp_path)
+        assert result == tmp_path / "Grimoire_TRACE.md"
+
+
+class TestLoadAllBmadLayout:
+    """Test load_all with BMAD-style directory layout."""
+
+    def test_loads_from_bmad_output(self, tmp_path):
+        out = tmp_path / "_bmad-output"
+        out.mkdir()
+        (out / "BMAD_TRACE.md").write_text(SAMPLE_TRACE, encoding="utf-8")
+        (out / ".event-log.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in SAMPLE_EVENTS) + "\n",
+            encoding="utf-8",
+        )
+        data = obs.load_all(tmp_path)
+        assert len(data.traces) == 12
+        assert len(data.events) == 5

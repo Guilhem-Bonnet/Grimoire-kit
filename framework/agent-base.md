@@ -268,6 +268,38 @@ Trigger : l'utilisateur tape "décide pour moi" / "fais au mieux" / "mode joueur
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
+## <img src="../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> TRP — Tool Resolution Protocol
+
+> **QUATRIÈME PRINCIPE** : Un agent qui code ce qui existe déjà est un agent qui gaspille.
+
+**Avant toute opération nécessitant un outil externe :**
+1. **Identifier le besoin** : quel type d'outil est nécessaire ? (3D, SVG, web, tests, etc.)
+2. **Résoudre** : appeler `bmad_tool_resolve` (ou `tool-resolver.py resolve`) avec l'intention en langage naturel
+3. **Vérifier** : les outils recommandés sont-ils disponibles ? Prêts à l'emploi ?
+4. **Provisionner si besoin** : suivre les instructions de provision (pip, npx, mcp_enable) si approuvé
+5. **Utiliser** : préférer l'outil résolu à une implémentation ad-hoc
+
+**Exemples de déclenchement :**
+- "J'ai besoin de créer un SVG" → `bmad_tool_resolve("créer un fichier SVG")`
+- "Je dois vérifier un site web" → `bmad_tool_resolve("naviguer sur un site web")`
+- "Je veux rendre un objet 3D" → `bmad_tool_resolve("rendre un objet 3D")`
+
+**Cas d'usage web :**
+- Pour accéder à un site, scraper du contenu, prendre un screenshot → utiliser `bmad_web_fetch`, `bmad_web_screenshot`, `bmad_web_readability`
+- web-browser.py est TOUJOURS disponible (fallback urllib). Playwright optionnel pour JS rendering.
+- SSRF protection intégrée — pas de requêtes vers localhost/metadata sauf IP explicitement autorisées
+
+**Règles :**
+- NE PAS recoder un outil qui existe dans le catalogue Grimoire
+- NE PAS appeler un MCP server sans vérifier sa disponibilité via tool-resolver
+- Le resolver est automatiquement appelé par l'orchestrateur pour chaque step (v1.2+)
+- En exécution directe (hors orchestrateur), l'agent DOIT résoudre manuellement avant d'agir
+
+> Catalogue complet des outils : `tool-resolver.py catalog`
+> Registre des outils Grimoire : `tool-registry.py`
+
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Wabi-sabi — Acceptation de l'Imperfection
 
 > Un MVP imparfait livré vaut mieux qu'un produit parfait jamais terminé.

@@ -40,7 +40,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-MCP_PROXY_VERSION = "1.0.0"
+MCP_PROXY_VERSION = "2.0.0"
+
+# ── Server Categories ────────────────────────────────────────────
+
+SERVER_CATEGORIES = {
+    "general": "General purpose tools",
+    "3d": "3D modeling and rendering (Blender, etc.)",
+    "vector": "Vector graphics (Inkscape, Figma, etc.)",
+    "evaluation": "Visual evaluation and quality assessment",
+    "browser": "Browser automation and web access",
+    "filesystem": "File system operations",
+}
 
 _DEFAULT_CONFIG = {
     "servers": [
@@ -48,13 +59,70 @@ _DEFAULT_CONFIG = {
             "name": "browser",
             "command": "npx @anthropic/mcp-browser",
             "description": "Browser automation via MCP",
+            "category": "browser",
             "enabled": False,
+            "capabilities": {
+                "tools": ["navigate", "click", "type", "screenshot"],
+                "input_types": ["text", "url"],
+                "output_types": ["screenshot", "html", "text"],
+            },
+            "agent_affinity": ["web-browser", "qa"],
         },
         {
             "name": "filesystem",
             "command": "npx @anthropic/mcp-filesystem",
             "description": "File system access via MCP",
+            "category": "filesystem",
             "enabled": False,
+            "capabilities": {
+                "tools": ["read_file", "write_file", "list_dir"],
+                "input_types": ["path"],
+                "output_types": ["text", "binary"],
+            },
+            "agent_affinity": ["*"],
+        },
+        {
+            "name": "blender-mcp",
+            "command": "blender --background --python blender_mcp_server.py",
+            "description": "Blender 3D modeling, materials, lighting, rendering via MCP",
+            "category": "3d",
+            "enabled": False,
+            "capabilities": {
+                "tools": ["create_mesh", "edit_mesh", "apply_material", "set_lighting",
+                          "set_camera", "render_scene", "export_format"],
+                "input_types": ["text", "json", "python_script"],
+                "output_types": ["mesh", "image/png", "scene_file", "gltf", "fbx", "obj"],
+            },
+            "agent_affinity": ["blender-expert", "3d-artist", "art-director"],
+            "health_check": {"method": "command", "test": "blender --version", "timeout": 5},
+        },
+        {
+            "name": "inkscape-mcp",
+            "command": "inkscape-mcp-server",
+            "description": "Inkscape vector graphics — paths, filters, SVG export via MCP",
+            "category": "vector",
+            "enabled": False,
+            "capabilities": {
+                "tools": ["create_path", "edit_path", "create_svg", "apply_filter",
+                          "export_svg", "export_png"],
+                "input_types": ["text", "svg", "json"],
+                "output_types": ["svg", "image/png", "pdf"],
+            },
+            "agent_affinity": ["illustration-expert", "brand-designer", "art-director"],
+            "health_check": {"method": "command", "test": "inkscape --version", "timeout": 5},
+        },
+        {
+            "name": "vision-provider",
+            "command": "python -m grimoire.mcp.vision_server",
+            "description": "Visual quality assessment for agent outputs via multimodal LLM",
+            "category": "evaluation",
+            "enabled": False,
+            "capabilities": {
+                "tools": ["evaluate_image", "compare_images", "validate_svg"],
+                "input_types": ["image/png", "image/svg+xml", "image/jpeg"],
+                "output_types": ["json"],
+            },
+            "agent_affinity": ["*"],
         },
     ],
 }
@@ -97,7 +165,10 @@ def check_server_status(server: dict[str, Any]) -> dict[str, Any]:
         "name": server["name"],
         "enabled": server.get("enabled", False),
         "command": server.get("command", ""),
+        "category": server.get("category", "general"),
         "available": False,
+        "capabilities": server.get("capabilities", {}),
+        "agent_affinity": server.get("agent_affinity", []),
     }
 
     if not server.get("enabled", False):
@@ -116,6 +187,21 @@ def check_server_status(server: dict[str, Any]) -> dict[str, Any]:
         result["status"] = "available"
     else:
         result["status"] = f"executable '{executable}' not found"
+
+    # Health check if configured and enabled
+    hc = server.get("health_check")
+    if hc and result["available"] and hc.get("method") == "command":
+        test_cmd = hc.get("test", "")
+        if test_cmd:
+            import subprocess
+            try:
+                cp = subprocess.run(
+                    test_cmd.split(),
+                    capture_output=True, timeout=hc.get("timeout", 5),
+                )
+                result["health"] = "healthy" if cp.returncode == 0 else "unhealthy"
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                result["health"] = "unreachable"
 
     return result
 
@@ -153,6 +239,49 @@ def mcp_proxy_status(project_root: str = ".") -> dict[str, Any]:
     statuses = get_all_status(Path(project_root))
     available = sum(1 for s in statuses if s["available"])
     return {"status": statuses, "available": available, "total": len(statuses)}
+
+
+def mcp_proxy_capabilities(project_root: str = ".") -> dict[str, Any]:
+    """MCP tool: retourne les capabilities de tous les serveurs MCP.
+
+    Args:
+        project_root: Racine du projet.
+
+    Returns:
+        {servers: [{name, category, capabilities, agent_affinity}]}
+    """
+    servers = list_servers(Path(project_root))
+    return {
+        "servers": [
+            {
+                "name": s["name"],
+                "category": s.get("category", "general"),
+                "capabilities": s.get("capabilities", {}),
+                "agent_affinity": s.get("agent_affinity", []),
+                "enabled": s.get("enabled", False),
+            }
+            for s in servers
+        ],
+    }
+
+
+def mcp_proxy_find_for_agent(agent_id: str, project_root: str = ".") -> dict[str, Any]:
+    """MCP tool: trouve les serveurs MCP adaptés à un agent donné.
+
+    Args:
+        agent_id: ID de l'agent.
+        project_root: Racine du projet.
+
+    Returns:
+        {agent: str, servers: [{name, status, capabilities}]}
+    """
+    all_status = get_all_status(Path(project_root))
+    matched = []
+    for s in all_status:
+        affinity = s.get("agent_affinity", [])
+        if "*" in affinity or agent_id in affinity:
+            matched.append(s)
+    return {"agent": agent_id, "servers": matched, "count": len(matched)}
 
 
 # ── Commands ─────────────────────────────────────────────────────

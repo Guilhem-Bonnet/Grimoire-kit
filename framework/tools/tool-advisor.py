@@ -77,8 +77,8 @@ CONTEXT_RULES: list[dict] = [
     {
         "id": "CTX-007",
         "pattern": r"(?:agent|persona|workflow|orchestrat|dispatch)",
-        "tools": ["orchestrator.py", "tool-registry.py", "grimoire-mcp-tools.py"],
-        "reason": "Contexte agents/workflows — outils d'orchestration",
+        "tools": ["orchestrator.py", "tool-registry.py", "tool-resolver.py", "grimoire-mcp-tools.py"],
+        "reason": "Contexte agents/workflows — outils d'orchestration et résolution",
     },
     {
         "id": "CTX-008",
@@ -97,6 +97,12 @@ CONTEXT_RULES: list[dict] = [
         "pattern": r"(?:session|bootstrap|resume|context|chain)",
         "tools": ["session-state.py", "shared-context.py", "context-summarizer.py"],
         "reason": "Contexte session — outils de gestion de contexte",
+    },
+    {
+        "id": "CTX-011",
+        "pattern": r"(?:outil|tool|install|discover|provision|mcp|résoud|resolver|capability)",
+        "tools": ["tool-resolver.py", "tool-registry.py", "mcp-proxy.py"],
+        "reason": "Contexte outillage — découverte et provision d'outils",
     },
 ]
 

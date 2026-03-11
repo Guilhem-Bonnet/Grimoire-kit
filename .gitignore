@@ -51,6 +51,10 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 
+# Grimoire memory runtime (local data)
+_grimoire/_memory/*.json
+_grimoire/_memory/*.jsonl
+
 # Runtime data
 .grimoire-rnd/
 nohup.out
@@ -60,5 +64,8 @@ _grimoire-output/.background/
 _grimoire-output/.runs/
 _grimoire-output/.orchestrator/
 _grimoire-output/.semantic-cache-stats.json
+_grimoire-output/.router-stats.jsonl
+_grimoire-output/.tool-resolver/
+_grimoire-output/hpe-dashboard.html
 .grimoire-memory/
 .grimoire-twin/

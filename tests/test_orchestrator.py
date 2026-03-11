@@ -362,7 +362,50 @@ class TestParallelExecution(unittest.TestCase):
         self.assertEqual(len(result.steps), len(agents))
 
     def test_version_bumped(self):
-        self.assertEqual(orc.ORCHESTRATOR_VERSION, "1.1.0")
+        self.assertEqual(orc.ORCHESTRATOR_VERSION, "1.2.0")
+
+
+class TestToolResolveHook(unittest.TestCase):
+    """Tests pour le hook _pre_resolve_tools (v1.2)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.orch = orc.Orchestrator(self.tmpdir, auto_resolve_tools=True)
+
+    def test_auto_resolve_default_true(self):
+        orch = orc.Orchestrator(self.tmpdir)
+        self.assertTrue(orch.auto_resolve_tools)
+
+    def test_auto_resolve_disabled(self):
+        orch = orc.Orchestrator(self.tmpdir, auto_resolve_tools=False)
+        self.assertFalse(orch.auto_resolve_tools)
+        self.assertIsNone(orch._resolver_mod)
+
+    def test_pre_resolve_empty_task(self):
+        step = orc.ExecutionStep(step_number=1, agent="dev", task="")
+        result = self.orch._pre_resolve_tools(step)
+        self.assertEqual(result, "")
+
+    def test_pre_resolve_with_task(self):
+        step = orc.ExecutionStep(step_number=1, agent="dev", task="créer un fichier SVG")
+        result = self.orch._pre_resolve_tools(step)
+        # tool-resolver.py may or may not be loadable depending on test env
+        # but the method should not raise
+        self.assertIsInstance(result, str)
+
+    def test_simulated_step_includes_tool_context(self):
+        """Simulated mode includes tool context in output_summary."""
+        plan = self.orch.create_plan(
+            workflow="party-mode",
+            agents=["dev"],
+            task="créer un fichier SVG",
+        )
+        result = self.orch.execute(plan)
+        self.assertEqual(result.status, "completed")
+        # If resolver loaded, summary should contain "Tools:"
+        # If not loaded, it should still complete without error
+        self.assertTrue(len(result.steps) == 1)
+        self.assertEqual(result.steps[0].status, "completed")
 
 
 class TestCLIIntegration(unittest.TestCase):

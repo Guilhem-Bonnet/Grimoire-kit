@@ -135,11 +135,21 @@ class T(unittest.TestCase):
         self.assertGreaterEqual(len(table_drifts), 1)
 
     def test_detect_missing_test_file(self):
+        """When README has a per-file table, missing files are reported."""
         _write(self.tmpdir, "tests/test_a.py", "def test_x(): pass\n")
-        _write(self.tmpdir, "README.md", "# Test\nNo table.\n")
+        _write(self.tmpdir, "tests/test_b.py", "def test_y(): pass\n")
+        _write(self.tmpdir, "README.md", "| `test_a.py` | Tool A | 1 |\n")
         report = self.mod.detect_drifts(self.tmpdir)
         missing = [d for d in report.drifts if "missing" in d.section]
         self.assertGreaterEqual(len(missing), 1)
+
+    def test_no_missing_when_category_table(self):
+        """When README uses category table (no per-file rows), no missing entry drift."""
+        _write(self.tmpdir, "tests/test_a.py", "def test_x(): pass\n")
+        _write(self.tmpdir, "README.md", "# Test\n| Catégorie | Tests |\n| Total | 1 |\n")
+        report = self.mod.detect_drifts(self.tmpdir)
+        missing = [d for d in report.drifts if "missing" in d.section]
+        self.assertEqual(len(missing), 0)
 
     def test_detect_real_drifts(self):
         """Le vrai README a des drifts connus (737 vs 933+)."""

@@ -390,11 +390,46 @@ def parse_shared_state(path: Path) -> dict:
 # ── Aggregate ────────────────────────────────────────────────────────────────
 
 
-def load_all(project_root: Path) -> ObservatoryData:
-    """Load all Grimoire data sources."""
-    out_dir = project_root / OUTPUT_DIR
+def _find_output_dir(project_root: Path) -> Path:
+    """Find the output directory — supports both Grimoire and BMAD layouts.
 
-    traces, sessions = parse_trace(out_dir / TRACE_FILE)
+    Prefers directories that actually contain trace data.
+    """
+    candidates = [
+        project_root / OUTPUT_DIR,          # _grimoire-output/
+        project_root / "_bmad-output",      # BMAD custom layout
+    ]
+    # First pass: find one with trace data
+    for d in candidates:
+        if d.is_dir():
+            for name in (TRACE_FILE, "BMAD_TRACE.md"):
+                if (d / name).exists():
+                    return d
+    # Second pass: just find an existing directory
+    for d in candidates:
+        if d.is_dir():
+            return d
+    # Default to standard
+    return project_root / OUTPUT_DIR
+
+
+def _find_trace(out_dir: Path) -> Path:
+    """Find trace file — supports multiple naming conventions."""
+    candidates = [
+        out_dir / TRACE_FILE,               # Grimoire_TRACE.md
+        out_dir / "BMAD_TRACE.md",          # BMAD custom naming
+    ]
+    for f in candidates:
+        if f.exists():
+            return f
+    return out_dir / TRACE_FILE
+
+
+def load_all(project_root: Path, output_dir: Path | None = None) -> ObservatoryData:
+    """Load all Grimoire data sources."""
+    out_dir = output_dir or _find_output_dir(project_root)
+
+    traces, sessions = parse_trace(_find_trace(out_dir))
     events = parse_event_log(out_dir / EVENT_LOG_FILE)
     agents, rels = parse_agent_graph(out_dir / AGENT_GRAPH_FILE)
     shared = parse_shared_state(out_dir / SHARED_STATE_FILE)
@@ -621,24 +656,99 @@ main{flex:1;overflow-y:auto}
 ::-webkit-scrollbar{width:7px;height:7px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:4px}
+
+/* ── Overview ───────────────────────────── */
+.ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:14px;margin-bottom:20px}
+.ov-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;transition:border-color .15s}
+.ov-card:hover{border-color:var(--accent)}
+.ov-card .ov-icon{font-size:1.5rem;margin-bottom:4px}
+.ov-card .ov-label{font-size:.72rem;color:var(--fg2);text-transform:uppercase;letter-spacing:.3px}
+.ov-card .ov-value{font-size:2rem;font-weight:700;color:var(--accent);margin:2px 0}
+.ov-card .ov-sub{font-size:.75rem;color:var(--fg2)}
+.ov-card.good .ov-value{color:var(--green)}
+.ov-card.warn .ov-value{color:var(--yellow)}
+.ov-card.bad .ov-value{color:var(--red)}
+.ov-section{margin-top:22px}
+.ov-section h3{font-size:.92rem;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.ov-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.ov-two-col{grid-template-columns:1fr}}
+.trust-gauge{position:relative;width:130px;height:130px;margin:0 auto}
+.trust-gauge svg{transform:rotate(-90deg)}
+.trust-gauge .gauge-text{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:1.5rem}
+.trust-gauge .gauge-label{font-size:.68rem;color:var(--fg2);font-weight:400}
+.sparkbar{display:flex;align-items:flex-end;gap:2px;height:48px;padding:4px 0}
+.sparkbar .bar{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-width:4px;transition:height .2s;opacity:.7}
+.sparkbar .bar:hover{opacity:1}
+.ov-decisions{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto}
+.ov-decision{padding:8px 10px;background:var(--bg3);border-radius:6px;border-left:3px solid var(--orange);font-size:.82rem;cursor:pointer;transition:background .1s}
+.ov-decision:hover{background:var(--bg2)}
+.ov-decision .d-agent{font-weight:600;font-size:.78rem}
+.ov-decision .d-time{font-size:.68rem;color:var(--fg2);font-family:var(--mono)}
+.ov-alerts{display:flex;flex-direction:column;gap:6px}
+.ov-alert{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:.82rem}
+.ov-alert.hup{background:rgba(210,153,34,.1);border-left:3px solid var(--yellow)}
+.ov-alert.error{background:rgba(248,81,73,.1);border-left:3px solid var(--red)}
+.ov-alert.info{background:rgba(88,166,255,.1);border-left:3px solid var(--accent)}
+.ov-workload{display:flex;flex-direction:column;gap:6px}
+.ov-work-row{display:flex;align-items:center;gap:8px;font-size:.78rem}
+.ov-work-row .wl-name{width:100px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ov-work-row .wl-bar{flex:1;height:14px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.ov-work-row .wl-fill{height:100%;border-radius:3px;display:flex;align-items:center;padding:0 5px;font-size:.64rem;color:#fff;font-family:var(--mono)}
+.ov-work-row .wl-score{width:32px;font-family:var(--mono);font-size:.72rem;color:var(--fg2)}
+.ov-sessions{display:flex;flex-direction:column;gap:8px}
+.ov-sess{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.ov-sess:hover{border-color:var(--accent)}
+.ov-sess .s-id{font-weight:600;font-size:.85rem;color:var(--accent);min-width:100px}
+.ov-sess .s-stats{font-size:.75rem;color:var(--fg2);display:flex;gap:12px}
+.ov-sess .s-bar{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;display:flex}
+.ov-sess .s-bar .s-seg{height:100%}
+.obs-tooltip{position:fixed;z-index:300;pointer-events:none;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:.78rem;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;transition:opacity .12s}
+.obs-tooltip.visible{opacity:1}
+.obs-tooltip .tt-agent{font-weight:600;margin-bottom:3px}
+.obs-tooltip .tt-type{font-family:var(--mono);font-size:.72rem;margin-bottom:3px}
+.obs-tooltip .tt-payload{color:var(--fg2);font-size:.74rem;word-break:break-word}
+.global-search{position:relative}
+.global-search input{background:var(--bg3);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:5px 10px 5px 28px;font-size:.82rem;width:180px;transition:width .2s,border-color .15s;font-family:var(--font)}
+.global-search input:focus{width:260px;border-color:var(--accent);outline:none}
+.global-search .search-icon{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--fg2);font-size:.82rem;pointer-events:none}
+.global-search .search-results{position:absolute;top:100%;left:0;right:-60px;max-height:360px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:0 0 6px 6px;display:none;z-index:150}
+.global-search .search-results.open{display:block}
+.global-search .sr-item{padding:6px 10px;cursor:pointer;font-size:.78rem;border-bottom:1px solid var(--border);transition:background .1s}
+.global-search .sr-item:hover{background:var(--bg3)}
+.global-search .sr-item .sr-agent{font-weight:600}
+.global-search .sr-item .sr-type{font-family:var(--mono);font-size:.7rem;color:var(--fg2)}
+.btn-export{background:var(--bg3);color:var(--fg2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;cursor:pointer;transition:all .15s;font-family:var(--font)}
+.btn-export:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.handoff-chain{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:16px}
+.handoff-chain h4{font-size:.85rem;margin-bottom:10px;color:var(--fg2)}
+.hc-flow{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.hc-node{padding:4px 10px;border-radius:14px;font-size:.78rem;font-weight:600;border:2px solid}
+.hc-arrow{color:var(--fg2);padding:0 4px;font-size:.85rem}
 </style>
 </head>
 <body>
 
 <header>
   <h1>🔭 Grimoire Observatory</h1>
+  <div class="global-search">
+    <span class="search-icon">&#128269;</span>
+    <input id="global-q" type="text" placeholder="Recherche globale…" autocomplete="off">
+    <div class="search-results" id="global-results"></div>
+  </div>
   <div class="header-stats">
     <span>Traces: <span class="n" id="stat-traces">0</span></span>
     <span>Events: <span class="n" id="stat-events">0</span></span>
     <span>Agents: <span class="n" id="stat-agents">0</span></span>
     <span>Sessions: <span class="n" id="stat-sessions">0</span></span>
   </div>
+  <button class="btn-export" id="btn-export" title="Exporter JSON">&#128229; Export</button>
   <span class="live-badge" id="live-badge" style="display:none">LIVE</span>
 </header>
 
 <div class="tabs" id="tabs">
+  <div class="tab active" data-view="overview">Overview <span class="kbd">0</span></div>
   <div class="tab" data-view="timeline">Timeline <span class="kbd">1</span></div>
-  <div class="tab active" data-view="swimlane">Swimlane <span class="kbd">2</span></div>
+  <div class="tab" data-view="swimlane">Swimlane <span class="kbd">2</span></div>
   <div class="tab" data-view="dag">DAG <span class="kbd">3</span></div>
   <div class="tab" data-view="graph">Network <span class="kbd">4</span></div>
   <div class="tab" data-view="tracelog">Log <span class="kbd">5</span></div>
@@ -646,6 +756,23 @@ main{flex:1;overflow-y:auto}
 </div>
 
 <main>
+  <!-- Overview -->
+  <div class="view active" id="view-overview">
+    <div class="ov-grid" id="ov-grid"></div>
+    <div class="ov-two-col">
+      <div>
+        <div class="ov-section"><h3>&#128200; Activit&eacute; par session</h3><div id="ov-activity"></div></div>
+        <div class="ov-section"><h3>&#128101; Charge agents</h3><div id="ov-workload" class="ov-workload"></div></div>
+      </div>
+      <div>
+        <div class="ov-section"><h3>&#9889; D&eacute;cisions r&eacute;centes</h3><div id="ov-decisions" class="ov-decisions"></div></div>
+        <div class="ov-section"><h3>&#9888;&#65039; Alertes</h3><div id="ov-alerts" class="ov-alerts"></div></div>
+      </div>
+    </div>
+    <div class="ov-section"><h3>&#128279; Cha&icirc;nes de Handoff</h3><div id="ov-handoffs"></div></div>
+    <div class="ov-section"><h3>&#128218; Sessions</h3><div id="ov-sessions" class="ov-sessions"></div></div>
+  </div>
+
   <!-- Timeline -->
   <div class="view" id="view-timeline">
     <div class="filters">
@@ -658,7 +785,7 @@ main{flex:1;overflow-y:auto}
   </div>
 
   <!-- Swimlane -->
-  <div class="view active" id="view-swimlane">
+  <div class="view" id="view-swimlane">
     <div class="filters">
       <label>Session <select id="f-sl-session"><option value="">Toutes</option></select></label>
     </div>
@@ -706,6 +833,7 @@ main{flex:1;overflow-y:auto}
   <button class="drawer-close" id="drawer-close">&times;</button>
   <div id="drawer-content"></div>
 </div>
+<div class="obs-tooltip" id="obs-tooltip"></div>
 
 <script>
 const DATA = __Grimoire_DATA__;
@@ -747,10 +875,11 @@ $('#stat-agents').textContent = DATA.agent_ids.length;
 $('#stat-sessions').textContent = DATA.sessions.length;
 
 // ── Tabs + Keyboard ─────────────────────────────────────────
-const TAB_VIEWS = ['timeline','swimlane','dag','graph','tracelog','metrics'];
+const TAB_VIEWS = ['overview','timeline','swimlane','dag','graph','tracelog','metrics'];
 function switchTab(name) {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view===name));
   $$('.view').forEach(v => v.classList.toggle('active', v.id==='view-'+name));
+  if (name==='overview') renderOverview();
   if (name==='swimlane') renderSwimlane();
   if (name==='dag') renderDAG();
   if (name==='graph') renderGraph();
@@ -760,7 +889,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.vi
 document.addEventListener('keydown', e => {
   if (e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
   const n = parseInt(e.key);
-  if (n >= 1 && n <= 6) { e.preventDefault(); switchTab(TAB_VIEWS[n-1]); }
+  if (n >= 0 && n <= 6) { e.preventDefault(); switchTab(TAB_VIEWS[n]); }
   if (e.key === 'Escape') closeDrawer();
 });
 
@@ -992,6 +1121,16 @@ function renderSwimlane() {
       const dispatch = positions.slice(Math.max(0,i-3), i).reverse().find(pp => pp.item.type.includes('dispatch') || pp.item.type.includes('routed'));
       if (dispatch && dispatch.ci !== p.ci) svgLines += svgArrow(dispatch.x, dispatch.y, p.x, p.y, agentColor(dispatch.item.agent));
     }
+
+    // HANDOFF→agent — arrow from sender to receiver
+    if (item.type.startsWith('HANDOFF')) {
+      const target = item.type.match(/HANDOFF\u2192(.+)/);
+      if (target) {
+        const tgtName = target[1].trim();
+        const tgtPos = positions.find((pp, j) => j > i && j <= i+4 && pp.item.agent.includes(tgtName));
+        if (tgtPos) svgLines += svgArrow(p.x, p.y, tgtPos.x, tgtPos.y, '#f778ba');
+      }
+    }
   }
 
   const svgHtml = `<svg class="sl-svg" width="${totalW}" height="${totalH}">${svgLines}</svg>`;
@@ -1125,62 +1264,193 @@ function renderGraph() {
     if (!allAgents.has(r.from_agent)) allAgents.set(r.from_agent, {id:r.from_agent,persona:'',capabilities:[],metrics:{}});
     if (!allAgents.has(r.to_agent)) allAgents.set(r.to_agent, {id:r.to_agent,persona:'',capabilities:[],metrics:{}});
   });
-  // Add agents from traces not in graph
   DATA.agent_ids.forEach(id => { if (!allAgents.has(id)) allAgents.set(id, {id,persona:'',capabilities:[],metrics:{}}); });
 
   const agentList = [...allAgents.values()];
 
   if (!agentList.length) {
     ctx.fillStyle='#8b949e'; ctx.font='14px system-ui'; ctx.textAlign='center';
-    ctx.fillText('Aucun agent détecté', W/2, H/2);
+    ctx.fillText('Aucun agent d\u00e9tect\u00e9', W/2, H/2);
     return;
   }
 
-  // Position in circle
-  const cx=W/2, cy=H/2, radius=Math.min(W,H)/2-70;
-  const positions = new Map();
-  agentList.forEach((a,i) => {
+  // Force-directed layout with drag support
+  const nodes = agentList.map((a, i) => {
     const angle = (2*Math.PI*i)/agentList.length - Math.PI/2;
-    positions.set(a.id, {x:cx+radius*Math.cos(angle), y:cy+radius*Math.sin(angle)});
+    const r = Math.min(W,H)/2 - 80;
+    return {id:a.id, data:a, x:W/2+r*Math.cos(angle), y:H/2+r*Math.sin(angle), vx:0, vy:0, fx:null, fy:null};
   });
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
-  // Draw edges
+  const edges = DATA.relationships.map(r => ({source:nodeMap.get(r.from_agent), target:nodeMap.get(r.to_agent), rel:r})).filter(e => e.source && e.target);
+
   const typeColors = {collaboration:'#3fb950',validation:'#bc8cff',delegation:'#39d2c0',challenge:'#f0883e'};
-  DATA.relationships.forEach(r => {
-    const from=positions.get(r.from_agent), to=positions.get(r.to_agent);
-    if (!from||!to) return;
-    ctx.beginPath(); ctx.moveTo(from.x,from.y); ctx.lineTo(to.x,to.y);
-    ctx.strokeStyle = typeColors[r.type]||'#30363d';
-    ctx.globalAlpha = Math.max(.15, r.strength);
-    ctx.lineWidth = 1 + r.strength*3;
-    ctx.stroke(); ctx.globalAlpha=1;
-    const mx=(from.x+to.x)/2, my=(from.y+to.y)/2;
-    ctx.fillStyle='#8b949e'; ctx.font='9px system-ui'; ctx.textAlign='center';
-    ctx.fillText(`${r.type} (${r.interactions})`, mx, my-3);
-    if (r.avg_trust) ctx.fillText(`trust:${r.avg_trust}`, mx, my+9);
-  });
 
-  // Draw nodes
-  agentList.forEach(a => {
-    const pos=positions.get(a.id); if (!pos) return;
-    const color = agentColor(a.id);
-    ctx.beginPath(); ctx.arc(pos.x,pos.y,26,0,2*Math.PI);
-    ctx.fillStyle='#161b22'; ctx.fill();
-    ctx.strokeStyle=color; ctx.lineWidth=3; ctx.stroke();
-    ctx.fillStyle=color; ctx.font='bold 11px system-ui'; ctx.textAlign='center';
-    ctx.fillText(a.id, pos.x, pos.y-34);
-    if (a.persona) { ctx.fillStyle='#8b949e'; ctx.font='10px system-ui'; ctx.fillText(a.persona, pos.x, pos.y-22); }
-    ctx.fillStyle=color; ctx.font='bold 13px system-ui';
-    ctx.fillText((a.persona||a.id).substring(0,2).toUpperCase(), pos.x, pos.y+4);
-    if (a.metrics && a.metrics.avg_trust_score) {
-      const ts=a.metrics.avg_trust_score;
-      ctx.fillStyle = ts>=90?'#3fb950':ts>=70?'#d29922':'#f85149';
-      ctx.font='10px system-ui'; ctx.fillText(`⭐${ts}`, pos.x, pos.y+44);
+  // Force simulation parameters
+  const REPULSION = 4000, ATTRACTION = 0.008, DAMPING = 0.85, CENTER_PULL = 0.01;
+  let simRunning = true, simSteps = 0;
+
+  function simulate() {
+    // Coulomb repulsion between all nodes
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i+1; j < nodes.length; j++) {
+        let dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const force = REPULSION / (dist * dist);
+        const fx = (dx/dist)*force, fy = (dy/dist)*force;
+        nodes[i].vx -= fx; nodes[i].vy -= fy;
+        nodes[j].vx += fx; nodes[j].vy += fy;
+      }
     }
+    // Hooke attraction along edges
+    edges.forEach(e => {
+      const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      const ideal = 120 + (1 - e.rel.strength) * 80;
+      const force = (dist - ideal) * ATTRACTION * (0.5 + e.rel.strength);
+      const fx = (dx/dist)*force, fy = (dy/dist)*force;
+      e.source.vx += fx; e.source.vy += fy;
+      e.target.vx -= fx; e.target.vy -= fy;
+    });
+    // Center pull
+    nodes.forEach(n => {
+      n.vx += (W/2 - n.x) * CENTER_PULL;
+      n.vy += (H/2 - n.y) * CENTER_PULL;
+    });
+    // Apply velocity
+    nodes.forEach(n => {
+      if (n.fx !== null) { n.x = n.fx; n.y = n.fy; n.vx = 0; n.vy = 0; return; }
+      n.vx *= DAMPING; n.vy *= DAMPING;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(40, Math.min(W-40, n.x));
+      n.y = Math.max(40, Math.min(H-40, n.y));
+    });
+  }
+
+  let highlightNode = null;
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw edges
+    edges.forEach(e => {
+      const from = e.source, to = e.target;
+      const isHighlighted = highlightNode && (from.id === highlightNode || to.id === highlightNode);
+      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y);
+      ctx.strokeStyle = typeColors[e.rel.type] || '#30363d';
+      ctx.globalAlpha = isHighlighted ? 0.9 : Math.max(.12, e.rel.strength * 0.5);
+      ctx.lineWidth = isHighlighted ? 2 + e.rel.strength*4 : 1 + e.rel.strength*2;
+      ctx.stroke(); ctx.globalAlpha = 1;
+
+      // Edge label
+      if (isHighlighted || edges.length < 12) {
+        const mx = (from.x+to.x)/2, my = (from.y+to.y)/2;
+        ctx.fillStyle = isHighlighted ? '#c9d1d9' : '#8b949e';
+        ctx.font = isHighlighted ? 'bold 10px system-ui' : '9px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.rel.type + ' (' + e.rel.interactions + ')', mx, my - 4);
+        if (e.rel.avg_trust) ctx.fillText('trust:' + e.rel.avg_trust, mx, my + 9);
+      }
+
+      // Draw arrow
+      const angle = Math.atan2(to.y-from.y, to.x-from.x);
+      const arrX = to.x - 30*Math.cos(angle), arrY = to.y - 30*Math.sin(angle);
+      ctx.beginPath();
+      ctx.moveTo(arrX + 8*Math.cos(angle), arrY + 8*Math.sin(angle));
+      ctx.lineTo(arrX - 5*Math.cos(angle-0.5), arrY - 5*Math.sin(angle-0.5));
+      ctx.lineTo(arrX - 5*Math.cos(angle+0.5), arrY - 5*Math.sin(angle+0.5));
+      ctx.closePath();
+      ctx.fillStyle = typeColors[e.rel.type] || '#30363d';
+      ctx.globalAlpha = isHighlighted ? 0.8 : 0.4;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw nodes
+    nodes.forEach(n => {
+      const a = n.data;
+      const color = agentColor(a.id);
+      const isHL = highlightNode === a.id;
+      const connected = highlightNode && edges.some(e => (e.source.id===a.id||e.target.id===a.id) && (e.source.id===highlightNode||e.target.id===highlightNode));
+      const dim = highlightNode && !isHL && !connected;
+
+      // Glow effect for highlighted node
+      if (isHL) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, 38, 0, 2*Math.PI);
+        const glow = ctx.createRadialGradient(n.x, n.y, 26, n.x, n.y, 38);
+        glow.addColorStop(0, color + '40'); glow.addColorStop(1, color + '00');
+        ctx.fillStyle = glow; ctx.fill();
+      }
+
+      // Node circle
+      ctx.globalAlpha = dim ? 0.25 : 1;
+      ctx.beginPath(); ctx.arc(n.x, n.y, isHL ? 30 : 26, 0, 2*Math.PI);
+      ctx.fillStyle = '#161b22'; ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = isHL ? 4 : 2.5; ctx.stroke();
+
+      // Label
+      ctx.fillStyle = color; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(a.id, n.x, n.y - 36);
+      if (a.persona) { ctx.fillStyle = dim ? '#555' : '#8b949e'; ctx.font = '10px system-ui'; ctx.fillText(a.persona, n.x, n.y - 24); }
+
+      // Initials
+      ctx.fillStyle = color; ctx.font = 'bold 14px system-ui';
+      ctx.fillText((a.persona||a.id).substring(0,2).toUpperCase(), n.x, n.y + 5);
+
+      // Trust badge
+      if (a.metrics && a.metrics.avg_trust_score) {
+        const ts = a.metrics.avg_trust_score;
+        ctx.fillStyle = ts>=90?'#3fb950':ts>=70?'#d29922':'#f85149';
+        ctx.font = 'bold 10px system-ui'; ctx.fillText('\u2b50'+ts, n.x, n.y + 46);
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // Animation loop
+  function tick() {
+    if (!simRunning) return;
+    simulate();
+    draw();
+    simSteps++;
+    if (simSteps < 200) requestAnimationFrame(tick);
+    else { simRunning = false; draw(); }
+  }
+  tick();
+
+  // Drag support
+  let dragNode = null;
+  cv.addEventListener('mousedown', e => {
+    const rect = cv.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    dragNode = nodes.find(n => Math.hypot(n.x-mx, n.y-my) < 30);
+    if (dragNode) { dragNode.fx = mx; dragNode.fy = my; cv.style.cursor = 'grabbing'; }
+  });
+  cv.addEventListener('mousemove', e => {
+    const rect = cv.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (dragNode) {
+      dragNode.fx = mx; dragNode.fy = my;
+      dragNode.x = mx; dragNode.y = my;
+      draw();
+    } else {
+      const hover = nodes.find(n => Math.hypot(n.x-mx, n.y-my) < 30);
+      const newHL = hover ? hover.id : null;
+      if (newHL !== highlightNode) { highlightNode = newHL; draw(); }
+      cv.style.cursor = hover ? 'grab' : 'default';
+    }
+  });
+  cv.addEventListener('mouseup', () => {
+    if (dragNode) { dragNode.fx = null; dragNode.fy = null; dragNode = null; cv.style.cursor = 'default'; if (!simRunning) { simRunning = true; simSteps = 150; tick(); } }
+  });
+  cv.addEventListener('mouseleave', () => {
+    if (dragNode) { dragNode.fx = null; dragNode.fy = null; dragNode = null; }
+    if (highlightNode) { highlightNode = null; draw(); }
+    cv.style.cursor = 'default';
   });
 
   // Legend
-  $('#graph-legend').innerHTML = Object.entries(typeColors).map(([k,v]) => `<span class="item"><span class="dot" style="background:${v}"></span>${k}</span>`).join('');
+  $('#graph-legend').innerHTML = Object.entries(typeColors).map(([k,v]) => `<span class="item"><span class="dot" style="background:${v}"></span>${k}</span>`).join('') + ' <span class="item" style="margin-left:12px;color:var(--fg2)">&#128073; Drag nodes \u2014 hover to highlight</span>';
 
   // Sidebar: Agent cards
   const sidebar = $('#graph-sidebar');
@@ -1309,6 +1579,214 @@ function renderMetrics() {
   chartsDiv.innerHTML = chartsHtml;
 }
 
+// ══════════════════════════════════════════════════════════════
+// OVERVIEW — High-level Dashboard
+// ══════════════════════════════════════════════════════════════
+function renderOverview() {
+  const grid = $('#ov-grid');
+  const cards = [];
+
+  // KPI Cards
+  cards.push({icon:'&#128209;',label:'Traces',value:DATA.traces.length,cls:DATA.traces.length>0?'good':'',sub:'BMAD_TRACE.md'});
+  cards.push({icon:'&#9889;',label:'\u00c9v\u00e9nements',value:DATA.events.length,cls:DATA.events.length>0?'good':'',sub:'.event-log.jsonl'});
+  cards.push({icon:'&#129302;',label:'Agents',value:DATA.agents.length||DATA.agent_ids.length,cls:DATA.agent_ids.length>3?'good':'warn',sub:DATA.agent_ids.length+' uniques'});
+  cards.push({icon:'&#128218;',label:'Sessions',value:DATA.sessions.length,cls:'',sub:'Contextes de travail'});
+
+  const decisions = DATA.traces.filter(t => t.event_type === 'DECISION');
+  cards.push({icon:'&#128161;',label:'D\u00e9cisions',value:decisions.length,cls:decisions.length>0?'good':'',sub:'Choix techniques'});
+
+  const hup = DATA.traces.filter(t => t.event_type.startsWith('HUP:'));
+  const hupEsc = hup.filter(t => t.event_type.includes('escalation'));
+  cards.push({icon:'&#128737;',label:'HUP Checks',value:hup.length,cls:hupEsc.length===0?'good':'warn',sub:hupEsc.length+' escalations'});
+
+  const trusts = DATA.agents.filter(a => a.metrics && a.metrics.avg_trust_score).map(a => a.metrics.avg_trust_score);
+  const avgTrust = trusts.length ? Math.round(trusts.reduce((a,b)=>a+b,0)/trusts.length) : 0;
+  cards.push({icon:'&#128170;',label:'Trust Moyen',value:avgTrust||'\u2014',cls:avgTrust>=85?'good':avgTrust>=70?'warn':avgTrust>0?'bad':'',sub:trusts.length?trusts.length+' agents':'Pas de donn\u00e9es ARG'});
+
+  const cvtl = DATA.traces.filter(t => t.event_type.startsWith('CVTL:'));
+  cards.push({icon:'&#9989;',label:'Cross-Valid.',value:cvtl.length,cls:cvtl.length>0?'good':'',sub:'CVTL checks'});
+
+  grid.innerHTML = cards.map(c => `<div class="ov-card ${c.cls}"><div class="ov-icon">${c.icon}</div><div class="ov-label">${esc(c.label)}</div><div class="ov-value">${esc(String(c.value))}</div><div class="ov-sub">${esc(c.sub)}</div></div>`).join('');
+
+  // Activity sparkbar per session
+  const actDiv = $('#ov-activity');
+  if (DATA.sessions.length) {
+    let html = '';
+    DATA.sessions.forEach(sid => {
+      const evts = DATA.traces.filter(t => t.session === sid);
+      // Build time slots (group by minute)
+      const slots = {};
+      evts.forEach(e => { const k = (e.timestamp||'').substring(0,16); slots[k] = (slots[k]||0)+1; });
+      const slotKeys = Object.keys(slots).sort();
+      const maxSlot = Math.max(...Object.values(slots), 1);
+      const bars = slotKeys.map(k => `<div class="bar" style="height:${(slots[k]/maxSlot)*100}%" title="${k}: ${slots[k]} events"></div>`).join('');
+      html += `<div style="margin-bottom:12px"><div style="font-size:.78rem;font-weight:600;color:var(--accent);margin-bottom:4px">${esc(sid)} <span style="color:var(--fg2);font-weight:400">(${evts.length} traces)</span></div><div class="sparkbar">${bars||'<span style="color:var(--fg2);font-size:.75rem">Pas de donn\u00e9es temporelles</span>'}</div></div>`;
+    });
+    actDiv.innerHTML = html;
+  } else {
+    actDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucune session d\u00e9tect\u00e9e</div>';
+  }
+
+  // Agent workload
+  const wlDiv = $('#ov-workload');
+  const agActivity = {};
+  DATA.traces.forEach(t => { const k = t.agent.split('/')[0]; agActivity[k] = (agActivity[k]||0)+1; });
+  const sortedAg = Object.entries(agActivity).sort((a,b)=>b[1]-a[1]);
+  const maxAg = sortedAg[0]?sortedAg[0][1]:1;
+  if (sortedAg.length) {
+    wlDiv.innerHTML = sortedAg.map(([ag,cnt]) => {
+      const pct = (cnt/maxAg)*100;
+      const color = agentColor(ag);
+      const trust = (DATA.agents.find(a=>a.id===ag)||{}).metrics;
+      const ts = trust && trust.avg_trust_score ? trust.avg_trust_score : '';
+      return `<div class="ov-work-row"><span class="wl-name" style="color:${color}">${esc(ag)}</span><span class="wl-bar"><span class="wl-fill" style="width:${pct}%;background:${color}">${cnt}</span></span><span class="wl-score">${ts?'\u2b50'+ts:''}</span></div>`;
+    }).join('');
+  } else {
+    wlDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucune activit\u00e9 agent</div>';
+  }
+
+  // Recent decisions
+  const decDiv = $('#ov-decisions');
+  if (decisions.length) {
+    decDiv.innerHTML = decisions.slice(-10).reverse().map(d => {
+      const time = (d.timestamp||'').replace(/.*T/,'').replace('Z','');
+      const idx = storeItem({ts:d.timestamp,agent:d.agent,type:d.event_type,payload:d.payload,session:d.session});
+      return `<div class="ov-decision" data-item-idx="${idx}"><span class="d-agent" style="color:${agentColor(d.agent)}">${esc(d.agent)}</span> <span class="d-time">${esc(time)}</span><div style="margin-top:3px">${esc(d.payload.substring(0,120))}</div></div>`;
+    }).join('');
+  } else {
+    decDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucune d\u00e9cision enregistr\u00e9e</div>';
+  }
+
+  // Alerts
+  const alertDiv = $('#ov-alerts');
+  const alerts = [];
+  hupEsc.forEach(h => alerts.push({cls:'hup',icon:'&#9888;&#65039;',text:`HUP Escalation: ${h.payload.substring(0,80)}`,ts:h.timestamp}));
+  DATA.traces.filter(t => t.event_type.includes('PCE:')).forEach(p => alerts.push({cls:'info',icon:'&#128172;',text:`D\u00e9bat: ${p.payload.substring(0,80)}`,ts:p.timestamp}));
+  DATA.traces.filter(t => t.payload.toLowerCase().includes('fail') || t.payload.toLowerCase().includes('error')).slice(-5).forEach(f => alerts.push({cls:'error',icon:'&#10060;',text:`${f.agent}: ${f.payload.substring(0,80)}`,ts:f.timestamp}));
+
+  if (alerts.length) {
+    alertDiv.innerHTML = alerts.slice(-8).reverse().map(a => `<div class="ov-alert ${a.cls}">${a.icon} ${esc(a.text)}</div>`).join('');
+  } else {
+    alertDiv.innerHTML = '<div class="ov-alert info">&#9989; Aucune alerte \u2014 tout est nominal</div>';
+  }
+
+  // Handoff chains
+  const hoDiv = $('#ov-handoffs');
+  const handoffs = DATA.traces.filter(t => t.event_type.startsWith('HANDOFF'));
+  if (handoffs.length) {
+    // Build chains
+    const chains = [];
+    let chain = [];
+    handoffs.forEach(h => {
+      const m = h.event_type.match(/HANDOFF\u2192(.+)/);
+      if (m) {
+        if (!chain.length) chain.push(h.agent);
+        chain.push(m[1]);
+      } else {
+        if (chain.length > 1) chains.push([...chain]);
+        chain = [h.agent];
+      }
+    });
+    if (chain.length > 1) chains.push(chain);
+
+    if (chains.length) {
+      hoDiv.innerHTML = chains.map(ch => {
+        const nodes = ch.map(a => `<span class="hc-node" style="border-color:${agentColor(a)};color:${agentColor(a)}">${esc(a)}</span>`);
+        return `<div class="handoff-chain"><div class="hc-flow">${nodes.join('<span class="hc-arrow">\u2192</span>')}</div></div>`;
+      }).join('');
+    } else {
+      hoDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Pas de cha\u00eenes d\u00e9tect\u00e9es</div>';
+    }
+  } else {
+    hoDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucun handoff inter-agents</div>';
+  }
+
+  // Sessions list
+  const sessDiv = $('#ov-sessions');
+  if (DATA.sessions.length) {
+    sessDiv.innerHTML = DATA.sessions.map(sid => {
+      const sTraces = DATA.traces.filter(t => t.session === sid);
+      const agents = [...new Set(sTraces.map(t => t.agent.split('/')[0]))];
+      const types = {};
+      sTraces.forEach(t => { const k = agentKey(t.agent); types[k] = (types[k]||0)+1; });
+      const total = sTraces.length || 1;
+      const segs = Object.entries(types).map(([k,v]) => `<span class="s-seg" style="width:${(v/total)*100}%;background:${AG_COLORS[k]||AG_COLORS.default}"></span>`).join('');
+      return `<div class="ov-sess" onclick="switchTab('swimlane');$('#f-sl-session').value='${esc(sid)}';renderSwimlane()"><span class="s-id">${esc(sid)}</span><span class="s-stats"><span>${sTraces.length} traces</span><span>${agents.length} agents</span></span><span class="s-bar">${segs}</span></div>`;
+    }).join('');
+  } else {
+    sessDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucune session</div>';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// TOOLTIP SYSTEM
+// ══════════════════════════════════════════════════════════════
+(function() {
+  const tt = $('#obs-tooltip');
+  let ttTimer = null;
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-item-idx]');
+    if (!el) return;
+    const item = ITEMS[parseInt(el.dataset.itemIdx)];
+    if (!item) return;
+    clearTimeout(ttTimer);
+    ttTimer = setTimeout(() => {
+      const payload = typeof item.payload === 'object' ? JSON.stringify(item.payload) : (item.payload||'');
+      tt.innerHTML = `<div class="tt-agent" style="color:${agentColor(item.agent)}">${esc(item.agent)}</div><div class="tt-type">${esc(item.type)}</div><div class="tt-payload">${esc(payload.substring(0,180))}${payload.length>180?'\u2026':''}</div>`;
+      const rect = el.getBoundingClientRect();
+      let top = rect.bottom + 6, left = rect.left;
+      if (top + 120 > window.innerHeight) top = rect.top - 80;
+      if (left + 340 > window.innerWidth) left = window.innerWidth - 350;
+      tt.style.top = top + 'px';
+      tt.style.left = Math.max(8, left) + 'px';
+      tt.classList.add('visible');
+    }, 300);
+  });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest('[data-item-idx]');
+    if (el) { clearTimeout(ttTimer); tt.classList.remove('visible'); }
+  });
+  document.addEventListener('click', () => { tt.classList.remove('visible'); });
+})();
+
+// ══════════════════════════════════════════════════════════════
+// GLOBAL SEARCH
+// ══════════════════════════════════════════════════════════════
+(function() {
+  const input = $('#global-q');
+  const results = $('#global-results');
+  let debounce = null;
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      const q = input.value.toLowerCase().trim();
+      if (q.length < 2) { results.classList.remove('open'); return; }
+      const items = getAllItems('');
+      const matches = items.filter(i => `${i.agent} ${i.type} ${i.payload}`.toLowerCase().includes(q)).slice(0, 20);
+      if (!matches.length) { results.innerHTML = '<div class="sr-item" style="color:var(--fg2)">Aucun r\u00e9sultat</div>'; results.classList.add('open'); return; }
+      results.innerHTML = matches.map(m => {
+        const idx = storeItem(m);
+        return `<div class="sr-item" data-item-idx="${idx}"><span class="sr-agent" style="color:${agentColor(m.agent)}">${esc(m.agent)}</span> <span class="sr-type">${esc(m.type)}</span><div style="color:var(--fg2);font-size:.72rem;margin-top:2px">${esc((m.payload||'').substring(0,100))}</div></div>`;
+      }).join('');
+      results.classList.add('open');
+    }, 200);
+  });
+  input.addEventListener('blur', () => { setTimeout(() => results.classList.remove('open'), 200); });
+  input.addEventListener('focus', () => { if (input.value.length >= 2) input.dispatchEvent(new Event('input')); });
+})();
+
+// ══════════════════════════════════════════════════════════════
+// EXPORT BUTTON
+// ══════════════════════════════════════════════════════════════
+$('#btn-export').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(DATA, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'grimoire-observatory-' + new Date().toISOString().substring(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
 // ── Auto-refresh (serve mode) ───────────────────────────────
 (function() {
   let lastMod = null;
@@ -1328,8 +1806,8 @@ function renderMetrics() {
 })();
 
 // ── Initial renders ─────────────────────────────────────────
-// Swimlane is the default tab — only render it once
-renderSwimlane();
+// Overview is the default tab
+renderOverview();
 </script>
 </body>
 </html>
@@ -1343,10 +1821,10 @@ renderSwimlane();
 def cmd_generate(args: argparse.Namespace) -> int:
     """Generate observatory HTML."""
     root = Path(args.project_root).resolve()
-    data = load_all(root)
+    out_dir = _find_output_dir(root)
+    data = load_all(root, out_dir)
     html = generate_html(data)
 
-    out_dir = root / OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / OBSERVATORY_HTML
     out_path.write_text(html, encoding="utf-8")
@@ -1359,19 +1837,20 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     """Generate + serve with auto-reload."""
     root = Path(args.project_root).resolve()
-    out_dir = root / OUTPUT_DIR
+    out_dir = _find_output_dir(root)
     port = args.port
 
     # Initial generate
-    data = load_all(root)
+    data = load_all(root, out_dir)
     html = generate_html(data, auto_refresh=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / OBSERVATORY_HTML
     out_path.write_text(html, encoding="utf-8")
 
     # Watch source files and regenerate on change
+    trace_path = _find_trace(out_dir)
     watch_files = [
-        out_dir / TRACE_FILE,
+        trace_path,
         out_dir / EVENT_LOG_FILE,
         out_dir / AGENT_GRAPH_FILE,
         out_dir / SHARED_STATE_FILE,
@@ -1390,7 +1869,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     last_mtimes[str(f)] = mt
             if changed:
                 try:
-                    new_data = load_all(root)
+                    new_data = load_all(root, out_dir)
                     new_html = generate_html(new_data, auto_refresh=True)
                     out_path.write_text(new_html, encoding="utf-8")
                     print(f"🔄 Regenerated ({len(new_data.traces)} traces, {len(new_data.events)} events)")
@@ -1421,7 +1900,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_export(args: argparse.Namespace) -> int:
     """Export parsed data as JSON."""
     root = Path(args.project_root).resolve()
-    data = load_all(root)
+    out_dir = _find_output_dir(root)
+    data = load_all(root, out_dir)
     print(data_to_json(data))
     return 0
 

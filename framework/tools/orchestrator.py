@@ -46,7 +46,7 @@ from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-ORCHESTRATOR_VERSION = "1.1.0"
+ORCHESTRATOR_VERSION = "1.2.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -223,13 +223,16 @@ class Orchestrator:
         self,
         project_root: Path,
         budget_cap: int = DEFAULT_BUDGET_CAP,
+        auto_resolve_tools: bool = True,
     ):
         self.project_root = project_root
         self.budget_cap = budget_cap
+        self.auto_resolve_tools = auto_resolve_tools
         self.history_dir = project_root / HISTORY_DIR
         self.history_dir.mkdir(parents=True, exist_ok=True)
         self._bus_mod = _load_module("message_bus", "message-bus.py")
         self._worker_mod = _load_module("agent_worker", "agent-worker.py")
+        self._resolver_mod = _load_module("tool_resolver", "tool-resolver.py") if auto_resolve_tools else None
 
     def decide_mode(self, workflow: str, override: str = "") -> tuple[str, str]:
         """
@@ -346,16 +349,47 @@ class Orchestrator:
 
         return result
 
+    def _pre_resolve_tools(self, step: ExecutionStep) -> str:
+        """Résout les outils nécessaires avant l'exécution d'un step.
+
+        Retourne un résumé des outils trouvés ou "" si rien à résoudre.
+        """
+        if not self._resolver_mod or not step.task:
+            return ""
+        try:
+            resolve_fn = getattr(self._resolver_mod, "resolve_intent", None)
+            if not resolve_fn:
+                return ""
+            plan = resolve_fn(step.task, self.project_root)
+            ready = plan.ready_to_use
+            provision = plan.provision_needed
+            if not ready and not provision:
+                return ""
+            parts = []
+            if ready:
+                tool_names = [t.get("name", t.get("provider_id", "?")) for t in ready[:3]]
+                parts.append(f"Tools: {', '.join(tool_names)}")
+            if provision:
+                prov_ids = [p.get("provider_id", "?") for p in provision[:2]]
+                parts.append(f"Need provision: {', '.join(prov_ids)}")
+            return " | ".join(parts)
+        except Exception:
+            return ""
+
     def _execute_step(self, step: ExecutionStep, mode: str) -> ExecutionStep:
         """Exécute un step individuel (commun à sequential et parallel)."""
         step_start = time.monotonic()
         step.status = "running"
 
+        # Pre-resolve tools for this step
+        tool_context = self._pre_resolve_tools(step)
+
         try:
             if mode == "simulated":
-                step.output_summary = (
-                    f"[Simulated] Agent {step.agent} processé via persona switching"
-                )
+                summary = f"[Simulated] Agent {step.agent} processé via persona switching"
+                if tool_context:
+                    summary += f" ({tool_context})"
+                step.output_summary = summary
             else:
                 # Sequential or Parallel: invoke worker if available
                 if self._worker_mod:
@@ -363,10 +397,13 @@ class Orchestrator:
                         mgr_cls = getattr(self._worker_mod, "AgentWorkerManager", None)
                         if mgr_cls:
                             mgr = mgr_cls(self.project_root)
-                            task_result = mgr.execute_task(step.agent, {
+                            task_payload = {
                                 "description": step.task,
                                 "task_id": f"step-{step.step_number}",
-                            })
+                            }
+                            if tool_context:
+                                task_payload["resolved_tools"] = tool_context
+                            task_result = mgr.execute_task(step.agent, task_payload)
                             step.output_summary = str(task_result.output.get("result", ""))
                             step.model = task_result.model_used
                     except Exception as e:

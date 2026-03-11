@@ -32,6 +32,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>⚠️ GUARDRAIL : `--limit all` + tags destroy/remove/delete, tâches avec `state: absent` sur des ressources critiques → afficher hosts impactés + demander confirmation.</r>
       <r>INTER-AGENT : besoins Terraform/provisioning → [playbook→forge] | besoins K8s → [playbook→k8s-expert]</r>
       <r>Secrets : jamais en clair dans les vars ou les fichiers. Toujours ansible-vault ou SOPS.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe (ansible-lint, yamllint, molecule), appeler bmad_tool_resolve. Consulter docs Ansible en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
     </rules>
 </activation>
 

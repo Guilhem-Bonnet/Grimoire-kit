@@ -27,6 +27,22 @@ traits:
     description: "Itération rapide avec feedback"
     rule: "Chaque livrable passe par un cycle : draft → feedback → refine → validate. Ne jamais livrer un V1 sans au moins un cycle de feedback."
     agents_affected: "*"
+  - name: vision-quality-gate
+    description: "Évaluation visuelle automatique via vision-judge"
+    rule: "Tout output visuel (3D render, SVG, illustration) est évalué via vision-judge avant livraison. Score minimum configurable par type. Itérer tant que le seuil n'est pas atteint."
+    agents_affected: [blender-expert, illustration-expert]
+  - name: expert-tool-pipeline
+    description: "Pipeline expert via MCP avec boucle vision"
+    rule: "Les agents experts utilisent la chaîne Expert Tool Chain (ETC) : expertise layer → MCP bridge → vision judge → iteration engine. Jamais d'appel MCP brut sans contexte d'expertise."
+    agents_affected: [blender-expert, illustration-expert]
+  - name: tool-resolve-first
+    description: "Résolution d'outils avant toute opération externe"
+    rule: "Avant toute opération nécessitant un outil externe (MCP, CLI, package), appeler bmad_tool_resolve pour identifier et vérifier les outils disponibles. Ne pas assumer la disponibilité d'un outil sans check."
+    agents_affected: "*"
+  - name: web-aware
+    description: "Accès web intuitif pour recherche et vérification"
+    rule: "Les agents peuvent naviguer le web via bmad_web_fetch / bmad_web_screenshot / bmad_web_readability pour rechercher des références, vérifier des sources, ou capturer des états visuels. Toujours disponible via urllib fallback."
+    agents_affected: "*"
 
 constraints:
   - id: design-tokens-mandatory
@@ -62,6 +78,44 @@ tools_required:
     description: "Template de design tokens (framework/prompt-templates/design-tokens.md)"
     required: true
     check_command: "test -f framework/prompt-templates/design-tokens.md"
+  - name: vision-judge
+    description: "Évaluation visuelle des outputs agents (framework/tools/vision-judge.py)"
+    required: true
+    check_command: "python3 framework/tools/vision-judge.py --version"
+  - name: expert-tool-chain
+    description: "Pipeline expert MCP + vision loop (framework/tools/expert-tool-chain.py)"
+    required: true
+    check_command: "python3 framework/tools/expert-tool-chain.py --version"
+  - name: agent-test
+    description: "Tests comportementaux agents (framework/tools/agent-test.py)"
+    required: false
+    check_command: "python3 framework/tools/agent-test.py --version"
+  - name: agent-watch
+    description: "Monitoring dérive agents (framework/tools/agent-watch.py)"
+    required: false
+    check_command: "python3 framework/tools/agent-watch.py --version"
+  - name: tool-resolver
+    description: "Résolution et provisionnement d'outils (framework/tools/tool-resolver.py)"
+    required: true
+    check_command: "python3 framework/tools/tool-resolver.py --version"
+  - name: web-browser
+    description: "Navigation web sandboxée (framework/tools/web-browser.py)"
+    required: false
+    check_command: "python3 framework/tools/web-browser.py --version"
+
+mcp_servers:
+  - name: blender-mcp
+    description: "Modelisation 3D via Blender en mode background"
+    required_by: [blender-expert]
+    required: false
+  - name: inkscape-mcp
+    description: "Création SVG avancée via Inkscape"
+    required_by: [illustration-expert]
+    required: false
+  - name: vision-provider
+    description: "Évaluation visuelle via LLM multimodal"
+    required_by: [blender-expert, illustration-expert]
+    required: false
 
 team_manifest:
   name: "Creative Team"
@@ -75,8 +129,19 @@ team_manifest:
     - tag: content-creator
       role: "Contenu textuel et visuel, copywriting, illustrations"
       scope: "Textes marketing, descriptions, visuels sociaux"
+    - tag: blender-expert
+      role: "Modélisation 3D — objets, scènes, matériaux, rendu via MCP Blender + vision loop"
+      scope: "Assets 3D, icônes 3D, objets low-poly, rendus, exports glTF/FBX/OBJ"
+    - tag: illustration-expert
+      role: "Illustrations vectorielles et icônes SVG — code pur ou MCP Inkscape + vision loop"
+      scope: "Icônes SVG, sets d'icônes, illustrations vectorielles, optimisation SVG"
   communication_protocol:
     - "[art-director→brand-designer] : briefing identité, validation palette"
     - "[brand-designer→content-creator] : guidelines de marque, tone-of-voice"
     - "[content-creator→art-director] : soumission visuels pour validation"
+    - "[blender-expert→art-director] : validation esthétique des assets 3D"
+    - "[blender-expert→brand-designer] : cohérence brand des éléments 3D"
+    - "[illustration-expert→art-director] : validation des illustrations"
+    - "[illustration-expert→brand-designer] : cohérence du design system icônes"
     - "[*→image-prompt] : génération de prompts pour assets visuels"
+    - "[*→vision-judge] : évaluation visuelle des livrables créatifs"

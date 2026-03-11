@@ -725,6 +725,118 @@ def status() -> BrowserStatus:
     )
 
 
+# ── MCP Interface ────────────────────────────────────────────────────────────
+# Ces fonctions mcp_* sont auto-découvertes par grimoire-mcp-tools.py
+# et exposées comme MCP tools aux agents. C'est ce qui rend le web-browser
+# "intuitivement" accessible : les agents voient ces outils dans leur toolbox.
+
+
+def mcp_web_fetch(
+    url: str,
+    selector: str = "",
+    wait_for: str = "",
+) -> dict:
+    """Récupère le contenu d'une page web en markdown (avec rendu JS si Playwright disponible).
+
+    Utiliser quand un agent a besoin de lire le contenu d'une page web,
+    accéder à une documentation en ligne, ou extraire des informations d'un site.
+
+    Args:
+        url: URL de la page à récupérer (http/https uniquement).
+        selector: Sélecteur CSS optionnel pour extraire une section spécifique.
+        wait_for: Sélecteur à attendre avant extraction (utile pour contenu dynamique JS).
+
+    Returns:
+        {url, title, markdown, links, status_code, method, elapsed_ms}
+    """
+    result = fetch(url, selector=selector, wait_for=wait_for)
+    return result.to_dict()
+
+
+def mcp_web_screenshot(
+    url: str,
+    output_path: str = "",
+    full_page: bool = False,
+) -> dict:
+    """Capture d'écran d'une page web (nécessite Playwright + Chromium).
+
+    Utiliser quand un agent a besoin d'une capture visuelle d'un site web,
+    pour évaluer un rendu UI, ou documenter l'état d'une interface.
+
+    Args:
+        url: URL de la page à capturer.
+        output_path: Chemin de sortie optionnel (défaut: fichier temporaire).
+        full_page: Si True, capture la page entière (scroll inclus).
+
+    Returns:
+        {url, path, width, height, elapsed_ms} ou {error} si échec.
+    """
+    result = take_screenshot(url, output_path=output_path, full_page=full_page)
+    return result.to_dict()
+
+
+def mcp_web_interact(
+    url: str,
+    actions: str = "[]",
+) -> dict:
+    """Exécute une séquence d'actions interactives sur une page web.
+
+    Utiliser quand un agent doit cliquer, remplir un formulaire, naviguer
+    dans une application web, ou extraire du contenu après interaction.
+
+    Actions supportées : click, type, fill, select, hover, scroll, wait,
+    extract, screenshot, evaluate.
+
+    Args:
+        url: URL de départ.
+        actions: JSON array d'actions, ex: '[{"click":"#btn"},{"extract":true}]'
+
+    Returns:
+        {url, steps: [{step, action, ok, ...}], final_url, elapsed_ms}
+    """
+    try:
+        action_list = json.loads(actions)
+    except (json.JSONDecodeError, TypeError):
+        return {"error": f"actions doit être un JSON array valide, reçu: {actions[:100]}"}
+
+    if not isinstance(action_list, list):
+        return {"error": "actions doit être un JSON array"}
+
+    result = interact(url, action_list)
+    return result.to_dict()
+
+
+def mcp_web_readability(
+    url: str,
+) -> dict:
+    """Extrait le contenu principal d'une page web (mode lecture).
+
+    Utiliser quand un agent veut lire un article, une documentation,
+    ou du contenu textuel sans le bruit de navigation/sidebar/footer.
+
+    Args:
+        url: URL de la page à lire.
+
+    Returns:
+        {url, title, markdown, elapsed_ms}
+    """
+    result = readability(url)
+    return result.to_dict()
+
+
+def mcp_web_status() -> dict:
+    """Vérifie si le navigateur web sandboxé est disponible et fonctionnel.
+
+    Utiliser pour diagnostiquer les problèmes de navigation web
+    ou vérifier si Playwright et Chromium sont installés.
+
+    Returns:
+        {playwright_installed, browser_installed, messages, version}
+    """
+    result = status()
+    return result.to_dict()
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _render_text(result: PageContent) -> str:

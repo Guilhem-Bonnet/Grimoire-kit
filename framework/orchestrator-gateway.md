@@ -172,6 +172,11 @@ prompt_enrichment:
 2. **Contraintes explicites** — toujours inclure ce qui NE DOIT PAS être fait
 3. **Historique pertinent** — Q&A et décisions, pas le bavardage
 4. **Directives HUP** — toujours rappeler les règles anti-hallucination
+5. **Détection de livrable documentaire** — Si la tâche produit ou modifie un fichier `.md` (README, architecture, guide, changelog), l'orchestrateur DOIT :
+   - Charger `_grimoire/_memory/tech-writer-sidecar/documentation-standards.md` (ou équivalent projet)
+   - Injecter les conventions dans `project_context.conventions`
+   - Router vers tech-writer (Paige) ou enrichir le prompt du sub-agent actif avec la charte
+   - Vérifier la conformité de l'output avant de le présenter à l'utilisateur
 
 
 ### 4. Route Engine — Routage Intelligent

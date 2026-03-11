@@ -7,9 +7,9 @@
 <p align="center">
   <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.0.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-701+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-3957+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-93-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-105-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
 </p>
 
 <p align="center">
@@ -613,7 +613,7 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 <tr>
 <td>
 
-**1 875+ tests** couvrant l'intégralité du framework :
+**3 957+ tests** couvrant l'intégralité du framework :
 
 ```bash
 # Tous les tests
@@ -638,7 +638,7 @@ bash tests/smoke-test.sh
 | Coordination | 200+ |
 | Intégrations | 180+ |
 | Robustesse (fuzzing) | 38 |
-| **Total** | **1 875+** |
+| **Total** | **3 957+** |
 
 </td>
 </tr>
@@ -713,7 +713,7 @@ grimoire-kit/
 │   └── features/                       # Feature-driven development
 │
 ├── docs/                            # Documentation complète
-├── tests/                           # 1 875+ tests Python + smoke tests Bash
+├── tests/                           # 3 957+ tests Python + smoke tests Bash
 └── src/                             # Package Python installable
 ```
 

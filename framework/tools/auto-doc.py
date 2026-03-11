@@ -32,7 +32,27 @@ _log = logging.getLogger("grimoire.auto_doc")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-AUTODOC_VERSION = "1.0.0"
+AUTODOC_VERSION = "2.0.0"
+
+# Regex for French-formatted numbers: "3 954" or "1 875" (space as thousands sep)
+_RE_FR_NUM = re.compile(r"(\d{1,3}(?:\s\d{3})*)")
+
+
+def _parse_fr_number(s: str) -> int:
+    """Parse a French-formatted number ('3 954' → 3954)."""
+    return int(s.replace(" ", "").replace("\u00a0", ""))
+
+
+def _format_fr_number(n: int) -> str:
+    """Format a number in French style ('3 954')."""
+    s = str(n)
+    if len(s) <= 3:
+        return s
+    parts = []
+    while s:
+        parts.append(s[-3:])
+        s = s[:-3]
+    return " ".join(reversed(parts))
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -78,21 +98,20 @@ def count_tests(project_root: Path) -> tuple[int, int]:
     test_files = sorted(tests_dir.glob("test_*.py"))
     file_count = len(test_files)
 
-    # Run unittest discover to get actual count
+    # Run pytest --collect-only for fast, accurate count (no test execution)
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", "discover",
-             "-s", str(tests_dir), "-p", "test_*.py"],
-            capture_output=True, text=True, timeout=120,
+            [sys.executable, "-m", "pytest", "--collect-only", "-q",
+             str(tests_dir)],
+            capture_output=True, text=True, timeout=30,
             cwd=str(project_root),
         )
-        output = result.stderr + result.stdout
-        match = re.search(r"Ran (\d+) test", output)
+        output = result.stdout + result.stderr
+        match = re.search(r"(\d+)\s+tests?\s+collected", output)
         if match:
             return int(match.group(1)), file_count
     except (subprocess.TimeoutExpired, FileNotFoundError) as _exc:
-        _log.debug("subprocess.TimeoutExpired, FileNotFoundError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
+        _log.debug("pytest collect-only failed, using regex fallback: %s", _exc)
 
     # Fallback: count test methods
     count = 0
@@ -179,14 +198,13 @@ def detect_drifts(project_root: Path) -> DocReport:
 
     readme_lines = readme_text.splitlines()
 
-    # 1. Test count drift
+    # 1. Test count drift (handles French formatting: "3 954+ tests")
     actual_tests, actual_files = count_tests(project_root)
     if actual_tests > 0:
-        # Find test count mentions in README
         for i, line in enumerate(readme_lines, 1):
-            match = re.search(r"(\d+)\+?\s*tests", line, re.IGNORECASE)
+            match = re.search(r"(\d{1,3}(?:\s\d{3})*)\+?\s*tests", line, re.IGNORECASE)
             if match:
-                stated = int(match.group(1))
+                stated = _parse_fr_number(match.group(1))
                 if stated != actual_tests:
                     report.drifts.append(DriftItem(
                         section="Test count",
@@ -194,10 +212,9 @@ def detect_drifts(project_root: Path) -> DocReport:
                         expected=f"{actual_tests} tests",
                         line=i,
                     ))
-            # File count
-            match2 = re.search(r"(\d+)\s*fichiers?,?\s*(\d+)\s*tests", line, re.IGNORECASE)
+            match2 = re.search(r"(\d{1,3}(?:\s\d{3})*)\s*fichiers?,?\s*(\d{1,3}(?:\s\d{3})*)\s*tests", line, re.IGNORECASE)
             if match2:
-                stated_files = int(match2.group(1))
+                stated_files = _parse_fr_number(match2.group(1))
                 if stated_files != actual_files:
                     report.drifts.append(DriftItem(
                         section="Test file count",
@@ -206,41 +223,91 @@ def detect_drifts(project_root: Path) -> DocReport:
                         line=i,
                     ))
 
-    # 2. Test table drift
+    # 2. Detect table format: per-file (| `test_X.py` |) vs category (| Catégorie |)
+    has_per_file_table = any(
+        re.search(r"\|\s*`?test_\w+\.py`?\s*\|", line)
+        for line in readme_lines
+    )
+
+    # 3. Per-file table drift (only if that format exists in README)
     tests_per_file = count_tests_per_file(project_root)
-    for i, line in enumerate(readme_lines, 1):
-        match = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|.*?\|\s*(\d+)\s*\|", line)
-        if match:
-            fname = match.group(1)
-            stated = int(match.group(2))
-            actual = tests_per_file.get(fname)
-            if actual is not None and actual != stated:
+    if has_per_file_table:
+        for i, line in enumerate(readme_lines, 1):
+            match = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|.*?\|\s*(\d+)\s*\|", line)
+            if match:
+                fname = match.group(1)
+                stated = int(match.group(2))
+                actual = tests_per_file.get(fname)
+                if actual is not None and actual != stated:
+                    report.drifts.append(DriftItem(
+                        section=f"Test table: {fname}",
+                        current=f"{stated}",
+                        expected=f"{actual}",
+                        line=i,
+                    ))
+
+        # Missing test files (only for per-file format)
+        table_files = set()
+        for line in readme_lines:
+            match = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|", line)
+            if match:
+                table_files.add(match.group(1))
+
+        for fname in tests_per_file:
+            if fname not in table_files:
                 report.drifts.append(DriftItem(
-                    section=f"Test table: {fname}",
-                    current=f"{stated}",
-                    expected=f"{actual}",
+                    section="Test table: missing entry",
+                    current="(absent)",
+                    expected=f"{fname} | {get_tool_for_test(fname)} | {tests_per_file[fname]}",
+                    line=0,
+                    auto_fixable=True,
+                ))
+
+    # 4. Category table Total drift (| **Total** | **N+** |)
+    for i, line in enumerate(readme_lines, 1):
+        match = re.search(
+            r"\|\s*\*\*Total\*\*\s*\|\s*\*\*(\d{1,3}(?:\s\d{3})*)\+?\*\*\s*\|",
+            line,
+        )
+        if match:
+            stated = _parse_fr_number(match.group(1))
+            if stated != actual_tests:
+                report.drifts.append(DriftItem(
+                    section="Category table: Total",
+                    current=f"{_format_fr_number(stated)}+",
+                    expected=f"{_format_fr_number(actual_tests)}+",
                     line=i,
                 ))
 
-    # 3. Missing test files in table
-    table_files = set()
-    for line in readme_lines:
-        match = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|", line)
-        if match:
-            table_files.add(match.group(1))
-
-    for fname in tests_per_file:
-        if fname not in table_files:
-            report.drifts.append(DriftItem(
-                section="Test table: missing entry",
-                current="(absent)",
-                expected=f"{fname} | {get_tool_for_test(fname)} | {tests_per_file[fname]}",
-                line=0,
-                auto_fixable=True,
-            ))
-
-    # 4. Tools mentioned in README
+    # 5. Badge drift (shields.io badges in header)
     tools = list_tools(project_root)
+    tool_count = len(tools)
+
+    for i, line in enumerate(readme_lines, 1):
+        # Test badge: tests-NNN+
+        badge_match = re.search(r"badge/tests-(\d+)\+?-", line)
+        if badge_match:
+            stated = int(badge_match.group(1))
+            if stated != actual_tests:
+                report.drifts.append(DriftItem(
+                    section="Badge: test count",
+                    current=f"tests-{stated}+",
+                    expected=f"tests-{actual_tests}+",
+                    line=i,
+                ))
+        # Tools badge: tools-NNN
+        tools_badge = re.search(r"badge/tools-(\d+)-", line)
+        if tools_badge:
+            stated = int(tools_badge.group(1))
+            if stated != tool_count:
+                report.drifts.append(DriftItem(
+                    section="Badge: tool count",
+                    current=f"tools-{stated}",
+                    expected=f"tools-{tool_count}",
+                    line=i,
+                ))
+
+    # 6. Tools mentioned in README
     readme_lower = readme_text.lower()
     for tool in tools:
         # Check if tool is mentioned anywhere in README
@@ -262,6 +329,12 @@ def detect_drifts(project_root: Path) -> DocReport:
 def sync_readme(project_root: Path) -> tuple[DocReport, int]:
     """Synchronise le README avec l'état réel du code.
 
+    Respecte le format existant du README :
+    - Table par catégorie → met à jour le Total uniquement
+    - Table par fichier   → met à jour chaque ligne + ajoute les manquants
+    - Badges shields.io   → met à jour les compteurs
+    - Nombres français    → préserve le format "3 954"
+
     Returns:
         (report, changes_made)
     """
@@ -279,80 +352,136 @@ def sync_readme(project_root: Path) -> tuple[DocReport, int]:
     changes = 0
     actual_tests, actual_files = count_tests(project_root)
     tests_per_file = count_tests_per_file(project_root)
+    tool_count = len(list_tools(project_root))
 
-    # Fix test count mentions
-    def _fix_test_count(m: re.Match) -> str:
+    # Detect table format
+    has_per_file_table = bool(
+        re.search(r"\|\s*`?test_\w+\.py`?\s*\|", text)
+    )
+
+    # ── 1. Badges (shields.io) ────────────────────────────────────────
+    def _fix_test_badge(m: re.Match) -> str:
         nonlocal changes
         stated = int(m.group(1))
         if stated != actual_tests:
             changes += 1
-            return m.group(0).replace(m.group(1), str(actual_tests))
+            return m.group(0).replace(f"tests-{stated}", f"tests-{actual_tests}")
         return m.group(0)
 
-    text = re.sub(r"(\d+)\+?\s*tests\)", _fix_test_count, text)
-    text = re.sub(r"(\d+)\+?\s*tests\b", _fix_test_count, text)
+    text = re.sub(r"badge/tests-(\d+)\+?-", _fix_test_badge, text)
 
-    # Fix file count in combined pattern "N fichiers, M tests"
-    def _fix_file_count(m: re.Match) -> str:
+    def _fix_tools_badge(m: re.Match) -> str:
         nonlocal changes
         stated = int(m.group(1))
-        if stated != actual_files:
+        if stated != tool_count:
             changes += 1
-            return m.group(0).replace(m.group(1), str(actual_files), 1)
+            return m.group(0).replace(f"tools-{stated}", f"tools-{tool_count}")
         return m.group(0)
 
-    text = re.sub(r"(\d+)\s*fichiers?,?\s*\d+\s*tests",
-                  _fix_file_count, text)
+    text = re.sub(r"badge/tools-(\d+)-", _fix_tools_badge, text)
 
-    # Fix individual test counts in table
-    def _fix_table_row(m: re.Match) -> str:
+    # ── 2. Inline test counts ("3 954+ tests") ───────────────────────
+    _fr_test_re = re.compile(r"(\d{1,3}(?:\s\d{3})*)\+?\s*tests")
+
+    def _fix_test_count(m: re.Match) -> str:
         nonlocal changes
-        fname = m.group(1)
-        stated = int(m.group(2))
-        actual = tests_per_file.get(fname, stated)
-        if actual != stated:
+        stated = _parse_fr_number(m.group(1))
+        if stated != actual_tests:
             changes += 1
-            return m.group(0).replace(str(stated), str(actual))
+            formatted = _format_fr_number(actual_tests)
+            return m.group(0).replace(m.group(1), formatted)
+        return m.group(0)
+
+    text = _fr_test_re.sub(_fix_test_count, text)
+
+    # ── 3. File count pattern ("N fichiers, M tests") ────────────────
+    def _fix_file_count(m: re.Match) -> str:
+        nonlocal changes
+        stated = _parse_fr_number(m.group(1))
+        if stated != actual_files:
+            changes += 1
+            return m.group(0).replace(m.group(1), _format_fr_number(actual_files), 1)
         return m.group(0)
 
     text = re.sub(
-        r"\|\s*`?(test_\w+\.py)`?\s*\|.*?\|\s*(\d+)\s*\|",
-        _fix_table_row, text,
+        r"(\d{1,3}(?:\s\d{3})*)\s*fichiers?,?\s*\d{1,3}(?:\s\d{3})*\s*tests",
+        _fix_file_count, text,
     )
 
-    # Add missing test files to table
-    # Find the last row of the test table
-    lines = text.splitlines()
-    table_end_idx = None
-    for i, line in enumerate(lines):
-        if re.search(r"\|\s*`?test_\w+\.py`?\s*\|", line):
-            table_end_idx = i
+    # ── 4. Category table Total (| **Total** | **N+** |) ─────────────
+    def _fix_category_total(m: re.Match) -> str:
+        nonlocal changes
+        stated = _parse_fr_number(m.group(1))
+        if stated != actual_tests:
+            changes += 1
+            formatted = _format_fr_number(actual_tests)
+            return m.group(0).replace(m.group(1), formatted)
+        return m.group(0)
 
-    if table_end_idx is not None:
-        table_files = set()
-        for line in lines:
-            m = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|", line)
-            if m:
-                table_files.add(m.group(1))
+    text = re.sub(
+        r"(\|\s*\*\*Total\*\*\s*\|\s*\*\*)(\d{1,3}(?:\s\d{3})*)\+?(\*\*\s*\|)",
+        lambda m: _fix_category_total_inner(m, actual_tests),
+        text,
+    )
 
-        new_rows = []
-        for fname in sorted(tests_per_file):
-            if fname not in table_files:
-                tool_name = get_tool_for_test(fname)
-                new_rows.append(
-                    f"| `{fname}` | {tool_name} | {tests_per_file[fname]} |"
-                )
+    # ── 5. Per-file table (only if format exists) ─────────────────────
+    if has_per_file_table:
+        def _fix_table_row(m: re.Match) -> str:
+            nonlocal changes
+            fname = m.group(1)
+            stated = int(m.group(2))
+            actual = tests_per_file.get(fname, stated)
+            if actual != stated:
                 changes += 1
+                return m.group(0).replace(str(stated), str(actual))
+            return m.group(0)
 
-        if new_rows:
-            for j, row in enumerate(new_rows):
-                lines.insert(table_end_idx + 1 + j, row)
-            text = "\n".join(lines)
+        text = re.sub(
+            r"\|\s*`?(test_\w+\.py)`?\s*\|.*?\|\s*(\d+)\s*\|",
+            _fix_table_row, text,
+        )
+
+        # Add missing test files to per-file table
+        lines = text.splitlines()
+        table_end_idx = None
+        for i, line in enumerate(lines):
+            if re.search(r"\|\s*`?test_\w+\.py`?\s*\|", line):
+                table_end_idx = i
+
+        if table_end_idx is not None:
+            table_files = set()
+            for line in lines:
+                m = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|", line)
+                if m:
+                    table_files.add(m.group(1))
+
+            new_rows = []
+            for fname in sorted(tests_per_file):
+                if fname not in table_files:
+                    tool_name = get_tool_for_test(fname)
+                    new_rows.append(
+                        f"| `{fname}` | {tool_name} | {tests_per_file[fname]} |"
+                    )
+                    changes += 1
+
+            if new_rows:
+                for j, row in enumerate(new_rows):
+                    lines.insert(table_end_idx + 1 + j, row)
+                text = "\n".join(lines)
 
     if changes > 0:
         readme_path.write_text(text, encoding="utf-8")
 
     return report, changes
+
+
+def _fix_category_total_inner(m: re.Match, actual_tests: int) -> str:
+    """Fix the Total row in category table."""
+    stated = _parse_fr_number(m.group(2))
+    if stated != actual_tests:
+        formatted = _format_fr_number(actual_tests)
+        return f"{m.group(1)}{formatted}+{m.group(3)}"
+    return m.group(0)
 
 
 # ── Rendu ─────────────────────────────────────────────────────────────────────

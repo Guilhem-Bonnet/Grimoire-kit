@@ -27,6 +27,14 @@ traits:
     description: "Accessibilité WCAG 2.1 AA minimum"
     rule: "Zéro composant UI sans aria-labels. Contraste ≥ 4.5:1. Navigation clavier fonctionnelle."
     agents_affected: [frontend-specialist, pixel]
+  - name: tool-resolve-first
+    description: "Résolution d'outils avant toute opération externe"
+    rule: "Avant toute opération nécessitant un outil externe (linter, test runner, build, browser), appeler bmad_tool_resolve pour vérifier disponibilité et alternatives."
+    agents_affected: "*"
+  - name: web-aware
+    description: "Accès web intuitif pour vérification et debug"
+    rule: "Les agents peuvent naviguer le web via bmad_web_fetch / bmad_web_screenshot / bmad_web_readability pour checker des endpoints, vérifier l'UI ou consulter des docs. Toujours disponible via urllib fallback."
+    agents_affected: [frontend-specialist, fullstack-dev]
 
 constraints:
   - id: no-console-log-in-prod
@@ -66,6 +74,14 @@ tools_required:
     description: "Navigateur headless pour les tests E2E (Playwright/Cypress)"
     required: false
     check_command: "which chromium || which google-chrome || which chromium-browser"
+  - name: tool-resolver
+    description: "Résolution et provisionnement d'outils (framework/tools/tool-resolver.py)"
+    required: true
+    check_command: "python3 framework/tools/tool-resolver.py --version"
+  - name: web-browser
+    description: "Navigation web sandboxée (framework/tools/web-browser.py)"
+    required: false
+    check_command: "python3 framework/tools/web-browser.py --version"
 
 acceptance_criteria:
   - id: tests-written-before-code

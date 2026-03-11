@@ -198,6 +198,7 @@ on_escalation:
 8. **Dispatch via AMN** — les tâches sont dispatchées via le mesh (BM-55), avec discovery et load balancing
 9. **Assignation via ARG** — l'agent optimal est sélectionné par le graphe relationnel (BM-57)
 10. **Events ELSS émis** — chaque spawn, completion, et failure émet un événement dans l'event bus (BM-59)
+11. **Tool Resolution pré-step** — l'orchestrateur (v1.2+) appelle `tool-resolver.py resolve` automatiquement avant chaque step pour identifier et vérifier les outils nécessaires. Les outils résolus sont injectés dans le contexte du sub-agent via `resolved_tools`.
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
