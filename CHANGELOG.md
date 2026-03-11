@@ -5,6 +5,35 @@ Toutes les modifications notables de ce projet sont documentées dans ce fichier
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [3.1.0] — 2026-03-11
+
+### User Config Sync + HPE Parallel Execution + Architecture Doc
+
+#### Ajouté
+
+- **`grimoire setup`** — Nouvelle commande CLI pour synchroniser la configuration utilisateur
+  (nom, langue, niveau) depuis `project-context.yaml` vers tous les fichiers BMAD.
+  Modes : `--sync`, `--check` (CI-friendly), `--json`, overrides CLI (`--user`, `--lang`, `--skill-level`)
+- **`grimoire-setup.py`** — Outil standalone (stdlib-only) pour la même synchronisation,
+  utilisable sans pip via `grimoire.sh setup`
+- **HPE — High-Performance Execution** — Moteur d'exécution parallèle pour les outils :
+  `hpe-runner.py` (orchestrateur), `hpe-executors.py` (ThreadPool/ProcessPool/Async),
+  `hpe-monitor.py` (métriques temps réel), `agent-task-system.py` (dispatch intelligent)
+- **ARCHITECTURE.md** — Documentation détaillée de l'architecture du projet
+- **Tests** — +3200 lignes de tests : `test_grimoire_setup.py` (50),
+  `test_hpe_runner.py`, `test_hpe_executors.py`, `test_hpe_monitor.py`,
+  `test_agent_task_system.py`
+- **Archetypes bundled** — Les archetypes sont désormais inclus dans le wheel Python
+
+#### Documentation
+
+- `getting-started.md` — Ajout de `grimoire setup` + section "Configurer votre identité"
+- `onboarding.md` — `grimoire setup` intégré dans le parcours J1
+- `grimoire-yaml-reference.md` — Section "Synchronisation avec grimoire setup"
+- Installation : `pipx` et `venv` documentés comme alternatives à `pip install` système
+
+<img src="docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="docs/assets/icons/branch.svg" width="28" height="28" alt=""> [3.0.0] — 2026-03-08
 
 ### Réécriture complète — SDK Python pur + Indépendance totale

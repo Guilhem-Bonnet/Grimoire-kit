@@ -5,7 +5,7 @@
 </picture>
 
 <p align="center">
-  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.0.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.1.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
   <a href="#-tests"><img src="https://img.shields.io/badge/tests-3957+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
@@ -87,7 +87,11 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 ## <img src="docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Quick Start
 
 ```bash
-# Installation via pip (v3)
+# Installation via pipx (recommandé)
+pipx install grimoire-kit
+
+# Ou via pip dans un venv
+python3 -m venv .venv && source .venv/bin/activate
 pip install grimoire-kit
 
 # Initialiser un nouveau projet

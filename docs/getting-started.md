@@ -5,13 +5,17 @@
 ## Prérequis
 
 - **Python 3.12+**
-- **pip** ou **uv** (recommandé)
+- **pip**, **pipx** (recommandé) ou **uv**
 - Un éditeur avec support Copilot / LLM (VS Code recommandé)
 
 ## Installation
 
 ```bash
-# Via pip
+# Via pipx (recommandé — isolation automatique)
+pipx install grimoire-kit
+
+# Via pip dans un venv
+python3 -m venv .venv && source .venv/bin/activate
 pip install grimoire-kit
 
 # Avec le support MCP (Model Context Protocol)
@@ -20,6 +24,9 @@ pip install grimoire-kit[mcp]
 # Toutes les extensions (MCP + Qdrant + Ollama)
 pip install grimoire-kit[all]
 ```
+
+> **Note** : Sur Ubuntu/Debian, `pip install` en dehors d'un venv est bloqué (PEP 668).
+> Utilisez `pipx` ou un venv.
 
 Vérifiez l'installation :
 
