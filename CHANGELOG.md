@@ -9,9 +9,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
-- **Tests: +10** — R33 DRY refactors + history enhancement : CompletionDRY (4) + ConfigKeyResolver (3) + HistoryVersionColumn (3) → 330 tests CLI (Round 33)
+- **Tests: +6** — R34 lint global output + env enrichment : LintGlobalOutput (2) + NullcontextImport (1) + EnvVarsComplete (3) → 336 tests CLI (Round 34)
 
 ### Corrigé
+
+- **CLI: H1 — lint ignore le flag global `-o`** — Seule des ~25 commandes, `lint` utilisait `--format/-f` au lieu de `ctx.obj["output"]`. Ajout de `ctx: typer.Context` ; `--format` reste comme fallback rétrocompat (Round 34)
+- **CLI: H2 — `_status_spinner` lazy import** — `contextlib` importé localement alors que `nullcontext` peut être importé au top-level. Remplacé par import direct (Round 34)
+- **CLI: H3 — `env` ne montre que 2/6 env vars** — Manquait GRIMOIRE_OUTPUT, GRIMOIRE_QUIET, GRIMOIRE_OFFLINE, NO_COLOR. Ajouté les 4 (Round 34)
+- **CLI: I1 — `env` sans statut réseau** — `env` est utilisé pour le debug et les bug reports. Ajout de `is_online()` dans la sortie text et JSON (Round 34)
+
+### Précédemment (Round 33)
+
+#### Ajouté
+
+- **Tests: +10** — R33 DRY refactors + history enhancement : CompletionDRY (4) + ConfigKeyResolver (3) + HistoryVersionColumn (3) → 330 tests CLI (Round 33)
+
+#### Corrigé
 
 - **CLI: H1+H4 — DRY completion** — `completion_install` et `completion_export` partageaient ~15 lignes identiques (subprocess + validation). Extrait helper `_generate_completion_script(shell)` + constante `_SUPPORTED_SHELLS = frozenset({"bash", "zsh", "fish"})` (Round 33)
 - **CLI: H2 — DRY config traversal** — `config_show` et `config_get` partageaient 28 lignes de traversée dot-notation YAML. Extrait helper `_resolve_config_key(data, key)` (Round 33)

@@ -3095,3 +3095,69 @@ class TestR33HistoryVersionColumn:
             result = runner.invoke(app, ["history"])
         # Should not crash and show fallback dash
         assert result.exit_code == 0
+
+
+# ── R34 — Lint global output, env enrichment ─────────────────────────────────
+
+
+class TestR34LintGlobalOutput:
+    """H1: lint should respect global -o json flag."""
+
+    def test_lint_respects_global_output_json(self, cli_project: Path) -> None:
+        (cli_project / "project-context.yaml").write_text(
+            "project:\n  name: demo\n  description: ''\n  type: webapp\n  stack: []\n"
+            "  repos:\n    - name: demo\n      path: .\n      default_branch: main\n"
+            "user:\n  name: u\n  language: Français\n  skill_level: intermediate\n"
+            "memory:\n  backend: auto\n"
+            "agents:\n  archetype: minimal\n  custom_agents: []\n"
+            "installed_archetypes: []\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["-o", "json", "lint", str(cli_project)])
+        data = json.loads(result.output)
+        assert "errors" in data
+
+    def test_lint_format_flag_still_works(self, cli_project: Path) -> None:
+        (cli_project / "project-context.yaml").write_text(
+            "project:\n  name: demo\n  description: ''\n  type: webapp\n  stack: []\n"
+            "  repos:\n    - name: demo\n      path: .\n      default_branch: main\n"
+            "user:\n  name: u\n  language: Français\n  skill_level: intermediate\n"
+            "memory:\n  backend: auto\n"
+            "agents:\n  archetype: minimal\n  custom_agents: []\n"
+            "installed_archetypes: []\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["lint", "--format", "json", str(cli_project)])
+        data = json.loads(result.output)
+        assert "count" in data
+
+
+class TestR34NullcontextImport:
+    """H2: nullcontext should be imported at module level."""
+
+    def test_nullcontext_available_at_module_level(self) -> None:
+        from grimoire.cli import app as _app_mod
+
+        assert hasattr(_app_mod, "nullcontext")
+
+
+class TestR34EnvVarsComplete:
+    """H3+I1: env command should show all recognized env vars + online status."""
+
+    def test_env_json_includes_all_env_vars(self) -> None:
+        result = runner.invoke(app, ["-o", "json", "env"])
+        data = json.loads(result.output)
+        env = data["environment"]
+        for var in ("GRIMOIRE_LOG_LEVEL", "GRIMOIRE_DEBUG", "GRIMOIRE_OUTPUT",
+                     "GRIMOIRE_QUIET", "GRIMOIRE_OFFLINE", "NO_COLOR"):
+            assert var in env, f"Missing env var: {var}"
+
+    def test_env_json_includes_online_status(self) -> None:
+        result = runner.invoke(app, ["-o", "json", "env"])
+        data = json.loads(result.output)
+        assert "online" in data
+        assert isinstance(data["online"], bool)
+
+    def test_env_text_shows_online_status(self) -> None:
+        result = runner.invoke(app, ["env"])
+        assert "Online" in result.output

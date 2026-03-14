@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -520,8 +520,7 @@ def _status_spinner(msg: str, *, show: bool = True) -> Any:
     """Return a Rich Status spinner (or a no-op context manager when silent)."""
     if show:
         return console.status(f"[bold]{msg}[/bold]", spinner="dots")
-    import contextlib
-    return contextlib.nullcontext()
+    return nullcontext()
 
 
 # ── grimoire add / remove ─────────────────────────────────────────────────────────
@@ -722,13 +721,15 @@ _lint_path_arg = typer.Argument(Path(), help="Path to YAML config file or projec
 
 @app.command("lint", rich_help_panel="Validation")
 def lint(
+    ctx: typer.Context,
     path: Path = _lint_path_arg,
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json."),
+    format_: str = typer.Option("", "--format", "-f", help="Output format (deprecated — use global --output)."),
 ) -> None:
     """Lint ``project-context.yaml`` — validate structure, types, and references."""
     from grimoire.core.validator import validate_config
     from grimoire.tools._common import load_yaml
 
+    fmt = format_ or (ctx.obj or {}).get("output", "text")
     target = path.resolve()
     config_path = target if target.suffix in {".yaml", ".yml"} else target / "project-context.yaml"
 
@@ -739,7 +740,7 @@ def lint(
     data = load_yaml(config_path)
     errors = validate_config(data, project_root=config_path.parent)
 
-    if format_ == "json":
+    if fmt == "json":
         items = [{"path": e.path, "message": e.message, "suggestion": e.suggestion} for e in errors]
         typer.echo(json.dumps({"file": str(config_path), "errors": items, "count": len(errors)}, indent=2))
         raise typer.Exit(0 if not errors else 1)
@@ -1847,7 +1848,13 @@ def env_cmd(ctx: typer.Context) -> None:
         except PackageNotFoundError:
             deps[dep] = None
 
-    env_vars = {var: os.environ.get(var) for var in ("GRIMOIRE_LOG_LEVEL", "GRIMOIRE_DEBUG")}
+    _env_var_names = (
+        "GRIMOIRE_LOG_LEVEL", "GRIMOIRE_DEBUG",
+        "GRIMOIRE_OUTPUT", "GRIMOIRE_QUIET", "GRIMOIRE_OFFLINE",
+        "NO_COLOR",
+    )
+    env_vars = {var: os.environ.get(var) for var in _env_var_names}
+    online = is_online()
 
     project_info: dict[str, str] | None = None
     try:
@@ -1864,6 +1871,7 @@ def env_cmd(ctx: typer.Context) -> None:
             "implementation": platform.python_implementation(),
             "platform": platform.platform(),
             "arch": platform.machine(),
+            "online": online,
             "dependencies": deps,
             "environment": env_vars,
             "project": project_info,
@@ -1877,6 +1885,8 @@ def env_cmd(ctx: typer.Context) -> None:
     console.print(f"  Python       {sys.version.split()[0]} ({platform.python_implementation()})")
     console.print(f"  Platform     {platform.platform()}")
     console.print(f"  Arch         {platform.machine()}")
+    online_icon = "[green]✓[/green]" if online else "[yellow]✗[/yellow]"
+    console.print(f"  Online       {online_icon}")
 
     console.print("\n[bold]Dependencies[/bold]")
     for dep, ver in deps.items():
