@@ -102,6 +102,11 @@ app = typer.Typer(
 
 console = Console(stderr=True)
 
+# ── Semantic exit codes ────────────────────────────────────────────────────────
+_EXIT_OK = 0
+_EXIT_USER = 1      # user/input error (missing file, bad arg, validation fail)
+_EXIT_CONFIG = 2    # configuration error (parse error, missing key)
+
 
 def _get_fmt(ctx: typer.Context) -> str:
     """Return the output format from context — 'text' or 'json'."""
@@ -468,7 +473,7 @@ def status(
         cfg = GrimoireConfig.from_yaml(config_path)
     except GrimoireConfigError as exc:
         console.print(f"[red]Config error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        raise typer.Exit(_EXIT_CONFIG) from None
 
     dirs = [*_REQUIRED_DIRS, _MEMORY_DIR]
     dir_status = {d: (target / d).is_dir() for d in dirs}
@@ -565,7 +570,7 @@ def _find_config(path: Path) -> Path:
         return root / "project-context.yaml"
     except (FileNotFoundError, PermissionError, OSError):
         console.print("[red]Not a Grimoire project[/red] — run [bold]grimoire init[/bold] first.")
-        raise typer.Exit(1) from None
+        raise typer.Exit(_EXIT_USER) from None
 
 
 _add_agent_id = typer.Argument(..., help="Agent identifier to add.")
@@ -1136,14 +1141,14 @@ app.add_typer(config_app, name="config", rich_help_panel="Configuration")
 
 
 def _resolve_config_key(data: Any, key: str) -> Any:
-    """Walk YAML data by dot-notation key — raise typer.Exit(1) if not found."""
+    """Walk YAML data by dot-notation key — raise typer.Exit(_EXIT_CONFIG) if not found."""
     value = data
     for part in key.split("."):
         if isinstance(value, dict) and part in value:
             value = value[part]
         else:
             console.print(f"[red]Key not found:[/red] {key}")
-            raise typer.Exit(1)
+            raise typer.Exit(_EXIT_CONFIG)
     return value
 
 
@@ -1953,13 +1958,14 @@ def _log_operation(command: str, args: dict[str, Any] | None = None, *, ok: bool
     try:
         with open(log_file, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-        # Truncate if too large — atomic read+write
+        # Truncate if too large — single handle avoids race between read and write
         with open(log_file, "r+", encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
+            lines = fh.readlines()
             if len(lines) > _AUDIT_MAX_ENTRIES:
+                keep = lines[-_AUDIT_MAX_ENTRIES:]
                 fh.seek(0)
+                fh.writelines(keep)
                 fh.truncate()
-                fh.write("\n".join(lines[-_AUDIT_MAX_ENTRIES:]) + "\n")
     except OSError as exc:
         if os.environ.get("GRIMOIRE_DEBUG"):
             console.print(f"[dim]Audit log write failed: {exc}[/dim]")

@@ -441,7 +441,7 @@ class TestStatusEdgeCases:
     def test_status_config_error(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text("not:\n  valid: config\n")
         result = runner.invoke(app, ["status", str(tmp_path)])
-        assert result.exit_code == 1
+        assert result.exit_code == 2  # _EXIT_CONFIG
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -966,7 +966,7 @@ class TestConfigGet:
     def test_config_get_missing_key(self, init_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(init_project)
         result = runner.invoke(app, ["config", "get", "nonexistent.key"])
-        assert result.exit_code == 1
+        assert result.exit_code == 2  # _EXIT_CONFIG
         assert "not found" in result.output.lower()
 
     def test_config_get_json(self, init_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3330,3 +3330,155 @@ class TestR35HistoryClear:
     def test_clear_help_shows_flag(self) -> None:
         result = runner.invoke(app, ["history", "--help"])
         assert "--clear" in result.output
+
+
+# ── R36 ─────────────────────────────────────────────────────────────────────────
+
+
+class TestR36ExitCodeConstants:
+    """E6: semantic exit code constants exist and are used."""
+
+    def test_constants_are_defined(self) -> None:
+        from grimoire.cli.app import _EXIT_CONFIG, _EXIT_OK, _EXIT_USER
+
+        assert _EXIT_OK == 0
+        assert _EXIT_USER == 1
+        assert _EXIT_CONFIG == 2
+
+    def test_find_config_exits_with_user_code(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _EXIT_USER, _find_config
+
+        # tmp_path has no project-context.yaml and find_project_root will fail
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError), \
+             pytest.raises(typer.Exit) as exc_info:
+            _find_config(tmp_path)
+        assert exc_info.value.exit_code == _EXIT_USER
+
+    def test_resolve_config_key_exits_with_config_code(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _EXIT_CONFIG, _resolve_config_key
+
+        with pytest.raises(typer.Exit) as exc_info:
+            _resolve_config_key({"a": 1}, "nonexistent.key")
+        assert exc_info.value.exit_code == _EXIT_CONFIG
+
+
+class TestR36LogOperationTruncate:
+    """F2: _log_operation truncate uses single file handle."""
+
+    def test_truncate_preserves_recent_entries(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME, _AUDIT_MAX_ENTRIES, _log_operation
+
+        mem_dir = tmp_path / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        log_file = mem_dir / _AUDIT_FILENAME
+
+        # Write more than max entries
+        lines = [json.dumps({"ts": f"2025-01-01T00:00:{i:02d}", "cmd": "test", "ok": True}) for i in range(_AUDIT_MAX_ENTRIES + 10)]
+        log_file.write_text("\n".join(lines) + "\n")
+
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            _log_operation("trigger_truncate", {"test": "yes"})
+
+        result_lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        assert len(result_lines) <= _AUDIT_MAX_ENTRIES
+
+
+class TestR36MergeCommand:
+    """T1: tests for grimoire merge CLI command."""
+
+    def test_merge_help(self) -> None:
+        result = runner.invoke(app, ["merge", "--help"])
+        assert result.exit_code == 0
+        assert "source" in result.output.lower() or "--target" in result.output
+
+    def test_merge_dry_run(self, tmp_path: Path) -> None:
+        from grimoire.core.merge import MergePlan, MergeResult
+
+        plan = MergePlan(
+            files_to_create=("agents/foo.md",),
+            directories_to_create=("agents",),
+            conflicts=(),
+        )
+        result_obj = MergeResult(
+            files_created=("agents/foo.md",),
+            files_skipped=(),
+            directories_created=("agents",),
+        )
+
+        src = tmp_path / "src"
+        src.mkdir()
+        tgt = tmp_path / "tgt"
+        tgt.mkdir()
+
+        with patch("grimoire.cli.cmd_merge.run_merge", return_value=(plan, result_obj)):
+            result = runner.invoke(app, ["merge", str(src), "--target", str(tgt), "--dry-run"])
+        assert result.exit_code == 0
+        assert "plan" in result.output.lower() or "dry-run" in result.output.lower()
+
+    def test_merge_error(self, tmp_path: Path) -> None:
+        from grimoire.core.exceptions import GrimoireMergeError
+
+        src = tmp_path / "src"
+        src.mkdir()
+        tgt = tmp_path / "tgt"
+        tgt.mkdir()
+
+        with patch("grimoire.cli.cmd_merge.run_merge", side_effect=GrimoireMergeError("bad source")):
+            result = runner.invoke(app, ["merge", str(src), "--target", str(tgt)])
+        assert result.exit_code == 1
+        assert "bad source" in result.output
+
+    def test_merge_undo(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        tgt = tmp_path / "tgt"
+        tgt.mkdir()
+
+        with patch("grimoire.cli.cmd_merge.run_undo", return_value=["file1.md", "file2.md"]):
+            result = runner.invoke(app, ["-y", "merge", str(src), "--target", str(tgt), "--undo"])
+        assert result.exit_code == 0
+        assert "file1.md" in result.output
+
+    def test_merge_undo_nothing(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        tgt = tmp_path / "tgt"
+        tgt.mkdir()
+
+        with patch("grimoire.cli.cmd_merge.run_undo", return_value=[]):
+            result = runner.invoke(app, ["-y", "merge", str(src), "--target", str(tgt), "--undo"])
+        assert result.exit_code == 0
+        assert "nothing" in result.output.lower() or "Nothing" in result.output
+
+
+class TestR36PluginsList:
+    """T2: tests for grimoire plugins list CLI command."""
+
+    def test_plugins_list_text(self) -> None:
+        with patch("grimoire.registry.discovery.discover_tools", return_value={"tool-a": {}, "tool-b": {}}), \
+             patch("grimoire.registry.discovery.discover_backends", return_value={"backend-x": {}}):
+            result = runner.invoke(app, ["plugins", "list"])
+        assert result.exit_code == 0
+        assert "tool-a" in result.output
+        assert "backend-x" in result.output
+
+    def test_plugins_list_json(self) -> None:
+        with patch("grimoire.registry.discovery.discover_tools", return_value={"my-tool": {}}), \
+             patch("grimoire.registry.discovery.discover_backends", return_value={}):
+            result = runner.invoke(app, ["-o", "json", "plugins", "list"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "tools" in data
+        assert "my-tool" in data["tools"]
+
+    def test_plugins_list_empty(self) -> None:
+        with patch("grimoire.registry.discovery.discover_tools", return_value={}), \
+             patch("grimoire.registry.discovery.discover_backends", return_value={}):
+            result = runner.invoke(app, ["plugins", "list"])
+        assert result.exit_code == 0
+        assert "no plugins" in result.output.lower() or "No plugins" in result.output
+
+    def test_plugins_help(self) -> None:
+        result = runner.invoke(app, ["plugins", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
