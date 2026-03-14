@@ -9,9 +9,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
-- **Tests: +8** — R31 review fixes : EnvCmdNarrowException (2) + VersionCmdGrimoireError (1) + InterruptedRemoved (2) + CtxObjGuard (1) + SetupGlobalJson (2) → 311 tests CLI (Round 31)
+- **Tests: +9** — R32 audit & housekeeping : AuditVersionField (2) + RepairAuditLog (2) + SetupAuditLog (1) + DoctorNumbering (1) + SelfVersionImport (1) + CompletionParentDir (2) → 320 tests CLI (Round 32)
 
 ### Corrigé
+
+- **CLI: I1 — Audit log sans version** — `_log_operation()` n'incluait pas la version de grimoire-kit. Ajout d'un champ `"v": __version__` dans chaque enregistrement JSONL (Round 32)
+- **CLI: H1 — repair sans audit** — `repair` ne loguait pas dans l'audit trail. Ajout de `_log_operation("repair", …)` après actions non-dry-run (Round 32)
+- **CLI: H2 — setup sans audit** — `setup` ne loguait pas dans l'audit trail. Ajout de `_log_operation("setup", …)` après apply dans les deux chemins sync/override et défaut (Round 32)
+- **CLI: H4 — doctor numérotation cassée** — Les commentaires de checks sautaient de 3 à 5 (check 4 supprimé sans renuméroter). Renuméroté séquentiellement 1→8 (Round 32)
+- **CLI: H5 — self_version import redondant** — `self_version` faisait `import json as _json` localement alors que `json` est importé au niveau module. Supprimé en faveur de `json.loads()` (Round 32)
+- **CLI: H6 — completion parent dir manquant** — `completion install` pour bash/zsh n'appelait pas `mkdir(parents=True)` sur le répertoire parent du fichier RC cible. Ajouté (fish l'avait déjà) (Round 32)
+
+### Précédemment (Round 31)
+
+#### Ajouté
+
+- **Tests: +8** — R31 review fixes : EnvCmdNarrowException (2) + VersionCmdGrimoireError (1) + InterruptedRemoved (2) + CtxObjGuard (1) + SetupGlobalJson (2) → 311 tests CLI (Round 31)
+
+#### Corrigé
 
 - **CLI: C1 — env_cmd exception trop large** — `env` catchait `(typer.Exit, Exception)` masquant tout. Réduit à `(typer.Exit, GrimoireError)` — même correctif que R30 M4 sur `version_cmd` (Round 31)
 - **CLI: C2 — version_cmd rate GrimoireProjectError** — `version` catchait `GrimoireConfigError` mais pas `GrimoireProjectError` (classes sœurs). Élargi à `GrimoireError` (base commune) (Round 31)

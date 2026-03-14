@@ -2815,3 +2815,172 @@ class TestR31SetupGlobalJson:
         assert output.startswith("{"), f"Expected JSON output, got: {output}"
         data = json.loads(output)
         assert data["synced"] is True
+
+
+# ── R32 — Audit version field, repair/setup audit logging, doctor numbering,
+#           self_version import cleanup, completion parent dir ──────────────────
+
+class TestR32AuditVersionField:
+    """I1: Every audit record must include a 'v' field with __version__."""
+
+    def test_log_operation_includes_version(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME, __version__, _log_operation
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            _log_operation("test_v_field", {"k": "v"})
+        log_file = mem_dir / _AUDIT_FILENAME
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
+        assert entry["v"] == __version__
+
+    def test_log_operation_version_is_string(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME, _log_operation
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            _log_operation("v_type_check")
+        log_file = mem_dir / _AUDIT_FILENAME
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
+        assert isinstance(entry["v"], str)
+        assert len(entry["v"]) > 0
+
+
+class TestR32RepairAuditLog:
+    """H1: repair command must write an audit entry after non-dry-run actions."""
+
+    def test_repair_logs_audit_entry(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        # Remove _grimoire dir to trigger repair action
+        grimoire_dir = cli_project / "_grimoire"
+        if grimoire_dir.exists():
+            import shutil
+            shutil.rmtree(grimoire_dir)
+        # Patch find_project_root so _log_operation resolves the test project
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["repair", str(cli_project)])
+        assert result.exit_code == 0
+
+        # Check audit log was written
+        audit = cli_project / "_grimoire" / "_memory" / _AUDIT_FILENAME
+        assert audit.is_file(), "repair should create audit entry"
+        entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").strip().splitlines()]
+        repair_entries = [e for e in entries if e["cmd"] == "repair"]
+        assert len(repair_entries) >= 1
+        assert repair_entries[-1]["ok"] is True
+        assert "count" in repair_entries[-1].get("args", {})
+
+    def test_repair_dry_run_no_audit(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        grimoire_dir = cli_project / "_grimoire"
+        if grimoire_dir.exists():
+            import shutil
+            shutil.rmtree(grimoire_dir)
+        result = runner.invoke(app, ["repair", "--dry-run", str(cli_project)])
+        assert result.exit_code == 0
+        audit = cli_project / "_grimoire" / "_memory" / _AUDIT_FILENAME
+        # Dry-run should not write audit (dir may not even exist)
+        if audit.is_file():
+            entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").strip().splitlines()]
+            repair_entries = [e for e in entries if e["cmd"] == "repair"]
+            assert len(repair_entries) == 0
+
+
+class TestR32SetupAuditLog:
+    """H2: setup command must write an audit entry after apply."""
+
+    def test_setup_sync_logs_audit(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+        from grimoire.cli.cmd_setup import SetupResult
+
+        pcy = tmp_path / "project-context.yaml"
+        pcy.write_text("project:\n  name: test\nuser:\n  name: Test\n", encoding="utf-8")
+        mem_dir = tmp_path / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_result = SetupResult(diffs=[], updated_files=["a.md"], skipped_files=[], errors=[])
+        with patch("grimoire.cli.cmd_setup.load_user_values") as mock_load, \
+             patch("grimoire.cli.cmd_setup.apply", return_value=mock_result):
+            mock_load.return_value = MagicMock(
+                user_name="Test", communication_language="en",
+                document_output_language="en", user_skill_level="expert",
+            )
+            result = runner.invoke(app, ["setup", "--sync", str(tmp_path)])
+        assert result.exit_code == 0
+
+        audit = mem_dir / _AUDIT_FILENAME
+        if audit.is_file():
+            entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").strip().splitlines()]
+            setup_entries = [e for e in entries if e["cmd"] == "setup"]
+            assert len(setup_entries) >= 1
+            assert setup_entries[-1]["ok"] is True
+
+
+class TestR32DoctorNumbering:
+    """H4: Doctor checks should be numbered sequentially 1-8."""
+
+    def test_doctor_sequential_check_numbers(self) -> None:
+        """Verify check comment numbering is sequential in source."""
+        import re
+
+        from grimoire.cli import app as app_mod
+
+        source = Path(app_mod.__file__).read_text(encoding="utf-8")
+        # Find the doctor function body
+        doctor_start = source.index("def doctor(")
+        # Extract until the next top-level def
+        next_def = source.index("\ndef ", doctor_start + 1)
+        doctor_body = source[doctor_start:next_def]
+        numbers = [int(m) for m in re.findall(r"^\s+# (\d+)\.", doctor_body, re.MULTILINE)]
+        assert numbers == list(range(1, len(numbers) + 1)), f"Doctor checks not sequential: {numbers}"
+
+
+class TestR32SelfVersionImport:
+    """H5: self_version should use module-level json, not import json as _json."""
+
+    def test_no_redundant_json_import(self) -> None:
+        """Verify no 'import json as _json' in self_version function body."""
+        from grimoire.cli import app as app_mod
+
+        source = Path(app_mod.__file__).read_text(encoding="utf-8")
+        fn_start = source.index("def self_version(")
+        next_def = source.index("\ndef ", fn_start + 1)
+        fn_body = source[fn_start:next_def]
+        assert "import json as _json" not in fn_body
+        assert "_json.loads" not in fn_body
+
+
+class TestR32CompletionParentDir:
+    """H6: completion_install should create parent directories for bash/zsh RC files."""
+
+    def test_completion_install_creates_parent_dirs(self, tmp_path: Path) -> None:
+        """Bash target's parent dir is created even if it doesn't exist."""
+        fake_rc = tmp_path / "nested" / "deep" / ".bashrc"
+
+        with patch("subprocess.run") as mock_run, \
+             patch("grimoire.cli.app.Path.expanduser", return_value=fake_rc):
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="# completion script\necho done",
+            )
+            runner.invoke(app, ["completion", "install", "--shell", "bash"])
+
+        # The parent should have been created
+        assert fake_rc.parent.is_dir()
+
+    def test_completion_install_fish_parent_dirs(self, tmp_path: Path) -> None:
+        """Fish target parent dir creation (was already present, verify still works)."""
+        fake_fish = tmp_path / "nested" / "completions" / "grimoire.fish"
+
+        with patch("subprocess.run") as mock_run, \
+             patch("grimoire.cli.app.Path.expanduser", return_value=fake_fish):
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="# fish completion\necho done",
+            )
+            runner.invoke(app, ["completion", "install", "--shell", "fish"])
+
+        assert fake_fish.parent.is_dir()

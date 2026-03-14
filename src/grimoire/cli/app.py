@@ -388,17 +388,17 @@ def doctor(
             else:
                 _record(f"dir_{d}", passed=present, detail=f"{d}/ {'present' if present else 'missing'}")
 
-    # 5. Archetype check
+    # 4. Archetype check
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
-    # 6. Config semantic validation
+    # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
         for w in warnings:
             _record("semantic", passed=False, detail=w)
 
-    # 7. Optional dependencies
+    # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
         from importlib.metadata import PackageNotFoundError
         from importlib.metadata import version as pkg_version
@@ -411,10 +411,10 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [dim]○[/dim]  Optional: {pkg_name} not installed")
 
-    # 8. Python version
+    # 7. Python version
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
-    # 9. Summary
+    # 8. Summary
     ok_count = sum(1 for r in results if r["passed"])
     fail_count = sum(1 for r in results if not r["passed"])
 
@@ -1388,6 +1388,7 @@ def completion_install(
         target.write_text(script + "\n", encoding="utf-8")
         console.print(f"[green]✓[/green] Completion installed to {target}")
     else:
+        target.parent.mkdir(parents=True, exist_ok=True)
         marker = "# grimoire shell completion"
         existing = target.read_text(encoding="utf-8") if target.is_file() else ""
         if marker in existing:
@@ -1452,8 +1453,7 @@ def self_version(ctx: typer.Context) -> None:
 
             url = "https://pypi.org/pypi/grimoire-kit/json"
             with urlopen(url, timeout=5) as resp:  # noqa: S310
-                import json as _json
-                pypi_data = _json.loads(resp.read())
+                pypi_data = json.loads(resp.read())
                 latest = pypi_data.get("info", {}).get("version")
         except Exception:
             latest = None
@@ -1830,11 +1830,15 @@ def setup(
     if sync or has_override:
         result = apply(target, current)
         _print_result(result)
+        if result.updated_files:
+            _log_operation("setup", {"updated": str(len(result.updated_files))})
         raise typer.Exit(0 if not result.errors else 1)
 
     # Default: sync (same as --sync)
     result = apply(target, current)
     _print_result(result)
+    if result.updated_files:
+        _log_operation("setup", {"updated": str(len(result.updated_files))})
     raise typer.Exit(0 if not result.errors else 1)
 
 
@@ -1932,6 +1936,7 @@ def _log_operation(command: str, args: dict[str, Any] | None = None, *, ok: bool
     log_file = log_dir / _AUDIT_FILENAME
     record = {
         "ts": _dt.datetime.now(tz=_dt.UTC).isoformat(),
+        "v": __version__,
         "cmd": command,
         "ok": ok,
     }
@@ -2100,7 +2105,10 @@ def repair(
                 tag = "[dim]would trim[/dim]" if dry_run else "[green]trimmed[/green]"
                 console.print(f"  {tag}  audit.jsonl — {trimmed} old entries")
 
-    # 3. Summary
+    # 3. Log + Summary
+    if not dry_run and actions:
+        _log_operation("repair", {"count": str(len(actions))})
+
     if fmt == "json":
         typer.echo(json.dumps({"ok": True, "project": str(target), "dry_run": dry_run, "actions": actions, "count": len(actions)}, indent=2))
     elif not actions:
