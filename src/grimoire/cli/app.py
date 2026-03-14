@@ -103,6 +103,11 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
+def _get_fmt(ctx: typer.Context) -> str:
+    """Return the output format from context — 'text' or 'json'."""
+    return (ctx.obj or {}).get("output", "text")
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"grimoire-kit {__version__}")
@@ -160,7 +165,7 @@ def main(
 @app.command("version", rich_help_panel="Info")
 def version_cmd(ctx: typer.Context) -> None:
     """Show extended version info (grimoire, Python, platform, project)."""
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     project_name: str | None = None
     try:
@@ -309,7 +314,7 @@ def init(
 
     _log_operation("init", {"project": project_name, "archetype": archetype, "backend": backend})
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     if fmt == "json":
         typer.echo(json.dumps({
             "ok": True, "project": project_name, "path": str(config_file),
@@ -341,7 +346,7 @@ def doctor(
     """
     target = path.resolve()
     results: list[dict[str, Any]] = []
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     def _record(name: str, *, passed: bool, detail: str = "") -> None:
         results.append({"name": name, "passed": passed, "detail": detail})
@@ -408,6 +413,7 @@ def doctor(
                 ver = pkg_version(pkg_name)
                 _record(f"optional_{pkg_name}", passed=True, detail=f"Optional: {pkg_name} {ver}")
             except PackageNotFoundError:
+                results.append({"name": f"optional_{pkg_name}", "passed": True, "detail": f"Optional: {pkg_name} not installed", "optional": True})
                 if fmt != "json":
                     console.print(f"  [dim]○[/dim]  Optional: {pkg_name} not installed")
 
@@ -427,6 +433,9 @@ def doctor(
         if fixed:
             console.print(f"\n[green]Fixed {len(fixed)} issue(s):[/green] {', '.join(fixed)}")
         console.print(f"\n[bold]{ok_count}/{ok_count + fail_count} checks passed[/bold]")
+
+    if fixed:
+        _log_operation("doctor", {"fixed": fixed})
 
     if fail_count > 0:
         raise typer.Exit(1)
@@ -464,7 +473,7 @@ def status(
     dirs = [*_REQUIRED_DIRS, _MEMORY_DIR]
     dir_status = {d: (target / d).is_dir() for d in dirs}
 
-    if (ctx.obj or {}).get("output") == "json":
+    if _get_fmt(ctx) == "json":
         data = {
             "project": {"name": cfg.project.name, "type": cfg.project.type, "stack": list(cfg.project.stack)},
             "user": {"name": cfg.user.name, "language": cfg.user.language, "skill_level": cfg.user.skill_level},
@@ -579,7 +588,7 @@ def add_agent(
     """
     config_path = _find_config(path)
     yaml, data = _load_yaml_rw(config_path)
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     agents = data.get("agents") or {}
     custom: list[str] = agents.get("custom_agents") or []
@@ -631,7 +640,7 @@ def remove_agent(
     """
     config_path = _find_config(path)
     yaml, data = _load_yaml_rw(config_path)
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     agents = data.get("agents") or {}
     custom: list[str] = agents.get("custom_agents") or []
@@ -685,7 +694,7 @@ def validate(
     from grimoire.core.validator import validate_config
     from grimoire.tools._common import load_yaml
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     target = path.resolve()
     config_path = target / "project-context.yaml"
 
@@ -729,7 +738,7 @@ def lint(
     from grimoire.core.validator import validate_config
     from grimoire.tools._common import load_yaml
 
-    fmt = format_ or (ctx.obj or {}).get("output", "text")
+    fmt = format_ or _get_fmt(ctx)
     target = path.resolve()
     config_path = target if target.suffix in {".yaml", ".yml"} else target / "project-context.yaml"
 
@@ -782,7 +791,7 @@ def up(
 
     cfg = project.config
     status = project.status()
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     if fmt != "json":
         if dry_run:
@@ -862,7 +871,7 @@ def registry_list(ctx: typer.Context) -> None:
         console.print("[yellow]No archetypes found.[/yellow]")
         return
 
-    if (ctx.obj or {}).get("output") == "json":
+    if _get_fmt(ctx) == "json":
         items = []
         for arch_id in archs:
             try:
@@ -913,7 +922,7 @@ def registry_search(
         console.print(f"[yellow]No agents matching '{query}'.[/yellow]")
         return
 
-    if (ctx.obj or {}).get("output") == "json":
+    if _get_fmt(ctx) == "json":
         items = [{"id": r.id, "archetype": r.archetype, "description": r.description or ""} for r in results]
         typer.echo(json.dumps(items, indent=2))
         return
@@ -981,7 +990,7 @@ def diff_config(
 
     all_keys = sorted(set(flat_current) | set(flat_defaults))
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     diffs: list[dict[str, Any]] = []
 
     for key in all_keys:
@@ -1039,7 +1048,7 @@ def check(
     from grimoire.core.validator import validate_config
     from grimoire.tools._common import load_yaml
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     quiet = (ctx.obj or {}).get("quiet", False)
     target = path.resolve()
     config_path = target / "project-context.yaml"
@@ -1152,7 +1161,7 @@ def config_show(
     with cfg_path.open(encoding="utf-8") as fh:
         data = yaml.load(fh)
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     if key:
         value = _resolve_config_key(data, key)
@@ -1186,7 +1195,7 @@ def config_get(
         data = yaml.load(fh)
 
     value = _resolve_config_key(data, key)
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     if fmt == "json":
         typer.echo(json.dumps({key: value}, indent=2, default=str))
     else:
@@ -1253,7 +1262,7 @@ def config_set(
         console.print("[red]Cannot set list values via CLI.[/red] Use [bold]grimoire config edit[/bold] instead.")
         raise typer.Exit(1)
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     if dry_run:
         if fmt == "json":
@@ -1287,7 +1296,7 @@ def config_list(ctx: typer.Context) -> None:
         data = yaml.load(fh)
 
     flat = list(_flatten(dict(data)).items())
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     if fmt == "json":
         typer.echo(json.dumps(dict(flat), indent=2, default=str))
@@ -1320,7 +1329,7 @@ def config_edit() -> None:
 def config_validate(ctx: typer.Context) -> None:
     """Validate project-context.yaml against the Grimoire schema."""
     cfg_path = _find_config(Path())
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     try:
         cfg = GrimoireConfig.from_yaml(cfg_path)
@@ -1404,6 +1413,8 @@ def completion_install(
         console.print(f"[green]✓[/green] Completion appended to {target}")
         console.print(f"[dim]Reload with: source {target}[/dim]")
 
+    _log_operation("completion_install", {"shell": shell})
+
 
 @completion_app.command("export")
 def completion_export(
@@ -1426,7 +1437,7 @@ app.add_typer(self_app, name="self", rich_help_panel="Info")
 @self_app.command("version")
 def self_version(ctx: typer.Context) -> None:
     """Show installed grimoire-kit version and check for updates on PyPI."""
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     installed = __version__
 
     # Detect editable install
@@ -1477,7 +1488,7 @@ def self_diagnose(ctx: typer.Context) -> None:
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as pkg_version
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     checks: list[dict[str, Any]] = []
 
@@ -1556,7 +1567,7 @@ def plugins_list(ctx: typer.Context) -> None:
     """List discovered tools and backend plugins."""
     from grimoire.registry.discovery import discover_backends, discover_tools
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     tools = discover_tools()
     backends = discover_backends()
 
@@ -1608,7 +1619,7 @@ def upgrade(
         plan_upgrade,
     )
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     target = path.resolve()
     version = detect_version(target)
 
@@ -1766,7 +1777,7 @@ def setup(
     from grimoire.cli.cmd_setup import SetupResult, apply, check, load_user_values
 
     # Respect both --json flag and global -o json
-    use_json = json_out or (ctx.obj or {}).get("output") == "json"
+    use_json = json_out or _get_fmt(ctx) == "json"
     target = path.resolve()
     pcy = target / "project-context.yaml"
 
@@ -1839,7 +1850,7 @@ def env_cmd(ctx: typer.Context) -> None:
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as pkg_version
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     deps: dict[str, str | None] = {}
     for dep in ("ruamel.yaml", "typer", "rich", "mcp"):
@@ -1959,6 +1970,7 @@ def history_cmd(
     ctx: typer.Context,
     limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show."),
     filter_cmd: str = typer.Option(None, "--filter", "-f", help="Filter by command name."),
+    clear: bool = typer.Option(False, "--clear", help="Clear the audit log (requires --yes or confirmation)."),
 ) -> None:
     """Show audit trail of recent CLI operations.
 
@@ -1966,10 +1978,11 @@ def history_cmd(
       [cyan]grimoire history[/cyan]                 Last 20 operations
       [cyan]grimoire history -n 50 -f init[/cyan]   Last 50 'init' operations
       [cyan]grimoire history -o json[/cyan]         Machine-readable audit log
+      [cyan]grimoire history --clear[/cyan]         Clear audit log
     """
     from grimoire.tools._common import find_project_root
 
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
 
     try:
         root = find_project_root()
@@ -1978,6 +1991,24 @@ def history_cmd(
         raise typer.Exit(1) from None
 
     log_file = root / "_grimoire" / "_memory" / _AUDIT_FILENAME
+
+    if clear:
+        if not log_file.is_file():
+            console.print("[dim]No audit history to clear.[/dim]")
+            return
+        yes = (ctx.obj or {}).get("yes", False)
+        if not yes:
+            confirm = typer.confirm("Clear the entire audit log?")
+            if not confirm:
+                raise typer.Abort
+        log_file.write_text("", encoding="utf-8")
+        _log_operation("history_clear", {})
+        if fmt == "json":
+            typer.echo(json.dumps({"cleared": True}))
+        else:
+            console.print("[green]✓[/green] Audit log cleared.")
+        return
+
     if not log_file.is_file():
         if fmt == "json":
             typer.echo(json.dumps({"entries": [], "total": 0}))
@@ -2052,7 +2083,7 @@ def repair(
       [cyan]grimoire repair . -o json[/cyan]    Machine-readable output
     """
     target = path.resolve()
-    fmt = (ctx.obj or {}).get("output", "text")
+    fmt = _get_fmt(ctx)
     actions: list[dict[str, str]] = []
 
     config_path = target / "project-context.yaml"

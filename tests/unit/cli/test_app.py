@@ -3161,3 +3161,172 @@ class TestR34EnvVarsComplete:
     def test_env_text_shows_online_status(self) -> None:
         result = runner.invoke(app, ["env"])
         assert "Online" in result.output
+
+
+# ── R35 ─────────────────────────────────────────────────────────────────────────
+
+
+class TestR35GetFmtHelper:
+    """H4: _get_fmt helper extracts output format from ctx.obj."""
+
+    def test_get_fmt_returns_text_default(self) -> None:
+        from grimoire.cli.app import _get_fmt
+
+        ctx = MagicMock(spec=typer.Context)
+        ctx.obj = None
+        assert _get_fmt(ctx) == "text"
+
+    def test_get_fmt_returns_json(self) -> None:
+        from grimoire.cli.app import _get_fmt
+
+        ctx = MagicMock(spec=typer.Context)
+        ctx.obj = {"output": "json"}
+        assert _get_fmt(ctx) == "json"
+
+    def test_get_fmt_with_empty_obj(self) -> None:
+        from grimoire.cli.app import _get_fmt
+
+        ctx = MagicMock(spec=typer.Context)
+        ctx.obj = {}
+        assert _get_fmt(ctx) == "text"
+
+
+class TestR35DoctorFixAudit:
+    """F1: doctor --fix should log to audit trail."""
+
+    def test_fix_creates_audit_entry(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        runner.invoke(app, ["init", str(tmp_path), "--name", "audit-fix"])
+        import shutil
+        shutil.rmtree(tmp_path / "_grimoire-output")
+
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["doctor", str(tmp_path), "--fix"])
+        assert result.exit_code == 0
+
+        log_file = tmp_path / "_grimoire" / "_memory" / _AUDIT_FILENAME
+        assert log_file.is_file()
+        lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        # Find the doctor entry
+        doctor_entries = [json.loads(ln) for ln in lines if json.loads(ln).get("cmd") == "doctor"]
+        assert len(doctor_entries) >= 1
+        assert "fixed" in doctor_entries[-1].get("args", {})
+
+    def test_fix_noop_no_audit(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        runner.invoke(app, ["init", str(tmp_path), "--name", "audit-noop"])
+        log_file = tmp_path / "_grimoire" / "_memory" / _AUDIT_FILENAME
+
+        # Ensure the audit log is empty/absent before doctor
+        if log_file.is_file():
+            log_file.write_text("")
+
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path), "--fix"])
+        assert result.exit_code == 0
+
+        # No new entry because nothing was fixed
+        content = log_file.read_text() if log_file.is_file() else ""
+        doctor_entries = [json.loads(ln) for ln in content.splitlines() if ln.strip() and json.loads(ln).get("cmd") == "doctor"]
+        assert len(doctor_entries) == 0
+
+
+class TestR35DoctorJsonOptionals:
+    """I4: doctor --json should include optional dependency info."""
+
+    def test_json_includes_optional_entries(self, tmp_path: Path) -> None:
+        runner.invoke(app, ["init", str(tmp_path), "--name", "opt-json"])
+        result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        check_names = [c["name"] for c in data["checks"]]
+        # Should have at least one optional_* entry (installed or not)
+        optional_checks = [n for n in check_names if n.startswith("optional_")]
+        assert len(optional_checks) >= 1
+
+    def test_json_optional_has_detail(self, tmp_path: Path) -> None:
+        runner.invoke(app, ["init", str(tmp_path), "--name", "opt-detail"])
+        result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+        data = json.loads(result.output)
+        optional_checks = [c for c in data["checks"] if c["name"].startswith("optional_")]
+        for check in optional_checks:
+            assert "detail" in check
+            assert "Optional:" in check["detail"]
+
+
+class TestR35CompletionInstallAudit:
+    """I5: completion install should log to audit trail."""
+
+    def test_completion_install_creates_audit_entry(self, tmp_path: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        runner.invoke(app, ["init", str(tmp_path), "--name", "comp-audit"])
+        rc_file = tmp_path / ".bashrc"
+        mem_dir = tmp_path / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+
+        def fake_expanduser(self: Path) -> Path:
+            return rc_file
+
+        with patch("grimoire.cli.app._generate_completion_script", return_value="# test-comp"), \
+             patch.object(Path, "expanduser", fake_expanduser), \
+             patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["completion", "install", "-s", "bash"])
+        assert result.exit_code == 0
+
+        log_file = mem_dir / _AUDIT_FILENAME
+        assert log_file.is_file()
+        lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        comp_entries = [json.loads(ln) for ln in lines if json.loads(ln).get("cmd") == "completion_install"]
+        assert len(comp_entries) >= 1
+        assert comp_entries[-1]["args"]["shell"] == "bash"
+
+
+class TestR35HistoryClear:
+    """I2: history --clear should clear the audit log."""
+
+    def test_clear_with_yes(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        log_file = mem_dir / _AUDIT_FILENAME
+        log_file.write_text(
+            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
+        )
+
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["-y", "history", "--clear"])
+        assert result.exit_code == 0
+        assert "cleared" in result.output.lower() or "✓" in result.output
+
+    def test_clear_json(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        log_file = mem_dir / _AUDIT_FILENAME
+        log_file.write_text(
+            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
+        )
+
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["-y", "-o", "json", "history", "--clear"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["cleared"] is True
+
+    def test_clear_empty_noop(self, cli_project: Path) -> None:
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        # No audit file
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["-y", "history", "--clear"])
+        assert result.exit_code == 0
+        assert "no audit" in result.output.lower() or "No audit" in result.output
+
+    def test_clear_help_shows_flag(self) -> None:
+        result = runner.invoke(app, ["history", "--help"])
+        assert "--clear" in result.output

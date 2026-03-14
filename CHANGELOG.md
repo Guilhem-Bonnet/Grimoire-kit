@@ -9,9 +9,23 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
-- **Tests: +6** — R34 lint global output + env enrichment : LintGlobalOutput (2) + NullcontextImport (1) + EnvVarsComplete (3) → 336 tests CLI (Round 34)
+- **CLI: I2 — `history --clear`** — Nouveau flag `--clear` pour purger l'audit log avec confirmation (ou `--yes` pour skip). Supporte JSON output (Round 35)
+- **Tests: +12** — R35 review complète : GetFmtHelper (3) + DoctorFixAudit (2) + DoctorJsonOptionals (2) + CompletionInstallAudit (1) + HistoryClear (4) → 348 tests CLI (Round 35)
 
 ### Corrigé
+
+- **CLI: F1 — `doctor --fix` sans audit trail** — Les commandes mutatives loguent toutes via `_log_operation` sauf `doctor --fix`. Ajout de l'appel audit quand des répertoires sont créés (Round 35)
+- **CLI: I4 — `doctor --json` omet les optionnels manquants** — Les packages optionnels non installés n'apparaissaient pas dans le JSON. Ils sont maintenant inclus avec `"optional": true` (Round 35)
+- **CLI: I5 — `completion install` sans audit trail** — Commande mutatrice (écrit dans ~/.bashrc/.zshrc) sans trace. Ajout `_log_operation("completion_install", {"shell": shell})` (Round 35)
+- **CLI: H4 — DRY output format** — Le pattern `(ctx.obj or {}).get("output", "text")` était répété 26× dans le code. Extrait helper `_get_fmt(ctx)` (Round 35)
+
+### Précédent (Round 34)
+
+#### Ajouté
+
+- **Tests: +6** — R34 lint global output + env enrichment : LintGlobalOutput (2) + NullcontextImport (1) + EnvVarsComplete (3) → 336 tests CLI (Round 34)
+
+#### Corrigé
 
 - **CLI: H1 — lint ignore le flag global `-o`** — Seule des ~25 commandes, `lint` utilisait `--format/-f` au lieu de `ctx.obj["output"]`. Ajout de `ctx: typer.Context` ; `--format` reste comme fallback rétrocompat (Round 34)
 - **CLI: H2 — `_status_spinner` lazy import** — `contextlib` importé localement alors que `nullcontext` peut être importé au top-level. Remplacé par import direct (Round 34)
