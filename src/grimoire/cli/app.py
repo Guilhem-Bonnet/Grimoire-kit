@@ -1125,6 +1125,18 @@ config_app = typer.Typer(help="Manage project configuration.")
 app.add_typer(config_app, name="config", rich_help_panel="Configuration")
 
 
+def _resolve_config_key(data: Any, key: str) -> Any:
+    """Walk YAML data by dot-notation key — raise typer.Exit(1) if not found."""
+    value = data
+    for part in key.split("."):
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        else:
+            console.print(f"[red]Key not found:[/red] {key}")
+            raise typer.Exit(1)
+    return value
+
+
 @config_app.command("show")
 def config_show(
     ctx: typer.Context,
@@ -1142,13 +1154,7 @@ def config_show(
     fmt = (ctx.obj or {}).get("output", "text")
 
     if key:
-        value: Any = data
-        for part in key.split("."):
-            if isinstance(value, dict) and part in value:
-                value = value[part]
-            else:
-                console.print(f"[red]Key not found:[/red] {key}")
-                raise typer.Exit(1)
+        value = _resolve_config_key(data, key)
         if fmt == "json":
             typer.echo(json.dumps({key: value}, indent=2, default=str))
         else:
@@ -1178,14 +1184,7 @@ def config_get(
     with cfg_path.open(encoding="utf-8") as fh:
         data = yaml.load(fh)
 
-    value: Any = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        else:
-            console.print(f"[red]Key not found:[/red] {key}")
-            raise typer.Exit(1)
-
+    value = _resolve_config_key(data, key)
     fmt = (ctx.obj or {}).get("output", "text")
     if fmt == "json":
         typer.echo(json.dumps({key: value}, indent=2, default=str))
@@ -1350,21 +1349,15 @@ def config_validate(ctx: typer.Context) -> None:
 completion_app = typer.Typer(help="Shell completion utilities.")
 app.add_typer(completion_app, name="completion", rich_help_panel="Utilities")
 
+_SUPPORTED_SHELLS = frozenset({"bash", "zsh", "fish"})
 
-@completion_app.command("install")
-def completion_install(
-    shell: str = typer.Option(
-        ...,
-        "--shell", "-s",
-        help="Shell to install completion for: bash, zsh, fish.",
-    ),
-) -> None:
-    """Install shell auto-completion for grimoire CLI."""
+
+def _generate_completion_script(shell: str) -> str:
+    """Generate a shell completion script via subprocess — raise typer.Exit(1) on failure."""
     import subprocess
 
-    supported = {"bash", "zsh", "fish"}
-    if shell not in supported:
-        console.print(f"[red]Unsupported shell:[/red] {shell} (supported: {', '.join(sorted(supported))})")
+    if shell not in _SUPPORTED_SHELLS:
+        console.print(f"[red]Unsupported shell:[/red] {shell} (supported: {', '.join(sorted(_SUPPORTED_SHELLS))})")
         raise typer.Exit(1)
 
     env = {**os.environ, "_GRIMOIRE_COMPLETE": f"{shell}_source"}
@@ -1375,10 +1368,21 @@ def completion_install(
 
     if result.returncode != 0 or not result.stdout.strip():
         console.print("[yellow]Completion script could not be generated.[/yellow]")
-        console.print("[dim]Try manually: _GRIMOIRE_COMPLETE={shell}_source grimoire[/dim]")
         raise typer.Exit(1)
 
-    script = result.stdout.strip()
+    return result.stdout.strip()
+
+
+@completion_app.command("install")
+def completion_install(
+    shell: str = typer.Option(
+        ...,
+        "--shell", "-s",
+        help="Shell to install completion for: bash, zsh, fish.",
+    ),
+) -> None:
+    """Install shell auto-completion for grimoire CLI."""
+    script = _generate_completion_script(shell)
 
     shell_rc = {"bash": "~/.bashrc", "zsh": "~/.zshrc", "fish": "~/.config/fish/completions/grimoire.fish"}
     target = Path(shell_rc[shell]).expanduser()
@@ -1409,24 +1413,7 @@ def completion_export(
     ),
 ) -> None:
     """Export shell completion script to stdout (for piping/redirection)."""
-    import subprocess
-
-    supported = {"bash", "zsh", "fish"}
-    if shell not in supported:
-        console.print(f"[red]Unsupported shell:[/red] {shell} (supported: {', '.join(sorted(supported))})", highlight=False)
-        raise typer.Exit(1)
-
-    env = {**os.environ, "_GRIMOIRE_COMPLETE": f"{shell}_source"}
-    result = subprocess.run(
-        [sys.executable, "-m", "grimoire"],
-        capture_output=True, text=True, env=env, timeout=10,
-    )
-
-    if result.returncode != 0 or not result.stdout.strip():
-        console.print("[yellow]Completion script could not be generated.[/yellow]")
-        raise typer.Exit(1)
-
-    typer.echo(result.stdout.strip())
+    typer.echo(_generate_completion_script(shell))
 
 
 # ── grimoire self ─────────────────────────────────────────────────────────────────
@@ -1988,6 +1975,7 @@ def history_cmd(
             console.print("[dim]No audit history yet.[/dim]")
         return
 
+    all_entries: list[dict[str, Any]] = []
     entries: list[dict[str, Any]] = []
     skipped = 0
     with log_file.open(encoding="utf-8") as fh:
@@ -1997,17 +1985,19 @@ def history_cmd(
                 continue
             try:
                 entry = json.loads(line)
+                all_entries.append(entry)
                 if filter_cmd and entry.get("cmd") != filter_cmd:
                     continue
                 entries.append(entry)
             except json.JSONDecodeError:
                 skipped += 1
 
+    total_entries = len(all_entries)
     # Most recent first, limited
     entries = entries[-limit:][::-1]
 
     if fmt == "json":
-        typer.echo(json.dumps({"entries": entries, "total": len(entries), "skipped": skipped}, indent=2))
+        typer.echo(json.dumps({"entries": entries, "total": len(entries), "total_entries": total_entries, "skipped": skipped}, indent=2))
         return
 
     if not entries:
@@ -2019,15 +2009,17 @@ def history_cmd(
 
     tbl = Table(title=f"Audit History (last {limit})")
     tbl.add_column("Timestamp", style="dim")
+    tbl.add_column("Version", style="dim")
     tbl.add_column("Command", style="bold")
     tbl.add_column("Status")
     tbl.add_column("Args", style="dim")
     for e in entries:
         ts = e.get("ts", "?")[:19].replace("T", " ")
+        ver = e.get("v", "—")
         cmd = e.get("cmd", "?")
         status_icon = "[green]✓[/green]" if e.get("ok") else "[red]✗[/red]"
         args_str = ", ".join(f"{k}={v}" for k, v in (e.get("args") or {}).items())
-        tbl.add_row(ts, cmd, status_icon, args_str)
+        tbl.add_row(ts, ver, cmd, status_icon, args_str)
     console.print(tbl)
 
 

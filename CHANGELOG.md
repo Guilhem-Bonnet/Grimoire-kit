@@ -9,9 +9,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
-- **Tests: +9** — R32 audit & housekeeping : AuditVersionField (2) + RepairAuditLog (2) + SetupAuditLog (1) + DoctorNumbering (1) + SelfVersionImport (1) + CompletionParentDir (2) → 320 tests CLI (Round 32)
+- **Tests: +10** — R33 DRY refactors + history enhancement : CompletionDRY (4) + ConfigKeyResolver (3) + HistoryVersionColumn (3) → 330 tests CLI (Round 33)
 
 ### Corrigé
+
+- **CLI: H1+H4 — DRY completion** — `completion_install` et `completion_export` partageaient ~15 lignes identiques (subprocess + validation). Extrait helper `_generate_completion_script(shell)` + constante `_SUPPORTED_SHELLS = frozenset({"bash", "zsh", "fish"})` (Round 33)
+- **CLI: H2 — DRY config traversal** — `config_show` et `config_get` partageaient 28 lignes de traversée dot-notation YAML. Extrait helper `_resolve_config_key(data, key)` (Round 33)
+- **CLI: H3 — history sans colonne version** — `history` n'affichait pas le champ `"v"` ajouté en R32. Ajout colonne « Version » dans la table Rich (fallback « — » pour anciennes entrées) (Round 33)
+- **CLI: I1 — history total_entries** — En mode JSON, `history` n'exposait que le nombre filtré (`total`). Ajout de `total_entries` (total brut du fichier) (Round 33)
+
+### Précédemment (Round 32)
+
+#### Ajouté
+
+- **Tests: +9** — R32 audit & housekeeping : AuditVersionField (2) + RepairAuditLog (2) + SetupAuditLog (1) + DoctorNumbering (1) + SelfVersionImport (1) + CompletionParentDir (2) → 320 tests CLI (Round 32)
+
+#### Corrigé
 
 - **CLI: I1 — Audit log sans version** — `_log_operation()` n'incluait pas la version de grimoire-kit. Ajout d'un champ `"v": __version__` dans chaque enregistrement JSONL (Round 32)
 - **CLI: H1 — repair sans audit** — `repair` ne loguait pas dans l'audit trail. Ajout de `_log_operation("repair", …)` après actions non-dry-run (Round 32)

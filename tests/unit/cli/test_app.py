@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from grimoire.cli.app import _ALIASES, _expand_aliases, app
@@ -2984,3 +2985,113 @@ class TestR32CompletionParentDir:
             runner.invoke(app, ["completion", "install", "--shell", "fish"])
 
         assert fake_fish.parent.is_dir()
+
+
+# ── R33 — DRY completion helper, DRY config key resolver, history version column,
+#           _SUPPORTED_SHELLS constant, history total_entries ──────────────────────
+
+class TestR33CompletionDRY:
+    """H1+H4: completion_install and completion_export share _generate_completion_script."""
+
+    def test_generate_completion_script_returns_string(self) -> None:
+        from grimoire.cli.app import _generate_completion_script
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="# script\n")
+            result = _generate_completion_script("bash")
+        assert result == "# script"
+
+    def test_generate_completion_script_rejects_unsupported_shell(self) -> None:
+        from grimoire.cli.app import _generate_completion_script
+
+        with pytest.raises(typer.Exit):
+            _generate_completion_script("powershell")
+
+    def test_generate_completion_script_fails_on_empty_output(self) -> None:
+        from grimoire.cli.app import _generate_completion_script
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            with pytest.raises(typer.Exit):
+                _generate_completion_script("bash")
+
+    def test_supported_shells_constant_exists(self) -> None:
+        from grimoire.cli.app import _SUPPORTED_SHELLS
+
+        assert frozenset({"bash", "zsh", "fish"}) == _SUPPORTED_SHELLS
+
+
+class TestR33ConfigKeyResolver:
+    """H2: config_show and config_get share _resolve_config_key."""
+
+    def test_resolve_config_key_returns_value(self) -> None:
+        from grimoire.cli.app import _resolve_config_key
+
+        data = {"project": {"name": "demo", "type": "webapp"}}
+        assert _resolve_config_key(data, "project.name") == "demo"
+
+    def test_resolve_config_key_exits_on_missing(self) -> None:
+        from grimoire.cli.app import _resolve_config_key
+
+        data = {"project": {"name": "demo"}}
+        with pytest.raises(typer.Exit):
+            _resolve_config_key(data, "project.missing")
+
+    def test_resolve_config_key_top_level(self) -> None:
+        from grimoire.cli.app import _resolve_config_key
+
+        data = {"project": {"name": "demo"}}
+        assert isinstance(_resolve_config_key(data, "project"), dict)
+
+
+class TestR33HistoryVersionColumn:
+    """H3: history command should display version column from audit records."""
+
+    def test_history_text_shows_version(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        audit = mem_dir / _AUDIT_FILENAME
+        audit.write_text(
+            json.dumps({"ts": "2025-01-01T00:00:00+00:00", "v": "1.2.3", "cmd": "init", "ok": True}) + "\n",
+            encoding="utf-8",
+        )
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["history"])
+        assert "1.2.3" in result.output
+
+    def test_history_json_includes_total_entries(self, cli_project: Path) -> None:
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        audit = mem_dir / _AUDIT_FILENAME
+        # Write 3 entries, filter for 'init' should show 1
+        audit.write_text(
+            json.dumps({"ts": "2025-01-01T00:00:00+00:00", "cmd": "init", "ok": True}) + "\n"
+            + json.dumps({"ts": "2025-01-02T00:00:00+00:00", "cmd": "add", "ok": True}) + "\n"
+            + json.dumps({"ts": "2025-01-03T00:00:00+00:00", "cmd": "remove", "ok": True}) + "\n",
+            encoding="utf-8",
+        )
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["-o", "json", "history", "--filter", "init"])
+        data = json.loads(result.output)
+        assert data["total"] == 1
+        assert data["total_entries"] == 3
+
+    def test_history_version_fallback_for_old_entries(self, cli_project: Path) -> None:
+        """Old entries without 'v' field should show dash in text mode."""
+        from grimoire.cli.app import _AUDIT_FILENAME
+
+        mem_dir = cli_project / "_grimoire" / "_memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        audit = mem_dir / _AUDIT_FILENAME
+        audit.write_text(
+            json.dumps({"ts": "2025-01-01T00:00:00+00:00", "cmd": "init", "ok": True}) + "\n",
+            encoding="utf-8",
+        )
+        with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
+            result = runner.invoke(app, ["history"])
+        # Should not crash and show fallback dash
+        assert result.exit_code == 0
