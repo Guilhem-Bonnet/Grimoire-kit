@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli.cmd_memory import memory_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
 from grimoire.core.log import configure_logging
@@ -35,6 +36,7 @@ _ALIASES: dict[str, str] = {
     "u": "up",
     "c": "config",
     "r": "registry",
+    "m": "memory",
     "st": "status",
     "ck": "check",
 }
@@ -92,7 +94,8 @@ app = typer.Typer(
         "\n"
         "[dim]Aliases:[/dim]  "
         "[cyan]i[/cyan]=init  [cyan]d[/cyan]=doctor  [cyan]s[/cyan]=status  "
-        "[cyan]v[/cyan]=validate  [cyan]l[/cyan]=lint  [cyan]ck[/cyan]=check\n"
+        "[cyan]v[/cyan]=validate  [cyan]l[/cyan]=lint  [cyan]m[/cyan]=memory  "
+        "[cyan]ck[/cyan]=check\n"
         "\n"
         "[dim]For more help:[/dim]\n"
         "  [bold]grimoire COMMAND --help[/bold]    Show command-specific help\n"
@@ -855,6 +858,11 @@ def up(
         if status.directories_missing:
             missing = ", ".join(status.directories_missing)
             console.print(f"\n[yellow]Missing dirs (after up):[/yellow] {missing}")
+
+
+# ── grimoire memory ───────────────────────────────────────────────────────────────
+
+app.add_typer(memory_app, name="memory", rich_help_panel="Data")
 
 
 # ── grimoire registry ─────────────────────────────────────────────────────────────
