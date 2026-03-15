@@ -41,6 +41,9 @@ def ollama_env(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     for name, mod in {"qdrant_client": qdrant_mod, "qdrant_client.models": models_mod}.items():
         monkeypatch.setitem(sys.modules, name, mod)
 
+    # Clear cached import to force re-import with mocked deps
+    monkeypatch.delitem(sys.modules, "grimoire.memory.backends.ollama", raising=False)
+
     # Patch ollama_embed to avoid real HTTP calls
     monkeypatch.setattr(
         "grimoire.memory.backends.ollama.ollama_embed",
@@ -173,6 +176,64 @@ class TestOllamaBackendConsolidate:
     def test_consolidate_returns_zero(self, ollama_env: MagicMock) -> None:
         backend = _make_backend(ollama_env)
         assert backend.consolidate() == 0
+
+
+class TestOllamaBackendTags:
+    def test_store_with_tags(self, ollama_env: MagicMock) -> None:
+        backend = _make_backend(ollama_env)
+        entry = backend.store("tagged", tags=("ollama", "test"))
+        assert entry.tags == ("ollama", "test")
+
+
+class TestOllamaBackendPagination:
+    def test_get_all_with_offset_limit(self, ollama_env: MagicMock) -> None:
+        pts = []
+        for i in range(5):
+            pt = MagicMock()
+            pt.id = f"p-{i}"
+            pt.payload = {"memory": f"item-{i}", "user_id": "global", "created_at": "", "tags": [], "updated_at": ""}
+            pts.append(pt)
+        ollama_env.scroll.return_value = (pts, None)
+
+        backend = _make_backend(ollama_env)
+        results = backend.get_all(offset=1, limit=2)
+        assert len(results) == 2
+        assert results[0].text == "item-1"
+
+
+class TestOllamaBackendDelete:
+    def test_delete_existing(self, ollama_env: MagicMock) -> None:
+        pt = MagicMock()
+        pt.id = "del-1"
+        ollama_env.retrieve.return_value = [pt]
+
+        backend = _make_backend(ollama_env)
+        assert backend.delete("del-1") is True
+        ollama_env.delete.assert_called_once()
+
+    def test_delete_missing(self, ollama_env: MagicMock) -> None:
+        ollama_env.retrieve.return_value = []
+        backend = _make_backend(ollama_env)
+        assert backend.delete("nope") is False
+
+
+class TestOllamaBackendUpdate:
+    def test_update_text(self, ollama_env: MagicMock) -> None:
+        pt = MagicMock()
+        pt.id = "u-1"
+        pt.payload = {"memory": "old", "user_id": "global", "created_at": "2025", "tags": [], "updated_at": ""}
+        pt.vector = _FAKE_VECTOR
+        ollama_env.retrieve.return_value = [pt]
+
+        backend = _make_backend(ollama_env)
+        result = backend.update("u-1", text="new")
+        assert result is not None
+        assert result.text == "new"
+
+    def test_update_missing(self, ollama_env: MagicMock) -> None:
+        ollama_env.retrieve.return_value = []
+        backend = _make_backend(ollama_env)
+        assert backend.update("nope", text="x") is None
 
 
 class TestOllamaEmbed:

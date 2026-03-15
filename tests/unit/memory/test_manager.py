@@ -27,6 +27,9 @@ def mock_backend() -> MagicMock:
     b.count.return_value = 1
     b.health_check.return_value = BackendStatus(backend="mock", healthy=True, entries=1)
     b.consolidate.return_value = 0
+    b.delete.return_value = True
+    b.update.return_value = MemoryEntry(id="m-1", text="updated", user_id="global")
+    b.store_many.return_value = [MemoryEntry(id="m-1", text="a"), MemoryEntry(id="m-2", text="b")]
     return b
 
 
@@ -49,7 +52,7 @@ class TestFromBackend:
     def test_store_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         result = mgr.store("hello")
-        mock_backend.store.assert_called_once_with("hello", user_id="", metadata=None)
+        mock_backend.store.assert_called_once_with("hello", user_id="", tags=(), metadata=None)
         assert result.text == "stored"
 
     def test_recall_delegates(self, mock_backend: MagicMock) -> None:
@@ -66,7 +69,12 @@ class TestFromBackend:
     def test_get_all_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         mgr.get_all(user_id="bob")
-        mock_backend.get_all.assert_called_once_with(user_id="bob")
+        mock_backend.get_all.assert_called_once_with(user_id="bob", offset=0, limit=None)
+
+    def test_get_all_pagination_delegates(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        mgr.get_all(offset=10, limit=5)
+        mock_backend.get_all.assert_called_once_with(user_id="", offset=10, limit=5)
 
     def test_count_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
@@ -80,6 +88,30 @@ class TestFromBackend:
     def test_consolidate_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         assert mgr.consolidate() == 0
+
+    def test_delete_delegates(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        assert mgr.delete("m-1") is True
+        mock_backend.delete.assert_called_once_with("m-1")
+
+    def test_update_delegates(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        result = mgr.update("m-1", text="new")
+        mock_backend.update.assert_called_once_with("m-1", text="new", tags=None, metadata=None)
+        assert result is not None
+        assert result.text == "updated"
+
+    def test_store_many_delegates(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        items = [{"text": "a"}, {"text": "b"}]
+        results = mgr.store_many(items)
+        mock_backend.store_many.assert_called_once_with(items)
+        assert len(results) == 2
+
+    def test_store_with_tags_delegates(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        mgr.store("tagged", tags=("t1", "t2"))
+        mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata=None)
 
 
 # ── auto-resolution ──────────────────────────────────────────────────────────

@@ -54,7 +54,7 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
     """
     mem = config.memory
     backend_id = mem.backend if mem.backend != _BACKEND_AUTO else _resolve_auto(config)
-    root = (project_root or Path(".")).resolve()
+    root = (project_root or Path()).resolve()
 
     if backend_id == _BACKEND_LOCAL:
         from grimoire.memory.backends.local import LocalMemoryBackend
@@ -140,8 +140,8 @@ class MemoryManager:
         """The underlying backend instance."""
         return self._backend
 
-    def store(self, text: str, *, user_id: str = "", metadata: dict[str, Any] | None = None) -> MemoryEntry:
-        return self._backend.store(text, user_id=user_id, metadata=metadata)
+    def store(self, text: str, *, user_id: str = "", tags: tuple[str, ...] = (), metadata: dict[str, Any] | None = None) -> MemoryEntry:
+        return self._backend.store(text, user_id=user_id, tags=tags, metadata=metadata)
 
     def recall(self, entry_id: str) -> MemoryEntry | None:
         return self._backend.recall(entry_id)
@@ -149,8 +149,8 @@ class MemoryManager:
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
         return self._backend.search(query, user_id=user_id, limit=limit)
 
-    def get_all(self, *, user_id: str = "") -> list[MemoryEntry]:
-        return self._backend.get_all(user_id=user_id)
+    def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
+        return self._backend.get_all(user_id=user_id, offset=offset, limit=limit)
 
     def count(self) -> int:
         return self._backend.count()
@@ -160,3 +160,12 @@ class MemoryManager:
 
     def consolidate(self) -> int:
         return self._backend.consolidate()
+
+    def delete(self, entry_id: str) -> bool:
+        return self._backend.delete(entry_id)
+
+    def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
+        return self._backend.update(entry_id, text=text, tags=tags, metadata=metadata)
+
+    def store_many(self, entries: list[dict[str, Any]]) -> list[MemoryEntry]:
+        return self._backend.store_many(entries)

@@ -54,7 +54,7 @@ def qdrant_env(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
     for name, mod in modules.items():
         monkeypatch.setitem(sys.modules, name, mod)
 
-    # Clear any cached import of the backend module
+    # Clear cached import to force re-import with mocked deps
     monkeypatch.delitem(sys.modules, "grimoire.memory.backends.qdrant", raising=False)
 
     return mock_client, mock_encoder
@@ -217,6 +217,90 @@ class TestQdrantBackendConsolidate:
     def test_consolidate_returns_zero(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
         backend = _make_backend(qdrant_env)
         assert backend.consolidate() == 0
+
+
+class TestQdrantBackendTags:
+    def test_store_with_tags(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        backend = _make_backend(qdrant_env)
+        entry = backend.store("tagged", tags=("python", "memory"))
+        assert entry.tags == ("python", "memory")
+
+
+class TestQdrantBackendPagination:
+    def test_get_all_with_offset_and_limit(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+        pts = []
+        for i in range(5):
+            pt = MagicMock()
+            pt.id = f"p-{i}"
+            pt.payload = {"memory": f"item-{i}", "user_id": "global", "created_at": "", "tags": [], "updated_at": ""}
+            pts.append(pt)
+        client.scroll.return_value = (pts, None)
+
+        backend = _make_backend(qdrant_env)
+        results = backend.get_all(offset=2, limit=2)
+        assert len(results) == 2
+        assert results[0].text == "item-2"
+
+    def test_get_all_paginates_through_batches(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        """Ensure scroll is called repeatedly when next_offset is returned."""
+        client, _ = qdrant_env
+        pt1 = MagicMock()
+        pt1.id = "b1"
+        pt1.payload = {"memory": "batch1", "user_id": "global", "created_at": "", "tags": [], "updated_at": ""}
+        pt2 = MagicMock()
+        pt2.id = "b2"
+        pt2.payload = {"memory": "batch2", "user_id": "global", "created_at": "", "tags": [], "updated_at": ""}
+        # First call returns 1 item + next_offset, second call returns 1 item + None
+        client.scroll.side_effect = [([pt1], "next"), ([pt2], None)]
+
+        backend = _make_backend(qdrant_env)
+        results = backend.get_all()
+        assert len(results) == 2
+        assert client.scroll.call_count == 2
+
+
+class TestQdrantBackendDelete:
+    def test_delete_existing(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+        pt = MagicMock()
+        pt.id = "del-1"
+        client.retrieve.return_value = [pt]
+
+        backend = _make_backend(qdrant_env)
+        assert backend.delete("del-1") is True
+        client.delete.assert_called_once()
+
+    def test_delete_missing(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+        client.retrieve.return_value = []
+
+        backend = _make_backend(qdrant_env)
+        assert backend.delete("nope") is False
+
+
+class TestQdrantBackendUpdate:
+    def test_update_text(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+        pt = MagicMock()
+        pt.id = "u-1"
+        pt.payload = {"memory": "old", "user_id": "global", "created_at": "2025-01-01", "tags": [], "updated_at": ""}
+        pt.vector = [0.0] * 384
+        client.retrieve.return_value = [pt]
+
+        backend = _make_backend(qdrant_env)
+        result = backend.update("u-1", text="new")
+        assert result is not None
+        assert result.text == "new"
+        assert result.updated_at != ""
+        client.upsert.assert_called()
+
+    def test_update_missing(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+        client.retrieve.return_value = []
+
+        backend = _make_backend(qdrant_env)
+        assert backend.update("nope", text="x") is None
 
 
 class TestQdrantBackendImportError:
