@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from grimoire.tools._common import GrimoireTool, estimate_tokens
 
@@ -60,7 +60,7 @@ class Priority:
     P3_LAZY = 3
     P4_ON_REQUEST = 4
 
-    LABELS = {
+    LABELS: ClassVar[dict[int, str]] = {
         0: "P0-ALWAYS",
         1: "P1-SESSION",
         2: "P2-TASK",

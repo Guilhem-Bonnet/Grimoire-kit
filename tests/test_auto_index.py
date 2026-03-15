@@ -194,7 +194,7 @@ class TestDetectChanges(unittest.TestCase):
         _write_file(self.tmpdir, "src/app.py")
         state = self.mod.IndexState()
         files = self.mod.discover_files(self.tmpdir)
-        new_or_mod, unchanged, deleted = self.mod.detect_changes(
+        new_or_mod, unchanged, _deleted = self.mod.detect_changes(
             self.tmpdir, state, files)
         self.assertGreater(len(new_or_mod), 0)
         self.assertEqual(len(unchanged), 0)
@@ -208,7 +208,7 @@ class TestDetectChanges(unittest.TestCase):
             indexed_at="2026-01-01",
         )
         files = [fp]
-        new_or_mod, unchanged, deleted = self.mod.detect_changes(
+        new_or_mod, unchanged, _deleted = self.mod.detect_changes(
             self.tmpdir, state, files)
         self.assertEqual(len(new_or_mod), 0)
         self.assertEqual(len(unchanged), 1)
@@ -219,7 +219,7 @@ class TestDetectChanges(unittest.TestCase):
         state.files["src/app.py"] = self.mod.FileState(
             path="src/app.py", hash="old_hash", indexed_at="2026-01-01")
         files = [fp]
-        new_or_mod, unchanged, deleted = self.mod.detect_changes(
+        new_or_mod, _unchanged, _deleted = self.mod.detect_changes(
             self.tmpdir, state, files)
         self.assertEqual(len(new_or_mod), 1)
 
@@ -227,7 +227,7 @@ class TestDetectChanges(unittest.TestCase):
         state = self.mod.IndexState()
         state.files["gone.py"] = self.mod.FileState(
             path="gone.py", hash="abc", indexed_at="2026-01-01")
-        new_or_mod, unchanged, deleted = self.mod.detect_changes(
+        _new_or_mod, _unchanged, deleted = self.mod.detect_changes(
             self.tmpdir, state, [])
         self.assertEqual(len(deleted), 1)
 
@@ -279,7 +279,7 @@ class TestGitHook(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_install_hook(self):
-        ok, msg = self.mod.install_hook(self.tmpdir)
+        ok, _msg = self.mod.install_hook(self.tmpdir)
         self.assertTrue(ok)
         hook = self.tmpdir / ".git" / "hooks" / "post-commit"
         self.assertTrue(hook.exists())
@@ -294,11 +294,11 @@ class TestGitHook(unittest.TestCase):
 
     def test_uninstall_hook(self):
         self.mod.install_hook(self.tmpdir)
-        ok, msg = self.mod.uninstall_hook(self.tmpdir)
+        ok, _msg = self.mod.uninstall_hook(self.tmpdir)
         self.assertTrue(ok)
 
     def test_uninstall_no_hook(self):
-        ok, msg = self.mod.uninstall_hook(self.tmpdir)
+        ok, _msg = self.mod.uninstall_hook(self.tmpdir)
         self.assertTrue(ok)
 
 

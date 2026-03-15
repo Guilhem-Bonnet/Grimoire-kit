@@ -125,9 +125,8 @@ class MergeEngine:
                 files_to_create.append(rel)
                 # Check if parent dir needs creation
                 rel_parent = str(target_file.parent.relative_to(self._target))
-                if rel_parent != "." and not target_file.parent.is_dir():
-                    if rel_parent not in dirs_to_create:
-                        dirs_to_create.append(rel_parent)
+                if rel_parent != "." and not target_file.parent.is_dir() and rel_parent not in dirs_to_create:
+                    dirs_to_create.append(rel_parent)
 
         return MergePlan(
             files_to_create=tuple(files_to_create),

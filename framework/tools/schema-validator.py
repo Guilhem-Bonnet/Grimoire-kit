@@ -150,9 +150,7 @@ def _parse_yaml_basic(text: str) -> tuple[dict | None, str | None]:
             current_key = key
 
             # Remove quotes and handle types
-            if val.startswith('"') and val.endswith('"'):
-                val = val[1:-1]
-            elif val.startswith("'") and val.endswith("'"):
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]
             elif val == "true":
                 val = True  # type: ignore[assignment]
@@ -161,9 +159,7 @@ def _parse_yaml_basic(text: str) -> tuple[dict | None, str | None]:
             elif val == "null" or val == "~":
                 val = None  # type: ignore[assignment]
 
-            if val == "" or val is None:
-                data[key] = val
-            elif isinstance(val, (bool,)):
+            if val == "" or val is None or isinstance(val, (bool,)):
                 data[key] = val
             elif stripped.count(":") == 1 and val.startswith("[") and val.endswith("]"):
                 # Inline list
@@ -226,7 +222,7 @@ def validate_dna(path: Path, data: dict) -> list[ValidationIssue]:
             _add(SEVERITY_ERROR, "tags",
                  f"'tags' doit être une liste (trouvé: {type(data['tags']).__name__})")
 
-    if "version" in data and data["version"]:
+    if data.get("version"):
         v = str(data["version"])
         parts = v.split(".")
         if len(parts) < 2:

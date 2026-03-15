@@ -87,10 +87,7 @@ def _parse_segments(content: str, filepath: Path) -> list[WorkflowSegment]:
     lines = content.splitlines()
     is_yaml = filepath.suffix in (".yaml", ".yml")
 
-    if is_yaml:
-        segments = _parse_yaml_segments(lines)
-    else:
-        segments = _parse_md_segments(lines)
+    segments = _parse_yaml_segments(lines) if is_yaml else _parse_md_segments(lines)
 
     return segments
 
@@ -598,7 +595,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="crispr",
         description="CRISPR — Édition chirurgicale de workflows",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

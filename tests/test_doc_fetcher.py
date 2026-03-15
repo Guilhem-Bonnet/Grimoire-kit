@@ -97,29 +97,29 @@ class TestHtmlExtractor(unittest.TestCase):
 
     def test_basic_extraction(self):
         html = "<html><body><p>Hello world</p></body></html>"
-        text, title = self.mod.extract_text_from_html(html)
+        text, _title = self.mod.extract_text_from_html(html)
         self.assertIn("Hello world", text)
 
     def test_title_extraction(self):
         html = "<html><head><title>My Page</title></head><body><p>Content</p></body></html>"
-        text, title = self.mod.extract_text_from_html(html)
+        _text, title = self.mod.extract_text_from_html(html)
         self.assertEqual(title, "My Page")
 
     def test_skip_script(self):
         html = "<html><body><script>alert('xss')</script><p>Safe</p></body></html>"
-        text, title = self.mod.extract_text_from_html(html)
+        text, _title = self.mod.extract_text_from_html(html)
         self.assertNotIn("alert", text)
         self.assertIn("Safe", text)
 
     def test_skip_style(self):
         html = "<html><body><style>.x{color:red}</style><p>Visible</p></body></html>"
-        text, title = self.mod.extract_text_from_html(html)
+        text, _title = self.mod.extract_text_from_html(html)
         self.assertNotIn("color", text)
         self.assertIn("Visible", text)
 
     def test_headings_converted(self):
         html = "<html><body><h2>Section</h2><p>Text</p></body></html>"
-        text, title = self.mod.extract_text_from_html(html)
+        text, _title = self.mod.extract_text_from_html(html)
         self.assertIn("##", text)
         self.assertIn("Section", text)
 

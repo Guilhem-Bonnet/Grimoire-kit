@@ -92,20 +92,20 @@ class TestOrchestrator(unittest.TestCase):
         self.orch = orc.Orchestrator(Path(self.tmpdir))
 
     def test_decide_mode_default(self):
-        mode, reason = self.orch.decide_mode("party-mode")
+        mode, _reason = self.orch.decide_mode("party-mode")
         self.assertEqual(mode, "simulated")
 
     def test_decide_mode_override(self):
-        mode, reason = self.orch.decide_mode("party-mode", override="concurrent-cpu")
+        mode, _reason = self.orch.decide_mode("party-mode", override="concurrent-cpu")
         self.assertEqual(mode, "concurrent-cpu")
 
     def test_decide_mode_unknown_workflow(self):
-        mode, reason = self.orch.decide_mode("unknown-workflow")
+        mode, _reason = self.orch.decide_mode("unknown-workflow")
         self.assertEqual(mode, "simulated")
 
     def test_decide_mode_budget_fallback(self):
         orch_low = orc.Orchestrator(Path(self.tmpdir), budget_cap=100)
-        mode, reason = orch_low.decide_mode("adversarial-review")
+        mode, _reason = orch_low.decide_mode("adversarial-review")
         self.assertIn(mode, ("sequential", "simulated"))
 
     def test_create_plan(self):
@@ -411,7 +411,7 @@ class TestToolResolveHook(unittest.TestCase):
 class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(
-            [sys.executable, str(TOOL)] + list(args),
+            [sys.executable, str(TOOL), *list(args)],
             capture_output=True, text=True, timeout=15,
         )
 

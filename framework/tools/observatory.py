@@ -140,7 +140,7 @@ def parse_trace(path: Path) -> tuple[list[TraceEntry], list[str]]:
 
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if not line or line.startswith("#") and not line.startswith("## Session"):
+        if not line or (line.startswith("#") and not line.startswith("## Session")):
             sm = _SESSION_RE.match(line)
             if sm:
                 current_session = sm.group(1)

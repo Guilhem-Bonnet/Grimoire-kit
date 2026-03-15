@@ -564,7 +564,7 @@ class TestScorePatternRecurrence(unittest.TestCase):
         self.assertEqual(d.score, 0.5)
 
     def test_diverse_categories(self):
-        cats = {c: 2 for c in self.mod.FAILURE_CATEGORIES}
+        cats = dict.fromkeys(self.mod.FAILURE_CATEGORIES, 2)
         d = self.mod.score_pattern_recurrence(
             {"categories": cats},
             {},

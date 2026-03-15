@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: "Grimoire Kit — Composable AI Agent Platform"
+message: "If you use Grimoire Kit in your research, please cite it as below."
+type: software
+authors:
+  - family-names: "Bonnet"
+    given-names: "Guilhem"
+license: MIT
+version: "3.1.0"
+date-released: "2025-03-13"
+repository-code: "https://github.com/Guilhem-Bonnet/Grimoire-kit"
+url: "https://guilhem-bonnet.github.io/Grimoire-kit/"
+keywords:
+  - ai-agents
+  - llm
+  - workflow
+  - copilot
+  - mcp
+  - composable-platform

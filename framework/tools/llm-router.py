@@ -37,6 +37,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 _log = logging.getLogger("grimoire.llm_router")
 
@@ -104,7 +105,7 @@ class Complexity:
     COMPLEX = "complex"
     EXPERT = "expert"
 
-    COST_MULTIPLIER = {
+    COST_MULTIPLIER: ClassVar[dict[str, float]] = {
         "trivial": 0.1,
         "standard": 0.5,
         "complex": 1.0,
@@ -757,7 +758,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--version", action="version", version=f"llm-router {LLM_ROUTER_VERSION}")

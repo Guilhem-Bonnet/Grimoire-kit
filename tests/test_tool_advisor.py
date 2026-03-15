@@ -5,7 +5,6 @@ import importlib.util
 import json
 import sys
 from dataclasses import asdict
-from io import StringIO
 from pathlib import Path
 
 import pytest

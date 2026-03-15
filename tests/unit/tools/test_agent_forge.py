@@ -99,26 +99,26 @@ class TestExtractAgentName:
 
     def test_french_description(self) -> None:
         _, profile = detect_domain("security")
-        name, tag = extract_agent_name("gérer la sécurité des APIs",
+        _name, tag = extract_agent_name("gérer la sécurité des APIs",
                                         "security", profile)
         assert len(tag) > 0
         assert tag.startswith("sec-")
 
     def test_empty_description_uses_domain(self) -> None:
         _, profile = detect_domain("")
-        name, tag = extract_agent_name("le la du", "custom", profile)
+        name, _tag = extract_agent_name("le la du", "custom", profile)
         # Should fallback to domain key
         assert len(name) > 0
 
     def test_grammatical_pattern(self) -> None:
         _, profile = detect_domain("api")
-        name, tag = extract_agent_name("agent for API gateway routing",
+        _name, tag = extract_agent_name("agent for API gateway routing",
                                         "api", profile)
         assert len(tag) > 3
 
     def test_accent_transliteration(self) -> None:
         _, profile = detect_domain("database")
-        name, tag = extract_agent_name("gérer les données éphémères",
+        _name, tag = extract_agent_name("gérer les données éphémères",
                                         "database", profile)
         # Should not contain accented chars
         assert all(c.isascii() for c in tag)

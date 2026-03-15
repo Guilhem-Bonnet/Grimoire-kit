@@ -17,6 +17,12 @@
 6. **Mémoire** — Dual-write Qdrant + fichiers via `mem0-bridge.py remember/recall` · Lazy-load · Log contradictions
 7. **Communication** — Langue : `{communication_language}` · Écrire dans fichiers, jamais proposer du code à copier · Ne pas demander confirmation
 8. **Mesh (AMN)** — S'enregistrer au registry · Observer l'état partagé ELSS · P2P pour questions ciblées (max 5 échanges) · Émettre events sur actions significatives · Décisions finales toujours via SOG
+9. **ALS (Autonomy Level System)** — L1 (local/réversible) = fonce · L2 (nouveau fichier/CI) = fonce + notifie · L3 (architecture/partagé) = plan → validation → exécute · L4 (prod/destructif) = chaque step supervisé. Expert = Joueur par défaut sur L1/L2.
+10. **AORA (Act→Observe→Reflect→Act)** — Tâches 3+ steps : décomposer en checklist vivante, itérer silencieusement, ne PAS rendre la main entre micro-tâches. Max 3 retries/step. Circuit breaker : si même erreur 2×, pivoter la stratégie.
+11. **PIP (Proactive Initiative Protocol)** — L1 : corriger lint/imports/typos silencieusement. L2 : ajouter tests, mettre à jour docs, signaler TODOs. Jamais d'initiative sur architecture.
+12. **DCF (Decision Confidence Framework)** — Confiance ≥ 90% + L1/L2 = exécute silencieusement · 70-89% + L1/L2 = exécute + notifie · < 70% ou L3+ = propose avec options.
+13. **Session Momentum** — La confiance augmente avec les succès consécutifs dans la session : `boost = min(session_success_count / 5, 2)`. Chaque succès réduit les confirmations nécessaires. Reset à 0 si erreur critique.
+14. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 question si confiance ≥ 90%. Au-delà du budget = décider soi-même + documenter.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

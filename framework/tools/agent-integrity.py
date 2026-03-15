@@ -159,7 +159,7 @@ def main() -> None:
         prog="agent-integrity",
         description="Vérification d'intégrité des fichiers agents",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."))
+    parser.add_argument("--project-root", type=Path, default=Path())
     parser.add_argument("--json", dest="as_json", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 

@@ -301,7 +301,7 @@ class TestEvaporation(unittest.TestCase):
         old = now - timedelta(hours=720)
         p = _make_pheromone(self.st, timestamp=old.isoformat(), intensity=0.3)
         board = _make_board(self.st, pheromones=[p])
-        board, count = self.st.evaporate(board, now)
+        board, _count = self.st.evaporate(board, now)
         self.assertEqual(board.total_evaporated, 1)
 
     def test_evaporate_keeps_all_fresh(self):
@@ -723,8 +723,7 @@ class TestCLI(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _run(self, *args) -> subprocess.CompletedProcess:
-        cmd = [sys.executable, str(TOOL),
-               "--project-root", str(self.root)] + list(args)
+        cmd = [sys.executable, str(TOOL), "--project-root", str(self.root), *list(args)]
         return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
 
     def test_cli_no_command(self):
@@ -781,7 +780,7 @@ class TestCLI(unittest.TestCase):
         r1 = self._run("emit", "--type", "NEED", "--location", "a",
                         "--text", "a", "--agent", "dev")
         # Extract PH-id from output
-        pid = [w for w in r1.stdout.split() if w.startswith("PH-")][0]
+        pid = next(w for w in r1.stdout.split() if w.startswith("PH-"))
         r2 = self._run("amplify", "--id", pid, "--agent", "qa")
         self.assertEqual(r2.returncode, 0)
         self.assertIn("renforcée", r2.stdout)
@@ -793,7 +792,7 @@ class TestCLI(unittest.TestCase):
     def test_cli_resolve(self):
         r1 = self._run("emit", "--type", "BLOCK", "--location", "a",
                         "--text", "blocked", "--agent", "dev")
-        pid = [w for w in r1.stdout.split() if w.startswith("PH-")][0]
+        pid = next(w for w in r1.stdout.split() if w.startswith("PH-"))
         r2 = self._run("resolve", "--id", pid, "--agent", "qa")
         self.assertEqual(r2.returncode, 0)
         self.assertIn("résolue", r2.stdout)

@@ -338,7 +338,7 @@ class TestProposeActions(BaseTest):
             ),
         ]
         actions = dw.propose_actions(scores)
-        fragile_action = [a for a in actions if a.agent_id == "weak"][0]
+        fragile_action = next(a for a in actions if a.agent_id == "weak")
         self.assertEqual(fragile_action.action, "HYBRIDIZE")
         self.assertIn("strong", fragile_action.source_agents)
 

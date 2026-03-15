@@ -28,6 +28,23 @@ Instead, report it privately:
 - **Initial assessment**: within 7 days
 - **Fix or mitigation**: best-effort within 30 days, depending on severity
 
+### Severity classification
+
+We follow [CVSS 3.1](https://www.first.org/cvss/) scoring to classify vulnerabilities:
+
+| Severity | CVSS Score | Examples | Target fix timeline |
+|----------|-----------|----------|---------------------|
+| **Critical** | 9.0–10.0 | Remote code execution, data exfiltration, supply-chain compromise | 7 days |
+| **High** | 7.0–8.9 | Authorization bypass, unintended filesystem access, prompt injection leading to tool execution | 14 days |
+| **Medium** | 4.0–6.9 | Denial of service, information disclosure (non-sensitive), agent output manipulation | 30 days |
+| **Low** | 0.1–3.9 | Performance degradation, edge-case crashes, cosmetic information leaks | Next release |
+
+### Supported versions
+
+We provide security fixes for:
+- The **latest** release on PyPI
+- The **main** branch (development)
+
 ### Scope
 
 This policy covers:

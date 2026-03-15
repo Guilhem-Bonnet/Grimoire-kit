@@ -37,14 +37,20 @@ grimoire-kit/
 ## Workflow de développement
 
 ```bash
-# Lancer les tests
-pytest tests/unit/ -q --tb=short -x
+# Setup complet (une seule fois)
+pip install -e ".[dev]"
+pre-commit install
 
-# Lint
-ruff check src/ tests/
+# Raccourcis Makefile
+make check      # lint + typecheck + tests
+make test-cov   # tests avec rapport de couverture
+make pre-push   # validation complète avant push
 
-# Lint + fix automatique
-ruff check src/ tests/ --fix
+# Commandes individuelles
+make lint        # ruff check
+make typecheck   # mypy --strict
+make test        # pytest unit
+make format      # ruff format
 ```
 
 ## Conventions
@@ -55,7 +61,7 @@ ruff check src/ tests/ --fix
 - **Type hints** sur toutes les fonctions publiques
 - **f-strings** (pas de `.format()` ni `%`)
 - **Imports** : `from __future__ import annotations` en premier
-- **Exceptions** : hériter de `GrimoireError` (voir `bmad.core.exceptions`)
+- **Exceptions** : hériter de `GrimoireError` (voir `grimoire.core.exceptions`)
 
 ### Tests
 

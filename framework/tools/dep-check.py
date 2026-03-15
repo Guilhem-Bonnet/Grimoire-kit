@@ -128,8 +128,8 @@ def find_orphans(graph: dict[str, list[str]]) -> list[str]:
 
 def find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
     """Détecte les cycles dans le graphe de dépendances (DFS)."""
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[str, int] = {n: WHITE for n in graph}
+    WHITE, GRAY, BLACK = 0, 1, 2  # noqa: N806
+    color: dict[str, int] = dict.fromkeys(graph, WHITE)
     cycles: list[list[str]] = []
     path: list[str] = []
 
@@ -142,7 +142,7 @@ def find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
             if color[dep] == GRAY:
                 # Found cycle — extract it
                 idx = path.index(dep)
-                cycles.append(path[idx:] + [dep])
+                cycles.append([*path[idx:], dep])
             elif color[dep] == WHITE:
                 dfs(dep)
         path.pop()

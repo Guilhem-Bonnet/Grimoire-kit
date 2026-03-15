@@ -440,7 +440,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="synapse-trace",
         description="Middleware de traçabilité Synapse Grimoire",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet Grimoire")
     parser.add_argument("--version", action="version", version=f"%(prog)s {SYNAPSE_TRACE_VERSION}")
 

@@ -254,7 +254,7 @@ class TestAutoDiscovery(unittest.TestCase):
 
     def test_discovered_tool_has_info(self):
         tools = self.mod.discover_synapse_tools()
-        for name, entry in tools.items():
+        for entry in tools.values():
             self.assertIn("module", entry)
             self.assertIn("func", entry)
             self.assertIn("info", entry)
@@ -468,7 +468,7 @@ class TestAuditTrail(unittest.TestCase):
         self.assertEqual(entry["args_keys"], ["x"])
 
     def test_audit_log_never_stores_arg_values(self):
-        secret = "super-secret-password-12345"
+        secret = "super-secret-password-12345"  # noqa: S105
         self.mod._audit_log("tool", {"password": secret}, "h", "ok", 1.0)
         audit_path = self.tmpdir / self.mod.AUDIT_TRAIL_FILE
         content = audit_path.read_text(encoding="utf-8")

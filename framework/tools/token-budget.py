@@ -181,7 +181,7 @@ def get_token_counter(mode: str = "auto", model: str = DEFAULT_MODEL) -> TokenCo
         return counter
     # auto
     try:
-        import tiktoken  # noqa: F401
+        import tiktoken
         return TiktokenCounter(model)
     except ImportError:
         return HeuristicCounter()
@@ -746,7 +746,7 @@ def main() -> None:
         description="Token Budget Enforcer — Enforcement automatique du budget token Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"Modèle LLM cible (défaut: {DEFAULT_MODEL})")

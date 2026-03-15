@@ -201,11 +201,11 @@ class TestGrimoireConfigFromDict:
         assert set(cfg.extra.keys()) == {"llm_router", "rag", "platform"}
 
     def test_missing_project_raises(self) -> None:
-        with pytest.raises(GrimoireConfigError, match="project.*section"):
+        with pytest.raises(GrimoireConfigError, match=r"project.*section"):
             GrimoireConfig.from_dict({})
 
     def test_missing_project_name_raises(self) -> None:
-        with pytest.raises(GrimoireConfigError, match="project.*name"):
+        with pytest.raises(GrimoireConfigError, match=r"project.*name"):
             GrimoireConfig.from_dict({"project": {}})
 
     def test_non_dict_raises(self) -> None:
@@ -269,11 +269,53 @@ class TestGrimoireConfigFindAndLoad:
     def test_not_found_raises(self, tmp_path: Path) -> None:
         isolated = tmp_path / "nowhere"
         isolated.mkdir()
-        with pytest.raises(GrimoireConfigError, match="No.*project-context.yaml"):
+        with pytest.raises(GrimoireConfigError, match=r"No.*project-context.yaml"):
             GrimoireConfig.find_and_load(isolated)
 
 
 # ── Live project-context.yaml ────────────────────────────────────────────────
+
+class TestConfigValidation:
+    """Tests for GrimoireConfig.validate() semantic checks."""
+
+    def test_valid_minimal_config(self) -> None:
+        cfg = GrimoireConfig.from_dict(_minimal_dict())
+        assert cfg.validate() == []
+
+    def test_warns_qdrant_server_without_url(self) -> None:
+        d = _minimal_dict()
+        d["memory"] = {"backend": "qdrant-server", "qdrant_url": ""}
+        cfg = GrimoireConfig.from_dict(d)
+        warnings = cfg.validate()
+        assert any("qdrant" in w.lower() for w in warnings)
+
+    def test_warns_ollama_without_url(self) -> None:
+        d = _minimal_dict()
+        d["memory"] = {"backend": "ollama", "ollama_url": ""}
+        cfg = GrimoireConfig.from_dict(d)
+        warnings = cfg.validate()
+        assert any("ollama" in w.lower() for w in warnings)
+
+    def test_warns_blank_project_name(self) -> None:
+        d = _minimal_dict()
+        d["project"]["name"] = "   "
+        cfg = GrimoireConfig.from_dict(d)
+        warnings = cfg.validate()
+        assert any("blank" in w.lower() for w in warnings)
+
+    def test_no_warnings_fully_configured(self) -> None:
+        d = _minimal_dict()
+        d["memory"] = {
+            "backend": "qdrant-server",
+            "qdrant_url": "http://localhost:6333",
+        }
+        cfg = GrimoireConfig.from_dict(d)
+        assert cfg.validate() == []
+
+    def test_no_warning_default_backend(self) -> None:
+        cfg = GrimoireConfig.from_dict(_minimal_dict())
+        assert cfg.validate() == []
+
 
 class TestLiveConfig:
     """Load the real project-context.yaml to ensure it parses."""

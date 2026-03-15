@@ -340,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="image-prompt",
         description="Image Prompt Generator — Prompts structurés pour génération d'images",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--json", action="store_true")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {IMAGE_PROMPT_VERSION}")

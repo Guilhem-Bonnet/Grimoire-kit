@@ -71,7 +71,7 @@ class TestConstants(unittest.TestCase):
             self.assertIn(filename, self.mod.TRACKED_FILES)
 
     def test_tracked_files_types(self):
-        for _filename, entry_type in self.mod.TRACKED_FILES.items():
+        for entry_type in self.mod.TRACKED_FILES.values():
             self.assertIsInstance(entry_type, str)
             self.assertGreater(len(entry_type), 0)
 
@@ -319,7 +319,7 @@ class TestMemoryParserGeneric(unittest.TestCase):
         content = "## A\n\nShort.\n\n## B\n\nThis is long enough to be a valid memory entry for testing.\n"
         entries = self.parser.parse_generic(content, "test.md", "test")
         texts = [e.text for e in entries]
-        self.assertTrue(all("Short." != t for t in texts))
+        self.assertTrue(all(t != "Short." for t in texts))
 
 
 class TestMemoryParserParseFile(unittest.TestCase):

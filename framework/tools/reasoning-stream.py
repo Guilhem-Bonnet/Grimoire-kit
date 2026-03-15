@@ -237,7 +237,7 @@ def analyze_stream(project_root: Path,
     for head_ts, chain_entries in chain_heads.items():
         head = next((e for e in entries if e.timestamp == head_ts), None)
         if head:
-            chains.append([head] + chain_entries)
+            chains.append([head, *chain_entries])
 
     # Recommandations
     recommendations = []

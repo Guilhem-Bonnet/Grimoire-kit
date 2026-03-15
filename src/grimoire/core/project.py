@@ -20,6 +20,8 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireProjectError
 from grimoire.core.resolver import PathResolver
 
+__all__ = ["AgentInfo", "GrimoireProject", "ProjectContext", "ProjectStatus"]
+
 # ── Data models ───────────────────────────────────────────────────────────────
 
 

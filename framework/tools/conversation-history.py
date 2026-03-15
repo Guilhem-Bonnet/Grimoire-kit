@@ -488,7 +488,7 @@ def main() -> None:
         description="Conversation History — Historique conversationnel vectorisé Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"conversation-history {CONVERSATION_HISTORY_VERSION}")

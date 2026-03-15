@@ -12,7 +12,6 @@ Usage:
     python3 tests/test_python_tools.py           # unittest runner
 """
 
-import os
 import sys
 import tempfile
 import unittest
@@ -265,7 +264,7 @@ class TestReadFileSafe(unittest.TestCase):
             f.flush()
             result = self.cg.read_file_safe(Path(f.name))
             self.assertEqual(result, "hello world")
-            os.unlink(f.name)
+            Path(f.name).unlink()
 
     def test_missing_file(self):
         result = self.cg.read_file_safe(Path("/nonexistent/file.txt"))
@@ -388,7 +387,7 @@ class TestFileLoad(unittest.TestCase):
             self.assertTrue(fl.loaded)
             self.assertGreater(fl.tokens, 0)
             self.assertIn("# Test agent", fl.content)
-            os.unlink(f.name)
+            Path(f.name).unlink()
 
     def test_compute_missing_file(self):
         fl = self.cg.FileLoad(path=Path("/nonexistent.md"), role="memory")

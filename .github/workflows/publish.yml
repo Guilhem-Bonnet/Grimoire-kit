@@ -32,6 +32,12 @@ jobs:
           pip install dist/*.whl
           grimoire --version
 
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format json -o dist/sbom.cdx.json
+          echo "SBOM generated: dist/sbom.cdx.json"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -140,5 +146,8 @@ jobs:
             ```bash
             pip install grimoire-kit==${{ github.ref_name }}
             ```
-          files: dist/*
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/sbom.cdx.json
           generate_release_notes: true

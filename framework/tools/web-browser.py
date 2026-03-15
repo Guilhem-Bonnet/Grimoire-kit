@@ -103,8 +103,8 @@ def validate_url(url: str) -> str:
 def _check_playwright() -> tuple[bool, str]:
     """Vérifie si Playwright est installé et fonctionnel."""
     try:
-        import playwright  # noqa: F401
-        from playwright.sync_api import sync_playwright  # noqa: F401
+        import playwright
+        from playwright.sync_api import sync_playwright
         return True, "OK"
     except ImportError:
         return False, "playwright non installé (pip install playwright)"
@@ -429,10 +429,7 @@ def _fetch_playwright(url: str, selector: str = "", wait_for: str = "") -> PageC
             if selector:
                 try:
                     element = page.query_selector(selector)
-                    if element:
-                        inner = element.inner_html()
-                    else:
-                        inner = full_html
+                    inner = element.inner_html() if element else full_html
                 except Exception:
                     inner = full_html
             else:
@@ -497,10 +494,9 @@ def take_screenshot(url: str, output_path: str = "", full_page: bool = False) ->
                 raw_bytes = path.read_bytes()
             else:
                 raw_bytes = page.screenshot(full_page=full_page)
-                tf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                tf.write(raw_bytes)
-                tf.close()
-                output_path = tf.name
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+                    tf.write(raw_bytes)
+                    output_path = tf.name
 
             b64 = base64.b64encode(raw_bytes).decode("ascii")
 
@@ -694,10 +690,7 @@ def readability(url: str) -> PageContent:
     validate_url(url)
 
     ok, _ = _check_playwright()
-    if ok:
-        page = _fetch_playwright(url)
-    else:
-        page = _fetch_urllib(url)
+    page = _fetch_playwright(url) if ok else _fetch_urllib(url)
 
     # Ré-appliquer readability sur le HTML brut
     if page.text:

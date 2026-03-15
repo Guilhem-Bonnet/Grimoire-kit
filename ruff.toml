@@ -3,7 +3,52 @@ line-length = 120
 target-version = "py312"
 
 [lint]
-select = ["E", "F", "I", "UP", "B", "N"]
-ignore = [
-    "E501",   # Line too long — handled by formatter, not linter
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "N",    # pep8-naming
+    "S",    # bandit (security)
+    "SIM",  # simplify
+    "PTH",  # pathlib
+    "RUF",  # ruff-specific
+    "C4",   # comprehensions
+    "PIE",  # misc improvements
+    "LOG",  # common logging issues
+    "PERF", # performance anti-patterns
+    "FLY",  # flynt f-string conversion
+    "FURB", # refurb modernization
+    "RSE",  # raise statement improvements
+    "ERA",  # eradicate commented-out code
 ]
+ignore = [
+    "E501",    # Line too long — handled by formatter, not linter
+    "S101",    # assert — expected in tests
+    "S603",    # subprocess without shell=True — too many false positives in tools
+    "S607",    # partial executable path — idem
+    "PTH123",  # builtin-open — too many to fix, low value
+    "RUF001",  # ambiguous unicode — false positives on French text
+    "RUF002",  # ambiguous unicode docstring — idem
+    "RUF003",  # ambiguous unicode comment — idem
+    "PERF401", # manual-list-comprehension — false positives on conditional appends
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S106", "S108", "S311", "FURB122", "ERA001"]
+"framework/tools/message-bus.py" = ["F401"]  # nats import-for-availability check
+"framework/tools/token-budget.py" = ["F401"]  # tiktoken import-for-availability
+"framework/tools/web-browser.py" = ["F401"]  # playwright import-for-availability
+"framework/tools/**" = [
+    "S603", "S607",
+    "S105",   # hardcoded-password — false positives on VERSION, LOG constants
+    "S310",   # urllib — validated upstream by _validate_url or local-only
+    "S110",   # try-except-pass — intentional defensive patterns in tools
+    "S112",   # try-except-continue — idem, resilient scanning loops
+    "S311",   # random — used for non-crypto IDs (correlation IDs, temp names)
+    "SIM102", # collapsible-if — readability preference in complex conditionals
+    "SIM112", # uncapitalized-env-vars — os.environ.get patterns are idiomatic
+    "ERA001", # commented-out-code — section comments mistaken for dead code
+]
+"src/grimoire/tools/**" = ["ERA001"]  # Section comments trigger false positives

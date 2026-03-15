@@ -14,10 +14,7 @@ import importlib.util
 import json
 import logging
 import sys
-import time  # noqa: F401 — re-exported for rnd_engine
-from collections import defaultdict  # noqa: F401 — re-exported
 from dataclasses import asdict, dataclass, field
-from datetime import datetime  # noqa: F401 — re-exported
 from pathlib import Path
 from typing import Any
 
@@ -160,9 +157,9 @@ class Policy:
         n_domains = len(DOMAINS)
         n_actions = len(ACTIONS)
         return cls(
-            source_weights={s: 1.0 / n_sources for s in HARVEST_SOURCES},
-            domain_weights={d: 1.0 / n_domains for d in DOMAINS},
-            action_weights={a: 1.0 / n_actions for a in ACTIONS},
+            source_weights=dict.fromkeys(HARVEST_SOURCES, 1.0 / n_sources),
+            domain_weights=dict.fromkeys(DOMAINS, 1.0 / n_domains),
+            action_weights=dict.fromkeys(ACTIONS, 1.0 / n_actions),
             scoring_weights=dict(SCORING_DIMS),
         )
 

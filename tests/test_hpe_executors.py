@@ -140,7 +140,7 @@ class TestSaveTrace(unittest.TestCase):
         trace = self.mod.ExecutionTrace(task_id="t1")
         self.mod.save_trace(self.tmp, trace)
         trace_dir = self.tmp / self.mod.TRACE_DIR
-        f = list(trace_dir.glob("*.json"))[0]
+        f = next(iter(trace_dir.glob("*.json")))
         data = json.loads(f.read_text(encoding="utf-8"))
         self.assertEqual(data["task_id"], "t1")
 
@@ -203,7 +203,7 @@ class TestDryRunExecutor(unittest.TestCase):
     def test_returns_task_info(self):
         executor = self.mod.DryRunExecutor(self.tmp)
         task = _sample_task(task_id="t42", agent="qa")
-        success, result = executor(task, {})
+        _success, result = executor(task, {})
         self.assertEqual(result["task_id"], "t42")
         self.assertEqual(result["agent"], "qa")
 
@@ -215,12 +215,12 @@ class TestDryRunExecutor(unittest.TestCase):
 
     def test_no_trace_without_root(self):
         executor = self.mod.DryRunExecutor(None)
-        success, result = executor(_sample_task(), {})
+        success, _result = executor(_sample_task(), {})
         self.assertTrue(success)
 
     def test_with_outputs(self):
         executor = self.mod.DryRunExecutor(self.tmp)
-        success, result = executor(_sample_task(), _sample_outputs())
+        success, _result = executor(_sample_task(), _sample_outputs())
         self.assertTrue(success)
 
 
@@ -464,7 +464,7 @@ class TestAutoExecutor(unittest.TestCase):
         """Forcer MCP sans agent-caller = échec."""
         with patch.object(self.mod, '_load_agent_caller', return_value=None):
             executor = self.mod.AutoExecutor(self.tmp, force_backend="mcp")
-            success, result = executor(_sample_task(), {})
+            success, _result = executor(_sample_task(), {})
             self.assertFalse(success)
 
     def test_mcp_failure_triggers_fallback(self):
@@ -479,7 +479,7 @@ class TestAutoExecutor(unittest.TestCase):
         with patch.object(self.mod, '_load_agent_caller', return_value=mock_mod):
             executor = self.mod.AutoExecutor(self.tmp)
             self.assertEqual(executor.active_backend, "mcp")
-            success, result = executor(_sample_task(), {})
+            success, _result = executor(_sample_task(), {})
             # Should have fallen back to sequential
             self.assertTrue(success)
             self.assertEqual(executor._fallback_count, 1)
@@ -742,7 +742,7 @@ class TestIntegrationWithHPERunner(unittest.TestCase):
         plan = self.runner_mod.build_plan_from_definition(defn)
         executor = self.exec_mod.sequential_executor(self.tmp)
 
-        plan, results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
+        plan, _results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
         self.assertEqual(plan.state, "completed")
         # Sequential prompt mode → outputs contain prompts
         self.assertIn("analysis", plan.outputs)
@@ -789,7 +789,7 @@ class TestIntegrationWithHPERunner(unittest.TestCase):
         plan = self.runner_mod.build_plan_from_definition(defn)
         executor = self.exec_mod.sequential_executor(self.tmp, llm_callback=capture_llm)
 
-        plan, results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
+        plan, _results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
         self.assertEqual(plan.state, "completed")
         self.assertEqual(len(received_prompts), 2)
         # Second prompt should reference the analysis output
@@ -817,7 +817,7 @@ class TestIntegrationWithHPERunner(unittest.TestCase):
             plan = self.runner_mod.build_plan_from_definition(defn)
             executor = self.exec_mod.auto_executor(self.tmp)
 
-            plan, results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
+            plan, _results = self.runner_mod.run_plan(plan, self.tmp, executor=executor)
             self.assertEqual(plan.state, "completed")
             self.assertEqual(executor._fallback_count, 1)
 

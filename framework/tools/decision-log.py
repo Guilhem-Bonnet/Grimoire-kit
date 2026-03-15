@@ -184,10 +184,7 @@ def cmd_chain(root: Path, limit: int, as_json: bool) -> dict[str, Any]:
     """Affiche la chaîne de décisions."""
     chain = _load_chain(root)
 
-    if limit > 0:
-        displayed = chain[-limit:]
-    else:
-        displayed = chain
+    displayed = chain[-limit:] if limit > 0 else chain
 
     result = {
         "total_decisions": len(chain),
@@ -458,7 +455,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="decision-log",
         description="Decision Log — Chaîne immuable de décisions architecturales",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

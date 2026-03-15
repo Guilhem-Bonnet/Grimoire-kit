@@ -351,7 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="cc-feedback",
         description="CC Feedback — Boucle de feedback Completion Contract",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--json", action="store_true")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {CC_FEEDBACK_VERSION}")

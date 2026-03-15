@@ -345,7 +345,7 @@ def detect_cycles(graph: TaskGraph) -> list[list[str]]:
     def _dfs(node: str) -> None:
         if node in path_set:
             cycle_start = path.index(node)
-            cycles.append(path[cycle_start:] + [node])
+            cycles.append([*path[cycle_start:], node])
             return
         if node in visited:
             return
@@ -366,7 +366,7 @@ def detect_cycles(graph: TaskGraph) -> list[list[str]]:
 def topological_sort(graph: TaskGraph) -> list[str]:
     """Tri topologique du DAG. Retourne l'ordre d'exécution."""
     dep_map = get_dependency_map(graph)
-    in_degree: dict[str, int] = {tid: 0 for tid in dep_map}
+    in_degree: dict[str, int] = dict.fromkeys(dep_map, 0)
 
     for tid, deps in dep_map.items():
         for d in deps:

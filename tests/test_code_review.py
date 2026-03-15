@@ -20,8 +20,6 @@ import importlib.util
 import json
 import subprocess
 import sys
-import tempfile
-import shutil
 import unittest
 from pathlib import Path
 
@@ -92,7 +90,7 @@ class TestCheckSecurity(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
 
-    def _make_diff(self, lines: list[str]) -> "DiffFile":
+    def _make_diff(self, lines: list[str]) -> "DiffFile":  # noqa: F821
         return self.mod.DiffFile(
             path="src/foo.py", status="M",
             added_lines=len(lines),

@@ -308,7 +308,7 @@ _issue_counter = 0
 
 def _next_id() -> str:
     """Génère un ID court pour les issues."""
-    global _issue_counter  # noqa: PLW0603
+    global _issue_counter
     _issue_counter += 1
     return f"ML-{_issue_counter:03d}"
 
@@ -599,7 +599,7 @@ def lint_memory(project_root: Path) -> LintReport:
 
     Retourne un LintReport avec tous les problèmes détectés.
     """
-    global _issue_counter  # noqa: PLW0603
+    global _issue_counter
     _issue_counter = 0
 
     files = collect_memory_files(project_root)

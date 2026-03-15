@@ -537,7 +537,7 @@ def main() -> None:
         description="Agent Worker — Workers isolés pour agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"agent-worker {AGENT_WORKER_VERSION}")
@@ -547,7 +547,7 @@ def main() -> None:
     # start
     start_p = sub.add_parser("start", help="Démarrer un worker")
     start_p.add_argument("--agent", required=True, help="Agent ID")
-    start_p.add_argument("--provider", default="", choices=[""] + sorted(VALID_PROVIDERS),
+    start_p.add_argument("--provider", default="", choices=["", *sorted(VALID_PROVIDERS)],
                          help="LLM provider")
     start_p.add_argument("--model", default="", help="Modèle LLM spécifique")
     start_p.add_argument("--json", action="store_true", help="Output JSON")

@@ -261,7 +261,7 @@ def cmd_learn(root: Path, source: str, pattern_type: str | None,
             continue
         matches = re.findall(regex, content, re.IGNORECASE)
         for match in matches:
-            pid = f"pat-{source}-{ptype}-{hashlib.md5(match.encode()).hexdigest()[:6]}"
+            pid = f"pat-{source}-{ptype}-{hashlib.sha256(match.encode()).hexdigest()[:6]}"
             if pid not in existing_ids:
                 lp = LearnedPattern(
                     pattern_id=pid,
@@ -471,7 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mirror-agent",
         description="Mirror Agent — Neurones miroirs pour apprentissage inter-agents",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

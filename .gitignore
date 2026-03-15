@@ -46,10 +46,12 @@ secrets.yml
 
 # Dev / CI artifacts
 .coverage
+coverage.xml
 htmlcov/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+site/
 
 # Grimoire memory runtime (local data)
 _grimoire/_memory/*.json

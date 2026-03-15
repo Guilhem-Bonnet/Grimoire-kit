@@ -9,7 +9,7 @@ from grimoire.core.exceptions import (
     GrimoireConfigError,
     GrimoireError,
     GrimoireMemoryError,
-    GrimoireMergeConflict,
+    GrimoireMergeConflictError,
     GrimoireMergeError,
     GrimoireProjectError,
     GrimoireRegistryError,
@@ -23,7 +23,7 @@ ALL_EXCEPTIONS: list[type[GrimoireError]] = [
     GrimoireAgentError,
     GrimoireToolError,
     GrimoireMergeError,
-    GrimoireMergeConflict,
+    GrimoireMergeConflictError,
     GrimoireRegistryError,
     GrimoireMemoryError,
     GrimoireValidationError,
@@ -42,7 +42,7 @@ class TestHierarchy:
         assert issubclass(exc_cls, Exception)
 
     def test_merge_conflict_inherits_from_merge_error(self) -> None:
-        assert issubclass(GrimoireMergeConflict, GrimoireMergeError)
+        assert issubclass(GrimoireMergeConflictError, GrimoireMergeError)
 
     @pytest.mark.parametrize("exc_cls", ALL_EXCEPTIONS)
     def test_catchable_as_grimoire_error(self, exc_cls: type[GrimoireError]) -> None:
@@ -55,7 +55,7 @@ class TestInstantiation:
 
     @pytest.mark.parametrize("exc_cls", ALL_EXCEPTIONS)
     def test_message_preserved(self, exc_cls: type[GrimoireError]) -> None:
-        if exc_cls is GrimoireMergeConflict:
+        if exc_cls is GrimoireMergeConflictError:
             err = exc_cls("conflict in 3 files", conflicts=["a.md", "b.md"])
             assert str(err) == "conflict in 3 files"
         else:
@@ -67,11 +67,11 @@ class TestMergeConflict:
     """GrimoireMergeConflict carries conflict paths."""
 
     def test_conflicts_list(self) -> None:
-        err = GrimoireMergeConflict("3 conflicts", conflicts=["a.md", "b.yaml", "c.py"])
+        err = GrimoireMergeConflictError("3 conflicts", conflicts=["a.md", "b.yaml", "c.py"])
         assert err.conflicts == ["a.md", "b.yaml", "c.py"]
 
     def test_conflicts_default_empty(self) -> None:
-        err = GrimoireMergeConflict("no details")
+        err = GrimoireMergeConflictError("no details")
         assert err.conflicts == []
 
 

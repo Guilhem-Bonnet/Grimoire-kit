@@ -321,7 +321,7 @@ def fetch_url(url: str, timeout: int = REQUEST_TIMEOUT) -> tuple[str, str]:
     try:
         import urllib.request
         req = urllib.request.Request(url, headers={"User-Agent": "Grimoire-DocsFetcher/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.length and resp.length > MAX_PAGE_SIZE:
                 return "", f"Page trop volumineuse ({resp.length} bytes > {MAX_PAGE_SIZE})"
             content = resp.read(MAX_PAGE_SIZE + 1)

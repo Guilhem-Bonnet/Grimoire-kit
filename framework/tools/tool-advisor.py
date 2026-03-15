@@ -389,7 +389,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tool-advisor",
         description="Grimoire Tool Advisor — Recommandation proactive d'outils",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--json", action="store_true", help="Sortie JSON")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {ADVISOR_VERSION}")

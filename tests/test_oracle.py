@@ -20,6 +20,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import shutil
@@ -211,42 +212,32 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_swot_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["swot"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_attract_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["attract"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_maturity_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["maturity"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_advise_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["advise"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_report_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["report"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -254,7 +245,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

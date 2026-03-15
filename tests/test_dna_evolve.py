@@ -105,7 +105,7 @@ class TestAnalyzeTrace(unittest.TestCase):
             "Running docker push\n"
             "terraform apply complete\n"
         )
-        tools, patterns = self.evolve.analyze_trace(f)
+        tools, _patterns = self.evolve.analyze_trace(f)
         self.assertIn("terraform", tools)
         self.assertIn("docker", tools)
         self.assertEqual(tools["terraform"].count, 2)
@@ -119,7 +119,7 @@ class TestAnalyzeTrace(unittest.TestCase):
             lines.append(f"## 2026-01-{i+1:02d} | dev | S1\n")
             lines.append(f"[CHECKPOINT] checkpoint_id: ckpt-00{i}\n")
         f.write_text("".join(lines))
-        tools, patterns = self.evolve.analyze_trace(f)
+        _tools, patterns = self.evolve.analyze_trace(f)
         pat_ids = [p.pattern_id for p in patterns]
         self.assertIn("checkpoint-heavy", pat_ids)
 
@@ -131,7 +131,7 @@ class TestAnalyzeTrace(unittest.TestCase):
         self.assertEqual(len(patterns), 0)
 
     def test_missing_trace(self):
-        tools, patterns = self.evolve.analyze_trace(self.tmpdir / "nope.md")
+        tools, _patterns = self.evolve.analyze_trace(self.tmpdir / "nope.md")
         self.assertEqual(len(tools), 0)
 
     def test_since_filter(self):

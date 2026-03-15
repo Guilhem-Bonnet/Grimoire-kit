@@ -470,9 +470,9 @@ def find_recurring_patterns(sources: list[DreamSource]) -> list[DreamInsight]:
             base_conf = 0.4 if is_bigram else 0.3
             label = kw.replace("_", " ") if is_bigram else kw
             # Agents mentionnés dans les entrées échantillons
-            agents = sorted(set(
+            agents = sorted({
                 a for e in sample_entries for a in _extract_agents(e)
-            ))
+            })
             insights.append(DreamInsight(
                 title=f"Pattern récurrent : '{label}'",
                 description=(
@@ -596,10 +596,7 @@ def validate_insight(insight: DreamInsight, sources: list[DreamSource]) -> bool:
         return False
 
     # Règle 4 : description non vide
-    if not insight.description or len(insight.description) < 10:
-        return False
-
-    return True
+    return bool(insight.description and len(insight.description) >= 10)
 
 
 def deduplicate_insights(insights: list[DreamInsight]) -> list[DreamInsight]:

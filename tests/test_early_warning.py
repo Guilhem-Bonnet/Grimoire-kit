@@ -26,6 +26,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import contextlib
 
 KIT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(KIT_DIR / "framework" / "tools"))
@@ -183,26 +184,20 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_scan_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["scan"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_entropy_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["entropy"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_trends_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["trends"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -210,7 +205,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

@@ -333,7 +333,7 @@ class RedisBus(MessageBus):
         self._redis = None
         self._connected = False
         try:
-            import redis  # noqa: F401
+            import redis
             self._redis = redis.from_url(url, decode_responses=True)
             self._redis.ping()
             self._connected = True
@@ -377,7 +377,7 @@ class RedisBus(MessageBus):
             key = self._stream_key(agent_id)
             result = self._redis.xread({key: "0-0"}, count=1, block=int(timeout * 1000))
             if result:
-                stream_name, entries = result[0]
+                _stream_name, entries = result[0]
                 if entries:
                     entry_id, fields = entries[0]
                     self._redis.xdel(key, entry_id)
@@ -457,7 +457,7 @@ class NATSBus(MessageBus):
         self._prefix = prefix
         self._available = False
         try:
-            import nats  # noqa: F401
+            import nats
             self._available = True
         except ImportError as _exc:
             _log.debug("ImportError suppressed: %s", _exc)

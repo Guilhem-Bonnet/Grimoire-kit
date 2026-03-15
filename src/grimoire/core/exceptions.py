@@ -6,9 +6,43 @@ Every exception inherits from :class:`GrimoireError` so callers can
 
 from __future__ import annotations
 
+__all__ = [
+    "GrimoireAgentError",
+    "GrimoireConfigError",
+    "GrimoireError",
+    "GrimoireMemoryError",
+    "GrimoireMergeConflictError",
+    "GrimoireMergeError",
+    "GrimoireNetworkError",
+    "GrimoireProjectError",
+    "GrimoireRegistryError",
+    "GrimoireTimeoutError",
+    "GrimoireToolError",
+    "GrimoireValidationError",
+]
+
 
 class GrimoireError(Exception):
-    """Base exception for all Grimoire Kit errors."""
+    """Base exception for all Grimoire Kit errors.
+
+    Attributes
+    ----------
+    error_code:
+        Optional stable code (e.g. ``GR001``) for docs cross-reference.
+    """
+
+    error_code: str | None = None
+
+    def __init__(self, message: str, *, error_code: str | None = None) -> None:
+        super().__init__(message)
+        if error_code is not None:
+            self.error_code = error_code
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.error_code:
+            return f"[{self.error_code}] {base}"
+        return base
 
 
 class GrimoireConfigError(GrimoireError):
@@ -51,7 +85,7 @@ class GrimoireMergeError(GrimoireError):
     """
 
 
-class GrimoireMergeConflict(GrimoireMergeError):  # noqa: N818 — semantic: it's a conflict, not an error
+class GrimoireMergeConflictError(GrimoireMergeError):
     """Unresolved merge conflict that requires user intervention.
 
     Carries the list of conflicting paths so the caller can present
@@ -84,4 +118,20 @@ class GrimoireValidationError(GrimoireError):
 
     Raised when DNA files, agent definitions, or other structured data
     fail validation against their expected schema.
+    """
+
+
+class GrimoireTimeoutError(GrimoireError):
+    """Operation exceeded its time limit.
+
+    Raised when a tool, registry call, or MCP operation takes longer
+    than the configured timeout.
+    """
+
+
+class GrimoireNetworkError(GrimoireError):
+    """Network communication failure.
+
+    Raised when HTTP requests, MCP transport, or registry API calls
+    fail due to connectivity or protocol errors.
     """

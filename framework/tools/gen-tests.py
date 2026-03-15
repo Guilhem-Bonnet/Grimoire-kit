@@ -21,7 +21,6 @@ Frameworks supportés :
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -245,7 +244,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
         by_trait.setdefault(trait, []).append(item)
 
     generated_files = []
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     archetype_name = dna.get("name", dna.get("id", "unknown"))
     archetype_version = dna.get("version", "1.0.0")
@@ -255,7 +254,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
         # Nom de fichier
         safe_trait = to_snake(trait_name)
         filename = f"test_{safe_trait}{tmpl['ext']}"
-        filepath = os.path.join(output_dir, filename)
+        filepath = Path(output_dir) / filename
 
         with open(filepath, "w", encoding="utf-8") as f:
             # Header

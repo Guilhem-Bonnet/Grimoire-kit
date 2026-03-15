@@ -42,39 +42,39 @@ class TestDetectDomain(unittest.TestCase):
         self.assertIn("🗄", profile["icon"])
 
     def test_security_domain(self):
-        key, profile = self.forge.detect_domain("audit de sécurité et scan de vulnérabilités")
+        key, _profile = self.forge.detect_domain("audit de sécurité et scan de vulnérabilités")
         self.assertEqual(key, "security")
 
     def test_frontend_domain(self):
-        key, profile = self.forge.detect_domain("I need a React component review agent")
+        key, _profile = self.forge.detect_domain("I need a React component review agent")
         self.assertEqual(key, "frontend")
 
     def test_api_domain(self):
-        key, profile = self.forge.detect_domain("gestion des endpoints REST et contrats OpenAPI")
+        key, _profile = self.forge.detect_domain("gestion des endpoints REST et contrats OpenAPI")
         self.assertEqual(key, "api")
 
     def test_testing_domain(self):
-        key, profile = self.forge.detect_domain("couverture de tests e2e avec Playwright")
+        key, _profile = self.forge.detect_domain("couverture de tests e2e avec Playwright")
         self.assertEqual(key, "testing")
 
     def test_devops_domain(self):
-        key, profile = self.forge.detect_domain("pipeline CI/CD GitHub Actions")
+        key, _profile = self.forge.detect_domain("pipeline CI/CD GitHub Actions")
         self.assertEqual(key, "devops")
 
     def test_monitoring_domain(self):
-        key, profile = self.forge.detect_domain("alerting Prometheus et Grafana dashboards")
+        key, _profile = self.forge.detect_domain("alerting Prometheus et Grafana dashboards")
         self.assertEqual(key, "monitoring")
 
     def test_networking_domain(self):
-        key, profile = self.forge.detect_domain("configuration du proxy Nginx et DNS")
+        key, _profile = self.forge.detect_domain("configuration du proxy Nginx et DNS")
         self.assertEqual(key, "networking")
 
     def test_performance_domain(self):
-        key, profile = self.forge.detect_domain("optimisation performance et profiling")
+        key, _profile = self.forge.detect_domain("optimisation performance et profiling")
         self.assertEqual(key, "performance")
 
     def test_documentation_domain(self):
-        key, profile = self.forge.detect_domain("rédaction de documentation technique et guides")
+        key, _profile = self.forge.detect_domain("rédaction de documentation technique et guides")
         self.assertEqual(key, "documentation")
 
     def test_unknown_returns_custom(self):
@@ -114,12 +114,12 @@ class TestExtractAgentName(unittest.TestCase):
 
     def test_security_audit(self):
         _, profile = self.forge.detect_domain("audit sécurité")
-        name, tag = self.forge.extract_agent_name("audit sécurité", "security", profile)
+        _name, tag = self.forge.extract_agent_name("audit sécurité", "security", profile)
         self.assertTrue(tag.startswith("sec-"))
 
     def test_french_contractions_cleaned(self):
         _, profile = self.forge.detect_domain("l'audit d'agents de sécurité")
-        name, tag = self.forge.extract_agent_name("l'audit d'agents de sécurité", "security", profile)
+        _name, tag = self.forge.extract_agent_name("l'audit d'agents de sécurité", "security", profile)
         # Should not contain l' or d'
         self.assertNotIn("l'", tag)
         self.assertNotIn("d'", tag)
@@ -135,7 +135,7 @@ class TestExtractAgentName(unittest.TestCase):
 
     def test_empty_fallback(self):
         profile = self.forge.DEFAULT_DOMAIN.copy()
-        name, tag = self.forge.extract_agent_name("je tu il", "custom", profile)
+        _name, tag = self.forge.extract_agent_name("je tu il", "custom", profile)
         # Should fallback to domain key
         self.assertGreater(len(tag), 0)
 

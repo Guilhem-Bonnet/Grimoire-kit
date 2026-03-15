@@ -413,7 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="session-lifecycle",
         description="Hooks automatiques de début/fin de session Grimoire",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

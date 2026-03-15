@@ -15,9 +15,12 @@ Usage::
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+__all__ = ["ValidationError", "validate_config"]
 
 # ── Validation result ─────────────────────────────────────────────────────────
 
@@ -53,6 +56,49 @@ _KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 })
+
+# Known keys per section for unknown-key detection
+_KNOWN_TOP_KEYS = frozenset({
+    "project", "user", "memory", "agents", "installed_archetypes",
+})
+
+_KNOWN_PROJECT_KEYS = frozenset({
+    "name", "description", "type", "metaphor", "stack", "repos",
+})
+
+_KNOWN_USER_KEYS = frozenset({
+    "name", "language", "document_language", "skill_level",
+})
+
+_KNOWN_MEMORY_KEYS = frozenset({
+    "backend", "collection_prefix", "embedding_model", "qdrant_url", "ollama_url",
+})
+
+_KNOWN_AGENTS_KEYS = frozenset({
+    "archetype", "custom_agents",
+})
+
+
+def _suggest_key(unknown: str, known: frozenset[str]) -> str:
+    """Return 'Did you mean X?' if a close match exists, else ''."""
+    matches = difflib.get_close_matches(unknown, sorted(known), n=1, cutoff=0.6)
+    return f"Did you mean '{matches[0]}'?" if matches else ""
+
+
+def _check_unknown_keys(
+    section: dict[str, Any],
+    known: frozenset[str],
+    path: str,
+    errors: list[ValidationError],
+) -> None:
+    """Emit warnings for unrecognised keys in a config section."""
+    for key in section:
+        if key not in known:
+            errors.append(ValidationError(
+                path=f"{path}.{key}" if path else key,
+                message=f"Unknown key '{key}'.",
+                suggestion=_suggest_key(key, known),
+            ))
 
 
 # ── Validators ────────────────────────────────────────────────────────────────
@@ -99,6 +145,9 @@ def validate_config(
 
     if "installed_archetypes" in data:
         _validate_installed_archetypes(data["installed_archetypes"], errors)
+
+    # Unknown top-level keys
+    _check_unknown_keys(data, _KNOWN_TOP_KEYS, "", errors)
 
     return errors
 
@@ -163,6 +212,8 @@ def _validate_project(section: Any, errors: list[ValidationError]) -> None:
                         message="Repo must have a 'name' field.",
                     ))
 
+    _check_unknown_keys(section, _KNOWN_PROJECT_KEYS, "project", errors)
+
 
 def _validate_user(section: Any, errors: list[ValidationError]) -> None:
     if not isinstance(section, dict):
@@ -180,6 +231,8 @@ def _validate_user(section: Any, errors: list[ValidationError]) -> None:
             suggestion=f"Valid levels: {', '.join(sorted(_VALID_SKILL_LEVELS))}",
         ))
 
+    _check_unknown_keys(section, _KNOWN_USER_KEYS, "user", errors)
+
 
 def _validate_memory(section: Any, errors: list[ValidationError]) -> None:
     if not isinstance(section, dict):
@@ -196,6 +249,8 @@ def _validate_memory(section: Any, errors: list[ValidationError]) -> None:
             message=f"Unknown memory backend '{backend}'.",
             suggestion=f"Valid backends: {', '.join(sorted(_VALID_BACKENDS))}",
         ))
+
+    _check_unknown_keys(section, _KNOWN_MEMORY_KEYS, "memory", errors)
 
 
 def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
@@ -237,6 +292,8 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
                     ))
                 else:
                     seen.add(agent_id)
+
+    _check_unknown_keys(section, _KNOWN_AGENTS_KEYS, "agents", errors)
 
 
 def _validate_installed_archetypes(

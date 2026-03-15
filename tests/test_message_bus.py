@@ -199,7 +199,7 @@ class TestNATSBusStub(unittest.TestCase):
 class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(
-            [sys.executable, str(TOOL)] + list(args),
+            [sys.executable, str(TOOL), *list(args)],
             capture_output=True, text=True, timeout=15,
         )
 

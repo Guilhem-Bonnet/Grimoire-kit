@@ -654,7 +654,7 @@ class TestE2EIntegration(unittest.TestCase):
         }
         plan = self.runner.build_plan_from_definition(defn)
         executor = self.executors.dry_executor(self.tmp)
-        plan, results = self.runner.run_plan(plan, self.tmp, executor=executor)
+        plan, _results = self.runner.run_plan(plan, self.tmp, executor=executor)
 
         data = self.monitor.load_all(self.tmp)
         exported = json.loads(self.monitor.data_to_json(data))

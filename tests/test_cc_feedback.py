@@ -10,14 +10,14 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "framework" / "tools"
 sys.path.insert(0, str(TOOLS))
 
-import importlib
+import importlib  # noqa: E402
 
 # Re-import fresh for each test module
 if "cc_feedback" in sys.modules:
     del sys.modules["cc_feedback"]
 
 # Module uses dashes in filename — import via spec
-import importlib.util
+import importlib.util  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("cc_feedback", TOOLS / "cc-feedback.py")
 cc_feedback = importlib.util.module_from_spec(_spec)
@@ -63,7 +63,7 @@ class TestRecordLoad:
         assert records[1].record_id == "CC-002"
 
     def test_sequential_ids(self, tmp_project):
-        for i in range(5):
+        for _i in range(5):
             cc_feedback.record_cc(tmp_project, "pass", "python")
         records = cc_feedback.load_records(tmp_project)
         assert records[-1].record_id == "CC-005"

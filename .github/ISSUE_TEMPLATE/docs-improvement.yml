@@ -1,0 +1,36 @@
+name: "📚 Amélioration de la documentation"
+description: Signaler une erreur ou proposer une amélioration dans la documentation.
+labels: ["type:docs"]
+body:
+  - type: dropdown
+    id: page
+    attributes:
+      label: Page concernée
+      description: Quelle section de la documentation est concernée ?
+      options:
+        - Getting started
+        - CLI reference
+        - API reference
+        - Configuration reference
+        - Plugin development
+        - FAQ
+        - Architecture / Concepts
+        - Migration guide
+        - Autre
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Décrivez l'erreur, l'information manquante ou l'amélioration souhaitée.
+      placeholder: "Ex: La page CLI reference ne documente pas la commande `grimoire lint`."
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggestion (optionnel)
+      description: Si vous avez une idée de correction ou d'amélioration.

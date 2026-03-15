@@ -231,7 +231,7 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
     text_clean = re.sub(r"\s+", " ", text_clean).strip()
 
     # ── Stop words FR + EN (articles, prépositions, pronoms)
-    STOP_WORDS = {  # noqa: N806
+    stop_words = {
         "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
         "veux", "voudrais", "faut", "besoin", "avoir", "être", "faire",
         "un", "une", "des", "les", "le", "la", "du", "de", "au", "aux",
@@ -247,7 +247,7 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
     # ── 1) Chercher les keywords du domaine présents dans le texte
     domain_keywords_found = []
     for kw in domain_profile.get("keywords", []):
-        if kw in text_clean and len(kw) > 2 and kw not in STOP_WORDS:
+        if kw in text_clean and len(kw) > 2 and kw not in stop_words:
             domain_keywords_found.append(kw)
 
     # ── 2) Extraire le sujet via patterns grammaticaux
@@ -264,11 +264,11 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
 
     # ── 3) Si aucun match, prendre les mots significatifs restants
     if not extracted_subject:
-        words = [w for w in re.split(r'\s+', text_clean) if len(w) > 2 and w not in STOP_WORDS]
+        words = [w for w in re.split(r'\s+', text_clean) if len(w) > 2 and w not in stop_words]
         extracted_subject = " ".join(words[:4])
 
     # ── 4) Nettoyer le sujet : retirer stop words en tête et queue
-    subject_words = [w for w in re.split(r'\s+', extracted_subject) if len(w) > 1 and w not in STOP_WORDS]
+    subject_words = [w for w in re.split(r'\s+', extracted_subject) if len(w) > 1 and w not in stop_words]
 
     # ── 5) Privilégier les keywords du domaine trouvés pour un tag concis
     if domain_keywords_found:
@@ -286,7 +286,7 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
             if (not any(sw_norm in re.sub(r"[^a-z0-9]", "", tw.lower()) or
                         re.sub(r"[^a-z0-9]", "", tw.lower()) in sw_norm
                         for tw in tag_words)
-                    and sw not in STOP_WORDS and len(tag_words) < 3):
+                    and sw not in stop_words and len(tag_words) < 3):
                 tag_words.append(sw)
         subject_words = tag_words if tag_words else subject_words
 
@@ -303,13 +303,13 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
         subject_words = [domain_key]
 
     # ── Translittérer les accents (sécurité → securite) avant de construire le tag
-    _ACCENT_MAP = str.maketrans(  # noqa: N806
+    _accent_map = str.maketrans(
         "àâäéèêëïîôùûüÿçñ",
         "aaaeeeeiioouuycn",
     )
 
     def _ascii(word: str) -> str:
-        return word.lower().translate(_ACCENT_MAP)
+        return word.lower().translate(_accent_map)
 
     # ── Construire tag (lowercase-hyphen, max 25 chars, coupe sur un mot entier)
     clean_parts = [re.sub(r"[^a-z0-9]", "", _ascii(w)) for w in subject_words]

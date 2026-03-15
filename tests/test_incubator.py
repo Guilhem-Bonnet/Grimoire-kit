@@ -19,6 +19,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import shutil
@@ -159,42 +160,32 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_submit_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["submit"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_status_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["status"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_viable_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["viable"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_wake_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["wake"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_prune_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["prune"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -202,7 +193,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

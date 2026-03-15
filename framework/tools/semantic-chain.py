@@ -306,7 +306,7 @@ def analyze_chain(project_root: Path) -> ChainReport:
             concepts_by_type[atype] = all_concepts
 
     # Comparer les maillons adjacents
-    types_with_data = [t for t in CHAIN_ORDER if t in concepts_by_type and concepts_by_type[t]]
+    types_with_data = [t for t in CHAIN_ORDER if concepts_by_type.get(t)]
 
     for i in range(len(types_with_data) - 1):
         src_type = types_with_data[i]

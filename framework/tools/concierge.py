@@ -384,7 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="concierge",
         description="Concierge — Triage et routage intelligent Grimoire",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--json", action="store_true")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {CONCIERGE_VERSION}")

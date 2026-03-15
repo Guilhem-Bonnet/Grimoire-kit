@@ -19,6 +19,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import shutil
@@ -179,42 +180,32 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_scan_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["scan"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_patterns_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["patterns"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_silos_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["silos"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_implicit_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["implicit"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_document_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["document"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -222,7 +213,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

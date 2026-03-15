@@ -1,7 +1,6 @@
 """Tests for framework/tools/gen-tests.py — BM-29 test scaffolding."""
 
 import importlib.util
-import os
 import shutil
 import sys
 import tempfile
@@ -186,7 +185,7 @@ class TestGenerateTests(unittest.TestCase):
     def test_pytest_generates_py_files(self):
         files = self.gen.generate_tests(self.dna, "pytest", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
-        self.assertTrue(files[0].endswith(".py"))
+        self.assertTrue(str(files[0]).endswith(".py"))
         content = Path(files[0]).read_text()
         self.assertIn("def test_", content)
         self.assertIn("test-archetype", content)
@@ -194,21 +193,21 @@ class TestGenerateTests(unittest.TestCase):
     def test_jest_generates_ts_files(self):
         files = self.gen.generate_tests(self.dna, "jest", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
-        self.assertTrue(files[0].endswith(".test.ts"))
+        self.assertTrue(str(files[0]).endswith(".test.ts"))
         content = Path(files[0]).read_text()
         self.assertIn("describe(", content)
 
     def test_bats_generates_bats_files(self):
         files = self.gen.generate_tests(self.dna, "bats", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
-        self.assertTrue(files[0].endswith(".bats"))
+        self.assertTrue(str(files[0]).endswith(".bats"))
         content = Path(files[0]).read_text()
         self.assertIn("@test", content)
 
     def test_go_test_generates_go_files(self):
         files = self.gen.generate_tests(self.dna, "go-test", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
-        self.assertTrue(files[0].endswith("_test.go"))
+        self.assertTrue(str(files[0]).endswith("_test.go"))
         content = Path(files[0]).read_text()
         self.assertIn("func Test_", content)
 
@@ -224,7 +223,7 @@ class TestGenerateTests(unittest.TestCase):
     def test_creates_output_dir(self):
         out = str(self.tmpdir / "nested" / "deep")
         self.gen.generate_tests(self.dna, "pytest", out, "test.dna.yaml")
-        self.assertTrue(os.path.isdir(out))
+        self.assertTrue(Path(out).is_dir())
 
     def test_multiple_traits_multiple_files(self):
         dna = {

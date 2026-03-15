@@ -18,6 +18,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
     "Typing :: Typed",
 ]
 
@@ -38,16 +40,27 @@ dev = [
     "pytest-cov>=5.0",
     "mypy>=1.10",
     "ruff>=0.6",
+    "pre-commit>=4.0",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.0",
+    "mkdocstrings[python]>=0.25",
 ]
 
 [project.scripts]
 grimoire = "grimoire.cli.app:cli"
 grimoire-mcp = "grimoire.mcp.server:main"
 
+[project.entry-points."grimoire.tools"]
+[project.entry-points."grimoire.backends"]
+
 [project.urls]
 Homepage = "https://github.com/Guilhem-Bonnet/Grimoire-kit"
 Repository = "https://github.com/Guilhem-Bonnet/Grimoire-kit"
-Documentation = "https://github.com/Guilhem-Bonnet/Grimoire-kit/tree/main/docs"
+Documentation = "https://guilhem-bonnet.github.io/Grimoire-kit/"
+Changelog = "https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues"
 
 [tool.hatch.version]
 path = "src/grimoire/__version__.py"
@@ -69,13 +82,7 @@ include = [
 ]
 
 [tool.ruff]
-line-length = 120
-target-version = "py312"
-src = ["src", "tests"]
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "N"]
-ignore = ["E501"]
+# Ruff configuration lives in ruff.toml — single source of truth.
 
 [tool.mypy]
 python_version = "3.12"
@@ -84,7 +91,35 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+    "integration: marks tests requiring external services (network, Ollama, Qdrant)",
+    "regression: marks known regression tests",
+    "bench: marks performance benchmark tests",
+]
+
+[tool.coverage.run]
+source = ["src/grimoire"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 70
+precision = 2
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

@@ -371,7 +371,7 @@ class TestConfigLoading(unittest.TestCase):
 class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(TOOL)] + list(args),
+            [sys.executable, str(TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

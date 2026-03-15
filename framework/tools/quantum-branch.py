@@ -408,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="quantum-branch",
         description="Quantum Branch — Timelines parallèles et multivers de projet",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

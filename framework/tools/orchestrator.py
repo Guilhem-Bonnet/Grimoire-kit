@@ -637,7 +637,7 @@ def main() -> None:
         description="Orchestrator — Orchestrateur hybride multi-agent Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"orchestrator {ORCHESTRATOR_VERSION}")

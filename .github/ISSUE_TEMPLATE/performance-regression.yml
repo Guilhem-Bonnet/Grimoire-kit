@@ -1,0 +1,47 @@
+name: "⚡ Régression de performance"
+description: Signaler une dégradation de performance.
+labels: ["type:core", "performance"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Décrivez la régression de performance observée.
+      placeholder: "Ex: `grimoire status` prend 5s au lieu de <1s depuis la v3.1."
+    validations:
+      required: true
+
+  - type: textarea
+    id: before-after
+    attributes:
+      label: Avant / Après
+      description: Temps d'exécution ou métriques avant et après la régression.
+      placeholder: |
+        Avant (v3.0.0) : grimoire status — 0.3s
+        Après (v3.1.0) : grimoire status — 5.2s
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environnement
+      description: OS, version Python, version grimoire-kit.
+      placeholder: |
+        OS: Ubuntu 24.04
+        Python: 3.12.3
+        grimoire-kit: 3.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes de reproduction
+      description: Commandes exactes pour reproduire le problème.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte additionnel
+      description: Profiling, logs, configuration pertinente.

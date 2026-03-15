@@ -38,11 +38,11 @@ class TestDimensions(unittest.TestCase):
 class TestScoreCompleteness(unittest.TestCase):
     def test_good_markdown(self):
         content = "# Title\n\nParagraph content.\n\n## Section\n\nMore content here.\n" * 5
-        score, details = qs._score_completeness(content, ".md")
+        score, _details = qs._score_completeness(content, ".md")
         self.assertGreaterEqual(score, 80)
 
     def test_empty_markdown(self):
-        score, details = qs._score_completeness("", ".md")
+        score, _details = qs._score_completeness("", ".md")
         self.assertLess(score, 50)
 
     def test_todos_penalized(self):
@@ -61,14 +61,14 @@ class TestScoreStructure(unittest.TestCase):
 
     def test_heading_jump(self):
         content = "# Title\n\n### Jump to H3\n\nContent.\n"
-        score, details = qs._score_structure(content, ".md")
+        score, _details = qs._score_structure(content, ".md")
         self.assertLess(score, 100)
 
 
 class TestScoreCCCompliance(unittest.TestCase):
     def test_cc_pass_marker(self):
         content = "# Report\n\n✅ CC PASS — py — 2024-01-01\n"
-        score, details = qs._score_cc_compliance(content, ".md")
+        score, _details = qs._score_cc_compliance(content, ".md")
         self.assertGreaterEqual(score, 90)
 
     def test_cc_fail_marker(self):
@@ -78,19 +78,19 @@ class TestScoreCCCompliance(unittest.TestCase):
 
     def test_unresolved_placeholders(self):
         content = "# Title\n\nHello {{user_name}}, your {PROJECT_NAME} is ready.\n"
-        score, details = qs._score_cc_compliance(content, ".md")
+        score, _details = qs._score_cc_compliance(content, ".md")
         self.assertLess(score, 100)
 
 
 class TestScoreConsistency(unittest.TestCase):
     def test_duplicate_headings(self):
         content = "# Title\n\n## Section\n\nContent.\n\n## Section\n\nMore.\n"
-        score, details = qs._score_consistency(content, ".md")
+        score, _details = qs._score_consistency(content, ".md")
         self.assertLess(score, 100)
 
     def test_empty_section(self):
         content = "# Title\n## Empty\n## Next\n\nContent.\n"
-        score, details = qs._score_consistency(content, ".md")
+        score, _details = qs._score_consistency(content, ".md")
         self.assertLess(score, 100)
 
 

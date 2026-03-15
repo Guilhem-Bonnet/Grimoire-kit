@@ -730,7 +730,7 @@ def main() -> None:
         description="Context Summarizer — Résumé automatique du contexte ancien Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"context-summarizer {CONTEXT_SUMMARIZER_VERSION}")

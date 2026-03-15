@@ -57,10 +57,7 @@ def grimoire_project_context(project_path: str = ".") -> str:
     try:
         path = Path(project_path).resolve()
         config_file = path / "project-context.yaml"
-        if config_file.is_file():
-            cfg = GrimoireConfig.from_yaml(config_file)
-        else:
-            cfg = GrimoireConfig.find_and_load(path)
+        cfg = GrimoireConfig.from_yaml(config_file) if config_file.is_file() else GrimoireConfig.find_and_load(path)
         return json.dumps({
             "project": {
                 "name": cfg.project.name,

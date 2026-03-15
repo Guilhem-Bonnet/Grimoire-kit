@@ -516,7 +516,7 @@ def main() -> None:
         description="Conversation Branching — Branches de conversation Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"conversation-branch {CONVERSATION_BRANCH_VERSION}")

@@ -471,9 +471,7 @@ class HashIndex:
         current_hash = self.file_hash(filepath)
         if not current_hash:
             return False
-        if key not in self._hashes or self._hashes[key] != current_hash:
-            return True
-        return False
+        return key not in self._hashes or self._hashes[key] != current_hash
 
     def mark_indexed(self, filepath: Path) -> None:
         """Marque un fichier comme indexé."""
@@ -490,6 +488,10 @@ class EmbeddingProvider:
         self.ollama_url = ollama_url
         self._st_model = None
         self._mode = "none"
+
+        # Validate ollama URL against SSRF if provided
+        if ollama_url:
+            _validate_url(ollama_url, allow_localhost=True)
 
         # Tenter sentence-transformers d'abord
         if not ollama_url:
@@ -956,7 +958,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--version", action="version", version=f"rag-indexer {RAG_INDEXER_VERSION}")

@@ -1,0 +1,42 @@
+# Auto-label PRs based on changed files.
+# Used by .github/workflows/auto-label.yml
+
+"type:cli":
+  - changed-files:
+      - any-glob-to-any-file: ["src/grimoire/cli/**"]
+
+"type:core":
+  - changed-files:
+      - any-glob-to-any-file: ["src/grimoire/core/**"]
+
+"type:memory":
+  - changed-files:
+      - any-glob-to-any-file: ["src/grimoire/memory/**"]
+
+"type:mcp":
+  - changed-files:
+      - any-glob-to-any-file: ["src/grimoire/mcp/**"]
+
+"type:docs":
+  - changed-files:
+      - any-glob-to-any-file: ["docs/**", "mkdocs.yml", "*.md"]
+
+"type:test":
+  - changed-files:
+      - any-glob-to-any-file: ["tests/**"]
+
+"type:ci":
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**"]
+
+"type:tools":
+  - changed-files:
+      - any-glob-to-any-file: ["framework/tools/**"]
+
+"type:archetypes":
+  - changed-files:
+      - any-glob-to-any-file: ["archetypes/**"]
+
+"type:packaging":
+  - changed-files:
+      - any-glob-to-any-file: ["pyproject.toml", "Makefile", "ruff.toml"]

@@ -274,11 +274,11 @@ class TestYAMLLoading(unittest.TestCase):
 
     def test_empty_file(self):
         p = _write(self.tmpdir, "test.yaml", "")
-        data, err = self.mod._load_yaml(p)
+        _data, err = self.mod._load_yaml(p)
         self.assertIsNotNone(err)
 
     def test_nonexistent_file(self):
-        data, err = self.mod._load_yaml(self.tmpdir / "nope.yaml")
+        _data, err = self.mod._load_yaml(self.tmpdir / "nope.yaml")
         self.assertIsNotNone(err)
 
     def test_corrupted_yaml(self):

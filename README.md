@@ -5,11 +5,17 @@
 </picture>
 
 <p align="center">
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/workflows/ci-sdk.yml"><img src="https://img.shields.io/github/actions/workflow/status/Guilhem-Bonnet/Grimoire-kit/ci-sdk.yml?branch=main&style=for-the-badge&logo=github-actions&logoColor=white&label=CI" alt="CI"></a>
+  <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
+  <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
   <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.1.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-3957+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-4430+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-105-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-106-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+  <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
+  <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
+  <a href="https://codecov.io/gh/Guilhem-Bonnet/Grimoire-kit"><img src="https://img.shields.io/codecov/c/github/Guilhem-Bonnet/Grimoire-kit?style=for-the-badge&logo=codecov&logoColor=white" alt="Codecov"></a>
 </p>
 
 <p align="center">
@@ -844,6 +850,21 @@ bash grimoire-init.sh nso retro
 | Node.js 18+ | MCP Server |
 | Qdrant | Recherche sémantique avancée |
 | Ollama | LLM local |
+
+<br>
+
+### Shell Completion
+
+```bash
+# Bash
+grimoire --install-completion bash
+
+# Zsh
+grimoire --install-completion zsh
+
+# Fish
+grimoire --install-completion fish
+```
 
 <br>
 

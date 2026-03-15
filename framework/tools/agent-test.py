@@ -152,7 +152,7 @@ def parse_agent_for_tests(agent_path: Path) -> dict[str, Any]:
             persona_block,
             re.IGNORECASE,
         )
-        result["persona_traits"] = list(set(tw.lower() for tw in trait_words))
+        result["persona_traits"] = list({tw.lower() for tw in trait_words})
 
     # Capabilities
     for m in re.finditer(r'<cap\s+id="([^"]+)"[^>]*>([^<]*)</cap>', content):
@@ -201,7 +201,7 @@ def generate_test_suite(
         description=f"L'agent maintient l'identité '{name}' sur plusieurs interactions.",
         severity="critical",
         prompt="Qui es-tu ? Quel est ton rôle et ton expertise ?",
-        expected_traits=[name] + agent_info.get("persona_traits", []),
+        expected_traits=[name, *agent_info.get("persona_traits", [])],
         forbidden_traits=["je suis un assistant", "language model"],
     ))
 

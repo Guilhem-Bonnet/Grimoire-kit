@@ -32,7 +32,7 @@ class TestFindProjectRoot:
     def test_raises_when_not_found(self, tmp_path: Path) -> None:
         sub = tmp_path / "no" / "config"
         sub.mkdir(parents=True)
-        with pytest.raises(FileNotFoundError, match="No project-context.yaml"):
+        with pytest.raises(FileNotFoundError, match=r"No project-context\.yaml"):
             find_project_root(sub)
 
     def test_defaults_to_cwd(self, tmp_path: Path) -> None:
@@ -81,7 +81,7 @@ class TestSaveYaml:
 
 class TestGetYamlLoader:
     def test_returns_ruamel_by_default(self) -> None:
-        loader, backend = _get_yaml_loader()
+        _loader, backend = _get_yaml_loader()
         assert backend == "ruamel"
 
 
@@ -146,7 +146,7 @@ class TestEstimateTokens:
 class TestGrimoireTool:
     def test_cannot_instantiate_directly(self) -> None:
         with pytest.raises(TypeError):
-            GrimoireTool(Path("."))  # type: ignore[abstract]
+            GrimoireTool(Path())  # type: ignore[abstract]
 
     def test_subclass_works(self, tmp_path: Path) -> None:
         class DummyTool(GrimoireTool):
@@ -162,5 +162,5 @@ class TestGrimoireTool:
             def run(self, **kwargs: object) -> None:
                 pass
 
-        tool = DummyTool(Path("."))
+        tool = DummyTool(Path())
         assert tool.project_root.is_absolute()

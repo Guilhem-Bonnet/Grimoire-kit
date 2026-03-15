@@ -227,7 +227,7 @@ def _parse_yaml_simple(text: str) -> dict:
     imbriqués au format clé: valeur. Suffisant pour project-context.yaml.
     """
     try:
-        import yaml  # noqa: F811
+        import yaml
         return yaml.safe_load(text) or {}
     except ImportError as _exc:
         _log.debug("ImportError suppressed: %s", _exc)
@@ -554,7 +554,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="synapse-config",
         description="Configuration centralisée Synapse Grimoire",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet Grimoire")
     parser.add_argument("--version", action="version", version=f"%(prog)s {SYNAPSE_CONFIG_VERSION}")
 

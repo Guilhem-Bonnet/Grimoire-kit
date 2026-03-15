@@ -156,9 +156,9 @@ EOF
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
 
-- Context Router : [framework/context-router.md](../context-router.md) — chargement P0 des `.agent-rules`
-- Archetype DNA : [framework/archetype-dna.schema.yaml](../archetype-dna.schema.yaml) — règles globales
-- Agent Base : [framework/agent-base.md](../agent-base.md) — règles universelles
+- Context Router : [framework/context-router.md](context-router.md) — chargement P0 des `.agent-rules`
+- Archetype DNA : [framework/archetype-dna.schema.yaml](archetype-dna.schema.yaml) — règles globales
+- Agent Base : [framework/agent-base.md](agent-base.md) — règles universelles
 
 
 *BM-25 Agent Rules par dossier | framework/agent-rules.md*

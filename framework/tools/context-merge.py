@@ -521,7 +521,7 @@ def main() -> None:
         description="Context Merge — Diff et merge de branches de conversation Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"context-merge {CONTEXT_MERGE_VERSION}")

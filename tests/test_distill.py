@@ -14,6 +14,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import subprocess
@@ -130,34 +131,26 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_condense_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["condense"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_modes_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["modes"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_transform_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["transform"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_compare_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["compare"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -165,7 +158,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

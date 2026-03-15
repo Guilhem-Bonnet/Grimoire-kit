@@ -516,7 +516,7 @@ def cmd_diff(root: Path, snapshot_path: str, as_json: bool) -> dict[str, Any]:
 
 def cmd_impact(root: Path, target: str, as_json: bool) -> dict[str, Any]:
     """Analyse les dépendances et dépendants d'une entité."""
-    entities, edges = scan_project(root)
+    entities, _edges = scan_project(root)
 
     # Trouver l'entité
     target_entity = None
@@ -696,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="digital-twin",
         description="Digital Twin — Simulation d'impact pour projets grimoire-kit",
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Sortie JSON")

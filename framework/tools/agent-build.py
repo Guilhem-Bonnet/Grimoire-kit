@@ -257,9 +257,7 @@ def build_agent(agent_path: Path, project_root: Path) -> BuildResult:
     status = "success"
     if not validation.valid:
         status = "failed"
-    elif not all_required_resolved:
-        status = "warning"
-    elif validation.warnings:
+    elif not all_required_resolved or validation.warnings:
         status = "warning"
 
     build_result = BuildResult(

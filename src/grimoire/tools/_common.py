@@ -36,7 +36,7 @@ def find_project_root(start: Path | None = None) -> Path:
 def _get_yaml_loader() -> tuple[Any, str]:
     """Return (module, backend_name) for the best available YAML library."""
     try:
-        from ruamel.yaml import YAML  # noqa: F811
+        from ruamel.yaml import YAML
 
         return YAML, "ruamel"
     except ImportError:

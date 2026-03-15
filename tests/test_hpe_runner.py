@@ -730,7 +730,7 @@ class TestExecuteWave(unittest.TestCase):
         defn = _simple_definition(1, with_deps=False)
         defn["dag"]["config"]["checkpoint_after"] = ["t0"]
         plan = self.mod.build_plan_from_definition(defn)
-        plan, wr = self.mod.execute_wave(plan, self.tmp)
+        plan, _wr = self.mod.execute_wave(plan, self.tmp)
         # checkpoint should have been saved
         cp_dir = self.mod._checkpoints_dir(self.tmp)
         self.assertTrue(cp_dir.exists())
@@ -792,7 +792,7 @@ class TestRunPlan(unittest.TestCase):
                 return False, {"error": "oops"}
             return True, {}
 
-        plan, results = self.mod.run_plan(plan, self.tmp, executor=executor)
+        plan, _results = self.mod.run_plan(plan, self.tmp, executor=executor)
         self.assertEqual(plan.state, "paused")
 
     def test_outputs_propagated(self):
@@ -801,7 +801,7 @@ class TestRunPlan(unittest.TestCase):
         def executor(task, outputs):
             return True, {"from": task["id"]}
 
-        plan, results = self.mod.run_plan(plan, self.tmp, executor=executor)
+        plan, _results = self.mod.run_plan(plan, self.tmp, executor=executor)
         self.assertIn("out_0", plan.outputs)
         self.assertIn("out_1", plan.outputs)
         self.assertEqual(plan.outputs["out_0"]["from"], "t0")

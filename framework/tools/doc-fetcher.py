@@ -39,7 +39,6 @@ import argparse
 import hashlib
 import json
 import logging
-import os
 import re
 import shutil
 import sys
@@ -502,7 +501,7 @@ def format_list(idx: DocIndex, as_json: bool = False) -> str:
         return "\n  📚 Aucune source de documentation indexée.\n"
 
     lines: list[str] = []
-    lines.append(f"\n  📚 Sources de documentation indexées")
+    lines.append("\n  📚 Sources de documentation indexées")
     lines.append(f"  {'─' * 50}")
 
     for name, source in sorted(idx.sources.items()):
@@ -592,7 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Doc Fetcher — Indexation de documentation externe Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     parser.add_argument("--version", action="version",

@@ -523,10 +523,7 @@ def scan_directory(root: Path, target: Path | None = None,
     start = time.monotonic()
 
     scan_root = target or root
-    if scan_root.is_file():
-        files = [scan_root]
-    else:
-        files = sorted(scan_root.rglob("*.py"))
+    files = [scan_root] if scan_root.is_file() else sorted(scan_root.rglob("*.py"))
 
     # Filtrer les exclusions
     exclude_dirs = {"node_modules", ".git", "__pycache__", ".pytest_cache",
@@ -684,7 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--json", action="store_true", help="Output JSON")

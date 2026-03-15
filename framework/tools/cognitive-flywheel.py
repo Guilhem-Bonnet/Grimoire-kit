@@ -722,7 +722,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="cognitive-flywheel",
         description="Cognitive Flywheel — Boucle d'auto-amélioration continue Grimoire",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."), help="Racine du projet")
+    p.add_argument("--project-root", type=Path, default=Path(), help="Racine du projet")
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     sub = p.add_subparsers(dest="command", required=True)

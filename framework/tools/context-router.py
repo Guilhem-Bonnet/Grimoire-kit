@@ -36,6 +36,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 _log = logging.getLogger("grimoire.context_router")
 
@@ -72,6 +73,7 @@ CRITICAL_THRESHOLD = 0.80  # 80% → suggestions agressives
 
 # ── Priority Levels ──────────────────────────────────────────────────────────
 
+
 class Priority:
     """Niveaux de priorité de chargement."""
     P0_ALWAYS = 0       # Persona, agent-base, rules
@@ -80,7 +82,7 @@ class Priority:
     P3_LAZY = 3         # Archives, repo-map, digests
     P4_ON_REQUEST = 4   # Fichiers volumineux ou rarement utiles
 
-    LABELS = {
+    LABELS: ClassVar[dict[int, str]] = {
         0: "P0-ALWAYS",
         1: "P1-SESSION",
         2: "P2-TASK",

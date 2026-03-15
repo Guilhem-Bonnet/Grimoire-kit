@@ -555,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--json", action="store_true", help="Output JSON")

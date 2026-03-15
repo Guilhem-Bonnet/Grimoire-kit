@@ -438,7 +438,7 @@ def generate_mutations(
         if pattern.pattern_id not in trait_map:
             continue
 
-        trait_id, section, name, rule = trait_map[pattern.pattern_id]
+        trait_id, section, name, _rule = trait_map[pattern.pattern_id]
 
         if trait_id.lower() in existing_traits_lower or trait_id.lower() in existing_constraints_lower:
             continue

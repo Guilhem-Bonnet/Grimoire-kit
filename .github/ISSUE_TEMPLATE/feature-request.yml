@@ -1,0 +1,60 @@
+name: "✨ Feature request"
+description: "Proposer une nouvelle fonctionnalité ou amélioration"
+title: "feat: Description courte"
+labels: ["enhancement", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de décrire votre idée aussi clairement que possible.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Domaine concerné
+      options:
+        - CLI (grimoire)
+        - MCP Server
+        - Core (config, exceptions, log)
+        - Archetypes
+        - Framework / Tools
+        - Documentation
+        - CI / Workflows
+        - Autre
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problème ou besoin
+      description: "Décrivez le problème que cette fonctionnalité résoudrait."
+      placeholder: "Actuellement, je dois faire X manuellement..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution proposée
+      description: "Décrivez la solution que vous envisagez."
+      placeholder: "Je voudrais pouvoir lancer `grimoire ...` pour..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+      description: "Avez-vous envisagé d'autres approches ?"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte supplémentaire
+      description: "Captures d'écran, logs, liens, etc."
+    validations:
+      required: false

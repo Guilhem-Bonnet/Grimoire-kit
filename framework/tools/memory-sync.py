@@ -748,7 +748,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--version", action="version", version=f"memory-sync {MEMORY_SYNC_VERSION}")

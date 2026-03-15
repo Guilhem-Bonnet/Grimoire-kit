@@ -414,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="failure-museum",
         description="Failure Museum — Catalogue structuré des échecs du projet",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."), help="Racine du projet")
+    p.add_argument("--project-root", type=Path, default=Path(), help="Racine du projet")
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     sub = p.add_subparsers(dest="command", required=True)

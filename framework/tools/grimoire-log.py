@@ -85,7 +85,7 @@ def setup(project_root: Path | str | None = None, level: str = DEFAULT_LEVEL) ->
     Returns:
         Le logger racine ``grimoire``.
     """
-    global _CONFIGURED  # noqa: PLW0603
+    global _CONFIGURED
     root_log = logging.getLogger(ROOT_LOGGER_NAME)
 
     if _CONFIGURED:
@@ -322,7 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="grimoire-log",
         description="Grimoire Log — logging structuré partagé Grimoire",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {GRIMOIRE_LOG_VERSION}")
 

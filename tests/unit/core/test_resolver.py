@@ -59,7 +59,7 @@ class TestResolveTemplate:
         assert result == "Guilhem speaks Français"
 
     def test_unknown_variable_raises(self, resolver: PathResolver) -> None:
-        with pytest.raises(GrimoireConfigError, match="Unknown variable.*unknown"):
+        with pytest.raises(GrimoireConfigError, match=r"Unknown variable.*unknown"):
             resolver.resolve_template("{unknown}", {})
 
     def test_no_variables(self, resolver: PathResolver) -> None:

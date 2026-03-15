@@ -474,7 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="grimoire-daemon",
         description="Grimoire Daemon — Maintenance automatique en arrière-plan",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {DAEMON_VERSION}")
 

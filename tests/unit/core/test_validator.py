@@ -194,3 +194,67 @@ class TestFullConfig:
         }
         errs = validate_config(data)
         assert len(errs) >= 4  # name + type + skill + backend
+
+
+class TestUnknownKeys:
+    """Tests for the unknown key detection and 'did you mean?' feature."""
+
+    def test_unknown_top_level_key(self) -> None:
+        data = {"project": {"name": "x"}, "projct": {"name": "typo"}}
+        errs = validate_config(data)
+        assert any("Unknown key" in e.message and "projct" in e.message for e in errs)
+
+    def test_unknown_top_level_key_did_you_mean(self) -> None:
+        data = {"project": {"name": "x"}, "uesr": {"name": "typo"}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "Unknown key" in e.message and "uesr" in e.message]
+        assert len(unknown_errs) == 1
+        assert "user" in unknown_errs[0].suggestion
+
+    def test_unknown_project_key(self) -> None:
+        data = {"project": {"name": "x", "naem": "typo"}}
+        errs = validate_config(data)
+        assert any("Unknown key" in e.message and "naem" in e.message for e in errs)
+
+    def test_unknown_project_key_did_you_mean(self) -> None:
+        data = {"project": {"name": "x", "stck": ["python"]}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "stck" in e.message]
+        assert len(unknown_errs) == 1
+        assert "stack" in unknown_errs[0].suggestion
+
+    def test_unknown_user_key(self) -> None:
+        data = {"project": {"name": "x"}, "user": {"name": "G", "langauge": "fr"}}
+        errs = validate_config(data)
+        assert any("langauge" in e.message for e in errs)
+        typo_err = next(e for e in errs if "langauge" in e.message)
+        assert "language" in typo_err.suggestion
+
+    def test_unknown_memory_key(self) -> None:
+        data = {"project": {"name": "x"}, "memory": {"bakend": "local"}}
+        errs = validate_config(data)
+        assert any("bakend" in e.message for e in errs)
+        assert any("backend" in e.suggestion for e in errs if "bakend" in e.message)
+
+    def test_unknown_agents_key(self) -> None:
+        data = {"project": {"name": "x"}, "agents": {"archtype": "minimal"}}
+        errs = validate_config(data)
+        assert any("archtype" in e.message for e in errs)
+        assert any("archetype" in e.suggestion for e in errs if "archtype" in e.message)
+
+    def test_no_false_positive_on_known_keys(self) -> None:
+        data = {
+            "project": {"name": "x", "type": "api", "stack": []},
+            "user": {"name": "G", "skill_level": "expert"},
+            "memory": {"backend": "local"},
+            "agents": {"archetype": "minimal"},
+        }
+        errs = validate_config(data)
+        assert not any("Unknown key" in e.message for e in errs)
+
+    def test_completely_unknown_no_suggestion(self) -> None:
+        data = {"project": {"name": "x"}, "zzzzz_garbage": 42}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "zzzzz_garbage" in e.message]
+        assert len(unknown_errs) == 1
+        assert unknown_errs[0].suggestion == ""

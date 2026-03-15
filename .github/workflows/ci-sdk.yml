@@ -19,6 +19,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: "Ruff lint"
@@ -29,6 +32,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install ruff
         run: pip install ruff
@@ -45,6 +49,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
@@ -52,25 +57,72 @@ jobs:
       - name: Type check
         run: mypy --strict src/grimoire/
 
-  test:
-    name: "Tests (Python ${{ matrix.python-version }})"
+  dep-audit:
+    name: "Dependency audit"
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + pip-audit
+        run: |
+          pip install -e ".[dev]"
+          pip install pip-audit
+
+      - name: Audit dependencies
+        run: pip-audit --strict --desc
+
+  test:
+    name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        exclude:
+          # Keep matrix lean: Windows/macOS only on 3.12
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
 
-      - name: Run unit tests
-        run: pytest tests/unit/ -q --tb=short -x
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit/ -q --tb=short -x \
+            --cov=src/grimoire \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
+
+      - name: Upload to Codecov
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
 
       - name: Report
         if: always()
@@ -81,13 +133,14 @@ jobs:
   build:
     name: "Build package"
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, dep-audit, test]
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install build
         run: pip install build

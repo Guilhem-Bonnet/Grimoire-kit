@@ -11,6 +11,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import subprocess
@@ -108,42 +109,32 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_capture_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["capture"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_recall_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["recall"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_decay_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["decay"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_prioritize_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["prioritize"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_flush_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["flush"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -151,7 +142,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 

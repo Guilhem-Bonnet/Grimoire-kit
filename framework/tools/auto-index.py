@@ -245,9 +245,7 @@ def detect_changes(project_root: Path, state: IndexState,
         current_paths.add(rel)
         file_hash = _hash_file(fpath)
 
-        if rel not in state.files:
-            new_or_modified.append(fpath)
-        elif state.files[rel].hash != file_hash:
+        if rel not in state.files or state.files[rel].hash != file_hash:
             new_or_modified.append(fpath)
         else:
             unchanged.append(fpath)
@@ -492,7 +490,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Auto-Index — Indexation RAG automatique Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     parser.add_argument("--version", action="version",
@@ -546,10 +544,7 @@ def main() -> None:
         since = getattr(args, "since", None)
         quiet = getattr(args, "quiet", False)
 
-        if since:
-            files = discover_git_modified(project_root, since)
-        else:
-            files = discover_files(project_root)
+        files = discover_git_modified(project_root, since) if since else discover_files(project_root)
 
         report = run_indexation(project_root, files, state, quiet)
 

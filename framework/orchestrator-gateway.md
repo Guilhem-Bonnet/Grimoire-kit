@@ -279,6 +279,130 @@ session_knowledge_graph:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
+## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> AORA — Orchestration Autonome de Tâches Complexes
+
+> **Principe** : Pour les tâches multi-step, le SOG ne rend PAS la main entre chaque étape.
+> Il décompose, itère, et ne livre qu'un résultat complet.
+
+### Protocole d'itération longue
+
+Quand l'orchestrateur reçoit une tâche complexe (complexity ≥ moderate) :
+
+```yaml
+aora_protocol:
+  # Phase 1 — Décomposition
+  decompose:
+    action: "Transformer la tâche en checklist de micro-tâches ordonnées"
+    output: "Living Checklist affichée à l'utilisateur"
+    max_tasks: 15  # Au-delà, regrouper en phases
+    
+  # Phase 2 — Boucle AORA
+  loop:
+    for_each_task:
+      act: "Dispatcher au sub-agent optimal (ou exécuter directement)"
+      observe: "Capturer le résultat : succès, échec, output, stderr"
+      reflect: |
+        - Succès → cocher ✅, passer à la tâche suivante
+        - Échec mineur → tenter correction (max 3 retries par micro-tâche)  
+        - Échec bloquant → escalader à l'utilisateur avec contexte complet
+        - Découverte inattendue → ajouter/modifier la checklist dynamiquement
+      act_again: "Continuer sans rendre la main"
+    
+    # Interruption utilisateur
+    user_interrupt:
+      always_possible: true
+      behavior: "Intégrer le feedback, adapter le plan, continuer la boucle"
+    
+    # Limites de sécurité
+    guardrails:
+      max_iterations_per_task: 3
+      max_total_iterations: 30
+      on_limit_reached: "Escalade utilisateur avec rapport de progression"
+  
+  # Phase 3 — Livraison
+  deliver:
+    format: |
+      ## Résultat — {task_description}
+      
+      {résumé exécutif en 2-3 lignes}
+      
+      ### Actions effectuées
+      {checklist complétée avec statuts}
+      
+      ### Décisions prises en autonomie
+      {liste des choix faits sans demander, si applicable}
+      
+      ### CC Status
+      {résultats de vérification}
+    
+    trust_score: "Score composite de tous les sub-agents impliqués"
+```
+
+### Quand activer AORA
+
+| Complexité | Micro-tâches estimées | Activation |
+|---|---|---|
+| Simple | 1-2 | Non — exécution directe |
+| Moderate | 3-7 | Oui — checklist courte |
+| Complex | 8-15 | Oui — checklist + phases |
+| Multi-step | 15+ | Oui — phases + checkpoints |
+
+### Interaction ALS × AORA
+
+- **L1/L2** : AORA itère silencieusement, livre le résultat final
+- **L3** : AORA présente le plan (checklist), attend validation UNE fois, puis itère
+- **L4** : pas d'AORA — chaque étape supervisée individuellement
+
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> PCS — Progressive Context Summarization
+
+> Pour les sessions longues (10+ échanges, 50K+ tokens estimés), le SOG gère activement le contexte.
+
+### Protocole de compression contextuelle
+
+```yaml
+context_summarization:
+  trigger:
+    exchange_count: 10  # Tous les ~10 échanges
+    token_estimate: 50000  # Ou quand le contexte approche 50K tokens
+  
+  process:
+    1_extract: |
+      Capturer de la session en cours :
+      - Décisions prises (avec justifications courtes)
+      - Fichiers créés/modifiés (chemins complets)
+      - Résultats importants (CC PASS/FAIL, tests, etc.)
+      - Tâches en cours / non terminées
+      - Préférences et contraintes exprimées
+    
+    2_compress: |
+      Créer un résumé structuré compact :
+      ## Résumé de session (auto-consolidé à {timestamp})
+      - **Objectif** : {objectif principal de la session}
+      - **Décisions** : {liste compacte}
+      - **Fichiers touchés** : {chemins}
+      - **État** : {ce qui reste à faire}
+      - **Contexte clé** : {facts/preferences importants}
+    
+    3_persist: |
+      Écrire dans session-state.md pour survie cross-session.
+      Injecter le résumé dans le prompt du prochain échange.
+  
+  what_to_keep:
+    always: ["décisions", "fichiers modifiés", "erreurs non résolues", "tâches en cours"]
+    prune: ["bavardage", "tentatives échouées résolues", "détails intermédiaires"]
+```
+
+### Avantage pour les itérations longues
+
+Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ échanges en :
+1. Ne perdant jamais les décisions clés
+2. Compressant le bruit conversationnel
+3. Rechargeable au prochain cycle si la session coupe
+
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec les Protocoles Existants
 
 | Protocole | Relation avec SOG |
@@ -296,6 +420,11 @@ session_knowledge_graph:
 | **ARG (BM-57)** | SOG utilise le graphe relationnel pour optimiser le routage et la formation d'équipes |
 | **HPE (BM-58)** | SOG utilise le moteur HPE pour orchestrer les DAG hybrides (parallel + séquentiel + opportuniste) |
 | **ELSS (BM-59)** | SOG observe l'état partagé, reconstruit le shared state, détecte les conflits |
+| **ALS** | SOG utilise l'Autonomy Level System pour déterminer quand foncer vs demander |
+| **AORA** | SOG active la boucle d'itération autonome pour les tâches complex+ |
+| **PCS** | SOG compresse le contexte progressivement pour les sessions longues |
+| **PIP** | SOG exploite les triggers proactifs pour signaler/corriger les patterns détectés |
+| **DCF** | SOG utilise la matrice Confiance × Risque pour calibrer chaque décision |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

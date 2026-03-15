@@ -160,42 +160,32 @@ class TestCLI(unittest.TestCase):
     def test_subcommand_diagnose_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["diagnose"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_heal_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["heal"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_history_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["history"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_playbook_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["playbook"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
     def test_subcommand_status_exists(self):
         parser = self.mod.build_parser()
         # Vérifie que le sous-parseur ne crashe pas
-        try:
+        with contextlib.suppress(SystemExit):
             parser.parse_args(["status"])
-        except SystemExit:
-            pass  # Some subcommands may require args
 
 
 class TestCLIIntegration(unittest.TestCase):
@@ -203,7 +193,7 @@ class TestCLIIntegration(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(self.TOOL)] + list(args),
+            [sys.executable, str(self.TOOL), *list(args)],
             capture_output=True, text=True, timeout=30,
         )
 
@@ -220,7 +210,8 @@ class TestCLIIntegration(unittest.TestCase):
 
 # ── Suggest Improvements (v1.1) ─────────────────────────────────────────────
 
-import json
+import contextlib  # noqa: E402
+import json  # noqa: E402
 
 
 class TestSuggestImprovements(unittest.TestCase):

@@ -339,7 +339,7 @@ def detect_cycles(plan: HPEPlan) -> list[list[str]]:
     def _dfs(node: str) -> None:
         if node in path_set:
             cycle_start = path.index(node)
-            cycles.append(path[cycle_start:] + [node])
+            cycles.append([*path[cycle_start:], node])
             return
         if node in visited:
             return
@@ -915,7 +915,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     except json.JSONDecodeError:
         # Try YAML if json fails
         try:
-            import yaml  # noqa: F811
+            import yaml
             definition = yaml.safe_load(content)
         except ImportError:
             print("  ❌ File is not valid JSON and PyYAML not available", file=sys.stderr)

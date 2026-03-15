@@ -417,10 +417,7 @@ class RAGRetriever:
         )
 
         rag_context = retrieval.context_block
-        if rag_context:
-            augmented = f"{rag_context}\n\n---\n\n{prompt}"
-        else:
-            augmented = prompt
+        augmented = f"{rag_context}\n\n---\n\n{prompt}" if rag_context else prompt
 
         budget_used = retrieval.total_tokens
         budget_pct = round(budget_used / model_window * 100, 2) if model_window else 0.0
@@ -677,7 +674,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--project-root", type=Path, default=Path("."),
+        "--project-root", type=Path, default=Path(),
         help="Racine du projet (défaut: .)",
     )
     parser.add_argument("--version", action="version", version=f"rag-retriever {RAG_RETRIEVER_VERSION}")

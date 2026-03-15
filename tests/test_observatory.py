@@ -172,7 +172,7 @@ class TestParseEventLog:
 class TestParseAgentGraph:
     def test_parses_agents(self, tmp_project):
         path = tmp_project / "_grimoire-output" / ".agent-graph.yaml"
-        agents, rels = obs.parse_agent_graph(path)
+        agents, _rels = obs.parse_agent_graph(path)
         assert len(agents) == 2
         ids = {a.id for a in agents}
         assert "dev" in ids

@@ -356,10 +356,7 @@ def measure_stagnation(project_root: Path, commits: list[dict]) -> Metric:
             for f in memory_dir.rglob("*"):
                 if f.is_file():
                     most_recent = max(most_recent, f.stat().st_mtime)
-            if most_recent > 0:
-                days_since = (now - most_recent) / 86400
-            else:
-                days_since = 999
+            days_since = (now - most_recent) / 86400 if most_recent > 0 else 999
         else:
             days_since = 999
     else:

@@ -583,7 +583,7 @@ def main() -> None:
         description="Agent Caller — Agent-to-Agent Tool Calling Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project-root", type=Path, default=Path("."),
+    parser.add_argument("--project-root", type=Path, default=Path(),
                         help="Racine du projet (défaut: .)")
     parser.add_argument("--version", action="version",
                         version=f"agent-caller {AGENT_CALLER_VERSION}")

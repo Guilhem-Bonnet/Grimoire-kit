@@ -37,6 +37,7 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import http.server
 import json
 import logging
@@ -151,10 +152,8 @@ def load_history(project_root: Path) -> list[dict[str, Any]]:
         line = line.strip()
         if not line:
             continue
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             events.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
     return events
 
 
@@ -229,7 +228,7 @@ def topological_layers(plan: dict[str, Any]) -> list[list[str]]:
     if not tasks:
         return []
 
-    in_degree: dict[str, int] = {tid: 0 for tid in tasks}
+    in_degree: dict[str, int] = dict.fromkeys(tasks, 0)
     children: dict[str, list[str]] = {tid: [] for tid in tasks}
 
     for t in tasks.values():

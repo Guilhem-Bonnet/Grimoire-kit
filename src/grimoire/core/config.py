@@ -19,7 +19,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.error_codes import CONFIG_MISSING_SECTION, CONFIG_NOT_FOUND, CONFIG_PARSE_ERROR
 from grimoire.core.exceptions import GrimoireConfigError
+
+__all__ = [
+    "AgentsConfig",
+    "GrimoireConfig",
+    "MemoryConfig",
+    "ProjectConfig",
+    "RepoConfig",
+    "UserConfig",
+]
 
 # ── Sub-sections ──────────────────────────────────────────────────────────────
 
@@ -82,7 +92,8 @@ class UserConfig:
         skill = str(data.get("skill_level", "intermediate"))
         if skill not in _VALID_SKILL_LEVELS:
             raise GrimoireConfigError(
-                f"Invalid skill_level '{skill}', expected one of: {sorted(_VALID_SKILL_LEVELS)}"
+                f"Invalid skill_level '{skill}', expected one of: {sorted(_VALID_SKILL_LEVELS)}",
+                error_code=CONFIG_PARSE_ERROR.code,
             )
         return cls(
             name=str(data.get("name", "")),
@@ -112,7 +123,8 @@ class MemoryConfig:
         backend = str(data.get("backend", "auto"))
         if backend not in _VALID_BACKENDS:
             raise GrimoireConfigError(
-                f"Invalid memory backend '{backend}', expected one of: {sorted(_VALID_BACKENDS)}"
+                f"Invalid memory backend '{backend}', expected one of: {sorted(_VALID_BACKENDS)}",
+                error_code=CONFIG_PARSE_ERROR.code,
             )
         return cls(
             backend=backend,
@@ -161,6 +173,24 @@ class GrimoireConfig:
     installed_archetypes: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
 
+    # ── Validation ────────────────────────────────────────────────────
+
+    def validate(self) -> list[str]:
+        """Return a list of config warnings (empty means valid).
+
+        Checks semantic consistency that goes beyond parse-time validation.
+        """
+        issues: list[str] = []
+
+        if self.memory.backend == "qdrant-server" and not self.memory.qdrant_url:
+            issues.append("Memory backend is 'qdrant-server' but qdrant_url is empty")
+        if self.memory.backend == "ollama" and not self.memory.ollama_url:
+            issues.append("Memory backend is 'ollama' but ollama_url is empty")
+        if not self.project.name.strip():
+            issues.append("Project name is blank")
+
+        return issues
+
     # ── Factory methods ───────────────────────────────────────────────
 
     @classmethod
@@ -170,11 +200,14 @@ class GrimoireConfig:
         Raises :class:`GrimoireConfigError` on validation failures.
         """
         if not isinstance(data, dict):
-            raise GrimoireConfigError("Config root must be a YAML mapping")
+            raise GrimoireConfigError("Config root must be a YAML mapping", error_code=CONFIG_PARSE_ERROR.code)
 
         raw_project = data.get("project")
         if not isinstance(raw_project, dict) or not raw_project.get("name"):
-            raise GrimoireConfigError("Config must contain a 'project' section with a 'name' field")
+            raise GrimoireConfigError(
+                "Config must contain a 'project' section with a 'name' field",
+                error_code=CONFIG_MISSING_SECTION.code,
+            )
 
         raw_archetypes = data.get("installed_archetypes") or []
         extra = {k: v for k, v in data.items() if k not in _KNOWN_TOP_KEYS}
@@ -196,7 +229,7 @@ class GrimoireConfig:
         or contains invalid YAML.
         """
         if not path.is_file():
-            raise GrimoireConfigError(f"Config file not found: {path}")
+            raise GrimoireConfigError(f"Config file not found: {path}", error_code=CONFIG_NOT_FOUND.code)
 
         try:
             from ruamel.yaml import YAML
@@ -211,12 +244,12 @@ class GrimoireConfig:
                 with open(path) as fh:
                     raw = pyyaml.safe_load(fh)
             except Exception as exc:
-                raise GrimoireConfigError(f"Cannot parse '{path}': {exc}") from exc
+                raise GrimoireConfigError(f"Cannot parse '{path}': {exc}", error_code=CONFIG_PARSE_ERROR.code) from exc
         except Exception as exc:
-            raise GrimoireConfigError(f"Cannot parse '{path}': {exc}") from exc
+            raise GrimoireConfigError(f"Cannot parse '{path}': {exc}", error_code=CONFIG_PARSE_ERROR.code) from exc
 
         if raw is None:
-            raise GrimoireConfigError(f"Config file is empty: {path}")
+            raise GrimoireConfigError(f"Config file is empty: {path}", error_code=CONFIG_PARSE_ERROR.code)
 
         return cls.from_dict(raw)
 
@@ -233,5 +266,6 @@ class GrimoireConfig:
             if candidate.is_file():
                 return cls.from_yaml(candidate)
         raise GrimoireConfigError(
-            f"No 'project-context.yaml' found in {current} or any parent directory"
+            f"No 'project-context.yaml' found in {current} or any parent directory",
+            error_code=CONFIG_NOT_FOUND.code,
         )

@@ -495,7 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="fitness-tracker",
         description="Grimoire Fitness Tracker — Score de santé global",
     )
-    p.add_argument("--project-root", type=Path, default=Path("."))
+    p.add_argument("--project-root", type=Path, default=Path())
     p.add_argument("--json", action="store_true", help="Sortie JSON")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {FITNESS_VERSION}")

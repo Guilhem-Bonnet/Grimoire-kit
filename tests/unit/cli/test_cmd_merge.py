@@ -39,24 +39,24 @@ def target(tmp_path: Path) -> Path:
 
 class TestRunMerge:
     def test_basic_merge(self, source: Path, target: Path) -> None:
-        plan, result = run_merge(source, target)
+        _plan, result = run_merge(source, target)
         assert "hello.txt" in result.files_created
         assert (target / "hello.txt").is_file()
 
     def test_dry_run(self, source: Path, target: Path) -> None:
-        plan, result = run_merge(source, target, dry_run=True)
+        _plan, result = run_merge(source, target, dry_run=True)
         assert len(result.files_created) >= 1
         assert not (target / "hello.txt").exists()
 
     def test_force(self, source: Path, target: Path) -> None:
         (target / "hello.txt").write_text("old\n")
-        plan, result = run_merge(source, target, force=True)
+        _plan, result = run_merge(source, target, force=True)
         assert "hello.txt" in result.files_created
         assert (target / "hello.txt").read_text() == "hello\n"
 
     def test_skip_conflicts(self, source: Path, target: Path) -> None:
         (target / "hello.txt").write_text("keep\n")
-        plan, result = run_merge(source, target)
+        _plan, result = run_merge(source, target)
         assert "hello.txt" in result.files_skipped
         assert (target / "hello.txt").read_text() == "keep\n"
 
@@ -99,7 +99,7 @@ class TestMergeCLI:
     def test_merge_undo(self, source: Path, target: Path) -> None:
         runner.invoke(app, ["merge", str(source), "--target", str(target)])
         assert (target / "hello.txt").is_file()
-        result = runner.invoke(app, ["merge", str(source), "--target", str(target), "--undo"])
+        result = runner.invoke(app, ["-y", "merge", str(source), "--target", str(target), "--undo"])
         assert result.exit_code == 0
         assert "deleted" in result.output.lower() or "removed" in result.output.lower()
 
@@ -119,5 +119,5 @@ class TestMergeCLI:
         assert "skipped" in result.output
 
     def test_undo_no_log(self, source: Path, target: Path) -> None:
-        result = runner.invoke(app, ["merge", str(source), "--target", str(target), "--undo"])
+        result = runner.invoke(app, ["-y", "merge", str(source), "--target", str(target), "--undo"])
         assert result.exit_code == 1

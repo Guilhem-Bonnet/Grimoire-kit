@@ -213,7 +213,7 @@ def _count_contradictions(path: Path) -> dict:
 
 def _count_sil_signals(memory_dir: Path, since: str | None = None) -> dict:
     """Compte les signaux SIL dans les sources mémoire."""
-    signals = {cat: 0 for cat in SIL_MARKERS}
+    signals = dict.fromkeys(SIL_MARKERS, 0)
 
     decisions_path = memory_dir / "decisions-log.md"
     learnings_dir = memory_dir / "agent-learnings"

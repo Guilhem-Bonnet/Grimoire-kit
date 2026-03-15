@@ -235,8 +235,7 @@ def _detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
             content = full.read_text(encoding="utf-8", errors="replace")
             for match in _REF_PATTERN.finditer(content):
                 ref = match.group(1)
-                if not ref.startswith("http") and ("/" in ref or ref.endswith((".md", ".yaml", ".py", ".xml"))):
-                    if not (project_root / ref).exists() and not (full.parent / ref).exists():
+                if not ref.startswith("http") and ("/" in ref or ref.endswith((".md", ".yaml", ".py", ".xml"))) and not (project_root / ref).exists() and not (full.parent / ref).exists():
                         dissonances.append(Dissonance(
                             "broken-ref", SEVERITY_HIGH, fpath,
                             f"Référence cassée : '{ref}' — fichier introuvable",

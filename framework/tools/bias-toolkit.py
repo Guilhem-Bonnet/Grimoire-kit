@@ -355,10 +355,7 @@ def cmd_catalog(args: argparse.Namespace) -> int:
 
 def cmd_audit(args: argparse.Namespace) -> int:
     target = Path(args.target).resolve() if args.target else Path(args.project_root).resolve()
-    if target.is_file():
-        dets = audit_file(target)
-    else:
-        dets = audit_project(target)
+    dets = audit_file(target) if target.is_file() else audit_project(target)
     if args.json:
         print(json.dumps([{"bias": d.bias_name, "file": d.file, "line": d.line,
                            "context": d.context, "level": d.ethical_level}
@@ -408,7 +405,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             "total_biases_catalogued": len(BIAS_CATALOG),
             "detections": len(detections),
             "by_category": {cat: len([b for b in BIAS_CATALOG if b.category == cat])
-                           for cat in set(b.category for b in BIAS_CATALOG)},
+                           for cat in {b.category for b in BIAS_CATALOG}},
         }, indent=2, ensure_ascii=False))
     else:
         print(format_catalog(BIAS_CATALOG))

@@ -60,8 +60,8 @@ Grimoire_MCP_TOOLS_VERSION = "2.2.0"
 
 # ── Audit Trail ──────────────────────────────────────────────────────────────
 
-import hashlib as _hashlib
-import time as _time_mod
+import hashlib as _hashlib  # noqa: E402
+import time as _time_mod  # noqa: E402
 
 AUDIT_TRAIL_FILE = "_grimoire/_memory/mcp-audit.jsonl"
 AUDIT_TRAIL_MAX_ENTRIES = 5000  # Prune when exceeding
@@ -117,7 +117,7 @@ def _hash_result(result: str) -> str:
 
 # ── Input Sanitization ──────────────────────────────────────────────────────
 
-import re as _re
+import re as _re  # noqa: E402
 
 # Patterns that indicate prompt injection attempts in MCP inputs
 _INJECTION_PATTERNS = [

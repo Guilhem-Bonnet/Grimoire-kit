@@ -1,0 +1,56 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "🚀 Fonctionnalités"
+    labels:
+      - "type:feature"
+      - "enhancement"
+  - title: "🐛 Corrections"
+    labels:
+      - "type:fix"
+      - "bug"
+  - title: "📚 Documentation"
+    labels:
+      - "type:docs"
+  - title: "🏗️ Infrastructure"
+    labels:
+      - "type:ci"
+      - "type:packaging"
+  - title: "🧪 Tests"
+    labels:
+      - "type:test"
+  - title: "🔧 Maintenance"
+    labels:
+      - "type:tools"
+      - "type:core"
+      - "dependencies"
+  - title: "⚠️ Breaking Changes"
+    labels:
+      - "breaking"
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+
+version-resolver:
+  major:
+    labels:
+      - "breaking"
+  minor:
+    labels:
+      - "type:feature"
+      - "enhancement"
+  patch:
+    labels:
+      - "type:fix"
+      - "bug"
+      - "type:docs"
+      - "type:ci"
+  default: patch
+
+template: |
+  ## Changements
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
