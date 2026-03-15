@@ -133,6 +133,7 @@ def main(
     show_time: bool = typer.Option(False, "--time", help="Show elapsed time after command execution."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts."),
     profile: bool = typer.Option(False, "--profile", help="Show per-phase timing breakdown."),
+    debug: bool = typer.Option(False, "--debug", "-D", help="Enable debug mode (full tracebacks on error)."),
 ) -> None:
     """Grimoire Kit — Composable AI agent platform."""
     ctx.ensure_object(dict)
@@ -147,11 +148,15 @@ def main(
     # NO_COLOR: standard (https://no-color.org/)
     if not no_color and os.environ.get("NO_COLOR", ""):
         no_color = True
+    # GRIMOIRE_DEBUG: debug mode
+    if not debug and os.environ.get("GRIMOIRE_DEBUG", "").lower() in ("1", "true"):
+        debug = True
 
     ctx.obj["output"] = output
     ctx.obj["quiet"] = quiet
     ctx.obj["show_time"] = show_time
     ctx.obj["profile"] = profile
+    ctx.obj["debug"] = debug
     ctx.obj["yes"] = yes or output == "json"
     ctx.obj["_timings"] = []
     if show_time or profile:
@@ -159,6 +164,8 @@ def main(
     if no_color:
         console.no_color = True
         console._force_terminal = False
+    if debug:
+        os.environ["GRIMOIRE_DEBUG"] = "1"
     if verbose:
         level = ("INFO" if verbose == 1 else "DEBUG")
         configure_logging(level, fmt=log_format)
@@ -1238,12 +1245,12 @@ def config_set(
             target = target[part]
         else:
             console.print(f"[red]Key not found:[/red] {key}")
-            raise typer.Exit(1)
+            raise typer.Exit(_EXIT_CONFIG)
 
     last = parts[-1]
     if not isinstance(target, dict) or last not in target:
         console.print(f"[red]Key not found:[/red] {key}")
-        raise typer.Exit(1)
+        raise typer.Exit(_EXIT_CONFIG)
 
     old_value = target[last]
 
@@ -1872,6 +1879,15 @@ def env_cmd(ctx: typer.Context) -> None:
     env_vars = {var: os.environ.get(var) for var in _env_var_names}
     online = is_online()
 
+    # Detect conflicting env vars
+    conflicts: list[str] = []
+    if env_vars.get("GRIMOIRE_DEBUG") and env_vars.get("GRIMOIRE_QUIET"):
+        conflicts.append("GRIMOIRE_DEBUG and GRIMOIRE_QUIET are both set — debug output may be suppressed")
+    if env_vars.get("GRIMOIRE_OFFLINE") and not env_vars.get("NO_COLOR"):
+        pass  # not a conflict
+    if env_vars.get("NO_COLOR") and env_vars.get("GRIMOIRE_OUTPUT") == "json":
+        pass  # not a conflict — json ignores colour anyway
+
     project_info: dict[str, str] | None = None
     try:
         ctx_file = _find_config(Path())
@@ -1890,6 +1906,7 @@ def env_cmd(ctx: typer.Context) -> None:
             "online": online,
             "dependencies": deps,
             "environment": env_vars,
+            "conflicts": conflicts,
             "project": project_info,
         }
         typer.echo(json.dumps(data, indent=2))
@@ -1914,6 +1931,11 @@ def env_cmd(ctx: typer.Context) -> None:
     console.print("\n[bold]Environment[/bold]")
     for var, val in env_vars.items():
         console.print(f"  {var}={val or '[dim]—[/dim]'}")
+
+    if conflicts:
+        console.print("\n[bold yellow]Conflicts[/bold yellow]")
+        for c in conflicts:
+            console.print(f"  [yellow]⚠[/yellow] {c}")
 
     if project_info and project_info["name"] != "(unreadable)":
         console.print("\n[bold]Project[/bold]")
@@ -2121,25 +2143,29 @@ def repair(
         import datetime as _dt
 
         cutoff = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=90)
-        lines = audit_log.read_text(encoding="utf-8").splitlines()
-        kept: list[str] = []
         trimmed = 0
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                ts = _dt.datetime.fromisoformat(entry.get("ts", ""))
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=_dt.UTC)
-                if ts >= cutoff:
-                    kept.append(line)
-                else:
-                    trimmed += 1
-            except (json.JSONDecodeError, ValueError):
-                kept.append(line)
+        kept: list[str] = []
+        with open(audit_log, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = _dt.datetime.fromisoformat(entry.get("ts", ""))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=_dt.UTC)
+                    if ts >= cutoff:
+                        kept.append(line + "\n")
+                    else:
+                        trimmed += 1
+                except (json.JSONDecodeError, ValueError):
+                    kept.append(line + "\n")
         if trimmed > 0:
             actions.append({"action": "trim_audit_log", "removed": str(trimmed)})
             if not dry_run:
-                audit_log.write_text("\n".join(kept) + "\n" if kept else "", encoding="utf-8")
+                with open(audit_log, "w", encoding="utf-8") as fh:
+                    fh.writelines(kept)
             if fmt != "json":
                 tag = "[dim]would trim[/dim]" if dry_run else "[green]trimmed[/green]"
                 console.print(f"  {tag}  audit.jsonl — {trimmed} old entries")
@@ -2181,13 +2207,21 @@ def _warn_deprecated() -> None:
 def _is_online(*, timeout: float = 1.0) -> bool:
     """Quick connectivity test — returns *False* if unreachable.
 
-    Respects ``GRIMOIRE_OFFLINE=1`` env override (always offline).
+    Uses DNS resolution (works behind corporate proxies) and falls back to a
+    direct socket connection. Respects ``GRIMOIRE_OFFLINE=1`` env override.
     Result is cached for the process lifetime.
     """
     if os.environ.get("GRIMOIRE_OFFLINE", "").lower() in ("1", "true"):
         return False
     import socket
 
+    # Prefer DNS — works behind proxies and firewalls
+    try:
+        socket.getaddrinfo("dns.google", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        return True
+    except OSError:
+        pass
+    # Fallback — direct TCP to a public DNS resolver
     try:
         socket.create_connection(("1.1.1.1", 53), timeout=timeout).close()
     except OSError:
@@ -2285,19 +2319,20 @@ def cli() -> None:
     _start = time.perf_counter()
     _show_time = "--time" in sys.argv
     _show_profile = "--profile" in sys.argv
+    _debug = "--debug" in sys.argv or "-D" in sys.argv or os.environ.get("GRIMOIRE_DEBUG", "").lower() in ("1", "true")
     try:
         app()
     except GrimoireError as exc:
         _format_error(exc)
         raise typer.Exit(1) from None
     except Exception as exc:
-        if os.environ.get("GRIMOIRE_DEBUG"):
+        if _debug:
             from rich.traceback import Traceback
 
             console.print(Traceback.from_exception(type(exc), exc, exc.__traceback__, width=120, show_locals=True))
             raise typer.Exit(2) from None
         console.print(f"[bold red]Unexpected error:[/bold red] {exc}")
-        console.print("[dim]Set GRIMOIRE_DEBUG=1 for full traceback.[/dim]")
+        console.print("[dim]Use --debug or set GRIMOIRE_DEBUG=1 for full traceback.[/dim]")
         raise typer.Exit(2) from None
     finally:
         total = time.perf_counter() - _start

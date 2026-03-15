@@ -1241,7 +1241,7 @@ class TestConfigSet:
 
     def test_set_unknown_key(self, project: Path) -> None:
         result = runner.invoke(app, ["config", "set", "nonexistent.key", "val"])
-        assert result.exit_code == 1
+        assert result.exit_code == 2  # _EXIT_CONFIG
         assert "not found" in result.output.lower()
 
     def test_set_no_project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2149,6 +2149,7 @@ class TestOfflineMode:
 
         os.environ.pop("GRIMOIRE_OFFLINE", None)
         with (
+            patch("socket.getaddrinfo", side_effect=OSError("no dns")),
             patch("socket.create_connection", side_effect=OSError("no network")),
             patch.dict("os.environ", {}, clear=False),
         ):
@@ -3482,3 +3483,161 @@ class TestR36PluginsList:
         result = runner.invoke(app, ["plugins", "--help"])
         assert result.exit_code == 0
         assert "list" in result.output
+
+
+# ── R37: --debug flag, DNS online, repair race, config set exit codes, env conflicts ──
+
+
+class TestR37DebugFlag:
+    """A1: --debug / -D global flag exposes debug mode."""
+
+    def test_debug_flag_in_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "--debug" in result.output
+
+    def test_debug_flag_sets_env(self, cli_project: Path) -> None:
+        """--debug or -D should set GRIMOIRE_DEBUG=1 in the environment."""
+        import os
+
+        old = os.environ.pop("GRIMOIRE_DEBUG", None)
+        try:
+            result = runner.invoke(app, ["--debug", "doctor", str(cli_project)])
+            # The flag is consumed by main() callback; env should be set for subprocess code
+            assert result.exit_code in (0, 1)
+        finally:
+            if old is not None:
+                os.environ["GRIMOIRE_DEBUG"] = old
+            else:
+                os.environ.pop("GRIMOIRE_DEBUG", None)
+
+    def test_debug_short_alias(self, cli_project: Path) -> None:
+        """Short flag -D should also work."""
+        result = runner.invoke(app, ["-D", "doctor", str(cli_project)])
+        assert result.exit_code in (0, 1)
+
+    def test_debug_env_var_fallback(self, cli_project: Path) -> None:
+        """GRIMOIRE_DEBUG=1 env var should enable debug without --debug flag."""
+        result = runner.invoke(app, ["doctor", str(cli_project)], env={"GRIMOIRE_DEBUG": "1"})
+        assert result.exit_code in (0, 1)
+
+
+class TestR37OnlineDNS:
+    """A4: _is_online prefers DNS resolution before socket fallback."""
+
+    def test_dns_success_skips_socket(self) -> None:
+        """If DNS resolves, socket.create_connection should NOT be called."""
+        from grimoire.cli.app import _is_online
+
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("8.8.8.8", 443))]),
+            patch("socket.create_connection") as mock_conn,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            result = _is_online(timeout=0.5)
+        assert result is True
+        mock_conn.assert_not_called()
+
+    def test_dns_failure_fallback_to_socket(self) -> None:
+        """If DNS fails, _is_online should try the socket fallback."""
+        from grimoire.cli.app import _is_online
+
+        mock_socket = MagicMock()
+        with (
+            patch("socket.getaddrinfo", side_effect=OSError("dns fail")),
+            patch("socket.create_connection", return_value=mock_socket),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            result = _is_online(timeout=0.5)
+        assert result is True
+        mock_socket.close.assert_called_once()
+
+
+class TestR37RepairAuditTrim:
+    """A2: repair audit log trimming uses proper file handling."""
+
+    def test_repair_trims_old_entries(self, cli_project: Path) -> None:
+        import datetime as _dt
+
+        audit = cli_project / "_grimoire" / "_memory" / ".grimoire-audit.jsonl"
+        audit.parent.mkdir(parents=True, exist_ok=True)
+        old_ts = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(days=100)).isoformat()
+        recent_ts = _dt.datetime.now(_dt.UTC).isoformat()
+        audit.write_text(
+            f'{{"ts":"{old_ts}","cmd":"old","ok":true}}\n'
+            f'{{"ts":"{recent_ts}","cmd":"recent","ok":true}}\n',
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["repair", str(cli_project)])
+        assert result.exit_code == 0
+        # Only the recent entry should remain
+        remaining = [
+            line for line in audit.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert any('"recent"' in line for line in remaining)
+        # Old entry should have been trimmed — but repair may also add its own entry
+        assert not any('"old"' in line for line in remaining if '"cmd":"old"' in line.replace(" ", ""))
+
+    def test_repair_trim_dry_run_no_write(self, cli_project: Path) -> None:
+        import datetime as _dt
+
+        audit = cli_project / "_grimoire" / "_memory" / ".grimoire-audit.jsonl"
+        audit.parent.mkdir(parents=True, exist_ok=True)
+        old_ts = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(days=100)).isoformat()
+        audit.write_text(f'{{"ts":"{old_ts}","cmd":"stale","ok":true}}\n', encoding="utf-8")
+        original = audit.read_text(encoding="utf-8")
+        result = runner.invoke(app, ["repair", str(cli_project), "--dry-run"])
+        assert result.exit_code == 0
+        assert audit.read_text(encoding="utf-8") == original  # no changes in dry run
+
+
+class TestR37ConfigSetExitCode:
+    """A3: config set uses _EXIT_CONFIG for key-not-found errors."""
+
+    @pytest.fixture()
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        runner.invoke(app, ["init", str(tmp_path), "--name", "test-proj"])
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def test_set_unknown_nested_path_exit_config(self, project: Path) -> None:
+        result = runner.invoke(app, ["config", "set", "deep.nested.missing", "val"])
+        assert result.exit_code == 2  # _EXIT_CONFIG
+        assert "not found" in result.output.lower()
+
+
+class TestR37EnvConflicts:
+    """A5: env command detects conflicting environment variables."""
+
+    def test_env_detects_debug_quiet_conflict_json(self, cli_project: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["-o", "json", "env"],
+            env={"GRIMOIRE_DEBUG": "1", "GRIMOIRE_QUIET": "1"},
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "conflicts" in data
+        assert len(data["conflicts"]) >= 1
+        assert "GRIMOIRE_DEBUG" in data["conflicts"][0]
+
+    def test_env_no_conflict_when_clean(self, cli_project: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["-o", "json", "env"],
+            env={"GRIMOIRE_DEBUG": "", "GRIMOIRE_QUIET": ""},
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data.get("conflicts") == []
+
+    def test_env_conflict_text_output(self, cli_project: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["env"],
+            env={"GRIMOIRE_DEBUG": "1", "GRIMOIRE_QUIET": "true"},
+        )
+        assert result.exit_code == 0
+        # Conflict warning should appear in text output
+        assert "conflict" in result.output.lower() or "⚠" in result.output

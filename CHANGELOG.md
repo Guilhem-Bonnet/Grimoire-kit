@@ -9,6 +9,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **CLI: A1 — `--debug` / `-D` flag global** — Expose GRIMOIRE_DEBUG en flag CLI (à la ruff/uv). Fonctionne aussi via `GRIMOIRE_DEBUG=1` env var. Active les tracebacks complets via Rich. Message d'erreur mis à jour : « Use --debug or set GRIMOIRE_DEBUG=1 » (Round 37)
+- **CLI: A5 — détection env vars conflictuelles** — La commande `env` détecte et signale les combinaisons incohérentes (ex: GRIMOIRE_DEBUG + GRIMOIRE_QUIET). Affiché en texte et JSON (champ `conflicts`) (Round 37)
+- **Tests: +12** — R37 : DebugFlag (4) + OnlineDNS (2) + RepairAuditTrim (2) + ConfigSetExitCode (1) + EnvConflicts (3) → 373 tests CLI (Round 37)
+
+### Corrigé
+
+- **CLI: A2 — `repair` audit trim race condition** — Même pattern que R36-F2 : `splitlines()` + `write_text()` remplacés par lecture ligne par ligne + `writelines()` propre (Round 37)
+- **CLI: A3 — `config set` exit codes sémantiques** — `config set` utilisait `Exit(1)` pour key-not-found alors que `_resolve_config_key` utilise `_EXIT_CONFIG=2`. Cohérence rétablie (Round 37)
+- **CLI: A4 — `_is_online` DNS-based** — Remplace le socket brut vers 1.1.1.1:53 par une résolution DNS (`getaddrinfo`) en premier, avec fallback socket. Fonctionne derrière proxy/firewall corporate (Round 37)
+
+### Précédent (Round 36)
+
+#### Ajouté
+
 - **CLI: E6 — exit codes sémantiques** — Constantes `_EXIT_OK=0`, `_EXIT_USER=1`, `_EXIT_CONFIG=2`. Appliquées à `_resolve_config_key` (key not found) et `GrimoireConfigError` dans status. Prêtes pour migration progressive (Round 36)
 - **Tests: +13** — R36 : ExitCodeConstants (3) + LogOperationTruncate (1) + MergeCommand (5) + PluginsList (4) → 361 tests CLI (Round 36)
 - **CLI: I2 — `history --clear`** — Nouveau flag `--clear` pour purger l'audit log avec confirmation (ou `--yes` pour skip). Supporte JSON output (Round 35)
