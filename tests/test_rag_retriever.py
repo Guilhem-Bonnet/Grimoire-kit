@@ -236,7 +236,11 @@ class TestDataclasses(unittest.TestCase):
 class TestReranker(unittest.TestCase):
     def setUp(self):
         self.mod = _import_mod()
+        self.tmpdir = Path(tempfile.mkdtemp())
         self.reranker = self.mod.Reranker()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_chunk(self, **kwargs):
         defaults = {
@@ -307,6 +311,49 @@ class TestReranker(unittest.TestCase):
     def test_empty_chunks_list(self):
         result = self.reranker.rerank([], "query", "agent")
         self.assertEqual(result, [])
+
+    def test_stigmergy_alert_boost(self):
+        board_dir = self.tmpdir / "_grimoire-output"
+        board_dir.mkdir(parents=True, exist_ok=True)
+        (board_dir / "pheromone-board.json").write_text(
+            json.dumps({
+                "pheromones": [
+                    {
+                        "pheromone_type": "ALERT",
+                        "location": "src/auth.py",
+                        "intensity": 1.0,
+                        "resolved": False,
+                    }
+                ]
+            }),
+            encoding="utf-8",
+        )
+        reranker = self.mod.Reranker(project_root=self.tmpdir)
+        chunks = [self._make_chunk(source_file="src/auth.py", score=0.5)]
+        reranker.rerank(chunks, "auth", "")
+        self.assertGreaterEqual(chunks[0].rerank_score, 0.16)
+
+    def test_stigmergy_boost_changes_order(self):
+        board_dir = self.tmpdir / "_grimoire-output"
+        board_dir.mkdir(parents=True, exist_ok=True)
+        (board_dir / "pheromone-board.json").write_text(
+            json.dumps({
+                "pheromones": [
+                    {
+                        "pheromone_type": "NEED",
+                        "location": "hot-zone.py",
+                        "intensity": 1.0,
+                        "resolved": False,
+                    }
+                ]
+            }),
+            encoding="utf-8",
+        )
+        reranker = self.mod.Reranker(project_root=self.tmpdir)
+        cold = self._make_chunk(source_file="cold-zone.py", score=0.64)
+        hot = self._make_chunk(source_file="hot-zone.py", score=0.55)
+        chunks = reranker.rerank([cold, hot], "test", "")
+        self.assertEqual(chunks[0].source_file, "hot-zone.py")
 
 
 # ── File-Based Fallback ──────────────────────────────────────────────────────

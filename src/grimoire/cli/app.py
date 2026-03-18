@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_memory import memory_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
@@ -37,6 +38,7 @@ _ALIASES: dict[str, str] = {
     "c": "config",
     "r": "registry",
     "m": "memory",
+    "dbg": "debugger",
     "st": "status",
     "ck": "check",
 }
@@ -94,7 +96,7 @@ app = typer.Typer(
         "\n"
         "[dim]Aliases:[/dim]  "
         "[cyan]i[/cyan]=init  [cyan]d[/cyan]=doctor  [cyan]s[/cyan]=status  "
-        "[cyan]v[/cyan]=validate  [cyan]l[/cyan]=lint  [cyan]m[/cyan]=memory  "
+        "[cyan]v[/cyan]=validate  [cyan]l[/cyan]=lint  [cyan]m[/cyan]=memory  [cyan]dbg[/cyan]=debugger  "
         "[cyan]ck[/cyan]=check\n"
         "\n"
         "[dim]For more help:[/dim]\n"
@@ -863,6 +865,12 @@ def up(
 # ── grimoire memory ───────────────────────────────────────────────────────────────
 
 app.add_typer(memory_app, name="memory", rich_help_panel="Data")
+
+
+# ── grimoire debugger ─────────────────────────────────────────────────────────────
+
+app.add_typer(debugger_app, name="debugger", rich_help_panel="Data")
+app.add_typer(debugger_app, name="dbg", hidden=True)
 
 
 # ── grimoire registry ─────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-SESSION_LIFECYCLE_VERSION = "1.1.0"
+SESSION_LIFECYCLE_VERSION = "1.1.1"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ LIFECYCLE_DIR = "_grimoire-output/.session-lifecycle"
 STATE_FILE = "current-session.json"
 SESSION_CHAIN_FILE = "_grimoire/_memory/session-chain.jsonl"
 SESSION_CHAIN_MAX_ENTRIES = 50  # Keep last N summaries for context injection
+MEMORY_DIR_CANDIDATES = ("_grimoire/_memory", "_memory")
 
 # ── Data Structures ──────────────────────────────────────────────────────────
 
@@ -89,8 +90,18 @@ def _load_module(name: str, path: Path):
     if not spec or not spec.loader:
         return None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[safe_name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def _find_memory_dir(project_root: Path) -> Path | None:
+    """Retourne le dossier mémoire existant, en privilégiant _grimoire/_memory."""
+    for relative in MEMORY_DIR_CANDIDATES:
+        candidate = project_root / relative
+        if candidate.exists():
+            return candidate
+    return None
 
 
 # ── Pre-Session Hooks ────────────────────────────────────────────────────────
@@ -124,16 +135,16 @@ def _hook_memory_integrity(project_root: Path) -> HookResult:
     result = HookResult(name="memory-integrity")
     start = time.monotonic()
 
-    memory_dir = project_root / "_memory"
-    if not memory_dir.exists():
+    memory_dir = _find_memory_dir(project_root)
+    if memory_dir is None:
         result.status = "skipped"
-        result.message = "Dossier _memory/ absent — probablement un nouveau projet"
+        result.message = "Dossier mémoire absent (_grimoire/_memory ou _memory) — probablement un nouveau projet"
         result.duration_seconds = round(time.monotonic() - start, 3)
         return result
 
     issues = []
     # Check critical files
-    for critical in ["memories.json", "shared-context.md"]:
+    for critical in ["memories.json", "grimoire.json", "shared-context.md"]:
         f = memory_dir / critical
         if f.exists():
             try:
@@ -165,11 +176,15 @@ def _hook_dream_quick(project_root: Path) -> HookResult:
     dream_path = project_root / "framework" / "tools" / "dream.py"
     try:
         mod = _load_module("dream", dream_path)
-        if mod and hasattr(mod, "DreamEngine"):
-            engine = mod.DreamEngine(project_root)
-            dream_result = engine.dream(quick=True)
+        if mod and hasattr(mod, "dream_quick"):
+            dream_result = mod.dream_quick(project_root)
+            insights = len(dream_result) if isinstance(dream_result, list) else 0
             result.status = "completed"
-            insights = dream_result.get("insights_count", 0) if isinstance(dream_result, dict) else 0
+            result.message = f"Dream quick terminé — {insights} insights"
+        elif mod and hasattr(mod, "dream"):
+            dream_result = mod.dream(project_root, quick=True)
+            result.status = "completed"
+            insights = len(dream_result) if isinstance(dream_result, list) else 0
             result.message = f"Dream quick terminé — {insights} insights"
         else:
             result.status = "skipped"
@@ -193,7 +208,7 @@ def _hook_stigmergy_evaporate(project_root: Path) -> HookResult:
         if mod and hasattr(mod, "load_board") and hasattr(mod, "evaporate"):
             board = mod.load_board(project_root)
             board, evaporated = mod.evaporate(board)
-            mod.save_board(board, project_root)
+            mod.save_board(project_root, board)
             result.status = "completed"
             result.message = f"Évaporation terminée — {evaporated} signaux nettoyés"
         else:
@@ -216,9 +231,17 @@ def _hook_session_save(project_root: Path) -> HookResult:
     try:
         mod = _load_module("session_save", save_path)
         if mod and hasattr(mod, "save_session"):
-            save_result = mod.save_session(project_root=project_root)
+            mod.save_session(
+                agent="mnemo",
+                work=["Lifecycle post-session executed"],
+                files=[str(project_root / SESSION_CHAIN_FILE)],
+                state="Session hooks exécutés via session-lifecycle.",
+                next_step="Inspecter les artefacts générés par le lifecycle.",
+                handoffs=[],
+                duration="<1s",
+            )
             result.status = "completed"
-            result.message = f"Session sauvegardée: {save_result.get('file', 'OK') if isinstance(save_result, dict) else 'OK'}"
+            result.message = "Session sauvegardée"
         else:
             result.status = "skipped"
             result.message = "Module session-save introuvable ou API incompatible"

@@ -59,7 +59,7 @@ CONTEXT_RULES: list[dict] = [
     {
         "id": "CTX-004",
         "pattern": r"(?:debug|erreur|error|crash|fix|bug|broken)",
-        "tools": ["self-healing.py", "early-warning.py", "failure-museum.py"],
+        "tools": ["agent-debugger.py", "self-healing.py", "early-warning.py", "failure-museum.py"],
         "reason": "Contexte debugging — outils de diagnostic",
     },
     {
@@ -152,9 +152,21 @@ WORKFLOWS: list[dict] = [
         "name": "🔧 Auto-réparation",
         "description": "Détecter et réparer les problèmes",
         "steps": [
+            "agent-debugger.py report",
             "self-healing.py status",
             "self-healing.py diagnose --error '<msg>'",
             "self-healing.py heal --error '<msg>'",
+        ],
+    },
+    {
+        "name": "🧪 Reality Check",
+        "description": "Mesurer l'écart entre promesse agentique et preuves runtime",
+        "steps": [
+            "agent-debugger.py status",
+            "agent-debugger.py claims",
+            "agent-debugger.py vector",
+            "agent-debugger.py ants",
+            "agent-debugger.py generate",
         ],
     },
 ]

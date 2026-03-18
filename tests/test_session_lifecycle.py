@@ -32,6 +32,9 @@ class TestConstants(unittest.TestCase):
     def test_lifecycle_dir(self):
         self.assertIn("session-lifecycle", sl.LIFECYCLE_DIR)
 
+    def test_memory_dir_candidates(self):
+        self.assertIn("_grimoire/_memory", sl.MEMORY_DIR_CANDIDATES)
+
 
 class TestHookResult(unittest.TestCase):
     def test_defaults(self):
@@ -83,6 +86,16 @@ class TestPreSession(unittest.TestCase):
             self.assertEqual(integrity_hook.status, "completed")
             self.assertIn("OK", integrity_hook.message)
 
+    def test_pre_session_with_grimoire_memory_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mem_dir = Path(tmp) / "_grimoire" / "_memory"
+            mem_dir.mkdir(parents=True)
+            (mem_dir / "shared-context.md").write_text("# Test\n", encoding="utf-8")
+            result = sl.run_pre_session(Path(tmp))
+            integrity_hook = result.hooks[1]
+            self.assertEqual(integrity_hook.status, "completed")
+            self.assertIn("OK", integrity_hook.message)
+
     def test_pre_session_corrupt_json(self):
         """Pre-session avec memories.json corrompu."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -105,6 +118,54 @@ class TestPostSession(unittest.TestCase):
             self.assertEqual(result.hooks[1].name, "stigmergy-evaporate")
             self.assertEqual(result.hooks[2].name, "session-save")
             self.assertEqual(result.hooks[3].name, "session-chain")
+
+    def test_stigmergy_hook_writes_board_with_correct_argument_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            tools_dir = project_root / "framework" / "tools"
+            tools_dir.mkdir(parents=True)
+            (tools_dir / "stigmergy.py").write_text(
+                "def load_board(project_root):\n"
+                "    return {'ok': True}\n\n"
+                "def evaporate(board):\n"
+                "    return board, 0\n\n"
+                "def save_board(project_root, board):\n"
+                "    (project_root / '_grimoire-output').mkdir(parents=True, exist_ok=True)\n"
+                "    (project_root / '_grimoire-output' / 'board-test.txt').write_text(str(board), encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            hook = sl._hook_stigmergy_evaporate(project_root)
+            self.assertEqual(hook.status, "completed")
+            self.assertTrue((project_root / "_grimoire-output" / "board-test.txt").exists())
+
+    def test_dream_hook_supports_function_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            tools_dir = project_root / "framework" / "tools"
+            tools_dir.mkdir(parents=True)
+            (tools_dir / "dream.py").write_text(
+                "def dream_quick(project_root):\n"
+                "    return ['a', 'b', 'c']\n",
+                encoding="utf-8",
+            )
+            hook = sl._hook_dream_quick(project_root)
+            self.assertEqual(hook.status, "completed")
+            self.assertIn("3 insights", hook.message)
+
+    def test_session_save_hook_supports_current_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            memory_dir = project_root / "framework" / "memory"
+            memory_dir.mkdir(parents=True)
+            (memory_dir / "session-save.py").write_text(
+                "def save_session(agent, work=None, files=None, state='', next_step='', handoffs=None, duration='—'):\n"
+                "    assert agent == 'mnemo'\n"
+                "    return None\n",
+                encoding="utf-8",
+            )
+            hook = sl._hook_session_save(project_root)
+            self.assertEqual(hook.status, "completed")
+            self.assertIn("sauvegardée", hook.message)
 
 
 class TestStatus(unittest.TestCase):

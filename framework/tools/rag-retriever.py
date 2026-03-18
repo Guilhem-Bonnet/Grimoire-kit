@@ -70,8 +70,23 @@ DEFAULT_RERANK_BOOST = {
     "heading_match": 0.10,     # Boost si heading contient un keyword de la query
     "decision_boost": 0.08,    # Boost si decisions-log
     "code_penalty": -0.05,     # Léger penalty pour code chunks (souvent trop verbeux)
+    "stigmergy_alert": 0.16,   # Boost si une zone ALERT correspond au chunk
+    "stigmergy_need": 0.12,    # Boost si une zone NEED correspond au chunk
+    "stigmergy_progress": 0.06,
+    "stigmergy_complete": 0.03,
+    "stigmergy_opportunity": 0.05,
+    "stigmergy_block": 0.14,
 }
 CHARS_PER_TOKEN = 4
+PHEROMONE_FILE = "_grimoire-output/pheromone-board.json"
+_PHEROMONE_TYPE_TO_BOOST = {
+    "ALERT": "stigmergy_alert",
+    "NEED": "stigmergy_need",
+    "PROGRESS": "stigmergy_progress",
+    "COMPLETE": "stigmergy_complete",
+    "OPPORTUNITY": "stigmergy_opportunity",
+    "BLOCK": "stigmergy_block",
+}
 
 # Collections Qdrant standard (sync avec rag-indexer.py)
 ALL_COLLECTIONS = ["agents", "memory", "docs", "code"]
@@ -163,8 +178,45 @@ class Reranker:
     Pas de ML, juste des heuristiques smart.
     """
 
-    def __init__(self, boosts: dict[str, float] | None = None):
+    def __init__(self, boosts: dict[str, float] | None = None, project_root: Path | None = None):
         self.boosts = boosts or DEFAULT_RERANK_BOOST
+        self.project_root = project_root
+        self._pheromones = self._load_active_pheromones(project_root)
+
+    @staticmethod
+    def _load_active_pheromones(project_root: Path | None) -> list[dict]:
+        if project_root is None:
+            return []
+        board_path = project_root / PHEROMONE_FILE
+        if not board_path.exists():
+            return []
+        try:
+            data = json.loads(board_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        pheromones = data.get("pheromones", [])
+        if not isinstance(pheromones, list):
+            return []
+        return [item for item in pheromones if isinstance(item, dict) and not item.get("resolved", False)]
+
+    @staticmethod
+    def _matches_pheromone(chunk: RetrievedChunk, pheromone: dict) -> bool:
+        location = str(pheromone.get("location", "")).strip().lower()
+        if not location:
+            return False
+        haystacks = [chunk.source_file.lower(), chunk.heading.lower(), chunk.text[:200].lower()]
+        return any(location in haystack or haystack in location for haystack in haystacks if haystack)
+
+    def _stigmergy_boost(self, chunk: RetrievedChunk) -> float:
+        boost = 0.0
+        for pheromone in self._pheromones:
+            if not self._matches_pheromone(chunk, pheromone):
+                continue
+            intensity = float(pheromone.get("intensity", 0.7) or 0.7)
+            key = _PHEROMONE_TYPE_TO_BOOST.get(str(pheromone.get("pheromone_type", "")).upper())
+            if key:
+                boost += self.boosts.get(key, 0.0) * max(0.0, min(intensity, 1.0))
+        return boost
 
     def rerank(
         self,
@@ -201,6 +253,10 @@ class Reranker:
             if chunk.collection == "code":
                 boost += self.boosts.get("code_penalty", 0.0)
 
+            # Stigmergy boost : si une phéromone active correspond au chunk,
+            # le retrieval en tient compte pour prioriser les zones chaudes.
+            boost += self._stigmergy_boost(chunk)
+
             chunk.rerank_score = round(boost, 4)
 
         # Re-sort par final_score
@@ -235,7 +291,7 @@ class RAGRetriever:
         self.max_chunks = max_chunks
         self.min_score = min_score
         self.max_context_tokens = max_context_tokens
-        self._reranker = Reranker()
+        self._reranker = Reranker(project_root=self.project_root)
 
         # Init Qdrant + embedding (lazy — only on first use)
         self._qdrant_url = qdrant_url

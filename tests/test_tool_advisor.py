@@ -78,7 +78,7 @@ class TestConstants:
             assert len(rule["tools"]) > 0
 
     def test_workflows_structure(self):
-        assert len(ta.WORKFLOWS) >= 5
+        assert len(ta.WORKFLOWS) >= 6
         for wf in ta.WORKFLOWS:
             assert "name" in wf
             assert "description" in wf
@@ -151,6 +151,7 @@ class TestContextSuggestions:
     def test_debug_context(self):
         suggestions = ta.suggest_for_context("j'ai une erreur dans le workflow")
         tools = [s.tool for s in suggestions]
+        assert "agent-debugger.py" in tools
         assert "self-healing.py" in tools
 
     def test_no_match(self):
