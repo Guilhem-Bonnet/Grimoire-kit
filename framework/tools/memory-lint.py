@@ -128,7 +128,7 @@ def _parse_markdown_entries(path: Path) -> list[tuple[str, str]]:
             continue
         match = _DATE_PATTERN.search(line)
         entry_date = match.group(1) if match else ""
-        if line.startswith("- ") or line.startswith("* "):
+        if line.startswith(("- ", "* ")):
             entries.append((entry_date, line[2:].strip()))
     return entries
 

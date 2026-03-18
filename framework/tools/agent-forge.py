@@ -288,7 +288,7 @@ def extract_agent_name(text: str, domain_key: str, domain_profile: dict) -> tupl
                         for tw in tag_words)
                     and sw not in stop_words and len(tag_words) < 3):
                 tag_words.append(sw)
-        subject_words = tag_words if tag_words else subject_words
+        subject_words = tag_words or subject_words
 
     # Dédupliquer par racine (ex: "migration" et "migrations")
     deduped: list[str] = []

@@ -2328,10 +2328,10 @@ def _format_error(exc: GrimoireError) -> None:
 def cli() -> None:
     """Typer entry point for ``grimoire`` console script."""
     _install_signal_handlers()
+    _phase_timings.clear()  # clear before any early-exit path
     _expand_aliases()
     _warn_deprecated()
     _suggest_command()
-    _phase_timings.clear()
     _start = time.perf_counter()
     _show_time = "--time" in sys.argv
     _show_profile = "--profile" in sys.argv

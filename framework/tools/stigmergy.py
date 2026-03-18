@@ -326,11 +326,28 @@ def deposit_pheromone(
 ) -> Pheromone | None:
     """Dépose une phéromone atomiquement : load → emit → save.
 
-    Fonction haut niveau pour les outils qui n'ont pas de board ouvert.
+    Si un signal actif identique (même ptype + location + text) existe déjà,
+    amplifie le signal existant au lieu d'en créer un doublon.
     Retourne None silencieusement si une erreur survient.
     """
     try:
         board = load_board(Path(project_root))
+        # Déduplication : chercher un signal actif identique
+        existing = next(
+            (p for p in board.pheromones
+             if not p.resolved
+             and p.pheromone_type == ptype
+             and p.location == location
+             and p.text == text[:200]),
+            None,
+        )
+        if existing:
+            existing.intensity = min(existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+            existing.reinforcements += 1
+            if emitter not in existing.reinforced_by:
+                existing.reinforced_by.append(emitter)
+            save_board(Path(project_root), board)
+            return existing
         p = emit_pheromone(board, ptype, location, text, emitter,
                            tags=tags, intensity=intensity)
         save_board(Path(project_root), board)

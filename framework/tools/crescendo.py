@@ -323,7 +323,7 @@ def cmd_guide(args: argparse.Namespace) -> int:
 
 
 def cmd_adapt(args: argparse.Namespace) -> int:
-    level = args.level if args.level else assess_project(Path(args.project_root).resolve()).level
+    level = args.level or assess_project(Path(args.project_root).resolve()).level
     items = generate_guidance(level)
     if args.json:
         print(json.dumps({"level": level, "guidance": [

@@ -311,7 +311,7 @@ def detect_implicit_assumptions(project_root: Path) -> list[DarkMatterItem]:
         try:
             content = fpath.read_text(encoding="utf-8")
             for pattern, desc in assumption_patterns:
-                for match in re.finditer(pattern, content, re.I):
+                for match in re.finditer(pattern, content, re.IGNORECASE):
                     line_num = content[:match.start()].count("\n") + 1
                     ctx = content[max(0, match.start()-20):match.end()+40].strip()
                     items.append(DarkMatterItem(

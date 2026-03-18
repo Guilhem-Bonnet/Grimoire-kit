@@ -206,7 +206,7 @@ def export_learnings(project_root: Path,
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                if line.startswith("- ") or line.startswith("* "):
+                if line.startswith(("- ", "* ")):
                     date = _parse_date_from_line(line)
                     if since and date and date < since:
                         continue

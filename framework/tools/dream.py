@@ -231,7 +231,7 @@ def _parse_markdown_entries(path: Path, since: str | None = None) -> list[tuple[
         entry_date = match.group(1) if match else ""
         if since and entry_date and entry_date < since:
             continue
-        if line.startswith("- ") or line.startswith("* "):
+        if line.startswith(("- ", "* ")):
             entries.append((entry_date, line[2:].strip()))
 
     return entries

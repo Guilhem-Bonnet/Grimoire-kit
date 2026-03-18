@@ -106,7 +106,7 @@ def _count_entries(path: Path, since: str | None = None) -> list[tuple[str, str]
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("- ") or line.startswith("* ") or line.startswith("### ["):
+        if line.startswith(("- ", "* ", "### [")):
             match = date_pattern.search(line)
             entry_date = match.group(1) if match else ""
             if since and entry_date and entry_date < since:

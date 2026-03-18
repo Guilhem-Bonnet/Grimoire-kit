@@ -668,7 +668,7 @@ def build_router_from_config(project_root: Path) -> LLMRouter:
     )
 
     return LLMRouter(
-        models=models if models else None,  # None → use defaults
+        models=models or None,  # None → use defaults
         rules=rules,
         default_model=default,
         classifier=classifier,

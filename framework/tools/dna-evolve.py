@@ -235,7 +235,7 @@ def analyze_trace(
                         # Silent exception — add logging when investigating issues
                 if include:
                     filtered_lines.append(line)
-            lines = filtered_lines if filtered_lines else lines
+            lines = filtered_lines or lines
         except ValueError as _exc:
             _log.debug("ValueError suppressed: %s", _exc)
             # Silent exception — add logging when investigating issues

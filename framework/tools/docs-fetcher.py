@@ -449,8 +449,7 @@ class DocsIndex:
             f.write(f"# {result.source.name}\n\n")
             f.write(f"> Source: {result.source.url}\n")
             f.write(f"> Fetched: {result.source.fetched_at}\n\n")
-            for chunk in result.chunks:
-                f.write(f"{chunk.text}\n\n---\n\n")
+            f.writelines(f"{chunk.text}\n\n---\n\n" for chunk in result.chunks)
 
         # Sauvegarder les chunks en JSON pour le RAG
         json_path = self.cache_dir / f"{slug}.chunks.json"

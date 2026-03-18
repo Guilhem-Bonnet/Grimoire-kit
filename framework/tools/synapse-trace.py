@@ -383,7 +383,7 @@ def synapse_traced(tool_name: str, operation: str, agent: str = ""):
                     agent=agent or kwargs.get("agent", kwargs.get("agent_id", "")),
                     duration_ms=round(elapsed_ms, 1),
                     status=entry_status,
-                    details=entry_details if entry_details else {},
+                    details=entry_details or {},
                 ))
         return wrapper
     return decorator

@@ -526,7 +526,7 @@ def _collect_retro_failures(project_root: Path,
 
     current_entry = ""
     for line in text.splitlines():
-        if line.startswith("## ") or line.startswith("### "):
+        if line.startswith(("## ", "### ")):
             if current_entry and len(current_entry) > 15:
                 items.append(RetroItem(
                     category="problem",

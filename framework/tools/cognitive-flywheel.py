@@ -452,7 +452,7 @@ def apply_gates(corrections: list[Correction], max_corrections: int) -> list[Cor
                 file_counts[c.target_file] = []
             file_counts[c.target_file].append(c)
 
-    for _file, cors in file_counts.items():
+    for cors in file_counts.values():
         if len(cors) >= 2:
             for c in cors:
                 c.status = "high-escalated"

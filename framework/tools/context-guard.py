@@ -372,7 +372,7 @@ def _count_comment_lines(content: str, ext: str) -> tuple[int, int]:
         elif ext == ".py":
             if stripped.startswith("#"):
                 comments += 1
-            elif stripped.startswith('"""') or stripped.startswith("'''"):
+            elif stripped.startswith(('"""', "'''")):
                 in_block = not in_block
             elif in_block:
                 comments += 1
@@ -707,7 +707,7 @@ def load_available_models(project_root: Path) -> list[dict[str, str]] | None:
             pass  # on pourrait l'utiliser plus tard
     if current:
         models.append(current)
-    return models if models else None
+    return models or None
 
 
 def do_recommend_models(

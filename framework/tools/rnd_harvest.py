@@ -547,7 +547,7 @@ def harvest(project_root: Path, policy: Policy,
         "dna-drift": _harvest_from_project_scan,
     }
 
-    for _source_key, harvester in harvesters.items():
+    for harvester in harvesters.values():
         try:
             results = harvester(project_root)
             raw_ideas.extend(results)

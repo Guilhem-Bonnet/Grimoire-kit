@@ -364,7 +364,7 @@ def count_agent_learnings(project_root: Path) -> dict[str, int]:
         try:
             lines = f.read_text(encoding="utf-8").splitlines()
             count = sum(1 for ln in lines
-                        if ln.strip() and (ln.startswith("- ") or ln.startswith("* ")))
+                        if ln.strip() and (ln.startswith(("- ", "* "))))
             counts[agent] = count
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)

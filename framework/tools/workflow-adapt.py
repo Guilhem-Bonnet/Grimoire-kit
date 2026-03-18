@@ -108,8 +108,7 @@ def _find_trace_files(project_root: Path) -> list[Path]:
     # Aussi chercher dans _grimoire/_memory
     mem_dir = project_root / "_grimoire" / "_memory"
     if mem_dir.exists():
-        for f in mem_dir.rglob("*trace*"):
-            traces.append(f)
+        traces.extend(mem_dir.rglob("*trace*"))
 
     return sorted(traces)
 

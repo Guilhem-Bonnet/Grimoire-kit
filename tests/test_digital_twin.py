@@ -12,6 +12,7 @@ Fonctions testées :
   - build_parser()
 """
 
+import contextlib
 import importlib
 import importlib.util
 import shutil
@@ -20,7 +21,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-import contextlib
 
 KIT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(KIT_DIR / "framework" / "tools"))

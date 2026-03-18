@@ -267,7 +267,7 @@ def read_memory_stats(grimoire_dir: Path) -> dict:
         for item in learnings_dir.glob("agent-learnings*.md"):
             try:
                 content = item.read_text(encoding="utf-8", errors="replace")
-                lines = [ln for ln in content.splitlines() if ln.startswith("- ") or ln.startswith("* ")]
+                lines = [ln for ln in content.splitlines() if ln.startswith(("- ", "* "))]
                 stats[item.stem] = len(lines)
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)

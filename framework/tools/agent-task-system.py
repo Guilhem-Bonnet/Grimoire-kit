@@ -680,7 +680,7 @@ def mcp_ats_update_status(
     append_history(root, {"event": "status_change", "task_id": task_id, "new_status": new_status})
 
     task = find_task(graph, task_id)
-    return task if task else {"error": f"Task {task_id} not found after update"}
+    return task or {"error": f"Task {task_id} not found after update"}
 
 
 def mcp_ats_graph(project_root: str = ".") -> dict[str, Any]:

@@ -100,8 +100,7 @@ def _save_buffer(root: Path, agent: str, items: list[SensoryItem]) -> None:
     bp = _buffer_path(root, agent)
     bp.parent.mkdir(parents=True, exist_ok=True)
     with open(bp, "w", encoding="utf-8") as fobj:
-        for item in items:
-            fobj.write(json.dumps(asdict(item), default=str) + "\n")
+        fobj.writelines(json.dumps(asdict(item), default=str) + "\n" for item in items)
 
 
 def _compute_decay(item: SensoryItem, now: datetime | None = None) -> float:

@@ -167,13 +167,13 @@ def analyze_document(content: str) -> DocumentAnalysis:
     analysis.sections = section_lines
 
     # Extract key sentences (first sentence of each section + bold lines)
-    for _section, slines in section_lines.items():
+    for slines in section_lines.values():
         for sline in slines[:2]:
             if sline and not sline.startswith("|") and not sline.startswith("```"):
                 analysis.key_sentences.append(sline)
         # Bold or important lines
         for sline in slines:
-            if "**" in sline or sline.startswith("- [ ]") or sline.startswith("- [x]"):
+            if "**" in sline or sline.startswith(("- [ ]", "- [x]")):
                 analysis.key_sentences.append(sline)
 
     if lines:
@@ -216,8 +216,7 @@ def condense(content: str, mode: str) -> CondensedOutput:
         for header in analysis.headers:
             section_content = analysis.sections.get(header, [])
             output_lines.append(f"## {header}")
-            for line in section_content[:config.get("max_lines_per_section", 10)]:
-                output_lines.append(line)
+            output_lines.extend(section_content[:config.get("max_lines_per_section", 10)])
             output_lines.append("")
 
     elif mode in ("VERBOSE", "DIRECTORS"):
@@ -261,8 +260,7 @@ def transform_document(content: str, template_id: str) -> str:
         matched = False
         for header, section_content in analysis.sections.items():
             if any(kw.lower() in header.lower() for kw in section.split("/")):
-                for line in section_content[:template["max_lines_per_section"]]:
-                    lines.append(line)
+                lines.extend(section_content[:template["max_lines_per_section"]])
                 matched = True
                 break
         if not matched:

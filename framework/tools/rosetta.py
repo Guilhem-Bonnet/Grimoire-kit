@@ -131,7 +131,7 @@ def detect_domain(filepath: Path, content: str = "") -> str:
 
     for domain, patterns in DOMAIN_PATTERNS.items():
         for pattern in patterns:
-            if re.search(pattern, fname, re.I) or re.search(pattern, fpath, re.I):
+            if re.search(pattern, fname, re.IGNORECASE) or re.search(pattern, fpath, re.IGNORECASE):
                 return domain
 
     # Fallback par extension
@@ -174,7 +174,7 @@ def build_glossary(project_root: Path) -> Glossary:
 
     # Scanner les fichiers
     scanned = 0
-    for _glob_domain, globs in DOMAIN_GLOBS.items():
+    for globs in DOMAIN_GLOBS.values():
         for glob_pattern in globs:
             for fpath in project_root.glob(glob_pattern):
                 if not fpath.is_file() or fpath.stat().st_size > 500_000:

@@ -130,7 +130,7 @@ class Finding:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        return {k: v for k, v in d.items() if v or k in ("line",)}
+        return {k: v for k, v in d.items() if v or k == "line"}
 
 
 @dataclass

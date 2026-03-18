@@ -473,6 +473,8 @@ class TestEmbeddingProvider(unittest.TestCase):
             provider = self.mod.EmbeddingProvider(model="nomic-embed-text")
         except ImportError:
             self.skipTest("No embedding provider available")
+        except OSError as exc:
+            self.skipTest(f"Modèle nomic-embed-text non accessible (réseau/token requis): {exc}")
         self.assertEqual(provider.vector_size, 768)
 
     def test_no_provider_raises(self):

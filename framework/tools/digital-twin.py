@@ -140,7 +140,7 @@ def _classify_entity(path: Path, root: Path) -> str | None:
         return "config"
     if "/teams/" in rel and path.suffix in (".md", ".yaml"):
         return "team"
-    if path.suffix in (".md",) and "/docs/" in rel:
+    if path.suffix == ".md" and "/docs/" in rel:
         return "doc"
     return None
 

@@ -284,7 +284,7 @@ def attempt_heal(project_root: Path, diagnosis: Diagnosis) -> Diagnosis:
 
     if rule_id == "HE-001":  # Fichier manquant
         # Extraire le nom du fichier
-        file_match = re.search(r'(?:file|fichier)[:\s]+([^\s]+)', diagnosis.error, re.I)
+        file_match = re.search(r'(?:file|fichier)[:\s]+([^\s]+)', diagnosis.error, re.IGNORECASE)
         if file_match:
             missing_file = file_match.group(1)
             target = project_root / missing_file
@@ -317,7 +317,7 @@ def attempt_heal(project_root: Path, diagnosis: Diagnosis) -> Diagnosis:
                     diagnosis.heal_result = f"Fichier minimal créé : {missing_file}"
 
     elif rule_id == "HE-003":  # Permission
-        file_match = re.search(r'(?:file|script)[:\s]+([^\s]+)', diagnosis.error, re.I)
+        file_match = re.search(r'(?:file|script)[:\s]+([^\s]+)', diagnosis.error, re.IGNORECASE)
         if file_match:
             target = project_root / file_match.group(1)
             if target.exists():

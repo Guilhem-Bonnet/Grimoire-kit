@@ -273,7 +273,7 @@ class ContextSummarizer:
         # Items de liste (contiennent souvent l'info clé)
         for line in lines:
             stripped = line.strip()
-            if stripped.startswith("- ") or stripped.startswith("* "):
+            if stripped.startswith(("- ", "* ")):
                 summary_lines.append(stripped[:150])
 
         # Phrases avec mots-clés décisionnels

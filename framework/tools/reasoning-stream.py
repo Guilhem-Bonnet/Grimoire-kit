@@ -355,8 +355,7 @@ def compact_stream(project_root: Path,
     # Réécrire le stream avec seulement les entrées récentes
     stream_path = output_dir / STREAM_FILE
     with open(stream_path, "w", encoding="utf-8") as f:
-        for entry in keep_entries:
-            f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+        f.writelines(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n" for entry in keep_entries)
 
     return {
         "compacted": len(old_entries),
