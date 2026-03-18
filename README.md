@@ -358,7 +358,17 @@ grimoire-mcp                    # Démarrer le serveur MCP
 grimoire-mcp --transport sse    # Mode SSE pour IDE distants
 ```
 
-8 outils exposés : `init`, `doctor`, `status`, `harmony_check`, `preflight`, `memory_lint`, `context_route`, `stigmergy_sense`.
+10 outils exposés : `init`, `doctor`, `status`, `memory`, `debugger`, `harmony_check`, `preflight`, `memory_lint`, `context_route`, `stigmergy_sense`.
+
+Debug runtime minimal :
+
+```bash
+grimoire debugger status
+grimoire debugger claims
+grimoire debugger generate
+```
+
+La commande `generate` produit un tableau de bord HTML local dans `_grimoire-output/agent-debugger.html`.
 
 <br>
 
@@ -514,10 +524,11 @@ bash grimoire-init.sh --auto
 </details>
 
 <details>
-<summary><b><img src="docs/assets/icons/resilience.svg" width="18" height="18" alt=""> Résilience & Qualité</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/resilience.svg" width="18" height="18" alt=""> Résilience & Qualité</b> — 11 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
+| `agent-debugger.py` | Vérification reality-first des preuves runtime agentiques |
 | `self-healing.py` | Diagnostic et réparation automatique |
 | `immune-system.py` | Détection d'anomalies et auto-réparation |
 | `antifragile-score.py` | Score de résilience adaptative |
