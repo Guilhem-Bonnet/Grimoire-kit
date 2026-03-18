@@ -10,8 +10,10 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+from grimoire.cli.cmd_debugger import _load_debugger_module
 
 runner = CliRunner()
+KIT_DIR = Path(__file__).resolve().parents[3]
 
 
 @dataclass
@@ -65,6 +67,10 @@ def _patch_project_root(tmp_path: Path):
 
 
 class TestDebuggerCli:
+    def test_load_debugger_module_real(self) -> None:
+        mod = _load_debugger_module(KIT_DIR)
+        assert hasattr(mod, "build_snapshot")
+
     def test_status_text(self, tmp_path: Path) -> None:
         with _patch_debugger(), _patch_project_root(tmp_path):
             result = runner.invoke(app, ["debugger", "status"])
