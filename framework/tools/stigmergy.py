@@ -315,6 +315,30 @@ def resolve_pheromone(board: PheromoneBoard, pheromone_id: str,
     return None
 
 
+def deposit_pheromone(
+    project_root: Path | str,
+    ptype: str,
+    location: str,
+    text: str,
+    emitter: str,
+    tags: list | None = None,
+    intensity: float = DEFAULT_INTENSITY,
+) -> Pheromone | None:
+    """Dépose une phéromone atomiquement : load → emit → save.
+
+    Fonction haut niveau pour les outils qui n'ont pas de board ouvert.
+    Retourne None silencieusement si une erreur survient.
+    """
+    try:
+        board = load_board(Path(project_root))
+        p = emit_pheromone(board, ptype, location, text, emitter,
+                           tags=tags, intensity=intensity)
+        save_board(Path(project_root), board)
+        return p
+    except Exception:
+        return None
+
+
 def sense_pheromones(board: PheromoneBoard,
                      ptype: str | None = None,
                      location: str | None = None,
@@ -760,7 +784,7 @@ def main():
         max_reinforced = max(
             (p.reinforcements for p in board.pheromones), default=0)
         print("# 📊 Statistiques Stigmergy")
-        print("")
+        print()
         print(f"- Signaux actifs : **{len(active)}**")
         print(f"- Résolus : **{resolved}**")
         print(f"- Total émis : **{board.total_emitted}**")

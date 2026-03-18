@@ -445,6 +445,50 @@ def format_report(report: PreflightReport) -> str:
     return "\n".join(lines)
 
 
+# ── Stigmergy Integration ────────────────────────────────────────────────────
+
+def _load_stigmergy():
+    """Charge stigmergy.py avec cache sys.modules."""
+    import importlib.util as _ilu
+    _key = "_grimoire_stigmergy"
+    if _key in sys.modules:
+        return sys.modules[_key]
+    sg_path = Path(__file__).parent / "stigmergy.py"
+    if not sg_path.exists():
+        return None
+    spec = _ilu.spec_from_file_location(_key, sg_path)
+    if not spec or not spec.loader:
+        return None
+    sg = _ilu.module_from_spec(spec)
+    sys.modules[_key] = sg
+    spec.loader.exec_module(sg)
+    return sg
+
+
+def emit_blockers_to_stigmergy(project_root: Path, report: PreflightReport) -> int:
+    """Émet les blockers preflight comme phéromones ALERT."""
+    if not report.blockers:
+        return 0
+    try:
+        sg = _load_stigmergy()
+        if sg is None or not hasattr(sg, "deposit_pheromone"):
+            return 0
+        emitted = 0
+        for check in report.blockers:
+            sg.deposit_pheromone(
+                project_root,
+                ptype="ALERT",
+                location=f"preflight/{check.name}",
+                text=check.message[:200],
+                emitter="preflight-check",
+                tags=["blocker", check.name],
+            )
+            emitted += 1
+        return emitted
+    except Exception:
+        return 0
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -466,6 +510,7 @@ def main() -> int:
 
     project_root = Path(args.project_root).resolve()
     report = run_all_checks(project_root, agent=args.agent or "", story=args.story or "")
+    emit_blockers_to_stigmergy(project_root, report)
 
     if args.json:
         result = {

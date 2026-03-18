@@ -258,6 +258,61 @@ def suggest_for_context(context: str) -> list[ToolSuggestion]:
     return suggestions
 
 
+# ── Stigmergy Integration ────────────────────────────────────────────────────
+
+def _load_stigmergy():
+    """Charge stigmergy.py avec cache sys.modules."""
+    import importlib.util as _ilu
+    _key = "_grimoire_stigmergy"
+    if _key in sys.modules:
+        return sys.modules[_key]
+    sg_path = Path(__file__).parent / "stigmergy.py"
+    if not sg_path.exists():
+        return None
+    spec = _ilu.spec_from_file_location(_key, sg_path)
+    if not spec or not spec.loader:
+        return None
+    sg = _ilu.module_from_spec(spec)
+    sys.modules[_key] = sg
+    spec.loader.exec_module(sg)
+    return sg
+
+
+def emit_needs_to_stigmergy(
+    project_root: Path, suggestions: list, context: str
+) -> int:
+    """Émet les suggestions haute priorité comme phéromones NEED (max 3)."""
+    high = [s for s in suggestions if s.priority == "high"]
+    if not high:
+        return 0
+    try:
+        sg = _load_stigmergy()
+        if sg is None or not hasattr(sg, "deposit_pheromone"):
+            return 0
+        location = (context[:50].lower().replace(" ", "-").replace("'", "") or "tool-advisor")
+        emitted = 0
+        seen: set[str] = set()
+        for s in high[:3]:
+            if s.tool in seen:
+                continue
+            seen.add(s.tool)
+            sg.deposit_pheromone(
+                project_root,
+                ptype="NEED",
+                location=f"tool-advisor/{location}",
+                text=f"Outil requis : {s.tool} — {s.reason}",
+                emitter="tool-advisor",
+                tags=["tool", s.context_rule or "suggest"],
+                intensity=0.6,
+            )
+            emitted += 1
+        return emitted
+    except Exception:
+        return 0
+
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+
 def find_unused_tools(project_root: Path) -> list[str]:
     """Trouve les outils disponibles mais jamais utilisés."""
     available = _discover_tools(project_root)
@@ -291,6 +346,9 @@ def build_advice(project_root: Path, context: str = "") -> AdvisorReport:
             suggestions.append(ToolSuggestion(
                 tool=tool, reason=reason, priority="low",
             ))
+
+    if context and suggestions:
+        emit_needs_to_stigmergy(project_root, suggestions, context)
 
     return AdvisorReport(
         timestamp=timestamp,

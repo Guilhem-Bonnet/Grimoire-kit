@@ -85,7 +85,9 @@ def _load_module(name: str, path: Path):
     """Charge un module Python depuis un chemin fichier."""
     if not path.exists():
         return None
-    safe_name = name.replace("-", "_")
+    safe_name = f"_grimoire_{name.replace('-', '_')}"
+    if safe_name in sys.modules:
+        return sys.modules[safe_name]
     spec = importlib.util.spec_from_file_location(safe_name, path)
     if not spec or not spec.loader:
         return None
@@ -166,6 +168,34 @@ def _hook_memory_integrity(project_root: Path) -> HookResult:
 
 
 # ── Post-Session Hooks ───────────────────────────────────────────────────────
+
+
+def _hook_stigmergy_progress(project_root: Path) -> HookResult:
+    """Émet une phéromone PROGRESS au démarrage de la session."""
+    result = HookResult(name="stigmergy-progress")
+    start = time.monotonic()
+    stigmergy_path = project_root / "framework" / "tools" / "stigmergy.py"
+    try:
+        mod = _load_module("stigmergy", stigmergy_path)
+        if mod and hasattr(mod, "deposit_pheromone"):
+            mod.deposit_pheromone(
+                project_root,
+                ptype="PROGRESS",
+                location="session-lifecycle",
+                text="Nouvelle session Grimoire démarrée",
+                emitter="session-lifecycle",
+                tags=["session", "pre"],
+            )
+            result.status = "completed"
+            result.message = "Signal PROGRESS émis pour la session"
+        else:
+            result.status = "skipped"
+            result.message = "Module stigmergy non disponible"
+    except Exception as exc:
+        result.status = "failed"
+        result.message = f"Erreur: {exc}"
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
 
 
 def _hook_dream_quick(project_root: Path) -> HookResult:
@@ -326,6 +356,34 @@ def load_session_chain(project_root: Path, limit: int = 5) -> list[dict]:
         return []
 
 
+def _hook_stigmergy_complete(project_root: Path) -> HookResult:
+    """Émet une phéromone COMPLETE à la fin de la session."""
+    result = HookResult(name="stigmergy-complete")
+    start = time.monotonic()
+    stigmergy_path = project_root / "framework" / "tools" / "stigmergy.py"
+    try:
+        mod = _load_module("stigmergy", stigmergy_path)
+        if mod and hasattr(mod, "deposit_pheromone"):
+            mod.deposit_pheromone(
+                project_root,
+                ptype="COMPLETE",
+                location="session-lifecycle",
+                text="Session Grimoire terminée",
+                emitter="session-lifecycle",
+                tags=["session", "post"],
+            )
+            result.status = "completed"
+            result.message = "Signal COMPLETE émis pour la session"
+        else:
+            result.status = "skipped"
+            result.message = "Module stigmergy non disponible"
+    except Exception as exc:
+        result.status = "failed"
+        result.message = f"Erreur: {exc}"
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
+
+
 # ── Lifecycle Orchestration ──────────────────────────────────────────────────
 
 
@@ -340,6 +398,7 @@ def run_pre_session(project_root: Path) -> LifecycleResult:
     hooks = [
         _hook_health_check,
         _hook_memory_integrity,
+        _hook_stigmergy_progress,
     ]
 
     for hook_fn in hooks:
@@ -376,6 +435,10 @@ def run_post_session(project_root: Path) -> LifecycleResult:
     # Session chain — append structured summary for cross-session memory
     chain_result = _hook_session_chain(project_root, result)
     result.hooks.append(chain_result)
+
+    # COMPLETE signal — emitted after chain so the session is persisted first
+    complete_result = _hook_stigmergy_complete(project_root)
+    result.hooks.append(complete_result)
 
     failed = [h for h in result.hooks if h.status == "failed"]
     result.status = "completed" if not failed else "partial"
