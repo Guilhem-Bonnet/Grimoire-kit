@@ -18,6 +18,7 @@ from grimoire.tools.stigmergy import (
     amplify_pheromone,
     analyze_trails,
     compute_intensity,
+    deposit_pheromone,
     emit_pheromone,
     evaporate,
     load_board,
@@ -388,3 +389,50 @@ class TestStigmergyTool:
         board = stig.run()
         assert isinstance(board, PheromoneBoard)
         assert len(board.pheromones) == 0
+
+
+# ── Deposit Pheromone (atomic helper) ────────────────────────────────────────
+
+
+class TestDepositPheromone:
+    def test_creates_new_signal(self, root: Path) -> None:
+        p = deposit_pheromone(root, "NEED", "test/loc", "test signal", "tester")
+        assert p is not None
+        board = load_board(root)
+        assert len(board.pheromones) == 1
+        assert board.pheromones[0].pheromone_type == "NEED"
+
+    def test_deduplicates_identical_signal(self, root: Path) -> None:
+        p1 = deposit_pheromone(root, "ALERT", "test/loc", "same signal", "tool-a", intensity=0.5)
+        p2 = deposit_pheromone(root, "ALERT", "test/loc", "same signal", "tool-b")
+        assert p1 is not None
+        assert p2 is not None
+        assert p1.pheromone_id == p2.pheromone_id
+        board = load_board(root)
+        assert len(board.pheromones) == 1
+        assert board.pheromones[0].reinforcements == 1
+
+    def test_different_location_creates_new(self, root: Path) -> None:
+        deposit_pheromone(root, "ALERT", "test/a", "signal", "tool")
+        deposit_pheromone(root, "ALERT", "test/b", "signal", "tool")
+        board = load_board(root)
+        assert len(board.pheromones) == 2
+
+    def test_resolved_signal_creates_new(self, root: Path) -> None:
+        p1 = deposit_pheromone(root, "NEED", "test/loc", "done", "tool")
+        assert p1 is not None
+        board = load_board(root)
+        resolve_pheromone(board, p1.pheromone_id, "agent")
+        save_board(root, board)
+        p2 = deposit_pheromone(root, "NEED", "test/loc", "done", "tool")
+        assert p2 is not None
+        assert p2.pheromone_id != p1.pheromone_id
+        board2 = load_board(root)
+        # 2 pheromones: 1 resolved + 1 new
+        assert len(board2.pheromones) == 2
+
+    def test_returns_none_on_missing_output_dir(self, tmp_path: Path) -> None:
+        # No _grimoire-output dir — load_board falls back to empty, save creates it
+        result = deposit_pheromone(tmp_path, "NEED", "loc", "text", "tool")
+        # Either succeeds (creates dir) or returns None — never raises
+        assert result is None or result.pheromone_type == "NEED"

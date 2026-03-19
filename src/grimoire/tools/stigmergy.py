@@ -222,6 +222,45 @@ def amplify_pheromone(board: PheromoneBoard, pheromone_id: str,
     return None
 
 
+def deposit_pheromone(
+    project_root: Path,
+    ptype: str,
+    location: str,
+    text: str,
+    emitter: str,
+    tags: list[str] | None = None,
+    intensity: float = DEFAULT_INTENSITY,
+) -> Pheromone | None:
+    """Atomic load → deduplicate/amplify → emit → save.
+
+    If an active signal with the same ptype + location + text already exists,
+    amplifies it instead of creating a duplicate. Returns None on error.
+    """
+    try:
+        board = load_board(project_root)
+        existing = next(
+            (p for p in board.pheromones
+             if not p.resolved
+             and p.pheromone_type == ptype
+             and p.location == location
+             and p.text == text[:200]),
+            None,
+        )
+        if existing:
+            existing.intensity = min(existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+            existing.reinforcements += 1
+            if emitter not in existing.reinforced_by:
+                existing.reinforced_by.append(emitter)
+            save_board(project_root, board)
+            return existing
+        p = emit_pheromone(board, ptype, location, text, emitter,
+                           tags=tags, intensity=intensity)
+        save_board(project_root, board)
+        return p
+    except Exception:
+        return None
+
+
 def resolve_pheromone(board: PheromoneBoard, pheromone_id: str,
                       agent: str) -> Pheromone | None:
     """Mark a pheromone as resolved."""
