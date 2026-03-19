@@ -1,0 +1,11 @@
+# BMAD Memory System — Dépendances Python
+#
+# Mode minimal (JSON only) : aucune dépendance requise
+# Mode sémantique (recommandé) : décommenter les lignes ci-dessous
+
+# --- Mode sémantique (embeddings locaux, ~80MB modèle) ---
+sentence-transformers>=2.2.0
+qdrant-client>=1.7.0
+
+# --- Utilitaire YAML (pour project-context.yaml) ---
+pyyaml>=6.0

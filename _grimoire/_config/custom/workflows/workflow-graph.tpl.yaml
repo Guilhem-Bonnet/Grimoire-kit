@@ -1,0 +1,167 @@
+# workflow-graph.tpl.yaml — Task DAG Template (BM-30)
+#
+# Inspiré de : Microsoft Copilot Workspace task graph, LangGraph StateGraph,
+# AutoGen Magentic-One orchestration.
+#
+# Chaque workflow peut déclarer un graphe de tâches (DAG) avec dépendances,
+# statuts, outputs attendus — rendu human-friendly ET machine-parsable.
+#
+# Usage : copier dans _grimoire-output/.runs/{run_id}/workflow-graph.yaml
+# et mettre à jour les statuts en temps réel.
+
+# ── Identité du workflow ─────────────────────────────────────────────────────
+workflow:
+  id: "dev-story-20260227-143022"       # run_id unique
+  name: "Dev Story US-042 — Auth JWT"   # Nom lisible
+  workflow_path: "_grimoire/bmm/workflows/4-implementation/dev-story/workflow.yaml"
+  session_branch: "main"
+  started_at: "2026-02-27T14:30:00Z"
+  completed_at: null
+  status: "running"                     # pending | running | completed | failed | paused
+
+# ── Graphe de nœuds (tasks = steps) ─────────────────────────────────────────
+# Chaque nœud est un step du workflow. Les dépendances forment le DAG.
+nodes:
+
+  - id: "step-01"
+    label: "Analyse de la story"
+    description: "Lire et valider la story US-042, identifier les ACs"
+    agent: "dev/Amelia"
+    status: "completed"                 # pending | running | completed | failed | skipped
+    started_at: "2026-02-27T14:30:05Z"
+    completed_at: "2026-02-27T14:31:00Z"
+    depends_on: []                      # Aucune dépendance — nœud racine
+    outputs:
+      - type: "artefact"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-01-analysis.md"
+    checkpoint_id: "a1b2c3"            # sha256[:6] de l'état sauvegardé
+
+  - id: "step-02"
+    label: "Écriture des tests (TDD)"
+    description: "Créer les tests unitaires pour US-042 avant l'implémentation"
+    agent: "dev/Amelia"
+    status: "completed"
+    started_at: "2026-02-27T14:31:05Z"
+    completed_at: "2026-02-27T14:32:00Z"
+    depends_on: ["step-01"]
+    outputs:
+      - type: "files"
+        paths: ["src/auth.spec.ts"]
+    checkpoint_id: "d4e5f6"
+
+  - id: "step-03"
+    label: "Implémentation"
+    description: "Coder l'authentification JWT (US-042)"
+    agent: "dev/Amelia"
+    status: "running"
+    started_at: "2026-02-27T14:32:05Z"
+    completed_at: null
+    depends_on: ["step-02"]
+    outputs:
+      - type: "files"
+        paths: ["src/auth.ts", "src/auth.service.ts"]
+    checkpoint_id: null
+
+  - id: "step-04"
+    label: "Validation tests"
+    description: "Lancer la suite de tests complète — tous doivent passer"
+    agent: "dev/Amelia"
+    status: "pending"
+    started_at: null
+    completed_at: null
+    depends_on: ["step-03"]            # Sequential — attend step-03
+    outputs:
+      - type: "test-report"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-04-test-report.md"
+    checkpoint_id: null
+
+  - id: "step-05"
+    label: "Code Review"
+    description: "Revue par l'architecte avant push"
+    agent: "architect/Winston"
+    status: "pending"
+    started_at: null
+    completed_at: null
+    depends_on: ["step-04"]
+    outputs:
+      - type: "review"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-05-review.md"
+    checkpoint_id: null
+
+  - id: "step-06-a"
+    label: "QA — Tests E2E"
+    description: "Tests end-to-end sur le flow d'authentification"
+    agent: "qa/Quinn"
+    status: "pending"
+    started_at: null
+    completed_at: null
+    depends_on: ["step-05"]
+    parallel_group: "qa"               # Peut s'exécuter en parallèle avec step-06-b
+    outputs:
+      - type: "test-report"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-06a-e2e.md"
+    checkpoint_id: null
+
+  - id: "step-06-b"
+    label: "QA — Sécurité"
+    description: "Vérification OWASP Auth : brute force, token expiry, HTTPS"
+    agent: "qa/Quinn"
+    status: "pending"
+    started_at: null
+    completed_at: null
+    depends_on: ["step-05"]
+    parallel_group: "qa"               # Même groupe = exécution parallèle possible
+    outputs:
+      - type: "security-report"
+        path: "_grimoire-output/.runs/dev-story-20260227-143022/artefacts/step-06b-security.md"
+    checkpoint_id: null
+
+  - id: "step-07"
+    label: "Story Done"
+    description: "Validation finale SM — critères AC tous cochés"
+    agent: "sm/Bob"
+    status: "pending"
+    started_at: null
+    completed_at: null
+    depends_on: ["step-06-a", "step-06-b"]  # Attend les DEUX branches parallèles
+    outputs:
+      - type: "story-update"
+        action: "mark-done"
+    checkpoint_id: null
+
+# ── Résumé du DAG ────────────────────────────────────────────────────────────
+# step-01 → step-02 → step-03 → step-04 → step-05 → step-06-a ─┐
+#                                                               ├─→ step-07
+#                                                step-06-b ─────┘
+#
+# Nœuds parallèles : step-06-a ∥ step-06-b (parallel_group: "qa")
+
+# ── Métriques ────────────────────────────────────────────────────────────────
+metrics:
+  total_nodes: 8
+  completed: 2
+  running: 1
+  pending: 5
+  failed: 0
+  completion_pct: 25
+  estimated_remaining_steps: 5
+
+# ── Agent trace (handoffs) ───────────────────────────────────────────────────
+handoffs:
+  - from: "dev/Amelia"
+    to: "architect/Winston"
+    at: null
+    step: "step-05"
+    message: "Implémentation terminée, tests verts — prête pour code review"
+
+  - from: "architect/Winston"
+    to: "qa/Quinn"
+    at: null
+    step: "step-06-a"
+    message: "Architecture validée — lancer QA parallèle E2E + Sécurité"
+
+  - from: "qa/Quinn"
+    to: "sm/Bob"
+    at: null
+    step: "step-07"
+    message: "QA OK sur les deux axes — story peut être marquée Done"

@@ -1,0 +1,4 @@
+user_name: "Guilhem"
+communication_language: "Français"
+document_output_language: "Français"
+output_folder: "{project-root}/_grimoire-output"

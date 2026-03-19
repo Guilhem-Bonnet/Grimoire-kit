@@ -1,0 +1,9 @@
+name,displayName,title,icon,role,module,path
+"agent-optimizer","agent-optimizer","","","","custom","_grimoire/_config/custom/agents/agent-optimizer.md"
+"art-director","art-director","","","","custom","_grimoire/_config/custom/agents/art-director.md"
+"concierge","concierge","","","","custom","_grimoire/_config/custom/agents/concierge.md"
+"creative-toolsmith","creative-toolsmith","","","","custom","_grimoire/_config/custom/agents/creative-toolsmith.md"
+"custom-agent.tpl","custom-agent.tpl","","","","custom","_grimoire/_config/custom/agents/custom-agent.tpl.md"
+"memory-keeper","memory-keeper","","","","custom","_grimoire/_config/custom/agents/memory-keeper.md"
+"project-navigator","project-navigator","","","","custom","_grimoire/_config/custom/agents/project-navigator.md"
+"vectus","vectus","","","","custom","_grimoire/_config/custom/agents/vectus.md"

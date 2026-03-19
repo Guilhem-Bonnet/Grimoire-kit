@@ -1,0 +1,8 @@
+# Requirements backend qdrant-local ou qdrant-server
+# Embeddings : sentence-transformers (all-MiniLM-L6-v2 ou all-mpnet-base-v2)
+# Stockage   : Qdrant fichier local ou serveur distant
+# NOTE: qdrant-client>=1.13 + grpcio>=1.78 provoque TypeError sur Python 3.12
+#       (EnumTypeWrapper | None syntax) — pin à <1.13 jusqu'à correction upstream
+pyyaml>=6.0
+qdrant-client>=1.7.0,<1.13
+sentence-transformers>=2.2.0
