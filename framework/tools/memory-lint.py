@@ -634,48 +634,40 @@ def emit_to_stigmergy(report: LintReport, project_root: Path) -> int:
     """
     try:
         import importlib.util
-        # Cache hit : réutiliser le module déjà chargé
-        if "stigmergy" in sys.modules:
-            sg = sys.modules["stigmergy"]
+        _key = "_grimoire_stigmergy"
+        if _key in sys.modules:
+            sg = sys.modules[_key]
         else:
             sg_path = Path(__file__).parent / "stigmergy.py"
             if not sg_path.exists():
                 return 0
-            spec = importlib.util.spec_from_file_location("stigmergy", sg_path)
+            spec = importlib.util.spec_from_file_location(_key, sg_path)
             if spec is None or spec.loader is None:
                 return 0
             sg = importlib.util.module_from_spec(spec)
-            sys.modules["stigmergy"] = sg
+            sys.modules[_key] = sg
             spec.loader.exec_module(sg)
     except Exception:
         return 0
 
-    board = sg.load_board(project_root)
-    existing_texts = {p.text for p in board.pheromones if not p.resolved}
-    emitted = 0
+    if not hasattr(sg, "deposit_pheromone"):
+        return 0
 
+    emitted = 0
     for issue in report.issues:
         if issue.severity != SEVERITY_ERROR:
             continue
-
-        text = f"[memory-lint] {issue.title}: {issue.description[:200]}"
-        if text in existing_texts:
-            continue
-
-        sg.emit_pheromone(
-            board,
+        result = sg.deposit_pheromone(
+            project_root,
             ptype="ALERT",
             location=issue.files[0] if issue.files else "memory",
-            text=text,
+            text=f"[memory-lint] {issue.title}: {issue.description[:160]}"[:200],
             emitter="memory-lint",
             tags=["auto-lint", issue.category],
             intensity=0.8,
         )
-        existing_texts.add(text)
-        emitted += 1
-
-    if emitted > 0:
-        sg.save_board(project_root, board)
+        if result is not None:
+            emitted += 1
 
     return emitted
 

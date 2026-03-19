@@ -75,6 +75,16 @@ REINFORCEMENT_BOOST = 0.2        # Boost par amplification
 MAX_INTENSITY = 1.0
 DEFAULT_INTENSITY = 0.7
 
+# Demi-vie par type (heures) — surcharge half_life_hours du board
+TYPE_HALF_LIFE: dict[str, float] = {
+    "COMPLETE":    24.0,   # Signal de fin : disparaît vite
+    "PROGRESS":    48.0,   # Travail en cours : durée modérée
+    "NEED":        72.0,   # Besoin de collaboration
+    "ALERT":       72.0,   # Alerte : demi-vie standard
+    "BLOCK":       96.0,   # Blocage : reste plus longtemps
+    "OPPORTUNITY": 168.0,  # Opportunité : persiste 7 jours
+}
+
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
@@ -238,9 +248,26 @@ def compute_current_intensity(pheromone: Pheromone,
     if age_hours <= 0:
         return pheromone.intensity
 
-    # Decay : intensity × 0.5^(age / half_life)
-    decay_factor = mpow(0.5, age_hours / half_life_hours)
+    # Decay : intensity × 0.5^(age / half_life) — per-type scaling
+    # effective_hl = board_hl × (type_hl / default_hl) to preserve proportionality
+    effective_hl = half_life_hours * (
+        TYPE_HALF_LIFE.get(pheromone.pheromone_type, DEFAULT_HALF_LIFE_HOURS)
+        / DEFAULT_HALF_LIFE_HOURS
+    )
+    decay_factor = mpow(0.5, age_hours / effective_hl)
     return pheromone.intensity * decay_factor
+
+
+def compute_urgency_score(pheromone: Pheromone,
+                          half_life_hours: float,
+                          now: datetime | None = None) -> float:
+    """Score d'urgence : intensité actuelle × (1 + reinforcements × 0.3).
+
+    Permet de prioriser les signaux très renforcés par rapport aux signaux
+    récents mais non renforcés. Plafonné à 2.0.
+    """
+    current = compute_current_intensity(pheromone, half_life_hours, now)
+    return min(current * (1.0 + pheromone.reinforcements * 0.3), 2.0)
 
 
 def evaporate(board: PheromoneBoard,
@@ -354,6 +381,54 @@ def deposit_pheromone(
         return p
     except Exception:
         return None
+
+
+def bulk_deposit(
+    project_root: Path | str,
+    signals: list[dict],
+) -> int:
+    """Dépose plusieurs phéromones en transaction atomique (1 load + N émits + 1 save).
+
+    Chaque signal est un dict avec : ptype, location, text, emitter,
+    et optionnellement tags et intensity.
+    Déduplique automatiquement (amplifie si signal identique actif).
+    Retourne le nombre de signaux traités (0 en cas d'erreur).
+    """
+    if not signals:
+        return 0
+    try:
+        root = Path(project_root)
+        board = load_board(root)
+        count = 0
+        for sig in signals:
+            ptype = sig["ptype"]
+            location = sig.get("location", "")
+            text = sig.get("text", "")
+            emitter = sig.get("emitter", "")
+            tags = sig.get("tags")
+            intensity = sig.get("intensity", DEFAULT_INTENSITY)
+            existing = next(
+                (p for p in board.pheromones
+                 if not p.resolved
+                 and p.pheromone_type == ptype
+                 and p.location == location
+                 and p.text == text[:200]),
+                None,
+            )
+            if existing:
+                existing.intensity = min(
+                    existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+                existing.reinforcements += 1
+                if emitter not in existing.reinforced_by:
+                    existing.reinforced_by.append(emitter)
+            else:
+                emit_pheromone(board, ptype, location, text, emitter,
+                               tags=tags, intensity=intensity)
+            count += 1
+        save_board(root, board)
+        return count
+    except Exception:
+        return 0
 
 
 def sense_pheromones(board: PheromoneBoard,
@@ -721,6 +796,9 @@ def main():
     # stats
     sub.add_parser("stats", help="Statistiques rapides")
 
+    # urgency
+    sub.add_parser("urgency", help="Signaux triés par score d'urgence (intensité × reinforcements)")
+
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
 
@@ -811,6 +889,26 @@ def main():
             max_item = active[0]
             print(f"- Signal le plus fort : **{max_item[0].pheromone_id}** "
                   f"({max_item[1]:.0%})")
+
+    elif args.command == "urgency":
+        active = sense_pheromones(board)
+        scored = sorted(
+            [(p, compute_urgency_score(p, board.half_life_hours))
+             for p, _ in active],
+            key=lambda x: x[1], reverse=True,
+        )
+        if not scored:
+            print("🌿 Aucun signal urgent détecté.")
+        else:
+            print("# 🚨 Signaux par score d'urgence")
+            print()
+            for p, score in scored[:10]:
+                icon = TYPE_ICONS.get(p.pheromone_type, "")
+                bar = _intensity_bar(min(score / 2.0, 1.0))
+                print(f"{icon} {p.pheromone_type} [{score:.2f}] — {p.location}")
+                print(f"   {p.text}")
+                print(f"   Renforcé {p.reinforcements}× | {bar} ({score:.0%})")
+                print()
 
 
 if __name__ == "__main__":

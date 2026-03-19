@@ -11,13 +11,17 @@ from grimoire.tools.stigmergy import (
     DEFAULT_HALF_LIFE_HOURS,
     MAX_INTENSITY,
     REINFORCEMENT_BOOST,
+    TYPE_HALF_LIFE,
+    TYPE_ICONS,
     Pheromone,
     PheromoneBoard,
     Stigmergy,
     TrailPattern,
     amplify_pheromone,
     analyze_trails,
+    bulk_deposit,
     compute_intensity,
+    compute_urgency_score,
     deposit_pheromone,
     emit_pheromone,
     evaporate,
@@ -436,3 +440,255 @@ class TestDepositPheromone:
         result = deposit_pheromone(tmp_path, "NEED", "loc", "text", "tool")
         # Either succeeds (creates dir) or returns None — never raises
         assert result is None or result.pheromone_type == "NEED"
+
+
+# ── Constants ──────────────────────────────────────────────────────────────────────
+
+
+class TestConstants:
+    def test_type_icons_complete(self) -> None:
+        from grimoire.tools.stigmergy import VALID_TYPES
+        assert set(TYPE_ICONS.keys()) == VALID_TYPES
+
+    def test_type_half_life_complete(self) -> None:
+        from grimoire.tools.stigmergy import VALID_TYPES
+        assert set(TYPE_HALF_LIFE.keys()) == VALID_TYPES
+
+    def test_complete_evaporates_fastest(self) -> None:
+        assert TYPE_HALF_LIFE["COMPLETE"] < TYPE_HALF_LIFE["ALERT"]
+        assert TYPE_HALF_LIFE["COMPLETE"] < TYPE_HALF_LIFE["BLOCK"]
+
+    def test_opportunity_persists_longest(self) -> None:
+        assert TYPE_HALF_LIFE["OPPORTUNITY"] == max(TYPE_HALF_LIFE.values())
+
+    def test_block_outlasts_progress(self) -> None:
+        assert TYPE_HALF_LIFE["BLOCK"] > TYPE_HALF_LIFE["PROGRESS"]
+
+
+# ── Per-type TTL ─────────────────────────────────────────────────────────────────
+
+
+class TestPerTypeTTL:
+    """COMPLETE and OPPORTUNITY have different evaporation rates."""
+
+    def _make(self, ptype: str, age_hours: float, intensity: float = 0.7) -> Pheromone:
+        ts = (datetime.now(tz=UTC) - timedelta(hours=age_hours)).isoformat()
+        return Pheromone(
+            pheromone_id="PH-x", pheromone_type=ptype,
+            location="", text="", emitter="",
+            timestamp=ts, intensity=intensity,
+        )
+
+    def test_complete_at_24h_is_half(self) -> None:
+        p = self._make("COMPLETE", age_hours=24.0)
+        result = compute_intensity(p, DEFAULT_HALF_LIFE_HOURS)
+        assert result == pytest.approx(0.35, rel=0.02)
+
+    def test_opportunity_at_24h_barely_decays(self) -> None:
+        p = self._make("OPPORTUNITY", age_hours=24.0)
+        result = compute_intensity(p, DEFAULT_HALF_LIFE_HOURS)
+        # half-life=168h, age=24h => 0.7 * 0.5^(24/168) ≈ 0.632
+        assert result > 0.60
+
+    def test_complete_decays_faster_than_block(self) -> None:
+        now = datetime.now(tz=UTC)
+        age = timedelta(hours=48)
+        ts = (now - age).isoformat()
+        p_complete = Pheromone(
+            pheromone_id="PH-1", pheromone_type="COMPLETE",
+            location="", text="", emitter="", timestamp=ts, intensity=0.7,
+        )
+        p_block = Pheromone(
+            pheromone_id="PH-2", pheromone_type="BLOCK",
+            location="", text="", emitter="", timestamp=ts, intensity=0.7,
+        )
+        i_complete = compute_intensity(p_complete, DEFAULT_HALF_LIFE_HOURS, now)
+        i_block = compute_intensity(p_block, DEFAULT_HALF_LIFE_HOURS, now)
+        assert i_complete < i_block
+
+    def test_evaporate_removes_old_complete_before_block(self, board: PheromoneBoard) -> None:
+        now = datetime.now(tz=UTC)
+        old_ts = (now - timedelta(hours=60)).isoformat()
+        # COMPLETE at 60h age (2.5x its 24h half-life) → ~0.7 * 0.5^2.5 ≈ 0.124 > threshold
+        # But at 100h → 0.7 * 0.5^(100/24) ≈ 0.024 < threshold → evaporates
+        very_old_ts = (now - timedelta(hours=100)).isoformat()
+        board.pheromones.append(Pheromone(
+            pheromone_id="PH-c", pheromone_type="COMPLETE",
+            location="", text="", emitter="", timestamp=very_old_ts, intensity=0.7,
+        ))
+        board.pheromones.append(Pheromone(
+            pheromone_id="PH-b", pheromone_type="BLOCK",
+            location="", text="", emitter="", timestamp=old_ts, intensity=0.7,
+        ))
+        _, removed = evaporate(board, now=now)
+        assert removed == 1  # only COMPLETE evaporated
+        remaining_types = [p.pheromone_type for p in board.pheromones]
+        assert "BLOCK" in remaining_types
+        assert "COMPLETE" not in remaining_types
+
+
+# ── Urgency Score ─────────────────────────────────────────────────────────────────
+
+
+class TestUrgencyScore:
+    def test_no_reinforcements_equals_intensity(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "ALERT", "src", "issue", "dev", intensity=0.6)
+        score = compute_urgency_score(p, DEFAULT_HALF_LIFE_HOURS)
+        assert score == pytest.approx(0.6, rel=0.01)
+
+    def test_reinforcements_raise_score(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "ALERT", "src", "issue", "dev", intensity=0.6)
+        p.reinforcements = 3
+        score = compute_urgency_score(p, DEFAULT_HALF_LIFE_HOURS)
+        # 0.6 * (1 + 3*0.3) = 0.6 * 1.9 = 1.14
+        assert score == pytest.approx(1.14, rel=0.01)
+
+    def test_capped_at_2(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "BLOCK", "src", "stuck", "dev", intensity=1.0)
+        p.reinforcements = 10
+        score = compute_urgency_score(p, DEFAULT_HALF_LIFE_HOURS)
+        assert score == pytest.approx(2.0)
+
+    def test_high_reinforce_beats_fresh_unreinforced(self, board: PheromoneBoard) -> None:
+        now = datetime.now(tz=UTC)
+        # Older signal but heavily reinforced
+        old_ts = (now - timedelta(hours=24)).isoformat()
+        p_old = Pheromone(
+            pheromone_id="PH-old", pheromone_type="ALERT",
+            location="", text="", emitter="dev",
+            timestamp=old_ts, intensity=0.7, reinforcements=5,
+        )
+        # Fresh signal, no reinforcements
+        p_fresh = emit_pheromone(board, "ALERT", "src", "fresh", "qa", intensity=0.7)
+        score_old = compute_urgency_score(p_old, DEFAULT_HALF_LIFE_HOURS, now)
+        score_fresh = compute_urgency_score(p_fresh, DEFAULT_HALF_LIFE_HOURS, now)
+        assert score_old > score_fresh
+
+
+# ── Sense (extended) ──────────────────────────────────────────────────────────────────
+
+
+class TestSenseExtended:
+    def test_sense_filter_emitter(self, board: PheromoneBoard) -> None:
+        emit_pheromone(board, "NEED", "src", "a", "dev")
+        emit_pheromone(board, "NEED", "src", "b", "qa")
+        results = sense_pheromones(board, emitter="dev")
+        assert len(results) == 1
+        assert results[0][0].emitter == "dev"
+
+    def test_sense_filter_emitter_case_insensitive(self, board: PheromoneBoard) -> None:
+        emit_pheromone(board, "NEED", "src", "a", "DEV")
+        results = sense_pheromones(board, emitter="dev")
+        assert len(results) == 1
+
+    def test_sense_include_resolved(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "NEED", "src", "done", "dev")
+        resolve_pheromone(board, p.pheromone_id, "qa")
+        assert len(sense_pheromones(board)) == 0
+        results = sense_pheromones(board, include_resolved=True)
+        assert len(results) == 1
+        assert results[0][0].resolved is True
+
+    def test_sense_include_resolved_false_by_default(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "ALERT", "src", "warn", "dev")
+        resolve_pheromone(board, p.pheromone_id, "qa")
+        results = sense_pheromones(board)
+        assert len(results) == 0
+
+
+# ── Trails (extended) ───────────────────────────────────────────────────────────────
+
+
+class TestTrailsExtended:
+    def test_cold_zone_detected(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "NEED", "src/old", "done", "dev")
+        resolve_pheromone(board, p.pheromone_id, "qa")
+        patterns = analyze_trails(board)
+        cold = [pt for pt in patterns if pt.pattern_type == "cold-zone"]
+        assert len(cold) == 1
+        assert cold[0].location == "src/old"
+
+    def test_cold_zone_not_detected_if_still_active(self, board: PheromoneBoard) -> None:
+        p = emit_pheromone(board, "NEED", "src/active", "still going", "dev")
+        resolve_pheromone(board, p.pheromone_id, "qa")
+        emit_pheromone(board, "PROGRESS", "src/active", "continuing", "dev")
+        patterns = analyze_trails(board)
+        cold = [pt for pt in patterns if pt.pattern_type == "cold-zone"]
+        assert len(cold) == 0
+
+    def test_relay_detected(self, board: PheromoneBoard) -> None:
+        emit_pheromone(board, "COMPLETE", "src/api", "v1 done", "dev")
+        emit_pheromone(board, "NEED", "src/api", "review v1", "qa")
+        patterns = analyze_trails(board)
+        relays = [pt for pt in patterns if pt.pattern_type == "relay"]
+        assert len(relays) >= 1
+        assert "dev" in relays[0].involved_agents
+        assert "qa" in relays[0].involved_agents
+
+    def test_relay_requires_different_agents(self, board: PheromoneBoard) -> None:
+        emit_pheromone(board, "COMPLETE", "src/api", "done", "dev")
+        emit_pheromone(board, "NEED", "src/api", "more work", "dev")  # same agent
+        patterns = analyze_trails(board)
+        relays = [pt for pt in patterns if pt.pattern_type == "relay"]
+        assert len(relays) == 0
+
+    def test_deduplication(self, board: PheromoneBoard) -> None:
+        """Same pattern_type + location should appear only once."""
+        for i in range(5):
+            emit_pheromone(board, "ALERT", "src/shared", f"msg {i}", "dev")
+        patterns = analyze_trails(board)
+        hot = [pt for pt in patterns if pt.pattern_type == "hot-zone"
+               and pt.location == "src/shared"]
+        assert len(hot) == 1
+
+
+# ── Bulk Deposit ───────────────────────────────────────────────────────────────────
+
+
+class TestBulkDeposit:
+    def test_deposits_multiple_signals(self, root: Path) -> None:
+        signals = [
+            {"ptype": "ALERT", "location": "src/a", "text": "issue a", "emitter": "dev"},
+            {"ptype": "NEED",  "location": "src/b", "text": "help b",  "emitter": "qa"},
+            {"ptype": "BLOCK", "location": "src/c", "text": "stuck c", "emitter": "dev"},
+        ]
+        count = bulk_deposit(root, signals)
+        assert count == 3
+        board = load_board(root)
+        assert len(board.pheromones) == 3
+
+    def test_is_atomic_single_write(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """save_board should be called exactly once regardless of signal count."""
+        save_calls: list[int] = []
+        original_save = save_board
+
+        def counting_save(pr: Path, b: PheromoneBoard) -> None:
+            save_calls.append(1)
+            original_save(pr, b)
+
+        monkeypatch.setattr(
+            "grimoire.tools.stigmergy.save_board", counting_save)
+        bulk_deposit(root, [
+            {"ptype": "NEED", "location": "x", "text": "a", "emitter": "dev"},
+            {"ptype": "NEED", "location": "y", "text": "b", "emitter": "dev"},
+        ])
+        assert len(save_calls) == 1
+
+    def test_deduplicates_within_batch(self, root: Path) -> None:
+        signals = [
+            {"ptype": "ALERT", "location": "src", "text": "fire", "emitter": "tool-a"},
+            {"ptype": "ALERT", "location": "src", "text": "fire", "emitter": "tool-b"},
+        ]
+        count = bulk_deposit(root, signals)
+        assert count == 2
+        board = load_board(root)
+        assert len(board.pheromones) == 1  # deduplicated
+        assert board.pheromones[0].reinforcements == 1
+
+    def test_empty_signals_returns_zero(self, root: Path) -> None:
+        assert bulk_deposit(root, []) == 0
+
+    def test_returns_zero_on_bad_signal(self, root: Path) -> None:
+        # Missing required key 'ptype'
+        result = bulk_deposit(root, [{"location": "x", "text": "y", "emitter": "z"}])
+        assert result == 0

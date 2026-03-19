@@ -37,6 +37,25 @@ REINFORCEMENT_BOOST = 0.2
 MAX_INTENSITY = 1.0
 DEFAULT_INTENSITY = 0.7
 
+TYPE_ICONS = {
+    "NEED":        "🔵",
+    "ALERT":       "🔴",
+    "OPPORTUNITY": "🟢",
+    "PROGRESS":    "🟡",
+    "COMPLETE":    "✅",
+    "BLOCK":       "🚧",
+}
+
+# Per-type half-life (hours) — overrides board.half_life_hours
+TYPE_HALF_LIFE: dict[str, float] = {
+    "COMPLETE":    24.0,   # Done signal: evaporates quickly
+    "PROGRESS":    48.0,   # Work in progress: moderate lifespan
+    "NEED":        72.0,   # Collaboration request: default
+    "ALERT":       72.0,   # Alert: default
+    "BLOCK":       96.0,   # Blocker: stays longer
+    "OPPORTUNITY": 168.0,  # Opportunity: persists 7 days
+}
+
 
 # ── Data Models ───────────────────────────────────────────────────────────────
 
@@ -189,7 +208,23 @@ def compute_intensity(pheromone: Pheromone, half_life: float,
     age_h = (now - emit).total_seconds() / 3600.0
     if age_h <= 0:
         return pheromone.intensity
-    return pheromone.intensity * mpow(0.5, age_h / half_life)
+    # Per-type scaling: effective_hl = board_hl × (type_hl / default_hl)
+    effective_hl = half_life * (
+        TYPE_HALF_LIFE.get(pheromone.pheromone_type, DEFAULT_HALF_LIFE_HOURS)
+        / DEFAULT_HALF_LIFE_HOURS
+    )
+    return pheromone.intensity * mpow(0.5, age_h / effective_hl)
+
+
+def compute_urgency_score(pheromone: Pheromone, half_life: float,
+                          now: datetime | None = None) -> float:
+    """Urgency score: current intensity × (1 + reinforcements × 0.3), capped at 2.0.
+
+    Prioritises heavily-reinforced signals over lightly-reinforced ones
+    regardless of raw intensity.
+    """
+    current = compute_intensity(pheromone, half_life, now)
+    return min(current * (1.0 + pheromone.reinforcements * 0.3), 2.0)
 
 
 def emit_pheromone(board: PheromoneBoard, ptype: str, location: str,
@@ -261,6 +296,53 @@ def deposit_pheromone(
         return None
 
 
+def bulk_deposit(
+    project_root: Path,
+    signals: list[dict],
+) -> int:
+    """Deposit multiple pheromones atomically (1 load + N emits + 1 save).
+
+    Each signal dict requires: ptype, location, text, emitter;
+    optional: tags, intensity.
+    Deduplicates internally (amplifies existing active signals).
+    Returns count of signals processed, 0 on error.
+    """
+    if not signals:
+        return 0
+    try:
+        board = load_board(project_root)
+        count = 0
+        for sig in signals:
+            ptype = sig["ptype"]
+            location = sig.get("location", "")
+            text = sig.get("text", "")
+            emitter = sig.get("emitter", "")
+            tags = sig.get("tags")
+            intensity = sig.get("intensity", DEFAULT_INTENSITY)
+            existing = next(
+                (p for p in board.pheromones
+                 if not p.resolved
+                 and p.pheromone_type == ptype
+                 and p.location == location
+                 and p.text == text[:200]),
+                None,
+            )
+            if existing:
+                existing.intensity = min(
+                    existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+                existing.reinforcements += 1
+                if emitter not in existing.reinforced_by:
+                    existing.reinforced_by.append(emitter)
+            else:
+                emit_pheromone(board, ptype, location, text, emitter,
+                               tags=tags, intensity=intensity)
+            count += 1
+        save_board(project_root, board)
+        return count
+    except Exception:
+        return 0
+
+
 def resolve_pheromone(board: PheromoneBoard, pheromone_id: str,
                       agent: str) -> Pheromone | None:
     """Mark a pheromone as resolved."""
@@ -275,13 +357,15 @@ def resolve_pheromone(board: PheromoneBoard, pheromone_id: str,
 
 def sense_pheromones(board: PheromoneBoard, ptype: str | None = None,
                      location: str | None = None, tag: str | None = None,
+                     emitter: str | None = None,
+                     include_resolved: bool = False,
                      now: datetime | None = None) -> list[tuple[Pheromone, float]]:
     """Detect active pheromones above detection threshold."""
     if now is None:
         now = datetime.now(tz=UTC)
     results: list[tuple[Pheromone, float]] = []
     for p in board.pheromones:
-        if p.resolved:
+        if not include_resolved and p.resolved:
             continue
         current = compute_intensity(p, board.half_life_hours, now)
         if current < DETECTION_THRESHOLD:
@@ -291,6 +375,8 @@ def sense_pheromones(board: PheromoneBoard, ptype: str | None = None,
         if location and location.lower() not in p.location.lower():
             continue
         if tag and tag.lower() not in [t.lower() for t in p.tags]:
+            continue
+        if emitter and emitter.lower() != p.emitter.lower():
             continue
         results.append((p, current))
     results.sort(key=lambda x: x[1], reverse=True)
@@ -357,7 +443,45 @@ def analyze_trails(board: PheromoneBoard,
                 avg_intensity=avg,
             ))
 
-    return patterns
+    # Cold zones: resolved locations with no active signals
+    resolved_locs = {p.location for p in board.pheromones if p.resolved}
+    for loc in resolved_locs - set(by_loc.keys()):
+        patterns.append(TrailPattern(
+            pattern_type="cold-zone", location=loc,
+            description="Previously active zone, now silent",
+        ))
+
+    # Relay: COMPLETE followed by NEED/PROGRESS in the same zone by a different agent
+    for cp in board.pheromones:
+        if cp.pheromone_type != "COMPLETE":
+            continue
+        if compute_intensity(cp, board.half_life_hours, now) < DETECTION_THRESHOLD:
+            continue
+        for p in board.pheromones:
+            if (p.pheromone_id != cp.pheromone_id
+                    and p.location == cp.location
+                    and p.emitter != cp.emitter
+                    and p.pheromone_type in ("NEED", "PROGRESS")
+                    and not p.resolved):
+                curr = compute_intensity(p, board.half_life_hours, now)
+                if curr >= DETECTION_THRESHOLD:
+                    patterns.append(TrailPattern(
+                        pattern_type="relay", location=cp.location,
+                        description=f"Relay: {cp.emitter} → {p.emitter} "
+                                    f"(complete → {p.pheromone_type.lower()})",
+                        involved_agents=(cp.emitter, p.emitter),
+                        pheromone_count=2, avg_intensity=curr,
+                    ))
+
+    # Deduplicate (same pattern_type + location)
+    seen: set[str] = set()
+    unique: list[TrailPattern] = []
+    for pat in patterns:
+        key = f"{pat.pattern_type}:{pat.location}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(pat)
+    return unique
 
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
