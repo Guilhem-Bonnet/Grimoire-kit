@@ -42,13 +42,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 VERBOSITY_MODES = {
     "TLDR": {
@@ -128,6 +131,8 @@ class DocumentAnalysis:
     headers: list[str] = field(default_factory=list)
     key_sentences: list[str] = field(default_factory=list)
     sections: dict[str, list[str]] = field(default_factory=dict)
+    # Sentences ranked by TF-IDF importance (score, text)
+    ranked_sentences: list[tuple[float, str]] = field(default_factory=list)
 
 @dataclass
 class CondensedOutput:
@@ -136,6 +141,75 @@ class CondensedOutput:
     condensed_words: int = 0
     ratio: float = 0.0
     content: str = ""
+
+
+# ── TF-IDF Scorer (stdlib only) ──────────────────────────────────────────────
+
+_STOPWORDS: frozenset[str] = frozenset({
+    # Français
+    "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou", "est",
+    "en", "à", "au", "aux", "ce", "se", "ne", "il", "je", "tu", "nous",
+    "vous", "ils", "elles", "que", "qui", "dont", "où", "si", "car",
+    "par", "sur", "sous", "dans", "avec", "sans", "pour", "plus", "très",
+    "bien", "lors", "tout", "tous", "pas", "non", "mais", "donc",
+    "après", "avant", "entre", "pendant", "cette", "cet", "ces",
+    # Anglais
+    "the", "a", "an", "and", "or", "is", "of", "to", "in", "for",
+    "that", "this", "with", "are", "as", "at", "be", "by", "from", "it",
+    "its", "was", "has", "have", "not", "but", "they", "their", "been",
+    "also", "each", "than", "then", "when", "will", "can", "may", "should",
+    "which", "what", "how", "all", "any", "some", "our", "your", "his",
+})
+
+_TOKEN_RE = re.compile(r"\b[a-zA-ZÀ-ÿ]{3,}\b")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Tokenise une ligne en mots significatifs (≥3 chars, hors stopwords)."""
+    return [t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
+
+
+def _tfidf_rank(sentences: list[str]) -> list[tuple[float, str]]:
+    """Classe des phrases par importance TF-IDF (stdlib).
+
+    TF-IDF = sum_t( tf(t,s) * log((N+1)/(df(t)+1)) ) / log(|s|+2)
+    La normalisation par longueur évite le biais vers les phrases longues.
+    """
+    if not sentences:
+        return []
+
+    n = len(sentences)
+    tokenized = [_tokenize(s) for s in sentences]
+
+    # Document frequency: nb de phrases contenant le terme
+    df: Counter[str] = Counter()
+    for tokens in tokenized:
+        df.update(set(tokens))
+
+    scored: list[tuple[float, str]] = []
+    for sent, tokens in zip(sentences, tokenized, strict=False):
+        # Ignorer les fragments trop courts (< 4 tokens significatifs)
+        if len(tokens) < 4:
+            scored.append((0.0, sent))
+            continue
+        tf = Counter(tokens)
+        score = sum(
+            (tf[t] / len(tokens)) * math.log((n + 1) / (df[t] + 1))
+            for t in tf
+        )
+        # Normalisation par longueur (pénalise les phrases triviales courtes)
+        score /= math.log(len(tokens) + 2)
+        scored.append((score, sent))
+
+    return sorted(scored, key=lambda x: -x[0])
+
+
+_HTML_TAG_RE = re.compile(r"^<[a-zA-Z/]")
+
+
+def _is_content_line(s: str) -> bool:
+    """Retourne True si la ligne est du texte analysable (pas table/HTML/code)."""
+    return bool(s and not s.startswith("|") and not _HTML_TAG_RE.match(s))
 
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
@@ -150,9 +224,17 @@ def analyze_document(content: str) -> DocumentAnalysis:
     # Extract headers
     current_section = ""
     section_lines: dict[str, list[str]] = {}
+    in_code_block = False
 
     for line in lines:
         stripped = line.strip()
+        # Track fenced code blocks (``` markers)
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+
         if stripped.startswith("#"):
             header = stripped.lstrip("#").strip()
             analysis.headers.append(header)
@@ -167,14 +249,30 @@ def analyze_document(content: str) -> DocumentAnalysis:
     analysis.sections = section_lines
 
     # Extract key sentences (first sentence of each section + bold lines)
+    all_candidates: list[str] = []
     for slines in section_lines.values():
         for sline in slines[:2]:
-            if sline and not sline.startswith("|") and not sline.startswith("```"):
-                analysis.key_sentences.append(sline)
+            if _is_content_line(sline):
+                all_candidates.append(sline)
         # Bold or important lines
         for sline in slines:
-            if "**" in sline or sline.startswith(("- [ ]", "- [x]")):
-                analysis.key_sentences.append(sline)
+            if _is_content_line(sline) and (
+                "**" in sline or sline.startswith(("- [ ]", "- [x]"))
+            ):
+                all_candidates.append(sline)
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    for s in all_candidates:
+        if s not in seen:
+            seen.add(s)
+            analysis.key_sentences.append(s)
+
+    # Rank all content sentences by TF-IDF importance
+    all_sentences: list[str] = []
+    for slines in section_lines.values():
+        all_sentences.extend(s for s in slines if _is_content_line(s))
+    analysis.ranked_sentences = _tfidf_rank(all_sentences)
 
     if lines:
         # Title
@@ -196,19 +294,29 @@ def condense(content: str, mode: str) -> CondensedOutput:
     output_lines = []
 
     if mode == "TLDR":
-        # Titre + premières phrases clés
+        # Titre + top phrases par TF-IDF (fallback: key_sentences positionnelles)
         if analysis.title:
             output_lines.append(f"**{analysis.title}**")
-        output_lines.extend(analysis.key_sentences[:config["max_sentences"]])
+        if analysis.ranked_sentences:
+            top = [s for _, s in analysis.ranked_sentences[:config["max_sentences"]]]
+        else:
+            top = analysis.key_sentences[:config["max_sentences"]]
+        output_lines.extend(top)
 
     elif mode == "SUMMARY":
         if analysis.title:
             output_lines.append(f"# {analysis.title}\n")
-        # Première phrase de chaque section
+        # Pour chaque section, la phrase la plus informative (TF-IDF)
+        section_sentences: dict[str, list[str]] = {
+            h: [s for s in lines if _is_content_line(s)]
+            for h, lines in analysis.sections.items()
+        }
         for header in analysis.headers[:7]:
-            section_content = analysis.sections.get(header, [])
-            if section_content:
-                output_lines.append(f"**{header}** : {section_content[0]}")
+            slines = section_sentences.get(header, [])
+            if slines:
+                ranked = _tfidf_rank(slines)
+                best = ranked[0][1] if ranked else slines[0]
+                output_lines.append(f"**{header}** : {best}")
 
     elif mode == "STANDARD":
         if analysis.title:
