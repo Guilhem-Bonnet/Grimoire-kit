@@ -1,0 +1,19 @@
+{
+  // ── Grimoire MCP Servers ─────────────────────────────────────────────
+  // Serveurs MCP exposés à VS Code Copilot Chat.
+  // Doc : https://code.visualstudio.com/docs/copilot/chat/mcp-servers
+  "servers": {
+    // Intelligence Layer (BM-40/42/47) — 81 outils Grimoire
+    // Transport : stdio | Démarrage automatique par Copilot
+    // Dépendance : pip install "mcp>=1.0"  (déjà installé dans .venv)
+    "grimoire-synapse": {
+      "command": "python3",
+      "args": [
+        "${workspaceFolder}/framework/tools/grimoire-mcp-tools.py"
+      ],
+      "env": {
+        "GRIMOIRE_PROJECT_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
