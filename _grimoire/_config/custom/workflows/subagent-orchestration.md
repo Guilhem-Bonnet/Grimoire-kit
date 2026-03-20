@@ -1,6 +1,6 @@
-<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+<p align="right"><a href="../../../../README.md">README</a> · <a href="../../../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol
+# <img src="../../../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol
 
 > **BM-19** — Architecture native pour spawner des sous-agents en parallèle depuis un workflow Grimoire.
 >
@@ -9,10 +9,10 @@
 > **Principe** : Un agent orchestrateur décompose une tâche complexe en sous-tâches atomiques,
 > les délègue à des agents spécialisés (en parallèle quand possible), puis agrège les résultats.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Syntaxe dans les Workflows YAML
+## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Syntaxe dans les Workflows YAML
 
 ### Step type `orchestrate`
 
@@ -40,9 +40,9 @@
     save_to: "_grimoire-output/implementation-artifacts/analysis-report-{date}.md"
 ```
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Stratégies de Merge
+## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Stratégies de Merge
 
 | Stratégie | Description | Cas d'usage |
 |---|---|---|
@@ -53,9 +53,9 @@
 | `structured` | Chaque output va dans une section prédéfinie du résultat final | Rapports multi-sections |
 | `cross-validate` | Un agent produit, un second valide avec Trust Score (BM-52 CVTL) | Outputs critiques, ADRs, décisions irréversibles |
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Fallback pour LLMs sans support sous-agents natif
+## <img src="../../../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Fallback pour LLMs sans support sous-agents natif
 
 Si le LLM ne supporte pas le spawn réel de sous-agents :
 
@@ -67,9 +67,9 @@ Si le LLM ne supporte pas le spawn réel de sous-agents :
 
 L'orchestrateur exécute les tâches une par une dans le même contexte, en simulant le changement de persona entre chaque tâche.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Patterns Recommandés
+## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Patterns Recommandés
 
 ### Pattern 1 — Analyse Parallèle
 
@@ -184,9 +184,9 @@ on_escalation:
 
 > Référence complète : `framework/honest-uncertainty-protocol.md` (BM-50) · `framework/question-escalation-chain.md` (BM-51)
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles Obligatoires
+## <img src="../../../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles Obligatoires
 
 1. **Chaque sous-agent reçoit un contexte minimal** — uniquement les fichiers nécessaires à SA tâche
 2. **Chaque sous-agent retourne du JSON ou Markdown structuré** — jamais du prose non-parseable
@@ -200,9 +200,9 @@ on_escalation:
 10. **Events ELSS émis** — chaque spawn, completion, et failure émet un événement dans l'event bus (BM-59)
 11. **Tool Resolution pré-step** — l'orchestrateur (v1.2+) appelle `tool-resolver.py resolve` automatiquement avant chaque step pour identifier et vérifier les outils nécessaires. Les outils résolus sont injectés dans le contexte du sub-agent via `resolved_tools`.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Extension — Hybrid Orchestrate (BM-58)
+## <img src="../../../../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Extension — Hybrid Orchestrate (BM-58)
 
 Pour les workflows complexes avec dépendances mixtes, utiliser `type: hybrid-orchestrate` :
 

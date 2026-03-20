@@ -1,22 +1,22 @@
-<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
+<p align="right"><a href="../../../../README.md">README</a> · <a href="../../../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/folder-tree.svg" width="32" height="32" alt=""> Repo Map Generator — BM-05
+# <img src="../../../../docs/assets/icons/folder-tree.svg" width="32" height="32" alt=""> Repo Map Generator — BM-05
 
 > Génère une carte statique du dépôt consultable par tous les agents, inspiré du Repo Map d'Aider.
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
+## <img src="../../../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
 
 La **Repo Map** est un index hiérarchique du projet : arborescence, symboles exportés, relations entre modules. Elle sert de "GPS du code" aux agents, réduisant les hallucinations de chemins et accélérant la navigation.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Déclenchement
+## <img src="../../../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Déclenchement
 
 L'agent Atlas peut générer la Repo Map via la commande `[RM]` de son menu, ou automatiquement lors d'un briefing de session si la map a plus de 24h.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Stratégies de génération
+## <img src="../../../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Stratégies de génération
 
 ### Stratégie 1 — `ctags` (universel, recommandé)
 
@@ -61,9 +61,9 @@ done < /tmp/grimoire-files.txt > _grimoire-output/repo-map.md
 node framework/mcp/grimoire-tree-sitter-map.js --output _grimoire-output/repo-map.json
 ```
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format de sortie (`repo-map.md`)
+## <img src="../../../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format de sortie (`repo-map.md`)
 
 ```markdown
 # Repo Map — {project_name}
@@ -102,9 +102,9 @@ node framework/mcp/grimoire-tree-sitter-map.js --output _grimoire-output/repo-ma
 - `internal/adapters/sqlite/job_repo.go` → `internal/domain`
 ```
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration dans agent-base.md
+## <img src="../../../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration dans agent-base.md
 
 Chaque agent qui a besoin de naviguer le code peut appeler :
 
@@ -114,9 +114,9 @@ Chaque agent qui a besoin de naviguer le code peut appeler :
 
 Atlas répond avec le chemin `_grimoire-output/repo-map.md` ou le régénère si obsolète.
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Mise à jour automatique
+## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Mise à jour automatique
 
 Ajouter dans `.git/hooks/post-commit` (optionnel) :
 
@@ -128,9 +128,9 @@ if [[ -f "_grimoire-output/repo-map.md" ]]; then
 fi
 ```
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Configuration dans `project-context.yaml`
+## <img src="../../../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Configuration dans `project-context.yaml`
 
 ```yaml
 repo_map:
@@ -143,9 +143,9 @@ repo_map:
   stale_after_hours: 24
 ```
 
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
+<img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes Atlas associées
+## <img src="../../../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Commandes Atlas associées
 
 | Cmd | Description |
 |-----|-------------|

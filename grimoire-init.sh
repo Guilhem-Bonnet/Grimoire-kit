@@ -2392,6 +2392,14 @@ cp -r "$SCRIPT_DIR/framework/prompt-templates/"* "$GRIMOIRE_DIR/_config/custom/p
 
 # Workflows
 cp -r "$SCRIPT_DIR/framework/workflows/"* "$GRIMOIRE_DIR/_config/custom/workflows/" 2>/dev/null || true
+# Ajuster les chemins relatifs pour la profondeur de destination (4 niveaux)
+for _wf in "$GRIMOIRE_DIR/_config/custom/workflows/"*.md; do
+    [[ -f "$_wf" ]] || continue
+    sed -i -E \
+        -e 's|href="(\.\./)+|href="../../../../|g' \
+        -e 's|src="(\.\./)+|src="../../../../|g' \
+        "$_wf"
+done
 
 ok "Framework installé"
 
@@ -2421,6 +2429,16 @@ if $AUTO_DETECT && [[ -n "${DETECTED_STACKS:-}" ]]; then
 fi
 # ─── 4c. Déployer les agents features selon le backend mémoire ────────────────────
 deploy_feature_agents "$MEMORY_BACKEND" "$GRIMOIRE_DIR/_config/custom/agents"
+
+# Ajuster les chemins relatifs agents pour la profondeur de destination (4 niveaux)
+for _af in "$GRIMOIRE_DIR/_config/custom/agents/"*.md; do
+    [[ -f "$_af" ]] || continue
+    sed -i -E \
+        -e 's|href="(\.\./)+|href="../../../../|g' \
+        -e 's|src="(\.\./)+|src="../../../../|g' \
+        "$_af"
+done
+
 # ─── 5. Générer project-context.yaml ────────────────────────────────────────
 info "Génération de project-context.yaml..."
 

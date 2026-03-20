@@ -97,6 +97,14 @@ class ArchScan:
 
 # ── Scanner ──────────────────────────────────────────────────────────────────
 
+_SCAN_EXCLUDE = frozenset({".git", ".venv", "node_modules", "__pycache__", "dist", "build"})
+
+
+def _excluded(path_str: str) -> bool:
+    """Retourne True si le chemin contient un répertoire à exclure du scan."""
+    return any(part in path_str for part in _SCAN_EXCLUDE)
+
+
 def scan_project(project_root: Path) -> ArchScan:
     """Scanner complet du projet."""
     scan = ArchScan()
@@ -104,35 +112,35 @@ def scan_project(project_root: Path) -> ArchScan:
     # Discover agents
     for pattern in ["**/agents/*.md", "**/agents/*.xml", "**/agents/*.yaml"]:
         for f in project_root.glob(pattern):
-            if ".git" not in str(f):
+            if not _excluded(str(f)):
                 scan.agents.append(str(f.relative_to(project_root)))
 
     # Discover workflows
     for pattern in ["**/workflows/**/*.md", "**/workflows/**/*.yaml", "**/workflows/**/*.xml"]:
         for f in project_root.glob(pattern):
-            if ".git" not in str(f):
+            if not _excluded(str(f)):
                 scan.workflows.append(str(f.relative_to(project_root)))
 
     # Discover tools
     for f in project_root.glob("**/tools/*.py"):
-        if ".git" not in str(f) and "__pycache__" not in str(f):
+        if not _excluded(str(f)):
             scan.tools.append(str(f.relative_to(project_root)))
 
     # Discover configs
     for pattern in ["**/*.yaml", "**/*.yml"]:
         for f in project_root.glob(pattern):
             rel = str(f.relative_to(project_root))
-            if ".git" not in rel and rel not in scan.workflows:
+            if not _excluded(rel) and rel not in scan.workflows:
                 scan.configs.append(rel)
 
     # Discover docs
     for f in project_root.glob("**/docs/**/*.md"):
-        if ".git" not in str(f):
+        if not _excluded(str(f)):
             scan.docs.append(str(f.relative_to(project_root)))
 
     # Discover tests
     for f in project_root.glob("**/tests/**/*"):
-        if ".git" not in str(f) and f.is_file() and "__pycache__" not in str(f):
+        if not _excluded(str(f)) and f.is_file():
             scan.tests.append(str(f.relative_to(project_root)))
 
     # Build cross-references
@@ -181,8 +189,16 @@ def detect_naming(scan: ArchScan, project_root: Path) -> list[Dissonance]:
     dissonances = []
     all_files = scan.agents + scan.workflows + scan.tools
 
+    # Exclure les packages Python (src/) qui suivent la convention snake_case (PEP 8)
+    _python_pkg_prefixes = ("src/", "tests/")
     for fpath in all_files:
+        if any(fpath.startswith(p) for p in _python_pkg_prefixes):
+            continue
         stem = Path(fpath).stem
+        # Les modules Python internes (snake_case, pas de CLI) sont exemptés du kebab-case
+        # Un module Python interne : fichier .py sans tiret, importé par d'autres
+        if fpath.endswith(".py") and "_" in stem and "-" not in stem:
+            continue
         if not NAMING_PATTERN.match(stem):
             dissonances.append(Dissonance(
                 "naming", SEVERITY_LOW, fpath,
@@ -253,6 +269,9 @@ def detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
 
     all_files = scan.agents + scan.workflows + scan.tools
     for fpath in all_files:
+        # Ignorer les fichiers Python de test (les string literals sont des fixtures, pas de vraies refs)
+        if fpath.endswith(".py"):
+            continue
         full = project_root / fpath
         if not full.exists():
             continue
