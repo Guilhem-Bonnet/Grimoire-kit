@@ -43,6 +43,7 @@ Stdlib only — aucune dépendance externe.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import sys
@@ -74,6 +75,10 @@ DETECTION_THRESHOLD = 0.05       # Invisible sous ce seuil
 REINFORCEMENT_BOOST = 0.2        # Boost par amplification
 MAX_INTENSITY = 1.0
 DEFAULT_INTENSITY = 0.7
+
+# Anti-loop guards
+MAX_ACTIVE_PER_ZONE = 5          # Max signaux actifs par zone (cap anti-storm)
+_LOCK_FILENAME = ".pheromone-write.lock"  # Verrou fichier pour deposit concurrent
 
 # Demi-vie par type (heures) — surcharge half_life_hours du board
 TYPE_HALF_LIFE: dict[str, float] = {
@@ -319,9 +324,16 @@ def emit_pheromone(board: PheromoneBoard, ptype: str, location: str,
 
 def amplify_pheromone(board: PheromoneBoard, pheromone_id: str,
                       agent: str) -> Pheromone | None:
-    """Renforce une phéromone existante."""
+    """Renforce une phéromone existante.
+
+    Guard anti-boucle : un agent ne peut pas amplifier son propre signal.
+    La sémantique stigmergy exige qu'un AUTRE agent confirme la pertinence.
+    """
     for p in board.pheromones:
         if p.pheromone_id == pheromone_id:
+            # Anti-loop : interdire l'auto-amplification
+            if agent == p.emitter:
+                return p  # Pas d'erreur, mais pas de boost non plus
             p.intensity = min(p.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
             p.reinforcements += 1
             if agent not in p.reinforced_by:
@@ -353,32 +365,60 @@ def deposit_pheromone(
 ) -> Pheromone | None:
     """Dépose une phéromone atomiquement : load → emit → save.
 
-    Si un signal actif identique (même ptype + location + text) existe déjà,
-    amplifie le signal existant au lieu d'en créer un doublon.
+    - Si un signal actif identique (même ptype + location + text) existe déjà,
+      amplifie le signal existant au lieu d'en créer un doublon.
+    - Si la zone dépasse MAX_ACTIVE_PER_ZONE signaux actifs, amplifie le plus
+      fort au lieu d'en créer un nouveau (anti signal-storm).
+    - Utilise un verrou fichier exclusif pour éviter les doublons par race
+      condition entre processus concurrents (TOCTOU guard).
     Retourne None silencieusement si une erreur survient.
     """
+    root = Path(project_root)
+    lock_path = root / "_grimoire-output" / _LOCK_FILENAME
     try:
-        board = load_board(Path(project_root))
-        # Déduplication : chercher un signal actif identique
-        existing = next(
-            (p for p in board.pheromones
-             if not p.resolved
-             and p.pheromone_type == ptype
-             and p.location == location
-             and p.text == text[:200]),
-            None,
-        )
-        if existing:
-            existing.intensity = min(existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
-            existing.reinforcements += 1
-            if emitter not in existing.reinforced_by:
-                existing.reinforced_by.append(emitter)
-            save_board(Path(project_root), board)
-            return existing
-        p = emit_pheromone(board, ptype, location, text, emitter,
-                           tags=tags, intensity=intensity)
-        save_board(Path(project_root), board)
-        return p
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as _lock_fh:
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX)
+            try:
+                board = load_board(root)
+                # Déduplication : chercher un signal actif identique
+                existing = next(
+                    (p for p in board.pheromones
+                     if not p.resolved
+                     and p.pheromone_type == ptype
+                     and p.location == location
+                     and p.text == text[:200]),
+                    None,
+                )
+                if existing:
+                    existing.intensity = min(
+                        existing.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+                    existing.reinforcements += 1
+                    if emitter not in existing.reinforced_by:
+                        existing.reinforced_by.append(emitter)
+                    save_board(root, board)
+                    return existing
+                # Anti signal-storm : cap par zone
+                active_in_zone = [
+                    p for p in board.pheromones
+                    if not p.resolved and p.location == location
+                ]
+                if len(active_in_zone) >= MAX_ACTIVE_PER_ZONE:
+                    strongest = max(active_in_zone,
+                                    key=lambda p: p.intensity)
+                    strongest.intensity = min(
+                        strongest.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+                    strongest.reinforcements += 1
+                    if emitter not in strongest.reinforced_by:
+                        strongest.reinforced_by.append(emitter)
+                    save_board(root, board)
+                    return strongest
+                p = emit_pheromone(board, ptype, location, text, emitter,
+                                   tags=tags, intensity=intensity)
+                save_board(root, board)
+                return p
+            finally:
+                fcntl.flock(_lock_fh, fcntl.LOCK_UN)
     except Exception:
         return None
 
@@ -392,12 +432,29 @@ def bulk_deposit(
     Chaque signal est un dict avec : ptype, location, text, emitter,
     et optionnellement tags et intensity.
     Déduplique automatiquement (amplifie si signal identique actif).
+    Applique le cap MAX_ACTIVE_PER_ZONE par zone (anti signal-storm).
+    Utilise un verrou fichier exclusif (TOCTOU guard).
     Retourne le nombre de signaux traités (0 en cas d'erreur).
     """
     if not signals:
         return 0
+    root = Path(project_root)
+    lock_path = root / "_grimoire-output" / _LOCK_FILENAME
     try:
-        root = Path(project_root)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as _lock_fh:
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX)
+            try:
+                return _bulk_deposit_locked(root, signals)
+            finally:
+                fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+    except Exception:
+        return 0
+
+
+def _bulk_deposit_locked(root: Path, signals: list[dict]) -> int:
+    """Implémentation interne de bulk_deposit, appelée sous verrou exclusif."""
+    try:
         board = load_board(root)
         count = 0
         for sig in signals:
@@ -422,8 +479,21 @@ def bulk_deposit(
                 if emitter not in existing.reinforced_by:
                     existing.reinforced_by.append(emitter)
             else:
-                emit_pheromone(board, ptype, location, text, emitter,
-                               tags=tags, intensity=intensity)
+                # Anti signal-storm : cap par zone
+                active_in_zone = [
+                    p for p in board.pheromones
+                    if not p.resolved and p.location == location
+                ]
+                if len(active_in_zone) >= MAX_ACTIVE_PER_ZONE:
+                    strongest = max(active_in_zone, key=lambda p: p.intensity)
+                    strongest.intensity = min(
+                        strongest.intensity + REINFORCEMENT_BOOST, MAX_INTENSITY)
+                    strongest.reinforcements += 1
+                    if emitter not in strongest.reinforced_by:
+                        strongest.reinforced_by.append(emitter)
+                else:
+                    emit_pheromone(board, ptype, location, text, emitter,
+                                   tags=tags, intensity=intensity)
             count += 1
         save_board(root, board)
         return count

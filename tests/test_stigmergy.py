@@ -431,6 +431,20 @@ class TestAmplify(unittest.TestCase):
         # reinforced_by dédupliqué
         self.assertEqual(len(p.reinforced_by), 1)
 
+    def test_amplify_no_self_amplification(self):
+        """Guard anti-boucle : un agent ne peut pas amplifier son propre signal."""
+        board = self.st.PheromoneBoard()
+        p = self.st.emit_pheromone(board, "NEED", "loc", "txt", "dev",
+                                   intensity=0.5)
+        original_intensity = p.intensity
+        original_reinforcements = p.reinforcements
+        result = self.st.amplify_pheromone(board, p.pheromone_id, "dev")
+        # Retourne le signal sans modification
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result.intensity, original_intensity)
+        self.assertEqual(result.reinforcements, original_reinforcements)
+        self.assertNotIn("dev", result.reinforced_by)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Resolve Tests
@@ -867,6 +881,85 @@ class TestConstants(unittest.TestCase):
     def test_reinforcement_boost(self):
         self.assertGreater(self.st.REINFORCEMENT_BOOST, 0)
         self.assertLessEqual(self.st.REINFORCEMENT_BOOST, 0.5)
+
+    def test_max_active_per_zone_constant_exists(self):
+        """Vérifie que la constante anti-storm est définie."""
+        self.assertGreater(self.st.MAX_ACTIVE_PER_ZONE, 0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Anti-Loop Guards Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAntiLoopGuards(unittest.TestCase):
+    """Tests spécifiques aux protections contre les patterns néfastes naturels."""
+
+    def setUp(self):
+        self.st = _import_st()
+
+    def test_zone_cap_amplifies_strongest_when_full(self):
+        """Quand une zone atteint MAX_ACTIVE_PER_ZONE, deposit_pheromone renforce
+        le signal le plus fort au lieu d'en créer un nouveau."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = tmpdir
+            (Path(tmpdir) / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+            # Remplir la zone jusqu'au cap
+            for i in range(self.st.MAX_ACTIVE_PER_ZONE):
+                self.st.deposit_pheromone(
+                    root, "ALERT", "ci/build", f"signal {i}", f"agent{i}",
+                    intensity=0.6 + i * 0.02,  # intensités croissantes
+                )
+            # Le board doit avoir exactement MAX_ACTIVE_PER_ZONE signaux
+            board = self.st.load_board(self.st.Path(root))
+            active = [p for p in board.pheromones
+                      if not p.resolved and p.location == "ci/build"]
+            self.assertEqual(len(active), self.st.MAX_ACTIVE_PER_ZONE)
+            strongest_id = max(active, key=lambda p: p.intensity).pheromone_id
+            reinforcements_before = max(
+                active, key=lambda p: p.intensity).reinforcements
+            # Un dépôt supplémentaire ne doit PAS créer de nouveau signal
+            self.st.deposit_pheromone(
+                root, "ALERT", "ci/build", "signal overflow", "agent_extra",
+            )
+            board2 = self.st.load_board(self.st.Path(root))
+            active2 = [p for p in board2.pheromones
+                       if not p.resolved and p.location == "ci/build"]
+            self.assertEqual(len(active2), self.st.MAX_ACTIVE_PER_ZONE)
+            # Le plus fort doit avoir été amplifié
+            strongest2 = next(p for p in active2
+                              if p.pheromone_id == strongest_id)
+            self.assertGreater(strongest2.reinforcements, reinforcements_before)
+
+    def test_self_amplification_blocked_in_amplify(self):
+        """amplify_pheromone doit ignorer l'émetteur original (anti-boucle)."""
+        board = self.st.PheromoneBoard()
+        p = self.st.emit_pheromone(board, "NEED", "zone", "msg", "agent-alpha",
+                                   intensity=0.5)
+        r = self.st.amplify_pheromone(board, p.pheromone_id, "agent-alpha")
+        # Intensité + reinforcements inchangés
+        self.assertAlmostEqual(r.intensity, 0.5)
+        self.assertEqual(r.reinforcements, 0)
+        self.assertNotIn("agent-alpha", r.reinforced_by)
+
+    def test_dedup_prevents_duplicate_same_zone(self):
+        """Deux appels deposit_pheromone identiques → 1 seul signal amplifié."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "_grimoire-output").mkdir(parents=True, exist_ok=True)
+            self.st.deposit_pheromone(
+                tmpdir, "ALERT", "preflight/structure",
+                "Dossier config manquant", "preflight-check",
+            )
+            self.st.deposit_pheromone(
+                tmpdir, "ALERT", "preflight/structure",
+                "Dossier config manquant", "preflight-check",
+            )
+            board = self.st.load_board(self.st.Path(tmpdir))
+            active = [p for p in board.pheromones if not p.resolved]
+            # Un seul signal, amplifié — pas deux
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0].reinforcements, 1)
 
 
 if __name__ == "__main__":
