@@ -37,7 +37,11 @@ grimoire-kit/
 ## Workflow de développement
 
 ```bash
-# Setup complet (une seule fois)
+# Setup complet (une seule fois) — crée le venv et installe tout
+make dev
+
+# Ou manuellement (venv déjà créé, voir Prérequis ci-dessus)
+source .venv/bin/activate
 pip install -e ".[dev]"
 pre-commit install
 

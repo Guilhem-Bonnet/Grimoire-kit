@@ -1,11 +1,28 @@
 .DEFAULT_GOAL := help
-PYTHON ?= python3
+VENV ?= .venv
+# Auto-detect venv Python to avoid PEP 668 errors on Ubuntu/Debian
+PYTHON ?= $(shell [ -f "$(VENV)/bin/python3" ] && echo "$(VENV)/bin/python3" || echo "python3")
 PYTEST_ARGS ?=
+
+## ─── Environment ────────────────────────────────────────────────
+.PHONY: venv
+venv: ## Create virtual environment ($(VENV)/)
+	@test -d $(VENV) || (python3 -m venv $(VENV) && $(VENV)/bin/pip install --upgrade pip --quiet)
+	@echo "✓ venv ready — activate with: source $(VENV)/bin/activate"
+
+.PHONY: dev
+dev: ## Full dev setup: create venv + install all dev deps + pre-commit
+	@test -d $(VENV) || python3 -m venv $(VENV)
+	$(VENV)/bin/pip install --upgrade pip --quiet
+	$(VENV)/bin/pip install -e ".[dev]"
+	$(VENV)/bin/pre-commit install
+	@echo "\n✓ Dev environment ready. Run: source $(VENV)/bin/activate"
 
 ## ─── Installation ──────────────────────────────────────────────
 .PHONY: install
 install: ## Install package in editable mode with dev deps
-	$(PYTHON) -m pip install -e ".[dev]"
+	@test -d $(VENV) || python3 -m venv $(VENV)
+	$(VENV)/bin/pip install -e ".[dev]"
 
 ## ─── Quality ───────────────────────────────────────────────────
 .PHONY: lint

@@ -104,6 +104,8 @@ def test_run_detects_config(tmp_path: Path) -> None:
 ### 5. Vérifier la découverte
 
 ```bash
+# Activer votre venv si ce n'est pas déjà fait (Ubuntu/Debian: requis, PEP 668)
+source .venv/bin/activate
 pip install -e .
 grimoire plugins list
 # → my_example_tool  grimoire_plugin_example.tool

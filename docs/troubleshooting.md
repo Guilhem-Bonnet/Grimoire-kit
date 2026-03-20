@@ -27,7 +27,13 @@ python3 _grimoire/_memory/mem0-bridge.py status
 
 **Note importante** : le fallback JSON est **fonctionnel**. Les agents travaillent normalement — seule la qualité de la recherche sémantique est réduite (mots-clés vs embeddings). Tu peux travailler sans Qdrant.
 
+> **Ubuntu/Debian (PEP 668)** : `pip install` est bloqué hors d'un venv sur Python 3.12+.
+> Activer le venv d'abord : `source .venv/bin/activate` (ou `pipx install grimoire-kit[all]`).
+
 ```bash
+# Activer le venv (si ce n'est pas déjà fait)
+source .venv/bin/activate
+
 # Réinstaller toutes les dépendances
 pip install -r _grimoire/_memory/requirements.txt
 
@@ -205,7 +211,8 @@ python3 --version  # 3.10+ requis
 # Vérifier le path
 cd _grimoire/_memory/ && python3 maintenance.py health-check
 
-# Vérifier les dépendances
+# Vérifier les dépendances (activer le venv si Ubuntu/Debian)
+source .venv/bin/activate 2>/dev/null || true
 pip3 install -r requirements.txt
 ```
 
