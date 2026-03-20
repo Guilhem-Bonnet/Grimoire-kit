@@ -41,10 +41,12 @@ def ollama_env(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     for name, mod in {"qdrant_client": qdrant_mod, "qdrant_client.models": models_mod}.items():
         monkeypatch.setitem(sys.modules, name, mod)
 
-    # Clear cached import to force re-import with mocked deps
-    monkeypatch.delitem(sys.modules, "grimoire.memory.backends.ollama", raising=False)
-
     # Patch ollama_embed to avoid real HTTP calls
+    # Note: do NOT delete grimoire.memory.backends.ollama from sys.modules before setattr.
+    # qdrant_client is only imported inside __init__ (not at module level), so forcing a
+    # re-import is unnecessary. Worse, delitem causes setattr to patch the stale module
+    # object found via the parent package attribute, while _make_backend then does a fresh
+    # import — the two end up referencing different module objects.
     monkeypatch.setattr(
         "grimoire.memory.backends.ollama.ollama_embed",
         lambda text, model, url, **kw: list(_FAKE_VECTOR),

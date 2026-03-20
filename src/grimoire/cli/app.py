@@ -134,7 +134,7 @@ def main(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable coloured output."),
     log_format: str = typer.Option("text", "--log-format", help="Log format: text or json."),
-    output: str = typer.Option("text", "--output", "-o", help="Output format: text or json."),
+    output: str | None = typer.Option(None, "--output", "-o", help="Output format: text or json."),
     show_time: bool = typer.Option(False, "--time", help="Show elapsed time after command execution."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts."),
     profile: bool = typer.Option(False, "--profile", help="Show per-phase timing breakdown."),
@@ -144,9 +144,10 @@ def main(
     ctx.ensure_object(dict)
 
     # Env var overrides (priority: CLI flag > env var > default)
-    # GRIMOIRE_OUTPUT: default output format
-    if output == "text" and os.environ.get("GRIMOIRE_OUTPUT", "").lower() == "json":
-        output = "json"
+    # output=None means no CLI flag was given — fall back to env var or "text"
+    if output is None:
+        env_fmt = os.environ.get("GRIMOIRE_OUTPUT", "").lower()
+        output = env_fmt if env_fmt in ("text", "json") else "text"
     # GRIMOIRE_QUIET: suppress non-error output
     if not quiet and os.environ.get("GRIMOIRE_QUIET", "").lower() in ("1", "true"):
         quiet = True
