@@ -15,6 +15,7 @@ Dépendances : qdrant-client
 """
 
 from __future__ import annotations
+
 import json
 import os
 import time
@@ -23,7 +24,6 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
-
 
 _MEMORY_DIR = Path(__file__).resolve().parent.parent.parent / "memory"
 _QDRANT_PATH = str(_MEMORY_DIR / "qdrant_data")
@@ -133,7 +133,7 @@ class OllamaBackend:
         return {"id": point_id, "memory": text, **payload}
 
     def search(self, query: str, user_id: str = "", limit: int = 5) -> list[dict]:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         vector = _ollama_embed(query, self._model, self._ollama_url, self._timeout)
         flt = None
@@ -150,7 +150,7 @@ class OllamaBackend:
         return [{"id": r.id, "score": r.score, **r.payload} for r in response.points]
 
     def get_all(self, user_id: str = "") -> list[dict]:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         flt = None
         if user_id:

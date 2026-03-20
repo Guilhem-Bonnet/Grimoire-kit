@@ -9,10 +9,10 @@ Dépendances : qdrant-client sentence-transformers
 """
 
 from __future__ import annotations
+
 import time
 import uuid
 from pathlib import Path
-
 
 _MEMORY_DIR = Path(__file__).resolve().parent.parent.parent / "memory"
 _QDRANT_PATH = str(_MEMORY_DIR / "qdrant_data")
@@ -84,7 +84,7 @@ class QdrantLocalBackend:
         return {"id": point_id, "memory": text, **payload}
 
     def search(self, query: str, user_id: str = "", limit: int = 5) -> list[dict]:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         vector = self._model.encode(query).tolist()
         flt = None
@@ -101,7 +101,7 @@ class QdrantLocalBackend:
         return [{"id": r.id, "score": r.score, **r.payload} for r in response.points]
 
     def get_all(self, user_id: str = "") -> list[dict]:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         flt = None
         if user_id:

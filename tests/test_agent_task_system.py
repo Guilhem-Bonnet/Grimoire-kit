@@ -959,9 +959,12 @@ class TestCLISmoke(unittest.TestCase):
         r = subprocess.run(
             [sys.executable, str(TOOL), "--version"],
             capture_output=True, text=True, timeout=10,
+            env={**__import__("os").environ, "COLUMNS": "200"},
         )
         self.assertEqual(r.returncode, 0)
-        self.assertIn("agent-task-system", r.stdout)
+        # Normalise les retours à la ligne provoqués par le wrapping argparse
+        normalized = " ".join(r.stdout.split())
+        self.assertIn("agent-task-system", normalized)
 
     def test_status_subprocess(self):
         r = subprocess.run(

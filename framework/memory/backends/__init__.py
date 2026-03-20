@@ -12,6 +12,7 @@ Backends disponibles :
 """
 
 from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -78,8 +79,8 @@ def get_backend(config_override: dict | None = None) -> tuple:
 
 def _auto_detect(mem_cfg: dict) -> str:
     """Détection automatique du meilleur backend disponible."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     # 1. Qdrant distant configuré ?
     qdrant_url = mem_cfg.get("qdrant_url", os.environ.get("Grimoire_QDRANT_URL", ""))
@@ -170,11 +171,11 @@ def _instantiate(backend_name: str, mem_cfg: dict, env_ollama: str, env_qdrant: 
 def _warn_install(backend: str, packages: str) -> None:
     print(f"❌ Backend {backend} : dépendances manquantes")
     print(f"   → pip install {packages}")
-    print(f"   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")
+    print("   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")
 
 
 def _warn_connection(backend: str, url: str, err: Exception) -> None:
     print(f"⚠️  Backend {backend} inaccessible ({err})")
     print(f"   → URL tentée : {url}")
-    print(f"   → Vérifier Grimoire_OLLAMA_URL / Grimoire_QDRANT_URL ou lancer le service")
-    print(f"   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")
+    print("   → Vérifier Grimoire_OLLAMA_URL / Grimoire_QDRANT_URL ou lancer le service")
+    print("   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")

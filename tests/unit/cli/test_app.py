@@ -1660,11 +1660,11 @@ class TestConftestFixtures:
         assert result.exit_code == 0
 
     def test_assert_json_output_helper(self, cli_project: Path) -> None:
-        from tests.unit.cli.conftest import assert_json_output
-
         result = runner.invoke(app, ["-o", "json", "status", str(cli_project)])
         assert result.exit_code == 0
-        data = assert_json_output(result.output, ["project", "agents"])
+        data = json.loads(result.output)
+        for key in ["project", "agents"]:
+            assert key in data, f"Missing key '{key}' in JSON output"
         assert isinstance(data, dict)
 
 

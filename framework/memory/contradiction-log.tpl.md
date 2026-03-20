@@ -29,7 +29,7 @@
 
 ```
 | 2026-02-23 | gopher | "SQLite in-memory pour les tests" | "SQLite fichier :memory: pour les tests" | ✅ résolu | Mémoire #42 archivée — les deux disent la même chose différemment |
-| 2026-02-22 | sakura | "Theme: dark mode via CSS var --bg-primary" | "Theme: dark mode via Tailwind dark: prefix" | ⚠️ escaladé | Décision architecturale → Atlas consulté |
+| 2026-02-22 | sakura | "Theme: dark mode via CSS var --bg-primary" | "Theme: dark mode via Tailwind dark: prefix" | escaladé | Décision architecturale → Atlas consulté |
 ```
 
-**Statuts** : `⏳ actif` | `✅ résolu` | `⚠️ escaladé` | `🗃️ archivé`
+**Statuts** : `⏳ actif` | `✅ résolu` | `escaladé` | `🗃️ archivé`

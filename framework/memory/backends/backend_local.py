@@ -6,12 +6,12 @@ Parfait pour débuter ou si aucune dépendance supplémentaire n'est souhaitée.
 """
 
 from __future__ import annotations
+
 import json
 import re
 import time
 import uuid
 from pathlib import Path
-
 
 _MEMORY_DIR = Path(__file__).resolve().parent.parent.parent / "memory"
 _MEMORY_FILE = _MEMORY_DIR / "memory.json"
