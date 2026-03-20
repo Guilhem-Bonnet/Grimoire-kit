@@ -410,7 +410,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 | **HUP (BM-50)** | Les sub-agents utilisent HUP → escaladent vers SOG |
 | **QEC (BM-51)** | SOG héberge le Question Buffer → agrège et présente |
 | **CVTL (BM-52)** | SOG déclenche les cross-validations → agrège les trust scores |
-| **Subagent (BM-19)** | SOG utilise l'orchestration subagent pour le dispatch parallèle |
+| **Subagent (BM-19)** | SOG utilise l'orchestration subagent pour le dispatch parallèle — en VS Code Copilot : synchrone, isolation de contexte (voir § Runtime) |
 | **Boomerang (BM-11)** | SOG peut déclencher un boomerang pour les tâches multi-step |
 | **A2A (BM-32)** | SOG peut dispatcher vers des agents externes via A2A |
 | **Grimoire Trace (BM-28)** | SOG logge chaque étape dans la trace |
@@ -518,5 +518,73 @@ Orchestrateur → Guilhem :
    🛡️ Trust: 91/100 | Produit par 💻 Amelia | Validé par 🏗️ Winston"
 ```
 
+
+---
+
+## ⚙️ Runtime VS Code Copilot — Comportement Réel
+
+> **Validé le 2026-03-20** par test en conditions réelles.
+
+L'architecture SOG est conçue pour une plateforme multi-agent native. Dans le runtime **VS Code Copilot Chat**, les contraintes suivantes s'appliquent :
+
+### `runSubagent` — Synchrone, pas parallèle
+
+| Aspect | Design idéal (natif) | Réalité VS Code Copilot |
+|---|---|---|
+| **Exécution** | Parallèle (BM-19 DAG) | **Séquentielle** — bloquant, attend le résultat |
+| **Isolation** | Contexte séparé ✅ | Contexte séparé ✅ |
+| **Accès tools** | Tous tools disponibles ✅ | Tous tools disponibles ✅ |
+| **Résultat** | Stream + agrégation | String renvoyée à l'appelant |
+| **Latence** | Réduite par parallélisme | Identique à une exécution directe |
+
+**Ce qui est réel et utile :**
+- ✅ `runSubagent` fonctionne — isole le contexte, évite la saturation de tokens sur les tâches longues
+- ✅ Le persona (Amelia = dev, Paige = tech-writer) a un impact réel sur la qualité — instructions système différentes = comportement différent
+- ✅ Idéal pour : exploration longue, rédaction complète d'un document, analyse exhaustive d'un codebase
+
+**Ce qui ne s'applique pas dans ce runtime :**
+- ❌ Pas de parallélisme agent-vs-agent (les dispatch `mode: parallel` s'exécutent séquentiellement)
+- ❌ BM-19, HPE (BM-58), AMN (BM-55) = patterns architecturaux pour plateformes natives
+
+### Parallélisme réel disponible : les Tool Calls
+
+LE vrai gain de performance dans ce runtime vient des **tool calls parallèles** :
+
+```yaml
+# ✅ EFFICACE — lancés simultanément par l'IDE
+- read_file(file_a)
+- read_file(file_b)
+- grep_search(pattern)
+- file_search(glob)
+
+# ❌ JAMAIS en parallèle
+- run_in_terminal  # terminal partagé, séquentiel obligatoire
+```
+
+### Politique de dispatch SOG pour VS Code Copilot
+
+```yaml
+dispatch_policy_vscode_copilot:
+  prefer_direct_execution:
+    when: "tâche < 3 étapes indépendantes"
+    rationale: "runSubagent ajoute de la latence sans gain réel pour les petites tâches"
+  
+  use_runSubagent_when:
+    - "tâche > 500 tokens de contexte → évite saturation du contexte principal"
+    - "persona spécialisé nécessaire (Paige pour doc complexe, Murat pour test archi)"
+    - "exploration exhaustive d'un codebase (agent Explore)"
+    - "tâche de rédaction complète autonome"
+  
+  parallelize_tool_calls:
+    always: true
+    pattern: "Batch toutes les lectures/recherches indépendantes dans un seul bloc"
+    examples:
+      - "lire 5 fichiers → 1 seul bloc de 5 read_file simultanés"
+      - "chercher 3 patterns → 1 seul bloc de 3 grep_search simultanés"
+  
+  sequential_subagents:
+    accept_as_normal: true
+    note: "Le gain est dans l'isolation de contexte et la spécialisation, pas la vitesse"
+```
 
 *BM-53 Smart Orchestrator Gateway | framework/orchestrator-gateway.md*
