@@ -350,8 +350,9 @@ This is a recent decision that should be kept.
             content="This is the first sentence.\n- Item one\n- Item two\n\nConclusion.",
         )
         summary = cs._extractive_summary(section)
-        self.assertIn("first sentence", summary)
+        # Items de liste toujours inclus (prioritaires sur la prose TF-IDF)
         self.assertIn("Item one", summary)
+        self.assertIn("Item two", summary)
 
     def test_extractive_summary_with_decisions(self):
         cs = self.mod.ContextSummarizer(self.tmpdir)
@@ -508,7 +509,7 @@ class TestAutoPrune(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(self.mod.CONTEXT_SUMMARIZER_VERSION, "1.1.0")
+        self.assertEqual(self.mod.CONTEXT_SUMMARIZER_VERSION, "1.2.0")
 
     def test_auto_prune_threshold_constant(self):
         self.assertEqual(self.mod.AUTO_PRUNE_THRESHOLD, 0.80)

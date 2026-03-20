@@ -32,16 +32,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-CONTEXT_SUMMARIZER_VERSION = "1.1.0"
+CONTEXT_SUMMARIZER_VERSION = "1.2.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,66 @@ MEMORY_DIR = "_grimoire/_memory"
 
 # Sections à préserver intégralement même si anciennes
 DEFAULT_PRESERVE_TAGS = ["critical", "architecture", "security", "breaking"]
+
+# ── TF-IDF Helpers (stdlib only) ─────────────────────────────────────────────
+
+_CS_STOPWORDS: frozenset[str] = frozenset({
+    # Français
+    "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou", "est",
+    "en", "à", "au", "aux", "ce", "se", "ne", "il", "je", "tu", "nous",
+    "vous", "ils", "elles", "que", "qui", "dont", "où", "si", "car",
+    "par", "sur", "sous", "dans", "avec", "sans", "pour", "plus", "très",
+    "bien", "lors", "tout", "tous", "pas", "non", "mais", "donc",
+    "après", "avant", "entre", "pendant", "cette", "cet", "ces",
+    # Anglais
+    "the", "a", "an", "and", "or", "is", "of", "to", "in", "for",
+    "that", "this", "with", "are", "as", "at", "be", "by", "from", "it",
+    "its", "was", "has", "have", "not", "but", "they", "their", "been",
+    "also", "each", "than", "then", "when", "will", "can", "may", "should",
+    "which", "what", "how", "all", "any", "some", "our", "your", "his",
+})
+
+_CS_TOKEN_RE = re.compile(r"\b[a-zA-ZÀ-ÿ]{3,}\b")
+_CS_HTML_TAG_RE = re.compile(r"^<[a-zA-Z/]")
+
+
+def _cs_tokenize(text: str) -> list[str]:
+    """Tokenise un texte en mots significatifs (≥3 chars, hors stopwords)."""
+    return [t for t in _CS_TOKEN_RE.findall(text.lower()) if t not in _CS_STOPWORDS]
+
+
+def _cs_is_content(s: str) -> bool:
+    """True si la ligne est du texte analysable (pas table/HTML)."""
+    return bool(s and not s.startswith("|") and not _CS_HTML_TAG_RE.match(s))
+
+
+def _cs_tfidf_rank(sentences: list[str]) -> list[tuple[float, str]]:
+    """Classe des phrases par score TF-IDF (stdlib pure).
+
+    score(s) = sum_t( tf(t,s) * log((N+1)/(df(t)+1)) ) / log(|tokens|+2)
+    Normalisation par longueur pour éviter le biais vers les phrases longues.
+    """
+    if not sentences:
+        return []
+    n = len(sentences)
+    tokenized = [_cs_tokenize(s) for s in sentences]
+    df: Counter[str] = Counter()
+    for tokens in tokenized:
+        df.update(set(tokens))
+    scored: list[tuple[float, str]] = []
+    for sent, tokens in zip(sentences, tokenized, strict=False):
+        if len(tokens) < 3:
+            scored.append((0.0, sent))
+            continue
+        tf = Counter(tokens)
+        score = sum(
+            (tf[t] / len(tokens)) * math.log((n + 1) / (df[t] + 1))
+            for t in tf
+        )
+        score /= math.log(len(tokens) + 2)
+        scored.append((score, sent))
+    return sorted(scored, key=lambda x: -x[0])
+
 
 # Patterns de date dans les headings
 DATE_PATTERNS = [
@@ -249,52 +311,67 @@ class ContextSummarizer:
 
     def _extractive_summary(self, section: Section) -> str:
         """
-        Résumé extractif — extrait les phrases clés sans LLM.
+        Résumé extractif TF-IDF — sélectionne les phrases les plus informatives.
 
-        Stratégie : garder la première phrase, les items de liste,
-        les décisions (mots-clés), et les conclusions.
+        Stratégie :
+        1. Items de liste (- / *) → toujours inclus (déjà condensés)
+        2. Prose : classer par score TF-IDF + boost mots-clés décisionnels
+        3. Sélectionner dans l'ordre score DESC jusqu'à épuiser le budget tokens
         """
         content = section.content
         lines = content.split("\n")
-        summary_lines: list[str] = []
         max_chars = self.max_summary_tokens * CHARS_PER_TOKEN
 
-        # Première phrase (souvent le TL;DR)
-        first_sentence = ""
+        list_items: list[str] = []
+        prose_candidates: list[str] = []
+        in_code_block = False
+
         for line in lines:
             stripped = line.strip()
-            if stripped and not stripped.startswith("#") and not stripped.startswith(">"):
-                first_sentence = stripped[:200]
-                break
-
-        if first_sentence:
-            summary_lines.append(first_sentence)
-
-        # Items de liste (contiennent souvent l'info clé)
-        for line in lines:
-            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                continue
+            if in_code_block or stripped.startswith(("#", ">")):
+                continue
+            if not stripped:
+                continue
             if stripped.startswith(("- ", "* ")):
-                summary_lines.append(stripped[:150])
+                list_items.append(stripped)
+            elif _cs_is_content(stripped) and len(stripped) > 15:
+                prose_candidates.append(stripped)
 
-        # Phrases avec mots-clés décisionnels
-        decision_keywords = {
+        if not list_items and not prose_candidates:
+            return content[:max_chars] + ("…" if len(content) > max_chars else "")
+
+        # Scorer la prose par TF-IDF + boost décisionnel
+        ranked_prose = _cs_tfidf_rank(prose_candidates)
+        _decision_kw = (
             "décidé", "choisi", "adopté", "rejeté", "validé", "approuvé",
             "decided", "chose", "adopted", "rejected", "approved",
             "raison", "because", "parce que", "conclusion",
-        }
-        for line in lines:
-            stripped = line.strip()
-            lower = stripped.lower()
-            if any(kw in lower for kw in decision_keywords):
-                if stripped not in summary_lines:
-                    summary_lines.append(stripped[:150])
+        )
+        boosted_prose = sorted(
+            [
+                (score + (0.5 if any(kw in sent.lower() for kw in _decision_kw) else 0.0), sent)
+                for score, sent in ranked_prose
+            ],
+            key=lambda x: -x[0],
+        )
 
-        # Tronquer au budget
-        result = "\n".join(summary_lines)
-        if len(result) > max_chars:
-            result = result[:max_chars] + "…"
+        # Combiner : items de liste en premier, puis prose scorée
+        combined: list[str] = list_items + [s for _, s in boosted_prose]
 
-        return result
+        # Sélectionner jusqu'au budget (chaque ligne tronquée à 150 chars)
+        result_lines: list[str] = []
+        total_chars = 0
+        for sent in combined:
+            truncated = sent[:150]
+            if total_chars + len(truncated) + 1 > max_chars:
+                break
+            result_lines.append(truncated)
+            total_chars += len(truncated) + 1
+
+        return "\n".join(result_lines)
 
     def _detect_file_type(self, filename: str) -> str:
         """Détecte le type de fichier mémoire."""
