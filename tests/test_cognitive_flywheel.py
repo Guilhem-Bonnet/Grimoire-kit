@@ -454,10 +454,13 @@ class TestCLIIntegration(unittest.TestCase):
     def test_version(self):
         r = subprocess.run(
             [sys.executable, str(TOOL), "--version"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30,
+            env={**__import__("os").environ, "COLUMNS": "200"},
         )
         self.assertEqual(r.returncode, 0)
-        self.assertIn("cognitive-flywheel", r.stdout.lower() + r.stderr.lower())
+        # Normalise les retours à la ligne provoqués par le wrapping argparse
+        normalized = " ".join((r.stdout + r.stderr).split()).lower()
+        self.assertIn("cognitive-flywheel", normalized)
 
     def test_analyze_on_empty_project(self):
         tmpdir = Path(tempfile.mkdtemp())
