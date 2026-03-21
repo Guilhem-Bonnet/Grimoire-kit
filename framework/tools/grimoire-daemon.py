@@ -441,7 +441,7 @@ def mcp_grimoire_daemon(
     project_root: str,
     action: str = "status",
 ) -> dict:
-    """MCP tool ``bmad_grimoire_daemon`` — statut et contrôle du daemon.
+    """MCP tool ``grimoire_grimoire_daemon`` — statut et contrôle du daemon.
 
     Args:
         project_root: Racine du projet.

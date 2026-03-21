@@ -12,18 +12,18 @@ Deux modes d'exposition :
      et les expose automatiquement via un dispatcher générique
 
 Tools legacy (Lot 1) :
-  - bmad_route_request, bmad_classify_task, bmad_router_stats
-  - bmad_rag_search, bmad_rag_augment, bmad_rag_status
-  - bmad_memory_push, bmad_memory_diff
+  - grimoire_route_request, grimoire_classify_task, grimoire_router_stats
+  - grimoire_rag_search, grimoire_rag_augment, grimoire_rag_status
+  - grimoire_memory_push, grimoire_memory_diff
 
 Tools auto-discovered (Lots 2-4) :
-  - bmad_context_budget, bmad_orchestrate, bmad_agent_worker
-  - bmad_message_bus_send, bmad_message_bus_status
-  - bmad_conversation_branch, bmad_conversation_history
-  - bmad_context_merge, bmad_background_task
-  - bmad_validate_contract, bmad_list_contracts
-  - bmad_synapse_config, bmad_synapse_trace
-  - bmad_synapse_dashboard
+  - grimoire_context_budget, grimoire_orchestrate, grimoire_agent_worker
+  - grimoire_message_bus_send, grimoire_message_bus_status
+  - grimoire_conversation_branch, grimoire_conversation_history
+  - grimoire_context_merge, grimoire_background_task
+  - grimoire_validate_contract, grimoire_list_contracts
+  - grimoire_synapse_config, grimoire_synapse_trace
+  - grimoire_synapse_dashboard
 
 Transport : stdio (standard MCP)
 
@@ -52,7 +52,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-_log = logging.getLogger("grimoire.bmad_mcp_tools")
+_log = logging.getLogger("grimoire.mcp_tools")
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -267,9 +267,9 @@ def _extract_tool_info(func) -> dict:
     """
     sig = inspect.signature(func)
     doc = inspect.getdoc(func) or ""
-    # MCP name: mcp_orchestrate → bmad_orchestrate
+    # MCP name: mcp_orchestrate → grimoire_orchestrate
     func_name = func.__name__
-    tool_name = func_name.replace("mcp_", "bmad_")
+    tool_name = func_name.replace("mcp_", "grimoire_")
 
     properties = {}
     required = []
@@ -413,9 +413,9 @@ def _call_discovered_tool(tool_name: str, args: dict) -> str:
 def get_all_tool_names() -> list[str]:
     """Retourne la liste de TOUS les outils MCP (legacy + discovered)."""
     legacy = [
-        "bmad_route_request", "bmad_classify_task", "bmad_router_stats",
-        "bmad_rag_search", "bmad_rag_augment", "bmad_rag_status",
-        "bmad_memory_push", "bmad_memory_diff",
+        "grimoire_route_request", "grimoire_classify_task", "grimoire_router_stats",
+        "grimoire_rag_search", "grimoire_rag_augment", "grimoire_rag_status",
+        "grimoire_memory_push", "grimoire_memory_diff",
     ]
     discovered = list(discover_synapse_tools().keys())
     return legacy + discovered
@@ -438,7 +438,7 @@ def create_server():
         )
         sys.exit(1)
 
-    server = Server("bmad-intelligence")
+    server = Server("grimoire-intelligence")
 
     # ── Tool Definitions ─────────────────────────────────────────────────
 
@@ -446,7 +446,7 @@ def create_server():
     async def list_tools() -> list[Tool]:
         legacy_tools = [
             Tool(
-                name="bmad_route_request",
+                name="grimoire_route_request",
                 description=(
                     "Route une requête agent vers le modèle LLM optimal. "
                     "Retourne le modèle recommandé, le fallback, la complexité, "
@@ -468,7 +468,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_classify_task",
+                name="grimoire_classify_task",
                 description=(
                     "Classifie la complexité d'une tâche "
                     "(trivial/standard/complex/expert) et son type "
@@ -491,7 +491,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_router_stats",
+                name="grimoire_router_stats",
                 description=(
                     "Retourne les statistiques d'utilisation du LLM Router : "
                     "requêtes par modèle, coûts estimés, recommandations."
@@ -508,7 +508,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_rag_search",
+                name="grimoire_rag_search",
                 description=(
                     "Recherche sémantique dans l'index Qdrant Grimoire. "
                     "Retourne les chunks les plus pertinents avec scores et metadata."
@@ -540,7 +540,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_rag_augment",
+                name="grimoire_rag_augment",
                 description=(
                     "Augmente un prompt avec du contexte RAG pertinent. "
                     "Retourne le prompt enrichi avec les chunks Qdrant les plus pertinents."
@@ -562,7 +562,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_rag_status",
+                name="grimoire_rag_status",
                 description=(
                     "État des collections Qdrant : nombre de chunks indexés, "
                     "modèle d'embedding, santé du système RAG."
@@ -573,7 +573,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_memory_push",
+                name="grimoire_memory_push",
                 description=(
                     "Synchronise les fichiers mémoire Grimoire (decisions-log, learnings, "
                     "failure-museum) vers Qdrant. Push uniquement les fichiers modifiés."
@@ -594,7 +594,7 @@ def create_server():
                 },
             ),
             Tool(
-                name="bmad_memory_diff",
+                name="grimoire_memory_diff",
                 description=(
                     "Affiche les différences entre les fichiers mémoire MD et l'index Qdrant. "
                     "Montre les fichiers modifiés, nouveaux ou synchronisés."
@@ -654,14 +654,14 @@ def _handle_tool(name: str, args: dict) -> str:
         _audit_log(name, args, "", "rate_limited", 0.0)
         return rl_error
 
-    if name == "bmad_route_request":
+    if name == "grimoire_route_request":
         router = _get_router()
         if not router:
             return "❌ LLM Router non disponible (llm-router.py introuvable)"
         decision = router.route(args["prompt"], args.get("agent", ""))
         result = json.dumps(asdict(decision), ensure_ascii=False, indent=2)
 
-    elif name == "bmad_classify_task":
+    elif name == "grimoire_classify_task":
         mod = _import_tool("llm-router.py", "llm_router_mcp")
         if not mod:
             return "❌ LLM Router non disponible"
@@ -669,7 +669,7 @@ def _handle_tool(name: str, args: dict) -> str:
         _res = classifier.classify(args["prompt"], args.get("agent", ""))
         result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
 
-    elif name == "bmad_router_stats":
+    elif name == "grimoire_router_stats":
         router = _get_router()
         if not router:
             return "❌ LLM Router non disponible"
@@ -679,7 +679,7 @@ def _handle_tool(name: str, args: dict) -> str:
             output["recommendations"] = router.get_recommendations()
         result = json.dumps(output, ensure_ascii=False, indent=2)
 
-    elif name == "bmad_rag_search":
+    elif name == "grimoire_rag_search":
         retriever = _get_retriever()
         if not retriever:
             # Fallback file-based
@@ -710,7 +710,7 @@ def _handle_tool(name: str, args: dict) -> str:
 
             result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
 
-    elif name == "bmad_rag_augment":
+    elif name == "grimoire_rag_augment":
         retriever = _get_retriever()
         if not retriever:
             result = json.dumps({
@@ -733,7 +733,7 @@ def _handle_tool(name: str, args: dict) -> str:
                 "fallback_used": aug.retrieval.fallback_used,
             }, ensure_ascii=False, indent=2)
 
-    elif name == "bmad_rag_status":
+    elif name == "grimoire_rag_status":
         retriever = _get_retriever()
         if not retriever:
             result = json.dumps({"error": "RAG non disponible", "qdrant_reachable": False})
@@ -741,7 +741,7 @@ def _handle_tool(name: str, args: dict) -> str:
             report = retriever.preflight()
             result = json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
-    elif name == "bmad_memory_push":
+    elif name == "grimoire_memory_push":
         syncer = _get_syncer()
         if not syncer:
             result = "❌ Memory Sync non disponible"
@@ -752,7 +752,7 @@ def _handle_tool(name: str, args: dict) -> str:
             )
             result = json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
-    elif name == "bmad_memory_diff":
+    elif name == "grimoire_memory_diff":
         syncer = _get_syncer()
         if not syncer:
             result = "❌ Memory Sync non disponible"
@@ -790,14 +790,14 @@ def main():
 
     if "--help" in sys.argv or "-h" in sys.argv:
         legacy_names = [
-            ("bmad_route_request", "Route une requête vers le modèle LLM optimal"),
-            ("bmad_classify_task", "Classifie la complexité d'une tâche"),
-            ("bmad_router_stats", "Stats d'utilisation du router"),
-            ("bmad_rag_search", "Recherche sémantique Qdrant"),
-            ("bmad_rag_augment", "Augmente un prompt avec contexte RAG"),
-            ("bmad_rag_status", "État des collections Qdrant"),
-            ("bmad_memory_push", "Push mémoire MD → Qdrant"),
-            ("bmad_memory_diff", "Diff MD vs Qdrant"),
+            ("grimoire_route_request", "Route une requête vers le modèle LLM optimal"),
+            ("grimoire_classify_task", "Classifie la complexité d'une tâche"),
+            ("grimoire_router_stats", "Stats d'utilisation du router"),
+            ("grimoire_rag_search", "Recherche sémantique Qdrant"),
+            ("grimoire_rag_augment", "Augmente un prompt avec contexte RAG"),
+            ("grimoire_rag_status", "État des collections Qdrant"),
+            ("grimoire_memory_push", "Push mémoire MD → Qdrant"),
+            ("grimoire_memory_diff", "Diff MD vs Qdrant"),
         ]
         discovered = discover_synapse_tools()
         print(f"""Grimoire MCP Tools Server v{Grimoire_MCP_TOOLS_VERSION}
@@ -821,7 +821,7 @@ Total : {8 + len(discovered)} tools
 Configuration MCP (VS Code mcp.json) :
   {{
     "servers": {{
-      "bmad-intelligence": {{
+      "grimoire-intelligence": {{
         "command": "python3",
         "args": ["{Path(__file__).resolve()}"],
         "env": {{ "Grimoire_PROJECT_ROOT": "{PROJECT_ROOT}" }}
@@ -834,9 +834,9 @@ Configuration MCP (VS Code mcp.json) :
     # Mode test : --list-tools (pas besoin du SDK MCP)
     if "--list-tools" in sys.argv:
         legacy_list = [
-            "bmad_route_request", "bmad_classify_task", "bmad_router_stats",
-            "bmad_rag_search", "bmad_rag_augment", "bmad_rag_status",
-            "bmad_memory_push", "bmad_memory_diff",
+            "grimoire_route_request", "grimoire_classify_task", "grimoire_router_stats",
+            "grimoire_rag_search", "grimoire_rag_augment", "grimoire_rag_status",
+            "grimoire_memory_push", "grimoire_memory_diff",
         ]
         print("Legacy Tools:")
         for t in legacy_list:

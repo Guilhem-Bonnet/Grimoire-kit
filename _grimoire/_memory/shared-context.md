@@ -1,11 +1,11 @@
-# Contexte Partagé — bmad-custom-kit
+# Contexte Partagé — grimoire-kit
 
 > Ce fichier est chargé par tous les agents au démarrage.
 > Il contient les informations essentielles du projet.
 
 ## Projet
 
-- **Nom** : bmad-custom-kit
+- **Nom** : grimoire-kit
 - **Type** : À compléter
 - **Stack** : À compléter
 

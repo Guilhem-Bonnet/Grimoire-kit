@@ -401,7 +401,7 @@ def mcp_synapse_trace(
     output_format: str = "json",
 ) -> dict:
     """
-    MCP tool ``bmad_synapse_trace`` — gère la traçabilité Synapse.
+    MCP tool ``grimoire_synapse_trace`` — gère la traçabilité Synapse.
 
     Actions: status, search, export, clear
     """

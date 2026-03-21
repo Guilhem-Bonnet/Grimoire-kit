@@ -365,7 +365,7 @@ def mcp_tool_advisor(
     action: str = "suggest",
     context: str = "",
 ) -> dict:
-    """MCP tool ``bmad_tool_advisor`` — conseil proactif d'outils.
+    """MCP tool ``grimoire_tool_advisor`` — conseil proactif d'outils.
 
     Args:
         project_root: Racine du projet.

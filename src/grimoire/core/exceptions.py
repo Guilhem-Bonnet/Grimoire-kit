@@ -46,7 +46,7 @@ class GrimoireError(Exception):
 
 
 class GrimoireConfigError(GrimoireError):
-    """Invalid or missing ``bmad.yaml`` configuration.
+    """Invalid or missing ``project-context.yaml`` configuration.
 
     Raised when the config file cannot be parsed, contains unknown keys,
     or fails schema validation.
@@ -64,7 +64,7 @@ class GrimoireProjectError(GrimoireError):
 class GrimoireAgentError(GrimoireError):
     """Agent not found, persona invalid, or activation failure.
 
-    Raised when an agent referenced in ``bmad.yaml`` cannot be loaded
+    Raised when an agent referenced in ``project-context.yaml`` cannot be loaded
     from built-in archetypes, the registry, or custom paths.
     """
 

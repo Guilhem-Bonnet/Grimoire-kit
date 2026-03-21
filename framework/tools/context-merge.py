@@ -487,7 +487,7 @@ def mcp_context_merge(
     force: bool = False,
 ) -> dict:
     """
-    MCP tool `bmad_context_merge` — diff et merge de branches.
+    MCP tool `grimoire_context_merge` — diff et merge de branches.
     """
     root = Path(project_root).resolve()
     merger = ContextMerger(root)

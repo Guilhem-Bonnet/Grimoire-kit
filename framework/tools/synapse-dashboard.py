@@ -494,7 +494,7 @@ def _collect_registry(project_root: Path) -> SectionResult:
 def _collect_mcp(project_root: Path) -> SectionResult:
     """Section MCP Server — outils exposés."""
     start = time.monotonic()
-    mod = _import_tool("grimoire-mcp-tools.py", "bmad_mcp_dash")
+    mod = _import_tool("grimoire-mcp-tools.py", "grimoire_mcp_dash")
     if not mod:
         return SectionResult(name="mcp", status="unavailable", error="grimoire-mcp-tools.py introuvable")
 

@@ -443,7 +443,7 @@ def mcp_conversation_history(
     top_k: int = DEFAULT_TOP_K,
 ) -> dict:
     """
-    MCP tool `bmad_conversation_history` — historique conversationnel.
+    MCP tool `grimoire_conversation_history` — historique conversationnel.
     """
     root = Path(project_root).resolve()
     manager = ConversationHistoryManager(root)

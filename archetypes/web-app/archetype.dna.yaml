@@ -29,11 +29,11 @@ traits:
     agents_affected: [frontend-specialist, pixel]
   - name: tool-resolve-first
     description: "Résolution d'outils avant toute opération externe"
-    rule: "Avant toute opération nécessitant un outil externe (linter, test runner, build, browser), appeler bmad_tool_resolve pour vérifier disponibilité et alternatives."
+    rule: "Avant toute opération nécessitant un outil externe (linter, test runner, build, browser), appeler grimoire_tool_resolve pour vérifier disponibilité et alternatives."
     agents_affected: "*"
   - name: web-aware
     description: "Accès web intuitif pour vérification et debug"
-    rule: "Les agents peuvent naviguer le web via bmad_web_fetch / bmad_web_screenshot / bmad_web_readability pour checker des endpoints, vérifier l'UI ou consulter des docs. Toujours disponible via urllib fallback."
+    rule: "Les agents peuvent naviguer le web via grimoire_web_fetch / grimoire_web_screenshot / grimoire_web_readability pour checker des endpoints, vérifier l'UI ou consulter des docs. Toujours disponible via urllib fallback."
     agents_affected: [frontend-specialist, fullstack-dev]
 
 constraints:

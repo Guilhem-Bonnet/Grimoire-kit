@@ -338,7 +338,7 @@ def mcp_failure_museum_check(
     project_root: str,
     description: str = "",
 ) -> dict:
-    """MCP tool ``bmad_failure_museum_check`` — vérifie un changement contre l'historique.
+    """MCP tool ``grimoire_failure_museum_check`` — vérifie un changement contre l'historique.
 
     Retourne les échecs passés similaires pour éviter de répéter les mêmes erreurs.
 
@@ -388,7 +388,7 @@ def mcp_failure_museum_check(
 
 
 def mcp_failure_museum_lessons(project_root: str) -> dict:
-    """MCP tool ``bmad_failure_museum_lessons`` — extrait les règles/leçons apprises.
+    """MCP tool ``grimoire_failure_museum_lessons`` — extrait les règles/leçons apprises.
 
     Returns:
         dict avec ``status`` et ``lessons`` (liste de règles).

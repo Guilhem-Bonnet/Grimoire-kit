@@ -49,7 +49,7 @@ print(ctx.stack)
 from grimoire.core.resolver import PathResolver
 
 resolver = PathResolver(project_root=Path("."))
-print(resolver.bmad_dir)         # _grimoire/
+print(resolver.grimoire_dir)         # _grimoire/
 print(resolver.config_dir)       # _grimoire/_config/
 print(resolver.memory_dir)       # _grimoire/_memory/
 print(resolver.agents_dir)       # _grimoire/_config/agents/

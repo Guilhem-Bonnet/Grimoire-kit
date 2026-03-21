@@ -401,7 +401,7 @@ def mcp_conversation_branch(
     purpose: str = "",
 ) -> dict:
     """
-    MCP tool `bmad_conversation_branch` — gère les branches de conversation.
+    MCP tool `grimoire_conversation_branch` — gère les branches de conversation.
     """
     root = Path(project_root).resolve()
     manager = BranchManager(root)

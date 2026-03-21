@@ -91,7 +91,7 @@ def plan_upgrade(project_root: Path) -> UpgradePlan:
     # v2 → v3 migration plan
     _extract_v2_config(project_root)  # validate readable
 
-    # 1. Generate bmad section in project-context.yaml
+    # 1. Generate grimoire section in project-context.yaml
     plan.actions.append(UpgradeAction(
         kind="generate-file",
         description="Add 'grimoire' section to project-context.yaml (v3 config)",

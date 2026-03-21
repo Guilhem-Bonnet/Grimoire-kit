@@ -515,7 +515,7 @@ def mcp_synapse_config(
     action: str = "show",
 ) -> dict:
     """
-    MCP tool ``bmad_synapse_config`` — gère la configuration Synapse.
+    MCP tool ``grimoire_synapse_config`` — gère la configuration Synapse.
 
     Actions: show, validate, generate, generate-mcp
     """

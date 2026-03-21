@@ -37,11 +37,11 @@ traits:
     agents_affected: [blender-expert, illustration-expert]
   - name: tool-resolve-first
     description: "Résolution d'outils avant toute opération externe"
-    rule: "Avant toute opération nécessitant un outil externe (MCP, CLI, package), appeler bmad_tool_resolve pour identifier et vérifier les outils disponibles. Ne pas assumer la disponibilité d'un outil sans check."
+    rule: "Avant toute opération nécessitant un outil externe (MCP, CLI, package), appeler grimoire_tool_resolve pour identifier et vérifier les outils disponibles. Ne pas assumer la disponibilité d'un outil sans check."
     agents_affected: "*"
   - name: web-aware
     description: "Accès web intuitif pour recherche et vérification"
-    rule: "Les agents peuvent naviguer le web via bmad_web_fetch / bmad_web_screenshot / bmad_web_readability pour rechercher des références, vérifier des sources, ou capturer des états visuels. Toujours disponible via urllib fallback."
+    rule: "Les agents peuvent naviguer le web via grimoire_web_fetch / grimoire_web_screenshot / grimoire_web_readability pour rechercher des références, vérifier des sources, ou capturer des états visuels. Toujours disponible via urllib fallback."
     agents_affected: "*"
 
 constraints:

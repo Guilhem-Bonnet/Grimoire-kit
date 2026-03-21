@@ -1,4 +1,4 @@
-# Log des Contradictions — bmad-custom-kit
+# Log des Contradictions — grimoire-kit
 
 > Mis à jour automatiquement par `maintenance.py memory-audit` et par les agents via mem0-bridge.
 > Une contradiction = deux mémoires incompatibles sur le même sujet.

@@ -100,7 +100,7 @@ Les agents loguent les événements critiques via le format standardisé :
 
 ```bash
 # Fonction bash helper (disponible dans grimoire-init.sh comme utilitaire)
-bmad_trace() {
+grimoire_trace() {
     local agent="$1"   # ex: "dev/Amelia"
     local type="$2"    # ex: "DECISION"
     local payload="$3" # ex: "Utilisé JWT — raison: scalabilité"
@@ -119,7 +119,7 @@ import os
 
 TRACE_FILE = "_grimoire-output/Grimoire_TRACE.md"
 
-def bmad_trace(agent: str, event_type: str, payload: str):
+def grimoire_trace(agent: str, event_type: str, payload: str):
     ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     line = f"[{ts}] [{agent}] [{event_type}] {payload}\n"
     os.makedirs(os.path.dirname(TRACE_FILE), exist_ok=True)
@@ -185,10 +185,10 @@ Chaque `remember` et `recall` est automatiquement tracé :
 
 ```python
 # Dans cmd_remember() :
-bmad_trace("mem0-bridge", "REMEMBER", f"type: {memory_type} | agent: {agent_id} | \"{text[:60]}...\"")
+grimoire_trace("mem0-bridge", "REMEMBER", f"type: {memory_type} | agent: {agent_id} | \"{text[:60]}...\"")
 
 # Dans cmd_recall() :
-bmad_trace("mem0-bridge", "RECALL", f"type: {memory_type} | query: \"{query[:60]}\" | results: {len(results)}")
+grimoire_trace("mem0-bridge", "RECALL", f"type: {memory_type} | query: \"{query[:60]}\" | results: {len(results)}")
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

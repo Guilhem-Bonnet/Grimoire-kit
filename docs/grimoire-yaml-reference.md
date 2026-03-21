@@ -27,7 +27,7 @@ user:
 
 memory:
   backend: "auto"
-  collection_prefix: "bmad"
+  collection_prefix: "grimoire"
   embedding_model: ""
   qdrant_url: ""
   ollama_url: ""
@@ -73,7 +73,7 @@ agents:
 | Clé | Type | Défaut | Description |
 |-----|------|--------|-------------|
 | `backend` | enum | `"auto"` | Backend mémoire |
-| `collection_prefix` | string | `"bmad"` | Préfixe des collections |
+| `collection_prefix` | string | `"grimoire"` | Préfixe des collections |
 | `embedding_model` | string | `""` | Modèle d'embedding (optionnel) |
 | `qdrant_url` | string | `""` | URL Qdrant (mode `qdrant-server`) |
 | `ollama_url` | string | `""` | URL Ollama (mode `ollama`) |

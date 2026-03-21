@@ -265,7 +265,7 @@ def mcp_grimoire_log(
     query: str = "",
     lines: int = 30,
 ) -> dict:
-    """MCP tool ``bmad_grimoire_log`` — consulter les logs structurés.
+    """MCP tool ``grimoire_grimoire_log`` — consulter les logs structurés.
 
     Args:
         project_root: Racine du projet.

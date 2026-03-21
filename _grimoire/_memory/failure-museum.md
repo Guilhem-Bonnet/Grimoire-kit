@@ -1,4 +1,4 @@
-# 🏛️ Failure Museum — bmad-custom-kit
+# 🏛️ Failure Museum — grimoire-kit
 
 > **Principe** : Chaque échec instruit. Ce document capture les erreurs les plus significatives
 > du projet pour que chaque agent les consulte au démarrage et apprenne AVANT de répéter.
@@ -80,4 +80,4 @@
 ---
 
 *Template Grimoire Custom Kit — BM-03 Failure Museum | framework/memory/failure-museum.tpl.md*
-*Initialisé le : 2026-03-19 — Projet : bmad-custom-kit*
+*Initialisé le : 2026-03-19 — Projet : grimoire-kit*

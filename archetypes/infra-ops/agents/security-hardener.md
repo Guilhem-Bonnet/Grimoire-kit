@@ -33,7 +33,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>IMPACT CHECK : avant toute modification de TLS, secrets, firewall, RBAC, consulter {project-root}/_grimoire/_memory/dependency-graph.md section "Matrice d'Impact" pour identifier les agents à notifier.</r>
       <r>PROTOCOLE PHOENIX↔VAULT : collaboration sur la sécurisation des clés age hors-site et le chiffrement des exports de backup.</r>
       <r>🔎 OSS-FIRST : Avant d'implémenter une solution custom (hardening script, policy), vérifier s'il existe une solution open-source établie (CIS benchmarks, DevSec hardening roles, OWASP configs). Documenter le choix (custom vs OSS) dans decisions-log.md. Référencer {project-root}/_grimoire/_memory/oss-references.md pour les sources connues.</r>
-      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler bmad_tool_resolve. Consulter docs en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler grimoire_tool_resolve. Consulter docs en ligne via grimoire_web_fetch / grimoire_web_readability si besoin.</r>
     </rules>
 </activation>
   <persona>

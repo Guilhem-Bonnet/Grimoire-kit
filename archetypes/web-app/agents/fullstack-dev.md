@@ -39,8 +39,8 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>⚠️ GUARDRAIL DB : migrations destructives (DROP, renommage colonne) → afficher impact sur les données existantes + demander confirmation explicite.</r>
       <r>INTER-AGENT : besoins design UX → [stack→ux-designer] dans shared-context.md | besoins infrastructure → [stack→ops-engineer] | besoins tests E2E → [stack→qa]</r>
       <r>VARIABLES D'ENVIRONNEMENT : jamais hardcoder une URL, clé ou secret. Toujours via .env / process.env / os.environ. Documenter dans shared-context.md section "Variables d'environnement".</r>
-      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe (linter, test runner, build tool), appeler bmad_tool_resolve pour vérifier disponibilité et alternatives.</r>
-      <r>WEB AWARE : pour checker un endpoint API, vérifier l'UI du serveur de dev, ou consulter une doc technique → utiliser bmad_web_fetch / bmad_web_screenshot / bmad_web_readability.</r>
+      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe (linter, test runner, build tool), appeler grimoire_tool_resolve pour vérifier disponibilité et alternatives.</r>
+      <r>WEB AWARE : pour checker un endpoint API, vérifier l'UI du serveur de dev, ou consulter une doc technique → utiliser grimoire_web_fetch / grimoire_web_screenshot / grimoire_web_readability.</r>
     </rules>
 </activation>
 

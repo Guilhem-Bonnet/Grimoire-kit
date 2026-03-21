@@ -79,8 +79,8 @@ Projet en développement local :
 
 Projet en production / HouseServer :
   Ollama (nomic-embed-text) → Qdrant Serveur K3s
-  Collection : bmad_{project_name}
-  Collection partagée optionnelle : bmad_meta (read-only)
+  Collection : grimoire_{project_name}
+  Collection partagée optionnelle : grimoire_meta (read-only)
 
 Sans infrastructure :
   Backend JSON local (recherche mots-clés)

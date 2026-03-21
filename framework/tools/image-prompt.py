@@ -289,7 +289,7 @@ def mcp_image_prompt(
     prompt: str = "",
     enhance: bool = False,
 ) -> dict:
-    """MCP tool ``bmad_image_prompt`` — génère des prompts pour images.
+    """MCP tool ``grimoire_image_prompt`` — génère des prompts pour images.
 
     Args:
         project_root: Racine du projet (non utilisé mais requis par convention MCP).

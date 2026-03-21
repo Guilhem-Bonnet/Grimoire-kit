@@ -347,7 +347,7 @@ def mcp_concierge_triage(
     project_root: str,
     query: str = "",
 ) -> dict:
-    """MCP tool ``bmad_concierge_triage`` — trie une requête et suggère un agent.
+    """MCP tool ``grimoire_concierge_triage`` — trie une requête et suggère un agent.
 
     Args:
         project_root: Racine du projet.
@@ -364,7 +364,7 @@ def mcp_concierge_triage(
 
 
 def mcp_concierge_agents(project_root: str) -> dict:
-    """MCP tool ``bmad_concierge_agents`` — liste les agents et leurs forces.
+    """MCP tool ``grimoire_concierge_agents`` — liste les agents et leurs forces.
 
     Returns:
         dict avec la liste des agents.

@@ -265,7 +265,7 @@ def mcp_cc_feedback(
     fix_applied: str = "",
     agent: str = "",
 ) -> dict:
-    """MCP tool ``bmad_cc_feedback`` — enregistre et consulte les résultats CC.
+    """MCP tool ``grimoire_cc_feedback`` — enregistre et consulte les résultats CC.
 
     Args:
         project_root: Racine du projet.

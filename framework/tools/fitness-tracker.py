@@ -403,7 +403,7 @@ def compute_trend(project_root: Path, last_n: int = 10) -> dict:
 # ── MCP Interface ────────────────────────────────────────────────────────────
 
 def mcp_fitness_check(project_root: str) -> dict:
-    """MCP tool ``bmad_fitness_check`` — calcule et enregistre la fitness.
+    """MCP tool ``grimoire_fitness_check`` — calcule et enregistre la fitness.
 
     Args:
         project_root: Racine du projet.
@@ -427,7 +427,7 @@ def mcp_fitness_check(project_root: str) -> dict:
 
 
 def mcp_fitness_trend(project_root: str, last_n: int = 10) -> dict:
-    """MCP tool ``bmad_fitness_trend`` — tendance de fitness.
+    """MCP tool ``grimoire_fitness_trend`` — tendance de fitness.
 
     Args:
         project_root: Racine du projet.

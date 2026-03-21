@@ -480,7 +480,7 @@ def mcp_agent_worker(
     provider: str = "",
 ) -> dict:
     """
-    MCP tool `bmad_agent_worker` — gère les workers d'agents.
+    MCP tool `grimoire_agent_worker` — gère les workers d'agents.
     """
     root = Path(project_root).resolve()
     manager = AgentWorkerManager(root)

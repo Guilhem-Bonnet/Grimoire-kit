@@ -32,7 +32,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>⚠️ GUARDRAIL : `kubectl delete namespace`, drain node, suppression de PVC avec données → afficher impact + demander confirmation.</r>
       <r>INTER-AGENT : besoins provisioning infra → [kube→terraform-expert ou forge] | besoins CI/CD → [kube→pipeline-architect]</r>
       <r>Resources limits OBLIGATOIRES sur chaque workload (requests + limits CPU/mémoire). Readiness et liveness probes sur chaque Deployment.</r>
-      <r>TOOL RESOLVE : avant d'utiliser un outil externe (kubectl, helm, kustomize), appeler bmad_tool_resolve. Consulter docs K8s en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe (kubectl, helm, kustomize), appeler grimoire_tool_resolve. Consulter docs K8s en ligne via grimoire_web_fetch / grimoire_web_readability si besoin.</r>
     </rules>
 </activation>
 

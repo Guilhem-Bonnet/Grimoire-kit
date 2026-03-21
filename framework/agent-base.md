@@ -123,14 +123,14 @@ Trigger : l'utilisateur tape [THINK] ou "réfléchis profondément" ou "extended
 ```
 
 **Protocole [THINK] :**
-1. **Créer une branche d'exploration** : appeler `bmad_conversation_branch(action="branch", name="think-<sujet>", purpose="délibération [THINK]")` pour isoler la réflexion
+1. **Créer une branche d'exploration** : appeler `grimoire_conversation_branch(action="branch", name="think-<sujet>", purpose="délibération [THINK]")` pour isoler la réflexion
 2. **Poser le problème** : reformuler en une question précise
 3. **Lister les contraintes** : non-négociables vs préférences
 4. **Explorer N ≥ 3 options** avec avantages, inconvénients, risques
 5. **Simuler les échecs** : "si on choisit X et que Y arrive, on fait quoi ?"
 6. **Décider** : option retenue + justification en 2 lignes
 7. **Documenter** : écrire un ADR dans `{project-root}/_grimoire/_memory/decisions-log.md`
-8. **Revenir à la branche principale** : `bmad_conversation_branch(action="switch", name="main")`
+8. **Revenir à la branche principale** : `grimoire_conversation_branch(action="switch", name="main")`
 
 Ne jamais sortir de [THINK] sans une décision claire et documentée.
 
@@ -326,18 +326,18 @@ L'agent détermine le niveau via ces signaux (premier match) :
 
 **Avant toute opération nécessitant un outil externe :**
 1. **Identifier le besoin** : quel type d'outil est nécessaire ? (3D, SVG, web, tests, etc.)
-2. **Résoudre** : appeler `bmad_tool_resolve` (ou `tool-resolver.py resolve`) avec l'intention en langage naturel
+2. **Résoudre** : appeler `grimoire_tool_resolve` (ou `tool-resolver.py resolve`) avec l'intention en langage naturel
 3. **Vérifier** : les outils recommandés sont-ils disponibles ? Prêts à l'emploi ?
 4. **Provisionner si besoin** : suivre les instructions de provision (pip, npx, mcp_enable) si approuvé
 5. **Utiliser** : préférer l'outil résolu à une implémentation ad-hoc
 
 **Exemples de déclenchement :**
-- "J'ai besoin de créer un SVG" → `bmad_tool_resolve("créer un fichier SVG")`
-- "Je dois vérifier un site web" → `bmad_tool_resolve("naviguer sur un site web")`
-- "Je veux rendre un objet 3D" → `bmad_tool_resolve("rendre un objet 3D")`
+- "J'ai besoin de créer un SVG" → `grimoire_tool_resolve("créer un fichier SVG")`
+- "Je dois vérifier un site web" → `grimoire_tool_resolve("naviguer sur un site web")`
+- "Je veux rendre un objet 3D" → `grimoire_tool_resolve("rendre un objet 3D")`
 
 **Cas d'usage web :**
-- Pour accéder à un site, scraper du contenu, prendre un screenshot → utiliser `bmad_web_fetch`, `bmad_web_screenshot`, `bmad_web_readability`
+- Pour accéder à un site, scraper du contenu, prendre un screenshot → utiliser `grimoire_web_fetch`, `grimoire_web_screenshot`, `grimoire_web_readability`
 - web-browser.py est TOUJOURS disponible (fallback urllib). Playwright optionnel pour JS rendering.
 - SSRF protection intégrée — pas de requêtes vers localhost/metadata sauf IP explicitement autorisées
 

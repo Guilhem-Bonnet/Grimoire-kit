@@ -475,7 +475,7 @@ def mcp_background_task(
     task_type: str = "custom",
 ) -> dict:
     """
-    MCP tool `bmad_background_task` — gère les tâches background.
+    MCP tool `grimoire_background_task` — gère les tâches background.
     """
     root = Path(project_root).resolve()
     manager = BackgroundTaskManager(root)

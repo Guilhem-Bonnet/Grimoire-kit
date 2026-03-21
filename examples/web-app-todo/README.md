@@ -10,7 +10,7 @@ Démonstration de l'archétype `web-app` sur un projet concret : une application
 ## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Stack détecté automatiquement
 
 ```bash
-bash /chemin/vers/grimoire-kit/bmad-init.sh \
+bash /chemin/vers/grimoire-kit/grimoire.sh \
   --name "TodoApp" --user "Alice" --auto
 ```
 

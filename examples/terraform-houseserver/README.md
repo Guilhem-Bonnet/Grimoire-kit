@@ -2,7 +2,7 @@
 
 # <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple : Terraform-HouseServer
 
-Ce dossier montre comment le BMAD Custom Kit est utilisé dans le projet d'origine [Terraform-HouseServer](https://github.com/Guilhem-Bonnet/Terraform-HouseServer).
+Ce dossier montre comment le Grimoire Kit est utilisé dans le projet d'origine [Terraform-HouseServer](https://github.com/Guilhem-Bonnet/Terraform-HouseServer).
 
 ## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
 

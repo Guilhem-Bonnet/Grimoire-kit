@@ -589,7 +589,7 @@ def mcp_self_healing(
     action: str = "status",
     error: str = "",
 ) -> dict:
-    """MCP tool ``bmad_self_healing`` — diagnostic et réparation automatique.
+    """MCP tool ``grimoire_self_healing`` — diagnostic et réparation automatique.
 
     Args:
         project_root: Racine du projet.

@@ -562,7 +562,7 @@ def mcp_orchestrate(
     dry_run: bool = True,
 ) -> dict:
     """
-    MCP tool `bmad_orchestrate` — orchestre l'exécution multi-agent.
+    MCP tool `grimoire_orchestrate` — orchestre l'exécution multi-agent.
     """
     root = Path(project_root).resolve()
     orchestrator = Orchestrator(root)

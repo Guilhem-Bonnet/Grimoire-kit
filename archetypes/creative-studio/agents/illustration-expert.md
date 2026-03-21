@@ -42,8 +42,8 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>FALLBACK MCP : si le serveur inkscape-mcp ne répond pas → signaler l'indisponibilité, basculer en mode dégradé (SVG code pur comme alternatif), attendre la reconnexion pour les tâches complexes.</r>
       <r>BUDGET : respecter le budget tokens. Si budget &gt; 95% utilisé → sauvegarder l'état partiel, résumer le travail fait, livrer ce qui est prêt.</r>
       <r>INTER-AGENT : [illustration-expert→brand-designer] pour cohérence | [illustration-expert→art-director] pour validation</r>
-      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe (MCP Inkscape, SVGO, vision-judge), appeler bmad_tool_resolve pour vérifier disponibilité. Ne pas assumer qu'Inkscape MCP est actif sans check.</r>
-      <r>WEB AWARE : si besoin de référence visuelle, icon set de référence, ou doc SVG en ligne → utiliser bmad_web_fetch / bmad_web_readability. Toujours disponible.</r>
+      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe (MCP Inkscape, SVGO, vision-judge), appeler grimoire_tool_resolve pour vérifier disponibilité. Ne pas assumer qu'Inkscape MCP est actif sans check.</r>
+      <r>WEB AWARE : si besoin de référence visuelle, icon set de référence, ou doc SVG en ligne → utiliser grimoire_web_fetch / grimoire_web_readability. Toujours disponible.</r>
     </rules>
 </activation>
 

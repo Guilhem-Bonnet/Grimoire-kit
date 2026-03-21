@@ -544,7 +544,7 @@ def mcp_message_bus_send(
     backend: str = "in-process",
 ) -> dict:
     """
-    MCP tool `bmad_message_bus_send` — envoie un message inter-agent.
+    MCP tool `grimoire_message_bus_send` — envoie un message inter-agent.
     """
     try:
         payload_dict = json.loads(payload) if isinstance(payload, str) else payload
@@ -564,7 +564,7 @@ def mcp_message_bus_send(
 
 def mcp_message_bus_status(backend: str = "in-process") -> dict:
     """
-    MCP tool `bmad_message_bus_status` — statut du bus.
+    MCP tool `grimoire_message_bus_status` — statut du bus.
     """
     bus = create_bus(backend)
     stats = bus.get_stats()

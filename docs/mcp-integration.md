@@ -66,30 +66,30 @@ Dans `claude_desktop_config.json` :
 
 | Outil | Description |
 |-------|-------------|
-| `bmad_project_context` | Retourne le contexte projet complet (JSON) |
-| `bmad_status` | État du projet (agents, mémoire, santé) |
-| `bmad_agent_list` | Liste des agents installés |
-| `bmad_harmony_check` | Exécute un Harmony Check et retourne le rapport |
-| `bmad_config` | Configuration brute du projet |
-| `bmad_memory_store` | Stocker un texte en mémoire sémantique |
-| `bmad_memory_search` | Recherche sémantique dans la mémoire |
-| `bmad_add_agent` | Ajouter un agent au projet |
+| `grimoire_project_context` | Retourne le contexte projet complet (JSON) |
+| `grimoire_status` | État du projet (agents, mémoire, santé) |
+| `grimoire_agent_list` | Liste des agents installés |
+| `grimoire_harmony_check` | Exécute un Harmony Check et retourne le rapport |
+| `grimoire_config` | Configuration brute du projet |
+| `grimoire_memory_store` | Stocker un texte en mémoire sémantique |
+| `grimoire_memory_search` | Recherche sémantique dans la mémoire |
+| `grimoire_add_agent` | Ajouter un agent au projet |
 
 ## Exemples d'utilisation
 
 Dans Copilot Chat ou Claude, les outils sont appelés automatiquement quand le LLM détecte le besoin :
 
 **"Quel est le stack de ce projet ?"**
-→ L'agent appelle `bmad_project_context` et extrait la liste du stack.
+→ L'agent appelle `grimoire_project_context` et extrait la liste du stack.
 
 **"Ajoute l'agent architect au projet"**
-→ L'agent appelle `bmad_add_agent("architect")`.
+→ L'agent appelle `grimoire_add_agent("architect")`.
 
 **"Y a-t-il des problèmes dans le projet ?"**
-→ L'agent appelle `bmad_harmony_check` et résume le rapport.
+→ L'agent appelle `grimoire_harmony_check` et résume le rapport.
 
 **"Mémorise que nous avons choisi PostgreSQL"**
-→ L'agent appelle `bmad_memory_store("Décision: PostgreSQL comme base de données")`.
+→ L'agent appelle `grimoire_memory_store("Décision: PostgreSQL comme base de données")`.
 
 ## Architecture
 

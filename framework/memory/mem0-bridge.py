@@ -230,7 +230,7 @@ class LocalMemory:
 # ─── Mode sémantique (sentence-transformers + Qdrant) ────────────────────────
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-COLLECTION_NAME = "bmad_memories"
+COLLECTION_NAME = "grimoire_memories"
 QDRANT_PATH = str(MEMORY_DIR / "qdrant_data")
 
 # Types de mémoire structurée (BM-22 — Qdrant source de vérité)

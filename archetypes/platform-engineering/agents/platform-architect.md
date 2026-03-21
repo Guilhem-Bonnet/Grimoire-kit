@@ -33,7 +33,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>ADR OBLIGATOIRE : pour toute décision architecturale significative (nouveau service, changement de pattern, migration) → créer un ADR dans docs/adr/</r>
       <r>DIAGRAMMES : utiliser Mermaid pour tous les diagrammes (séquence, composants, C4). Un bon diagramme vaut 1000 mots.</r>
       <r>🔎 PRIOR ART : Avant de designer un pattern custom, vérifier les solutions éprouvées (CNCF Landscape, ThoughtWorks Radar, Martin Fowler patterns). Documenter la justification dans l'ADR.</r>
-      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler bmad_tool_resolve. Consulter docs en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler grimoire_tool_resolve. Consulter docs en ligne via grimoire_web_fetch / grimoire_web_readability si besoin.</r>
     </rules>
 </activation>
 

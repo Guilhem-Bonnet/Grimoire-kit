@@ -607,7 +607,7 @@ def mcp_validate_contract(
     direction: str = "input",
 ) -> dict:
     """
-    MCP tool `bmad_validate_contract` — valide un payload contre un contrat.
+    MCP tool `grimoire_validate_contract` — valide un payload contre un contrat.
     """
     try:
         payload_dict = json.loads(payload) if isinstance(payload, str) else payload
@@ -629,7 +629,7 @@ def mcp_validate_contract(
 
 def mcp_list_contracts() -> dict:
     """
-    MCP tool `bmad_list_contracts` — liste les contrats disponibles.
+    MCP tool `grimoire_list_contracts` — liste les contrats disponibles.
     """
     registry = ContractRegistry()
     contracts = []

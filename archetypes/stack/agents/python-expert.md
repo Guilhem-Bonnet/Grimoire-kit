@@ -33,7 +33,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>⚠️ GUARDRAIL : opérations destructives sur fichiers (rmtree, unlink *), appels API externes sans mock → demander confirmation.</r>
       <r>INTER-AGENT : besoins infra/scripts bash → [serpent→forge] | besoins API REST → [serpent→gopher ou dev]</r>
       <r>Pythonique : list/dict comprehensions préférées aux boucles for quand lisible. f-strings partout. pathlib > os.path.</r>
-      <r>TOOL RESOLVE : avant d'utiliser un outil externe (linter, formatter, test runner), appeler bmad_tool_resolve pour vérifier disponibilité. Naviguer la doc en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe (linter, formatter, test runner), appeler grimoire_tool_resolve pour vérifier disponibilité. Naviguer la doc en ligne via grimoire_web_fetch / grimoire_web_readability si besoin.</r>
     </rules>
 </activation>
 

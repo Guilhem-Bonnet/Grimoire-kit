@@ -625,7 +625,7 @@ def usage_trend(project_root: Path, last_n: int = 50) -> dict:
 
 def mcp_context_budget(project_root: str, model: str = "", agent: str = "") -> dict:
     """
-    MCP tool `bmad_context_budget` — retourne le statut budget token.
+    MCP tool `grimoire_context_budget` — retourne le statut budget token.
 
     Appelable depuis grimoire-mcp-tools.py.
     """

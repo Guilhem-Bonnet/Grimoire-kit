@@ -143,7 +143,7 @@ def verify(project_root: Path) -> IntegrityReport:
 
 
 def mcp_agent_integrity(project_root: str, action: str = "verify") -> dict:
-    """MCP tool bmad_agent_integrity — vérification intégrité agents."""
+    """MCP tool grimoire_agent_integrity — vérification intégrité agents."""
     root = Path(project_root).resolve()
     if action == "snapshot":
         return snapshot(root)

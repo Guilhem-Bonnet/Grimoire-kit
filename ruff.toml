@@ -1,4 +1,4 @@
-# BMAD Custom Kit — Ruff configuration
+# Grimoire Kit — Ruff configuration
 line-length = 120
 target-version = "py312"
 exclude = ["_grimoire", "_gen_tests.py"]

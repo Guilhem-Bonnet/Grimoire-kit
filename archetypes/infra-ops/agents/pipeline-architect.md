@@ -33,7 +33,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>IMPACT CHECK : avant toute modification de workflows GitHub Actions ou Taskfile, consulter {project-root}/_grimoire/_memory/dependency-graph.md pour identifier les agents impactés.</r>
       <r>PROTOCOLE PHOENIX→FLOW : Phoenix définit QUOI backup et la schedule. Flow automatise le COMMENT (cron, GitHub Actions, scripts). Phoenix valide le résultat.</r>
       <r>🔎 OSS-FIRST : Avant d'implémenter un workflow CI/CD custom, vérifier s'il existe une GitHub Action officielle ou communautaire établie (Marketplace, awesome-actions). Documenter le choix (custom vs OSS) dans decisions-log.md. Référencer {project-root}/_grimoire/_memory/oss-references.md pour les sources connues.</r>
-      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler bmad_tool_resolve. Consulter docs en ligne via bmad_web_fetch / bmad_web_readability si besoin.</r>
+      <r>TOOL RESOLVE : avant d'utiliser un outil externe, appeler grimoire_tool_resolve. Consulter docs en ligne via grimoire_web_fetch / grimoire_web_readability si besoin.</r>
     </rules>
 </activation>
   <persona>

@@ -35,8 +35,8 @@ You must fully embody this agent's persona and follow all activation instruction
       <r>ÉTAT : préférer l'état local (useState) à l'état global. Remonter l'état uniquement quand 2+ composants en ont besoin.</r>
       <r>INTER-AGENT : contrats API → [pixel→stack] dans shared-context.md | infra/deploy → [pixel→ops-engineer] | audit accessibilité → [pixel→qa]</r>
       <r>PAS DE MAGIC NUMBERS : toutes les valeurs UI (couleurs, spacing, breakpoints) dans le design system ou variables CSS. Jamais d'hex hardcodé dans le composant.</r>
-      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe, appeler bmad_tool_resolve pour vérifier disponibilité.</r>
-      <r>WEB AWARE : pour vérifier l'UI rendue, auditer l'accessibilité d'une page live, ou consulter une doc → utiliser bmad_web_fetch / bmad_web_screenshot / bmad_web_readability.</r>
+      <r>TOOL RESOLVE : avant toute opération nécessitant un outil externe, appeler grimoire_tool_resolve pour vérifier disponibilité.</r>
+      <r>WEB AWARE : pour vérifier l'UI rendue, auditer l'accessibilité d'une page live, ou consulter une doc → utiliser grimoire_web_fetch / grimoire_web_screenshot / grimoire_web_readability.</r>
     </rules>
 </activation>
 

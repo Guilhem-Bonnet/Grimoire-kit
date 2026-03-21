@@ -1,6 +1,6 @@
 """``grimoire merge`` — merge Grimoire files from a source into a project.
 
-Wraps :class:`bmad.core.merge.MergeEngine` with CLI output and
+Wraps :class:`grimoire.core.merge.MergeEngine` with CLI output and
 confirmation prompts.
 """
 

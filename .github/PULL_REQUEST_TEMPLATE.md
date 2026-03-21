@@ -1,4 +1,4 @@
-<!-- BMAD Custom Kit — Pull Request Template -->
+<!-- Grimoire Kit — Pull Request Template -->
 <!-- Supprimez les sections non-applicables avant de soumettre -->
 
 ## Type de changement
