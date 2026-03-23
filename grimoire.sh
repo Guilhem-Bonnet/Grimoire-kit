@@ -45,8 +45,8 @@ find_project_root() {
 }
 
 PROJECT_ROOT="$(find_project_root)"
-TOOLS_DIR="${PROJECT_ROOT}/framework/tools"
-MEMORY_DIR="${PROJECT_ROOT}/framework/memory"
+TOOLS_DIR="${SCRIPT_DIR}/framework/tools"
+MEMORY_DIR="${SCRIPT_DIR}/framework/memory"
 
 # ─── Commandes ────────────────────────────────────────────────────────────────
 
