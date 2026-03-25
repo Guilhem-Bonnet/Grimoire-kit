@@ -98,6 +98,18 @@ release: check ## Release — bump version, tag, build
 	@echo "  git commit -m 'chore: release $(VERSION)'"
 	@echo "  git tag -a v$(VERSION) -m 'Release $(VERSION)'"
 	@echo "  git push origin main --tags"
+	@echo "\n  Then publish to PyPI:"
+	@echo "  make publish"
+
+.PHONY: publish
+publish: ## Upload dist/ to PyPI (requires TWINE_USERNAME + TWINE_PASSWORD or ~/.pypirc)
+	@test -d dist || (echo "No dist/ found. Run 'make build' or 'make release' first." && exit 1)
+	$(PYTHON) -m twine upload dist/*.whl dist/*.tar.gz
+
+.PHONY: publish-test
+publish-test: ## Upload dist/ to TestPyPI
+	@test -d dist || (echo "No dist/ found. Run 'make build' first." && exit 1)
+	$(PYTHON) -m twine upload --repository testpypi dist/*.whl dist/*.tar.gz
 
 ## ─── Docs ──────────────────────────────────────────────────────
 .PHONY: docs
