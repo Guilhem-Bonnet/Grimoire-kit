@@ -252,3 +252,30 @@ class TestProjectScaffolder:
         s.execute(plan)
         result2 = s.execute(plan)
         assert result2.total == plan.total_operations
+
+    def test_plan_includes_copilot_instructions(self, tmp_path: Path) -> None:
+        """Scaffold must generate .github/copilot-instructions.md."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        tpl_labels = [t.label for t in plan.templates]
+        assert ".github/copilot-instructions.md" in tpl_labels
+
+    def test_copilot_instructions_contains_agents_table(self, tmp_path: Path) -> None:
+        """Generated copilot-instructions should list installed agents."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "| Agent |" in ci
+        assert "concierge" in ci
+
+    def test_copilot_instructions_not_overwritten(self, tmp_path: Path) -> None:
+        """Existing copilot-instructions.md should not be overwritten."""
+        gh = tmp_path / ".github"
+        gh.mkdir()
+        existing = gh / "copilot-instructions.md"
+        existing.write_text("# Custom instructions\n")
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        assert existing.read_text() == "# Custom instructions\n"
