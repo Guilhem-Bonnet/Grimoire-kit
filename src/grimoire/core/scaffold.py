@@ -11,6 +11,7 @@ This separation makes ``--dry-run`` trivial and unit testing straightforward.
 
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -170,6 +171,13 @@ project-context.yaml     <- Global project configuration
 
 $agents_table
 
+## VS Code Copilot Agents
+
+Type `@concierge` in Copilot Chat to interact with the project's AI concierge.
+Other agents are sub-agents routed automatically by the concierge.
+
+Agent files are in `.github/agents/` — VS Code discovers them automatically.
+
 ## Conventions
 
 1. **Language**: Always respond in $language
@@ -221,6 +229,7 @@ class ProjectScaffolder:
         self._plan_feature_agents(p)
         self._plan_framework(p)
         self._plan_templates(p)
+        self._plan_agent_wrappers(p)
         self._plan_copilot_instructions(p)
         return p
 
@@ -272,7 +281,7 @@ class ProjectScaffolder:
     def _plan_directories(self, p: ScaffoldPlan) -> None:
         base = self._target
         dirs = [
-            base / ".github",
+            base / ".github" / "agents",
             base / "_grimoire" / "_config" / "custom" / "agents",
             base / "_grimoire" / "_config" / "custom" / "prompt-templates",
             base / "_grimoire" / "_config" / "custom" / "workflows",
@@ -471,6 +480,50 @@ class ProjectScaffolder:
             content='{"name": "main", "created": "auto", "active": true}\n',
             label=".runs/main/branch.json",
         ))
+
+    def _plan_agent_wrappers(self, p: ScaffoldPlan) -> None:
+        """Generate .github/agents/*.agent.md wrappers for VS Code discovery."""
+        gh_agents = self._target / ".github" / "agents"
+        concierge_name = "concierge"
+        for fc in p.copies:
+            if fc.dst.suffix != ".md" or "/agents/" not in str(fc.dst):
+                continue
+            name = fc.dst.stem
+            wrapper_dst = gh_agents / f"{name}.agent.md"
+            if wrapper_dst.is_file():
+                continue
+            desc = self._extract_agent_description(fc.src)
+            is_entry = name == concierge_name
+            tools = "['read', 'search']" if not is_entry else "['read', 'search', 'execute']"
+            lines = [
+                "---",
+                f"description: '{desc}'",
+                f"tools: {tools}",
+            ]
+            if not is_entry:
+                lines.append("user-invocable: false")
+            lines.append("---")
+            lines.append("")
+            lines.append(f"1. Load {{{{project-root}}}}/_grimoire/_config/custom/agents/{name}.md")
+            lines.append("2. Follow ALL activation instructions in the agent file")
+            lines.append("")
+            p.templates.append(TemplateRender(
+                dst=wrapper_dst,
+                content="\n".join(lines),
+                label=f".github/agents/{name}.agent.md",
+            ))
+
+    @staticmethod
+    def _extract_agent_description(src: Path) -> str:
+        """Extract description from internal agent YAML frontmatter."""
+        try:
+            text = src.read_text(encoding="utf-8")
+        except OSError:
+            return "Grimoire agent"
+        m = re.search(r'^description:\s*["\']?(.+?)["\']?\s*$', text, re.MULTILINE)
+        if m:
+            return m.group(1).replace("'", "''")
+        return "Grimoire agent"
 
     def _plan_copilot_instructions(self, p: ScaffoldPlan) -> None:
         copilot_file = self._target / ".github" / "copilot-instructions.md"

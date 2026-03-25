@@ -279,3 +279,67 @@ class TestProjectScaffolder:
         plan = s.plan()
         s.execute(plan)
         assert existing.read_text() == "# Custom instructions\n"
+
+    def test_plan_generates_agent_wrappers(self, tmp_path: Path) -> None:
+        """Each deployed agent must get a .github/agents/*.agent.md wrapper."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        wrapper_labels = [t.label for t in plan.templates if ".agent.md" in t.label]
+        assert len(wrapper_labels) > 0
+        assert any("concierge" in label for label in wrapper_labels)
+
+    def test_agent_wrapper_has_frontmatter(self, tmp_path: Path) -> None:
+        """Generated .agent.md wrapper must have YAML frontmatter with description."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        wrapper = tmp_path / ".github" / "agents" / "concierge.agent.md"
+        assert wrapper.is_file()
+        content = wrapper.read_text()
+        assert content.startswith("---\n")
+        assert "description:" in content
+
+    def test_concierge_is_user_invocable(self, tmp_path: Path) -> None:
+        """Concierge wrapper must NOT have user-invocable: false."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        content = (tmp_path / ".github" / "agents" / "concierge.agent.md").read_text()
+        assert "user-invocable: false" not in content
+
+    def test_non_concierge_agents_are_sub_agents(self, tmp_path: Path) -> None:
+        """Non-concierge agents should be marked user-invocable: false."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        wrapper = tmp_path / ".github" / "agents" / "project-navigator.agent.md"
+        assert wrapper.is_file()
+        content = wrapper.read_text()
+        assert "user-invocable: false" in content
+
+    def test_agent_wrapper_references_internal_file(self, tmp_path: Path) -> None:
+        """Wrapper activation must reference the internal agent file."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        content = (tmp_path / ".github" / "agents" / "concierge.agent.md").read_text()
+        assert "_grimoire/_config/custom/agents/concierge.md" in content
+
+    def test_agent_wrapper_not_overwritten(self, tmp_path: Path) -> None:
+        """Existing .agent.md wrappers should not be overwritten."""
+        gh = tmp_path / ".github" / "agents"
+        gh.mkdir(parents=True)
+        existing = gh / "concierge.agent.md"
+        existing.write_text("# My custom agent\n")
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        assert existing.read_text() == "# My custom agent\n"
+
+    def test_copilot_instructions_mentions_at_concierge(self, tmp_path: Path) -> None:
+        """copilot-instructions.md should tell users about @concierge."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "@concierge" in ci
