@@ -263,7 +263,7 @@ def init(
     path: Path = _init_path_arg,
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
-    archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype (auto-detected if omitted)."),
+    archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
     backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
 ) -> None:
@@ -276,17 +276,21 @@ def init(
       [cyan]grimoire init .[/cyan]                               Interactive wizard
       [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
       [cyan]grimoire init . -a infra-ops -b qdrant-local[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """
-    # Validate archetype if explicitly provided
-    if archetype and archetype not in _KNOWN_ARCHETYPES:
-        console.print(f"[red]Unknown archetype:[/red] {archetype}")
-        matches = difflib.get_close_matches(archetype, sorted(_KNOWN_ARCHETYPES), n=2, cutoff=0.5)
-        if matches:
-            console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
-        else:
+    # Validate archetype(s) if explicitly provided
+    if archetype:
+        parts = [a.strip() for a in archetype.split(",") if a.strip()]
+        invalid = [a for a in parts if a not in _KNOWN_ARCHETYPES]
+        if invalid:
+            for a in invalid:
+                console.print(f"[red]Unknown archetype:[/red] {a}")
+                matches = difflib.get_close_matches(a, sorted(_KNOWN_ARCHETYPES), n=2, cutoff=0.5)
+                if matches:
+                    console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
             console.print(f"Available: {', '.join(sorted(_KNOWN_ARCHETYPES))}")
-        raise typer.Exit(1)
+            raise typer.Exit(1)
 
     # Validate backend
     if backend not in _KNOWN_BACKENDS:

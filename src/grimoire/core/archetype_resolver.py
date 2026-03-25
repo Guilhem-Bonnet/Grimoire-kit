@@ -15,6 +15,13 @@ class ResolvedArchetype:
     stack_agents: tuple[str, ...]
     feature_agents: tuple[str, ...]
     reason: str
+    # Multi-archetype support: ordered tuple of selected archetypes
+    archetypes: tuple[str, ...] = ()
+
+    @property
+    def is_composite(self) -> bool:
+        """True if more than one archetype was selected."""
+        return len(self.archetypes) > 1
 
 
 # Stack name → expert agent filename (without .md)
@@ -55,28 +62,43 @@ _ARCHETYPE_RULES: list[tuple[frozenset[str], str, str]] = [
 class ArchetypeResolver:
     """Resolve a ScanResult into archetype + agent selections."""
 
+    # Archetypes exposed for wizard display (exclude internal dirs)
+    _USER_ARCHETYPES = ("minimal", "web-app", "infra-ops", "platform-engineering", "creative-studio", "fix-loop")
+
     def resolve(
         self,
         scan: ScanResult,
         *,
         backend: str = "local",
         archetype_override: str | None = None,
+        archetypes_override: list[str] | None = None,
     ) -> ResolvedArchetype:
         detected = {d.name for d in scan.stacks}
 
-        # Archetype — use override or auto-select
-        if archetype_override:
+        # Multi-archetype support
+        if archetypes_override:
+            invalid = [a for a in archetypes_override if a not in _VALID_ARCHETYPES]
+            if invalid:
+                msg = f"Unknown archetype(s): {', '.join(repr(a) for a in invalid)}"
+                raise ValueError(msg)
+            archetypes = tuple(archetypes_override)
+            archetype = archetypes[0]  # primary for backward compat
+            reason = f"User selected: {', '.join(archetypes)}"
+        elif archetype_override:
             if archetype_override not in _VALID_ARCHETYPES:
                 msg = f"Unknown archetype: {archetype_override!r}"
                 raise ValueError(msg)
             archetype = archetype_override
+            archetypes = (archetype_override,)
             reason = f"User selected: {archetype_override}"
         else:
             archetype = "minimal"
+            archetypes = ("minimal",)
             reason = "No specific stack pattern matched"
             for required, arch, desc in _ARCHETYPE_RULES:
                 if required <= detected:
                     archetype = arch
+                    archetypes = (arch,)
                     reason = desc
                     break
 
@@ -99,4 +121,16 @@ class ArchetypeResolver:
             stack_agents=tuple(stack_agents),
             feature_agents=tuple(feature_agents),
             reason=reason,
+            archetypes=archetypes,
         )
+
+    def suggest_archetypes(self, scan: ScanResult) -> list[str]:
+        """Suggest archetypes based on scan results (for guided discovery)."""
+        detected = {d.name for d in scan.stacks}
+        suggestions: list[str] = []
+        seen: set[str] = set()
+        for required, arch, _desc in _ARCHETYPE_RULES:
+            if required <= detected and arch not in seen:
+                suggestions.append(arch)
+                seen.add(arch)
+        return suggestions or ["minimal"]

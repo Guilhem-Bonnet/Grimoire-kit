@@ -162,3 +162,68 @@ class TestArchetypeResolver:
     def test_reason_is_always_set(self) -> None:
         result = self.resolver.resolve(_scan())
         assert len(result.reason) > 0
+
+    # ── Multi-archetype support ───────────────────────────────────────
+
+    def test_archetypes_override_single(self) -> None:
+        result = self.resolver.resolve(_scan(), archetypes_override=["web-app"])
+        assert result.archetype == "web-app"
+        assert result.archetypes == ("web-app",)
+        assert not result.is_composite
+
+    def test_archetypes_override_multiple(self) -> None:
+        result = self.resolver.resolve(_scan(), archetypes_override=["web-app", "infra-ops"])
+        assert result.archetype == "web-app"  # first = primary
+        assert result.archetypes == ("web-app", "infra-ops")
+        assert result.is_composite
+
+    def test_archetypes_override_three(self) -> None:
+        result = self.resolver.resolve(
+            _scan(),
+            archetypes_override=["web-app", "infra-ops", "fix-loop"],
+        )
+        assert result.archetypes == ("web-app", "infra-ops", "fix-loop")
+        assert result.is_composite
+        assert result.archetype == "web-app"
+
+    def test_archetypes_override_invalid_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown archetype"):
+            self.resolver.resolve(_scan(), archetypes_override=["web-app", "bogus"])
+
+    def test_archetypes_override_takes_priority_over_single(self) -> None:
+        result = self.resolver.resolve(
+            _scan("terraform"),
+            archetype_override="web-app",
+            archetypes_override=["fix-loop", "infra-ops"],
+        )
+        # archetypes_override wins over archetype_override
+        assert result.archetypes == ("fix-loop", "infra-ops")
+        assert result.archetype == "fix-loop"
+
+    def test_auto_detect_sets_archetypes_tuple(self) -> None:
+        result = self.resolver.resolve(_scan("terraform"))
+        assert result.archetypes == ("infra-ops",)
+        assert not result.is_composite
+
+    def test_minimal_sets_archetypes_tuple(self) -> None:
+        result = self.resolver.resolve(_scan())
+        assert result.archetypes == ("minimal",)
+        assert not result.is_composite
+
+    # ── suggest_archetypes ────────────────────────────────────────────
+
+    def test_suggest_archetypes_empty_scan(self) -> None:
+        suggestions = self.resolver.suggest_archetypes(_scan())
+        assert suggestions == ["minimal"]
+
+    def test_suggest_archetypes_terraform(self) -> None:
+        suggestions = self.resolver.suggest_archetypes(_scan("terraform"))
+        assert "infra-ops" in suggestions
+
+    def test_suggest_archetypes_react(self) -> None:
+        suggestions = self.resolver.suggest_archetypes(_scan("react"))
+        assert "web-app" in suggestions
+
+    def test_suggest_archetypes_no_duplicates(self) -> None:
+        suggestions = self.resolver.suggest_archetypes(_scan("react", "vue", "django"))
+        assert len(suggestions) == len(set(suggestions))

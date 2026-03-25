@@ -7,6 +7,7 @@ framework installation, and a rich summary report.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import sys
@@ -35,15 +36,16 @@ KNOWN_ARCHETYPES = frozenset({
 
 KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
 
-# Archetype human descriptions for the wizard
-_ARCHETYPE_INFO: dict[str, tuple[str, str]] = {
-    "minimal": ("Minimal", "Core meta-agents only — lightweight starting point"),
-    "web-app": ("Web Application", "Frontend + backend agents for full-stack projects"),
-    "infra-ops": ("Infrastructure & DevOps", "Terraform, K8s, Ansible, monitoring, security specialists"),
-    "creative-studio": ("Creative Studio", "Brand design, illustration, content creation agents"),
-    "fix-loop": ("Fix Loop", "9-phase automated bug correction orchestrator"),
-    "platform-engineering": ("Platform Engineering", "Microservices, deploy, reliability agents"),
+# Archetype human descriptions for the wizard (order = display order)
+_ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
+    "web-app": ("🌐 Web App", "2 agents", "TDD, type-safety, API-first"),
+    "infra-ops": ("⚙️  Infra & DevOps", "7 agents", "IaC, security-first, observability"),
+    "platform-engineering": ("🏗️  Platform Eng.", "4 agents", "architecture-first, contract-driven"),
+    "creative-studio": ("🎨 Creative Studio", "5 agents", "visual-consistency, brand-voice"),
+    "fix-loop": ("🔁 Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
 }
+# Minimal is always base — not shown in multi-select
+_ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())
 
 
 # ── Memory backend detection ─────────────────────────────────────────────────
@@ -95,13 +97,16 @@ def _run_wizard(
     resolved: ResolvedArchetype,
     backend: str,
 ) -> dict[str, Any]:
-    """Interactive wizard — asks 3-4 questions, returns config dict."""
+    """Interactive wizard — multi-select archetypes, returns config dict."""
     console.print()
     console.print(Panel.fit(
         f"[bold]Grimoire Kit v{__version__}[/bold] — Project Setup Wizard",
         border_style="cyan",
     ))
+
+    # ── Step 1/4 · Identity ───────────────────────────────────────────
     console.print()
+    console.print("  [dim]\\[■□□□] 1/4 · Identity[/dim]")
 
     # Show detected stacks
     if scan and scan.stacks:
@@ -112,78 +117,93 @@ def _run_wizard(
             console.print(f"    [green]✓[/green] {det.name} ({conf_pct}) — {evidence}")
         console.print()
 
-    # Q1 — Project name
     default_name = target.name
     project_name = Prompt.ask(
         "  [bold]Project name[/bold]",
         default=default_name,
     )
 
-    # Q2 — User name
     git_name = _git_user_name()
     user_name = Prompt.ask(
         "  [bold]Your name[/bold]",
         default=git_name or "Developer",
     )
 
-    # Q3 — Language
+    # ── Step 2/4 · Preferences ────────────────────────────────────────
     console.print()
+    console.print("  [dim]\\[■■□□] 2/4 · Preferences[/dim]")
+
     _lang_choices = {"1": "Français", "2": "English"}
-    console.print("  [bold]Preferred language:[/bold]")
-    console.print("    [bold]1[/bold]) Français")
-    console.print("    [bold]2[/bold]) English")
+    console.print("  [bold]Language:[/bold]  1) Français  2) English")
     lang_input = Prompt.ask(
-        "  [bold]Choose language[/bold]",
+        "  [bold]Choose[/bold]",
         default="1",
         choices=["1", "2"],
     )
     language = _lang_choices[lang_input]
 
-    # Q4 — Skill level
     _skill_choices = {"1": "beginner", "2": "intermediate", "3": "expert"}
-    _skill_labels = {"1": "Débutant — plus d'explications", "2": "Intermédiaire — équilibré", "3": "Expert — concis, moins de cérémoniel"}
-    console.print()
-    console.print("  [bold]Skill level:[/bold]")
-    for k, v in _skill_labels.items():
-        console.print(f"    [bold]{k}[/bold]) {v}")
+    console.print("  [bold]Skill:[/bold]    1) Débutant  2) Intermédiaire  3) Expert")
     skill_input = Prompt.ask(
-        "  [bold]Choose skill level[/bold]",
+        "  [bold]Choose[/bold]",
         default="2",
         choices=["1", "2", "3"],
     )
     skill_level = _skill_choices[skill_input]
 
-    # Q5 — Archetype selection
+    # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
     console.print()
-    console.print("  [bold]Available archetypes:[/bold]")
-    arch_choices: list[str] = []
-    idx = 1
-    for key, (label, desc) in _ARCHETYPE_INFO.items():
-        marker = " [cyan]← auto-detected[/cyan]" if key == resolved.archetype else ""
-        console.print(f"    [bold]{idx}[/bold]) {label}{marker}")
-        console.print(f"       [dim]{desc}[/dim]")
-        arch_choices.append(key)
-        idx += 1
-    console.print(f"    [bold]{idx}[/bold]) I'm not sure — use minimal")
+    console.print("  [dim]\\[■■■□] 3/4 · Archetypes[/dim]")
+    console.print()
+    console.print("  [bold]minimal[/bold] is always included — it's the base.")
+    console.print("  Choose specializations to add:\n")
+
+    # Compute auto-detected defaults from resolver
+    auto_suggested = list(resolved.archetypes) if resolved.archetypes else [resolved.archetype]
+    auto_indices: list[str] = []
+    for idx, key in enumerate(_ARCHETYPE_KEYS, 1):
+        label, agent_count, traits = _ARCHETYPE_INFO[key]
+        marker = " [cyan]← detected[/cyan]" if key in auto_suggested and key != "minimal" else ""
+        console.print(f"    [bold]{idx}[/bold]) {label:<22} {agent_count:<10} {traits}{marker}")
+        if key in auto_suggested and key != "minimal":
+            auto_indices.append(str(idx))
+
+    console.print()
+    console.print("    [bold]0[/bold]) 🤷 Not sure — help me choose")
     console.print()
 
-    default_idx = str(arch_choices.index(resolved.archetype) + 1) if resolved.archetype in arch_choices else "1"
+    default_input = ",".join(auto_indices) if auto_indices else ""
     arch_input = Prompt.ask(
-        "  [bold]Choose archetype[/bold]",
-        default=default_idx,
-        choices=[str(i) for i in range(1, len(arch_choices) + 2)],
+        "  [bold]Choice (ex: 1,3,5 or all)[/bold]",
+        default=default_input or "none",
     )
-    arch_idx = int(arch_input)
-    archetype = "minimal" if arch_idx > len(arch_choices) else arch_choices[arch_idx - 1]
 
-    # Q6 — Confirm
+    # Parse selection
+    selected_archetypes = _parse_archetype_selection(arch_input, scan)
+
+    # Show composition preview
+    _display_composition_preview(selected_archetypes)
+
+    # Allow adjustment
+    adjust = Prompt.ask(
+        "  [bold]Adjust? (new numbers, or Enter to confirm)[/bold]",
+        default="",
+    )
+    if adjust.strip():
+        selected_archetypes = _parse_archetype_selection(adjust, scan)
+        _display_composition_preview(selected_archetypes)
+
+    # ── Step 4/4 · Confirm ────────────────────────────────────────────
+    console.print()
+    console.print("  [dim]\\[■■■■] 4/4 · Confirmation[/dim]")
+    arch_display = ", ".join(selected_archetypes) if selected_archetypes else "minimal"
     console.print()
     console.print("  [bold]Summary:[/bold]")
     console.print(f"    Project:     {project_name}")
     console.print(f"    User:        {user_name}")
     console.print(f"    Language:    {language}")
     console.print(f"    Skill level: {skill_level}")
-    console.print(f"    Archetype:   {archetype}")
+    console.print(f"    Archetypes:  {arch_display}")
     console.print(f"    Backend:     {backend}")
     console.print()
 
@@ -195,9 +215,111 @@ def _run_wizard(
         "user_name": user_name,
         "language": language,
         "skill_level": skill_level,
-        "archetype": archetype,
+        "archetypes": selected_archetypes,
+        "archetype": selected_archetypes[0] if selected_archetypes else "minimal",
         "backend": backend,
     }
+
+
+def _parse_archetype_selection(
+    raw: str,
+    scan: ScanResult | None = None,
+) -> list[str]:
+    """Parse user input like '1,3,5' or 'all' or '0' into archetype list."""
+    raw = raw.strip().lower()
+
+    if raw == "all":
+        return list(_ARCHETYPE_KEYS)
+
+    if raw in ("none", ""):
+        return ["minimal"]
+
+    if raw == "0":
+        return _guided_discovery(scan)
+
+    # Parse comma/space separated numbers
+    parts = raw.replace(" ", ",").split(",")
+    selected: list[str] = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            idx = int(p)
+        except ValueError:
+            # Try as archetype name directly
+            if p in _ARCHETYPE_KEYS and p not in selected:
+                selected.append(p)
+            continue
+        if 1 <= idx <= len(_ARCHETYPE_KEYS):
+            key = _ARCHETYPE_KEYS[idx - 1]
+            if key not in selected:
+                selected.append(key)
+
+    return selected or ["minimal"]
+
+
+def _guided_discovery(scan: ScanResult | None) -> list[str]:
+    """3-question guided flow for users who don't know which archetypes to pick."""
+    console.print()
+    console.print("  [bold]── 🤷 Guided Discovery ──[/bold]\n")
+
+    # Detect defaults from scan
+    detected = {d.name for d in scan.stacks} if scan and scan.stacks else set()
+    has_frontend = bool(detected & {"react", "vue", "angular", "javascript", "typescript"})
+    has_infra = bool(detected & {"terraform", "kubernetes", "ansible", "docker"})
+
+    q1 = Confirm.ask(
+        "  Does your project have a [bold]web frontend[/bold] (React, Vue, Angular)?",
+        default=has_frontend,
+    )
+    q2 = Confirm.ask(
+        "  Do you manage [bold]infrastructure[/bold] (K8s, Terraform, CI/CD)?",
+        default=has_infra,
+    )
+    q3 = Confirm.ask(
+        "  Do you need a [bold]certified fix loop[/bold] (TDD proofs, incident response)?",
+        default=False,
+    )
+
+    result: list[str] = []
+    if q1:
+        result.append("web-app")
+    if q2:
+        result.append("infra-ops")
+    if q3:
+        result.append("fix-loop")
+
+    # If nothing selected, check for platform patterns
+    if not result and detected & {"python", "go", "fastapi", "django"}:
+        result.append("platform-engineering")
+
+    if not result:
+        console.print("  [dim]No specialization selected — using minimal base.[/dim]")
+        return ["minimal"]
+
+    names = ", ".join(result)
+    console.print(f"\n  [bold]Recommended:[/bold] {names}")
+    return result
+
+
+def _display_composition_preview(archetypes: list[str]) -> None:
+    """Show what the selected composition includes."""
+    console.print()
+    console.print("  [bold]── Composition ──[/bold]")
+    console.print("  📦 Base : [bold]minimal[/bold] (3 meta-agents)")
+    total_agents = 3  # meta-agents
+    for key in archetypes:
+        if key == "minimal":
+            continue
+        info = _ARCHETYPE_INFO.get(key)
+        if info:
+            label, agent_count, traits = info
+            console.print(f"  {label:<22} → +{agent_count} · {traits}")
+            # Parse agent count
+            with contextlib.suppress(ValueError, IndexError):
+                total_agents += int(agent_count.split()[0])
+    console.print(f"\n  [dim]Total: ~{total_agents} agents[/dim]")
 
 
 # ── Rich summary report ─────────────────────────────────────────────────────
@@ -221,9 +343,16 @@ def _display_report(
         )
         console.print(f"  [cyan]📦 Stack:[/cyan] {stacks_str}")
 
-    # Archetype
-    info = _ARCHETYPE_INFO.get(resolved.archetype, (resolved.archetype, ""))
-    console.print(f"  [cyan]🧬 Archetype:[/cyan] {info[0]} ({resolved.reason})")
+    # Archetypes
+    if resolved.is_composite:
+        names = []
+        for a in resolved.archetypes:
+            ai = _ARCHETYPE_INFO.get(a)
+            names.append(ai[0] if ai else a)
+        console.print(f"  [cyan]🧬 Archetypes:[/cyan] {' + '.join(names)}")
+    else:
+        info = _ARCHETYPE_INFO.get(resolved.archetype, (resolved.archetype, "", ""))
+        console.print(f"  [cyan]🧬 Archetype:[/cyan] {info[0]} ({resolved.reason})")
     console.print(f"  [cyan]🧠 Memory:[/cyan] {backend}")
     _backend_tips = {
         "local": "Mémoire fichier locale — aucune dépendance requise",
@@ -280,7 +409,10 @@ def _display_dry_run(
 ) -> None:
     """Display what would happen in dry-run mode."""
     console.print("[bold]grimoire init --dry-run[/bold]")
-    console.print(f"[dim]Scaffold plan for [bold]{project_name}[/bold] (archetype: {archetype})[/dim]\n")
+    arch_display = archetype
+    if resolved and resolved.is_composite:
+        arch_display = ", ".join(resolved.archetypes)
+    console.print(f"[dim]Scaffold plan for [bold]{project_name}[/bold] (archetypes: {arch_display})[/dim]\n")
 
     # Agent deployment breakdown
     agents_by_cat: dict[str, list[str]] = {}
@@ -361,6 +493,7 @@ def _display_json(
         "project": project_name,
         "path": str(target),
         "archetype": resolved.archetype,
+        "archetypes": list(resolved.archetypes) if resolved.archetypes else [resolved.archetype],
         "backend": backend,
         "stacks": [d.name for d in scan.stacks] if scan else [],
         "agents": {
@@ -419,10 +552,14 @@ def run_init(
 
     # Phase 3: Resolve archetype
     resolver = ArchetypeResolver()
+    # Parse comma-separated archetypes from CLI
+    archetypes_override: list[str] | None = None
+    if archetype:
+        archetypes_override = [a.strip() for a in archetype.split(",") if a.strip()]
     resolved = resolver.resolve(
         scan,
         backend=backend,
-        archetype_override=archetype or None,
+        archetypes_override=archetypes_override,
     )
 
     # Phase 4: Interactive wizard or express mode
@@ -439,14 +576,15 @@ def run_init(
         user_name = wizard_result["user_name"]
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
-        # Re-resolve if user changed archetype or backend
-        new_arch = wizard_result["archetype"]
+        # Re-resolve if user changed archetypes or backend
+        new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
         new_backend = wizard_result["backend"]
-        if new_arch != resolved.archetype or new_backend != backend:
+        current_archs = list(resolved.archetypes) if resolved.archetypes else [resolved.archetype]
+        if set(new_archetypes) != set(current_archs) or new_backend != backend:
             resolved = resolver.resolve(
                 scan,
                 backend=new_backend,
-                archetype_override=new_arch,
+                archetypes_override=new_archetypes,
             )
         backend = new_backend
 
@@ -472,6 +610,7 @@ def run_init(
                 "copies": len(plan.copies),
                 "templates": len(plan.templates),
                 "archetype": resolved.archetype,
+                "archetypes": list(resolved.archetypes) if resolved.archetypes else [resolved.archetype],
                 "backend": backend,
                 "stacks": [d.name for d in scan.stacks],
                 "stack_agents": list(resolved.stack_agents),

@@ -200,3 +200,86 @@ class TestInitCLI:
         assert gi.is_file()
         content = gi.read_text()
         assert "Grimoire Kit" in content
+
+    # ── Batch 4 — Multi-archetype ──────────────────────────────
+
+    def test_init_multi_archetype_comma_separated(self, runner, app, tmp_path: Path) -> None:
+        """CLI --archetype supports comma-separated values."""
+        target = tmp_path / "multi-arch"
+        result = runner.invoke(app, ["-y", "init", str(target), "--archetype", "web-app,infra-ops"])
+        assert result.exit_code == 0
+        # Should have DNA for primary archetype at least
+        dna = target / "_grimoire" / "_config" / "archetype.dna.yaml"
+        assert dna.is_file()
+
+    def test_init_multi_archetype_json_output(self, runner, app, tmp_path: Path) -> None:
+        """JSON output should contain archetypes list."""
+        import json
+        target = tmp_path / "multi-json"
+        result = runner.invoke(app, ["-y", "-o", "json", "init", str(target), "--archetype", "web-app,fix-loop"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "archetypes" in data
+        assert "web-app" in data["archetypes"]
+        assert "fix-loop" in data["archetypes"]
+
+    def test_init_multi_archetype_dry_run(self, runner, app, tmp_path: Path) -> None:
+        """Dry-run with multiple archetypes shows composite info."""
+        target = tmp_path / "multi-dry"
+        result = runner.invoke(app, ["-y", "init", str(target), "--dry-run", "--archetype", "infra-ops,fix-loop"])
+        assert result.exit_code == 0
+
+
+class TestParseArchetypeSelection:
+    """Tests for _parse_archetype_selection helper."""
+
+    def test_all_returns_all_keys(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("all")
+        assert result == list(_ARCHETYPE_KEYS)
+
+    def test_none_returns_minimal(self) -> None:
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+        assert _parse_archetype_selection("none") == ["minimal"]
+
+    def test_empty_returns_minimal(self) -> None:
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+        assert _parse_archetype_selection("") == ["minimal"]
+
+    def test_single_number(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("1")
+        assert result == [_ARCHETYPE_KEYS[0]]
+
+    def test_multiple_numbers(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("1,3,5")
+        assert result == [_ARCHETYPE_KEYS[0], _ARCHETYPE_KEYS[2], _ARCHETYPE_KEYS[4]]
+
+    def test_numbers_with_spaces(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("1 3 5")
+        assert result == [_ARCHETYPE_KEYS[0], _ARCHETYPE_KEYS[2], _ARCHETYPE_KEYS[4]]
+
+    def test_deduplication(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("1,1,1")
+        assert result == [_ARCHETYPE_KEYS[0]]
+
+    def test_archetype_names_directly(self) -> None:
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+        result = _parse_archetype_selection("web-app")
+        assert result == ["web-app"]
+
+    def test_out_of_range_ignored(self) -> None:
+        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
+        result = _parse_archetype_selection("1,99")
+        assert result == [_ARCHETYPE_KEYS[0]]
+
+    def test_zero_triggers_guided(self) -> None:
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+        # "0" calls _guided_discovery which needs user input — for unit test, we mock
+        from unittest.mock import patch
+        with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
+            result = _parse_archetype_selection("0")
+        assert result == ["web-app"]

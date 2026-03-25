@@ -99,8 +99,7 @@ agents:
   archetype: "$archetype"
   custom_agents: []
 
-installed_archetypes:
-  - "$archetype"
+installed_archetypes: [$archetype_list]
 """
 
 _MEMORY_CONFIG_TPL = """\
@@ -322,6 +321,8 @@ class ProjectScaffolder:
     def _tpl_vars(self) -> dict[str, str]:
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
         stack_list = ", ".join(f'"{s}"' for s in stacks) if stacks else ""
+        archetypes = self._resolved.archetypes or (self._resolved.archetype,)
+        archetype_list = ", ".join(f'"{a}"' for a in archetypes)
         return {
             "project_name": self._project_name,
             "user_name": self._user_name,
@@ -329,7 +330,8 @@ class ProjectScaffolder:
             "skill_level": self._skill_level,
             "project_type": self._scan.project_type if self._scan else "generic",
             "stack_list": stack_list,
-            "archetype": self._resolved.archetype,
+            "archetype": ", ".join(archetypes),
+            "archetype_list": archetype_list,
             "backend": self._backend,
         }
 
@@ -365,42 +367,54 @@ class ProjectScaffolder:
             ))
 
     def _plan_archetype_agents(self, p: ScaffoldPlan) -> None:
-        arch = self._resolved.archetype
-        arch_dir = self._archetypes / arch
-        if not arch_dir.is_dir():
-            return
+        archetypes = self._resolved.archetypes or (self._resolved.archetype,)
+        for arch in archetypes:
+            arch_dir = self._archetypes / arch
+            if not arch_dir.is_dir():
+                continue
 
-        # Agents
-        agents_src = arch_dir / "agents"
-        if agents_src.is_dir():
-            agents_dst = self._agents_dir()
-            for md in sorted(agents_src.glob("*.md")):
+            # Agents
+            agents_src = arch_dir / "agents"
+            if agents_src.is_dir():
+                agents_dst = self._agents_dir()
+                for md in sorted(agents_src.glob("*.md")):
+                    # Skip if already planned (from a previous archetype layer)
+                    if any(fc.dst == agents_dst / md.name for fc in p.copies):
+                        continue
+                    p.copies.append(FileCopy(
+                        src=md,
+                        dst=agents_dst / md.name,
+                        label=f"{arch}/{md.stem}",
+                    ))
+
+            # Archetype DNA — merge multiple into composite
+            dna_src = arch_dir / "archetype.dna.yaml"
+            if dna_src.is_file():
                 p.copies.append(FileCopy(
-                    src=md,
-                    dst=agents_dst / md.name,
-                    label=f"{arch}/{md.stem}",
+                    src=dna_src,
+                    dst=self._target / "_grimoire" / "_config" / f"archetype.dna.{arch}.yaml",
+                    label=f"{arch}/archetype.dna.yaml",
                 ))
+                # Also keep a primary DNA copy for backward compat (first archetype wins)
+                primary_dst = self._target / "_grimoire" / "_config" / "archetype.dna.yaml"
+                if not any(fc.dst == primary_dst for fc in p.copies):
+                    p.copies.append(FileCopy(
+                        src=dna_src,
+                        dst=primary_dst,
+                        label=f"{arch}/archetype.dna.yaml",
+                    ))
 
-        # Archetype DNA — project constraints, traits, values for agents
-        dna_src = arch_dir / "archetype.dna.yaml"
-        if dna_src.is_file():
-            p.copies.append(FileCopy(
-                src=dna_src,
-                dst=self._target / "_grimoire" / "_config" / "archetype.dna.yaml",
-                label=f"{arch}/archetype.dna.yaml",
-            ))
-
-        # Shared context template (prefer archetype-specific over default)
-        shared_tpl = arch_dir / "shared-context.tpl.md"
-        if shared_tpl.is_file():
-            content = shared_tpl.read_text(encoding="utf-8")
-            # Substitute known variables using safe_substitute
-            rendered = Template(content).safe_substitute(self._tpl_vars())
-            p.templates.append(TemplateRender(
-                dst=self._memory_dir() / "shared-context.md",
-                content=rendered,
-                label="shared-context.md (archetype)",
-            ))
+            # Shared context template (first archetype with template wins)
+            shared_tpl = arch_dir / "shared-context.tpl.md"
+            shared_dst = self._memory_dir() / "shared-context.md"
+            if shared_tpl.is_file() and not any(t.dst == shared_dst for t in p.templates):
+                content = shared_tpl.read_text(encoding="utf-8")
+                rendered = Template(content).safe_substitute(self._tpl_vars())
+                p.templates.append(TemplateRender(
+                    dst=shared_dst,
+                    content=rendered,
+                    label="shared-context.md (archetype)",
+                ))
 
     def _plan_stack_agents(self, p: ScaffoldPlan) -> None:
         stack_agents_dir = self._archetypes / "stack" / "agents"
