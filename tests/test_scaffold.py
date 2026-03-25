@@ -343,3 +343,57 @@ class TestProjectScaffolder:
         s.execute(plan)
         ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
         assert "@concierge" in ci
+
+    # ── UX improvements (P1-P6) ──────────────────────────────────────
+
+    def test_copilot_instructions_has_quick_start(self, tmp_path: Path) -> None:
+        """copilot-instructions.md should have a Quick Start section."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "## Quick Start" in ci
+        assert "Copilot Chat" in ci
+
+    def test_copilot_instructions_has_file_ownership(self, tmp_path: Path) -> None:
+        """copilot-instructions.md should have a File Ownership section."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "## File Ownership" in ci
+        assert "shared-context.md" in ci
+
+    def test_agents_table_has_description_column(self, tmp_path: Path) -> None:
+        """Agents table in copilot-instructions should have a Description column."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "| Agent | Role | Description |" in ci
+
+    def test_decisions_log_has_format_guide(self, tmp_path: Path) -> None:
+        """decisions-log.md should have a format guide with example template."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        dl = (tmp_path / "_grimoire" / "_memory" / "decisions-log.md").read_text()
+        assert "## Format" in dl
+        assert "Contexte" in dl
+        assert "Alternatives" in dl
+
+    def test_session_state_has_first_run_flag(self, tmp_path: Path) -> None:
+        """session-state.md should contain first_run: true for onboarding."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ss = (tmp_path / "_grimoire" / "_memory" / "session-state.md").read_text()
+        assert "first_run: true" in ss
+
+    def test_copilot_instructions_has_no_hallucination_rule(self, tmp_path: Path) -> None:
+        """copilot-instructions conventions should include no-hallucination rule."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "hallucination" in ci.lower()

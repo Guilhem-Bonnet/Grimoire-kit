@@ -195,6 +195,15 @@ def _display_report(
     info = _ARCHETYPE_INFO.get(resolved.archetype, (resolved.archetype, ""))
     console.print(f"  [cyan]🧬 Archetype:[/cyan] {info[0]} ({resolved.reason})")
     console.print(f"  [cyan]🧠 Memory:[/cyan] {backend}")
+    _backend_tips = {
+        "local": "Mémoire fichier locale — aucune dépendance requise",
+        "qdrant-local": "Qdrant détecté sur localhost:6333 — recherche sémantique activée",
+        "qdrant-server": "Qdrant distant configuré — vérifier avec grimoire doctor",
+        "ollama": "Ollama détecté — embeddings locaux activés",
+    }
+    _tip = _backend_tips.get(backend)
+    if _tip:
+        console.print(f"           [dim]{_tip}[/dim]")
     console.print()
 
     # Agents deployed
@@ -215,10 +224,14 @@ def _display_report(
     # Next steps
     console.print(Panel(
         "[bold]Your project is alive![/bold]\n\n"
-        f"  Open VS Code:  [cyan]code {target.name}[/cyan]\n"
-        "  Health check:  [cyan]grimoire doctor[/cyan]\n"
-        "  See agents:    [cyan]grimoire status[/cyan]\n"
-        "  Get started:   [cyan]Ask @grimoire in Copilot Chat[/cyan]",
+        f"  [bold cyan]Step 1:[/bold cyan] Open your project in VS Code\n"
+        f"           [cyan]code {target.name}[/cyan]\n\n"
+        "  [bold cyan]Step 2:[/bold cyan] Talk to your AI concierge\n"
+        "           Open Copilot Chat → type [cyan]@concierge[/cyan]\n"
+        "           Marcel will guide you through your first session.\n\n"
+        "  [dim]Optional:[/dim]\n"
+        "  Health check:   [cyan]grimoire doctor[/cyan]\n"
+        "  Agent registry: [cyan]grimoire status[/cyan]",
         title="[bold green]Next Steps[/bold green]",
         border_style="green",
     ))
