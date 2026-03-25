@@ -147,7 +147,7 @@ _DECISIONS_LOG = """\
 *(Les décisions seront loguées ici au fil du projet)*
 """
 
-_MANIFEST_HEADER = "name,file,role,icon\n"
+_MANIFEST_HEADER = "name,file,role,icon\n"  # kept for backward compat
 
 _COPILOT_INSTRUCTIONS_TPL = """\
 # Copilot Instructions — $project_name
@@ -192,11 +192,18 @@ Agent files are in `.github/agents/` — VS Code discovers them automatically.
 | `.github/agents/` | Auto-généré | Wrappers VS Code — ne pas modifier manuellement |
 | `_grimoire-output/` | Agents | Outputs de travail — lecture seule pour l'humain |
 
+## Archetype DNA
+
+Le fichier `_grimoire/_config/archetype.dna.yaml` définit les **traits**,
+**contraintes** et **valeurs** du projet selon l'archétype choisi ($archetype).
+Les agents le consultent pour adapter leur comportement.
+
 ## Grimoire Structure
 
 ```
 _grimoire/
   _config/
+    archetype.dna.yaml     # Traits, contraintes, valeurs (NE PAS SUPPRIMER)
     custom/
       agents/              # Agents IA du projet (personnalisables)
       prompt-templates/    # Templates de prompts
@@ -211,8 +218,9 @@ _grimoire/
     failure-museum.md      # Musée des erreurs (auto)
     session-state.md       # État de session (auto)
 _grimoire-output/
-  .runs/                   # Sessions de travail
+  .runs/                   # Sessions de travail (exclu du git)
 project-context.yaml       # Config globale du projet
+.gitignore                 # Patterns Grimoire auto-ajoutés
 ```
 
 ## Conventions
@@ -228,6 +236,7 @@ project-context.yaml       # Config globale du projet
 
 | Commande | Usage |
 |----------|-------|
+| `grimoire init` | Initialiser un nouveau projet Grimoire |
 | `grimoire doctor` | Health check complet du projet |
 | `grimoire status` | Voir les agents installés et leur état |
 """
@@ -276,6 +285,7 @@ class ProjectScaffolder:
         self._plan_templates(p)
         self._plan_agent_wrappers(p)
         self._plan_copilot_instructions(p)
+        self._plan_gitignore(p)
         return p
 
     def execute(self, plan: ScaffoldPlan) -> ScaffoldResult:
@@ -370,6 +380,15 @@ class ProjectScaffolder:
                     dst=agents_dst / md.name,
                     label=f"{arch}/{md.stem}",
                 ))
+
+        # Archetype DNA — project constraints, traits, values for agents
+        dna_src = arch_dir / "archetype.dna.yaml"
+        if dna_src.is_file():
+            p.copies.append(FileCopy(
+                src=dna_src,
+                dst=self._target / "_grimoire" / "_config" / "archetype.dna.yaml",
+                label=f"{arch}/archetype.dna.yaml",
+            ))
 
         # Shared context template (prefer archetype-specific over default)
         shared_tpl = arch_dir / "shared-context.tpl.md"
@@ -506,13 +525,15 @@ class ProjectScaffolder:
             label="session-state.md",
         ))
 
-        # Agent manifest
-        manifest_lines = [_MANIFEST_HEADER]
-        all_agents = list(self._list_planned_agents(p))
-        for agent_label in all_agents:
-            parts = agent_label.split("/")
-            name = parts[-1] if len(parts) > 1 else parts[0]
-            manifest_lines.append(f"{name},{name}.md,agent,🤖\n")
+        # Agent manifest (enriched with category + description)
+        manifest_lines = ["name,file,category,description,icon\n"]
+        for fc in p.copies:
+            if fc.dst.suffix != ".md" or "/agents/" not in str(fc.dst):
+                continue
+            name = fc.dst.stem
+            category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
+            desc = self._extract_agent_description(fc.src).replace(",", ";")
+            manifest_lines.append(f"{name},{name}.md,{category},{desc},🤖\n")
         p.templates.append(TemplateRender(
             dst=self._target / "_grimoire" / "_config" / "agent-manifest.csv",
             content="".join(manifest_lines),
@@ -592,6 +613,32 @@ class ProjectScaffolder:
             dst=copilot_file,
             content=Template(_COPILOT_INSTRUCTIONS_TPL).safe_substitute(v),
             label=".github/copilot-instructions.md",
+        ))
+
+    def _plan_gitignore(self, p: ScaffoldPlan) -> None:
+        """Add grimoire-specific patterns to .gitignore."""
+        gitignore = self._target / ".gitignore"
+        marker = "# --- Grimoire Kit ---"
+        section = (
+            f"{marker}\n"
+            "# Session runs — ephemeral runtime data\n"
+            "_grimoire-output/.runs/\n"
+            "# Memory archives — compressed old sessions\n"
+            "_grimoire/_memory/archives/\n"
+        )
+
+        if gitignore.is_file():
+            existing = gitignore.read_text(encoding="utf-8")
+            if marker in existing:
+                return  # Already has grimoire section
+            content = existing.rstrip() + "\n\n" + section
+        else:
+            content = section
+
+        p.templates.append(TemplateRender(
+            dst=gitignore,
+            content=content,
+            label=".gitignore (grimoire patterns)",
         ))
 
     @staticmethod

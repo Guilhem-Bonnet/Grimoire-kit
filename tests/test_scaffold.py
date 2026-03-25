@@ -197,7 +197,7 @@ class TestProjectScaffolder:
         manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
         assert manifest.is_file()
         content = manifest.read_text()
-        assert "name,file,role,icon" in content
+        assert "name,file,category,description,icon" in content
 
     def test_execute_result_counts_match(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
@@ -397,3 +397,83 @@ class TestProjectScaffolder:
         s.execute(plan)
         ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
         assert "hallucination" in ci.lower()
+
+    # ── Batch 2 improvements ───────────────────────────────────────
+
+    def test_archetype_dna_deployed(self, tmp_path: Path) -> None:
+        """Archetype with DNA file should deploy it to _grimoire/_config/."""
+        s = _scaffolder(tmp_path, archetype="infra-ops")
+        plan = s.plan()
+        labels = [fc.label for fc in plan.copies]
+        assert any("archetype.dna.yaml" in lb for lb in labels)
+
+    def test_archetype_dna_written_to_disk(self, tmp_path: Path) -> None:
+        """Archetype DNA file should be written during execute."""
+        s = _scaffolder(tmp_path, archetype="infra-ops")
+        plan = s.plan()
+        s.execute(plan)
+        dna = tmp_path / "_grimoire" / "_config" / "archetype.dna.yaml"
+        assert dna.is_file()
+        content = dna.read_text()
+        assert "infra-ops" in content or "traits" in content
+
+    def test_gitignore_generated(self, tmp_path: Path) -> None:
+        """.gitignore with grimoire patterns should be generated."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        gi = tmp_path / ".gitignore"
+        assert gi.is_file()
+        content = gi.read_text()
+        assert "Grimoire Kit" in content
+        assert "_grimoire-output/.runs/" in content
+
+    def test_gitignore_appends_to_existing(self, tmp_path: Path) -> None:
+        """Existing .gitignore should be preserved with grimoire patterns appended."""
+        gi = tmp_path / ".gitignore"
+        gi.write_text("node_modules/\n.env\n")
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        content = gi.read_text()
+        assert "node_modules/" in content
+        assert "Grimoire Kit" in content
+
+    def test_gitignore_not_duplicated(self, tmp_path: Path) -> None:
+        """Grimoire section should not be added twice."""
+        gi = tmp_path / ".gitignore"
+        gi.write_text("# --- Grimoire Kit ---\n_grimoire-output/.runs/\n")
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        tpl_labels = [t.label for t in plan.templates]
+        assert ".gitignore" not in " ".join(tpl_labels)
+
+    def test_agent_manifest_has_descriptions(self, tmp_path: Path) -> None:
+        """Agent manifest CSV should include category and description columns."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
+        content = manifest.read_text()
+        assert "name,file,category,description,icon" in content
+        lines = content.strip().splitlines()
+        assert len(lines) >= 4  # header + at least 3 meta agents
+        # Each data line should have 5 columns
+        for line in lines[1:]:
+            assert line.count(",") == 4, f"Expected 5 columns: {line}"
+
+    def test_copilot_instructions_references_dna(self, tmp_path: Path) -> None:
+        """copilot-instructions should mention archetype DNA."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "archetype.dna.yaml" in ci
+
+    def test_copilot_instructions_has_grimoire_init_in_cli(self, tmp_path: Path) -> None:
+        """CLI reference should include grimoire init."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        s.execute(plan)
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        assert "grimoire init" in ci

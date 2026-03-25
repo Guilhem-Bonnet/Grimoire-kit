@@ -127,7 +127,34 @@ def _run_wizard(
         default=git_name or "Developer",
     )
 
-    # Q3 — Archetype selection
+    # Q3 — Language
+    console.print()
+    _lang_choices = {"1": "Français", "2": "English"}
+    console.print("  [bold]Preferred language:[/bold]")
+    console.print("    [bold]1[/bold]) Français")
+    console.print("    [bold]2[/bold]) English")
+    lang_input = Prompt.ask(
+        "  [bold]Choose language[/bold]",
+        default="1",
+        choices=["1", "2"],
+    )
+    language = _lang_choices[lang_input]
+
+    # Q4 — Skill level
+    _skill_choices = {"1": "beginner", "2": "intermediate", "3": "expert"}
+    _skill_labels = {"1": "Débutant — plus d'explications", "2": "Intermédiaire — équilibré", "3": "Expert — concis, moins de cérémoniel"}
+    console.print()
+    console.print("  [bold]Skill level:[/bold]")
+    for k, v in _skill_labels.items():
+        console.print(f"    [bold]{k}[/bold]) {v}")
+    skill_input = Prompt.ask(
+        "  [bold]Choose skill level[/bold]",
+        default="2",
+        choices=["1", "2", "3"],
+    )
+    skill_level = _skill_choices[skill_input]
+
+    # Q5 — Archetype selection
     console.print()
     console.print("  [bold]Available archetypes:[/bold]")
     arch_choices: list[str] = []
@@ -150,13 +177,15 @@ def _run_wizard(
     arch_idx = int(arch_input)
     archetype = "minimal" if arch_idx > len(arch_choices) else arch_choices[arch_idx - 1]
 
-    # Q4 — Confirm
+    # Q6 — Confirm
     console.print()
     console.print("  [bold]Summary:[/bold]")
-    console.print(f"    Project:   {project_name}")
-    console.print(f"    User:      {user_name}")
-    console.print(f"    Archetype: {archetype}")
-    console.print(f"    Backend:   {backend}")
+    console.print(f"    Project:     {project_name}")
+    console.print(f"    User:        {user_name}")
+    console.print(f"    Language:    {language}")
+    console.print(f"    Skill level: {skill_level}")
+    console.print(f"    Archetype:   {archetype}")
+    console.print(f"    Backend:     {backend}")
     console.print()
 
     if not Confirm.ask("  [bold]Proceed with installation?[/bold]", default=True):
@@ -165,6 +194,8 @@ def _run_wizard(
     return {
         "project_name": project_name,
         "user_name": user_name,
+        "language": language,
+        "skill_level": skill_level,
         "archetype": archetype,
         "backend": backend,
     }
@@ -347,6 +378,8 @@ def run_init(
         wizard_result = _run_wizard(target, scan, resolved, backend)
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
+        language = wizard_result["language"]
+        skill_level = wizard_result["skill_level"]
         # Re-resolve if user changed archetype or backend
         new_arch = wizard_result["archetype"]
         new_backend = wizard_result["backend"]
