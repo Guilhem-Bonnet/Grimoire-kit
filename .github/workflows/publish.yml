@@ -35,14 +35,21 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         run: |
           pip install cyclonedx-bom
-          cyclonedx-py environment --output-format json -o dist/sbom.cdx.json
-          echo "SBOM generated: dist/sbom.cdx.json"
+          mkdir -p sbom
+          cyclonedx-py environment --output-format json -o sbom/sbom.cdx.json
+          echo "SBOM generated: sbom/sbom.cdx.json"
 
-      - name: Upload artifacts
+      - name: Upload dist artifacts
         uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom/
 
   test:
     name: "Smoke test"
@@ -119,6 +126,12 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Download SBOM
+        uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: sbom/
+
       - name: Generate release notes
         id: notes
         run: |
@@ -149,5 +162,5 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
-            dist/sbom.cdx.json
+            sbom/sbom.cdx.json
           generate_release_notes: true
