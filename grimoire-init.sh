@@ -49,6 +49,9 @@ Usage:
   $(basename "$0") --name "Nom du Projet" --user "Votre Nom" [options]
   $(basename "$0") session-branch --name "branch-name" [--list|--diff|--merge|--archive|--cherry-pick]
   $(basename "$0") install --archetype TYPE [--force] [--list] [--inspect TYPE]
+  $(basename "$0") reset [--hard] [--dry-run] [--yes]
+  $(basename "$0") uninstall [--yes] [--keep-config]
+  $(basename "$0") quick-update [--dry-run]
 
 Options init:
   --name NAME         Nom du projet (requis)
@@ -95,6 +98,13 @@ Exemples:
   $(basename "$0") install --archetype infra-ops
   $(basename "$0") install --archetype stack/go --force
   $(basename "$0") install --inspect fix-loop
+  $(basename "$0") reset                                    # Soft reset (préserve mémoire)
+  $(basename "$0") reset --hard --yes                        # Hard reset (tout supprimer)
+  $(basename "$0") reset --dry-run                           # Preview du reset
+  $(basename "$0") uninstall                                 # Supprimer Grimoire du projet
+  $(basename "$0") uninstall --keep-config                   # Garder project-context.yaml
+  $(basename "$0") quick-update                              # MAJ rapide framework
+  $(basename "$0") quick-update --dry-run                    # Preview des MAJ
   $(basename "$0") resume
   $(basename "$0") resume --checkpoint a3f9b2
   $(basename "$0") resume --list
@@ -2044,7 +2054,419 @@ cmd_trace() {
     exit 0
 }
 
+# ─── Reset (remet l'installation à zero) ─────────────────────────────────────
+# Usage: grimoire-init.sh reset [--hard] [--dry-run] [--yes]
+cmd_reset() {
+    shift  # retirer "reset"
+    local hard=false
+    local dry_run=false
+    local yes=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --hard)     hard=true; shift ;;
+            --dry-run)  dry_run=true; shift ;;
+            --yes|-y)   yes=true; shift ;;
+            --help)
+                echo -e "${CYAN}Usage: $(basename "$0") reset [--hard] [--dry-run] [--yes]${NC}"
+                echo ""
+                echo "  Remet l'installation Grimoire à un état propre."
+                echo ""
+                echo "  Mode par défaut (soft) :"
+                echo "    • Réinstalle le framework (agent-base, scripts, templates)"
+                echo "    • Réinstalle les meta agents (Atlas, Sentinel, Mnemo)"
+                echo "    • Préserve _memory/ (learnings, sessions, shared-context)"
+                echo "    • Préserve les agents custom de l'archétype"
+                echo "    • Préserve project-context.yaml"
+                echo ""
+                echo "  --hard      Supprime tout _grimoire/ et recrée depuis zéro"
+                echo "              (ATTENTION: perte des learnings et de la mémoire)"
+                echo "  --dry-run   Afficher les actions sans les exécuter"
+                echo "  --yes       Ne pas demander de confirmation"
+                exit 0
+                ;;
+            *)  error "Option reset inconnue: $1" ;;
+        esac
+    done
+
+    local grimoire_dir="${TARGET_DIR}/_grimoire"
+
+    if [[ ! -d "$grimoire_dir/_config/custom" ]]; then
+        error "Pas de projet Grimoire détecté dans $(pwd)"
+    fi
+
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════${NC}"
+    if $hard; then
+        echo -e "${CYAN}║  Grimoire — HARD Reset${NC}"
+    else
+        echo -e "${CYAN}║  Grimoire — Soft Reset${NC}"
+    fi
+    echo -e "${CYAN}╙═══════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if $hard; then
+        echo -e "  ${RED}⚠  HARD RESET : tout _grimoire/ sera supprimé et recréé${NC}"
+        echo -e "  ${RED}   Les learnings, sessions et mémoire seront PERDUS${NC}"
+    else
+        echo -e "  ${GREEN}Soft reset : framework + meta agents réinstallés${NC}"
+        echo -e "  ${GREEN}Mémoire et agents custom préservés${NC}"
+    fi
+    echo ""
+
+    if [[ "$yes" != true && "$dry_run" != true ]]; then
+        read -p "Continuer ? (y/N) " -n 1 -r
+        echo
+        [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+    fi
+
+    if $hard; then
+        # Hard reset: supprimer et recréer la structure
+        if [[ "$dry_run" == true ]]; then
+            echo -e "  ${RED}✗${NC}  rm -rf $grimoire_dir"
+            echo -e "  ${GREEN}+${NC}  Recréation de la structure de base"
+            echo ""
+            echo -e "  ${CYAN}Dry-run — aucune modification effectuée${NC}"
+        else
+            rm -rf "$grimoire_dir"
+            mkdir -p "$grimoire_dir/_config/custom/agents"
+            mkdir -p "$grimoire_dir/_config/custom/prompt-templates"
+            mkdir -p "$grimoire_dir/_config/custom/workflows"
+            mkdir -p "$grimoire_dir/_memory/agent-learnings"
+            mkdir -p "$grimoire_dir/_memory/session-summaries"
+            mkdir -p "$grimoire_dir/_memory/archives"
+            mkdir -p "$grimoire_dir/_memory/backends"
+
+            # Réinstaller le framework
+            cp "$SCRIPT_DIR/framework/agent-base.md" "$grimoire_dir/_config/custom/agent-base.md"
+            cp "$SCRIPT_DIR/framework/cc-verify.sh" "$grimoire_dir/_config/custom/cc-verify.sh"
+            chmod +x "$grimoire_dir/_config/custom/cc-verify.sh"
+            cp "$SCRIPT_DIR/framework/sil-collect.sh" "$grimoire_dir/_config/custom/sil-collect.sh"
+            chmod +x "$grimoire_dir/_config/custom/sil-collect.sh"
+            cp "$SCRIPT_DIR/framework/memory/maintenance.py" "$grimoire_dir/_memory/maintenance.py"
+            cp "$SCRIPT_DIR/framework/memory/mem0-bridge.py" "$grimoire_dir/_memory/mem0-bridge.py"
+            cp "$SCRIPT_DIR/framework/memory/session-save.py" "$grimoire_dir/_memory/session-save.py"
+            cp -r "$SCRIPT_DIR/framework/memory/backends/"* "$grimoire_dir/_memory/backends/" 2>/dev/null || true
+            cp -r "$SCRIPT_DIR/framework/prompt-templates/"* "$grimoire_dir/_config/custom/prompt-templates/" 2>/dev/null || true
+            cp -r "$SCRIPT_DIR/framework/workflows/"* "$grimoire_dir/_config/custom/workflows/" 2>/dev/null || true
+
+            # Meta agents
+            cp "$SCRIPT_DIR/archetypes/meta/agents/"*.md "$grimoire_dir/_config/custom/agents/" 2>/dev/null || true
+
+            # Fichiers mémoire vides
+            touch "$grimoire_dir/_memory/decisions-log.md"
+            touch "$grimoire_dir/_memory/handoff-log.md"
+            touch "$grimoire_dir/_memory/agent-changelog.md"
+            echo '[]' > "$grimoire_dir/_memory/memories.json"
+            touch "$grimoire_dir/_memory/activity.jsonl"
+
+            ok "Hard reset terminé — _grimoire/ recréé depuis zéro"
+            info "Relancez 'grimoire setup --sync' pour reconfigurer"
+        fi
+    else
+        # Soft reset: réinstaller framework sans toucher à _memory/ ni agents custom
+        local reset_count=0
+        _reset_file() {
+            local src="$1" dst="$2" label="$3"
+            [[ ! -f "$src" ]] && return
+            if [[ "$dry_run" == true ]]; then
+                echo -e "  ${GREEN}↻${NC}  $label"
+            else
+                mkdir -p "$(dirname "$dst")"
+                cp "$src" "$dst"
+            fi
+            reset_count=$((reset_count + 1))
+        }
+
+        echo -e "${YELLOW}▶ Framework core${NC}"
+        _reset_file "$SCRIPT_DIR/framework/agent-base.md" \
+                    "$grimoire_dir/_config/custom/agent-base.md" "agent-base.md"
+        _reset_file "$SCRIPT_DIR/framework/cc-verify.sh" \
+                    "$grimoire_dir/_config/custom/cc-verify.sh" "cc-verify.sh"
+        _reset_file "$SCRIPT_DIR/framework/sil-collect.sh" \
+                    "$grimoire_dir/_config/custom/sil-collect.sh" "sil-collect.sh"
+
+        echo -e "${YELLOW}▶ Memory scripts${NC}"
+        _reset_file "$SCRIPT_DIR/framework/memory/maintenance.py" \
+                    "$grimoire_dir/_memory/maintenance.py" "maintenance.py"
+        _reset_file "$SCRIPT_DIR/framework/memory/mem0-bridge.py" \
+                    "$grimoire_dir/_memory/mem0-bridge.py" "mem0-bridge.py"
+        _reset_file "$SCRIPT_DIR/framework/memory/session-save.py" \
+                    "$grimoire_dir/_memory/session-save.py" "session-save.py"
+
+        echo -e "${YELLOW}▶ Meta agents${NC}"
+        if [[ -d "$SCRIPT_DIR/archetypes/meta/agents" ]]; then
+            for meta_agent in "$SCRIPT_DIR/archetypes/meta/agents/"*.md; do
+                [[ -f "$meta_agent" ]] || continue
+                local aname
+                aname="$(basename "$meta_agent")"
+                _reset_file "$meta_agent" \
+                            "$grimoire_dir/_config/custom/agents/$aname" "meta/$aname"
+            done
+        fi
+
+        echo -e "${YELLOW}▶ Templates & Workflows${NC}"
+        for tpl in "$SCRIPT_DIR/framework/prompt-templates/"*; do
+            [[ -f "$tpl" ]] || continue
+            _reset_file "$tpl" \
+                        "$grimoire_dir/_config/custom/prompt-templates/$(basename "$tpl")" \
+                        "prompt-templates/$(basename "$tpl")"
+        done
+        for wf in "$SCRIPT_DIR/framework/workflows/"*; do
+            [[ -f "$wf" ]] || continue
+            _reset_file "$wf" \
+                        "$grimoire_dir/_config/custom/workflows/$(basename "$wf")" \
+                        "workflows/$(basename "$wf")"
+        done
+
+        echo ""
+        if [[ "$dry_run" == true ]]; then
+            echo -e "  ${CYAN}Dry-run : ${reset_count} fichier(s) seraient réinitialisés${NC}"
+        else
+            [[ -f "$grimoire_dir/_config/custom/cc-verify.sh" ]] && chmod +x "$grimoire_dir/_config/custom/cc-verify.sh"
+            [[ -f "$grimoire_dir/_config/custom/sil-collect.sh" ]] && chmod +x "$grimoire_dir/_config/custom/sil-collect.sh"
+            ok "Soft reset terminé : ${reset_count} fichier(s) réinitialisés"
+            info "Mémoire et agents custom préservés"
+        fi
+    fi
+    exit 0
+}
+
+# ─── Uninstall (suppression complète) ────────────────────────────────────────
+# Usage: grimoire-init.sh uninstall [--yes] [--keep-config]
+cmd_uninstall() {
+    shift  # retirer "uninstall"
+    local yes=false
+    local keep_config=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y)       yes=true; shift ;;
+            --keep-config)  keep_config=true; shift ;;
+            --help)
+                echo -e "${CYAN}Usage: $(basename "$0") uninstall [--yes] [--keep-config]${NC}"
+                echo ""
+                echo "  Supprime complètement l'installation Grimoire du projet."
+                echo ""
+                echo "  Fichiers supprimés :"
+                echo "    • _grimoire/           (agents, mémoire, config)"
+                echo "    • _grimoire-output/    (artefacts, sessions, traces)"
+                echo "    • .github/copilot-instructions.md (si généré par Grimoire)"
+                echo ""
+                echo "  --keep-config  Préserver project-context.yaml"
+                echo "  --yes          Ne pas demander de confirmation"
+                exit 0
+                ;;
+            *)  error "Option uninstall inconnue: $1" ;;
+        esac
+    done
+
+    local grimoire_dir="${TARGET_DIR}/_grimoire"
+    local output_dir="${TARGET_DIR}/_grimoire-output"
+    local copilot_file="${TARGET_DIR}/.github/copilot-instructions.md"
+    local project_ctx="${TARGET_DIR}/project-context.yaml"
+
+    if [[ ! -d "$grimoire_dir" ]]; then
+        error "Pas de projet Grimoire détecté dans $(pwd)"
+    fi
+
+    echo -e "${RED}╔═══════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}║  Grimoire — Désinstallation${NC}"
+    echo -e "${RED}╙═══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Les éléments suivants seront supprimés :"
+    echo ""
+
+    local items=()
+    if [[ -d "$grimoire_dir" ]]; then
+        local file_count
+        file_count=$(find "$grimoire_dir" -type f | wc -l)
+        echo -e "  ${RED}✗${NC}  _grimoire/              ($file_count fichiers)"
+        items+=("$grimoire_dir")
+    fi
+    if [[ -d "$output_dir" ]]; then
+        local out_count
+        out_count=$(find "$output_dir" -type f | wc -l)
+        echo -e "  ${RED}✗${NC}  _grimoire-output/       ($out_count fichiers)"
+        items+=("$output_dir")
+    fi
+    if [[ -f "$copilot_file" ]] && grep -q "Grimoire Custom Kit" "$copilot_file" 2>/dev/null; then
+        echo -e "  ${RED}✗${NC}  .github/copilot-instructions.md"
+        items+=("$copilot_file")
+    fi
+    if [[ "$keep_config" == false && -f "$project_ctx" ]] && grep -q "grimoire_kit_version" "$project_ctx" 2>/dev/null; then
+        echo -e "  ${RED}✗${NC}  project-context.yaml"
+        items+=("$project_ctx")
+    elif [[ -f "$project_ctx" ]]; then
+        echo -e "  ${GREEN}✓${NC}  project-context.yaml   (préservé)"
+    fi
+
+    # Git hooks
+    local git_hooks_dir
+    git_hooks_dir="$(git -C "$TARGET_DIR" rev-parse --git-dir 2>/dev/null)/hooks" 2>/dev/null || true
+    if [[ -f "${git_hooks_dir:-/dev/null}/pre-commit" ]] && grep -q "Grimoire" "${git_hooks_dir}/pre-commit" 2>/dev/null; then
+        echo -e "  ${RED}✗${NC}  git pre-commit hook (Grimoire CC)"
+        items+=("${git_hooks_dir}/pre-commit")
+    fi
+    echo ""
+
+    if [[ ${#items[@]} -eq 0 ]]; then
+        info "Rien à supprimer"
+        exit 0
+    fi
+
+    if [[ "$yes" != true ]]; then
+        echo -e "  ${RED}⚠  Cette action est IRRÉVERSIBLE${NC}"
+        read -p "  Confirmer la suppression ? (tapez 'oui' pour confirmer) " -r
+        [[ "$REPLY" != "oui" ]] && { info "Annulé"; exit 1; }
+    fi
+
+    for item in "${items[@]}"; do
+        rm -rf "$item"
+    done
+
+    # Nettoyer .github/ si vide
+    if [[ -d "${TARGET_DIR}/.github" ]]; then
+        rmdir "${TARGET_DIR}/.github" 2>/dev/null || true
+    fi
+
+    echo ""
+    ok "Grimoire désinstallé avec succès"
+    info "Le projet est revenu à un état pré-Grimoire"
+    if [[ "$keep_config" == true ]]; then
+        info "project-context.yaml a été préservé"
+    fi
+    exit 0
+}
+
+# ─── Quick Update (mise à jour rapide framework only) ────────────────────────
+# Usage: grimoire-init.sh quick-update [--dry-run]
+cmd_quickupdate() {
+    shift  # retirer "quick-update"
+    local dry_run=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)  dry_run=true; shift ;;
+            --help)
+                echo -e "${CYAN}Usage: $(basename "$0") quick-update [--dry-run]${NC}"
+                echo ""
+                echo "  Mise à jour rapide du framework sans prompts interactifs."
+                echo "  Équivalent à 'upgrade' mais sans vérification de version"
+                echo "  et avec un récapitulatif compact."
+                echo ""
+                echo "  Fichiers mis à jour :"
+                echo "    • agent-base.md, cc-verify.sh, sil-collect.sh"
+                echo "    • Scripts mémoire (maintenance, mem0-bridge, session-save)"
+                echo "    • Meta agents (Atlas, Sentinel, Mnemo)"
+                echo "    • Templates et workflows"
+                echo ""
+                echo "  Fichiers préservés :"
+                echo "    • Agents custom de l'archétype"
+                echo "    • _memory/ (learnings, sessions)"
+                echo "    • project-context.yaml"
+                echo ""
+                echo "  --dry-run   Afficher les changements sans les appliquer"
+                exit 0
+                ;;
+            *)  error "Option quick-update inconnue: $1" ;;
+        esac
+    done
+
+    local grimoire_dir="${TARGET_DIR}/_grimoire"
+    local project_ctx="${TARGET_DIR}/project-context.yaml"
+
+    if [[ ! -d "$grimoire_dir/_config/custom" ]]; then
+        error "Pas de projet Grimoire détecté dans $(pwd)"
+    fi
+
+    local installed_version="unknown"
+    if [[ -f "$project_ctx" ]]; then
+        installed_version="$(grep 'grimoire_kit_version:' "$project_ctx" 2>/dev/null | sed 's/.*: *//' | tr -d '"' || echo "unknown")"
+    fi
+
+    echo -e "  ${CYAN}⚡ Quick Update${NC} — ${installed_version} → ${GRIMOIRE_KIT_VERSION}"
+    echo ""
+
+    local updated=0
+    local skipped=0
+
+    _qu_file() {
+        local src="$1" dst="$2"
+        [[ ! -f "$src" ]] && return
+        if [[ ! -f "$dst" ]]; then
+            [[ "$dry_run" == false ]] && { mkdir -p "$(dirname "$dst")"; cp "$src" "$dst"; }
+            updated=$((updated + 1)); return
+        fi
+        if diff -q "$src" "$dst" &>/dev/null; then
+            skipped=$((skipped + 1)); return
+        fi
+        [[ "$dry_run" == false ]] && cp "$src" "$dst"
+        updated=$((updated + 1))
+    }
+
+    # Framework core
+    _qu_file "$SCRIPT_DIR/framework/agent-base.md" "$grimoire_dir/_config/custom/agent-base.md"
+    _qu_file "$SCRIPT_DIR/framework/cc-verify.sh" "$grimoire_dir/_config/custom/cc-verify.sh"
+    _qu_file "$SCRIPT_DIR/framework/sil-collect.sh" "$grimoire_dir/_config/custom/sil-collect.sh"
+
+    # Memory scripts
+    _qu_file "$SCRIPT_DIR/framework/memory/maintenance.py" "$grimoire_dir/_memory/maintenance.py"
+    _qu_file "$SCRIPT_DIR/framework/memory/mem0-bridge.py" "$grimoire_dir/_memory/mem0-bridge.py"
+    _qu_file "$SCRIPT_DIR/framework/memory/session-save.py" "$grimoire_dir/_memory/session-save.py"
+
+    # Backends
+    if [[ -d "$SCRIPT_DIR/framework/memory/backends" ]]; then
+        for bf in "$SCRIPT_DIR/framework/memory/backends/"*.py; do
+            [[ -f "$bf" ]] || continue
+            _qu_file "$bf" "$grimoire_dir/_memory/backends/$(basename "$bf")"
+        done
+    fi
+
+    # Meta agents
+    if [[ -d "$SCRIPT_DIR/archetypes/meta/agents" ]]; then
+        for ma in "$SCRIPT_DIR/archetypes/meta/agents/"*.md; do
+            [[ -f "$ma" ]] || continue
+            _qu_file "$ma" "$grimoire_dir/_config/custom/agents/$(basename "$ma")"
+        done
+    fi
+
+    # Templates & workflows
+    for tpl in "$SCRIPT_DIR/framework/prompt-templates/"*; do
+        [[ -f "$tpl" ]] || continue
+        _qu_file "$tpl" "$grimoire_dir/_config/custom/prompt-templates/$(basename "$tpl")"
+    done
+    for wf in "$SCRIPT_DIR/framework/workflows/"*; do
+        [[ -f "$wf" ]] || continue
+        _qu_file "$wf" "$grimoire_dir/_config/custom/workflows/$(basename "$wf")"
+    done
+
+    # Executable bits
+    if [[ "$dry_run" == false ]]; then
+        [[ -f "$grimoire_dir/_config/custom/cc-verify.sh" ]] && chmod +x "$grimoire_dir/_config/custom/cc-verify.sh"
+        [[ -f "$grimoire_dir/_config/custom/sil-collect.sh" ]] && chmod +x "$grimoire_dir/_config/custom/sil-collect.sh"
+
+        # Update version in project-context.yaml
+        if [[ -f "$project_ctx" ]]; then
+            if grep -q 'grimoire_kit_version:' "$project_ctx"; then
+                sed -i "s/grimoire_kit_version:.*/grimoire_kit_version: \"$GRIMOIRE_KIT_VERSION\"/" "$project_ctx"
+            fi
+        fi
+    fi
+
+    echo -e "  ${GREEN}✅ ${updated} mis à jour${NC}, ${skipped} inchangé(s)"
+    if [[ "$dry_run" == true ]]; then
+        info "Dry-run — aucune modification effectuée"
+    fi
+    exit 0
+}
+
 # ─── Dispatch des sous-commandes ──────────────────────────────────────────────────
+if [[ "${1:-}" == "reset" ]]; then
+    cmd_reset "$@"
+fi
+if [[ "${1:-}" == "uninstall" ]]; then
+    cmd_uninstall "$@"
+fi
+if [[ "${1:-}" == "quick-update" ]]; then
+    cmd_quickupdate "$@"
+fi
 if [[ "${1:-}" == "session-branch" ]]; then
     cmd_session_branch "$@"
 fi

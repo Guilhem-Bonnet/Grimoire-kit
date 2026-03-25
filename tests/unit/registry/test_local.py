@@ -70,6 +70,7 @@ class TestListArchetypes:
         assert "infra-ops" in archs
 
     def test_empty_kit(self, tmp_path: Path) -> None:
+        (tmp_path / "archetypes").mkdir()
         reg = LocalRegistry(tmp_path)
         assert reg.list_archetypes() == []
 

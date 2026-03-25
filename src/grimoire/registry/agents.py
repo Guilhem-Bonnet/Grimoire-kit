@@ -136,8 +136,11 @@ class AgentRegistry:
         if local_archetypes.is_dir():
             self._archetypes_dir = local_archetypes
         else:
-            from grimoire.archetypes import bundled_path
-            self._archetypes_dir = bundled_path()
+            try:
+                from grimoire.archetypes import bundled_path
+                self._archetypes_dir = bundled_path()
+            except FileNotFoundError:
+                self._archetypes_dir = local_archetypes
         self._cache: dict[str, ArchetypeDNA] = {}
 
     @property

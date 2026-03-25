@@ -63,6 +63,9 @@ ${BOLD}Commandes:${NC}
   ${GREEN}health${NC}           Health-check mémoire
   ${GREEN}setup${NC}            Configurer les valeurs utilisateur du projet
   ${GREEN}init${NC}             Initialiser un projet (proxy grimoire-init.sh)
+  ${GREEN}reset${NC}            Réinitialiser l'installation (soft/--hard)
+  ${GREEN}uninstall${NC}        Supprimer complètement Grimoire du projet
+  ${GREEN}quick-update${NC}     Mise à jour rapide du framework (sans prompts)
   ${GREEN}version${NC}          Version du kit
   ${GREEN}help${NC}             Cette aide
 
@@ -74,6 +77,9 @@ ${BOLD}Exemples:${NC}
   grimoire setup --check
   grimoire setup --sync
   grimoire setup --user "Alice" --lang "EN"
+  grimoire reset --dry-run
+  grimoire quick-update
+  grimoire uninstall --keep-config
 EOF
 }
 
@@ -271,6 +277,18 @@ cmd_init() {
     bash "${SCRIPT_DIR}/grimoire-init.sh" "$@"
 }
 
+cmd_reset() {
+    bash "${SCRIPT_DIR}/grimoire-init.sh" reset "$@"
+}
+
+cmd_uninstall() {
+    bash "${SCRIPT_DIR}/grimoire-init.sh" uninstall "$@"
+}
+
+cmd_quickupdate() {
+    bash "${SCRIPT_DIR}/grimoire-init.sh" quick-update "$@"
+}
+
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 main() {
@@ -286,6 +304,9 @@ main() {
         health)     cmd_health "$@" ;;
         setup)      cmd_setup "$@" ;;
         init)       cmd_init "$@" ;;
+        reset)      cmd_reset "$@" ;;
+        uninstall)  cmd_uninstall "$@" ;;
+        quick-update) cmd_quickupdate "$@" ;;
         version|-v|--version)  cmd_version ;;
         help|-h|--help)        cmd_help ;;
         *)

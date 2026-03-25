@@ -71,11 +71,13 @@ packages = ["src/grimoire"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "archetypes" = "grimoire/archetypes"
+"framework" = "grimoire/data/framework"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/grimoire/",
     "archetypes/",
+    "framework/",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",

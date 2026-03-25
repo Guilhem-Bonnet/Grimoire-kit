@@ -178,6 +178,7 @@ class TestAgentRegistry:
             reg.resolve_agents("broken")
 
     def test_empty_archetypes_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "archetypes").mkdir()
         reg = AgentRegistry(tmp_path)
         assert reg.list_archetypes() == []
 

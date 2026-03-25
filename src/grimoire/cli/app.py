@@ -215,6 +215,13 @@ def version_cmd(ctx: typer.Context) -> None:
 
 # ── grimoire init ─────────────────────────────────────────────────────────────────
 
+_KNOWN_ARCHETYPES = frozenset({
+    "minimal", "web-app", "creative-studio", "fix-loop",
+    "infra-ops", "meta", "stack", "features", "platform-engineering",
+})
+
+_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
 # Run: grimoire doctor  to validate this file.
@@ -244,44 +251,35 @@ agents:
 installed_archetypes: []
 """
 
-_KNOWN_ARCHETYPES = frozenset({
-    "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-})
-
-_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
-
 _REQUIRED_DIRS = ("_grimoire", "_grimoire-output")
 _MEMORY_DIR = "_grimoire/_memory"
 
 _init_path_arg = typer.Argument(Path(), help="Project directory to initialise.")
-_init_name_opt = typer.Option("", help="Project name (default: directory name).")
-_init_force_opt = typer.Option(False, "--force", "-f", help="Overwrite existing config.")
-_init_archetype_opt = typer.Option("minimal", "--archetype", "-a", help="Agent archetype to use.")
-_init_backend_opt = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama).")
 
 
 @app.command(rich_help_panel="Project")
 def init(
     ctx: typer.Context,
     path: Path = _init_path_arg,
-    name: str = _init_name_opt,
-    force: bool = _init_force_opt,
-    archetype: str = _init_archetype_opt,
-    backend: str = _init_backend_opt,
+    name: str = typer.Option("", help="Project name (default: directory name)."),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
+    archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype (auto-detected if omitted)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
 ) -> None:
-    """Initialise a Grimoire project (creates project-context.yaml).
+    """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
+
+    Without flags, launches an interactive wizard. Use [cyan]--yes[/cyan] for
+    express mode (auto-detect everything, no questions asked).
 
     [dim]Examples:[/dim]
-      [cyan]grimoire init myproject[/cyan]
-      [cyan]grimoire init . --name demo -a web-app -b qdrant-local[/cyan]
-      [cyan]grimoire init --dry-run[/cyan]
+      [cyan]grimoire init .[/cyan]                               Interactive wizard
+      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
+      [cyan]grimoire init . -a infra-ops -b qdrant-local[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """
-    target = path.resolve()
-
-    # Validate archetype
-    if archetype not in _KNOWN_ARCHETYPES:
+    # Validate archetype if explicitly provided
+    if archetype and archetype not in _KNOWN_ARCHETYPES:
         console.print(f"[red]Unknown archetype:[/red] {archetype}")
         matches = difflib.get_close_matches(archetype, sorted(_KNOWN_ARCHETYPES), n=2, cutoff=0.5)
         if matches:
@@ -300,47 +298,17 @@ def init(
             console.print(f"Available: {', '.join(sorted(_KNOWN_BACKENDS))}")
         raise typer.Exit(1)
 
-    config_file = target / "project-context.yaml"
-    project_name = name or target.name
+    from grimoire.cli.cmd_init import run_init
 
-    if dry_run:
-        console.print("[bold]grimoire init --dry-run[/bold]\n")
-        console.print(f"  [cyan]plan[/cyan]  Create {config_file}")
-        for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
-            dp = target / d
-            if not dp.is_dir():
-                console.print(f"  [cyan]plan[/cyan]  Create directory: {d}/")
-        console.print(f"\n  Project: {project_name}")
-        console.print(f"  Archetype: {archetype}")
-        console.print(f"  Backend: {backend}")
-        return
-
-    target.mkdir(parents=True, exist_ok=True)
-
-    if config_file.exists() and not force:
-        console.print(f"[yellow]project-context.yaml already exists at {target}[/yellow]")
-        console.print("Use --force to overwrite.")
-        raise typer.Exit(1)
-
-    config_file.write_text(_TEMPLATE_YAML.format(name=project_name, archetype=archetype, backend=backend))
-
-    # Create standard directories
-    dirs_created = []
-    for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
-        (target / d).mkdir(parents=True, exist_ok=True)
-        dirs_created.append(d)
-
-    _log_operation("init", {"project": project_name, "archetype": archetype, "backend": backend})
-
-    fmt = _get_fmt(ctx)
-    if fmt == "json":
-        typer.echo(json.dumps({
-            "ok": True, "project": project_name, "path": str(config_file),
-            "archetype": archetype, "backend": backend, "directories": dirs_created,
-        }, indent=2))
-    else:
-        console.print(f"[green]Initialised Grimoire project:[/green] {project_name}")
-        console.print(f"  Config: {config_file}")
+    run_init(
+        ctx,
+        path,
+        name=name,
+        archetype=archetype,
+        backend=backend,
+        force=force,
+        dry_run=dry_run,
+    )
 
 
 # ── grimoire doctor ───────────────────────────────────────────────────────────────
