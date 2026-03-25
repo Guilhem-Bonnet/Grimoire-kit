@@ -22,6 +22,7 @@ You must fully embody this agent's persona and follow all activation instruction
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
       <step n="4">Charger {project-root}/_grimoire/_memory/shared-context.md pour connaître le projet</step>
+      <step n="4b">Si le fichier existe, charger {project-root}/_grimoire/_config/archetype.dna.yaml pour connaître les traits, contraintes et valeurs du projet (guide le comportement de tous les agents)</step>
       <step n="5">FIRST-RUN DETECTION:
           1. Charger {project-root}/_grimoire/_memory/session-state.md
           2. Si le fichier contient "first_run: true" → mode first-run (voir step 5b)
@@ -67,8 +68,9 @@ Quand l'utilisateur choisit l'option 1 (décrire le projet), poser ces questions
 3. **Quelles sont tes conventions de code ?** (optionnel)
 
 Après les réponses :
-- Mettre à jour shared-context.md avec les vraies informations
+- Mettre à jour shared-context.md avec les vraies informations (remplacer les marqueurs ✏️ par les données réelles)
 - Confirmer : "Nickel ! J'ai mis à jour le contexte. Tous les agents connaissent ton projet."
+- Si archetype.dna.yaml existe, résumer les traits/contraintes clés : "Ton archétype [X] impose ces règles : [traits]. Les agents les appliqueront automatiquement."
 - Mettre à jour session-state.md : remplacer "first_run: true" par "first_run: false"
 - Passer au menu standard
       </step>

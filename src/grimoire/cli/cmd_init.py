@@ -19,7 +19,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
 
 from grimoire.__version__ import __version__
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
@@ -237,15 +236,19 @@ def _display_report(
         console.print(f"           [dim]{_tip}[/dim]")
     console.print()
 
-    # Agents deployed
-    agents_table = Table(show_header=False, box=None, padding=(0, 2))
+    # Agents deployed (categorized)
+    agents_by_cat: dict[str, list[str]] = {}
     for label in result.copied_files:
         if "/" in label:
-            category, name = label.split("/", 1)
-            agents_table.add_row("[green]✓[/green]", f"[bold]{name}[/bold]", f"[dim]{category}[/dim]")
-    if agents_table.row_count:
+            cat, name = label.split("/", 1)
+            agents_by_cat.setdefault(cat, []).append(name)
+    _cat_icons = {"meta": "🧠", "stack": "📦", "feature": "✨"}
+    if agents_by_cat:
         console.print("  [cyan]🤖 Agents deployed:[/cyan]")
-        console.print(agents_table)
+        for cat, agents in agents_by_cat.items():
+            icon = _cat_icons.get(cat, "🤖")
+            names = ", ".join(f"[bold]{a}[/bold]" for a in agents)
+            console.print(f"    {icon} [dim]{cat}:[/dim] {names}")
         console.print()
 
     # Summary counts
@@ -273,10 +276,49 @@ def _display_dry_run(
     target: Path,
     project_name: str,
     archetype: str,
+    resolved: ResolvedArchetype | None = None,
 ) -> None:
     """Display what would happen in dry-run mode."""
     console.print("[bold]grimoire init --dry-run[/bold]")
     console.print(f"[dim]Scaffold plan for [bold]{project_name}[/bold] (archetype: {archetype})[/dim]\n")
+
+    # Agent deployment breakdown
+    agents_by_cat: dict[str, list[str]] = {}
+    for fc in plan.copies:
+        if fc.label and "/" in fc.label and fc.dst.suffix == ".md" and "/agents/" in str(fc.dst):
+            cat, name = fc.label.split("/", 1)
+            agents_by_cat.setdefault(cat, []).append(name)
+    if agents_by_cat:
+        console.print("[bold]Agents to deploy:[/bold]")
+        _cat_icons = {"meta": "🧠", "stack": "📦", "feature": "✨"}
+        for cat, agents in agents_by_cat.items():
+            icon = _cat_icons.get(cat, "🤖")
+            console.print(f"  {icon} [cyan]{cat}[/cyan]: {', '.join(agents)}")
+        console.print()
+
+    # DNA traits preview
+    dna_copies = [fc for fc in plan.copies if "archetype.dna.yaml" in fc.label]
+    if dna_copies:
+        console.print(f"[bold]Archetype DNA:[/bold] {archetype}")
+        try:
+            dna_text = dna_copies[0].src.read_text(encoding="utf-8")
+            for key in ("traits:", "constraints:", "values:"):
+                if key in dna_text:
+                    console.print(f"  [dim]{key}[/dim]")
+                    in_section = False
+                    for line in dna_text.splitlines():
+                        if line.strip().startswith(key):
+                            in_section = True
+                            continue
+                        if in_section:
+                            if line.startswith(("  - ", "  - ")):
+                                val = line.strip().lstrip("- ").split(":")[0]
+                                console.print(f"    [green]✓[/green] {val}")
+                            elif not line.startswith(" "):
+                                break
+        except OSError:
+            pass
+        console.print()
 
     if plan.directories:
         console.print("[bold]Directories:[/bold]")
@@ -292,6 +334,15 @@ def _display_dry_run(
         console.print("\n[bold]Generated files:[/bold]")
         for tr in plan.templates:
             console.print(f"  [cyan]write[/cyan]  {tr.label}")
+
+    # Gitignore preview
+    gi_tpls = [t for t in plan.templates if ".gitignore" in (t.label or "")]
+    if gi_tpls:
+        console.print("\n[bold].gitignore patterns added:[/bold]")
+        for line in gi_tpls[0].content.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                console.print(f"  [dim]{stripped}[/dim]")
 
     console.print(f"\n[dim]Total: {plan.total_operations} operations[/dim]")
 
@@ -312,11 +363,19 @@ def _display_json(
         "archetype": resolved.archetype,
         "backend": backend,
         "stacks": [d.name for d in scan.stacks] if scan else [],
-        "agents": result.copied_files,
+        "agents": {
+            "total": len(result.copied_files),
+            "by_category": {},
+            "list": result.copied_files,
+        },
         "dirs_created": len(result.created_dirs),
         "files_copied": len(result.copied_files),
         "configs_generated": len(result.rendered_files),
     }
+    for label in result.copied_files:
+        if "/" in label:
+            cat = label.split("/")[0]
+            data["agents"]["by_category"].setdefault(cat, []).append(label.split("/", 1)[1])
     typer.echo(json.dumps(data, indent=2))
 
 
@@ -419,7 +478,7 @@ def run_init(
                 "feature_agents": list(resolved.feature_agents),
             }, indent=2))
         else:
-            _display_dry_run(plan, target, project_name, resolved.archetype)
+            _display_dry_run(plan, target, project_name, resolved.archetype, resolved)
         return
 
     # Phase 6: Execute

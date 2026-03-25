@@ -151,3 +151,52 @@ class TestInitCLI:
         runner.invoke(app, ["-y", "init", str(target)])
         branch_file = target / "_grimoire-output" / ".runs" / "main" / "branch.json"
         assert branch_file.is_file()
+
+    # ── Batch 3 — Enriched dry-run and JSON output ──────────────
+
+    def test_dry_run_shows_agent_categories(self, runner, app, tmp_path: Path) -> None:
+        """Dry-run should display agents grouped by category."""
+        target = tmp_path / "dry-cats"
+        result = runner.invoke(app, ["-y", "init", str(target), "--dry-run"])
+        assert result.exit_code == 0
+        assert "meta" in result.output.lower()
+
+    def test_dry_run_shows_gitignore_patterns(self, runner, app, tmp_path: Path) -> None:
+        """Dry-run should preview .gitignore patterns."""
+        target = tmp_path / "dry-gi"
+        result = runner.invoke(app, ["-y", "init", str(target), "--dry-run"])
+        assert result.exit_code == 0
+        assert "_grimoire-output/.runs/" in result.output
+
+    def test_dry_run_infra_shows_dna(self, runner, app, tmp_path: Path) -> None:
+        """Dry-run for infra-ops should show DNA traits."""
+        target = tmp_path / "dry-dna"
+        result = runner.invoke(app, ["-y", "init", str(target), "--dry-run", "--archetype", "infra-ops"])
+        assert result.exit_code == 0
+        assert "Archetype DNA" in result.output
+
+    def test_json_output_agents_categorized(self, runner, app, tmp_path: Path) -> None:
+        """JSON output should have agents.by_category breakdown."""
+        import json
+        target = tmp_path / "json-cats"
+        result = runner.invoke(app, ["-y", "-o", "json", "init", str(target)])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "by_category" in data["agents"]
+        assert "meta" in data["agents"]["by_category"]
+
+    def test_init_deploys_archetype_dna(self, runner, app, tmp_path: Path) -> None:
+        """Init with infra-ops should deploy archetype.dna.yaml."""
+        target = tmp_path / "dna-test"
+        runner.invoke(app, ["-y", "init", str(target), "--archetype", "infra-ops"])
+        dna = target / "_grimoire" / "_config" / "archetype.dna.yaml"
+        assert dna.is_file()
+
+    def test_init_creates_gitignore(self, runner, app, tmp_path: Path) -> None:
+        """Init should generate .gitignore with grimoire patterns."""
+        target = tmp_path / "gi-test"
+        runner.invoke(app, ["-y", "init", str(target)])
+        gi = target / ".gitignore"
+        assert gi.is_file()
+        content = gi.read_text()
+        assert "Grimoire Kit" in content
