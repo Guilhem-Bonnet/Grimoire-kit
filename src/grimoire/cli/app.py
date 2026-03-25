@@ -757,6 +757,15 @@ def lint(
     raise typer.Exit(1)
 
 
+# ── grimoire update ────────────────────────────────────────────────────────────────
+
+
+@app.command("update", rich_help_panel="Info")
+def update_cmd() -> None:
+    """Update grimoire-kit to the latest version (alias for 'self update')."""
+    self_update()
+
+
 # ── grimoire up ───────────────────────────────────────────────────────────────────
 
 _up_path_arg = typer.Argument(Path(), help="Project root.")
@@ -1476,11 +1485,76 @@ def self_version(ctx: typer.Context) -> None:
         console.print("  [dim]Editable install (development mode)[/dim]")
     if latest and update_available:
         console.print(f"  [yellow]Update available:[/yellow] {latest}")
-        console.print("  [dim]Run: pip install --upgrade grimoire-kit[/dim]")
+        console.print("  [dim]Run: grimoire self update[/dim]")
     elif latest:
         console.print("  [green]Up to date[/green]")
     else:
         console.print("  [dim]Could not check for updates[/dim]")
+
+
+@self_app.command("update")
+def self_update() -> None:
+    """Update grimoire-kit to the latest version from PyPI."""
+    import shutil
+    import subprocess
+
+    installed = __version__
+    console.print(f"[bold]grimoire-kit[/bold]  {installed}\n")
+
+    # Check connectivity
+    if not is_online():
+        console.print("[red]No internet connection — cannot check for updates.[/red]")
+        raise typer.Exit(1)
+
+    # Check PyPI for latest version
+    latest: str | None = None
+    try:
+        from urllib.request import urlopen
+
+        url = "https://pypi.org/pypi/grimoire-kit/json"
+        with urlopen(url, timeout=5) as resp:  # noqa: S310
+            pypi_data = json.loads(resp.read())
+            latest = pypi_data.get("info", {}).get("version")
+    except Exception:
+        console.print("[red]Could not reach PyPI.[/red]")
+        raise typer.Exit(1) from None
+
+    if latest == installed:
+        console.print(f"  [green]Already up to date ({installed})[/green]")
+        raise typer.Exit(0)
+
+    console.print(f"  [yellow]Updating:[/yellow] {installed} → {latest}\n")
+
+    # Detect install method: pipx vs pip
+    use_pipx = False
+    pipx_bin = shutil.which("pipx")
+    if pipx_bin:
+        try:
+            result = subprocess.run(
+                [pipx_bin, "list", "--short"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "grimoire-kit" in result.stdout:
+                use_pipx = True
+        except Exception:  # noqa: S110
+            pass  # pipx detection is best-effort
+
+    if use_pipx:
+        cmd = [pipx_bin, "upgrade", "grimoire-kit"]
+        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "grimoire-kit"]
+        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
+
+    result = subprocess.run(cmd, timeout=120)
+    if result.returncode != 0:
+        console.print("\n[red]Update failed.[/red] Try manually:")
+        hint = "pipx upgrade grimoire-kit" if use_pipx else "pip install --upgrade grimoire-kit"
+        console.print(f"  [dim]{hint}[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[green]✓ Updated to {latest}[/green]")
+    console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
 
 
 @self_app.command("diagnose")

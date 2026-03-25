@@ -1067,6 +1067,84 @@ class TestSelfDiagnose:
         assert "grimoire-cli" in names
 
 
+class TestSelfUpdate:
+    """Tests for ``grimoire self update`` and ``grimoire update``."""
+
+    @patch("grimoire.cli.app.is_online", return_value=False)
+    def test_self_update_offline(self, _mock_online: MagicMock) -> None:
+        result = runner.invoke(app, ["self", "update"])
+        assert result.exit_code == 1
+        assert "No internet" in result.output
+
+    @patch("grimoire.cli.app.is_online", return_value=True)
+    def test_self_update_already_up_to_date(self, _mock_online: MagicMock) -> None:
+        from grimoire.__version__ import __version__
+
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = json.dumps({"info": {"version": __version__}}).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=fake_resp):
+            result = runner.invoke(app, ["self", "update"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+    @patch("grimoire.cli.app.is_online", return_value=True)
+    def test_self_update_performs_pip_upgrade(self, _mock_online: MagicMock) -> None:
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        fake_run = MagicMock()
+        fake_run.returncode = 0
+
+        with patch("urllib.request.urlopen", return_value=fake_resp), \
+             patch("shutil.which", return_value=None), \
+             patch("subprocess.run", return_value=fake_run) as mock_run:
+            result = runner.invoke(app, ["self", "update"])
+
+        assert result.exit_code == 0
+        assert "Updated to 99.0.0" in result.output
+        # Verify pip upgrade was called
+        call_args = mock_run.call_args[0][0]
+        assert "pip" in call_args[1] or "pip" in str(call_args)
+        assert "--upgrade" in call_args
+        assert "grimoire-kit" in call_args
+
+    @patch("grimoire.cli.app.is_online", return_value=True)
+    def test_self_update_detects_pipx(self, _mock_online: MagicMock) -> None:
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        pipx_list_result = MagicMock()
+        pipx_list_result.stdout = "grimoire-kit 3.3.0\n"
+
+        fake_upgrade = MagicMock()
+        fake_upgrade.returncode = 0
+
+        def side_effect(cmd, **kwargs):
+            if "list" in cmd:
+                return pipx_list_result
+            return fake_upgrade
+
+        with patch("urllib.request.urlopen", return_value=fake_resp), \
+             patch("shutil.which", return_value="/usr/bin/pipx"), \
+             patch("subprocess.run", side_effect=side_effect):
+            result = runner.invoke(app, ["self", "update"])
+
+        assert result.exit_code == 0
+        assert "Updated to 99.0.0" in result.output
+
+    def test_top_level_update_command_exists(self) -> None:
+        result = runner.invoke(app, ["update", "--help"])
+        assert result.exit_code == 0
+        assert "update" in result.output.lower()
+
+
 # ── Command Aliases ───────────────────────────────────────────────────────────
 
 
