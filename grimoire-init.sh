@@ -31,7 +31,15 @@ MCP_ENABLED=false
 MCP_PYTHON_PATH=""
 QDRANT_REMOTE_URL=""
 QDRANT_API_KEY=""
+OLLAMA_REMOTE_URL=""
 QDRANT_START_NOW=false
+DETECTED_QDRANT_URL=""
+DETECTED_QDRANT_API_KEY=""
+DETECTED_QDRANT_SOURCE=""
+DETECTED_OLLAMA_URL=""
+DETECTED_OLLAMA_SOURCE=""
+DETECTED_QDRANT_COMPOSE_FILE=""
+DETECTED_QDRANT_K8S_FILE=""
 
 # ─── Couleurs ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -2784,6 +2792,171 @@ deploy_feature_agents() {
     esac
 }
 
+trim_value() {
+    printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+strip_wrapping_quotes() {
+    local value
+    value="$(trim_value "$1")"
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    printf '%s' "$value"
+}
+
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+extract_env_value_from_file() {
+    local file="$1"
+    local key="$2"
+    local line
+    [[ -f "$file" ]] || return 0
+    line="$(grep -E -m1 "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null || true)"
+    [[ -n "$line" ]] || return 0
+    line="${line#export }"
+    line="${line#*=}"
+    strip_wrapping_quotes "$line"
+}
+
+probe_qdrant_url() {
+    local url="${1%/}"
+    [[ -n "$url" ]] || return 1
+    curl -sf --connect-timeout 3 --max-time 5 "$url/healthz" &>/dev/null 2>&1 || \
+        curl -sf --connect-timeout 3 --max-time 5 "$url/health" &>/dev/null 2>&1
+}
+
+probe_ollama_url() {
+    local url="${1%/}"
+    [[ -n "$url" ]] || return 1
+    curl -sf --connect-timeout 3 --max-time 5 "$url/api/tags" &>/dev/null 2>&1
+}
+
+discover_existing_memory_setup() {
+    local target_dir="${1:-$TARGET_DIR}"
+    local candidate=""
+
+    DETECTED_QDRANT_URL=""
+    DETECTED_QDRANT_API_KEY=""
+    DETECTED_QDRANT_SOURCE=""
+    DETECTED_OLLAMA_URL=""
+    DETECTED_OLLAMA_SOURCE=""
+    DETECTED_QDRANT_COMPOSE_FILE=""
+    DETECTED_QDRANT_K8S_FILE=""
+
+    # 1. Variables d'environnement shell courant
+    candidate="${Grimoire_QDRANT_URL:-${QDRANT_URL:-}}"
+    if [[ -n "$candidate" ]]; then
+        DETECTED_QDRANT_URL="$candidate"
+        DETECTED_QDRANT_SOURCE="variables d'environnement"
+        DETECTED_QDRANT_API_KEY="${Grimoire_QDRANT_API_KEY:-${QDRANT_API_KEY:-}}"
+    fi
+    candidate="${Grimoire_OLLAMA_URL:-${OLLAMA_URL:-}}"
+    if [[ -n "$candidate" ]]; then
+        DETECTED_OLLAMA_URL="$candidate"
+        DETECTED_OLLAMA_SOURCE="variables d'environnement"
+    fi
+
+    # 2. project-context.yaml existant dans le projet cible
+    local project_context="$target_dir/project-context.yaml"
+    if [[ -f "$project_context" ]]; then
+        if [[ -z "$DETECTED_QDRANT_URL" ]]; then
+            candidate="$(grep -E '^[[:space:]]*qdrant_url:' "$project_context" 2>/dev/null | head -1 | sed 's/.*qdrant_url:[[:space:]]*//' )"
+            candidate="$(strip_wrapping_quotes "$candidate")"
+            if [[ -n "$candidate" ]]; then
+                DETECTED_QDRANT_URL="$candidate"
+                DETECTED_QDRANT_SOURCE="project-context.yaml"
+            fi
+            candidate="$(grep -E '^[[:space:]]*qdrant_api_key:' "$project_context" 2>/dev/null | head -1 | sed 's/.*qdrant_api_key:[[:space:]]*//' )"
+            candidate="$(strip_wrapping_quotes "$candidate")"
+            [[ -n "$candidate" ]] && DETECTED_QDRANT_API_KEY="$candidate"
+        fi
+        if [[ -z "$DETECTED_OLLAMA_URL" ]]; then
+            candidate="$(grep -E '^[[:space:]]*ollama_url:' "$project_context" 2>/dev/null | head -1 | sed 's/.*ollama_url:[[:space:]]*//' )"
+            candidate="$(strip_wrapping_quotes "$candidate")"
+            if [[ -n "$candidate" ]]; then
+                DETECTED_OLLAMA_URL="$candidate"
+                DETECTED_OLLAMA_SOURCE="project-context.yaml"
+            fi
+        fi
+    fi
+
+    # 3. Fichiers .env / .envrc / .env.local
+    while IFS= read -r env_file; do
+        [[ -n "$DETECTED_QDRANT_URL" ]] || {
+            candidate="$(extract_env_value_from_file "$env_file" "Grimoire_QDRANT_URL")"
+            [[ -z "$candidate" ]] && candidate="$(extract_env_value_from_file "$env_file" "QDRANT_URL")"
+            if [[ -n "$candidate" ]]; then
+                DETECTED_QDRANT_URL="$candidate"
+                DETECTED_QDRANT_SOURCE="$(basename "$env_file")"
+                DETECTED_QDRANT_API_KEY="$(extract_env_value_from_file "$env_file" "Grimoire_QDRANT_API_KEY")"
+                [[ -z "$DETECTED_QDRANT_API_KEY" ]] && DETECTED_QDRANT_API_KEY="$(extract_env_value_from_file "$env_file" "QDRANT_API_KEY")"
+            fi
+        }
+        [[ -n "$DETECTED_OLLAMA_URL" ]] || {
+            candidate="$(extract_env_value_from_file "$env_file" "Grimoire_OLLAMA_URL")"
+            [[ -z "$candidate" ]] && candidate="$(extract_env_value_from_file "$env_file" "OLLAMA_URL")"
+            if [[ -n "$candidate" ]]; then
+                DETECTED_OLLAMA_URL="$candidate"
+                DETECTED_OLLAMA_SOURCE="$(basename "$env_file")"
+            fi
+        }
+    done < <(find "$target_dir" -maxdepth 4 -type f \
+        \( -name '.env' -o -name '.env.local' -o -name '.env.development' -o -name '.env.production' -o -name '.envrc' -o -name '.env.*' \) \
+        -not -name '*.example' -not -name '*.sample' -not -name '*.template' \
+        -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.venv/*' \
+        -print 2>/dev/null | sort)
+
+    # 4. docker-compose / compose déjà présent
+    while IFS= read -r compose_file; do
+        grep -qiE "image:[[:space:]]*['\"]?qdrant/qdrant|container_name:[[:space:]]*.*qdrant|^[[:space:]]*qdrant:" "$compose_file" 2>/dev/null || continue
+        DETECTED_QDRANT_COMPOSE_FILE="$compose_file"
+        if [[ -z "$DETECTED_QDRANT_URL" ]]; then
+            local port_line=""
+            local host_port=""
+            port_line="$(grep -E -m1 "^[[:space:]]*-[[:space:]]*['\"]?([0-9]{2,5}|\\$\\{[^}]+:-[0-9]{2,5}\\}):6333" "$compose_file" 2>/dev/null || true)"
+            if [[ -n "$port_line" ]]; then
+                host_port="$(printf '%s' "$port_line" | sed -nE 's/.*:-([0-9]{2,5})\}:6333.*/\1/p')"
+                [[ -z "$host_port" ]] && host_port="$(printf '%s' "$port_line" | sed -nE 's/.*[^0-9]([0-9]{2,5}):6333.*/\1/p')"
+            fi
+            [[ -z "$host_port" ]] && host_port="6333"
+            DETECTED_QDRANT_URL="http://localhost:${host_port}"
+            DETECTED_QDRANT_SOURCE="docker-compose: $(basename "$compose_file")"
+        fi
+        break
+    done < <(find "$target_dir" -maxdepth 5 -type f \
+        \( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' -o -name 'docker-compose.*.yml' -o -name 'docker-compose.*.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \) \
+        -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.venv/*' \
+        -print 2>/dev/null | sort)
+
+    # 5. Kubernetes / k8s existant
+    while IFS= read -r k8s_file; do
+        grep -qiE 'qdrant/qdrant|^[[:space:]]*app:[[:space:]]*qdrant|^[[:space:]]*name:[[:space:]]*qdrant' "$k8s_file" 2>/dev/null || continue
+        DETECTED_QDRANT_K8S_FILE="$k8s_file"
+        if [[ -z "$DETECTED_QDRANT_URL" ]]; then
+            local host_line=""
+            local host_value=""
+            local scheme="http"
+            host_line="$(grep -E -m1 '^[[:space:]]*-?[[:space:]]*host:[[:space:]]*' "$k8s_file" 2>/dev/null || true)"
+            host_value="$(printf '%s' "$host_line" | sed -nE 's/.*host:[[:space:]]*([^[:space:]]+).*/\1/p')"
+            host_value="$(strip_wrapping_quotes "$host_value")"
+            grep -qiE 'router\.tls|tls:' "$k8s_file" 2>/dev/null && scheme="https"
+            if [[ -n "$host_value" ]]; then
+                DETECTED_QDRANT_URL="${scheme}://${host_value}"
+                DETECTED_QDRANT_SOURCE="k8s ingress: $(basename "$k8s_file")"
+            else
+                DETECTED_QDRANT_SOURCE="k8s manifest: $(basename "$k8s_file")"
+            fi
+        fi
+        break
+    done < <(find "$target_dir" -maxdepth 6 -type f \( -name '*.yml' -o -name '*.yaml' \) \
+        -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.venv/*' \
+        -print 2>/dev/null | sort)
+}
+
 # ─── Wizard mémoire interactive (Qdrant / Ollama / local) ────────────────────
 # Appelé quand MEMORY_BACKEND == "auto" pour guider l'utilisateur.
 # Met à jour : MEMORY_BACKEND, QDRANT_REMOTE_URL, QDRANT_API_KEY, QDRANT_START_NOW
@@ -2792,10 +2965,26 @@ setup_memory_wizard() {
     if [[ "$MEMORY_BACKEND" != "auto" ]]; then
         return 0
     fi
+    discover_existing_memory_setup "$TARGET_DIR"
     # Mode non-interactif (pipe, CI) : auto-détection silencieuse
     if [[ ! -t 0 ]]; then
         info "Détection du backend mémoire (mode non-interactif)..."
-        MEMORY_BACKEND=$(detect_memory_backend)
+        if [[ -n "$DETECTED_OLLAMA_URL" ]] && probe_ollama_url "$DETECTED_OLLAMA_URL"; then
+            MEMORY_BACKEND="ollama"
+            OLLAMA_REMOTE_URL="$DETECTED_OLLAMA_URL"
+            QDRANT_REMOTE_URL="$DETECTED_QDRANT_URL"
+            QDRANT_API_KEY="$DETECTED_QDRANT_API_KEY"
+        elif [[ -n "$DETECTED_QDRANT_URL" ]] && probe_qdrant_url "$DETECTED_QDRANT_URL"; then
+            if [[ "$DETECTED_QDRANT_URL" == "http://localhost:6333" ]]; then
+                MEMORY_BACKEND="qdrant-local"
+            else
+                MEMORY_BACKEND="qdrant-server"
+                QDRANT_REMOTE_URL="$DETECTED_QDRANT_URL"
+                QDRANT_API_KEY="$DETECTED_QDRANT_API_KEY"
+            fi
+        else
+            MEMORY_BACKEND=$(detect_memory_backend)
+        fi
         ok "Backend mémoire : $MEMORY_BACKEND"
         return 0
     fi
@@ -2817,7 +3006,36 @@ setup_memory_wizard() {
     $qdrant_up && echo -e "  ${GREEN}✓${NC}  Qdrant détecté sur localhost:6333"
     $ollama_up && echo -e "  ${GREEN}✓${NC}  Ollama détecté sur localhost:11434"
     $docker_up && echo -e "  ${GREEN}✓${NC}  Docker disponible" || echo -e "  ${YELLOW}⚠${NC}  Docker non disponible"
+    [[ -n "$DETECTED_QDRANT_URL" ]] && echo -e "  ${GREEN}✓${NC}  Setup Qdrant existant détecté (${DETECTED_QDRANT_SOURCE}) → ${DETECTED_QDRANT_URL}"
+    [[ -n "$DETECTED_OLLAMA_URL" ]] && echo -e "  ${GREEN}✓${NC}  Setup Ollama existant détecté (${DETECTED_OLLAMA_SOURCE}) → ${DETECTED_OLLAMA_URL}"
+    [[ -n "$DETECTED_QDRANT_COMPOSE_FILE" && -z "$DETECTED_QDRANT_URL" ]] && echo -e "  ${GREEN}✓${NC}  docker-compose Qdrant détecté : ${DETECTED_QDRANT_COMPOSE_FILE}"
+    [[ -n "$DETECTED_QDRANT_K8S_FILE" && -z "$DETECTED_QDRANT_URL" ]] && echo -e "  ${GREEN}✓${NC}  manifest K8s Qdrant détecté : ${DETECTED_QDRANT_K8S_FILE}"
     echo ""
+
+    if [[ -n "$DETECTED_OLLAMA_URL" || -n "$DETECTED_QDRANT_URL" ]]; then
+        read -p "$(echo -e "  Réutiliser automatiquement le setup mémoire détecté ? ${CYAN}[Y/n]${NC} ")" -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            if [[ -n "$DETECTED_OLLAMA_URL" ]]; then
+                MEMORY_BACKEND="ollama"
+                OLLAMA_REMOTE_URL="$DETECTED_OLLAMA_URL"
+                QDRANT_REMOTE_URL="$DETECTED_QDRANT_URL"
+                QDRANT_API_KEY="$DETECTED_QDRANT_API_KEY"
+                ok "Backend sélectionné : ollama (${DETECTED_OLLAMA_URL})"
+            elif [[ "$DETECTED_QDRANT_URL" == "http://localhost:6333" ]]; then
+                MEMORY_BACKEND="qdrant-local"
+                ok "Backend sélectionné : qdrant-local (setup existant)"
+            else
+                MEMORY_BACKEND="qdrant-server"
+                QDRANT_REMOTE_URL="$DETECTED_QDRANT_URL"
+                QDRANT_API_KEY="$DETECTED_QDRANT_API_KEY"
+                ok "Backend sélectionné : qdrant-server (${DETECTED_QDRANT_URL})"
+            fi
+            echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+            echo ""
+            return 0
+        fi
+    fi
 
     read -p "$(echo -e "  Configurer la mémoire vectorielle ? ${CYAN}[Y/n]${NC} ")" -n 1 -r
     echo ""
@@ -2882,7 +3100,7 @@ setup_memory_wizard() {
             ;;
         3)
             echo ""
-            read -p "$(echo -e "  URL Qdrant ${CYAN}(ex: https://qdrant.example.com:6333)${NC} : ")" QDRANT_REMOTE_URL
+            read -r -p "$(echo -e "  URL Qdrant ${CYAN}(ex: https://qdrant.example.com:6333)${NC} : ")" QDRANT_REMOTE_URL
             echo ""
             if [[ -z "$QDRANT_REMOTE_URL" ]]; then
                 warn "URL vide — basculement vers mémoire locale"
@@ -2895,7 +3113,7 @@ setup_memory_wizard() {
             if curl -sf --connect-timeout 5 --max-time 8 "${QDRANT_REMOTE_URL%/}/healthz" &>/dev/null 2>&1; then
                 ok "Qdrant distant accessible"
                 MEMORY_BACKEND="qdrant-server"
-                read -p "$(echo -e "  API Key Qdrant (Entrée pour ignorer) : ")" QDRANT_API_KEY
+                read -r -p "$(echo -e "  API Key Qdrant (Entrée pour ignorer) : ")" QDRANT_API_KEY
                 echo ""
                 ok "Backend sélectionné : qdrant-server ($QDRANT_REMOTE_URL)"
             else
@@ -2914,6 +3132,7 @@ setup_memory_wizard() {
         4)
             if $ollama_up; then
                 MEMORY_BACKEND="ollama"
+                OLLAMA_REMOTE_URL="http://localhost:11434"
                 ok "Backend sélectionné : ollama (localhost:11434)"
             else
                 warn "Ollama non détecté sur localhost:11434 — assurez-vous de le démarrer"
@@ -2921,6 +3140,7 @@ setup_memory_wizard() {
                 echo ""
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
                     MEMORY_BACKEND="ollama"
+                    OLLAMA_REMOTE_URL="http://localhost:11434"
                     warn "Backend configuré mais non vérifié : ollama"
                 else
                     MEMORY_BACKEND="local"
@@ -3245,13 +3465,29 @@ fi
 # ─── Injection des valeurs dynamiques dans project-context.yaml ──────────────
 # Qdrant server URL et API key
 if [[ "$MEMORY_BACKEND" == "qdrant-server" && -n "$QDRANT_REMOTE_URL" && -f "$PROJECT_CONTEXT" ]]; then
-    sed -i "s|# qdrant_url: \"http://localhost:6333\".*|qdrant_url: \"$QDRANT_REMOTE_URL\"|" "$PROJECT_CONTEXT"
+    escaped_qdrant_url="$(escape_sed_replacement "$QDRANT_REMOTE_URL")"
+    sed -i "s|# qdrant_url: \"http://localhost:6333\".*|qdrant_url: \"$escaped_qdrant_url\"|" "$PROJECT_CONTEXT"
     info "qdrant_url injecté dans project-context.yaml"
     if [[ -n "$QDRANT_API_KEY" ]]; then
-        # Ajouter qdrant_api_key après qdrant_url si absent
-        if ! grep -q "qdrant_api_key:" "$PROJECT_CONTEXT"; then
-            sed -i "/qdrant_url:/a\\  qdrant_api_key: \"$QDRANT_API_KEY\"" "$PROJECT_CONTEXT"
+        info "qdrant_api_key détectée mais non persistée dans project-context.yaml (sécurité)"
+        info "Définissez Grimoire_QDRANT_API_KEY dans l'environnement pour l'exécution"
+    fi
+fi
+if [[ "$MEMORY_BACKEND" == "ollama" && -n "$OLLAMA_REMOTE_URL" && -f "$PROJECT_CONTEXT" ]]; then
+    escaped_ollama_url="$(escape_sed_replacement "$OLLAMA_REMOTE_URL")"
+    sed -i "s|# ollama_url: \"http://localhost:11434\".*|ollama_url: \"$escaped_ollama_url\"|" "$PROJECT_CONTEXT"
+    info "ollama_url injecté dans project-context.yaml"
+    if [[ -n "$QDRANT_REMOTE_URL" ]]; then
+        escaped_qdrant_url="$(escape_sed_replacement "$QDRANT_REMOTE_URL")"
+        if grep -q "^[[:space:]]*qdrant_url:" "$PROJECT_CONTEXT"; then
+            sed -i "s|^[[:space:]]*qdrant_url:.*|  qdrant_url: \"$escaped_qdrant_url\"|" "$PROJECT_CONTEXT"
+        else
+            sed -i "/ollama_url:/a\\  qdrant_url: \"$escaped_qdrant_url\"" "$PROJECT_CONTEXT"
         fi
+    fi
+    if [[ -n "$QDRANT_API_KEY" ]]; then
+        info "qdrant_api_key détectée mais non persistée dans project-context.yaml (sécurité)"
+        info "Définissez Grimoire_QDRANT_API_KEY dans l'environnement pour l'exécution"
     fi
 fi
 # MCP activation

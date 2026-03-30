@@ -82,6 +82,7 @@ user:
 memory:
   backend: "auto"                      # auto | local | qdrant-local | qdrant-server | ollama
   # qdrant_url: "http://localhost:6333"  # si qdrant-server
+  # qdrant_api_key: ""                    # optionnel; préférer Grimoire_QDRANT_API_KEY en environnement
   # ollama_url: "http://localhost:11434"  # si ollama
   # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # modèle d'embedding
   # collection_prefix: "grimoire"          # préfixe des collections Qdrant
