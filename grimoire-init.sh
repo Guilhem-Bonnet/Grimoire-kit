@@ -1583,7 +1583,29 @@ cmd_upgrade() {
     fi
     echo ""
 
-    # ─── 6. Mise à jour version dans project-context.yaml ──────────────
+    # ─── 6. VS Code Copilot integration (.github/prompts/ + .github/instructions/) ──
+    echo -e "${YELLOW}▶ VS Code Copilot workflows${NC}"
+    if [[ -d "$SCRIPT_DIR/framework/copilot/prompts" ]]; then
+        mkdir -p "$TARGET_DIR/.github/prompts"
+        for pf in "$SCRIPT_DIR/framework/copilot/prompts/"*.prompt.md; do
+            [[ -f "$pf" ]] || continue
+            local pfname
+            pfname="$(basename "$pf")"
+            _upgrade_file "$pf" "$TARGET_DIR/.github/prompts/$pfname" "prompts/$pfname"
+        done
+    fi
+    if [[ -d "$SCRIPT_DIR/framework/copilot/instructions" ]]; then
+        mkdir -p "$TARGET_DIR/.github/instructions"
+        for inf in "$SCRIPT_DIR/framework/copilot/instructions/"*.instructions.md; do
+            [[ -f "$inf" ]] || continue
+            local infname
+            infname="$(basename "$inf")"
+            _upgrade_file "$inf" "$TARGET_DIR/.github/instructions/$infname" "instructions/$infname"
+        done
+    fi
+    echo ""
+
+    # ─── 7. Mise à jour version dans project-context.yaml ──────────────
     if [[ "$dry_run" == false && -f "$project_ctx" ]]; then
         if grep -q 'grimoire_kit_version:' "$project_ctx"; then
             sed -i "s/grimoire_kit_version:.*/grimoire_kit_version: \"$GRIMOIRE_KIT_VERSION\"/" "$project_ctx"
