@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -109,58 +110,81 @@ def scan_project(project_root: Path) -> ArchScan:
     """Scanner complet du projet."""
     scan = ArchScan()
 
-    # Discover agents
-    for pattern in ["**/agents/*.md", "**/agents/*.xml", "**/agents/*.yaml"]:
-        for f in project_root.glob(pattern):
-            if not _excluded(str(f)):
-                scan.agents.append(str(f.relative_to(project_root)))
+    # Single-pass filesystem walk with pruning for performance.
+    # Path.glob("**") on large repositories can be very slow because it still
+    # traverses excluded folders before filtering.
+    for root, dirs, files in os.walk(project_root, topdown=True):
+        dirs[:] = [d for d in dirs if d not in _SCAN_EXCLUDE]
 
-    # Discover workflows
-    for pattern in ["**/workflows/**/*.md", "**/workflows/**/*.yaml", "**/workflows/**/*.xml"]:
-        for f in project_root.glob(pattern):
-            if not _excluded(str(f)):
-                scan.workflows.append(str(f.relative_to(project_root)))
+        root_path = Path(root)
+        rel_root = root_path.relative_to(project_root)
+        rel_parts = rel_root.parts
 
-    # Discover tools
-    for f in project_root.glob("**/tools/*.py"):
-        if not _excluded(str(f)):
-            scan.tools.append(str(f.relative_to(project_root)))
+        for fname in files:
+            full = root_path / fname
+            rel = full.relative_to(project_root).as_posix()
+            if _excluded(rel):
+                continue
 
-    # Discover configs
-    for pattern in ["**/*.yaml", "**/*.yml"]:
-        for f in project_root.glob(pattern):
-            rel = str(f.relative_to(project_root))
-            if not _excluded(rel) and rel not in scan.workflows:
+            suffix = full.suffix.lower()
+            parent_name = full.parent.name
+
+            # agents/*.md|xml|yaml (fichier direct dans un dossier agents)
+            if parent_name == "agents" and suffix in {".md", ".xml", ".yaml"}:
+                scan.agents.append(rel)
+
+            # workflows/**/*.md|yaml|xml (tout fichier sous un dossier workflows)
+            if "workflows" in rel_parts and suffix in {".md", ".xml", ".yaml"}:
+                scan.workflows.append(rel)
+
+            # tools/*.py (fichier direct dans tools)
+            if parent_name == "tools" and suffix == ".py":
+                scan.tools.append(rel)
+
+            # docs/**/*.md
+            if "docs" in rel_parts and suffix == ".md":
+                scan.docs.append(rel)
+
+            # tests/**/* (tous fichiers sous tests)
+            if "tests" in rel_parts:
+                scan.tests.append(rel)
+
+            # configs *.yaml|*.yml (workflows filtrés plus bas)
+            if suffix in {".yaml", ".yml"}:
                 scan.configs.append(rel)
 
-    # Discover docs
-    for f in project_root.glob("**/docs/**/*.md"):
-        if not _excluded(str(f)):
-            scan.docs.append(str(f.relative_to(project_root)))
-
-    # Discover tests
-    for f in project_root.glob("**/tests/**/*"):
-        if not _excluded(str(f)) and f.is_file():
-            scan.tests.append(str(f.relative_to(project_root)))
+    # Remove workflow files from generic configs bucket
+    workflow_set = set(scan.workflows)
+    scan.configs = [c for c in scan.configs if c not in workflow_set]
 
     # Build cross-references
+    # NOTE: version précédente en O(n^2) sur tous les fichiers (substring check)
+    # pouvait devenir très lente sur de gros workspaces. Ici on tokenise le
+    # contenu puis on mappe les stems candidats en quasi O(n).
     all_files = scan.agents + scan.workflows + scan.tools
+    stem_to_paths: dict[str, list[str]] = {}
+    for other in all_files:
+        stem = Path(other).stem
+        stem_to_paths.setdefault(stem, []).append(other)
+
+    token_pattern = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b")
     for fpath in all_files:
         full = project_root / fpath
-        if full.exists() and full.stat().st_size < 100_000:
-            try:
-                content = full.read_text(encoding="utf-8", errors="replace")
-                refs = []
-                for other in all_files:
-                    if other != fpath:
-                        stem = Path(other).stem
-                        if stem in content:
-                            refs.append(other)
-                if refs:
-                    scan.cross_refs[fpath] = refs
-            except OSError as _exc:
-                _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
+        if not full.exists() or full.stat().st_size >= 100_000:
+            continue
+        try:
+            content = full.read_text(encoding="utf-8", errors="replace")
+            tokens = set(token_pattern.findall(content))
+            refs_set: set[str] = set()
+            for token in tokens:
+                for candidate in stem_to_paths.get(token, []):
+                    if candidate != fpath:
+                        refs_set.add(candidate)
+            if refs_set:
+                scan.cross_refs[fpath] = sorted(refs_set)
+        except OSError as _exc:
+            _log.debug("OSError suppressed: %s", _exc)
+            # Silent exception — add logging when investigating issues
 
     return scan
 
