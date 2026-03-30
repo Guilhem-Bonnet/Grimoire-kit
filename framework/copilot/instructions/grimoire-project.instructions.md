@@ -61,3 +61,44 @@ Avant toute action, charger :
 | `/grimoire-changelog` | Générer les notes de version |
 | `/grimoire-status` | Tableau de bord rapide |
 | `/grimoire-self-heal` | Réparer les problèmes courants |
+
+## Guide des Workflows
+
+### Pour bien démarrer
+
+1. **Premier accès** → `/grimoire-session-bootstrap` (charge contexte)
+2. **Vérification rapide** → `/grimoire-health-check` (diagnostique)
+3. **Pendant le travail** → `/grimoire-status` (vue d'ensemble)
+4. **Avant commit** → `/grimoire-pre-push` (validation)
+5. **Fin de journée** → `/grimoire-dream` (insights)
+
+### En cas de problème
+
+- Erreur pas claire → `/grimoire-health-check`
+- Système cassé → `/grimoire-self-heal`
+- Besoin de contexte → charger `_grimoire/_memory/shared-context.md`
+
+## Activation d'un Agent
+
+Quand un agent est activé, il doit suivre ce protocole :
+
+1. ✅ **Charger le contexte** : `_grimoire/_memory/shared-context.md`
+2. ✅ **Charger la config** : `_grimoire/_memory/config.yaml`
+3. ✅ **Charger agent-base** : `_grimoire/_config/custom/agent-base.md`
+4. ✅ **Suivre les instructions** : de ce fichier exactement
+5. ✅ **Appliquer la persona** : jamais sortir de rôle
+
+## Complétion Contract
+
+Avant chaque commit, valider :
+
+```bash
+bash _grimoire/_config/custom/cc-verify.sh
+```
+
+Cela vérifie :
+- ✅ Contexte à jour
+- ✅ Memory cohérente
+- ✅ Pas de secrets
+- ✅ Decisions loggées
+- ✅ Failures documentées
