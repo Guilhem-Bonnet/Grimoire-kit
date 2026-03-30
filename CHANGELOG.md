@@ -7,6 +7,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-03-30
+
+### Corrigé
+
+- **Init mémoire: durcissement non-interactif** — la réutilisation auto d'un setup détecté valide désormais la reachability (Qdrant/Ollama) avant sélection backend.
+- **Secrets: non persistance dans project-context.yaml** — `qdrant_api_key` détectée n'est plus écrite automatiquement dans la configuration projet; usage recommandé via variable d'environnement.
+- **Init YAML: échappement des remplacements sed** — les URLs injectées sont échappées pour éviter la corruption YAML quand des caractères spéciaux sont présents.
+- **Backend Qdrant: compat env vars** — prise en charge de `GRIMOIRE_QDRANT_API_KEY` en plus de `Grimoire_QDRANT_API_KEY`.
+- **README: rendu architecture GitHub** — suppression du wrapper HTML autour du diagramme Mermaid pour un rendu fiable sur GitHub.
+
 ### Ajouté
 
 - **CLI: A1 — `--debug` / `-D` flag global** — Expose GRIMOIRE_DEBUG en flag CLI (à la ruff/uv). Fonctionne aussi via `GRIMOIRE_DEBUG=1` env var. Active les tracebacks complets via Rich. Message d'erreur mis à jour : « Use --debug or set GRIMOIRE_DEBUG=1 » (Round 37)
