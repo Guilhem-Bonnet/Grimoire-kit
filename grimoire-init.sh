@@ -26,6 +26,12 @@ ARCHETYPE="minimal"
 AUTO_DETECT=false
 FORCE=false
 MEMORY_BACKEND="auto"
+MCP_SETUP="ask"         # ask | yes | no  (ask = demande interactive si terminal)
+MCP_ENABLED=false
+MCP_PYTHON_PATH=""
+QDRANT_REMOTE_URL=""
+QDRANT_API_KEY=""
+QDRANT_START_NOW=false
 
 # ─── Couleurs ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -66,6 +72,8 @@ Options init:
                         qdrant-docker (génère docker-compose.memory.yml)
   --force             Écraser une installation existante sans demander confirmation
   --help              Afficher cette aide
+    --mcp               Forcer la configuration du serveur MCP dans .vscode/mcp.json
+    --no-mcp            Désactiver complètement la configuration MCP (non-interactive)
 
 Options session-branch:
   session-branch --name NAME    Créer une nouvelle branche de session
@@ -1732,6 +1740,45 @@ cmd_doctor() {
     fi
     echo ""
 
+    # ─ 3b. MCP (Model Context Protocol) ───────────────────────────────
+    echo -e "${YELLOW}▶ MCP${NC}"
+    local mcp_json="${TARGET_DIR:-$SCRIPT_DIR}/.vscode/mcp.json"
+    local pc_yaml="${TARGET_DIR:-$SCRIPT_DIR}/project-context.yaml"
+    if [[ -f "$mcp_json" ]]; then
+        if grep -q '"grimoire"' "$mcp_json" 2>/dev/null; then
+            echo -e "  ${GREEN}✓${NC}  .vscode/mcp.json — entrée grimoire présente"
+        else
+            echo -e "  ${YELLOW}⚠${NC}  .vscode/mcp.json existe mais sans entrée grimoire"
+            echo -e "       Relancez : $(basename "$0") --name ... --mcp"
+            warnings=$((warnings + 1))
+        fi
+    else
+        echo -e "  ${YELLOW}⚠${NC}  .vscode/mcp.json absent — MCP non configuré"
+        echo -e "       Pour activer : $(basename "$0") --name ... --mcp"
+        warnings=$((warnings + 1))
+    fi
+    # Vérifier cohérence avec project-context.yaml
+    if [[ -f "$pc_yaml" ]] && grep -q "^mcp:" "$pc_yaml" 2>/dev/null; then
+        local mcp_enabled
+        mcp_enabled="$(grep -A2 "^mcp:" "$pc_yaml" | grep "enabled:" | sed 's/.*: *//' | tr -d ' ')"
+        if [[ "$mcp_enabled" == "true" ]]; then
+            echo -e "  ${GREEN}✓${NC}  project-context.yaml — mcp.enabled: true"
+        else
+            echo -e "  ${YELLOW}⚠${NC}  project-context.yaml — mcp.enabled: false (MCP désactivé)"
+        fi
+    fi
+    # Tester si le module grimoire.mcp.server est importable
+    if command -v python3 &>/dev/null; then
+        if python3 -c "import grimoire.mcp.server" &>/dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${NC}  grimoire.mcp.server importable"
+        else
+            echo -e "  ${YELLOW}⚠${NC}  grimoire.mcp.server non importable"
+            echo -e "       Installez : pip install grimoire-kit[mcp]"
+            warnings=$((warnings + 1))
+        fi
+    fi
+    echo ""
+
     # ─ 4. DNA des archétypes ──────────────────────────────────────────
     echo -e "${YELLOW}▶ DNA des archétypes${NC}"
     local arch_base="$SCRIPT_DIR/archetypes"
@@ -2575,6 +2622,8 @@ while [[ $# -gt 0 ]]; do
         --target)   TARGET_DIR="$2"; shift 2 ;;
         --auto)     AUTO_DETECT=true; shift ;;
         --memory)   MEMORY_BACKEND="$2"; shift 2 ;;
+        --mcp)      MCP_SETUP="yes"; shift ;;
+        --no-mcp)   MCP_SETUP="no"; shift ;;
         --force)    FORCE=true; shift ;;
         --version)  echo "Grimoire Custom Kit v${GRIMOIRE_KIT_VERSION}"; exit 0 ;;
         --help)     usage ;;
@@ -2735,6 +2784,280 @@ deploy_feature_agents() {
     esac
 }
 
+# ─── Wizard mémoire interactive (Qdrant / Ollama / local) ────────────────────
+# Appelé quand MEMORY_BACKEND == "auto" pour guider l'utilisateur.
+# Met à jour : MEMORY_BACKEND, QDRANT_REMOTE_URL, QDRANT_API_KEY, QDRANT_START_NOW
+setup_memory_wizard() {
+    # Pas de wizard si le backend a été explicitement choisi via --memory
+    if [[ "$MEMORY_BACKEND" != "auto" ]]; then
+        return 0
+    fi
+    # Mode non-interactif (pipe, CI) : auto-détection silencieuse
+    if [[ ! -t 0 ]]; then
+        info "Détection du backend mémoire (mode non-interactif)..."
+        MEMORY_BACKEND=$(detect_memory_backend)
+        ok "Backend mémoire : $MEMORY_BACKEND"
+        return 0
+    fi
+
+    # ── Détection préalable disponibilité ──────────────────────────────────
+    local qdrant_up=false
+    local ollama_up=false
+    local docker_up=false
+    curl -sf --connect-timeout 2 --max-time 3 http://localhost:6333/healthz &>/dev/null 2>&1 && qdrant_up=true
+    curl -sf --connect-timeout 2 --max-time 3 http://localhost:11434/api/tags &>/dev/null 2>&1 && ollama_up=true
+    command -v docker &>/dev/null && docker info &>/dev/null 2>&1 && docker_up=true
+
+    echo ""
+    echo -e "${CYAN}┌─── 🧠 Configuration de la mémoire vectorielle ──────────────────────────┐${NC}"
+    echo ""
+    echo -e "  La mémoire vectorielle (Qdrant) permet aux agents de mémoriser et"
+    echo -e "  retrouver des informations de façon sémantique entre les sessions."
+    echo ""
+    $qdrant_up && echo -e "  ${GREEN}✓${NC}  Qdrant détecté sur localhost:6333"
+    $ollama_up && echo -e "  ${GREEN}✓${NC}  Ollama détecté sur localhost:11434"
+    $docker_up && echo -e "  ${GREEN}✓${NC}  Docker disponible" || echo -e "  ${YELLOW}⚠${NC}  Docker non disponible"
+    echo ""
+
+    read -p "$(echo -e "  Configurer la mémoire vectorielle ? ${CYAN}[Y/n]${NC} ")" -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        MEMORY_BACKEND="local"
+        info "Mémoire locale JSON (modes vectoriels désactivés)"
+        echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    echo -e "  ${YELLOW}Choisissez le mode :${NC}"
+    echo ""
+    if $docker_up; then
+        echo -e "  ${GREEN}1)${NC} Docker local ${CYAN}(recommandé)${NC} — lance Qdrant dans un conteneur Docker"
+    else
+        echo -e "  ${YELLOW}1)${NC} Docker local              — ${RED}docker non disponible${NC}"
+    fi
+    if $qdrant_up; then
+        echo -e "  ${GREEN}2)${NC} Process local ${CYAN}(détecté)${NC}     — Qdrant déjà actif sur localhost:6333"
+    else
+        echo -e "  ${GREEN}2)${NC} Process local             — Qdrant à démarrer sur localhost:6333"
+    fi
+    echo -e "  ${GREEN}3)${NC} Serveur distant           — Qdrant sur une URL distante (cloud/VPS)"
+    if $ollama_up; then
+        echo -e "  ${GREEN}4)${NC} Ollama ${CYAN}(détecté)${NC}             — embeddings via localhost:11434"
+    else
+        echo -e "  ${YELLOW}4)${NC} Ollama                    — non détecté sur localhost:11434"
+    fi
+    echo -e "  ${GREEN}5)${NC} Sans mémoire vectorielle   — JSON local uniquement (défaut de base)"
+    echo ""
+
+    read -p "$(echo -e "  Votre choix ${CYAN}[1-5]${NC} : ")" -n 1 -r
+    echo ""
+
+    case "$REPLY" in
+        1)
+            if ! $docker_up; then
+                warn "Docker non disponible — basculement vers mémoire locale"
+                MEMORY_BACKEND="local"
+                echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+                echo ""
+                return 0
+            fi
+            MEMORY_BACKEND="qdrant-docker"
+            echo ""
+            echo -e "  ${CYAN}→  docker-compose.memory.yml sera généré automatiquement${NC}"
+            read -p "$(echo -e "  Démarrer Qdrant maintenant avec docker compose ? ${CYAN}[Y/n]${NC} ")" -n 1 -r
+            echo ""
+            [[ ! $REPLY =~ ^[Nn]$ ]] && QDRANT_START_NOW=true
+            ok "Backend sélectionné : qdrant-docker"
+            ;;
+        2)
+            MEMORY_BACKEND="qdrant-local"
+            if ! $qdrant_up; then
+                warn "Qdrant non détecté sur localhost:6333 — assurez-vous de le démarrer"
+                echo -e "       ${CYAN}docker run -d -p 6333:6333 qdrant/qdrant${NC}"
+            else
+                ok "Backend sélectionné : qdrant-local (localhost:6333)"
+            fi
+            ;;
+        3)
+            echo ""
+            read -p "$(echo -e "  URL Qdrant ${CYAN}(ex: https://qdrant.example.com:6333)${NC} : ")" QDRANT_REMOTE_URL
+            echo ""
+            if [[ -z "$QDRANT_REMOTE_URL" ]]; then
+                warn "URL vide — basculement vers mémoire locale"
+                MEMORY_BACKEND="local"
+                echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+                echo ""
+                return 0
+            fi
+            info "Test de connexion vers $QDRANT_REMOTE_URL ..."
+            if curl -sf --connect-timeout 5 --max-time 8 "${QDRANT_REMOTE_URL%/}/healthz" &>/dev/null 2>&1; then
+                ok "Qdrant distant accessible"
+                MEMORY_BACKEND="qdrant-server"
+                read -p "$(echo -e "  API Key Qdrant (Entrée pour ignorer) : ")" QDRANT_API_KEY
+                echo ""
+                ok "Backend sélectionné : qdrant-server ($QDRANT_REMOTE_URL)"
+            else
+                warn "Qdrant non accessible sur $QDRANT_REMOTE_URL"
+                read -p "$(echo -e "  Continuer quand même avec qdrant-server ? ${CYAN}[y/N]${NC} ")" -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    MEMORY_BACKEND="qdrant-server"
+                    warn "Backend configuré mais non vérifié : qdrant-server ($QDRANT_REMOTE_URL)"
+                else
+                    MEMORY_BACKEND="local"
+                    info "Basculement vers mémoire locale"
+                fi
+            fi
+            ;;
+        4)
+            if $ollama_up; then
+                MEMORY_BACKEND="ollama"
+                ok "Backend sélectionné : ollama (localhost:11434)"
+            else
+                warn "Ollama non détecté sur localhost:11434 — assurez-vous de le démarrer"
+                read -p "$(echo -e "  Configurer ollama quand même ? ${CYAN}[y/N]${NC} ")" -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    MEMORY_BACKEND="ollama"
+                    warn "Backend configuré mais non vérifié : ollama"
+                else
+                    MEMORY_BACKEND="local"
+                    info "Basculement vers mémoire locale"
+                fi
+            fi
+            ;;
+        5|""|*)
+            MEMORY_BACKEND="local"
+            info "Mémoire locale JSON"
+            ;;
+    esac
+
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
+# ─── Wizard MCP (Model Context Protocol) ─────────────────────────────────────
+# Configure .vscode/mcp.json dans TARGET_DIR pour exposer le serveur MCP Grimoire.
+# Met à jour : MCP_ENABLED, MCP_PYTHON_PATH
+setup_mcp_wizard() {
+    # Désactivation explicite via --no-mcp
+    if [[ "$MCP_SETUP" == "no" ]]; then
+        return 0
+    fi
+    # Mode non-interactif + pas forcé : sauter
+    if [[ ! -t 0 && "$MCP_SETUP" == "ask" ]]; then
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}┌─── 🔌 Configuration du serveur MCP Grimoire ────────────────────────────┐${NC}"
+    echo ""
+    echo -e "  Le serveur MCP expose les outils Grimoire (mémoire, agents, traces)"
+    echo -e "  directement dans VS Code Copilot via .vscode/mcp.json."
+    echo ""
+
+    # Vérifier la disponibilité du module grimoire.mcp.server
+    local mcp_available=false
+    local detect_py=""
+    for pybin in "$TARGET_DIR/.venv/bin/python" "python3" "python"; do
+        local resolved_py
+        if [[ -x "$pybin" ]] || command -v "$pybin" &>/dev/null 2>&1; then
+            resolved_py="$(command -v "$pybin" 2>/dev/null || echo "$pybin")"
+            if "$resolved_py" -c "import grimoire.mcp.server" &>/dev/null 2>&1; then
+                mcp_available=true
+                detect_py="$resolved_py"
+                break
+            fi
+        fi
+    done
+
+    if $mcp_available; then
+        echo -e "  ${GREEN}✓${NC}  grimoire.mcp.server disponible (${detect_py})"
+    else
+        echo -e "  ${YELLOW}⚠${NC}  grimoire.mcp.server non trouvé"
+        echo -e "       Configurez maintenant — activez après : pip install grimoire-kit[mcp]"
+    fi
+    echo ""
+
+    if [[ "$MCP_SETUP" != "yes" ]]; then
+        read -p "$(echo -e "  Configurer .vscode/mcp.json pour VS Code Copilot ? ${CYAN}[Y/n]${NC} ")" -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            info "Configuration MCP ignorée"
+            echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+            echo ""
+            return 0
+        fi
+    fi
+
+    # Déterminer le chemin Python le plus adapté
+    local py_path=".venv/bin/python"
+    if [[ -f "$TARGET_DIR/.venv/bin/python" ]]; then
+        py_path=".venv/bin/python"
+    elif command -v python3 &>/dev/null; then
+        py_path="python3"
+    elif command -v python &>/dev/null; then
+        py_path="python"
+    fi
+    MCP_PYTHON_PATH="$py_path"
+
+    # Créer ou enrichir .vscode/mcp.json
+    local vscode_dir="$TARGET_DIR/.vscode"
+    local mcp_file="$vscode_dir/mcp.json"
+    mkdir -p "$vscode_dir"
+
+    if [[ ! -f "$mcp_file" ]]; then
+        cat > "$mcp_file" << MCPEOF
+{
+  "inputs": [],
+  "servers": {
+    "grimoire": {
+      "type": "stdio",
+      "command": "${py_path}",
+      "args": ["-m", "grimoire.mcp.server"],
+      "env": {
+        "GRIMOIRE_PROJECT_ROOT": "\${workspaceFolder}"
+      }
+    }
+  }
+}
+MCPEOF
+        ok ".vscode/mcp.json créé avec le serveur grimoire"
+    else
+        if grep -q '"grimoire"' "$mcp_file" 2>/dev/null; then
+            ok "Entrée MCP grimoire déjà présente dans .vscode/mcp.json"
+        else
+            # Injecter via python3 pour garder le JSON valide
+            if python3 -c "
+import json, sys
+path = sys.argv[1]; py = sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+data.setdefault('servers', {})
+data['servers']['grimoire'] = {
+    'type': 'stdio',
+    'command': py,
+    'args': ['-m', 'grimoire.mcp.server'],
+    'env': {'GRIMOIRE_PROJECT_ROOT': '\${workspaceFolder}'}
+}
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+" "$mcp_file" "$py_path" 2>/dev/null; then
+                ok "Entrée grimoire ajoutée à .vscode/mcp.json existant"
+            else
+                warn "Impossible de modifier .vscode/mcp.json — ajoutez l'entrée manuellement"
+            fi
+        fi
+    fi
+
+    MCP_ENABLED=true
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
 # ─── Validation ──────────────────────────────────────────────────────────────
 [[ -z "$PROJECT_NAME" ]] && error "--name est requis"
 [[ -z "$USER_NAME" ]]    && error "--user est requis"
@@ -2749,12 +3072,8 @@ if $AUTO_DETECT; then
     ok "Stack détecté : ${DETECTED_STACKS:-aucun} → archétype : $ARCHETYPE"
 fi
 
-# Auto-détection du backend mémoire si "auto"
-if [[ "$MEMORY_BACKEND" == "auto" ]]; then
-    info "Détection du backend mémoire..."
-    MEMORY_BACKEND=$(detect_memory_backend)
-    ok "Backend mémoire détecté : $MEMORY_BACKEND"
-fi
+# Configuration du backend mémoire (wizard interactif ou auto-détection)
+setup_memory_wizard
 
 ARCHETYPE_DIR="$SCRIPT_DIR/archetypes/$ARCHETYPE"
 [[ ! -d "$ARCHETYPE_DIR" ]] && error "Archétype '$ARCHETYPE' non trouvé. Disponibles: $(ls "$SCRIPT_DIR/archetypes/")"
@@ -2775,6 +3094,25 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTALLATION
 # ═══════════════════════════════════════════════════════════════════════════════
+# ─── Configuration MCP (wizard interactif) ───────────────────────────────────
+setup_mcp_wizard
+
+# ─── Preflight — Validation de l'environnement ───────────────────────────────
+PREFLIGHT_SCRIPT="$SCRIPT_DIR/framework/tools/preflight-check.py"
+if [[ -f "$PREFLIGHT_SCRIPT" ]] && command -v python3 &>/dev/null; then
+    info "Vérification de l'environnement (preflight)..."
+    if ! python3 "$PREFLIGHT_SCRIPT" --project-root "$TARGET_DIR" 2>&1; then
+        warn "Preflight a détecté des problèmes — consultez les avertissements ci-dessus"
+        if [[ -t 0 ]]; then
+            read -p "$(echo -e "  Continuer quand même ? ${CYAN}[y/N]${NC} ")" -n 1 -r
+            echo ""
+            [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+        fi
+    else
+        ok "Preflight OK"
+    fi
+fi
+
 
 echo ""
 echo -e "${CYAN}🤖 Grimoire Custom Kit v${GRIMOIRE_KIT_VERSION} — Initialisation${NC}"
@@ -2784,6 +3122,7 @@ echo -e "  Utilisateur: ${GREEN}$USER_NAME${NC}"
 echo -e "  Langue:     ${GREEN}$LANGUAGE${NC}"
 echo -e "  Archétype:  ${GREEN}$ARCHETYPE${NC}"
 echo -e "  Mémoire:    ${GREEN}$MEMORY_BACKEND${NC}"
+echo -e "  MCP:        ${GREEN}$([ "$MCP_ENABLED" = "true" ] && echo "activé (.vscode/mcp.json)" || echo "désactivé")${NC}"
 echo -e "  Cible:      ${GREEN}$TARGET_DIR${NC}"
 echo ""
 
@@ -2901,6 +3240,33 @@ if [[ ! -f "$PROJECT_CONTEXT" ]]; then
     ok "project-context.yaml créé"
 else
     warn "project-context.yaml existe déjà, pas écrasé"
+fi
+
+# ─── Injection des valeurs dynamiques dans project-context.yaml ──────────────
+# Qdrant server URL et API key
+if [[ "$MEMORY_BACKEND" == "qdrant-server" && -n "$QDRANT_REMOTE_URL" && -f "$PROJECT_CONTEXT" ]]; then
+    sed -i "s|# qdrant_url: \"http://localhost:6333\".*|qdrant_url: \"$QDRANT_REMOTE_URL\"|" "$PROJECT_CONTEXT"
+    info "qdrant_url injecté dans project-context.yaml"
+    if [[ -n "$QDRANT_API_KEY" ]]; then
+        # Ajouter qdrant_api_key après qdrant_url si absent
+        if ! grep -q "qdrant_api_key:" "$PROJECT_CONTEXT"; then
+            sed -i "/qdrant_url:/a\\  qdrant_api_key: \"$QDRANT_API_KEY\"" "$PROJECT_CONTEXT"
+        fi
+    fi
+fi
+# MCP activation
+if [[ "$MCP_ENABLED" == "true" && -f "$PROJECT_CONTEXT" ]]; then
+    if ! grep -q "^mcp:" "$PROJECT_CONTEXT"; then
+        cat >> "$PROJECT_CONTEXT" << MPCYAML
+
+# MCP — configuré par grimoire-init.sh ($(date +%Y-%m-%d))
+mcp:
+  enabled: true
+  python: "$MCP_PYTHON_PATH"
+  server: "grimoire.mcp.server"
+MPCYAML
+        info "Section MCP ajoutée à project-context.yaml"
+    fi
 fi
 
 # ─── 6. Générer les configs Grimoire ────────────────────────────────────────────
@@ -3150,6 +3516,15 @@ if [[ "$MEMORY_BACKEND" == "qdrant-docker" ]]; then
         cp "$SCRIPT_DIR/framework/memory/docker-compose.memory.tpl.yml" "$DOCKER_MEM"
         ok "docker-compose.memory.yml généré — lancer : docker compose -f docker-compose.memory.yml up -d"
     fi
+    if [[ "$QDRANT_START_NOW" == "true" ]]; then
+        info "Démarrage de Qdrant via docker compose..."
+        if docker compose -f "$DOCKER_MEM" up -d 2>&1; then
+            ok "Qdrant démarré (docker compose)"
+        else
+            warn "Impossible de démarrer Qdrant — lancez manuellement :"
+            echo "     ${CYAN}docker compose -f docker-compose.memory.yml up -d${NC}"
+        fi
+    fi
 fi
 
 # ─── 10. Installer les dépendances Python (optionnel) ────────────────────────────────
@@ -3189,6 +3564,11 @@ echo ""
 echo "  Completion Contract — vérifier votre code :"
 echo "     ${CYAN}bash _grimoire/_config/custom/cc-verify.sh${NC}"
 echo ""
+if [[ "$MCP_ENABLED" == "true" ]]; then
+        echo -e "  ${GREEN}🔌 MCP activé${NC} — rechargez VS Code pour accéder aux outils Grimoire"
+        echo -e "     ${CYAN}Copilot Chat → @grimoire — ou Ctrl+Shift+P → MCP: List Servers${NC}"
+        echo ""
+fi
 
 if $AUTO_DETECT && [[ -n "${DETECTED_STACKS:-}" ]]; then
     echo -e "  ${CYAN}Stack(s) détecté(s) : ${GREEN}$DETECTED_STACKS${NC}"
