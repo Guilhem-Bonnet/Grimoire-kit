@@ -1,7 +1,7 @@
 # Grimoire Kit — Ruff configuration
 line-length = 120
 target-version = "py312"
-exclude = ["_grimoire", "_gen_tests.py"]
+exclude = ["_grimoire", "_gen_tests.py", "docs/"]
 
 [lint]
 select = [

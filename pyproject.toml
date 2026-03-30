@@ -103,7 +103,7 @@ disallow_untyped_decorators = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short -n auto"
+addopts = "-q --tb=short -x"
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",

@@ -196,6 +196,15 @@ $agents_table
 | `project-context.yaml` | Config globale (name, stack, language) | Modifier si besoin |
 | `_grimoire/_config/archetype.dna.yaml` | Traits et contraintes de l'archétype | Ne pas modifier sans raison |
 
+## File Ownership
+
+| Fichier | Propriétaire | Accès |
+|---------|-------------|-------|
+| `_grimoire/_memory/shared-context.md` | Tous les agents | Lecture/écriture |
+| `_grimoire/_memory/decisions-log.md` | Agents décisionnels | Écriture, utilisateurs lecture |
+| `_grimoire/_config/archetype.dna.yaml` | Grimoire Kit | Ne pas modifier sans raison |
+| `project-context.yaml` | Équipe projet | Configurable |
+
 ## Project Context
 
 - **Name**: $project_name

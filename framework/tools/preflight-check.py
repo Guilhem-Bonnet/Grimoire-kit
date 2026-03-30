@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -350,6 +351,179 @@ def check_story_readiness(project_root: Path, story_path: str) -> list[Check]:
     return checks
 
 
+def _parse_major_version(raw_version: str) -> int | None:
+    """Extrait la version majeure depuis une sortie de type v20.11.0."""
+    match = re.search(r"(\d+)", raw_version)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def check_vscode_getting_started_readiness(project_root: Path) -> list[Check]:
+    """Checks d'environnement inspirés de VS Code Getting Started."""
+    checks: list[Check] = []
+
+    project_path = str(project_root)
+    if " " in project_path:
+        checks.append(Check(
+            name="workspace-path-space",
+            severity=Severity.WARNING,
+            message=(
+                "Le chemin du workspace contient des espaces — risque de comportements "
+                "instables sur les builds natifs Node"
+            ),
+            fix_hint="Déplacer le projet vers un chemin sans espace ou utiliser un lien symbolique",
+        ))
+
+    has_node = bool(shutil.which("node"))
+    has_npm = bool(shutil.which("npm"))
+
+    if not has_node:
+        checks.append(Check(
+            name="node-missing",
+            severity=Severity.WARNING,
+            message="Node.js introuvable dans le PATH",
+            fix_hint="Installer Node.js LTS (>= 20) pour les workflows VS Code côté JavaScript",
+        ))
+    else:
+        try:
+            result = subprocess.run(
+                ["node", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            node_major = _parse_major_version(result.stdout.strip())
+            if node_major is not None and node_major < 20:
+                checks.append(Check(
+                    name="node-version",
+                    severity=Severity.WARNING,
+                    message=f"Node.js {result.stdout.strip()} détecté — recommandé: >= v20",
+                    fix_hint="Mettre à jour Node.js vers la version LTS actuelle",
+                ))
+            else:
+                checks.append(Check(
+                    name="node-version",
+                    severity=Severity.INFO,
+                    message=f"Node.js {result.stdout.strip()} détecté",
+                ))
+        except (subprocess.TimeoutExpired, OSError):
+            checks.append(Check(
+                name="node-version-check",
+                severity=Severity.WARNING,
+                message="Impossible de vérifier la version Node.js",
+            ))
+
+    if not has_npm:
+        checks.append(Check(
+            name="npm-missing",
+            severity=Severity.WARNING,
+            message="npm introuvable dans le PATH",
+            fix_hint="Installer npm via Node.js officiel ou un gestionnaire de version (nvm/asdf)",
+        ))
+
+    if not shutil.which("code"):
+        checks.append(Check(
+            name="code-cli-missing",
+            severity=Severity.INFO,
+            message="CLI `code` indisponible dans ce shell",
+            fix_hint="Dans VS Code: Command Palette > 'Shell Command: Install code command in PATH'",
+        ))
+
+    if sys.platform.startswith("linux") and has_node:
+        for build_tool in ["g++", "make"]:
+            if not shutil.which(build_tool):
+                checks.append(Check(
+                    name="native-build-tool-missing",
+                    severity=Severity.WARNING,
+                    message=f"Outil de build natif manquant: {build_tool}",
+                    fix_hint="Installer build-essential pour compiler les dépendances natives Node",
+                ))
+
+        # Bibliothèques natives VS Code (Debian/Ubuntu)
+        # Source: DeepWiki Getting Started — Platform-Specific Setup / Linux
+        if shutil.which("pkg-config"):
+            vscode_libs = {
+                "x11": "libx11-dev",
+                "xkbfile": "libxkbfile-dev",
+                "libsecret-1": "libsecret-1-dev",
+                "krb5": "libkrb5-dev",
+            }
+            missing_libs = []
+            for pc_name, pkg_name in vscode_libs.items():
+                try:
+                    r = subprocess.run(
+                        ["pkg-config", "--exists", pc_name],
+                        capture_output=True,
+                        timeout=5,
+                        check=False,
+                    )
+                    if r.returncode != 0:
+                        missing_libs.append(pkg_name)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+            if missing_libs:
+                checks.append(Check(
+                    name="vscode-native-libs-missing",
+                    severity=Severity.WARNING,
+                    message=f"Bibliothèques natives VS Code manquantes : {', '.join(missing_libs)}",
+                    fix_hint=(
+                        f"sudo apt-get install {' '.join(missing_libs)}"
+                    ),
+                ))
+
+        # ENOSPC / inotify — limite de file watchers (Linux)
+        # Source: DeepWiki Getting Started — Troubleshooting Build Issues
+        inotify_path = Path("/proc/sys/fs/inotify/max_user_watches")
+        if inotify_path.exists():
+            try:
+                limit = int(inotify_path.read_text(encoding="utf-8").strip())
+                if limit < 524288:
+                    checks.append(Check(
+                        name="inotify-limit-low",
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Limite inotify trop basse : max_user_watches={limit} "
+                            f"(recommandé : >= 524288) — risque ENOSPC sur gros projets"
+                        ),
+                        fix_hint=(
+                            "echo fs.inotify.max_user_watches=524288 | "
+                            "sudo tee -a /etc/sysctl.conf && sudo sysctl -p"
+                        ),
+                    ))
+            except (OSError, ValueError):
+                pass
+
+    # WSL1 — non supporté (DeepWiki Getting Started — Additional Resources)
+    if sys.platform.startswith("linux"):
+        proc_version = Path("/proc/version")
+        if proc_version.exists():
+            try:
+                content = proc_version.read_text(encoding="utf-8").lower()
+                if "microsoft" in content and "wsl2" not in content and "WSL_DISTRO_NAME" in os.environ:
+                    checks.append(Check(
+                        name="wsl1-not-supported",
+                        severity=Severity.WARNING,
+                        message="WSL1 détecté — non supporté pour les builds VS Code natifs",
+                        fix_hint=(
+                            "Migrer vers WSL2 : wsl --set-version <distro> 2 "
+                            "ou utiliser le .devcontainer"
+                        ),
+                    ))
+            except OSError:
+                pass
+
+    if (project_root / ".devcontainer").exists():
+        checks.append(Check(
+            name="devcontainer-available",
+            severity=Severity.INFO,
+            message=".devcontainer détecté — fallback reproductible disponible",
+        ))
+
+    return checks
+
+
 # ── Module Wuwei (#107) : Non-interruption ───────────────────────────────────
 
 def check_wuwei(project_root: Path, agent: str) -> list[Check]:
@@ -392,6 +566,7 @@ def run_all_checks(
 
     report.checks.extend(check_grimoire_structure(project_root))
     report.checks.extend(check_tools_available(project_root))
+    report.checks.extend(check_vscode_getting_started_readiness(project_root))
     report.checks.extend(check_git_state(project_root))
     report.checks.extend(check_memory_state(project_root))
 
