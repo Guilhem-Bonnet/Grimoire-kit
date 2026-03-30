@@ -135,51 +135,40 @@ pip install -e ".[dev]"
 
 ## <img src="docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
 
-<table>
-<tr><td>
-
 ```mermaid
-graph TB
-    subgraph VISION["TEAM VISION"]
-        PM["PM"]
-        AN["Analyst"]
-        UX["UX Designer"]
-    end
+flowchart TB
+  subgraph VISION[TEAM VISION]
+    PM[PM]
+    AN[Analyst]
+    UX[UX Designer]
+  end
 
-    subgraph BUILD["TEAM BUILD"]
-        DEV["Dev"]
-        ARCH["Architect"]
-        QA["QA"]
-        SM["Scrum Master"]
-    end
+  subgraph BUILD[TEAM BUILD]
+    DEV[Dev]
+    ARCH[Architect]
+    QA[QA]
+    SM[Scrum Master]
+  end
 
-    subgraph OPS["TEAM OPS"]
-        INFRA["Infra"]
-        SEC["Security"]
-        MON["Monitoring"]
-    end
+  subgraph OPS[TEAM OPS]
+    INFRA[Infra]
+    SEC[Security]
+    MON[Monitoring]
+  end
 
-    subgraph ENGINE["GRIMOIRE ENGINE"]
-        MEM["Semantic Memory"]
-        TOOLS["93+ Tools"]
-        PROTO["Protocols"]
-        HEAL["Self-Healing"]
-    end
+  subgraph ENGINE[GRIMOIRE ENGINE]
+    MEM[Semantic Memory]
+    TOOLS[93+ Tools]
+    PROTO[Protocols]
+    HEAL[Self-Healing]
+  end
 
-    VISION -- "Delivery Contract" --> BUILD
-    BUILD -- "Delivery Contract" --> OPS
-    ENGINE -.- VISION
-    ENGINE -.- BUILD
-    ENGINE -.- OPS
-
-    style VISION fill:#1a1040,stroke:#a371f7,color:#c9d1d9
-    style BUILD fill:#0d2818,stroke:#3fb950,color:#c9d1d9
-    style OPS fill:#2d1a02,stroke:#d29922,color:#c9d1d9
-    style ENGINE fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
+  VISION -- Delivery Contract --> BUILD
+  BUILD -- Delivery Contract --> OPS
+  ENGINE -. support .-> VISION
+  ENGINE -. support .-> BUILD
+  ENGINE -. support .-> OPS
 ```
-
-</td></tr>
-</table>
 
 **Règle fondamentale** : aucune team ne commence sans un **Delivery Contract** signé de la team précédente. Zéro handoff informel.
 
