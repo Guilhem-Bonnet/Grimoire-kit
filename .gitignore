@@ -32,6 +32,7 @@ Thumbs.db
 # Virtual environments
 venv/
 .venv/
+.venv-release/
 env/
 
 # Secrets (never commit)
