@@ -408,6 +408,26 @@ def check_vscode_getting_started_readiness(project_root: Path) -> list[Check]:
                     severity=Severity.INFO,
                     message=f"Node.js {result.stdout.strip()} détecté",
                 ))
+
+            # VS Code supporte uniquement x64/ARM64 pour le build natif.
+            arch_result = subprocess.run(
+                ["node", "-p", "process.arch"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            node_arch = arch_result.stdout.strip()
+            if node_arch and node_arch not in {"x64", "arm64"}:
+                checks.append(Check(
+                    name="node-unsupported-arch",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Architecture Node.js non recommandée pour VS Code: {node_arch} "
+                        "(attendu: x64 ou arm64)"
+                    ),
+                    fix_hint="Utiliser une distribution Node.js x64/arm64 (cf .nvmrc)",
+                ))
         except (subprocess.TimeoutExpired, OSError):
             checks.append(Check(
                 name="node-version-check",
@@ -440,6 +460,15 @@ def check_vscode_getting_started_readiness(project_root: Path) -> list[Check]:
                     message=f"Outil de build natif manquant: {build_tool}",
                     fix_hint="Installer build-essential pour compiler les dépendances natives Node",
                 ))
+
+        # node-gyp utilise souvent la commande "python" (pas seulement python3).
+        if not shutil.which("python"):
+            checks.append(Check(
+                name="python-command-missing",
+                severity=Severity.WARNING,
+                message="Commande `python` introuvable (node-gyp peut échouer)",
+                fix_hint="Installer python-is-python3 (Debian/Ubuntu) ou créer un alias python -> python3",
+            ))
 
         # Bibliothèques natives VS Code (Debian/Ubuntu)
         # Source: DeepWiki Getting Started — Platform-Specific Setup / Linux
@@ -520,6 +549,16 @@ def check_vscode_getting_started_readiness(project_root: Path) -> list[Check]:
             severity=Severity.INFO,
             message=".devcontainer détecté — fallback reproductible disponible",
         ))
+        if not shutil.which("docker"):
+            checks.append(Check(
+                name="devcontainer-no-docker",
+                severity=Severity.WARNING,
+                message=(
+                    ".devcontainer présent mais Docker CLI introuvable — "
+                    "Remote-Containers local indisponible"
+                ),
+                fix_hint="Installer Docker Desktop/Engine ou utiliser GitHub Codespaces",
+            ))
 
     return checks
 
