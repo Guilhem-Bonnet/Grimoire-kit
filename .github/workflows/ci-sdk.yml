@@ -117,10 +117,11 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
-      - name: Upload to Codecov
+      - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
 
