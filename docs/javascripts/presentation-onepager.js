@@ -7,6 +7,51 @@
 
   document.body.classList.add("gd-onepager");
 
+  const renderMermaidDiagrams = () => {
+    if (typeof window.mermaid === "undefined") {
+      return;
+    }
+
+    const codeBlocks = Array.from(document.querySelectorAll(".md-typeset pre > code.language-mermaid"));
+
+    codeBlocks.forEach((codeBlock, index) => {
+      const pre = codeBlock.parentElement;
+      if (!pre) {
+        return;
+      }
+
+      const mermaidHost = document.createElement("div");
+      mermaidHost.className = "mermaid";
+      mermaidHost.id = "gd-mermaid-" + String(index + 1).padStart(2, "0");
+      mermaidHost.textContent = codeBlock.textContent || "";
+
+      pre.replaceWith(mermaidHost);
+    });
+
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "loose",
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#1f3d4d",
+        primaryTextColor: "#f6f2ea",
+        primaryBorderColor: "#4fd2c7",
+        lineColor: "#ffd166",
+        tertiaryColor: "#183446",
+        fontFamily: "Space Grotesk",
+      },
+      flowchart: {
+        curve: "basis",
+      },
+    });
+
+    window.mermaid.run({
+      querySelector: ".gd-onepager .mermaid",
+    });
+  };
+
+  renderMermaidDiagrams();
+
   const panels = Array.from(document.querySelectorAll(".md-typeset .admonition.onepager"));
 
   if (!panels.length) {

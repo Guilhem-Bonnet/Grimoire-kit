@@ -67,6 +67,7 @@ extra_css:
   - stylesheets/presentation-onepager.css
 
 extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
   - javascripts/presentation-onepager.js
 
 nav:
