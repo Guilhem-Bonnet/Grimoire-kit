@@ -49,6 +49,9 @@ plugins:
             docstring_style: numpy
             show_if_no_docstring: false
 
+hooks:
+  - mkdocs_hooks/signals.py
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -72,6 +75,7 @@ extra_javascript:
 nav:
   - Accueil: index.md
   - Presentation & Decouverte: presentation-decouverte.md
+  - Signaux & nouveautes: signaux.md
   - Démarrage:
       - Quick Start: getting-started.md
       - Setup VS Code: vscode-setup.md
@@ -81,11 +85,13 @@ nav:
       - Mémoire: memory-system.md
       - Workflows: workflow-design-patterns.md
       - Taxonomie Workflows: workflow-taxonomy.md
+      - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
   - Guides:
       - SDK Python: sdk-guide.md
       - Créer un agent: creating-agents.md
       - Archétypes: archetype-guide.md
       - Intégration MCP: mcp-integration.md
+      - Observatory API: observatory-api.md
       - Référence YAML: grimoire-yaml-reference.md
   - Référence:
       - CLI: cli-reference.md
@@ -101,3 +107,4 @@ nav:
       - Plugin Development: plugin-development.md
   - ADR:
       - "001 — No Multi-LLM": adr-001-no-multi-llm.md
+      - "002 — SemVer Policy": adr-002-semver-policy.md
