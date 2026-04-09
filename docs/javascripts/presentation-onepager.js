@@ -58,11 +58,7 @@
 
         link.classList.toggle("is-active", isActive);
 
-        if (isActive) {
-          link.setAttribute("aria-current", "true");
-        } else {
-          link.removeAttribute("aria-current");
-        }
+        link.setAttribute("aria-pressed", isActive ? "true" : "false");
       });
 
       panels.forEach((panel, current) => {
@@ -146,15 +142,13 @@
       }
 
       const listItem = document.createElement("li");
-      const link = document.createElement("a");
-      link.href = "#" + panel.id;
+      const link = document.createElement("button");
+      link.type = "button";
       link.textContent = label;
       link.setAttribute("aria-label", fullTitle);
-      link.setAttribute("data-no-instant", "");
+      link.setAttribute("aria-controls", panel.id);
 
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+      link.addEventListener("click", () => {
         setActive(index);
         panel.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
         window.history.replaceState(null, "", "#" + panel.id);
