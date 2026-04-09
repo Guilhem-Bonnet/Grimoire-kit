@@ -1,104 +1,84 @@
-# Experience Presentation & Decouverte
+# Grimoire Immersive Experience
 
-Cette page est un onepager narratif: elle remplace une presentation classique et evolue au scroll.
+Cette section est un onepager de demonstration. Elle est faite pour pitcher le projet et faire comprendre sa valeur sans effet "page de doc classique".
 
-!!! onepager "Chapitre 01 - Le grimoire s'ouvre"
-    **Une experience visuelle pour presenter Grimoire sans sortir un diaporama.**
+!!! onepager "Chapitre 01 - Prologue"
+    **Le vrai probleme n'est pas la vitesse de generation. Le vrai probleme est la perte de continuite.**
 
-    Ici, chaque scroll revele une couche de plus: probleme, mecanique, differenciation, passage a l'action.
+    Beaucoup d'assistants IA produisent vite. Peu de systemes transforment cette vitesse en delivery fiable.
 
-    - narration continue,
-    - progression par chapitres,
-    - lecture adaptee a la demo live et a la decouverte autonome.
-    {: .gd-stagger }
+    - contexte qui se perd entre sessions,
+    - decisions qui deviennent implicites,
+    - execution rapide mais qualite instable,
+    - equipe qui repart de zero trop souvent.
+    {: .gp-reveal }
 
-    - [Lancer un parcours concret](getting-started.md)
-    - [Voir la carte des concepts](concepts.md)
-    {: .gd-cta-row }
+    - [Demarrer un parcours reel](getting-started.md)
+    - [Voir la vue architecture](concepts.md)
+    {: .gp-cta }
 
-!!! onepager "Chapitre 02 - Pourquoi Grimoire"
-    Les assistants IA accelerent l'execution, mais la continuite se casse vite si le systeme ne garde pas le fil.
+!!! onepager "Chapitre 02 - Ce que Grimoire change"
+    Grimoire transforme un enchainement de prompts en systeme operationnel.
 
-    Grimoire Kit est concu pour eviter cette fragmentation:
+    - **Routage d'intention**: le besoin est interprete avant execution.
+    - **Specialisation des agents**: chaque role est explicite.
+    - **Verification evidence-first**: pas de "done" sans preuves.
+    - **Memoire vivante**: les apprentissages restent disponibles.
+    {: .gp-reveal }
 
-    - **specialisation explicite** des roles agents,
-    - **orchestration visible** de bout en bout,
-    - **verification evidence-first** avant validation,
-    - **memoire persistante** qui conserve le contexte utile.
-    {: .gd-stagger }
+    Le resultat attendu est simple: moins de rework, plus de clarte, plus de confiance.
 
-!!! onepager "Chapitre 03 - Schema vivant: boucle de base"
-    Quand on avance, le systeme ne saute pas des etapes. Il suit une boucle claire.
+!!! onepager "Chapitre 03 - Schema dynamique: boucle operative"
+    La boucle de base se revele en continu au scroll.
 
-    1. Intention captee
-    2. Routing vers les specialistes
-    3. Execution tracee
-    4. Verification des preuves
-    5. Memoire et apprentissage
-    {: .gd-schema .gd-stagger }
+    - Intention produit captee
+    - Selection du cadre d'execution
+    - Dispatch vers les bons specialistes
+    - Production des artefacts
+    - Validation et preuves
+    - Consolidation memoire
+    {: .gp-flow .gp-reveal }
 
-    ```mermaid
-    flowchart LR
-        A[Intention] --> B[Routing]
-        B --> C[Execution]
-        C --> D[Verification]
-        D --> E[Memoire]
-    ```
-    {: .gd-diagram }
+!!! onepager "Chapitre 04 - Schema dynamique: couche de confiance"
+    Ici on ne parle pas seulement de generation. On parle de gouvernance de la qualite.
 
-!!! onepager "Chapitre 04 - Schema etendu: systeme complet"
-    En scrollant, la meme boucle se densifie: plus de controle, plus de lisibilite, plus de fiabilite.
+    - Gates de verification a chaque etape
+    - Limitation des boucles inutiles
+    - Trace des decisions et des handoffs
+    - Recuperation de contexte inter-session
+    - Escalade quand le niveau de confiance baisse
+    {: .gp-flow .gp-reveal }
 
-    - Couche 1: intention et selection du bon cadre
-    - Couche 2: orchestration multi-roles
-    - Couche 3: controle qualite et garde-fous
-    - Couche 4: capitalisation dans la memoire projet
-    {: .gd-stagger }
-
-    ```mermaid
-    flowchart LR
-        A[Intention] --> B[Intent Routing]
-        B --> C[Sub-agent Dispatch]
-        C --> D[Implementation]
-        D --> E[Validation]
-        E --> F[Trust Scoring]
-        F --> G[Memory Update]
-        G --> H[Next Iteration]
-    ```
-    {: .gd-diagram }
-
-!!! onepager "Chapitre 05 - Positionnement clair"
-    Grimoire ne remplace pas tout: il se positionne comme systeme operationnel complet dans l'IDE.
+!!! onepager "Chapitre 05 - Positionnement produit"
+    Grimoire ne nie pas les autres approches. Il complete et operationalise.
 
     | Criteres | Grimoire Kit | BMAD | Devkit | OpenClaw |
     | --- | --- | --- | --- | --- |
-    | Nature principale | Systeme operationnel agentique complet | Methode de cadrage | Boite a outils technique | Runtime oriente execution |
-    | Point fort | Continuite intention -> execution -> verification | Structuration methodologique | Flexibilite de construction | Execution sandboxee |
-    | Memoire projet | Nativement centrale | Variable selon implementation | Souvent a assembler | Plutot orientee run |
-    | Gouvernance qualite | Integree au workflow | Forte sur le cadre | Depend de l'equipe | Souvent centree execution |
-    | Usage ideal | Delivery fiable et durable | Organisation des pratiques | Assemblage sur mesure | Automatisation ciblee |
+    | Coeur de proposition | Systeme de travail agentique complet | Methode et structure de travail | Ensemble de briques techniques | Runtime d'execution |
+    | Valeur immediate | Continuite intention -> execution -> verification | Clarte methodologique | Flexibilite de construction | Action rapide en sandbox |
+    | Memoire projet | Nativement centrale | Variable | Souvent a assembler | Plus orientee run |
+    | Gouvernance qualite | Integree | Forte en cadre | Depend de l'implementation | Majoritairement execution |
+    | Usage cible | Delivery durable en equipe | Cadrage et discipline | Construction custom | Execution focalisee |
 
-!!! onepager "Chapitre 06 - Scenario de presentation"
-    Pour presenter Grimoire en live, suis ce deroule narratif:
+!!! onepager "Chapitre 06 - Sequence de demo"
+    Utilise cette sequence pour un pitch live:
 
-    1. poser le probleme de fragmentation,
-    2. montrer la boucle de base,
-    3. reveler la boucle etendue,
-    4. afficher le positionnement,
-    5. terminer par un parcours concret.
-    {: .gd-schema .gd-stagger }
+    1. poser le cout de la fragmentation,
+    2. montrer la boucle operative,
+    3. reveler la couche de confiance,
+    4. positionner Grimoire face aux alternatives,
+    5. ouvrir un parcours concret.
+    {: .gp-steps .gp-reveal }
 
-    L'effet visuel vient du scroll progressif: chaque chapitre s'active, puis passe le relais au suivant.
+!!! onepager "Chapitre 07 - Parcours par profil"
+    Choisis ton entree selon ton objectif.
 
-!!! onepager "Chapitre 07 - Passer a l'action"
-    Choisis un chemin selon ton profil.
-
-    - **Dev solo**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Patterns](workflow-design-patterns.md)
+    - **Dev solo**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Workflow Design Patterns](workflow-design-patterns.md)
     - **Equipe produit**: [Concepts](concepts.md) -> [Taxonomie Workflows](workflow-taxonomy.md) -> [Memoire](memory-system.md)
-    - **Manager ou sponsor**: [Architecture](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
-    {: .gd-stagger }
+    - **Manager/Sponsor**: [Concepts](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
+    {: .gp-reveal }
 
-    - [Entrer dans le Quick Start](getting-started.md)
+    - [Lancer le Quick Start](getting-started.md)
     - [Explorer l'architecture](concepts.md)
-    - [Consulter les workflows](workflow-design-patterns.md)
-    {: .gd-cta-row }
+    - [Approfondir les workflows](workflow-design-patterns.md)
+    {: .gp-cta }
