@@ -205,29 +205,36 @@ body.gp-onepager .gp-section-nav li {
   flex: 0 0 auto;
 }
 
-body.gp-onepager .gp-section-nav a {
+body.gp-onepager .gp-section-nav a,
+body.gp-onepager .gp-section-nav button {
   display: inline-flex;
   align-items: center;
   min-height: 2.9rem;
   padding: 0 1rem;
   border-radius: 999px;
   border: 1px solid transparent;
+  background: transparent;
   color: var(--gp-ink-soft);
   font-size: 0.92rem;
   font-weight: 700;
+  font-family: inherit;
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
   transition: color 0.22s ease, background 0.22s ease, border-color 0.22s ease, transform 0.22s ease;
 }
 
-body.gp-onepager .gp-section-nav a:hover {
+body.gp-onepager .gp-section-nav a:hover,
+body.gp-onepager .gp-section-nav button:hover {
   color: var(--gp-ink);
   background: var(--gp-panel);
   border-color: var(--gp-line);
   transform: translateY(-1px);
 }
 
-body.gp-onepager .gp-section-nav a.is-active {
+body.gp-onepager .gp-section-nav a.is-active,
+body.gp-onepager .gp-section-nav button.is-active {
   color: #051008;
   background: var(--gp-accent);
   border-color: rgba(12, 245, 116, 0.78);
@@ -619,6 +626,7 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 > .admonition-titl
   body.gp-onepager .md-typeset .admonition.onepager,
   body.gp-onepager .md-typeset .admonition.onepager ul > li,
   body.gp-onepager .gp-section-nav a,
+  body.gp-onepager .gp-section-nav button,
   body.gp-onepager .gp-hero-actions a,
   body.gp-onepager .gp-hero-signals a,
   body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type a {
