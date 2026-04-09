@@ -1,0 +1,48 @@
+signals:
+  - title: Guardrails runtime agentiques
+    path: grimoire-game-runtime-guardrails.md
+    date: 2026-04-09
+    kicker: AIVS · OWASP Agentic · IEEE P3394
+    summary: Contrat de mutation, niveaux de confiance et gouvernance runtime pour le Grimoire Game.
+    featured: true
+    proof: true
+
+  - title: Guide Observatory API
+    path: observatory-api.md
+    date: 2026-04-09
+    kicker: API locale · diff · apply · rollback
+    summary: Surface HTTP locale pour comparer, appliquer et annuler des changements de configuration agentique.
+    featured: true
+    proof: false
+
+  - title: Integration MCP
+    path: mcp-integration.md
+    date: 2026-03-21
+    kicker: Copilot · Claude Desktop · MCP
+    summary: Mise en place du serveur MCP Grimoire et configuration des principaux clients compatibles.
+    featured: true
+    proof: false
+
+  - title: Creer un agent
+    path: creating-agents.md
+    date: 2026-03-08
+    kicker: Agent Forge · scaffold · installation
+    summary: Guide complet pour generer, revoir et installer un nouvel agent specialise.
+    featured: true
+    proof: false
+
+  - title: Guide SDK Python
+    path: sdk-guide.md
+    date: 2026-03-21
+    kicker: SDK · Project API · outils importables
+    summary: Point d'entree Python pour piloter projets, outils et workflows sans passer par le shell.
+    featured: false
+    proof: false
+
+  - title: Taxonomie workflows
+    path: workflow-taxonomy.md
+    date: 2026-03-08
+    kicker: types de workflows · selection du bon mode
+    summary: Carte de lecture des workflows Grimoire pour choisir la bonne structure d'execution et de validation.
+    featured: false
+    proof: false
