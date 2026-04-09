@@ -63,6 +63,12 @@ markdown_extensions:
   - attr_list
   - md_in_html
 
+extra_css:
+  - stylesheets/presentation-onepager.css
+
+extra_javascript:
+  - javascripts/presentation-onepager.js
+
 nav:
   - Accueil: index.md
   - Presentation & Decouverte: presentation-decouverte.md

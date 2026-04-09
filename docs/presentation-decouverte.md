@@ -1,93 +1,104 @@
-# Presentation & Decouverte
+# Experience Presentation & Decouverte
 
-Cette page est le point d'entree pour comprendre Grimoire Kit rapidement, sans ouvrir un diaporama.
+Cette page est un onepager narratif: elle remplace une presentation classique et evolue au scroll.
 
-Elle est pensee pour deux usages:
+!!! onepager "Chapitre 01 - Le grimoire s'ouvre"
+    **Une experience visuelle pour presenter Grimoire sans sortir un diaporama.**
 
-- presenter le projet en session live,
-- guider un visiteur qui decouvre Grimoire pour la premiere fois.
+    Ici, chaque scroll revele une couche de plus: probleme, mecanique, differenciation, passage a l'action.
 
-## Pourquoi Grimoire
+    - narration continue,
+    - progression par chapitres,
+    - lecture adaptee a la demo live et a la decouverte autonome.
+    {: .gd-stagger }
 
-Grimoire Kit repond a un probleme simple: l'IA produit vite, mais la continuite de travail est souvent fragile.
+    - [Lancer un parcours concret](getting-started.md)
+    - [Voir la carte des concepts](concepts.md)
+    {: .gd-cta-row }
 
-Les equipes ont besoin d'un cadre qui combine:
+!!! onepager "Chapitre 02 - Pourquoi Grimoire"
+    Les assistants IA accelerent l'execution, mais la continuite se casse vite si le systeme ne garde pas le fil.
 
-- specialisation des roles agents,
-- memoire inter-sessions,
-- orchestration explicite,
-- verification avant validation.
+    Grimoire Kit est concu pour eviter cette fragmentation:
 
-## Comment ca fonctionne
+    - **specialisation explicite** des roles agents,
+    - **orchestration visible** de bout en bout,
+    - **verification evidence-first** avant validation,
+    - **memoire persistante** qui conserve le contexte utile.
+    {: .gd-stagger }
 
-```mermaid
-flowchart LR
-    A[Intention] --> B[Routing]
-    B --> C[Orchestration]
-    C --> D[Execution]
-    D --> E[Verification]
-    E --> F[Memoire]
-    F --> G[Amelioration continue]
-```
+!!! onepager "Chapitre 03 - Schema vivant: boucle de base"
+    Quand on avance, le systeme ne saute pas des etapes. Il suit une boucle claire.
 
-## Deux modes d'usage
+    1. Intention captee
+    2. Routing vers les specialistes
+    3. Execution tracee
+    4. Verification des preuves
+    5. Memoire et apprentissage
+    {: .gd-schema .gd-stagger }
 
-=== "Mode Presentation"
+    ```mermaid
+    flowchart LR
+        A[Intention] --> B[Routing]
+        B --> C[Execution]
+        C --> D[Verification]
+        D --> E[Memoire]
+    ```
+    {: .gd-diagram }
 
-    Utilise cette page comme fil narratif lors d'une demo:
+!!! onepager "Chapitre 04 - Schema etendu: systeme complet"
+    En scrollant, la meme boucle se densifie: plus de controle, plus de lisibilite, plus de fiabilite.
 
-    - commence par le probleme,
-    - enchaine sur la boucle de fonctionnement,
-    - termine par le comparatif et le parcours de mise en action.
+    - Couche 1: intention et selection du bon cadre
+    - Couche 2: orchestration multi-roles
+    - Couche 3: controle qualite et garde-fous
+    - Couche 4: capitalisation dans la memoire projet
+    {: .gd-stagger }
 
-=== "Mode Decouverte"
+    ```mermaid
+    flowchart LR
+        A[Intention] --> B[Intent Routing]
+        B --> C[Sub-agent Dispatch]
+        C --> D[Implementation]
+        D --> E[Validation]
+        E --> F[Trust Scoring]
+        F --> G[Memory Update]
+        G --> H[Next Iteration]
+    ```
+    {: .gd-diagram }
 
-    Si tu visites le site pour comprendre Grimoire:
+!!! onepager "Chapitre 05 - Positionnement clair"
+    Grimoire ne remplace pas tout: il se positionne comme systeme operationnel complet dans l'IDE.
 
-    - lis le "Pourquoi Grimoire",
-    - parcours le schema "Comment ca fonctionne",
-    - choisis un chemin adapte a ton profil dans "Parcours recommandes".
+    | Criteres | Grimoire Kit | BMAD | Devkit | OpenClaw |
+    | --- | --- | --- | --- | --- |
+    | Nature principale | Systeme operationnel agentique complet | Methode de cadrage | Boite a outils technique | Runtime oriente execution |
+    | Point fort | Continuite intention -> execution -> verification | Structuration methodologique | Flexibilite de construction | Execution sandboxee |
+    | Memoire projet | Nativement centrale | Variable selon implementation | Souvent a assembler | Plutot orientee run |
+    | Gouvernance qualite | Integree au workflow | Forte sur le cadre | Depend de l'equipe | Souvent centree execution |
+    | Usage ideal | Delivery fiable et durable | Organisation des pratiques | Assemblage sur mesure | Automatisation ciblee |
 
-## Positionnement: Grimoire, BMAD, Devkit, OpenClaw
+!!! onepager "Chapitre 06 - Scenario de presentation"
+    Pour presenter Grimoire en live, suis ce deroule narratif:
 
-| Criteres | Grimoire Kit | BMAD | Devkit | OpenClaw |
-| --- | --- | --- | --- | --- |
-| Nature principale | Systeme operationnel agentique complet | Methode de cadrage | Boite a outils technique | Runtime oriente execution |
-| Point fort | Continuite intention -> execution -> verification | Structuration methodologique | Flexibilite de construction | Execution sandboxee |
-| Memoire projet | Nativement centrale | Variable selon implementation | Souvent a assembler | Plutot orientee run |
-| Gouvernance qualite | Integree au workflow | Forte sur le cadre | Depend de l'equipe | Souvent centree execution |
-| Usage ideal | Delivery fiable et durable | Organisation des pratiques | Assemblage sur mesure | Automatisation ciblee |
+    1. poser le probleme de fragmentation,
+    2. montrer la boucle de base,
+    3. reveler la boucle etendue,
+    4. afficher le positionnement,
+    5. terminer par un parcours concret.
+    {: .gd-schema .gd-stagger }
 
-## Philosophie Grimoire
+    L'effet visuel vient du scroll progressif: chaque chapitre s'active, puis passe le relais au suivant.
 
-Grimoire privilegie la clarte operationnelle:
+!!! onepager "Chapitre 07 - Passer a l'action"
+    Choisis un chemin selon ton profil.
 
-- expliciter qui fait quoi,
-- rendre visibles les preuves de completion,
-- conserver la memoire utile,
-- reduire la re-fragmentation du travail.
+    - **Dev solo**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Patterns](workflow-design-patterns.md)
+    - **Equipe produit**: [Concepts](concepts.md) -> [Taxonomie Workflows](workflow-taxonomy.md) -> [Memoire](memory-system.md)
+    - **Manager ou sponsor**: [Architecture](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
+    {: .gd-stagger }
 
-## Parcours recommandes
-
-| Profil | Point de depart | Suite recommandee |
-| --- | --- | --- |
-| Dev solo | [Quick Start](getting-started.md) | [Concepts](concepts.md), [Workflow Design Patterns](workflow-design-patterns.md) |
-| Equipe produit | [Concepts](concepts.md) | [Taxonomie Workflows](workflow-taxonomy.md), [Memoire](memory-system.md) |
-| Manager / Sponsor | Cette page | [Architecture](concepts.md), [FAQ](faq.md), [Troubleshooting](troubleshooting.md) |
-
-## Tutoriel visuel guide
-
-Pour un parcours explicatif complet:
-
-1. comprendre la boucle de fonctionnement sur cette page,
-2. voir les concepts d'architecture et de memoire,
-3. executer un premier scenario via le quick start,
-4. valider les pratiques de qualite via les guides workflows.
-
-## Aller plus loin
-
-- [Architecture & Concepts](concepts.md)
-- [Memoire](memory-system.md)
-- [Workflow Design Patterns](workflow-design-patterns.md)
-- [Quick Start](getting-started.md)
-- [FAQ](faq.md)
+    - [Entrer dans le Quick Start](getting-started.md)
+    - [Explorer l'architecture](concepts.md)
+    - [Consulter les workflows](workflow-design-patterns.md)
+    {: .gd-cta-row }
