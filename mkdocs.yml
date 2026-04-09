@@ -74,8 +74,8 @@ extra_javascript:
 
 nav:
   - Accueil: index.md
-  - Presentation & Decouverte: presentation-decouverte.md
-  - Signaux & nouveautes: signaux.md
+  - Présentation & Découverte: presentation-decouverte.md
+  - Signaux & nouveautés: signaux.md
   - Démarrage:
       - Quick Start: getting-started.md
       - Setup VS Code: vscode-setup.md

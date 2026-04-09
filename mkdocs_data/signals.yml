@@ -15,7 +15,7 @@ signals:
     featured: true
     proof: false
 
-  - title: Integration MCP
+  - title: Intégration MCP
     path: mcp-integration.md
     date: 2026-03-21
     kicker: Copilot · Claude Desktop · MCP
@@ -23,11 +23,11 @@ signals:
     featured: true
     proof: false
 
-  - title: Creer un agent
+  - title: Créer un agent
     path: creating-agents.md
     date: 2026-03-08
     kicker: Agent Forge · scaffold · installation
-    summary: Guide complet pour generer, revoir et installer un nouvel agent specialise.
+    summary: Guide complet pour générer, revoir et installer un nouvel agent spécialisé.
     featured: true
     proof: false
 
@@ -35,7 +35,7 @@ signals:
     path: sdk-guide.md
     date: 2026-03-21
     kicker: SDK · Project API · outils importables
-    summary: Point d'entree Python pour piloter projets, outils et workflows sans passer par le shell.
+    summary: Point d'entrée Python pour piloter projets, outils et workflows sans passer par le shell.
     featured: false
     proof: false
 
@@ -43,6 +43,6 @@ signals:
     path: workflow-taxonomy.md
     date: 2026-03-08
     kicker: types de workflows · selection du bon mode
-    summary: Carte de lecture des workflows Grimoire pour choisir la bonne structure d'execution et de validation.
+    summary: Carte de lecture des workflows Grimoire pour choisir la bonne structure d'exécution et de validation.
     featured: false
     proof: false

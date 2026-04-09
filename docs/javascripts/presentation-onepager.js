@@ -6,6 +6,7 @@
     "gd-step-04",
     "gd-step-05",
     "gd-step-06",
+    "gd-step-07",
   ];
   let cleanupPresentationPage = null;
 
@@ -18,10 +19,36 @@
     const isPresentationPage = window.location.pathname.includes("/presentation-decouverte/");
     if (!isPresentationPage) {
       document.body.classList.remove("gp-onepager");
+      document.body.removeAttribute("data-gp-scheme");
       return;
     }
 
     document.body.classList.add("gp-onepager");
+
+    const syncThemeState = () => {
+      const scheme = document.body.getAttribute("data-md-color-scheme")
+        || document.documentElement.getAttribute("data-md-color-scheme")
+        || "default";
+
+      document.body.setAttribute("data-gp-scheme", scheme);
+    };
+
+    const themeObservers = [document.body, document.documentElement]
+      .filter(Boolean)
+      .map((target) => {
+        const observer = new MutationObserver(() => {
+          syncThemeState();
+        });
+
+        observer.observe(target, {
+          attributes: true,
+          attributeFilter: ["data-md-color-scheme"],
+        });
+
+        return observer;
+      });
+
+    syncThemeState();
 
     const panels = Array.from(document.querySelectorAll(".md-typeset .admonition.onepager"));
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -29,6 +56,7 @@
     let activeIndex = 0;
 
     if (!panels.length) {
+      themeObservers.forEach((observer) => observer.disconnect());
       return;
     }
 
@@ -43,12 +71,16 @@
 
     const sectionNav = document.createElement("nav");
     sectionNav.className = "gp-section-nav";
-    sectionNav.setAttribute("aria-label", "Sections de la presentation");
+    sectionNav.setAttribute("aria-label", "Sections de la présentation");
 
     const sectionList = document.createElement("ol");
     sectionNav.appendChild(sectionList);
 
     const navLinks = [];
+
+    const setNavResting = () => {
+      sectionNav.classList.toggle("is-resting", window.scrollY <= 48);
+    };
 
     const setActive = (index) => {
       activeIndex = index;
@@ -58,7 +90,11 @@
 
         link.classList.toggle("is-active", isActive);
 
-        link.setAttribute("aria-pressed", isActive ? "true" : "false");
+        if (isActive) {
+          link.setAttribute("aria-current", "step");
+        } else {
+          link.removeAttribute("aria-current");
+        }
       });
 
       panels.forEach((panel, current) => {
@@ -99,6 +135,8 @@
     };
 
     const syncActiveFromScroll = () => {
+      setNavResting();
+
       if (window.scrollY <= 24) {
         setActive(0);
         return;
@@ -127,6 +165,20 @@
       }
     };
 
+    const revealPanelsInViewport = () => {
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const minVisibleHeight = Math.min(220, viewportHeight * 0.22);
+
+      panels.forEach((panel) => {
+        const rect = panel.getBoundingClientRect();
+        const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
+
+        if (visibleHeight >= minVisibleHeight) {
+          panel.classList.add("is-visible");
+        }
+      });
+    };
+
     panels.forEach((panel, index) => {
       const step = String(index + 1).padStart(2, "0");
       const title = panel.querySelector(".admonition-title");
@@ -136,6 +188,10 @@
       panel.dataset.step = step;
       panel.dataset.scene = String(index + 1);
       panel.classList.add("gp-scene-" + step);
+
+      if (title) {
+        title.dataset.step = step;
+      }
 
       if (!panel.id) {
         panel.id = sectionIds[index] || "gd-step-" + step;
@@ -161,7 +217,10 @@
     });
 
     const heroSignals = document.querySelector(".gp-hero-signals");
-    if (heroSignals) {
+    const newsStrip = document.querySelector(".gp-news-strip");
+    if (newsStrip) {
+      newsStrip.insertAdjacentElement("afterend", sectionNav);
+    } else if (heroSignals) {
       heroSignals.insertAdjacentElement("afterend", sectionNav);
     } else {
       panels[0].insertAdjacentElement("beforebegin", sectionNav);
@@ -188,9 +247,11 @@
         if (index >= 0) {
           setActive(index);
         }
+
+        revealPanelsInViewport();
       },
       {
-        threshold: [0.18, 0.4, 0.66],
+        threshold: [0.08, 0.18, 0.4, 0.66],
         rootMargin: "-8% 0px -18% 0px",
       }
     );
@@ -198,19 +259,25 @@
     panels.forEach((panel) => observer.observe(panel));
 
     const onScroll = () => {
+      revealPanelsInViewport();
       syncActiveFromScroll();
     };
     const onHashChange = () => {
+      revealPanelsInViewport();
       syncActiveFromScroll();
     };
     const initialSyncFrame = requestAnimationFrame(() => {
+      revealPanelsInViewport();
       syncActiveFromScroll();
     });
+
+    setNavResting();
 
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("hashchange", onHashChange);
 
     cleanupPresentationPage = () => {
+      themeObservers.forEach((observer) => observer.disconnect());
       observer.disconnect();
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("hashchange", onHashChange);

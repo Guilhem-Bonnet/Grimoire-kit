@@ -1,12 +1,12 @@
 # Signaux & nouveautés
 
-Les ajouts publics les plus structurants du kit sont consolides ici. La meme source alimente aussi l'accueil et la presentation.
+Les ajouts publics les plus structurants du kit sont consolidés ici. La même source alimente aussi l'accueil et la présentation.
 
-## A la une
+## À la une
 
 {{ grimoire_signals_featured }}
 
-## Autres reperes
+## Autres repères
 
 {{ grimoire_signals_archive }}
 

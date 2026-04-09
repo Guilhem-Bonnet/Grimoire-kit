@@ -1,11 +1,11 @@
 # Grimoire Kit {: .gp-hero-brand }
 
-## L'agentic OS qui empeche les projets IA de retomber a zero {: .gp-hero-title }
+## L'agentic OS qui empêche les projets IA de retomber à zéro {: .gp-hero-title }
 
-Une session cadre. La suivante execute. La troisieme verifie. Rien ne retombe a zero entre les trois.
+Une session cadre. La suivante exécute. La troisième vérifie. Rien ne retombe à zéro entre les trois.
 {: .gp-hero-lead }
 
-Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste une bonne session.
+Pour les builders, leads et équipes qui veulent une continuité réelle, pas juste une bonne session.
 {: .gp-hero-audience }
 
 [Voir un workflow vivant](workflow-design-patterns.md)
@@ -40,11 +40,11 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
 
 [Orchestration et intent routing](concepts.md)
 [Evidence-first et Completion Contract](workflow-design-patterns.md)
-[Memoire projet et session](memory-system.md)
+[Mémoire projet et session](memory-system.md)
 [Workflows et artefacts](workflow-taxonomy.md)
 {: .gp-hero-signals }
 
-<div class="gp-site-rail" aria-label="Navigation presentation">
+<div class="gp-site-rail" aria-label="Navigation de la présentation">
     <span class="gp-site-rail__label">Parcours</span>
     <div class="gp-site-rail__items">
         <a href="../">Accueil</a>
@@ -57,36 +57,36 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
 
 {{ grimoire_signals_presentation }}
 
-!!! onepager "Mouvement I — Le cout cache"
-    **Le probleme n'est pas que l'IA reponde mal. Le probleme, c'est que le projet oublie.**
+!!! onepager "Mouvement I — Le coût caché"
+    **Le problème n'est pas que l'IA réponde mal. Le problème, c'est que le projet oublie.**
 
-    Quand le contexte, les decisions et la validation restent prisonniers du chat, la reprise suivante reconsomme du temps humain au lieu de produire.
+    Quand le contexte, les décisions et la validation restent prisonniers du chat, la reprise suivante reconsomme du temps humain au lieu de produire.
 
     - le rebrief devient une taxe,
-    - le meme assistant pretend tout faire,
+    - le même assistant prétend tout faire,
     - le "done" arrive avant la preuve,
-    - la session suivante herite d'indices, pas d'un etat.
+    - la session suivante hérite d'indices, pas d'un état.
 
 !!! onepager "Mouvement II — La bascule"
     **Avant Grimoire, la session improvise. Avec Grimoire, le projet reprend.**
 
     <div class="gp-contrast-grid">
         <section class="gp-contrast-card gp-contrast-card--before">
-            <p class="gp-diagram-label">Sans systeme</p>
+            <p class="gp-diagram-label">Sans système</p>
             <ul>
-                <li>Contexte reexplique a chaque reprise</li>
-                <li>Un seul assistant pour cadrer, coder, verifier et conclure</li>
-                <li>Validation declarative sans Definition of Done stable</li>
-                <li>Handoffs implicites et erreurs rediscutees plus tard</li>
+                <li>Contexte réexpliqué à chaque reprise</li>
+                <li>Un seul assistant pour cadrer, coder, vérifier et conclure</li>
+                <li>Validation déclarative sans Definition of Done stable</li>
+                <li>Handoffs implicites et erreurs rediscutées plus tard</li>
             </ul>
         </section>
         <section class="gp-contrast-card gp-contrast-card--after">
             <p class="gp-diagram-label">Avec Grimoire</p>
             <ul>
-                <li>Intention cadree avant execution</li>
-                <li>Roles specialises et delegations observables</li>
+                <li>Intention cadrée avant exécution</li>
+                <li>Rôles spécialisés et délégations observables</li>
                 <li>Evidence-first, Challenger et Completion Contract</li>
-                <li>Memoire, decisions et artefacts reutilisables</li>
+                <li>Mémoire, décisions et artefacts réutilisables</li>
             </ul>
         </section>
     </div>
@@ -97,24 +97,52 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     <div class="gp-pillars">
         <article class="gp-pillar">
             <p class="gp-pillar-kicker">Orchestration</p>
-            <h3>Le bon mode, le bon role</h3>
-            <p>La demande part vers le bon specialiste sans perdre son cadre.</p>
+            <h3>Le bon mode, le bon rôle</h3>
+            <p>La demande part vers le bon spécialiste sans perdre son cadre.</p>
         </article>
         <article class="gp-pillar">
             <p class="gp-pillar-kicker">Roles</p>
             <h3>Le fixeur n'est pas son challenger</h3>
-            <p>Chaque role porte une responsabilite lisible au lieu d'une competence floue.</p>
+            <p>Chaque rôle porte une responsabilité lisible au lieu d'une compétence floue.</p>
         </article>
         <article class="gp-pillar">
             <p class="gp-pillar-kicker">Workflows</p>
             <h3>Les garde-fous sont dans la boucle</h3>
-            <p>Les phases, escalades et verifications sont codees dans le systeme.</p>
+            <p>Les phases, escalades et vérifications sont codées dans le système.</p>
         </article>
         <article class="gp-pillar">
-            <p class="gp-pillar-kicker">Memoire</p>
-            <h3>Ce qui a ete appris reste</h3>
-            <p>Decisions, contradictions et learnings restent utilisables a la reprise.</p>
+            <p class="gp-pillar-kicker">Mémoire</p>
+            <h3>Ce qui a été appris reste</h3>
+            <p>Décisions, contradictions et learnings restent utilisables à la reprise.</p>
         </article>
+    </div>
+
+    <div class="gp-machine-preview">
+        <figure class="gp-machine-preview__frame">
+            <p class="gp-machine-preview__eyebrow">Aperçu visuel</p>
+            <img src="../assets/presentation/pixel-office-reference.jpg" alt="Vue pixel art d'un observatoire avec postes de travail, war room et agents visibles." loading="lazy" decoding="async">
+            <figcaption>Un observatoire lisible où rooms, rôles, mémoire et contexte restent visibles sans quitter l'IDE.</figcaption>
+        </figure>
+        <aside class="gp-machine-preview__aside">
+            <p class="gp-diagram-label">Repères runtime</p>
+            <ul class="gp-machine-preview__rooms">
+                <li><img src="../assets/presentation/room-war.png" alt="" loading="lazy" decoding="async"> War room</li>
+                <li><img src="../assets/presentation/room-dev.png" alt="" loading="lazy" decoding="async"> Build room</li>
+                <li><span class="gp-machine-preview__badge">Replay</span> Timeline et état rejouable</li>
+            </ul>
+            <div class="gp-machine-preview__agents">
+                <article>
+                    <div class="gp-sprite gp-sprite--archivist" aria-hidden="true"></div>
+                    <strong>Archiviste</strong>
+                    <p>Les décisions et la mémoire projet restent visibles et récupérables.</p>
+                </article>
+                <article>
+                    <div class="gp-sprite gp-sprite--ember" aria-hidden="true"></div>
+                    <strong>Operator Ember</strong>
+                    <p>Le replay continue au lieu de casser au changement de session.</p>
+                </article>
+            </div>
+        </aside>
     </div>
 
 !!! onepager "Mouvement IV — Le fil"
@@ -128,41 +156,41 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
         </li>
         <li>
             <strong>Cadrage</strong>
-            <span>DoD, severite, surface d'impact et preuves attendues sont poses avant le code.</span>
+            <span>DoD, sévérité, surface d'impact et preuves attendues sont posées avant le code.</span>
             <em>Sortie: contrat de validation</em>
         </li>
         <li>
             <strong>Dispatch</strong>
-            <span>Le bon role prend la main: analyst, dev, qa, challenger ou orchestrateur.</span>
-            <em>Sortie: delegation explicite</em>
+            <span>Le bon rôle prend la main: analyst, dev, qa, challenger ou orchestrateur.</span>
+            <em>Sortie: délégation explicite</em>
         </li>
         <li>
             <strong>Execution</strong>
-            <span>Le travail suit un workflow borne plutot qu'une suite de prompts opportunistes.</span>
-            <em>Sortie: implementation tracable</em>
+            <span>Le travail suit un workflow borné plutôt qu'une suite de prompts opportunistes.</span>
+            <em>Sortie: implémentation traçable</em>
         </li>
         <li>
             <strong>Verification</strong>
-            <span>Evidence-first, Challenger et circuit-breaker testent le resultat au lieu de le declarer.</span>
-            <em>Sortie: confiance operationnelle</em>
+            <span>Evidence-first, Challenger et circuit-breaker testent le résultat au lieu de le déclarer.</span>
+            <em>Sortie: confiance opérationnelle</em>
         </li>
         <li>
             <strong>Reprise</strong>
-            <span>La session suivante retrouve artefacts, decisions, learnings et etat de projet.</span>
-            <em>Sortie: continuite reelle</em>
+            <span>La session suivante retrouve artefacts, décisions, learnings et état de projet.</span>
+            <em>Sortie: continuité réelle</em>
         </li>
     </ol>
 
-    <p class="gp-flow-caption">Cadrage -> execution specialisee -> evidence-first -> challenger -> memoire.</p>
+    <p class="gp-flow-caption">Cadrage → exécution spécialisée → evidence-first → challenger → mémoire.</p>
 
 !!! onepager "Mouvement V — La preuve"
-    **Grimoire gagne sa credibilite en se contredisant, en se verifiant et en bornant ses propres sorties.**
+    **Grimoire gagne sa crédibilité en se contredisant, en se vérifiant et en bornant ses propres sorties.**
 
     <div class="gp-trust-loop">
         <article>
             <p class="gp-diagram-label">Contract</p>
             <h3>Completion Contract</h3>
-            <p>Pas de "fini" sans checks, sans preuves et sans cloture verificable.</p>
+            <p>Pas de "fini" sans checks, sans preuves et sans clôture vérifiable.</p>
         </article>
         <article>
             <p class="gp-diagram-label">Proof</p>
@@ -176,28 +204,28 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
         <article>
             <p class="gp-diagram-label">Challenge</p>
             <h3>Adversarial review</h3>
-            <p>Le systeme veut casser un fix avant de l'accepter.</p>
+            <p>Le système veut casser un fix avant de l'accepter.</p>
         </article>
         <article>
             <p class="gp-diagram-label">Guardrails</p>
-            <h3>Escalade et boucles bornees</h3>
-            <p>Quand la root cause bouge ou que les iterations s'emballent, le workflow s'arrete et requalifie.</p>
+            <h3>Escalade et boucles bornées</h3>
+            <p>Quand la root cause bouge ou que les itérations s'emballent, le workflow s'arrête et requalifie.</p>
         </article>
     </div>
 
 !!! onepager "Mouvement VI — Ce qui survit"
-    **Une bonne session laisse une memoire, pas une impression.**
+    **Une bonne session laisse une mémoire, pas une impression.**
 
     <div class="gp-memory-stack">
         <article>
-            <p class="gp-diagram-label">Memoire de session</p>
+            <p class="gp-diagram-label">Mémoire de session</p>
             <h3>Ce qui permet de reprendre vite</h3>
-            <p>Etat courant, arbitrages, prochain geste.</p>
+            <p>État courant, arbitrages, prochain geste.</p>
         </article>
         <article>
-            <p class="gp-diagram-label">Memoire projet</p>
+            <p class="gp-diagram-label">Mémoire projet</p>
             <h3>Ce qui permet de reprendre juste</h3>
-            <p>Decisions, contradictions, conventions et learnings qui survivent a la session.</p>
+            <p>Décisions, contradictions, conventions et learnings qui survivent à la session.</p>
         </article>
         <article>
             <p class="gp-diagram-label">Artefacts</p>
@@ -215,10 +243,10 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
         <li>Replay traces</li>
     </ul>
 
-!!! onepager "Mouvement VII — Salle de controle"
-    **Grimoire n'ajoute pas un chatbot de plus dans l'IDE. Il installe une salle de controle.**
+!!! onepager "Mouvement VII — Salle de contrôle"
+    **Grimoire n'ajoute pas un chatbot de plus dans l'IDE. Il installe une salle de contrôle.**
 
-    War room pour orchestrer. Rooms pour specialiser. Timeline pour rejouer. Memoire pour tenir l'etat. Le Game UI sert a voir le travail, pas a le decorer.
+    War room pour orchestrer. Rooms pour spécialiser. Timeline pour rejouer. Mémoire pour tenir l'état. Le Game UI sert à voir le travail, pas à le décorer.
 
     <div class="gp-agentic-map">
     <span>Intent</span>
@@ -231,18 +259,18 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     <div class="gp-os-grid">
     <article>
     <p class="gp-diagram-label">System of record</p>
-    <h3>La session devient un etat rejouable</h3>
+    <h3>La session devient un état rejouable</h3>
     <p>Snapshots, sequence ids et replay remplacent le "re-explique-moi" permanent.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Team of Teams</p>
-    <h3>Les roles prennent place dans des rooms</h3>
-    <p>War room, build room, qa room et design room rendent visibles delegation et charge.</p>
+    <h3>Les rôles prennent place dans des rooms</h3>
+    <p>War room, build room, qa room et design room rendent visibles délégation et charge.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Explainability</p>
-    <h3>Les preuves deviennent un ecran de controle</h3>
-    <p>Tool calls, workflow steps et decisions deviennent lisibles sans lecture forensee.</p>
+    <h3>Les preuves deviennent un écran de contrôle</h3>
+    <p>Tool calls, workflow steps et décisions deviennent lisibles sans lecture forensique.</p>
     </article>
     </div>
 
@@ -252,11 +280,11 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     <div class="gp-observatory-hud">
     <span>war room</span>
     <span>build room</span>
-    <span>spectator mode</span>
+    <span>mode spectateur</span>
     </div>
-    <img src="../assets/presentation/pixel-office-reference.jpg" alt="Prototype pixel art d'un observatoire agentique avec open space, salle de reunion et postes de travail." loading="lazy" decoding="async">
+    <img src="../assets/presentation/pixel-office-reference.jpg" alt="Prototype pixel art d'un observatoire agentique avec open space, salle de réunion et postes de travail." loading="lazy" decoding="async">
     </div>
-    <figcaption>Prototype d'observatoire: positions, rooms et densite de travail deviennent visibles au premier regard.</figcaption>
+    <figcaption>Prototype d'observatoire: positions, rooms et densité de travail deviennent visibles au premier regard.</figcaption>
     <div class="gp-room-strip">
     <span><img src="../assets/presentation/room-war.png" alt="" loading="lazy" decoding="async"> Orchestrateur</span>
     <span><img src="../assets/presentation/room-dev.png" alt="" loading="lazy" decoding="async"> Agents de build</span>
@@ -266,12 +294,12 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     <div class="gp-observatory-stack">
     <div class="gp-dialogue-stage">
     <article class="gp-agent-card">
-    <p class="gp-agent-bubble">Decision enregistree. Le contexte ne retombe plus.</p>
+    <p class="gp-agent-bubble">Décision enregistrée. Le contexte ne retombe plus.</p>
     <div class="gp-sprite gp-sprite--archivist" aria-hidden="true"></div>
     <h3>Archiviste</h3>
     </article>
     <article class="gp-agent-card">
-    <p class="gp-agent-bubble gp-agent-bubble--accent">Replay synchronise. La reprise reste continue.</p>
+    <p class="gp-agent-bubble gp-agent-bubble--accent">Replay synchronisé. La reprise reste continue.</p>
     <div class="gp-sprite gp-sprite--ember" aria-hidden="true"></div>
     <h3>Operator Ember</h3>
     </article>
@@ -280,12 +308,12 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     <article>
     <p class="gp-diagram-label">Observatoire</p>
     <h3>Board live</h3>
-    <p>Agents actifs, charge et colonnes de taches restent lisibles au meme endroit.</p>
+    <p>Agents actifs, charge et colonnes de tâches restent lisibles au même endroit.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Replay</p>
     <h3>Timeline et reconnexion</h3>
-    <p>Handshake et curseur de sequence reconstruisent l'etat depuis les evenements.</p>
+    <p>Handshake et curseur de séquence reconstruisent l'état depuis les événements.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Contrats</p>
@@ -296,13 +324,13 @@ Pour les builders, leads et equipes qui veulent une continuite reelle, pas juste
     </div>
     </div>
 
-    <p class="gp-final-kicker">Entre par un besoin. Ressors avec un systeme qui tient.</p>
+    <p class="gp-final-kicker">Entre par un besoin. Ressors avec un système qui tient.</p>
 
     <div class="gp-final-actions">
     <a class="gp-final-actions__link gp-final-actions__link--primary" href="../workflow-design-patterns/">Lancer un premier workflow</a>
-    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Demarrer sans setup long</a>
+    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Démarrer sans setup long</a>
     <a class="gp-final-actions__link" href="../concepts/">Explorer la carte des concepts</a>
-    <a class="gp-final-actions__link" href="../memory-system/">Ouvrir la memoire projet</a>
+    <a class="gp-final-actions__link" href="../memory-system/">Ouvrir la mémoire projet</a>
     </div>
 
 <!-- markdownlint-enable MD033 -->
