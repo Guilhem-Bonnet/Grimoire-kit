@@ -65,6 +65,7 @@ markdown_extensions:
 
 nav:
   - Accueil: index.md
+  - Presentation & Decouverte: presentation-decouverte.md
   - Démarrage:
       - Quick Start: getting-started.md
       - Setup VS Code: vscode-setup.md
@@ -79,6 +80,7 @@ nav:
       - Créer un agent: creating-agents.md
       - Archétypes: archetype-guide.md
       - Intégration MCP: mcp-integration.md
+      - Observatory API: observatory-api.md
       - Référence YAML: grimoire-yaml-reference.md
   - Référence:
       - CLI: cli-reference.md
