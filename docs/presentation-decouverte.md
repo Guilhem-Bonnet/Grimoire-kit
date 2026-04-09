@@ -1,72 +1,86 @@
 # Grimoire Kit {: .gp-hero-brand }
 
-## L'agentic OS qui garde *le fil* entre intention, execution et preuve {: .gp-hero-title }
+## L'agentic OS qui evite a vos sessions IA de repartir de zero {: .gp-hero-title }
 
-Les autres assistants accelerent un prompt. Grimoire orchestre un systeme de travail qui garde le contexte, la qualite et la memoire jusqu'au delivery.
+Grimoire Kit transforme un assistant utile mais ponctuel en systeme de travail continu: la bonne expertise intervient, la verification laisse des preuves, et la session suivante reprend avec du contexte au lieu d'un rebrief.
 {: .gp-hero-lead }
 
+[Voir un workflow reel](workflow-design-patterns.md)
 [Entrer dans le Quick Start](getting-started.md)
-[Voir l'architecture](concepts.md)
-[Explorer les workflows](workflow-design-patterns.md)
+[Explorer l'architecture](concepts.md)
 {: .gp-hero-actions }
 
-[Intent routing](concepts.md)
-[Sub-agents specialises](concepts.md)
+[Contexte qui survit aux sessions](memory-system.md)
+[Roles specialises et explicites](concepts.md)
 [Verification evidence-first](workflow-design-patterns.md)
-[Memoire projet vivante](memory-system.md)
+[Artefacts exploitables apres execution](workflow-design-patterns.md)
 {: .gp-hero-signals }
 
-!!! onepager "Acte I — Le cout cache"
-    **Le vrai gaspillage n'est pas la lenteur. C'est la rupture de continuite.**
+!!! onepager "Acte I — Le probleme reel"
+    **Le vrai cout des assistants IA n'est pas la generation. C'est le rebrief permanent.**
 
-    Quand le contexte se perd, l'equipe repaie plusieurs fois la meme reflexion: cadrage, execution, verification.
+    Quand l'intention, les decisions et la validation vivent dans des fragments de chat, l'equipe passe plus de temps a reconstruire le contexte qu'a faire avancer le projet.
 
-    - le brief derive,
-    - les decisions deviennent implicites,
-    - la validation arrive trop tard,
-    - la memoire projet n'existe qu'en fragments.
+    - on recontextualise au lieu d'executer,
+    - les handoffs cassent la continuite,
+    - le "done" arrive avant la preuve,
+    - chaque nouvelle session oublie une partie du travail.
 
-!!! onepager "Acte II — La boucle operative"
-    **Grimoire remplace la succession de prompts par une boucle lisible, complete et continue.**
+!!! onepager "Acte II — La bascule"
+    **Grimoire fait passer l'IDE d'un assistant qui repond a des prompts a un systeme qui fait avancer un projet.**
 
-    - intention captee
+    L'intention est cadree, le bon mode d'execution est choisi, les bons specialistes interviennent, la verification consolide ce qui a ete fait, et la memoire projet reste disponible pour la suite.
+
+    - intention clarifiee
     - cadre d'execution choisi
-    - dispatch vers les bons specialistes
+    - roles dispatches au bon moment
     - artefacts produits
-    - preuves de verification consolidees
-    - memoire projet mise a jour
+    - preuves consolidees
+    - memoire mise a jour
 
-!!! onepager "Acte III — La couche de confiance"
-    **Le systeme ne dit pas juste “done”. Il dit pourquoi on peut y croire.**
+!!! onepager "Acte III — Le mecanisme"
+    **La promesse tient sur trois couches visibles: orchestration, verification, memoire.**
 
-    - verification evidence-first
-    - scoring de confiance avant aggregation
-    - handoffs traces entre roles
-    - apprentissage persistant entre sessions
+    Grimoire n'ajoute pas de magie. Il rend lisible ce qui se passe entre la demande initiale et le livrable.
 
-!!! onepager "Acte IV — Le positionnement"
-    **Grimoire assemble la discipline methodologique, l'orchestration agentique et la memoire projet dans le meme espace de travail.**
+    - **Roles explicites**: chaque agent intervient pour une responsabilite identifiable.
+    - **Verification evidence-first**: la cloture repose sur des checks et des traces, pas sur une declaration.
+    - **Handoffs observables**: les transitions entre etapes ne dependent plus d'une memoire humaine fragile.
+    - **Memoire projet**: decisions, contexte et apprentissages restent exploitables d'une session a l'autre.
 
-    | Axe | Grimoire Kit | BMAD | Devkit | OpenClaw |
-    | --- | --- | --- | --- | --- |
-    | Proposition centrale | Systeme de travail agentique complet | Methode de cadrage | Boite a outils technique | Runtime d'execution |
-    | Point fort immediat | Continuite intention -> execution -> verification | Structure methodologique | Flexibilite de construction | Rapidite d'action |
-    | Memoire projet | Native et structurante | Variable | Souvent a assembler | Majoritairement orientee run |
-    | Gouvernance qualite | Integree au flux | Forte sur le cadre | Depend de l'equipe | Souvent secondaire |
-    | Usage ideal | Delivery durable en equipe | Discipline de travail | Assemblage custom | Execution ciblee |
+!!! onepager "Acte IV — Un workflow reel"
+    **La difference se voit quand un besoin traverse tout le systeme sans perdre le fil.**
 
-!!! onepager "Acte V — Les portes d'entree"
-    **On n'entre pas dans Grimoire par un tunnel de documentation. On entre par le bon parcours.**
+    Voici ce que change Grimoire sur un workflow concret, de la demande initiale a la reprise suivante.
 
-    - **Dev solo**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Workflow Design Patterns](workflow-design-patterns.md)
-    - **Equipe produit**: [Concepts](concepts.md) -> [Taxonomie Workflows](workflow-taxonomy.md) -> [Memoire](memory-system.md)
-    - **Sponsor ou manager**: [Concepts](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
+    | Etape | Sans systeme | Avec Grimoire |
+    | --- | --- | --- |
+    | Cadrage | Il faut reexpliquer le contexte a chaque reprise | L'intention et le cadre d'execution sont deja lisibles |
+    | Execution | Tout passe par le meme assistant, quel que soit le besoin | Les roles specialises prennent le relais au bon moment |
+    | Validation | Le "done" est surtout declaratif | Les preuves et controles restent attaches au flux |
+    | Reprise | La session suivante repart a zero | Le projet reprend avec artefacts, decisions et memoire |
 
-!!! onepager "Acte VI — Ouvrir le systeme"
-    **La meilleure demonstration de Grimoire n'est pas une promesse. C'est un premier workflow qui se deroule sans perdre le fil.**
+!!! onepager "Acte V — Pourquoi y croire"
+    **La valeur ne tient pas a une promesse marketing. Elle tient a ce qui reste apres le workflow.**
 
-    Tu n'as pas besoin de lire toute la documentation pour sentir la difference. Il suffit d'entrer par le bon flux.
+    Quand Grimoire a travaille, il reste plus qu'une reponse: il reste un etat de projet plus lisible, plus verifiable et plus facile a reprendre.
 
-    - [Lancer le Quick Start](getting-started.md)
+    - artefacts produits et retrouvables,
+    - gouvernance qualite integree au flux,
+    - decisions et handoffs tracables,
+    - adoption progressive sans reconfigurer toute l'equipe.
+
+!!! onepager "Acte VI — Entrer sans friction"
+    **Tu n'as pas besoin de tout apprendre avant de commencer. Il faut seulement le bon point d'entree.**
+
+    Choisis le parcours qui correspond a ton contexte, puis laisse le systeme montrer sa valeur sur un vrai workflow.
+
+    - **Decouverte rapide**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Workflow Design Patterns](workflow-design-patterns.md)
+    - **Mise en place equipe**: [Concepts](concepts.md) -> [Taxonomie Workflows](workflow-taxonomy.md) -> [Memoire](memory-system.md)
+    - **Pilotage et confiance**: [Concepts](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
+
+    Choisis un point de depart concret.
+
+    - [Voir un premier workflow](workflow-design-patterns.md)
     - [Explorer la carte des concepts](concepts.md)
-    - [Approfondir la taxonomie des workflows](workflow-taxonomy.md)
+    - [Demarrer sans repartir de zero](getting-started.md)
