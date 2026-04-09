@@ -15,17 +15,17 @@ from ruamel.yaml import YAML
 
 _MONTHS_FR = {
     1: "janvier",
-    2: "fevrier",
+    2: "février",
     3: "mars",
     4: "avril",
     5: "mai",
     6: "juin",
     7: "juillet",
-    8: "aout",
+    8: "août",
     9: "septembre",
     10: "octobre",
     11: "novembre",
-    12: "decembre",
+    12: "décembre",
 }
 _REGISTRY_FILE = Path("mkdocs_data/signals.yml")
 _SIGNALS: tuple["SignalEntry", ...] = ()
@@ -162,7 +162,7 @@ def _render_home_signals(page: Page) -> str:
 def _render_signal_blocks(page: Page, *, featured_only: bool) -> str:
     selected_entries = [entry for entry in _SIGNALS if entry.featured is featured_only]
     if not selected_entries:
-        return "_Aucun signal supplementaire pour le moment._"
+        return "_Aucun signal supplémentaire pour le moment._"
 
     blocks: list[str] = []
     for entry in selected_entries:

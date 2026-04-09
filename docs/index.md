@@ -16,17 +16,17 @@ Ajouts récents à explorer en priorité:
 
 Si vous arrivez depuis le README, suivez ce parcours:
 
-1. [Guide de demarrage](getting-started.md)
+1. [Guide de démarrage](getting-started.md)
 2. [Concepts](concepts.md)
 3. [Configuration YAML](grimoire-yaml-reference.md)
 
-## Fonctionnalites cles
+## Fonctionnalités clés
 
 - **Teams & Personas** — Agents spécialisés avec personnalités, règles et mémoire
 - **Mémoire sémantique** — Contexte persistant entre sessions
 - **Workflows composables** — Enchaînements d'agents avec handoffs automatiques
 - **Qualité automatisée** — Lint, preflight, harmony-check intégrés
-- **Self-Healing** — Diagnostic et reparation autonome des workflows
+- **Self-Healing** — Diagnostic et réparation autonome des workflows
 - **Archétypes** — Templates de projets prêts à l'emploi
 
 ## Quick Start
@@ -38,7 +38,7 @@ cd mon-projet
 grimoire doctor
 ```
 
-Consultez le [guide de demarrage](getting-started.md) pour le parcours complet et les cas "nouveau projet" vs "projet existant".
+Consultez le [guide de démarrage](getting-started.md) pour le parcours complet et les cas "nouveau projet" vs "projet existant".
 
 ## Architecture
 
@@ -59,9 +59,9 @@ grimoire-kit/
 
 | Ressource | Description |
 | --- | --- |
-| [Guide de demarrage](getting-started.md) | Installation et premier projet en quelques minutes |
+| [Guide de démarrage](getting-started.md) | Installation et premier projet en quelques minutes |
 | [Concepts](concepts.md) | Architecture et principes |
-| [Guardrails runtime Grimoire Game](grimoire-game-runtime-guardrails.md) | Gouvernance des mutations, trust et compatibilite du runtime |
+| [Guardrails runtime Grimoire Game](grimoire-game-runtime-guardrails.md) | Gouvernance des mutations, trust et compatibilité du runtime |
 | [SDK Guide](sdk-guide.md) | API Python complète |
 | [Créer un agent](creating-agents.md) | Guide pas-à-pas |
 | [Archétypes](archetype-guide.md) | Templates de projets |
