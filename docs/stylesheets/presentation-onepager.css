@@ -173,11 +173,72 @@ body.gp-onepager .gp-hero-signals a {
   text-decoration: none;
 }
 
+body.gp-onepager .gp-section-nav {
+  position: sticky;
+  top: 4.6rem;
+  z-index: 15;
+  width: min(100%, 72rem);
+  margin: 0 0 clamp(2rem, 4vw, 3rem);
+  padding: 0.55rem;
+  border: 1px solid var(--gp-line);
+  border-radius: 1.35rem;
+  background: var(--gp-panel-strong);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 42px var(--gp-shadow);
+}
+
+body.gp-onepager .gp-section-nav ol {
+  display: flex;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+body.gp-onepager .gp-section-nav ol::-webkit-scrollbar {
+  display: none;
+}
+
+body.gp-onepager .gp-section-nav li {
+  flex: 0 0 auto;
+}
+
+body.gp-onepager .gp-section-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.9rem;
+  padding: 0 1rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--gp-ink-soft);
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.22s ease, background 0.22s ease, border-color 0.22s ease, transform 0.22s ease;
+}
+
+body.gp-onepager .gp-section-nav a:hover {
+  color: var(--gp-ink);
+  background: var(--gp-panel);
+  border-color: var(--gp-line);
+  transform: translateY(-1px);
+}
+
+body.gp-onepager .gp-section-nav a.is-active {
+  color: #051008;
+  background: var(--gp-accent);
+  border-color: rgba(12, 245, 116, 0.78);
+}
+
 body.gp-onepager .md-typeset .admonition.onepager {
   position: relative;
   display: grid;
   align-content: center;
   min-height: 100vh;
+  scroll-margin-top: 8rem;
   margin: 0;
   padding: clamp(2rem, 5vw, 4rem);
   border: 0;
@@ -193,26 +254,6 @@ body.gp-onepager .md-typeset .admonition.onepager {
 body.gp-onepager .md-typeset .admonition.onepager.is-visible {
   opacity: 1;
   transform: translate3d(0, 0, 0);
-}
-
-body.gp-onepager .md-typeset .admonition.onepager::before {
-  content: attr(data-step);
-  position: absolute;
-  top: clamp(1.2rem, 2vw, 2rem);
-  right: clamp(1.2rem, 2vw, 2rem);
-  z-index: 2;
-  width: 3.2rem;
-  height: 3.2rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--gp-line);
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  backdrop-filter: blur(10px);
 }
 
 body.gp-onepager .md-typeset .admonition.onepager > .admonition-title {
@@ -332,7 +373,7 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01 ul > li {
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-02 ul {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   counter-reset: item;
 }
@@ -375,8 +416,9 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 ul > li {
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+  max-width: 56rem;
 }
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul > li {
@@ -392,16 +434,39 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul a {
 }
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul {
+  margin-top: 1.6rem;
+}
+
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:first-of-type {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:first-of-type > li {
+  padding: 1.3rem;
+  border-radius: 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:first-of-type strong {
+  display: block;
+  margin-bottom: 0.7rem;
+}
+
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type {
   display: flex;
   flex-wrap: wrap;
   gap: 0.85rem;
 }
 
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul > li {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type > li {
   margin: 0;
 }
 
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul a {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -416,12 +481,12 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul a {
   text-decoration: none;
 }
 
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul a:hover {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type a:hover {
   transform: translateY(-2px);
   border-color: rgba(12, 245, 116, 0.42);
 }
 
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul li:first-child a {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type li:first-child a {
   background: var(--gp-accent);
   color: #051008;
   border-color: rgba(12, 245, 116, 0.78);
@@ -447,8 +512,7 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01::after {
 }
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01 p:not(:first-of-type),
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01 > .admonition-title,
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01::before {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-01 > .admonition-title {
   color: var(--gp-dark-soft);
 }
 
@@ -468,8 +532,7 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 {
 }
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 p:not(:first-of-type),
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 > .admonition-title,
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03::before {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 > .admonition-title {
   color: var(--gp-dark-soft);
 }
 
@@ -495,71 +558,26 @@ body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 {
 }
 
 body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 p:not(:first-of-type),
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 > .admonition-title,
-body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06::before {
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 > .admonition-title {
   color: var(--gp-dark-soft);
-}
-
-body.gp-onepager .gp-progress {
-  position: fixed;
-  top: 50%;
-  right: clamp(0.8rem, 2vw, 2rem);
-  z-index: 20;
-  transform: translateY(-50%);
-  padding: 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--gp-line);
-  background: rgba(9, 11, 15, 0.62);
-  backdrop-filter: blur(14px);
-}
-
-body.gp-onepager .gp-progress ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.45rem;
-}
-
-body.gp-onepager .gp-progress button {
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.05);
-  color: #f5f2ec;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.7rem;
-  cursor: pointer;
-  transition: transform 0.22s ease, background 0.22s ease, border-color 0.22s ease;
-}
-
-body.gp-onepager .gp-progress button.is-active {
-  background: var(--gp-accent);
-  color: #061009;
-  border-color: rgba(12, 245, 116, 0.82);
-}
-
-body.gp-onepager .gp-progress button.is-past {
-  border-color: rgba(12, 245, 116, 0.38);
-  background: rgba(12, 245, 116, 0.12);
 }
 
 @media (max-width: 1180px) {
   body.gp-onepager .md-typeset .admonition.onepager.gp-scene-02 ul,
-  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul {
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul,
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:first-of-type {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
-  body.gp-onepager .gp-progress,
   body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03 ul {
     display: none;
   }
 
   body.gp-onepager .md-typeset .admonition.onepager.gp-scene-02 ul,
-  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul {
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-05 ul,
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:first-of-type {
     grid-template-columns: 1fr;
   }
 
@@ -573,17 +591,21 @@ body.gp-onepager .gp-progress button.is-past {
     padding-inline: 1rem;
   }
 
+  body.gp-onepager .gp-section-nav {
+    top: 4.1rem;
+  }
+
   body.gp-onepager .gp-hero-title {
     max-width: 100%;
   }
 
   body.gp-onepager .gp-hero-actions,
-  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul {
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type {
     flex-direction: column;
   }
 
   body.gp-onepager .gp-hero-actions a,
-  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul a {
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type a {
     width: 100%;
   }
 
@@ -596,10 +618,10 @@ body.gp-onepager .gp-progress button.is-past {
 @media (prefers-reduced-motion: reduce) {
   body.gp-onepager .md-typeset .admonition.onepager,
   body.gp-onepager .md-typeset .admonition.onepager ul > li,
-  body.gp-onepager .gp-progress button,
+  body.gp-onepager .gp-section-nav a,
   body.gp-onepager .gp-hero-actions a,
   body.gp-onepager .gp-hero-signals a,
-  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul a {
+  body.gp-onepager .md-typeset .admonition.onepager.gp-scene-06 ul:last-of-type a {
     transition: none !important;
     transform: none !important;
     opacity: 1 !important;
