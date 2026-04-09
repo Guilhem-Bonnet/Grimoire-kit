@@ -8,9 +8,20 @@
   document.body.classList.add("gp-onepager");
 
   const panels = Array.from(document.querySelectorAll(".md-typeset .admonition.onepager"));
+  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const heroTitle = document.querySelector(".gp-hero-title") || document.querySelector(".md-content h2");
 
   if (!panels.length) {
     return;
+  }
+
+  if (heroTitle) {
+    document.title = heroTitle.textContent.replace(/¶$/, "").trim() + " · Grimoire Kit";
+  }
+
+  const existingRail = document.querySelector(".gp-progress");
+  if (existingRail) {
+    existingRail.remove();
   }
 
   const progressRail = document.createElement("nav");
@@ -25,6 +36,8 @@
   panels.forEach((panel, index) => {
     const step = String(index + 1).padStart(2, "0");
     panel.dataset.step = step;
+    panel.dataset.scene = String(index + 1);
+    panel.classList.add("gp-scene-" + step);
 
     const title = panel.querySelector(".admonition-title");
     if (!panel.id) {
@@ -35,10 +48,10 @@
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = step;
-    button.setAttribute("aria-label", title ? title.textContent.trim() : "Chapitre " + step);
+    button.setAttribute("aria-label", title ? title.textContent.trim() : "Acte " + step);
 
     button.addEventListener("click", () => {
-      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      panel.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
     });
 
     listItem.appendChild(button);
@@ -61,20 +74,29 @@
 
   const observer = new IntersectionObserver(
     (entries) => {
+      const visibleEntries = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => right.intersectionRatio - left.intersectionRatio);
+
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
-          const index = panels.indexOf(entry.target);
-
-          if (index >= 0) {
-            entry.target.classList.add("is-visible");
-            setActive(index);
-          }
+          entry.target.classList.add("is-visible");
         }
       });
+
+      if (!visibleEntries.length) {
+        return;
+      }
+
+      const index = panels.indexOf(visibleEntries[0].target);
+
+      if (index >= 0) {
+        setActive(index);
+      }
     },
     {
-      threshold: 0.42,
-      rootMargin: "-10% 0px -28% 0px",
+      threshold: [0.18, 0.4, 0.66],
+      rootMargin: "-8% 0px -18% 0px",
     }
   );
 

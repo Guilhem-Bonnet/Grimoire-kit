@@ -1,84 +1,72 @@
-# Grimoire Immersive Experience
+# Grimoire Kit {: .gp-hero-brand }
 
-Cette section est un onepager de demonstration. Elle est faite pour pitcher le projet et faire comprendre sa valeur sans effet "page de doc classique".
+## L'agentic OS qui garde *le fil* entre intention, execution et preuve {: .gp-hero-title }
 
-!!! onepager "Chapitre 01 - Prologue"
-    **Le vrai probleme n'est pas la vitesse de generation. Le vrai probleme est la perte de continuite.**
+Les autres assistants accelerent un prompt. Grimoire orchestre un systeme de travail qui garde le contexte, la qualite et la memoire jusqu'au delivery.
+{: .gp-hero-lead }
 
-    Beaucoup d'assistants IA produisent vite. Peu de systemes transforment cette vitesse en delivery fiable.
+[Entrer dans le Quick Start](getting-started.md)
+[Voir l'architecture](concepts.md)
+[Explorer les workflows](workflow-design-patterns.md)
+{: .gp-hero-actions }
 
-    - contexte qui se perd entre sessions,
-    - decisions qui deviennent implicites,
-    - execution rapide mais qualite instable,
-    - equipe qui repart de zero trop souvent.
-    {: .gp-reveal }
+[Intent routing](concepts.md)
+[Sub-agents specialises](concepts.md)
+[Verification evidence-first](workflow-design-patterns.md)
+[Memoire projet vivante](memory-system.md)
+{: .gp-hero-signals }
 
-    - [Demarrer un parcours reel](getting-started.md)
-    - [Voir la vue architecture](concepts.md)
-    {: .gp-cta }
+!!! onepager "Acte I — Le cout cache"
+    **Le vrai gaspillage n'est pas la lenteur. C'est la rupture de continuite.**
 
-!!! onepager "Chapitre 02 - Ce que Grimoire change"
-    Grimoire transforme un enchainement de prompts en systeme operationnel.
+    Quand le contexte se perd, l'equipe repaie plusieurs fois la meme reflexion: cadrage, execution, verification.
 
-    - **Routage d'intention**: le besoin est interprete avant execution.
-    - **Specialisation des agents**: chaque role est explicite.
-    - **Verification evidence-first**: pas de "done" sans preuves.
-    - **Memoire vivante**: les apprentissages restent disponibles.
-    {: .gp-reveal }
+    - le brief derive,
+    - les decisions deviennent implicites,
+    - la validation arrive trop tard,
+    - la memoire projet n'existe qu'en fragments.
 
-    Le resultat attendu est simple: moins de rework, plus de clarte, plus de confiance.
+!!! onepager "Acte II — La boucle operative"
+    **Grimoire remplace la succession de prompts par une boucle lisible, complete et continue.**
 
-!!! onepager "Chapitre 03 - Schema dynamique: boucle operative"
-    La boucle de base se revele en continu au scroll.
+    - intention captee
+    - cadre d'execution choisi
+    - dispatch vers les bons specialistes
+    - artefacts produits
+    - preuves de verification consolidees
+    - memoire projet mise a jour
 
-    - Intention produit captee
-    - Selection du cadre d'execution
-    - Dispatch vers les bons specialistes
-    - Production des artefacts
-    - Validation et preuves
-    - Consolidation memoire
-    {: .gp-flow .gp-reveal }
+!!! onepager "Acte III — La couche de confiance"
+    **Le systeme ne dit pas juste “done”. Il dit pourquoi on peut y croire.**
 
-!!! onepager "Chapitre 04 - Schema dynamique: couche de confiance"
-    Ici on ne parle pas seulement de generation. On parle de gouvernance de la qualite.
+    - verification evidence-first
+    - scoring de confiance avant aggregation
+    - handoffs traces entre roles
+    - apprentissage persistant entre sessions
 
-    - Gates de verification a chaque etape
-    - Limitation des boucles inutiles
-    - Trace des decisions et des handoffs
-    - Recuperation de contexte inter-session
-    - Escalade quand le niveau de confiance baisse
-    {: .gp-flow .gp-reveal }
+!!! onepager "Acte IV — Le positionnement"
+    **Grimoire assemble la discipline methodologique, l'orchestration agentique et la memoire projet dans le meme espace de travail.**
 
-!!! onepager "Chapitre 05 - Positionnement produit"
-    Grimoire ne nie pas les autres approches. Il complete et operationalise.
-
-    | Criteres | Grimoire Kit | BMAD | Devkit | OpenClaw |
+    | Axe | Grimoire Kit | BMAD | Devkit | OpenClaw |
     | --- | --- | --- | --- | --- |
-    | Coeur de proposition | Systeme de travail agentique complet | Methode et structure de travail | Ensemble de briques techniques | Runtime d'execution |
-    | Valeur immediate | Continuite intention -> execution -> verification | Clarte methodologique | Flexibilite de construction | Action rapide en sandbox |
-    | Memoire projet | Nativement centrale | Variable | Souvent a assembler | Plus orientee run |
-    | Gouvernance qualite | Integree | Forte en cadre | Depend de l'implementation | Majoritairement execution |
-    | Usage cible | Delivery durable en equipe | Cadrage et discipline | Construction custom | Execution focalisee |
+    | Proposition centrale | Systeme de travail agentique complet | Methode de cadrage | Boite a outils technique | Runtime d'execution |
+    | Point fort immediat | Continuite intention -> execution -> verification | Structure methodologique | Flexibilite de construction | Rapidite d'action |
+    | Memoire projet | Native et structurante | Variable | Souvent a assembler | Majoritairement orientee run |
+    | Gouvernance qualite | Integree au flux | Forte sur le cadre | Depend de l'equipe | Souvent secondaire |
+    | Usage ideal | Delivery durable en equipe | Discipline de travail | Assemblage custom | Execution ciblee |
 
-!!! onepager "Chapitre 06 - Sequence de demo"
-    Utilise cette sequence pour un pitch live:
-
-    1. poser le cout de la fragmentation,
-    2. montrer la boucle operative,
-    3. reveler la couche de confiance,
-    4. positionner Grimoire face aux alternatives,
-    5. ouvrir un parcours concret.
-    {: .gp-steps .gp-reveal }
-
-!!! onepager "Chapitre 07 - Parcours par profil"
-    Choisis ton entree selon ton objectif.
+!!! onepager "Acte V — Les portes d'entree"
+    **On n'entre pas dans Grimoire par un tunnel de documentation. On entre par le bon parcours.**
 
     - **Dev solo**: [Quick Start](getting-started.md) -> [Concepts](concepts.md) -> [Workflow Design Patterns](workflow-design-patterns.md)
     - **Equipe produit**: [Concepts](concepts.md) -> [Taxonomie Workflows](workflow-taxonomy.md) -> [Memoire](memory-system.md)
-    - **Manager/Sponsor**: [Concepts](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
-    {: .gp-reveal }
+    - **Sponsor ou manager**: [Concepts](concepts.md) -> [FAQ](faq.md) -> [Troubleshooting](troubleshooting.md)
+
+!!! onepager "Acte VI — Ouvrir le systeme"
+    **La meilleure demonstration de Grimoire n'est pas une promesse. C'est un premier workflow qui se deroule sans perdre le fil.**
+
+    Tu n'as pas besoin de lire toute la documentation pour sentir la difference. Il suffit d'entrer par le bon flux.
 
     - [Lancer le Quick Start](getting-started.md)
-    - [Explorer l'architecture](concepts.md)
-    - [Approfondir les workflows](workflow-design-patterns.md)
-    {: .gp-cta }
+    - [Explorer la carte des concepts](concepts.md)
+    - [Approfondir la taxonomie des workflows](workflow-taxonomy.md)

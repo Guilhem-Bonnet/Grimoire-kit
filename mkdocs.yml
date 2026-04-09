@@ -86,7 +86,6 @@ nav:
       - Créer un agent: creating-agents.md
       - Archétypes: archetype-guide.md
       - Intégration MCP: mcp-integration.md
-      - Observatory API: observatory-api.md
       - Référence YAML: grimoire-yaml-reference.md
   - Référence:
       - CLI: cli-reference.md
