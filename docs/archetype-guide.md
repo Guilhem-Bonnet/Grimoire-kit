@@ -1,8 +1,8 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/puzzle.svg" width="32" height="32" alt=""> Guide des Archétypes
+# <img src="../assets/icons/puzzle.svg" width="32" height="32" alt=""> Guide des Archétypes
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Qu'est-ce qu'un archétype ?
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Qu'est-ce qu'un archétype ?
 
 Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA de comportements et de templates adapté à un type de projet spécifique. Chaque archétype déclare ses **traits** (règles comportementales), ses **constraints** (bloquants), ses **tools_required** et ses **acceptance_criteria** machine-lisibles.
 
@@ -20,9 +20,9 @@ bash grimoire-init.sh validate --all
 bash grimoire-init.sh doctor
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
 
 ### `minimal` — Archétype racine universel
 
@@ -230,9 +230,9 @@ bash grimoire-init.sh install --archetype stack/terraform
 bash grimoire-init.sh install --archetype stack/ansible
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/flask.svg" width="28" height="28" alt=""> Accept Criteria & gen-tests.py (BM-27 + BM-29)
+## <img src="../assets/icons/flask.svg" width="28" height="28" alt=""> Accept Criteria & gen-tests.py (BM-27 + BM-29)
 
 Chaque archétype déclare des `acceptance_criteria` dans son DNA. L'outil `gen-tests.py` les convertit en squelettes de tests dans le framework de votre choix.
 
@@ -251,9 +251,9 @@ python3 framework/tools/gen-tests.py \
 # Frameworks supportés : pytest | jest | bats | go-test | rspec | vitest
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> .agent-rules — Override DNA par dossier (BM-25)
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> .agent-rules — Override DNA par dossier (BM-25)
 
 Un fichier `.agent-rules` dans n'importe quel dossier surcharge localement le DNA global :
 
@@ -273,9 +273,9 @@ reminders:
 
 Référence : [framework/agent-rules.md](../framework/agent-rules.md)
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 ```bash
 # Structure minimale
@@ -306,9 +306,9 @@ bash grimoire-init.sh install --archetype mon-archetype
 
 Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.schema.yaml](../framework/archetype-dna.schema.yaml)
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype installé
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype installé
 
 ### Étape 1 : Adapter les identités agents
 
@@ -347,9 +347,9 @@ echo 'rules: [{id: no-plaintext-secrets, description: "No secrets in yaml", enfo
   > src/config/.agent-rules
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> Diagnostics
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> Diagnostics
 
 ```bash
 # Health check complet
@@ -377,9 +377,9 @@ bash grimoire-init.sh evolve                 # proposer patch (revue humaine req
 
 Voir [framework/tools/README.md](../framework/tools/README.md) pour la référence complète des outils.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/rocket.svg" width="28" height="28" alt=""> Ressources complémentaires
+## <img src="../assets/icons/rocket.svg" width="28" height="28" alt=""> Ressources complémentaires
 
 - [getting-started.md](getting-started.md) — Démarrage en 7 étapes
 - [memory-system.md](memory-system.md) — Mémoire Qdrant multi-collection
@@ -447,9 +447,9 @@ bash grimoire-init.sh --name "Mon App" --user "Guilhem" --auto
 - Infrastructure as Code (Terraform, Ansible)
 - Stacks de monitoring (Prometheus/Grafana/Loki)
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype
 
 ### Étape 1 : Adapter les identités
 
@@ -486,9 +486,9 @@ Ce fichier est la source de vérité lue par tous les agents. Décrivez-y :
 - Services et où ils tournent
 - Conventions d'équipe
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 Pour contribuer un archétype au kit :
 

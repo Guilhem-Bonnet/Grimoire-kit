@@ -1,14 +1,14 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre Grimoire Custom Kit
+# <img src="../assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre Grimoire Custom Kit
 
 > Ce guide explique **tous les concepts** du kit avec des analogies simples.
 > Lisez-le avant de plonger dans le code — tout deviendra limpide.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="assets/icons/grimoire.svg" width="28" height="28" alt=""> Vue d'ensemble en 30 secondes
+## <img src="../assets/icons/grimoire.svg" width="28" height="28" alt=""> Vue d'ensemble en 30 secondes
 
 Grimoire Custom Kit transforme votre IDE en **entreprise virtuelle** peuplée d'agents IA spécialisés.
 
@@ -23,9 +23,9 @@ Votre projet
 
 Chaque agent a une **persona** (nom, style, expertise), suit des **règles communes** (le protocole), et communique via une **mémoire partagée**. C'est comme une équipe réelle — sauf qu'elle vit dans votre éditeur de code.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les 3 piliers
+## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les 3 piliers
 
 ### 1. Les Agents — "Qui fait quoi"
 
@@ -82,9 +82,9 @@ _memory/
 └── session-state.md         ← Où on en était (reprise automatique)
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les concepts clés expliqués
+## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les concepts clés expliqués
 
 ### Completion Contract (CC)
 
@@ -136,9 +136,9 @@ SM → "Dev, implémente cette story" → Dev travaille → résultat revient au
 SM → "QA, teste ce code" → QA teste → résultat revient au SM
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
+## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
 
 Ces principes sont intégrés dans le protocole que TOUS les agents suivent :
 
@@ -180,9 +180,9 @@ L'agent charge toujours le contexte pertinent AVANT de poser une question.
 
 Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfections cosmétiques sont documentées en `Known Limitations`, pas bloquantes.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Les 41 outils — Carte de navigation
+## <img src="../assets/icons/wrench.svg" width="28" height="28" alt=""> Les 41 outils — Carte de navigation
 
 ### Outils fondamentaux (pré-existants)
 
@@ -255,9 +255,9 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 | `sensory-buffer` | Mémoire court terme à décroissance | La mémoire de travail |
 | `r-and-d` | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes | Le laboratoire de R&D autonome |
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/temple.svg" width="28" height="28" alt=""> Architecture du projet
+## <img src="../assets/icons/temple.svg" width="28" height="28" alt=""> Architecture du projet
 
 ```
 grimoire-kit/
@@ -305,9 +305,9 @@ votre-projet/
     └── copilot-instructions.md  ← Instructions pour GitHub Copilot
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/moon.svg" width="28" height="28" alt=""> Flux typique d'une session
+## <img src="../assets/icons/moon.svg" width="28" height="28" alt=""> Flux typique d'une session
 
 ```
 1. Ouvrir l'IDE
@@ -336,9 +336,9 @@ votre-projet/
    └── Consolidation mémoire
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/plug.svg" width="28" height="28" alt=""> Glossaire rapide
+## <img src="../assets/icons/plug.svg" width="28" height="28" alt=""> Glossaire rapide
 
 | Terme | Signification |
 |-------|--------------|
@@ -377,9 +377,9 @@ votre-projet/
 | **GO threshold** | Seuil de score minimum (0.60) pour qu'une idée passe le challenge |
 | **Prototype** | Squelette Python auto-généré pour implémenter une idée gagnante |
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/rocket.svg" width="28" height="28" alt=""> Pour aller plus loin
+## <img src="../assets/icons/rocket.svg" width="28" height="28" alt=""> Pour aller plus loin
 
 - [getting-started.md](getting-started.md) — Guide d'installation pas à pas
 - [creating-agents.md](creating-agents.md) — Créer un agent custom
