@@ -17,10 +17,10 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 
 <div class="gp-hero-stage" aria-hidden="true">
     <div class="gp-hero-stage__orbit">
-        <span>Intent</span>
-        <span>Dispatch</span>
-        <span class="gp-hero-stage__node--proof">Proof</span>
-        <span>Replay</span>
+        <span>Intention</span>
+        <span>Routage</span>
+        <span class="gp-hero-stage__node--proof">Preuve</span>
+        <span>Rejeu</span>
     </div>
     <div class="gp-hero-stage__timeline">
         <article>
@@ -29,11 +29,11 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
         </article>
         <article>
             <p>Session 02</p>
-            <strong>Execution</strong>
+            <strong>Exécution</strong>
         </article>
         <article>
             <p>Session 03</p>
-            <strong>Verification</strong>
+            <strong>Vérification</strong>
         </article>
     </div>
 </div>
@@ -101,7 +101,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
             <p>La demande part vers le bon spécialiste sans perdre son cadre.</p>
         </article>
         <article class="gp-pillar">
-            <p class="gp-pillar-kicker">Roles</p>
+            <p class="gp-pillar-kicker">Rôles</p>
             <h3>Le fixeur n'est pas son challenger</h3>
             <p>Chaque rôle porte une responsabilité lisible au lieu d'une compétence floue.</p>
         </article>
@@ -165,12 +165,12 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
             <em>Sortie: délégation explicite</em>
         </li>
         <li>
-            <strong>Execution</strong>
+            <strong>Exécution</strong>
             <span>Le travail suit un workflow borné plutôt qu'une suite de prompts opportunistes.</span>
             <em>Sortie: implémentation traçable</em>
         </li>
         <li>
-            <strong>Verification</strong>
+            <strong>Vérification</strong>
             <span>Evidence-first, Challenger et circuit-breaker testent le résultat au lieu de le déclarer.</span>
             <em>Sortie: confiance opérationnelle</em>
         </li>
@@ -188,12 +188,12 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 
     <div class="gp-trust-loop">
         <article>
-            <p class="gp-diagram-label">Contract</p>
+            <p class="gp-diagram-label">Contrat</p>
             <h3>Completion Contract</h3>
             <p>Pas de "fini" sans checks, sans preuves et sans clôture vérifiable.</p>
         </article>
         <article>
-            <p class="gp-diagram-label">Proof</p>
+            <p class="gp-diagram-label">Preuve</p>
             <h3>Evidence-first</h3>
             <p>Les commandes, sorties et verdicts s'attachent au flux au lieu de rester implicites.</p>
         </article>
@@ -207,7 +207,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
             <p>Le système veut casser un fix avant de l'accepter.</p>
         </article>
         <article>
-            <p class="gp-diagram-label">Guardrails</p>
+            <p class="gp-diagram-label">Garde-fous</p>
             <h3>Escalade et boucles bornées</h3>
             <p>Quand la root cause bouge ou que les itérations s'emballent, le workflow s'arrête et requalifie.</p>
         </article>
@@ -235,12 +235,12 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     </div>
 
     <ul class="gp-artifact-strip">
-        <li>Routing</li>
-        <li>Contracts</li>
-        <li>Workflow map</li>
-        <li>Decision logs</li>
-        <li>Failure museum</li>
-        <li>Replay traces</li>
+        <li>Routage</li>
+        <li>Contrats</li>
+        <li>Carte workflows</li>
+        <li>Journaux de décisions</li>
+        <li>Musée des échecs</li>
+        <li>Traces de rejeu</li>
     </ul>
 
 !!! onepager "Mouvement VII — Salle de contrôle"
@@ -249,28 +249,28 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     War room pour orchestrer. Rooms pour spécialiser. Timeline pour rejouer. Mémoire pour tenir l'état. Le Game UI sert à voir le travail, pas à le décorer.
 
     <div class="gp-agentic-map">
-    <span>Intent</span>
-    <span>Router</span>
-    <span>Rooms</span>
-    <span class="gp-agentic-map__node--proof">Proof</span>
-    <span>Replay</span>
+    <span>Intention</span>
+    <span>Routage</span>
+    <span>Salles</span>
+    <span class="gp-agentic-map__node--proof">Preuve</span>
+    <span>Rejeu</span>
     </div>
 
     <div class="gp-os-grid">
     <article>
-    <p class="gp-diagram-label">System of record</p>
+    <p class="gp-diagram-label">Source de vérité</p>
     <h3>La session devient un état rejouable</h3>
-    <p>Snapshots, sequence ids et replay remplacent le "re-explique-moi" permanent.</p>
+    <p>Snapshots, identifiants de séquence et rejeu remplacent le "re-explique-moi" permanent.</p>
     </article>
     <article>
-    <p class="gp-diagram-label">Team of Teams</p>
+    <p class="gp-diagram-label">Équipe d'équipes</p>
     <h3>Les rôles prennent place dans des rooms</h3>
     <p>War room, build room, qa room et design room rendent visibles délégation et charge.</p>
     </article>
     <article>
-    <p class="gp-diagram-label">Explainability</p>
+    <p class="gp-diagram-label">Lisibilité</p>
     <h3>Les preuves deviennent un écran de contrôle</h3>
-    <p>Tool calls, workflow steps et décisions deviennent lisibles sans lecture forensique.</p>
+    <p>Appels d'outils, étapes de workflow et décisions deviennent lisibles sans lecture forensique.</p>
     </article>
     </div>
 
@@ -288,7 +288,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     <div class="gp-room-strip">
     <span><img src="../assets/presentation/room-war.png" alt="" loading="lazy" decoding="async"> Orchestrateur</span>
     <span><img src="../assets/presentation/room-dev.png" alt="" loading="lazy" decoding="async"> Agents de build</span>
-    <span>Replay timeline</span>
+    <span>Timeline de rejeu</span>
     </div>
     </figure>
     <div class="gp-observatory-stack">
@@ -307,18 +307,18 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     <div class="gp-runtime-lenses">
     <article>
     <p class="gp-diagram-label">Observatoire</p>
-    <h3>Board live</h3>
+    <h3>Vue live</h3>
     <p>Agents actifs, charge et colonnes de tâches restent lisibles au même endroit.</p>
     </article>
     <article>
-    <p class="gp-diagram-label">Replay</p>
+    <p class="gp-diagram-label">Rejeu</p>
     <h3>Timeline et reconnexion</h3>
     <p>Handshake et curseur de séquence reconstruisent l'état depuis les événements.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Contrats</p>
     <h3>Runtimes lisibles</h3>
-    <p>Transitions, status, workflow steps et tool calls laissent une trace exploitable.</p>
+    <p>Transitions, statuts, étapes de workflow et appels d'outils laissent une trace exploitable.</p>
     </article>
     </div>
     </div>
@@ -328,7 +328,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 
     <div class="gp-final-actions">
     <a class="gp-final-actions__link gp-final-actions__link--primary" href="../workflow-design-patterns/">Lancer un premier workflow</a>
-    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Démarrer sans setup long</a>
+    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Démarrer sans configuration lourde</a>
     <a class="gp-final-actions__link" href="../concepts/">Explorer la carte des concepts</a>
     <a class="gp-final-actions__link" href="../memory-system/">Ouvrir la mémoire projet</a>
     </div>
