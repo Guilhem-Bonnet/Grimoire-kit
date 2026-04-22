@@ -298,15 +298,48 @@ def _detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
     return dissonances
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
+
+# Directory fragments where agents are blueprints/catalogs/overrides and intentionally
+# share vocabulary. Duplication detection across these paths is always noise.
+_CATALOG_PARTS = frozenset({
+    "archetypes",       # grimoire-kit/archetypes/*/agents — reusable blueprints
+})
+
+
+def _is_catalog_agent(path: str) -> bool:
+    """Return True for agent paths that live in a catalog/mirror area.
+
+    Catalogs (archetypes, ``_config/agents`` mirrors, ``.customize.yaml``) deliberately
+    repeat blueprints. Flagging them as duplication produces only noise.
+    """
+    parts = Path(path).parts
+    if any(part in _CATALOG_PARTS for part in parts):
+        return True
+    # _config/agents/ mirrors (any depth) are overrides, not real agents.
+    for i in range(len(parts) - 1):
+        if parts[i] == "_config" and parts[i + 1] == "agents":
+            return True
+    return False
+
+
+def _strip_frontmatter(content: str) -> str:
+    """Remove leading YAML frontmatter to avoid structural-only duplication signals."""
+    return _FRONTMATTER_RE.sub("", content, count=1)
+
+
 def _detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
     dissonances: list[Dissonance] = []
     summaries: dict[str, set[str]] = {}
     for agent_path in scan.agents:
+        if _is_catalog_agent(agent_path):
+            continue
         full = project_root / agent_path
         if full.exists():
             try:
-                content = full.read_text(encoding="utf-8", errors="replace")[:500].lower()
-                summaries[agent_path] = set(re.findall(r"\b\w{4,}\b", content))
+                raw = full.read_text(encoding="utf-8", errors="replace")
+                body = _strip_frontmatter(raw)[:500].lower()
+                summaries[agent_path] = set(re.findall(r"\b\w{4,}\b", body))
             except OSError:
                 pass
     items = list(summaries.items())
@@ -314,7 +347,10 @@ def _detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
         for path_b, words_b in items[i + 1:]:
             if words_a and words_b:
                 jaccard = len(words_a & words_b) / len(words_a | words_b)
-                if jaccard > 0.6:
+                # 0.8 threshold: agents partagent souvent un protocole d'activation
+                # commun (SOG, ALS, AORA). Un Jaccard >= 0.8 indique une duplication
+                # structurelle réelle, pas juste un boilerplate partagé.
+                if jaccard >= 0.8:
                     dissonances.append(Dissonance(
                         "duplication", SEVERITY_MEDIUM, path_a,
                         f"Possiblement similaire à '{path_b}' (Jaccard={jaccard:.0%})",

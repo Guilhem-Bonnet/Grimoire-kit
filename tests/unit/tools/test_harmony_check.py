@@ -295,6 +295,36 @@ class TestDetectDuplication:
         scan = ArchScan(agents=["agents/gone.md"])
         assert _detect_duplication(scan, tmp_path) == []
 
+    def test_archetype_catalogs_skipped(self, tmp_path: Path) -> None:
+        """Archetype blueprints and _config mirrors must not flood duplication signal."""
+        content = "Agent persona: architecture review, design patterns, system, infrastructure, deployment."
+        for rel in [
+            "archetypes/meta/agents/a.md",
+            "archetypes/stack/agents/a.md",
+            "_grimoire-runtime/_config/agents/a.md",
+            "_grimoire-runtime/_config/agents/b.md",
+        ]:
+            p = tmp_path / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content)
+        scan = ArchScan(agents=[
+            "archetypes/meta/agents/a.md",
+            "archetypes/stack/agents/a.md",
+            "_grimoire-runtime/_config/agents/a.md",
+            "_grimoire-runtime/_config/agents/b.md",
+        ])
+        assert _detect_duplication(scan, tmp_path) == []
+
+    def test_real_duplication_still_detected_outside_catalogs(self, tmp_path: Path) -> None:
+        """Two genuine agents outside catalogs must still be flagged."""
+        content = "Agent persona: architecture review, design patterns, system, infrastructure, deployment."
+        (tmp_path / "agents").mkdir(parents=True)
+        (tmp_path / "agents" / "a.md").write_text(content)
+        (tmp_path / "agents" / "b.md").write_text(content)
+        scan = ArchScan(agents=["agents/a.md", "agents/b.md"])
+        dissonances = _detect_duplication(scan, tmp_path)
+        assert len(dissonances) == 1
+
 
 # ── _scan_project cross-refs ─────────────────────────────────────────────────
 
