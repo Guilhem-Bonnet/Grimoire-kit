@@ -91,6 +91,36 @@ class TestScanProject:
         assert len(scan.tests) >= 1
         assert scan.total_files > 0
 
+    def test_excludes_vendored_and_cached_dirs(self, project: Path) -> None:
+        """node_modules, .venv, caches, site/, _archive* must never appear."""
+        for junk in [
+            "node_modules/pkg/agents/ghost.md",
+            ".venv/lib/agents/ghost.md",
+            "__pycache__/agents/ghost.md",
+            ".mypy_cache/tools/ghost.py",
+            ".pytest_cache/workflows/ghost.md",
+            "site/agents/ghost.md",
+            "dist/agents/ghost.md",
+            "build/tools/ghost.py",
+            ".github/agents/_archived/ghost.md",
+        ]:
+            p = project / junk
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("# ghost\n")
+
+        scan = _scan_project(project)
+        all_paths = scan.agents + scan.workflows + scan.tools + scan.docs + scan.tests + scan.configs
+        for p in all_paths:
+            assert "node_modules" not in p
+            assert ".venv" not in p
+            assert "__pycache__" not in p
+            assert ".mypy_cache" not in p
+            assert ".pytest_cache" not in p
+            assert "_archived" not in p
+            assert not p.startswith("site/")
+            assert not p.startswith("dist/")
+            assert not p.startswith("build/")
+
 
 # ── Detectors ─────────────────────────────────────────────────────────────────
 
@@ -120,6 +150,30 @@ class TestDetectNaming:
         dissonances = _detect_naming(scan)
         assert len(dissonances) == 1
         assert dissonances[0].category == "naming"
+
+    def test_readme_is_whitelisted(self) -> None:
+        scan = ArchScan(workflows=["foo/workflows/README.md"])
+        assert _detect_naming(scan) == []
+
+    def test_root_docs_are_whitelisted(self) -> None:
+        scan = ArchScan(
+            workflows=[
+                "a/LICENSE.md",
+                "b/CHANGELOG.md",
+                "c/CONTRIBUTING.md",
+                "d/CODE_OF_CONDUCT.md",
+                "e/SECURITY.md",
+            ],
+        )
+        assert _detect_naming(scan) == []
+
+    def test_python_snake_case_exempt(self) -> None:
+        scan = ArchScan(tools=["framework/tools/agent_lint.py"])
+        assert _detect_naming(scan) == []
+
+    def test_src_and_tests_python_pkgs_exempt(self) -> None:
+        scan = ArchScan(tools=["src/grimoire/tools/bad_Name.py", "tests/unit/test_X.py"])
+        assert _detect_naming(scan) == []
 
 
 class TestDetectOversized:

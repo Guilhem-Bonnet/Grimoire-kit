@@ -32,6 +32,39 @@ SEVERITY_HIGH = "HIGH"
 SEVERITY_MEDIUM = "MEDIUM"
 SEVERITY_LOW = "LOW"
 
+# Directories that pollute scans (vendored deps, caches, generated output, archives).
+# A path is excluded if any of its parts matches one of these names.
+_SCAN_EXCLUDE_PARTS = frozenset({
+    ".git", ".venv", "venv", "node_modules", "__pycache__",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "dist", "build", "site",
+})
+
+# Canonical root docs that use SCREAMING_CASE or PascalCase by community convention.
+# Their stems must not be flagged by the kebab-case naming rule.
+_ROOT_DOC_STEMS = frozenset({
+    "README", "LICENSE", "CHANGELOG", "CONTRIBUTING", "CODE_OF_CONDUCT",
+    "SECURITY", "AGENTS", "CLAUDE", "MAINTAINERS", "AUTHORS", "NOTICE",
+    "SUPPORT", "CITATION", "GOVERNANCE",
+})
+
+
+def _is_excluded_path(rel_path: str) -> bool:
+    """Return True when a project-relative path sits inside an excluded folder.
+
+    Also excludes any path part starting with ``_archive`` so `.github/agents/_archived/`
+    and similar do not pollute the scan.
+    """
+    if ".git" in rel_path:  # fast path preserved from original
+        return True
+    parts = Path(rel_path).parts
+    for part in parts:
+        if part in _SCAN_EXCLUDE_PARTS:
+            return True
+        if part.startswith("_archive"):
+            return True
+    return False
+
 
 # ── Data Models ───────────────────────────────────────────────────────────────
 
@@ -104,31 +137,36 @@ def _scan_project(project_root: Path) -> ArchScan:
 
     for pattern in ["**/agents/*.md", "**/agents/*.xml", "**/agents/*.yaml"]:
         for f in project_root.glob(pattern):
-            if ".git" not in str(f):
-                scan.agents.append(str(f.relative_to(project_root)))
+            rel = str(f.relative_to(project_root))
+            if not _is_excluded_path(rel):
+                scan.agents.append(rel)
 
     for pattern in ["**/workflows/**/*.md", "**/workflows/**/*.yaml", "**/workflows/**/*.xml"]:
         for f in project_root.glob(pattern):
-            if ".git" not in str(f):
-                scan.workflows.append(str(f.relative_to(project_root)))
+            rel = str(f.relative_to(project_root))
+            if not _is_excluded_path(rel):
+                scan.workflows.append(rel)
 
     for f in project_root.glob("**/tools/*.py"):
-        if ".git" not in str(f) and "__pycache__" not in str(f):
-            scan.tools.append(str(f.relative_to(project_root)))
+        rel = str(f.relative_to(project_root))
+        if not _is_excluded_path(rel):
+            scan.tools.append(rel)
 
     for pattern in ["**/*.yaml", "**/*.yml"]:
         for f in project_root.glob(pattern):
             rel = str(f.relative_to(project_root))
-            if ".git" not in rel and rel not in scan.workflows:
+            if not _is_excluded_path(rel) and rel not in scan.workflows:
                 scan.configs.append(rel)
 
     for f in project_root.glob("**/docs/**/*.md"):
-        if ".git" not in str(f):
-            scan.docs.append(str(f.relative_to(project_root)))
+        rel = str(f.relative_to(project_root))
+        if not _is_excluded_path(rel):
+            scan.docs.append(rel)
 
     for f in project_root.glob("**/tests/**/*"):
-        if ".git" not in str(f) and f.is_file() and "__pycache__" not in str(f):
-            scan.tests.append(str(f.relative_to(project_root)))
+        rel = str(f.relative_to(project_root))
+        if not _is_excluded_path(rel) and f.is_file():
+            scan.tests.append(rel)
 
     all_files = scan.agents + scan.workflows + scan.tools
     for fpath in all_files:
@@ -164,15 +202,25 @@ def _detect_orphans(scan: ArchScan) -> list[Dissonance]:
 
 
 def _detect_naming(scan: ArchScan) -> list[Dissonance]:
-    return [
-        Dissonance(
-            "naming", SEVERITY_LOW, fpath,
-            f"Nom de fichier '{Path(fpath).stem}' ne respecte pas la convention kebab-case",
-            "Renommer en kebab-case : lettres minuscules et tirets",
-        )
-        for fpath in scan.agents + scan.workflows + scan.tools
-        if not NAMING_PATTERN.match(Path(fpath).stem)
-    ]
+    dissonances: list[Dissonance] = []
+    for fpath in scan.agents + scan.workflows + scan.tools:
+        # Python packages under src/ and tests/ follow PEP 8 snake_case by design.
+        if fpath.startswith(("src/", "tests/")):
+            continue
+        stem = Path(fpath).stem
+        # Canonical root docs (README, LICENSE, ...) use SCREAMING_CASE by community convention.
+        if stem in _ROOT_DOC_STEMS:
+            continue
+        # Python modules with snake_case identifiers (no kebab mixed in) are exempt.
+        if fpath.endswith(".py") and "_" in stem and "-" not in stem:
+            continue
+        if not NAMING_PATTERN.match(stem):
+            dissonances.append(Dissonance(
+                "naming", SEVERITY_LOW, fpath,
+                f"Nom de fichier '{stem}' ne respecte pas la convention kebab-case",
+                "Renommer en kebab-case : lettres minuscules et tirets",
+            ))
+    return dissonances
 
 
 def _detect_oversized(scan: ArchScan, project_root: Path) -> list[Dissonance]:
