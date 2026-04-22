@@ -27,8 +27,10 @@ _SRC = _KIT_ROOT / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from grimoire.tools.memory_lint import (  # noqa: E402
+from grimoire.tools.memory_lint import (  # noqa: E402,F401
+    LintIssue,
     LintReport,
+    MemoryFile,
     MemoryLint,
     check_chronological,
     check_contradictions,
@@ -106,8 +108,15 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "LINT_VERSION",
+    "LintIssue",
     "LintReport",
+    "MemoryFile",
     "MemoryLint",
+    "check_chronological",
+    "check_contradictions",
+    "check_duplicates",
+    "check_freshness",
+    "check_orphan_decisions",
     "collect_memory_files",
     "lint_memory",
     "main",
