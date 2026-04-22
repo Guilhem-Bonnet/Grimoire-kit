@@ -1,572 +1,167 @@
 #!/usr/bin/env python3
-"""
-harmony-check.py — Architecture Harmony Check Grimoire.
-=====================================================
+"""harmony-check.py — Thin CLI shim over ``grimoire.tools.harmony_check``.
 
-Détecte les dissonances architecturales dans un projet Grimoire :
+Historical location for the Architecture Harmony Check tool. The real
+implementation now lives in ``grimoire-kit/src/grimoire/tools/harmony_check.py``
+as the canonical :class:`HarmonyCheck` ``GrimoireTool``.
 
-  1. `scan`      — Scanner le projet pour détecter les patterns
-  2. `check`     — Vérifier l'harmonie architecturale
-  3. `dissonance`— Lister les dissonances détectées
-  4. `score`     — Calculer le score d'harmonie global
-  5. `report`    — Rapport complet
+This shim preserves the legacy CLI surface used by ``tests/test_harmony_check.py``
+and external scripts:
 
-Dissonances détectées :
-  - Agents orphelins (non référencés)
-  - Workflows cassés (refs invalides)
-  - Conventions de nommage incohérentes
-  - Duplication de responsabilités
-  - Cycles de dépendances
-  - Fichiers hors-norme (trop gros, mal placés)
-  - Incohérence entre manifests et fichiers réels
+  - Subcommands : ``scan``, ``check``, ``dissonance``, ``score``, ``report``
+  - Flags      : ``--project-root``, ``--json``
+  - Callables  : ``build_parser``, ``full_analysis``, ``format_report``, ``main``
 
-Principe : "L'harmonie naît quand chaque composant joue sa partition."
-
-Usage :
-  python3 harmony-check.py --project-root . scan
-  python3 harmony-check.py --project-root . check
-  python3 harmony-check.py --project-root . dissonance
-  python3 harmony-check.py --project-root . score
-  python3 harmony-check.py --project-root . report
-
-Stdlib only — aucune dépendance externe.
+All detection logic is delegated — no duplication. Keeping the same
+exit-codes as before (0 on success).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import logging
-import os
-import re
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-
-_log = logging.getLogger("grimoire.harmony_check")
-
-# ── Constantes ────────────────────────────────────────────────────────────────
-
-VERSION = "1.0.0"
-
-# Seuils
-MAX_FILE_LINES = 800
-NAMING_PATTERN = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z]+)?$")
-
-# Niveaux de sévérité
-SEVERITY_HIGH = "HIGH"
-SEVERITY_MEDIUM = "MEDIUM"
-SEVERITY_LOW = "LOW"
-
-
-# ── Data Classes ─────────────────────────────────────────────────────────────
-
-@dataclass
-class Dissonance:
-    """Une dissonance architecturale détectée."""
-    category: str         # orphan | broken-ref | naming | duplication | cycle | size | manifest
-    severity: str         # HIGH | MEDIUM | LOW
-    file: str
-    message: str
-    suggestion: str = ""
-
-    def to_dict(self) -> dict:
-        return {
-            "category": self.category, "severity": self.severity,
-            "file": self.file, "message": self.message,
-            "suggestion": self.suggestion,
-        }
-
-
-@dataclass
-class ArchScan:
-    """Résultat d'un scan architectural."""
-    agents: list[str] = field(default_factory=list)
-    workflows: list[str] = field(default_factory=list)
-    tools: list[str] = field(default_factory=list)
-    configs: list[str] = field(default_factory=list)
-    docs: list[str] = field(default_factory=list)
-    tests: list[str] = field(default_factory=list)
-    cross_refs: dict[str, list[str]] = field(default_factory=dict)  # file -> [refs]
-    dissonances: list[Dissonance] = field(default_factory=list)
-
-    @property
-    def total_files(self) -> int:
-        return len(self.agents) + len(self.workflows) + len(self.tools) + \
-               len(self.configs) + len(self.docs) + len(self.tests)
-
-
-# ── Scanner ──────────────────────────────────────────────────────────────────
-
-_SCAN_EXCLUDE = frozenset({".git", ".venv", "node_modules", "__pycache__", "dist", "build"})
-
-
-def _excluded(path_str: str) -> bool:
-    """Retourne True si le chemin contient un répertoire à exclure du scan."""
-    return any(part in path_str for part in _SCAN_EXCLUDE)
-
-
-def scan_project(project_root: Path) -> ArchScan:
-    """Scanner complet du projet."""
-    scan = ArchScan()
-
-    # Single-pass filesystem walk with pruning for performance.
-    # Path.glob("**") on large repositories can be very slow because it still
-    # traverses excluded folders before filtering.
-    for root, dirs, files in os.walk(project_root, topdown=True):
-        dirs[:] = [d for d in dirs if d not in _SCAN_EXCLUDE]
-
-        root_path = Path(root)
-        rel_root = root_path.relative_to(project_root)
-        rel_parts = rel_root.parts
-
-        for fname in files:
-            full = root_path / fname
-            rel = full.relative_to(project_root).as_posix()
-            if _excluded(rel):
-                continue
-
-            suffix = full.suffix.lower()
-            parent_name = full.parent.name
-
-            # agents/*.md|xml|yaml (fichier direct dans un dossier agents)
-            if parent_name == "agents" and suffix in {".md", ".xml", ".yaml"}:
-                scan.agents.append(rel)
-
-            # workflows/**/*.md|yaml|xml (tout fichier sous un dossier workflows)
-            if "workflows" in rel_parts and suffix in {".md", ".xml", ".yaml"}:
-                scan.workflows.append(rel)
-
-            # tools/*.py (fichier direct dans tools)
-            if parent_name == "tools" and suffix == ".py":
-                scan.tools.append(rel)
-
-            # docs/**/*.md
-            if "docs" in rel_parts and suffix == ".md":
-                scan.docs.append(rel)
-
-            # tests/**/* (tous fichiers sous tests)
-            if "tests" in rel_parts:
-                scan.tests.append(rel)
-
-            # configs *.yaml|*.yml (workflows filtrés plus bas)
-            if suffix in {".yaml", ".yml"}:
-                scan.configs.append(rel)
-
-    # Remove workflow files from generic configs bucket
-    workflow_set = set(scan.workflows)
-    scan.configs = [c for c in scan.configs if c not in workflow_set]
-
-    # Build cross-references
-    # NOTE: version précédente en O(n^2) sur tous les fichiers (substring check)
-    # pouvait devenir très lente sur de gros workspaces. Ici on tokenise le
-    # contenu puis on mappe les stems candidats en quasi O(n).
-    all_files = scan.agents + scan.workflows + scan.tools
-    stem_to_paths: dict[str, list[str]] = {}
-    for other in all_files:
-        stem = Path(other).stem
-        stem_to_paths.setdefault(stem, []).append(other)
-
-    token_pattern = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b")
-    for fpath in all_files:
-        full = project_root / fpath
-        if not full.exists() or full.stat().st_size >= 100_000:
-            continue
-        try:
-            content = full.read_text(encoding="utf-8", errors="replace")
-            tokens = set(token_pattern.findall(content))
-            refs_set: set[str] = set()
-            for token in tokens:
-                for candidate in stem_to_paths.get(token, []):
-                    if candidate != fpath:
-                        refs_set.add(candidate)
-            if refs_set:
-                scan.cross_refs[fpath] = sorted(refs_set)
-        except OSError as _exc:
-            _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
-
-    return scan
-
-
-# ── Dissonance Detectors ─────────────────────────────────────────────────────
-
-def detect_orphans(scan: ArchScan) -> list[Dissonance]:
-    """Détecter les fichiers orphelins (non référencés nulle part)."""
-    dissonances = []
-    referenced = set()
-    for refs in scan.cross_refs.values():
-        referenced.update(refs)
-
-    for agent in scan.agents:
-        if agent not in referenced and agent not in scan.cross_refs:
-            dissonances.append(Dissonance(
-                "orphan", SEVERITY_MEDIUM, agent,
-                "Agent orphelin — non référencé par aucun workflow ou outil",
-                "Vérifier si cet agent est utilisé ou s'il peut être retiré",
-            ))
-    return dissonances
-
-
-def detect_naming(scan: ArchScan, project_root: Path) -> list[Dissonance]:
-    """Vérifier la cohérence des conventions de nommage."""
-    dissonances = []
-    all_files = scan.agents + scan.workflows + scan.tools
-
-    # Exclure les packages Python (src/) qui suivent la convention snake_case (PEP 8)
-    _python_pkg_prefixes = ("src/", "tests/")
-    for fpath in all_files:
-        if any(fpath.startswith(p) for p in _python_pkg_prefixes):
-            continue
-        stem = Path(fpath).stem
-        # Les modules Python internes (snake_case, pas de CLI) sont exemptés du kebab-case
-        # Un module Python interne : fichier .py sans tiret, importé par d'autres
-        if fpath.endswith(".py") and "_" in stem and "-" not in stem:
-            continue
-        if not NAMING_PATTERN.match(stem):
-            dissonances.append(Dissonance(
-                "naming", SEVERITY_LOW, fpath,
-                f"Nom de fichier '{stem}' ne respecte pas la convention kebab-case",
-                "Renommer en kebab-case : lettres minuscules et tirets",
-            ))
-    return dissonances
-
-
-def detect_oversized(scan: ArchScan, project_root: Path) -> list[Dissonance]:
-    """Détecter les fichiers trop volumineux."""
-    dissonances = []
-    all_files = scan.agents + scan.workflows + scan.tools
-
-    for fpath in all_files:
-        full = project_root / fpath
-        if full.exists():
-            try:
-                lines = full.read_text(encoding="utf-8", errors="replace").count("\n")
-                if lines > MAX_FILE_LINES:
-                    dissonances.append(Dissonance(
-                        "size", SEVERITY_LOW, fpath,
-                        f"Fichier volumineux ({lines} lignes > {MAX_FILE_LINES} max)",
-                        "Envisager de découper en modules plus petits",
-                    ))
-            except OSError as _exc:
-                _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
-    return dissonances
-
-
-def detect_manifest_mismatch(scan: ArchScan, project_root: Path) -> list[Dissonance]:
-    """Vérifier la cohérence entre manifests et fichiers réels."""
-    dissonances = []
-
-    # Check agent manifest si présent
-    for manifest_name in ["agent-manifest.csv", "team-manifest.yaml"]:
-        for mpath in project_root.glob(f"**/{manifest_name}"):
-            try:
-                content = mpath.read_text(encoding="utf-8")
-                agent_stems = {Path(a).stem for a in scan.agents}
-                # Simple : chercher des noms dans le manifest qui ne correspondent à rien
-                for line in content.splitlines():
-                    parts = line.split(",")
-                    if len(parts) >= 1:
-                        name = parts[0].strip().lower()
-                        if name and name not in ("agent", "name", "id", "#") and \
-                           name not in agent_stems and \
-                           not name.startswith("#"):
-                            # Vérification que ce pourrait être un nom d'agent
-                            if re.match(r"^[a-z][a-z0-9-]+$", name):
-                                dissonances.append(Dissonance(
-                                    "manifest", SEVERITY_MEDIUM,
-                                    str(mpath.relative_to(project_root)),
-                                    f"'{name}' référencé dans le manifest mais pas de fichier agent correspondant",
-                                    "Vérifier si l'agent existe ou retirer du manifest",
-                                ))
-            except OSError as _exc:
-                _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
-    return dissonances
-
-
-def detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
-    """Détecter des références vers des fichiers inexistants."""
-    dissonances = []
-    ref_pattern = re.compile(r'(?:include|load|source|import|ref)\s*[=:]\s*["\']?([a-zA-Z0-9_/.@-]+)')
-
-    all_files = scan.agents + scan.workflows + scan.tools
-    for fpath in all_files:
-        # Ignorer les fichiers Python de test (les string literals sont des fixtures, pas de vraies refs)
-        if fpath.endswith(".py"):
-            continue
-        full = project_root / fpath
-        if not full.exists():
-            continue
-        try:
-            content = full.read_text(encoding="utf-8", errors="replace")
-            for match in ref_pattern.finditer(content):
-                ref = match.group(1)
-                if not ref.startswith("http") and ("/" in ref or ref.endswith((".md", ".yaml", ".py", ".xml"))):
-                    ref_path = project_root / ref
-                    if not ref_path.exists():
-                        # Check relative to file
-                        ref_path2 = full.parent / ref
-                        if not ref_path2.exists():
-                            dissonances.append(Dissonance(
-                                "broken-ref", SEVERITY_HIGH, fpath,
-                                f"Référence cassée : '{ref}' — fichier introuvable",
-                                "Corriger le chemin ou retirer la référence",
-                            ))
-        except OSError as _exc:
-            _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
-    return dissonances
-
-
-def detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
-    """Détecter les duplications de responsabilités (agents similaires)."""
-    dissonances = []
-
-    # Comparer les descriptions d'agents pour trouver des doublons potentiels
-    agent_summaries: dict[str, str] = {}
-    for agent_path in scan.agents:
-        full = project_root / agent_path
-        if full.exists():
-            try:
-                content = full.read_text(encoding="utf-8", errors="replace")[:500].lower()
-                agent_summaries[agent_path] = content
-            except OSError as _exc:
-                _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
-
-    # Simple Jaccard sur les mots
-    agent_list = list(agent_summaries.items())
-    for i, (path_a, content_a) in enumerate(agent_list):
-        words_a = set(re.findall(r"\b\w{4,}\b", content_a))
-        for path_b, content_b in agent_list[i + 1:]:
-            words_b = set(re.findall(r"\b\w{4,}\b", content_b))
-            if words_a and words_b:
-                jaccard = len(words_a & words_b) / len(words_a | words_b)
-                if jaccard > 0.6:
-                    dissonances.append(Dissonance(
-                        "duplication", SEVERITY_MEDIUM, path_a,
-                        f"Possiblement similaire à '{path_b}' (Jaccard={jaccard:.0%})",
-                        "Vérifier si les responsabilités se chevauchent",
-                    ))
-    return dissonances
-
-
-# ── Score Calculation ────────────────────────────────────────────────────────
-
-def calculate_harmony_score(scan: ArchScan) -> dict:
-    """Calculer le score d'harmonie 0-100."""
-    if not scan.dissonances:
-        return {"score": 100, "grade": "A+", "detail": {}}
-
-    penalty = 0
-    cat_count: dict[str, int] = {}
-
-    for d in scan.dissonances:
-        cat_count[d.category] = cat_count.get(d.category, 0) + 1
-        if d.severity == SEVERITY_HIGH:
-            penalty += 8
-        elif d.severity == SEVERITY_MEDIUM:
-            penalty += 4
-        else:
-            penalty += 2
-
-    score = max(0, 100 - penalty)
-    if score >= 90:
-        grade = "A"
-    elif score >= 75:
-        grade = "B"
-    elif score >= 60:
-        grade = "C"
-    elif score >= 40:
-        grade = "D"
-    else:
-        grade = "F"
-
-    return {"score": score, "grade": grade, "detail": cat_count}
-
-
-# ── Full Analysis ────────────────────────────────────────────────────────────
-
-def full_analysis(project_root: Path) -> tuple[ArchScan, dict]:
-    """Analyse complète : scan + toutes les détections."""
-    scan = scan_project(project_root)
-
-    scan.dissonances.extend(detect_orphans(scan))
-    scan.dissonances.extend(detect_naming(scan, project_root))
-    scan.dissonances.extend(detect_oversized(scan, project_root))
-    scan.dissonances.extend(detect_manifest_mismatch(scan, project_root))
-    scan.dissonances.extend(detect_broken_refs(scan, project_root))
-    scan.dissonances.extend(detect_duplication(scan, project_root))
-
-    score_data = calculate_harmony_score(scan)
-    return scan, score_data
-
-
-# ── Formatters ───────────────────────────────────────────────────────────────
-
-def format_scan(scan: ArchScan) -> str:
-    lines = [
-        "🏛️ Scan architectural",
-        f"   Agents     : {len(scan.agents)}",
-        f"   Workflows  : {len(scan.workflows)}",
-        f"   Tools      : {len(scan.tools)}",
-        f"   Configs    : {len(scan.configs)}",
-        f"   Docs       : {len(scan.docs)}",
-        f"   Tests      : {len(scan.tests)}",
-        f"   Total      : {scan.total_files}",
-        f"   Cross-refs : {len(scan.cross_refs)} fichiers avec références",
-    ]
-    return "\n".join(lines)
-
-
-def format_dissonances(dissonances: list[Dissonance]) -> str:
-    if not dissonances:
-        return "✅ Aucune dissonance détectée — Architecture harmonieuse !"
-
-    by_sev = {SEVERITY_HIGH: [], SEVERITY_MEDIUM: [], SEVERITY_LOW: []}
-    for d in dissonances:
-        by_sev[d.severity].append(d)
-
-    icons = {SEVERITY_HIGH: "🔴", SEVERITY_MEDIUM: "🟡", SEVERITY_LOW: "🔵"}
-    lines = [f"🎵 Dissonances détectées : {len(dissonances)}\n"]
-
-    for sev in [SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW]:
-        items = by_sev[sev]
-        if items:
-            lines.append(f"   {icons[sev]} {sev} ({len(items)})")
-            for d in items:
-                lines.append(f"      [{d.category}] {d.file}")
-                lines.append(f"         {d.message}")
-                if d.suggestion:
-                    lines.append(f"         → {d.suggestion}")
-            lines.append("")
-
-    return "\n".join(lines)
-
-
-def format_score(score_data: dict) -> str:
-    lines = [
-        f"🎼 Score d'harmonie : {score_data['score']}/100 ({score_data['grade']})",
-    ]
-    if score_data["detail"]:
-        lines.append("   Détail par catégorie :")
-        for cat, count in sorted(score_data["detail"].items()):
-            lines.append(f"      {cat} : {count}")
-    return "\n".join(lines)
-
-
-def format_report(scan: ArchScan, score_data: dict) -> str:
-    sections = [
-        "═══════════════════════════════════════════════",
-        "   ARCHITECTURE HARMONY CHECK — Rapport complet",
-        "═══════════════════════════════════════════════\n",
-        format_scan(scan),
-        "",
-        format_score(score_data),
-        "",
-        format_dissonances(scan.dissonances),
-        "",
-        "───────────────────────────────────────────────",
-    ]
-    return "\n".join(sections)
-
-
-# ── CLI Commands ─────────────────────────────────────────────────────────────
-
-def cmd_scan(args: argparse.Namespace) -> int:
-    scan = scan_project(Path(args.project_root).resolve())
-    if args.json:
-        print(json.dumps({
-            "agents": len(scan.agents), "workflows": len(scan.workflows),
-            "tools": len(scan.tools), "configs": len(scan.configs),
-            "docs": len(scan.docs), "tests": len(scan.tests),
-            "cross_refs": len(scan.cross_refs),
-        }, indent=2))
-    else:
-        print(format_scan(scan))
-    return 0
-
-
-def cmd_check(args: argparse.Namespace) -> int:
-    scan, score_data = full_analysis(Path(args.project_root).resolve())
-    if args.json:
-        print(json.dumps({
-            "score": score_data["score"], "grade": score_data["grade"],
-            "dissonances": len(scan.dissonances),
-        }, indent=2))
-    else:
-        print(format_score(score_data))
-        print()
-        if scan.dissonances:
-            high = sum(1 for d in scan.dissonances if d.severity == SEVERITY_HIGH)
-            med = sum(1 for d in scan.dissonances if d.severity == SEVERITY_MEDIUM)
-            low = sum(1 for d in scan.dissonances if d.severity == SEVERITY_LOW)
-            print(f"   🔴 {high} critiques | 🟡 {med} moyennes | 🔵 {low} mineures")
-    return 0
-
-
-def cmd_dissonance(args: argparse.Namespace) -> int:
-    scan, _ = full_analysis(Path(args.project_root).resolve())
-    if args.json:
-        print(json.dumps([d.to_dict() for d in scan.dissonances], indent=2, ensure_ascii=False))
-    else:
-        print(format_dissonances(scan.dissonances))
-    return 0
-
-
-def cmd_score(args: argparse.Namespace) -> int:
-    _, score_data = full_analysis(Path(args.project_root).resolve())
-    if args.json:
-        print(json.dumps(score_data, indent=2))
-    else:
-        print(format_score(score_data))
-    return 0
-
-
-def cmd_report(args: argparse.Namespace) -> int:
-    scan, score_data = full_analysis(Path(args.project_root).resolve())
-    if args.json:
-        print(json.dumps({
-            "scan": {"agents": len(scan.agents), "workflows": len(scan.workflows),
-                     "tools": len(scan.tools), "total": scan.total_files},
-            "score": score_data,
-            "dissonances": [d.to_dict() for d in scan.dissonances],
-        }, indent=2, ensure_ascii=False))
-    else:
-        print(format_report(scan, score_data))
-    return 0
-
-
-# ── CLI Builder ──────────────────────────────────────────────────────────────
+from typing import Any
+
+# Ensure the kit src/ is importable when invoked as a bare script.
+_HERE = Path(__file__).resolve()
+_KIT_ROOT = _HERE.parent.parent.parent  # grimoire-kit/
+_SRC = _KIT_ROOT / "src"
+if _SRC.exists() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from grimoire.tools.harmony_check import (  # noqa: E402
+    HarmonyCheck,
+    _compute_score,
+    _detect_broken_refs,
+    _detect_duplication,
+    _detect_manifest_mismatch,
+    _detect_naming,
+    _detect_orphans,
+    _detect_oversized,
+    _scan_project,
+)
+
+VERSION = "2.0.0"
+
+
+# ── CLI parser ────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the legacy CLI parser (kept stable for external callers)."""
     parser = argparse.ArgumentParser(
-        description="Grimoire Architecture Harmony Check",
+        prog="harmony-check",
+        description="Grimoire Architecture Harmony Check (shim)",
     )
-    parser.add_argument("--project-root", default=".")
-    parser.add_argument("--json", action="store_true")
-
-    subs = parser.add_subparsers(dest="command")
-
-    subs.add_parser("scan", help="Scanner le projet").set_defaults(func=cmd_scan)
-    subs.add_parser("check", help="Vérifier l'harmonie").set_defaults(func=cmd_check)
-    subs.add_parser("dissonance", help="Lister les dissonances").set_defaults(func=cmd_dissonance)
-    subs.add_parser("score", help="Score d'harmonie").set_defaults(func=cmd_score)
-    subs.add_parser("report", help="Rapport complet").set_defaults(func=cmd_report)
-
+    parser.add_argument("--project-root", default=".", help="Project root directory")
+    parser.add_argument("--json", action="store_true", help="Emit JSON output")
+    parser.add_argument(
+        "command",
+        choices=("scan", "check", "dissonance", "score", "report"),
+        help="Subcommand to run",
+    )
     return parser
 
 
-def main() -> int:
+# ── Analysis entrypoints ──────────────────────────────────────────────────────
+
+def full_analysis(project_root: Path) -> dict[str, Any]:
+    """Run the full harmony analysis and return a legacy-shaped payload."""
+    scan = _scan_project(project_root)
+    scan.dissonances.extend(_detect_orphans(scan))
+    scan.dissonances.extend(_detect_naming(scan))
+    scan.dissonances.extend(_detect_oversized(scan, project_root))
+    scan.dissonances.extend(_detect_manifest_mismatch(scan, project_root))
+    scan.dissonances.extend(_detect_broken_refs(scan, project_root))
+    scan.dissonances.extend(_detect_duplication(scan, project_root))
+    score, grade, cats = _compute_score(scan.dissonances, scan.total_files)
+    return {
+        "score": score,
+        "grade": grade,
+        "total_files": scan.total_files,
+        "agents": len(scan.agents),
+        "workflows": len(scan.workflows),
+        "tools": len(scan.tools),
+        "category_counts": cats,
+        "dissonances": [
+            {
+                "category": d.category,
+                "severity": d.severity,
+                "file": d.file,
+                "message": d.message,
+                "suggestion": d.suggestion,
+            }
+            for d in scan.dissonances
+        ],
+    }
+
+
+def format_report(payload: dict[str, Any]) -> str:
+    """Render a human-readable report from a ``full_analysis`` payload."""
+    lines: list[str] = []
+    lines.append(f"Score: {payload['score']}/100 ({payload['grade']})")
+    lines.append(f"Files scanned: {payload['total_files']}")
+    lines.append(
+        f"Agents: {payload['agents']} | Workflows: {payload['workflows']} | Tools: {payload['tools']}"
+    )
+    diss = payload["dissonances"]
+    lines.append(f"Dissonances: {len(diss)}")
+    for d in diss:
+        icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🔵"}.get(d["severity"], "⚪")
+        lines.append(f"  {icon} [{d['category']}] {d['file']}: {d['message']}")
+    return "\n".join(lines)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
+    args = parser.parse_args(argv)
+    project_root = Path(args.project_root).resolve()
+
+    if args.command == "scan":
+        scan = _scan_project(project_root)
+        payload = {
+            "agents": len(scan.agents),
+            "workflows": len(scan.workflows),
+            "tools": len(scan.tools),
+            "total_files": scan.total_files,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(format_report({**payload, "score": 0, "grade": "-", "dissonances": []}))
         return 0
-    return args.func(args)
+
+    # check / dissonance / score / report all use the full analysis.
+    payload = full_analysis(project_root)
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "score":
+        print(f"Score: {payload['score']}/100 ({payload['grade']})")
+    elif args.command == "dissonance":
+        for d in payload["dissonances"]:
+            icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🔵"}.get(d["severity"], "⚪")
+            print(f"{icon} [{d['category']}] {d['file']}: {d['message']}")
+    else:  # check / report
+        print(format_report(payload))
+    return 0
+
+
+# Export the real tool class for programmatic consumers.
+__all__ = [
+    "HarmonyCheck",
+    "VERSION",
+    "build_parser",
+    "format_report",
+    "full_analysis",
+    "main",
+]
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
