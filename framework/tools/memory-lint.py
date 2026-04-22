@@ -1,793 +1,119 @@
 #!/usr/bin/env python3
-"""
-memory-lint.py — Linter de cohérence mémoire Grimoire.
-=====================================================
+"""memory-lint.py — Thin CLI shim over ``grimoire.tools.memory_lint``.
 
-Valide la cohérence croisée des fichiers mémoire du projet :
-  - Contradictions inter-fichiers (learnings vs decisions, decisions vs trace)
-  - Entrées orphelines (décision référencée dans trace mais absente)
-  - Doublons inter-fichiers (même entrée copiée dans plusieurs fichiers)
-  - Références cassées (fichier source mentionné mais inexistant)
-  - Incohérences chronologiques (entrée datée avant la création du fichier)
+Historical CLI entrypoint. The canonical implementation now lives in
+``grimoire-kit/src/grimoire/tools/memory_lint.py`` as :class:`MemoryLint`.
 
-Émet un rapport structuré et peut optionnellement créer des phéromones
-stigmergy pour les problèmes critiques.
+This shim preserves the legacy surface used by ``tests/test_memory_lint.py``:
 
-Usage :
-  python3 memory-lint.py --project-root .
-  python3 memory-lint.py --project-root . --json
-  python3 memory-lint.py --project-root . --emit     # émettre vers stigmergy
-  python3 memory-lint.py --project-root . --fix       # suggestions de fix
+  - Callables : ``collect_memory_files``, ``lint_memory``, ``report_to_dict``
+  - CLI       : ``--project-root``, ``--json``, ``--emit``, ``--fix``
 
-Stdlib only — aucune dépendance externe.
+All detection logic is delegated — no duplication.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-# ── Constantes ────────────────────────────────────────────────────────────────
+# Ensure the kit src/ is importable when invoked as a bare script.
+_HERE = Path(__file__).resolve()
+_KIT_ROOT = _HERE.parent.parent.parent  # grimoire-kit/
+_SRC = _KIT_ROOT / "src"
+if _SRC.exists() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-LINT_VERSION = "1.1.0"
-
-# Seuil de similarité pour la détection de doublons
-DUPLICATE_THRESHOLD = 0.75
-
-# Seuil de similarité pour la détection de contradictions
-CONTRADICTION_THRESHOLD = 0.30
-
-# Memory decay — entries older than this are flagged as stale
-STALENESS_DAYS = 90
-DECAY_HALFLIFE_DAYS = 30
-
-# Marqueurs de contradiction (même logique que dream.py)
-POSITIVE_MARKERS = frozenset({
-    "toujours", "always", "must", "doit", "jamais", "never",
-    "obligatoire", "required", "important", "critical",
-})
-
-NEGATIVE_MARKERS = frozenset({
-    "éviter", "avoid", "ne pas", "danger",
-    "risque", "problème", "échec", "fail", "broken", "cassé",
-})
-
-# Severity levels
-SEVERITY_ERROR = "error"      # Contradiction avérée, référence cassée
-SEVERITY_WARNING = "warning"  # Doublon probable, orphelin potentiel
-SEVERITY_INFO = "info"        # Suggestion d'amélioration
-
-
-# ── Data classes ──────────────────────────────────────────────────────────────
-
-@dataclass
-class LintIssue:
-    """Un problème détecté par le linter mémoire."""
-    issue_id: str
-    severity: str          # error | warning | info
-    category: str          # contradiction | orphan | duplicate | broken-ref | chrono
-    title: str
-    description: str
-    files: list[str]       # fichiers impliqués
-    entries: list[str] = field(default_factory=list)  # entrées concernées
-    fix_suggestion: str = ""
-
-
-@dataclass
-class MemoryFile:
-    """Un fichier mémoire parsé."""
-    path: str              # chemin relatif depuis _grimoire/_memory
-    kind: str              # learnings | decisions | trace | failure-museum | shared-context | contradictions | cc-feedback | flywheel
-    entries: list[tuple[str, str]] = field(default_factory=list)  # (date, text)
-
-
-@dataclass
-class LintReport:
-    """Rapport complet du linter."""
-    version: str = LINT_VERSION
-    files_scanned: int = 0
-    entries_scanned: int = 0
-    issues: list[LintIssue] = field(default_factory=list)
-
-    @property
-    def error_count(self) -> int:
-        return sum(1 for i in self.issues if i.severity == SEVERITY_ERROR)
-
-    @property
-    def warning_count(self) -> int:
-        return sum(1 for i in self.issues if i.severity == SEVERITY_WARNING)
-
-    @property
-    def info_count(self) -> int:
-        return sum(1 for i in self.issues if i.severity == SEVERITY_INFO)
-
-
-# ── Parsing ───────────────────────────────────────────────────────────────────
-
-_DATE_PATTERN = re.compile(r'\[(\d{4}-\d{2}-\d{2})')
-_TRACE_PATTERN = re.compile(
-    r'\[(\d{4}-\d{2}-\d{2})[^\]]*\]\s*\[(\w+)\]\s*\[([^\]]+)\]\s*(.*)'
+from grimoire.tools.memory_lint import (  # noqa: E402
+    LintReport,
+    MemoryLint,
+    check_chronological,
+    check_contradictions,
+    check_duplicates,
+    check_freshness,
+    check_orphan_decisions,
+    collect_memory_files,
 )
 
+LINT_VERSION = "2.0.0"
 
-def _parse_markdown_entries(path: Path) -> list[tuple[str, str]]:
-    """Parse un fichier markdown en (date, text)."""
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    entries: list[tuple[str, str]] = []
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = _DATE_PATTERN.search(line)
-        entry_date = match.group(1) if match else ""
-        if line.startswith(("- ", "* ")):
-            entries.append((entry_date, line[2:].strip()))
-    return entries
-
-
-def _parse_trace_entries(path: Path) -> list[tuple[str, str]]:
-    """Parse Grimoire_TRACE.md en (date, text)."""
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    entries: list[tuple[str, str]] = []
-    for line in content.splitlines():
-        m = _TRACE_PATTERN.match(line.strip())
-        if m:
-            date, level, agent, payload = m.groups()
-            entries.append((date, f"[{agent}] [{level}] {payload}"))
-    return entries
-
-
-def _parse_jsonl_entries(path: Path) -> list[tuple[str, str]]:
-    """Parse un fichier JSONL en (date, summary)."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    entries: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        ts = rec.get("timestamp", "")
-        entry_date = ts[:10] if len(ts) >= 10 else ""
-        summary = rec.get("details") or rec.get("title") or rec.get("description", "")
-        if summary:
-            entries.append((entry_date, summary))
-    return entries
-
-
-def collect_memory_files(project_root: Path) -> list[MemoryFile]:
-    """Collecte tous les fichiers mémoire du projet."""
-    files: list[MemoryFile] = []
-    memory_dir = project_root / "_grimoire" / "_memory"
-
-    # Learnings
-    learnings_dir = memory_dir / "agent-learnings"
-    if learnings_dir.exists():
-        for f in sorted(learnings_dir.glob("*.md")):
-            entries = _parse_markdown_entries(f)
-            if entries:
-                files.append(MemoryFile(
-                    path=f"learnings/{f.name}", kind="learnings",
-                    entries=entries,
-                ))
-
-    # Decisions log
-    decisions_file = memory_dir / "decisions-log.md"
-    if decisions_file.exists():
-        entries = _parse_markdown_entries(decisions_file)
-        if entries:
-            files.append(MemoryFile(
-                path="decisions-log.md", kind="decisions",
-                entries=entries,
-            ))
-
-    # Grimoire_TRACE
-    trace_file = project_root / "_grimoire-output" / "Grimoire_TRACE.md"
-    if trace_file.exists():
-        entries = _parse_trace_entries(trace_file)
-        if entries:
-            files.append(MemoryFile(
-                path="Grimoire_TRACE.md", kind="trace",
-                entries=entries,
-            ))
-
-    # Failure Museum
-    failure_file = memory_dir / "failure-museum.md"
-    if failure_file.exists():
-        entries = _parse_markdown_entries(failure_file)
-        if entries:
-            files.append(MemoryFile(
-                path="failure-museum.md", kind="failure-museum",
-                entries=entries,
-            ))
-
-    # Contradiction log
-    contradiction_file = memory_dir / "contradiction-log.md"
-    if contradiction_file.exists():
-        entries = _parse_markdown_entries(contradiction_file)
-        if entries:
-            files.append(MemoryFile(
-                path="contradiction-log.md", kind="contradictions",
-                entries=entries,
-            ))
-
-    # Shared context
-    shared_file = memory_dir / "shared-context.md"
-    if shared_file.exists():
-        entries = _parse_markdown_entries(shared_file)
-        if entries:
-            files.append(MemoryFile(
-                path="shared-context.md", kind="shared-context",
-                entries=entries,
-            ))
-
-    # CC-feedback (JSONL)
-    cc_file = memory_dir / "cc-feedback.jsonl"
-    if cc_file.exists():
-        entries = _parse_jsonl_entries(cc_file)
-        if entries:
-            files.append(MemoryFile(
-                path="cc-feedback.jsonl", kind="cc-feedback",
-                entries=entries,
-            ))
-
-    # Flywheel history (JSONL)
-    fw_file = memory_dir / "flywheel-history.jsonl"
-    if fw_file.exists():
-        entries = _parse_jsonl_entries(fw_file)
-        if entries:
-            files.append(MemoryFile(
-                path="flywheel-history.jsonl", kind="flywheel",
-                entries=entries,
-            ))
-
-    return files
-
-
-# ── Analyse keywords ──────────────────────────────────────────────────────────
-
-_STOPWORDS = frozenset({
-    "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou", "en",
-    "à", "au", "aux", "pour", "par", "sur", "dans", "avec", "que", "qui",
-    "est", "sont", "a", "ont", "sera", "seront", "pas", "ne", "ni", "mais",
-    "the", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-    "should", "may", "might", "can", "could", "of", "to", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "about", "between",
-    "after", "before", "not", "no", "but", "or", "and", "if", "then",
-    "than", "too", "very", "just", "don", "it", "its", "this", "that",
-})
-
-
-def _extract_keywords(text: str) -> set[str]:
-    """Extrait les mots-clés significatifs d'un texte."""
-    words = re.findall(r'[a-zA-ZÀ-ÿ]{3,}', text.lower())
-    return {w for w in words if w not in _STOPWORDS}
-
-
-def _similarity(text_a: str, text_b: str) -> float:
-    """Similarité Jaccard sur les keywords."""
-    ka = _extract_keywords(text_a)
-    kb = _extract_keywords(text_b)
-    if not ka or not kb:
-        return 0.0
-    intersection = ka & kb
-    union = ka | kb
-    return len(intersection) / len(union) if union else 0.0
-
-
-def _has_polarity(text: str) -> tuple[bool, bool]:
-    """Retourne (is_positive, is_negative) selon les marqueurs."""
-    text_lower = text.lower()
-    is_pos = any(m in text_lower for m in POSITIVE_MARKERS)
-    is_neg = any(m in text_lower for m in NEGATIVE_MARKERS)
-    return is_pos, is_neg
-
-
-# ── Checks ────────────────────────────────────────────────────────────────────
-
-_issue_counter = 0
-
-
-def _next_id() -> str:
-    """Génère un ID court pour les issues."""
-    global _issue_counter
-    _issue_counter += 1
-    return f"ML-{_issue_counter:03d}"
-
-
-def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les contradictions entre fichiers mémoire.
-
-    Une contradiction = deux entrées de fichiers DIFFÉRENTS sur le même sujet
-    avec des polarités opposées (positive vs négative).
-    """
-    issues: list[LintIssue] = []
-
-    positive_entries: list[tuple[str, str, str]] = []  # (file, date, text)
-    negative_entries: list[tuple[str, str, str]] = []
-
-    for mf in files:
-        for date, text in mf.entries:
-            is_pos, is_neg = _has_polarity(text)
-            if is_pos:
-                positive_entries.append((mf.path, date, text))
-            if is_neg:
-                negative_entries.append((mf.path, date, text))
-
-    for pos_file, _pos_date, pos_text in positive_entries:
-        for neg_file, _neg_date, neg_text in negative_entries:
-            if pos_file == neg_file:
-                continue
-            sim = _similarity(pos_text, neg_text)
-            if sim >= CONTRADICTION_THRESHOLD:
-                issues.append(LintIssue(
-                    issue_id=_next_id(),
-                    severity=SEVERITY_ERROR,
-                    category="contradiction",
-                    title=f"Contradiction entre {pos_file} et {neg_file}",
-                    description=(
-                        f"Polarité positive/négative sur un sujet similaire "
-                        f"(similarité : {sim:.0%})"
-                    ),
-                    files=[pos_file, neg_file],
-                    entries=[pos_text[:120], neg_text[:120]],
-                    fix_suggestion=(
-                        "Vérifier si les deux entrées sont compatibles. "
-                        "Si oui, clarifier le contexte. Si non, résoudre "
-                        "et documenter dans contradiction-log.md."
-                    ),
-                ))
-
-    return issues
-
-
-def check_duplicates(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les doublons inter-fichiers.
-
-    Un doublon = même entrée (ou très similaire) dans 2+ fichiers différents.
-    """
-    issues: list[LintIssue] = []
-    seen: list[tuple[str, str]] = []  # (file, text)
-
-    for mf in files:
-        for _date, text in mf.entries:
-            for prev_file, prev_text in seen:
-                if prev_file == mf.path:
-                    continue
-                if _similarity(text, prev_text) >= DUPLICATE_THRESHOLD:
-                    issues.append(LintIssue(
-                        issue_id=_next_id(),
-                        severity=SEVERITY_WARNING,
-                        category="duplicate",
-                        title=f"Doublon entre {mf.path} et {prev_file}",
-                        description="Entrées très similaires dans deux fichiers mémoire",
-                        files=[mf.path, prev_file],
-                        entries=[text[:120], prev_text[:120]],
-                        fix_suggestion=(
-                            "Garder l'entrée dans le fichier le plus approprié. "
-                            "Supprimer le doublon de l'autre fichier."
-                        ),
-                    ))
-            seen.append((mf.path, text))
-
-    return issues
-
-
-def check_orphan_decisions(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les décisions référencées dans trace mais absentes du decisions-log.
-
-    Une décision orpheline = Grimoire_TRACE contient [DECISION] mais aucune entrée
-    similaire dans decisions-log.md.
-    """
-    issues: list[LintIssue] = []
-
-    # Trouver les fichiers concernés
-    trace_file = next((f for f in files if f.kind == "trace"), None)
-    decision_file = next((f for f in files if f.kind == "decisions"), None)
-
-    if not trace_file or not decision_file:
-        return issues
-
-    # Extraire les décisions depuis la trace
-    trace_decisions = [
-        (date, text) for date, text in trace_file.entries
-        if "[DECISION]" in text
-    ]
-
-    if not trace_decisions:
-        return issues
-
-    # Pour chaque décision de la trace, chercher une correspondance
-    decision_texts = [text for _, text in decision_file.entries]
-
-    for date, trace_text in trace_decisions:
-        found = False
-        for dec_text in decision_texts:
-            if _similarity(trace_text, dec_text) >= 0.3:
-                found = True
-                break
-        if not found:
-            issues.append(LintIssue(
-                issue_id=_next_id(),
-                severity=SEVERITY_WARNING,
-                category="orphan",
-                title=f"Décision orpheline dans Grimoire_TRACE [{date}]",
-                description=(
-                    "Une décision enregistrée dans la trace n'a pas "
-                    "d'entrée correspondante dans decisions-log.md"
-                ),
-                files=["Grimoire_TRACE.md", "decisions-log.md"],
-                entries=[trace_text[:150]],
-                fix_suggestion=(
-                    "Ajouter cette décision dans decisions-log.md pour "
-                    "assurer la traçabilité complète."
-                ),
-            ))
-
-    return issues
-
-
-def check_failure_without_lesson(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les failures sans leçon associée dans les learnings.
-
-    Un failure non capitalisé = entry dans failure-museum sans entrée
-    correspondante dans aucun learnings/*.md.
-    """
-    issues: list[LintIssue] = []
-
-    failure_file = next((f for f in files if f.kind == "failure-museum"), None)
-    learning_files = [f for f in files if f.kind == "learnings"]
-
-    if not failure_file or not learning_files:
-        return issues
-
-    all_learning_texts = [
-        text for lf in learning_files for _, text in lf.entries
-    ]
-
-    for date, failure_text in failure_file.entries:
-        found = False
-        for learn_text in all_learning_texts:
-            if _similarity(failure_text, learn_text) >= 0.25:
-                found = True
-                break
-        if not found:
-            issues.append(LintIssue(
-                issue_id=_next_id(),
-                severity=SEVERITY_INFO,
-                category="orphan",
-                title=f"Failure non capitalisé [{date}]",
-                description=(
-                    "Un échec dans le failure-museum n'a pas de leçon "
-                    "correspondante dans les learnings."
-                ),
-                files=["failure-museum.md"],
-                entries=[failure_text[:150]],
-                fix_suggestion=(
-                    "Extraire la leçon apprise de cet échec et l'ajouter "
-                    "dans le fichier learnings de l'agent concerné."
-                ),
-            ))
-
-    return issues
-
-
-def check_chronological_consistency(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les incohérences chronologiques dans chaque fichier.
-
-    Les entrées avec dates devraient être en ordre décroissant (plus récente en haut)
-    ou croissant. On détecte les sauts de date incohérents.
-    """
-    issues: list[LintIssue] = []
-
-    for mf in files:
-        dated_entries = [(d, t) for d, t in mf.entries if d]
-        if len(dated_entries) < 2:
-            continue
-
-        dates = [d for d, _ in dated_entries]
-
-        # Calculer si c'est ascendant ou descendant
-        asc_count = sum(1 for i in range(1, len(dates)) if dates[i] >= dates[i - 1])
-        desc_count = sum(1 for i in range(1, len(dates)) if dates[i] <= dates[i - 1])
-
-        total = len(dates) - 1
-        if total == 0:
-            continue
-
-        # Seuil : si ni clairement asc ni desc (< 70% d'un sens)
-        max_dir = max(asc_count, desc_count)
-        if max_dir / total < 0.7 and total >= 3:
-            issues.append(LintIssue(
-                issue_id=_next_id(),
-                severity=SEVERITY_INFO,
-                category="chrono",
-                title=f"Dates désordonnées dans {mf.path}",
-                description=(
-                    f"{total + 1} entrées datées ne suivent pas un ordre "
-                    f"chronologique cohérent (asc: {asc_count}, desc: {desc_count})"
-                ),
-                files=[mf.path],
-                fix_suggestion="Réorganiser les entrées par date.",
-            ))
-
-    return issues
-
-
-def check_memory_freshness(files: list[MemoryFile]) -> list[LintIssue]:
-    """Détecte les entrées mémoire périmées (stale).
-
-    Chaque entrée datée reçoit un freshness_score = 2^(-age/halflife).
-    Les fichiers dont la majorité des entrées sont périmées (> STALENESS_DAYS)
-    sont signalés comme candidats à l'archivage.
-    """
-    import math
-    from datetime import datetime
-
-    issues: list[LintIssue] = []
-    now = datetime.now()
-
-    for mf in files:
-        dated = [(d, t) for d, t in mf.entries if d and len(d) >= 10]
-        if not dated:
-            continue
-
-        stale_count = 0
-        total_freshness = 0.0
-
-        for date_str, _text in dated:
-            try:
-                entry_date = datetime(int(date_str[:4]), int(date_str[5:7]),
-                                      int(date_str[8:10]))
-            except (ValueError, IndexError):
-                continue
-            age_days = max(0, (now - entry_date).days)
-            freshness = math.pow(2.0, -age_days / DECAY_HALFLIFE_DAYS)
-            total_freshness += freshness
-            if age_days > STALENESS_DAYS:
-                stale_count += 1
-
-        if not dated:
-            continue
-
-        avg_freshness = total_freshness / len(dated)
-        stale_pct = stale_count / len(dated)
-
-        if stale_pct > 0.5:
-            issues.append(LintIssue(
-                issue_id=_next_id(),
-                severity=SEVERITY_INFO,
-                category="staleness",
-                title=f"Fichier périmé : {mf.path}",
-                description=(
-                    f"{stale_count}/{len(dated)} entrées datées ont > {STALENESS_DAYS} jours. "
-                    f"Freshness moyen : {avg_freshness:.2f}. "
-                    f"Candidat à l'archivage ou au nettoyage."
-                ),
-                files=[mf.path],
-                fix_suggestion=(
-                    "Archiver les entrées anciennes dans un sous-dossier 'archive/' "
-                    "ou supprimer les entrées obsolètes."
-                ),
-            ))
-
-    return issues
-
-
-# ── Orchestration ─────────────────────────────────────────────────────────────
 
 def lint_memory(project_root: Path) -> LintReport:
-    """Exécute toutes les vérifications de cohérence mémoire.
-
-    Retourne un LintReport avec tous les problèmes détectés.
-    """
-    global _issue_counter
-    _issue_counter = 0
-
-    files = collect_memory_files(project_root)
-
+    """Run the full memory lint and return a :class:`LintReport`."""
+    files = collect_memory_files(Path(project_root))
     report = LintReport(
         files_scanned=len(files),
         entries_scanned=sum(len(f.entries) for f in files),
     )
-
-    # Exécuter tous les checks
     report.issues.extend(check_contradictions(files))
     report.issues.extend(check_duplicates(files))
     report.issues.extend(check_orphan_decisions(files))
-    report.issues.extend(check_failure_without_lesson(files))
-    report.issues.extend(check_chronological_consistency(files))
-    report.issues.extend(check_memory_freshness(files))
-
-    # Trier : errors > warnings > info
-    severity_order = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 1, SEVERITY_INFO: 2}
+    report.issues.extend(check_chronological(files))
+    report.issues.extend(check_freshness(files))
+    severity_order = {"error": 0, "warning": 1, "info": 2}
     report.issues.sort(key=lambda i: severity_order.get(i.severity, 9))
-
     return report
 
 
-# ── Émission Stigmergy ───────────────────────────────────────────────────────
-
-def emit_to_stigmergy(report: LintReport, project_root: Path) -> int:
-    """Émet les issues critiques comme phéromones stigmergy.
-
-    Seuls les errors sont émis (contradictions, refs cassées).
-    Retourne le nombre de phéromones émises.
-    """
-    try:
-        import importlib.util
-        _key = "_grimoire_stigmergy"
-        if _key in sys.modules:
-            sg = sys.modules[_key]
-        else:
-            sg_path = Path(__file__).parent / "stigmergy.py"
-            if not sg_path.exists():
-                return 0
-            spec = importlib.util.spec_from_file_location(_key, sg_path)
-            if spec is None or spec.loader is None:
-                return 0
-            sg = importlib.util.module_from_spec(spec)
-            sys.modules[_key] = sg
-            spec.loader.exec_module(sg)
-    except Exception:
-        return 0
-
-    if not hasattr(sg, "deposit_pheromone"):
-        return 0
-
-    emitted = 0
-    for issue in report.issues:
-        if issue.severity != SEVERITY_ERROR:
-            continue
-        result = sg.deposit_pheromone(
-            project_root,
-            ptype="ALERT",
-            location=issue.files[0] if issue.files else "memory",
-            text=f"[memory-lint] {issue.title}: {issue.description[:160]}"[:200],
-            emitter="memory-lint",
-            tags=["auto-lint", issue.category],
-            intensity=0.8,
-        )
-        if result is not None:
-            emitted += 1
-
-    return emitted
+def report_to_dict(report: LintReport) -> dict[str, Any]:
+    """Serialize a :class:`LintReport` to a plain dict."""
+    return report.to_dict()
 
 
-# ── Rendu ─────────────────────────────────────────────────────────────────────
-
-SEVERITY_ICONS = {
-    SEVERITY_ERROR: "🔴",
-    SEVERITY_WARNING: "🟡",
-    SEVERITY_INFO: "🔵",
-}
-
-CATEGORY_ICONS = {
-    "contradiction": "⚡",
-    "duplicate": "📋",
-    "orphan": "👻",
-    "broken-ref": "🔗",
-    "chrono": "📅",
-}
-
-
-def render_report(report: LintReport, show_fix: bool = False) -> str:
-    """Rend le rapport en texte formaté."""
-    lines = [
-        "🔍 Grimoire Memory Lint Report",
-        f"   Fichiers scannés : {report.files_scanned}",
-        f"   Entrées analysées : {report.entries_scanned}",
-        "",
-    ]
-
-    if not report.issues:
-        lines.append("✅ Aucun problème détecté — mémoire cohérente.")
-        return "\n".join(lines)
-
-    lines.append(
-        f"   Problèmes : {report.error_count} erreurs, "
-        f"{report.warning_count} warnings, {report.info_count} infos"
-    )
-    lines.extend(["", "---", ""])
-
-    for issue in report.issues:
-        sev_icon = SEVERITY_ICONS.get(issue.severity, "❓")
-        cat_icon = CATEGORY_ICONS.get(issue.category, "")
-        lines.append(
-            f"{sev_icon} {cat_icon} [{issue.issue_id}] {issue.title}"
-        )
-        lines.append(f"   {issue.description}")
-        if issue.entries:
-            for entry in issue.entries[:2]:
-                lines.append(f"     → {entry}")
-        if show_fix and issue.fix_suggestion:
-            lines.append(f"   💡 Fix : {issue.fix_suggestion}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def report_to_dict(report: LintReport) -> dict:
-    """Convertit le rapport en dict JSON."""
-    return {
-        "version": report.version,
-        "files_scanned": report.files_scanned,
-        "entries_scanned": report.entries_scanned,
-        "summary": {
-            "errors": report.error_count,
-            "warnings": report.warning_count,
-            "info": report.info_count,
-            "total": len(report.issues),
-        },
-        "issues": [
-            {
-                "issue_id": i.issue_id,
-                "severity": i.severity,
-                "category": i.category,
-                "title": i.title,
-                "description": i.description,
-                "files": i.files,
-                "entries": i.entries,
-                "fix_suggestion": i.fix_suggestion,
-            }
-            for i in report.issues
-        ],
-    }
-
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-
-def main():
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Grimoire Memory Lint — vérification de cohérence mémoire",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        prog="memory-lint",
+        description="Memory Lint — cross-file coherence analysis for Grimoire memory",
     )
-    parser.add_argument("--project-root", default=".",
-                        help="Racine du projet Grimoire")
-    parser.add_argument("--json", action="store_true",
-                        help="Sortie JSON")
-    parser.add_argument("--fix", action="store_true",
-                        help="Afficher les suggestions de fix")
-    parser.add_argument("--emit", action="store_true",
-                        help="Émettre les erreurs comme phéromones stigmergy")
+    parser.add_argument("--project-root", default=".", help="Project root directory")
+    parser.add_argument("--json", action="store_true", help="Emit JSON output")
+    parser.add_argument(
+        "--emit",
+        action="store_true",
+        help="(deprecated) formerly emitted stigmergy signals — now a no-op",
+    )
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Show fix suggestions in human-readable output",
+    )
+    args = parser.parse_args(argv)
 
-    args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
-
     report = lint_memory(project_root)
 
     if args.json:
         print(json.dumps(report_to_dict(report), indent=2, ensure_ascii=False))
-        sys.exit(0)
+        return 0
 
-    print(render_report(report, show_fix=args.fix))
+    print(f"Memory Lint v{LINT_VERSION}")
+    print(f"Files scanned: {report.files_scanned} | Entries: {report.entries_scanned}")
+    print(
+        f"Issues: {len(report.issues)} "
+        f"(errors={report.error_count}, warnings={report.warning_count}, info={report.info_count})"
+    )
+    for issue in report.issues:
+        icon = {"error": "🔴", "warning": "🟡", "info": "🔵"}.get(issue.severity, "⚪")
+        print(f"  {icon} [{issue.category}] {issue.issue_id} — {issue.title}")
+        print(f"      {issue.description}")
+        if args.fix and issue.fix_suggestion:
+            print(f"      ↳ fix: {issue.fix_suggestion}")
+    return 0
 
-    if args.emit and report.error_count > 0:
-        count = emit_to_stigmergy(report, project_root)
-        if count > 0:
-            print(f"🐜 {count} erreur(s) émise(s) comme phéromones stigmergy")
 
-    # Exit code : 1 si erreurs, 0 sinon
-    sys.exit(1 if report.error_count > 0 else 0)
+__all__ = [
+    "LINT_VERSION",
+    "LintReport",
+    "MemoryLint",
+    "collect_memory_files",
+    "lint_memory",
+    "main",
+    "report_to_dict",
+]
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
