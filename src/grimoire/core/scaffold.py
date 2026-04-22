@@ -94,7 +94,7 @@ user:
   skill_level: "$skill_level"
 
 memory:
-  backend: "$backend"
+  backend: "$backend"$memory_extra
 
 agents:
   archetype: "$archetype"
@@ -341,6 +341,11 @@ class ProjectScaffolder:
         stack_list = ", ".join(f'"{s}"' for s in stacks) if stacks else ""
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
+        memory_extra = ""
+        if self._backend == "ollama":
+            memory_extra = '\n  ollama_url: "http://localhost:11434"'
+        elif self._backend == "qdrant-server":
+            memory_extra = '\n  qdrant_url: "http://localhost:6333"'
         return {
             "project_name": self._project_name,
             "user_name": self._user_name,
@@ -351,6 +356,7 @@ class ProjectScaffolder:
             "archetype": ", ".join(archetypes),
             "archetype_list": archetype_list,
             "backend": self._backend,
+            "memory_extra": memory_extra,
             "version": _grimoire_version,
         }
 
