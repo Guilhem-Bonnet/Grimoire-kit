@@ -276,6 +276,10 @@ _REF_PATTERN = re.compile(
 def _detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
     dissonances: list[Dissonance] = []
     for fpath in scan.agents + scan.workflows + scan.tools:
+        # Python test files typically contain ref-like strings as fixtures; skip them.
+        stem = Path(fpath).stem
+        if fpath.endswith(".py") and (stem.startswith("test_") or stem.endswith("_test")):
+            continue
         full = project_root / fpath
         if not full.exists():
             continue

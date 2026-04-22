@@ -264,6 +264,14 @@ class TestDetectBrokenRefs:
         scan = ArchScan(agents=["nonexistent/agent.md"])
         assert _detect_broken_refs(scan, tmp_path) == []
 
+    def test_python_test_files_skipped(self, tmp_path: Path) -> None:
+        """test_*.py and *_test.py contain ref-like strings as fixtures."""
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "test_foo.py").write_text('ref = "include: missing/file.md"\n')
+        (tmp_path / "tools" / "bar_test.py").write_text('ref = "load: shared.md"\n')
+        scan = ArchScan(tools=["tools/test_foo.py", "tools/bar_test.py"])
+        assert _detect_broken_refs(scan, tmp_path) == []
+
 
 class TestDetectDuplication:
     def test_no_duplication(self, tmp_path: Path) -> None:
