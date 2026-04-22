@@ -2,6 +2,7 @@ import { cp, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { buildHookEventSnapshot } from '../src/server/hook-events-feed';
+import { buildPheromoneBoardSnapshot } from '../src/server/pheromone-board-feed';
 import { materializeObservatorySources, writeObservatoryManifest } from './observatory-sources';
 import { materializeProofSources, writeProofManifest } from './proof-sources';
 
@@ -39,6 +40,20 @@ async function main(): Promise<void> {
   });
   await writeFile(hookEventsPath, JSON.stringify(hookEventsSnapshot, null, 2), 'utf8');
 
+  // V4.4.b — publish a static snapshot of the pheromone board (BM-20).
+  // Missing board is not an error: writer returns an empty board so the
+  // observability surface renders a neutral "no signals" state.
+  const pheromoneBoardPath = resolve(packageRoot, '.generated/public/pheromone-board.json');
+  const pheromoneBoardSnapshot = buildPheromoneBoardSnapshot({
+    projectRoot,
+    limit: 500
+  });
+  await writeFile(
+    pheromoneBoardPath,
+    JSON.stringify(pheromoneBoardSnapshot, null, 2),
+    'utf8'
+  );
+
   console.log(
     JSON.stringify(
       {
@@ -48,7 +63,10 @@ async function main(): Promise<void> {
         latestProofRunId: proofSources.latestRunId,
         availableProofSources: proofSources.sources.filter((source) => source.available).map((source) => source.id),
         hookEventsPath,
-        hookEventsCount: hookEventsSnapshot.events.length
+        hookEventsCount: hookEventsSnapshot.events.length,
+        pheromoneBoardPath,
+        pheromoneBoardActive: pheromoneBoardSnapshot.counters.active,
+        pheromoneBoardHeatmapCells: pheromoneBoardSnapshot.heatmap.length
       },
       null,
       2
