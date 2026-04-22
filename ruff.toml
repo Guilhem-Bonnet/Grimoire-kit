@@ -52,4 +52,16 @@ ignore = [
     "SIM112", # uncapitalized-env-vars — os.environ.get patterns are idiomatic
     "ERA001", # commented-out-code — section comments mistaken for dead code
 ]
-"src/grimoire/tools/**" = ["ERA001"]  # Section comments trigger false positives
+"src/grimoire/tools/**" = [
+    "ERA001", # Section comments trigger false positives
+    "S105",   # hardcoded-password — false positives on VERSION, LOG constants
+    "S110",   # try-except-pass — intentional defensive patterns in tools
+    "S112",   # try-except-continue — idem, resilient scanning loops
+    "S310",   # urllib — validated upstream by _validate_url or local-only
+    "S311",   # random — used for non-crypto IDs
+    "SIM102", # collapsible-if — readability preference in complex conditionals
+    "SIM108", # ternary — readability preference
+    "SIM110", # any() — readability preference on loops
+    "SIM112", # uncapitalized-env-vars — os.environ.get patterns are idiomatic
+]
+"src/grimoire/tools/token_budget.py" = ["F401"]  # tiktoken import-for-availability

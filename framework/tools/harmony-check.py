@@ -154,8 +154,8 @@ def main(argv: list[str] | None = None) -> int:
 
 # Export the real tool class for programmatic consumers.
 __all__ = [
-    "HarmonyCheck",
     "VERSION",
+    "HarmonyCheck",
     "build_parser",
     "format_report",
     "full_analysis",
