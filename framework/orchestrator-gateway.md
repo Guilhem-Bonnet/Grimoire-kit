@@ -419,7 +419,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 | **SHP (BM-56)** | SOG déclenche et supervise les huddles sélectifs, arbitre si non-convergence |
 | **ARG (BM-57)** | SOG utilise le graphe relationnel pour optimiser le routage et la formation d'équipes |
 | **HPE (BM-58)** | SOG utilise le moteur HPE pour orchestrer les DAG hybrides (parallel + séquentiel + opportuniste) |
-| **ELSS (BM-59)** | SOG observe l'état partagé, reconstruit le shared state, détecte les conflits |
+| **Event Log (BM-59)** | SOG observe l'état partagé, reconstruit le shared state, détecte les conflits |
 | **ALS** | SOG utilise l'Autonomy Level System pour déterminer quand foncer vs demander |
 | **AORA** | SOG active la boucle d'itération autonome pour les tâches complex+ |
 | **PCS** | SOG compresse le contexte progressivement pour les sessions longues |

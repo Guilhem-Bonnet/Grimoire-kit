@@ -2,6 +2,13 @@
 
 # <img src="../docs/assets/icons/workflow.svg" width="32" height="32" alt=""> Event Log & Shared State (ELSS) — Journal d'Événements et État Partagé
 
+> **Convention de nommage (V4.2)** : le nom court canonique est **Event Log**.
+> L'acronyme `ELSS` est conservé ici comme dénomination historique du
+> protocole, mais les autres documents du framework utilisent désormais
+> "Event Log" ou "event log". Voir
+> [_grimoire-runtime/_memory/bm-registry.md](../../_grimoire-runtime/_memory/bm-registry.md)
+> §Ambiguïtés → BM-59.
+
 > **BM-59** — Bus d'événements persistant et état partagé observable pour la coordination multi-agents.
 >
 > **Problème résolu** : Les agents opèrent dans des contextes isolés. Quand un agent prend une

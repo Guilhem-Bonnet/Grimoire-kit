@@ -88,9 +88,9 @@ Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 | `HPE:schedule` | DAG planifié et dispatché | HPE (BM-58) |
 | `HPE:critical-path` | Alerte sur chemin critique | HPE (BM-58) |
 | `HPE:checkpoint` | Checkpoint DAG sauvegardé | HPE (BM-58) |
-| `ELSS:emit` | Événement émis sur l'event bus | ELSS (BM-59) |
-| `ELSS:observe` | Observation reçue par un agent | ELSS (BM-59) |
-| `ELSS:conflict` | Conflit d'état partagé détecté | ELSS (BM-59) |
+| `EventLog:emit` | Événement émis sur l'event bus | Event Log (BM-59) |
+| `EventLog:observe` | Observation reçue par un agent | Event Log (BM-59) |
+| `EventLog:conflict` | Conflit d'état partagé détecté | Event Log (BM-59) |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

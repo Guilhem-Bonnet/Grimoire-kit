@@ -14,7 +14,7 @@
 > la gouvernance de l'orchestrateur pour les décisions finales.
 >
 > **Implémentation** : S'appuie sur `message-bus.py` (transport), `agent-worker.py` (KNOWN_AGENTS),
-> `agent-caller.py` (A2A calls), ARG (BM-57) pour le graphe relationnel, et ELSS (BM-59) pour
+> `agent-caller.py` (A2A calls), ARG (BM-57) pour le graphe relationnel, et l'Event Log (BM-59) pour
 > l'observabilité.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -44,7 +44,7 @@
 │         │ emit events                      │ emit events         │
 │         ▼                                  ▼                     │
 │  ┌──────────────────────────────────────────────────────┐       │
-│  │          EVENT BUS (ELSS BM-59) — observabilité       │       │
+│  │          EVENT BUS (Event Log BM-59) — observabilité    │       │
 │  └──────────────────────────────────────────────────────┘       │
 │                          │                                       │
 │                          ▼                                       │
@@ -136,7 +136,7 @@ registration_protocol:
     1: "Charger ses capabilities depuis agent-manifest + ARG émergentes"
     2: "S'enregistrer dans le registry avec status=online"
     3: "S'abonner au message bus : p2p-{agent_id}, huddle-*, broadcast"
-    4: "Émettre événement ELSS : type=agent_registered"
+    4: "Émettre événement event log : type=agent_registered"
     5: "Démarrer le heartbeat (toutes les 30 secondes)"
   
   # Heartbeat
@@ -151,7 +151,7 @@ registration_protocol:
   on_deactivate:
     1: "Mettre status=offline dans le registry"
     2: "Se désabonner du message bus"
-    3: "Émettre événement ELSS : type=agent_deregistered"
+    3: "Émettre événement event log : type=agent_deregistered"
   
   # Nettoyage des agents fantômes
   stale_cleanup:
@@ -172,7 +172,7 @@ registration_protocol:
 | `request` | Demande de tâche déléguée | Sous-tâche spécifique | Notification SOG |
 | `respond` | Réponse à un ask/request | Suite d'un échange | Non |
 | `challenge` | Contre-argument sur un output | Désaccord substantiel à résoudre | Notification SOG |
-| `offer` | Proposition d'aide non sollicitée | Agent observe un besoin via ELSS | Non |
+| `offer` | Proposition d'aide non sollicitée | Agent observe un besoin via l'event log | Non |
 
 ### Format d'un Message P2P
 
@@ -199,7 +199,7 @@ p2p_message:
   # Gouvernance
   governance:
     sog_notified: true | false  # SOG a-t-il été notifié ?
-    elss_logged: true           # toujours loggé dans le event bus
+    event_logged: true          # toujours loggé dans le event bus
     
   # Transport
   transport:
@@ -226,14 +226,14 @@ governance_rules:
       condition: "Réponse à un message P2P existant"
     
     - type: "offer"
-      condition: "Proposition d'aide basée sur observation ELSS"
+      condition: "Proposition d'aide basée sur observation event log"
       example: "J'ai vu ton uncertainty_raised sur le caching — je peux aider"
   
   # Ce qui nécessite une notification au SOG
   sog_notify:
     - type: "request"
       reason: "Tâche déléguée → SOG doit tracker"
-      notification: "informal — SOG observe via ELSS"
+      notification: "informal — SOG observe via event log"
     
     - type: "challenge"
       reason: "Désaccord → peut nécessiter arbitrage"
@@ -285,7 +285,7 @@ discovery_protocol:
   find_related:
     input: "{task_id ou topic}"
     process:
-      1: "Chercher dans ELSS les événements liés au topic"
+      1: "Chercher dans l'event log les événements liés au topic"
       2: "Identifier les agents ayant émis des events sur ce topic"
       3: "Croiser avec le status actuel dans le registry"
     
@@ -321,11 +321,11 @@ load_balancing:
 
 ## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Observabilité
 
-Toute communication mesh est observable via ELSS :
+Toute communication mesh est observable via l'event log :
 
 ```yaml
 observability:
-  # Chaque message P2P émet un événement ELSS
+  # Chaque message P2P émet un événement event log
   on_p2p_send:
     event_type: "p2p_message"
     payload:

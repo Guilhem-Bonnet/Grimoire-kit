@@ -16,7 +16,7 @@
 5. **Chunking 7±2** — Max 7 items par liste/menu/phase. Au-delà → sous-grouper
 6. **Mémoire** — Dual-write Qdrant + fichiers via `mem0-bridge.py remember/recall` · Lazy-load · Log contradictions
 7. **Communication** — Langue : `{communication_language}` · Écrire dans fichiers, jamais proposer du code à copier · Ne pas demander confirmation
-8. **Mesh (AMN)** — S'enregistrer au registry · Observer l'état partagé ELSS · P2P pour questions ciblées (max 5 échanges) · Émettre events sur actions significatives · Décisions finales toujours via SOG
+8. **Mesh (AMN)** — S'enregistrer au registry · Observer l'état partagé via l'event log · P2P pour questions ciblées (max 5 échanges) · Émettre events sur actions significatives · Décisions finales toujours via SOG
 9. **ALS (Autonomy Level System)** — L1 (local/réversible) = fonce · L2 (nouveau fichier/CI) = fonce + notifie · L3 (architecture/partagé) = plan → validation → exécute · L4 (prod/destructif) = chaque step supervisé. Expert = Joueur par défaut sur L1/L2.
 10. **AORA (Act→Observe→Reflect→Act)** — Tâches 3+ steps : décomposer en checklist vivante, itérer silencieusement, ne PAS rendre la main entre micro-tâches. Max 3 retries/step. Circuit breaker : si même erreur 2×, pivoter la stratégie.
 11. **PIP (Proactive Initiative Protocol)** — L1 : corriger lint/imports/typos silencieusement. L2 : ajouter tests, mettre à jour docs, signaler TODOs. Jamais d'initiative sur architecture.

@@ -13,7 +13,7 @@
 > entre agents et enrichit le routage. Le graphe évolue à chaque interaction.
 >
 > **Implémentation** : S'appuie sur `agent-worker.py` (KNOWN_AGENTS), `agent-caller.py`
-> (CALL_HISTORY), `swarm-consensus.py` (AGENT_WEIGHTS), et ELSS (BM-59) pour les événements.
+> (CALL_HISTORY), `swarm-consensus.py` (AGENT_WEIGHTS), et l'Event Log (BM-59) pour les événements.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -41,7 +41,7 @@
 │  └─────────┘         synergy_score: 0.88                     │
 │                                                               │
 │  Enrichi dynamiquement par :                                 │
-│  - ELSS events (BM-59)                                       │
+│  - Event log events (BM-59)                                  │
 │  - CVTL validations (BM-52)                                 │
 │  - Huddles (BM-56)                                           │
 │  - A2A calls (BM-32)                                         │
@@ -201,7 +201,7 @@ agent_graph:
 
 ## <img src="../docs/assets/icons/dna.svg" width="28" height="28" alt=""> Enrichissement Dynamique
 
-Le graphe se met à jour automatiquement via les événements ELSS :
+Le graphe se met à jour automatiquement via les événements de l'event log :
 
 ```yaml
 enrichment_rules:

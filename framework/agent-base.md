@@ -56,7 +56,7 @@
 
 **À chaque activation :**
 1. **S'enregistrer** dans le Service Registry avec status + capabilities
-2. **Observer** l'état partagé via ELSS (Event Log & Shared State)
+2. **Observer** l'état partagé via l'Event Log (BM-59)
 3. **Communiquer en P2P** pour les questions ciblées (ask, inform, offer) SANS passer par le SOG
 4. **Émettre des événements** sur chaque action significative (décision, artifact, task)
 

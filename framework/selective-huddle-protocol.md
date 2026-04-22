@@ -16,7 +16,7 @@
 >
 > **Implémentation** : S'appuie sur AMN (BM-55) pour la découverte d'agents,
 > ARG (BM-57) pour la sélection optimale, PCE (BM-54) pour les techniques de débat,
-> et ELSS (BM-59) pour l'observabilité.
+> et l'Event Log (BM-59) pour l'observabilité.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -26,7 +26,7 @@
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │  DÉCLENCHEUR                                                   │
-│  ├── Agent détecte un besoin (via ELSS observation)           │
+│  ├── Agent détecte un besoin (via observation event log)     │
 │  ├── SOG identifie un conflit multi-perspectives              │
 │  ├── CVTL produit un challenge nécessitant discussion         │
 │  └── Utilisateur demande une concertation rapide              │
@@ -82,15 +82,15 @@ auto_triggers:
     topic: "Consolider la confiance sur {task}"
     urgency: normal
   
-  # 3. Contradiction détectée (ELSS conflict_detected)
+  # 3. Contradiction détectée (event log conflict_detected)
   contradiction:
-    condition: "Événement conflict_detected dans ELSS"
+    condition: "Événement conflict_detected dans l'event log"
     huddle_type: "debate"
     participants: "Agents impliqués dans la contradiction"
     topic: "Résoudre la contradiction : {existing} vs {proposed}"
     urgency: high
   
-  # 4. Agent observe un besoin via ELSS
+  # 4. Agent observe un besoin via l'event log
   agent_initiated:
     condition: "Un agent envoie un message P2P de type 'offer' ou 'challenge'"
     huddle_type: "quick-consult"
@@ -253,7 +253,7 @@ lifecycle:
     1: "Créer un huddle_id unique"
     2: "Réserver un canal message-bus : huddle-{huddle_id}"
     3: "Envoyer les invitations via AMN P2P"
-    4: "Émettre événement ELSS : huddle_requested"
+    4: "Émettre événement event log : huddle_requested"
     5: "Démarrer le timer (time-box)"
     6: "Si auto-trigger : SOG cadre le sujet. Si user-trigger : user cadre"
   
@@ -261,7 +261,7 @@ lifecycle:
   discuss:
     routing: "Messages P2P multidirectionnels via canal dédié"
     moderation:
-      - "SOG observe les échanges (via ELSS)"
+      - "SOG observe les échanges (via event log)"
       - "Si divergence_score > 0.8 → SOG intervient pour recentrer"
       - "Si boucle circulaire détectée → SOG force la synthèse"
       - "Respecter le time-box : warning à 80%, force-close à 100%"
@@ -271,9 +271,9 @@ lifecycle:
   close:
     1: "SOG (ou agent désigné) synthétise les échanges"
     2: "Produire le deliverable structuré"
-    3: "Émettre événement ELSS : huddle_completed"
+    3: "Émettre événement event log : huddle_completed"
     4: "Mettre à jour ARG : relationships enrichies"
-    5: "Si décision prise → émettre événement decision dans ELSS"
+    5: "Si décision prise → émettre événement decision dans l'event log"
     6: "Fermer le canal message-bus"
     7: "Logger le résumé dans Grimoire_TRACE"
 

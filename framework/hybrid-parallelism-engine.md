@@ -15,7 +15,7 @@
 > et lance de façon opportuniste ce qui peut bénéficier de résultats partiels.
 >
 > **Implémentation** : Étend `subagent-orchestration.md` (BM-19) et utilise AMN (BM-55) pour
-> le dispatch, ARG (BM-57) pour l'assignation, ELSS (BM-59) pour la coordination, et
+> le dispatch, ARG (BM-57) pour l'assignation, l'Event Log (BM-59) pour la coordination, et
 > `agent-worker.py` pour l'exécution isolée.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -43,7 +43,7 @@
 │  ┌────────────▼───────────────────┐                          │
 │  │        EXECUTOR                │                          │
 │  │  AMN dispatch → agent workers  │                          │
-│  │  Monitor via ELSS events       │                          │
+│  │  Monitor via event log         │                          │
 │  │  Collect results               │                          │
 │  └────────────┬───────────────────┘                          │
 │               │                                               │
@@ -165,7 +165,7 @@ parallel_mode:
     2: "Trier par priorité (high > medium > low)"
     3: "Dispatcher via AMN (BM-55) aux agents disponibles"
     4: "Limiter au max_parallel de agent-worker.py (défaut: 5)"
-    5: "Monitorer via ELSS events"
+    5: "Monitorer via l'event log"
   
   example:
     # Couche 0 : ces deux tâches partent en même temps
@@ -364,7 +364,7 @@ Parallel workers: 1/5 active
 | **Boomerang (BM-11)** | Le mode `sequential` de HPE remplace le boomerang simple |
 | **AMN (BM-55)** | Dispatch des tâches via le mesh + discovery |
 | **ARG (BM-57)** | Sélection optimale des agents par tâche |
-| **ELSS (BM-59)** | Monitoring temps réel + coordination |
+| **Event Log (BM-59)** | Monitoring temps réel + coordination |
 | **HUP (BM-50)** | Chaque tâche du DAG applique HUP |
 | **QEC (BM-51)** | Questions agrégées depuis toutes les tâches parallèles |
 | **CVTL (BM-52)** | `mode: cross-validate` déclenche la validation croisée |
