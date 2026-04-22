@@ -363,15 +363,28 @@ def _detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
 
 _SEVERITY_PENALTY = {SEVERITY_HIGH: 8, SEVERITY_MEDIUM: 4, SEVERITY_LOW: 2}
 
+# Denominator floor: keeps small projects from getting a free pass while allowing
+# large codebases to be scored by dissonance density rather than raw count.
+_DENSITY_FLOOR = 50
 
-def _compute_score(dissonances: list[Dissonance]) -> tuple[int, str, dict[str, int]]:
+
+def _compute_score(
+    dissonances: list[Dissonance],
+    total_files: int = 0,
+) -> tuple[int, str, dict[str, int]]:
     if not dissonances:
         return 100, "A+", {}
     penalty = sum(_SEVERITY_PENALTY.get(d.severity, 0) for d in dissonances)
     cat_counts: dict[str, int] = {}
     for d in dissonances:
         cat_counts[d.category] = cat_counts.get(d.category, 0) + 1
-    score = max(0, 100 - penalty)
+    # Density-normalized penalty: penalty-per-50-files.
+    # Falls back to absolute penalty when total_files unknown (legacy calls).
+    if total_files > 0:
+        density_penalty = penalty * _DENSITY_FLOOR / max(total_files, _DENSITY_FLOOR)
+    else:
+        density_penalty = penalty
+    score = max(0, round(100 - density_penalty))
     if score >= 90:
         grade = "A"
     elif score >= 75:
@@ -400,7 +413,7 @@ class HarmonyCheck(GrimoireTool):
         scan.dissonances.extend(_detect_broken_refs(scan, self.project_root))
         scan.dissonances.extend(_detect_duplication(scan, self.project_root))
 
-        score, grade, cats = _compute_score(scan.dissonances)
+        score, grade, cats = _compute_score(scan.dissonances, scan.total_files)
         return HarmonyResult(
             score=score,
             grade=grade,

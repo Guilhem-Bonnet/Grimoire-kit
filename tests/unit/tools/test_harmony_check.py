@@ -394,6 +394,22 @@ class TestComputeScore:
         assert score == 44
         assert grade == "D"
 
+    def test_density_scoring_large_codebase(self) -> None:
+        # 30 LOW size on a 1500-file codebase → low density → A/B range
+        # penalty=60, density_penalty=60*50/1500=2, score=98 → A
+        ds = [Dissonance("size", SEVERITY_LOW, "f", "m")] * 30
+        score, grade, _ = _compute_score(ds, total_files=1500)
+        assert score >= 90
+        assert grade == "A"
+
+    def test_density_scoring_small_codebase(self) -> None:
+        # Same 30 LOW on a 10-file project → floored to 50 → penalty unchanged
+        # penalty=60, density_penalty=60*50/50=60, score=40 → D
+        ds = [Dissonance("size", SEVERITY_LOW, "f", "m")] * 30
+        score, grade, _ = _compute_score(ds, total_files=10)
+        assert score == 40
+        assert grade == "D"
+
 
 # ── HarmonyResult ─────────────────────────────────────────────────────────────
 
