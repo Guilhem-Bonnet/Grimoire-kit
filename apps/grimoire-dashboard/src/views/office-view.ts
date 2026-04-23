@@ -1,20 +1,37 @@
-import type { DashboardStateSnapshot } from '../dashboard-store';
 import { createViewShell, type View } from './view-common';
 import type { OfficeCharacter } from '@game/state/office-view';
 import type { OfficePlacement } from '@game/state/office-placement';
+import { createGrimoireSpritePreset } from '@game/rendering/grimoire-sprite-preset';
+import {
+  loadSpriteImages,
+  type SpriteImageLike
+} from '@game/rendering/sprite-image-loader';
+import { buildOfficeDrawPlan } from '@game/rendering/office-draw-plan';
+import { renderOfficeDrawPlanToCanvas } from '@game/rendering/office-canvas-renderer';
+import type { SpriteRegistry } from '@game/rendering/sprite-registry';
 
-const CELL_PX = 20;
-const GAP_PX = 2;
+const CELL_PX = 24;
 
 /**
- * Office view — pixel-agent mosaic powered by `resolveOfficePlacement`
- * (free placement + collision avoidance, S3.7 part 1).
+ * Office view — pixel-agent mosaic.
  *
- * Each agent shows up as a coloured cell on the grid, with its id and
- * state in the tooltip. Pure live — no pixel sprites yet (S3.7 part 2).
+ * Uses the V3.S3.7 part 2 sprite renderer stack:
+ *   - `createGrimoireSpritePreset` wires the 9 curated character sheets
+ *   - `loadSpriteImages` preloads the bitmaps (served by the dev plugin
+ *     at `/assets/characters/`)
+ *   - `buildOfficeDrawPlan` projects the live office state
+ *   - `renderOfficeDrawPlanToCanvas` paints on the canvas every frame
+ *
+ * Falls back to colored squares if an asset fails to load so the
+ * surface never goes blank when running offline.
  */
 export function createOfficeView(): View {
   let bodyRef: HTMLElement | null = null;
+  let canvasRef: HTMLCanvasElement | null = null;
+  let images: ReadonlyMap<string, SpriteImageLike> = new Map();
+  let registry: SpriteRegistry | null = null;
+  let assetsReady = false;
+
   return {
     route: 'office',
     title: 'Agents · Office',
@@ -22,11 +39,26 @@ export function createOfficeView(): View {
     mount(root) {
       const { root: viewRoot, body } = createViewShell({
         title: 'Agents · Office',
-        subtitle: 'Placement libre + évitement de collisions (V3.S3.7 part 1). Sprites pixel à venir en part 2.',
+        subtitle: 'Placement libre + sprites pixel (V3.S3.7 part 2). Base characters + cosmétiques = rôles.',
         status: 'live'
       });
       root.replaceChildren(viewRoot);
       bodyRef = body;
+
+      registry = createGrimoireSpritePreset({ baseUrl: '/assets/characters/' });
+      void loadSpriteImages(registry).then((bundle) => {
+        images = bundle.images;
+        assetsReady = true;
+        if (bodyRef) {
+          const status = bodyRef.querySelector('[data-assets-status]');
+          if (status) {
+            const err = bundle.errors.length;
+            status.textContent = err > 0
+              ? `${bundle.images.size}/${bundle.images.size + err} sprites chargés (${err} en fallback)`
+              : `${bundle.images.size} sprites chargés`;
+          }
+        }
+      });
     },
     update(snapshot) {
       if (!bodyRef) return;
@@ -37,12 +69,25 @@ export function createOfficeView(): View {
         .map(([state, count]) => `<span class="badge">${state}: ${count}</span>`)
         .join(' ');
 
+      const canvasWidth = grid.cols * CELL_PX;
+      const canvasHeight = grid.rows * (CELL_PX * 2); // 16x32 frames
+
       bodyRef.innerHTML = `
         <section class="panel">
           <h2 class="panel__title">État du bureau</h2>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">${legend}</div>
-          <div style="display:flex; gap:24px; flex-wrap:wrap;">
-            <div>${renderOfficeGrid(characters, placement, grid)}</div>
+          <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
+            <div>
+              <canvas
+                data-office-canvas
+                width="${canvasWidth}"
+                height="${canvasHeight}"
+                style="background: var(--elev-2); border: 1px solid var(--line); image-rendering: pixelated; display:block;"
+              ></canvas>
+              <div class="muted" data-assets-status style="margin-top:8px; font-family: var(--mono); font-size:12px;">
+                ${assetsReady ? 'sprites prêts' : 'chargement des sprites…'}
+              </div>
+            </div>
             <div style="flex:1; min-width:280px;">
               <h3 class="panel__title">Agents placés</h3>
               ${renderAgentList(characters, placement)}
@@ -53,35 +98,18 @@ export function createOfficeView(): View {
           </div>
         </section>
       `;
-    }
-  };
-}
 
-function renderOfficeGrid(
-  characters: readonly OfficeCharacter[],
-  placement: OfficePlacement,
-  grid: { cols: number; rows: number }
-): string {
-  const byCell = new Map<string, OfficeCharacter>();
-  for (const char of characters) {
-    const seat = placement.seats.get(char.agentId);
-    if (seat) byCell.set(`${seat.row}:${seat.col}`, char);
-  }
-  const cells: string[] = [];
-  for (let row = 0; row < grid.rows; row += 1) {
-    for (let col = 0; col < grid.cols; col += 1) {
-      const char = byCell.get(`${row}:${col}`);
-      if (char) {
-        cells.push(
-          `<div class="office-cell" data-state="${escape(char.state)}" title="${escape(char.agentId)} · ${escape(char.role)} · ${escape(char.state)}"></div>`
-        );
-      } else {
-        cells.push('<div class="office-cell"></div>');
+      canvasRef = bodyRef.querySelector<HTMLCanvasElement>('[data-office-canvas]');
+      if (canvasRef && registry) {
+        const plan = buildOfficeDrawPlan(office, placement, registry, { cellSize: CELL_PX });
+        renderOfficeDrawPlanToCanvas(canvasRef, plan, images, {
+          canvasWidth,
+          canvasHeight,
+          fallbackFill: '#FF6B3D'
+        });
       }
     }
-  }
-  const width = grid.cols * CELL_PX + (grid.cols - 1) * GAP_PX;
-  return `<div class="office-grid" style="grid-template-columns: repeat(${grid.cols}, ${CELL_PX}px); width:${width + 16}px;">${cells.join('')}</div>`;
+  };
 }
 
 function renderAgentList(
