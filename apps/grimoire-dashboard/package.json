@@ -1,0 +1,35 @@
+{
+  "name": "@grimoire-kit/grimoire-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dashboard local de commande Grimoire Forge — live WebSocket sur activity.jsonl, pilotage réel (v0 scaffold).",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist coverage .release",
+    "dev": "vite --host --port 4174",
+    "dev:server": "tsx server/index.ts",
+    "dev:all": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev\"",
+    "build": "vite build",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "preview": "vite preview --host --port 4174",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/ws": "^8.18.0",
+    "concurrently": "^9.1.2",
+    "jsdom": "^26.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.2",
+    "ws": "^8.18.0"
+  }
+}

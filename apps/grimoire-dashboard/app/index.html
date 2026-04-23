@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grimoire Dashboard — Control Plane</title>
+    <meta name="description" content="Dashboard local de commande Grimoire Forge. Données runtime temps réel." />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="shell" data-connection="idle">
+      <aside id="nav" aria-label="Surfaces du control plane">
+        <header class="nav__header">
+          <span class="nav__brand">GRIMOIRE</span>
+          <span class="nav__kind">DASHBOARD · LOCAL</span>
+        </header>
+        <nav class="nav__list">
+          <a class="nav__link" href="#/observability" data-route="observability">
+            <span class="nav__dot" data-status="live"></span>
+            <span>Observability</span>
+          </a>
+          <a class="nav__link" href="#/office" data-route="office">
+            <span class="nav__dot" data-status="live"></span>
+            <span>Agents · Office</span>
+          </a>
+          <a class="nav__link" href="#/kanban" data-route="kanban">
+            <span class="nav__dot" data-status="live"></span>
+            <span>Kanban</span>
+          </a>
+          <a class="nav__link" href="#/flows" data-route="flows">
+            <span class="nav__dot" data-status="partial"></span>
+            <span>Flows</span>
+          </a>
+          <a class="nav__link" href="#/console" data-route="console">
+            <span class="nav__dot" data-status="partial"></span>
+            <span>Console</span>
+          </a>
+        </nav>
+        <footer class="nav__footer">
+          <div class="nav__meta">
+            <span class="nav__meta-label">STATUT</span>
+            <span id="conn-state" class="nav__meta-value">idle</span>
+          </div>
+          <div class="nav__meta">
+            <span class="nav__meta-label">SOURCE</span>
+            <span id="conn-source" class="nav__meta-value">—</span>
+          </div>
+          <div class="nav__meta">
+            <span class="nav__meta-label">ÉVÉNEMENTS</span>
+            <span id="conn-count" class="nav__meta-value">0</span>
+          </div>
+        </footer>
+      </aside>
+      <main id="view-mount" aria-live="polite"></main>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
