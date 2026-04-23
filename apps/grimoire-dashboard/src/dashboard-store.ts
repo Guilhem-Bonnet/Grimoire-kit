@@ -30,6 +30,10 @@ import {
   createOfficeDebugPanelView,
   type OfficeDebugPanelView
 } from '@game/state/office-debug-panel-view';
+import {
+  buildFlowGraphView,
+  type FlowGraphView
+} from '@game/state/flow-graph-view';
 
 import type { ConnectionState } from './dashboard-ws-client';
 import type { ServerMessage } from './contracts/wsProtocol';
@@ -43,6 +47,7 @@ export interface DashboardStateSnapshot {
   placement: OfficePlacement;
   timeline: OfficeTimeline;
   debugPanel: OfficeDebugPanelView;
+  flowGraph: FlowGraphView;
   lastError: string | null;
   receivedCount: number;
   droppedCount: number;
@@ -68,6 +73,7 @@ function emptySnapshot(): DashboardStateSnapshot {
     placement: resolveOfficePlacement(office.characters, office.grid),
     timeline: buildOfficeTimeline([]),
     debugPanel: createOfficeDebugPanelView([]),
+    flowGraph: buildFlowGraphView([]),
     lastError: null,
     receivedCount: 0,
     droppedCount: 0
@@ -178,12 +184,14 @@ export class DashboardStore {
     this.previousPlacement = placement;
     const timeline = buildOfficeTimeline(partial.events);
     const debugPanel = createOfficeDebugPanelView(partial.events);
+    const flowGraph = buildFlowGraphView(partial.events, { limit: 50 });
     return {
       ...partial,
       office,
       placement,
       timeline,
-      debugPanel
+      debugPanel,
+      flowGraph
     };
   }
 

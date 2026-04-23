@@ -1,69 +1,99 @@
-import type { DashboardStateSnapshot } from '../dashboard-store';
 import { createViewShell, type View } from './view-common';
 
 /**
- * Flows view — placeholder. Lists distinct `source_hook` keys + their event
- * volume, as a first approximation of active flows. Real flow graph
- * (with edges between events) is deferred to a later iteration.
+ * Flows view — V3.S3.7 part 3.
+ *
+ * Consumes `DashboardStateSnapshot.flowGraph`, a pure projection that
+ * groups HookEvents by `correlation_id`. Each flow exposes its
+ * participants, scopes, phase mix, duration and node sequence.
  */
 export function createFlowsView(): View {
   let bodyRef: HTMLElement | null = null;
   return {
     route: 'flows',
     title: 'Flows',
-    status: 'partial',
+    status: 'live',
     mount(root) {
       const { root: viewRoot, body } = createViewShell({
         title: 'Flows',
-        subtitle: 'Vue partielle — recensement par source_hook. Graphe de flow à venir.',
-        status: 'partial'
+        subtitle: 'Flows corrélés par correlation_id — agents, scopes, phases, durée.',
+        status: 'live'
       });
       root.replaceChildren(viewRoot);
       bodyRef = body;
     },
     update(snapshot) {
       if (!bodyRef) return;
-      const counts = new Map<string, { count: number; lastTs: string; scopes: Set<string> }>();
-      for (const event of snapshot.events) {
-        const key = event.source_hook || 'unknown';
-        const entry = counts.get(key) ?? { count: 0, lastTs: event.ts, scopes: new Set<string>() };
-        entry.count += 1;
-        if (event.ts > entry.lastTs) entry.lastTs = event.ts;
-        entry.scopes.add(event.scope);
-        counts.set(key, entry);
+      const { flowGraph } = snapshot;
+
+      if (flowGraph.flows.length === 0 && flowGraph.orphans.length === 0) {
+        bodyRef.innerHTML = `
+          <section class="panel">
+            <h2 class="panel__title">Flows corrélés</h2>
+            <div class="empty">Aucun événement corrélé reçu.</div>
+          </section>`;
+        return;
       }
-      const rows = [...counts.entries()]
-        .sort((a, b) => b[1].count - a[1].count)
-        .map(
-          ([hook, data]) => `
-          <tr>
-            <td>${escape(hook)}</td>
-            <td>${data.count}</td>
-            <td>${[...data.scopes].map((s) => `<span class="badge">${escape(s)}</span>`).join(' ')}</td>
-            <td>${escape(data.lastTs)}</td>
-          </tr>`
-        )
+
+      const flowsHtml = flowGraph.flows
+        .map((flow) => {
+          const phases = Object.entries(flow.phaseCounters)
+            .map(([p, c]) => `<span class="badge">${escape(p)}: ${c}</span>`)
+            .join(' ');
+          const agents = flow.agents.length
+            ? flow.agents.map((a) => `<span class="badge">${escape(a)}</span>`).join(' ')
+            : '<span class="muted">—</span>';
+          const scopes = flow.scopes.map((s) => `<span class="badge">${escape(s)}</span>`).join(' ');
+          const timeline = flow.nodes
+            .map((n) => {
+              const hms = n.ts.split('T')[1]?.replace('Z', '') ?? n.ts;
+              return `<li><code>${escape(hms)}</code> · <strong>${escape(n.sourceHook)}</strong> · ${escape(n.phase)}${n.agentId ? ` · ${escape(n.agentId)}` : ''}</li>`;
+            })
+            .join('');
+          return `
+            <details class="panel" style="margin-bottom:12px;">
+              <summary style="cursor:pointer; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <code>${escape(flow.correlationId.slice(0, 12))}…</code>
+                <span class="badge">${flow.nodes.length} events</span>
+                <span class="badge">${formatDuration(flow.durationMs)}</span>
+                ${agents}
+              </summary>
+              <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <div>
+                  <div class="muted" style="font-family:var(--mono); font-size:12px; margin-bottom:4px;">scopes</div>
+                  ${scopes}
+                </div>
+                <div>
+                  <div class="muted" style="font-family:var(--mono); font-size:12px; margin-bottom:4px;">phases</div>
+                  ${phases}
+                </div>
+              </div>
+              <div style="margin-top:12px;">
+                <div class="muted" style="font-family:var(--mono); font-size:12px; margin-bottom:4px;">séquence</div>
+                <ol style="font-family:var(--mono); font-size:12px; line-height:1.6; padding-left:20px;">${timeline}</ol>
+              </div>
+            </details>`;
+        })
         .join('');
+
+      const orphanRow = flowGraph.orphans.length
+        ? `<div class="banner"><strong>ORPHELINS</strong>${flowGraph.orphans.length} événement(s) sans correlation_id.</div>`
+        : '';
+
       bodyRef.innerHTML = `
-        <div class="banner">
-          <strong>PARTIEL</strong>
-          Le véritable graphe de flows (edges HookEvent→HookEvent) n'est pas encore branché.
-          Cette vue liste pour l'instant les hooks observés et leur volume.
-        </div>
         <section class="panel">
-          <h2 class="panel__title">Hooks observés</h2>
-          ${
-            counts.size === 0
-              ? '<div class="empty">Aucun événement reçu.</div>'
-              : `<table class="table">
-                  <thead><tr><th>source_hook</th><th>events</th><th>scopes</th><th>dernier</th></tr></thead>
-                  <tbody>${rows}</tbody>
-                </table>`
-          }
-        </section>
-      `;
+          <h2 class="panel__title">Flows corrélés (${flowGraph.flows.length})</h2>
+          ${orphanRow}
+          ${flowsHtml || '<div class="empty">Aucun flow corrélé.</div>'}
+        </section>`;
     }
   };
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = (ms / 1000).toFixed(1);
+  return `${s}s`;
 }
 
 function escape(value: string): string {
