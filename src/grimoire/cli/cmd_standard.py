@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import typer
@@ -10,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.core.agentic_standard import (
+    StandardProviderDetection,
     StandardVerificationResult,
     detect_standard_providers,
     list_profiles,
@@ -22,6 +24,7 @@ standard_app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+# Human-readable Rich output goes to stderr so JSON emitted with typer.echo remains pipeable on stdout.
 console = Console(stderr=True)
 
 
@@ -45,7 +48,7 @@ def _checks(result: StandardVerificationResult) -> list[dict[str, str | None]]:
     ]
 
 
-def _provider_detection_json() -> list[dict[str, object]]:
+def _provider_detection_json(providers: Sequence[StandardProviderDetection]) -> list[dict[str, object]]:
     return [
         {
             "id": provider.id,
@@ -53,7 +56,7 @@ def _provider_detection_json() -> list[dict[str, object]]:
             "signals": list(provider.signals),
             "note": provider.note,
         }
-        for provider in detect_standard_providers()
+        for provider in providers
     ]
 
 
@@ -124,7 +127,7 @@ def detect_providers(ctx: typer.Context) -> None:
     """Detect non-secret provider availability signals."""
     detections = detect_standard_providers()
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(_provider_detection_json(), indent=2, ensure_ascii=False))
+        typer.echo(json.dumps(_provider_detection_json(detections), indent=2, ensure_ascii=False))
         return
 
     table = Table(title="Detected LLM provider signals")

@@ -99,3 +99,14 @@ Le kit possède une première structure pour transformer le standard en flow act
 - Le registry provider est audité et vérifié, mais pas encore branché à un routeur runtime.
 - Les gates d'évidence sont visibles dans le task envelope et l'evidence pack, mais pas encore imposées par une FSM d'exécution.
 - Les sources knowledge sont déclarées ; le manifeste d'index automatique et le doc-to-graph pipeline restent à brancher.
+
+## Étendre les profils
+
+Les profils livrés par défaut vivent dans `framework/agentic-standard/profile-map.yaml`. Pour créer un profil projet ou organisation :
+
+1. ajouter une entrée dans `profiles` avec un `id`, des `required_artifacts`, des `mapped_capabilities` et du `minimum_evidence` ;
+2. déclarer tout nouveau type d'artefact dans `artifact_types` avec un template associé ;
+3. ajouter sa destination dans `generation_targets` si l'artefact doit être généré ;
+4. versionner les templates custom avec les autres artefacts de gouvernance.
+
+La commande `standard init` ne remplace pas les artefacts existants sauf avec `--force`, ce qui permet de faire évoluer la carte de profils sans écraser une baseline projet déjà remplie.

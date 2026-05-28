@@ -88,12 +88,22 @@ def test_setup_can_enable_selected_provider(tmp_path: Path) -> None:
     assert not any(check.id == "providers.none_enabled" for check in result.checks)
 
 
-def test_detect_standard_providers_masks_secret_values() -> None:
-    detections = {provider.id: provider for provider in detect_standard_providers({"OPENAI_API_KEY": "secret-value"})}
+@pytest.mark.parametrize(
+    ("provider_id", "env_var"),
+    [
+        ("github-copilot", "GITHUB_TOKEN"),
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("google-gemini", "GEMINI_API_KEY"),
+        ("local", "OLLAMA_HOST"),
+    ],
+)
+def test_detect_standard_providers_masks_secret_values(provider_id: str, env_var: str) -> None:
+    detections = {provider.id: provider for provider in detect_standard_providers({env_var: "secret-value"})}
 
-    assert detections["openai"].available
-    assert "env:OPENAI_API_KEY=set" in detections["openai"].signals
-    assert "secret-value" not in str(detections["openai"])
+    assert detections[provider_id].available
+    assert f"env:{env_var}=set" in detections[provider_id].signals
+    assert "secret-value" not in str(detections[provider_id])
 
 
 def test_verify_fails_when_default_provider_is_disabled(tmp_path: Path) -> None:

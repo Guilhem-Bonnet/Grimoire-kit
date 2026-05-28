@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import shutil
@@ -410,8 +411,6 @@ def _manifest_content(profile: StandardProfile, project_name: str, task_id: str,
             for artifact in artifacts
         ],
     }
-    import io
-
     stream = io.StringIO()
     _yaml().dump(data, stream)
     return stream.getvalue()
@@ -497,8 +496,6 @@ def configure_provider_registry(
     routing["default_fallback_chain"] = list(selected)
     routing["require_capability_match"] = True
     routing["require_data_policy_match"] = True
-
-    import io
 
     stream = io.StringIO()
     _yaml().dump(data, stream)
