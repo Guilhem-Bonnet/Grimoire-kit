@@ -33,6 +33,7 @@
   <a href="#-architecture">Architecture</a> •
   <a href="#-features">Features</a> •
   <a href="#-outils-cli">Outils CLI</a> •
+  <a href="docs/agentic-standard-integration.md">Standard agentique</a> •
   <a href="docs/concepts.md">Concepts</a> •
   <a href="docs/getting-started.md">Guide complet</a> •
   <a href="CHANGELOG.md">Changelog</a>

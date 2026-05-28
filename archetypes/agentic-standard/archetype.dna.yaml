@@ -1,0 +1,135 @@
+$schema: "grimoire-archetype-dna/v1"
+
+id: agentic-standard
+name: "Agentic Standard"
+version: "0.1.0"
+description: "Pont installable entre un corpus normatif agentique externe et les artefacts consommables Grimoire Kit."
+icon: "⚖️"
+author: "grimoire-kit"
+tags: [standard, governance, compliance, context, knowledge, llm-provider, evidence]
+
+inherits: minimal
+
+traits:
+  - name: normative-traceability
+    description: "Chaque artefact standard-aware garde une trace vers l'exigence, le contrôle ou le pattern amont."
+    rule: "Ne pas reformuler une obligation comme source de vérité locale sans référence au corpus normatif amont. Toute conformité déclarée pointe vers mission-brief, compliance-declaration ou evidence-pack."
+    agents_affected: "*"
+  - name: evidence-gated-workflow
+    description: "Aucune livraison standard-aware sans preuve attachée."
+    rule: "Avant de déclarer une tâche terminée, produire ou mettre à jour un Evidence Pack et documenter les contrôles non applicables."
+    agents_affected: "*"
+  - name: context-orchestrated
+    description: "Le contexte n'est pas injecté en vrac : il est sélectionné, borné et justifié."
+    rule: "Pour toute tâche complexe, renseigner les sources de contexte, la raison de sélection, la fraîcheur et le budget dans le Task Envelope."
+    agents_affected: "*"
+  - name: knowledge-indexer-aware
+    description: "Les sources externes indexées sont séparées de la mémoire agentique."
+    rule: "Toute donnée externe greffée via dossier, dépôt, URL, API, MCP ou base de données doit être déclarée dans knowledge-source-registry.yaml avant usage récurrent."
+    agents_affected: "*"
+  - name: provider-neutral-routing
+    description: "Les appels LLM sont compatibles Copilot, Codex/OpenAI, Claude, Gemini et local via registre."
+    rule: "Aucun provider ou modèle non déclaré dans llm-provider-registry.yaml ne doit devenir une dépendance implicite du flow."
+    agents_affected: "*"
+
+constraints:
+  - id: no-local-norm-fork
+    description: "Ne pas forker silencieusement la norme dans un template Grimoire."
+    enforcement: hard
+    checked_by: agent-optimizer
+  - id: evidence-pack-required
+    description: "Un Evidence Pack est requis pour toute déclaration de conformité."
+    enforcement: hard
+    checked_by: agent-optimizer
+  - id: knowledge-not-memory
+    description: "La base de connaissance indexée ne doit pas être mélangée à la mémoire agentique."
+    enforcement: hard
+    checked_by: memory-keeper
+  - id: registered-provider-only
+    description: "Les providers LLM doivent être déclarés avant usage."
+    enforcement: hard
+    checked_by: agent-optimizer
+
+values:
+  - name: normative-clarity
+    description: "Séparer ce qui est obligatoire, informatif, généré et spécifique au projet."
+    priority: 1
+  - name: provider-portability
+    description: "Un flow Grimoire ne dépend pas d'un fournisseur LLM unique par accident."
+    priority: 1
+  - name: evidence-first-delivery
+    description: "La preuve de livraison fait partie du produit livré."
+    priority: 1
+
+tools_required:
+  - name: git
+    description: "Traçabilité des changements et références vers la norme amont."
+    required: true
+    check_command: "which git"
+  - name: python3
+    description: "Validation et scripts Grimoire."
+    required: false
+    check_command: "which python3"
+
+acceptance_criteria:
+  - id: mission-brief-present
+    description: "Le projet déclare son profil et son périmètre standard-aware."
+    enforcement: hard
+    context: "Template framework/agentic-standard/templates/mission-brief.md"
+    triggers_on: ["_grimoire/standard/mission-brief.md"]
+    checked_by: agent-optimizer
+  - id: task-envelope-used
+    description: "Les tâches complexes ont un état, un contexte borné et des limites d'outils."
+    enforcement: soft
+    context: "Template framework/agentic-standard/templates/task-envelope.md"
+    triggers_on: ["_grimoire-output/evidence/**/task-envelope.md"]
+    checked_by: agent-optimizer
+  - id: evidence-pack-used
+    description: "Les validations et écarts sont attachés à un Evidence Pack."
+    enforcement: hard
+    context: "Template framework/agentic-standard/templates/evidence-pack.md"
+    triggers_on: ["_grimoire-output/evidence/**/evidence-pack.md"]
+    checked_by: agent-optimizer
+  - id: knowledge-sources-declared
+    description: "Les sources documentaires externes indexées sont déclarées avec trust boundary."
+    enforcement: hard
+    context: "Knowledge Base Indexer — pas une mémoire."
+    triggers_on: ["_grimoire/standard/knowledge-source-registry.yaml"]
+    checked_by: memory-keeper
+  - id: providers-declared
+    description: "Les providers LLM utilisables sont explicitement déclarés."
+    enforcement: hard
+    context: "Provider-first routing."
+    triggers_on: ["_grimoire/standard/llm-provider-registry.yaml"]
+    checked_by: agent-optimizer
+
+agents:
+  - path: "../../archetypes/meta/agents/project-navigator.md"
+    required: true
+    description: "Atlas — cartographie du projet et des artefacts standard-aware"
+  - path: "../../archetypes/meta/agents/agent-optimizer.md"
+    required: true
+    description: "Sentinel — vérification des evidence gates et guardrails"
+  - path: "../../archetypes/meta/agents/memory-keeper.md"
+    required: true
+    description: "Mnemo — séparation mémoire / connaissance indexée"
+
+workflows: []
+shared_context_template: "../../archetypes/agentic-standard/shared-context.tpl.md"
+prompts_directory: null
+
+compatible_with: [minimal, infra-ops, web-app, fix-loop, platform-engineering, features/vector-memory, stack/go, stack/typescript, stack/python, stack/terraform, stack/k8s]
+incompatible_with: []
+requires: [minimal]
+
+auto_detect:
+  files: ["_grimoire/standard/mission-brief.md", "_grimoire/standard/compliance-declaration.md"]
+  directories: ["_grimoire/standard/", "_grimoire-output/evidence/"]
+  confidence_boost: 80
+  exclusive: false
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-05-10"
+    changes:
+      - "Création du pont agentic-standard : traçabilité normative, evidence gates, Knowledge Base Indexer, registre LLM provider-neutral."
