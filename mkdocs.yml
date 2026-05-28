@@ -82,6 +82,7 @@ nav:
       - Onboarding: onboarding.md
   - Concepts:
       - Architecture: concepts.md
+      - Standard agentique: agentic-standard-integration.md
       - Mémoire: memory-system.md
       - Workflows: workflow-design-patterns.md
       - Taxonomie Workflows: workflow-taxonomy.md
