@@ -23,6 +23,7 @@ from rich.table import Table
 from grimoire.__version__ import __version__
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_standard import standard_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
 from grimoire.core.log import configure_logging
@@ -223,6 +224,7 @@ def version_cmd(ctx: typer.Context) -> None:
 _KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
+    "agentic-standard",
 })
 
 _KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
@@ -871,6 +873,7 @@ app.add_typer(registry_app, name="registry", rich_help_panel="Agents")
 workflows_app = typer.Typer(help="Inspect available Copilot workflows.")
 app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
 app.add_typer(workflows_app, name="wf", hidden=True)
+app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 
 
 _WF_DESCRIPTIONS: dict[str, str] = {

@@ -32,6 +32,7 @@ console = Console(stderr=True)
 KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
+    "agentic-standard",
 })
 
 KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
@@ -41,6 +42,7 @@ _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
     "web-app": ("🌐 Web App", "2 agents", "TDD, type-safety, API-first"),
     "infra-ops": ("⚙️  Infra & DevOps", "7 agents", "IaC, security-first, observability"),
     "platform-engineering": ("🏗️  Platform Eng.", "4 agents", "architecture-first, contract-driven"),
+    "agentic-standard": ("⚖️  Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
     "creative-studio": ("🎨 Creative Studio", "5 agents", "visual-consistency, brand-voice"),
     "fix-loop": ("🔁 Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
 }
