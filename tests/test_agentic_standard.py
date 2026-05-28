@@ -49,6 +49,28 @@ def test_verify_passes_after_setup(tmp_path: Path) -> None:
 
     assert result.ok
     assert result.profile == "controlled"
+    assert result.warning_count > 0
+    assert any(check.id == "providers.none_enabled" for check in result.checks)
+
+
+def test_orchestrated_verify_reports_knowledge_placeholder(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="orchestrated")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert result.ok
+    assert any(check.id == "knowledge.no_real_source" for check in result.checks)
+
+
+def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter")
+    manifest = tmp_path / "_grimoire" / "standard" / "standard-profile.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("profile: starter", "profile: production"), encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path, profile_id="starter")
+
+    assert not result.ok
+    assert any(check.id == "manifest.profile_mismatch" for check in result.checks)
 
 
 def test_cli_standard_init_and_verify_json(tmp_path: Path) -> None:
@@ -78,3 +100,22 @@ def test_cli_standard_init_and_verify_json(tmp_path: Path) -> None:
     verify_data = json.loads(verify_result.output)
     assert verify_data["ok"] is True
     assert verify_data["profile"] == "starter"
+    assert "checks" in verify_data
+
+
+def test_cli_standard_audit_markdown(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "orchestrated"])
+
+    result = runner.invoke(app, [
+        "standard",
+        "audit",
+        str(tmp_path),
+        "--profile",
+        "orchestrated",
+        "--markdown",
+    ])
+
+    assert result.exit_code == 0
+    assert "# Agentic Standard Audit" in result.output
+    assert "knowledge.no_real_source" in result.output
