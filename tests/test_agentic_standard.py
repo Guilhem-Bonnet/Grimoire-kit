@@ -136,6 +136,17 @@ def test_verify_blocks_knowledge_locator_outside_project_root(tmp_path: Path) ->
     assert any(check.id == "knowledge.locator_outside_root" for check in result.checks)
 
 
+def test_verify_blocks_knowledge_index_manifest_outside_project_root(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="orchestrated")
+    registry = tmp_path / "_grimoire/standard/knowledge-source-registry.yaml"
+    registry.write_text(registry.read_text(encoding="utf-8").replace('index_manifest: ""', 'index_manifest: "../../../etc/passwd"'), encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert not result.ok
+    assert any(check.id == "knowledge.index_manifest_outside_root" for check in result.checks)
+
+
 def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="starter")
     manifest = tmp_path / "_grimoire" / "standard" / "standard-profile.yaml"
