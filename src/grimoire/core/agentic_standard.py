@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -43,6 +44,7 @@ PROVIDER_DEFAULT_MODELS = {
     "google-gemini": ("gemini-family",),
     "local": ("local-open-weight",),
 }
+TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,8 +306,35 @@ def _generation_targets() -> dict[str, str]:
     return targets
 
 
+def normalize_task_id(task_id: str) -> str:
+    """Validate task ids before using them in generated paths."""
+    normalized = str(task_id).strip()
+    if not TASK_ID_PATTERN.fullmatch(normalized) or normalized in {".", ".."}:
+        msg = (
+            f"Invalid task_id {task_id!r}. Use 1-128 letters, numbers, dots, underscores, "
+            "or hyphens, starting with a letter or number."
+        )
+        raise ValueError(msg)
+    return normalized
+
+
+def _ensure_inside_root(root: Path, path: Path, *, label: str) -> Path:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
+        msg = f"{label} resolves outside project root: {path}"
+        raise ValueError(msg)
+    return resolved_path
+
+
+def _is_inside_root(root: Path, path: Path) -> bool:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
 def _format_destination(path_template: str, task_id: str) -> Path:
-    return Path(path_template.replace("{task-id}", task_id))
+    return Path(path_template.replace("{task-id}", normalize_task_id(task_id)))
 
 
 def _single_line_value(value: str) -> str:
@@ -498,6 +527,7 @@ def setup_standard_profile(
 
     for artifact in artifacts:
         dst = root / artifact.destination
+        _ensure_inside_root(root, dst, label=f"Artifact {artifact.artifact_type!r}")
         if dst.exists() and not force:
             result.skipped.append(artifact.destination)
             continue
@@ -763,7 +793,9 @@ def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: Sta
             local_locator = True
         if source.get("enabled") is True and locator and local_locator:
             locator_path = (root / locator).resolve()
-            if not locator_path.exists():
+            if not _is_inside_root(root, locator_path):
+                _add_check(result, "knowledge.locator_outside_root", "error", f"Knowledge source {source_id!r} locator must stay within project root: {locator}", path=rel_path)
+            elif not locator_path.exists():
                 _add_check(result, "knowledge.locator_not_found", "warning", f"Knowledge source {source_id!r} locator does not exist: {locator}", path=rel_path)
         trust = source.get("trust")
         if source.get("enabled") is True and not isinstance(trust, dict):
@@ -775,8 +807,12 @@ def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: Sta
         evidence = source.get("evidence")
         if source.get("enabled") is True and isinstance(evidence, dict):
             manifest = str(evidence.get("index_manifest", "")).strip()
-            if manifest and manifest != "planned" and not (root / manifest).exists():
-                _add_check(result, "knowledge.index_manifest_missing", "warning", f"Knowledge source {source_id!r} index manifest is missing: {manifest}", path=rel_path)
+            if manifest and manifest != "planned":
+                manifest_path = root / manifest
+                if not _is_inside_root(root, manifest_path):
+                    _add_check(result, "knowledge.index_manifest_outside_root", "error", f"Knowledge source {source_id!r} index manifest must stay within project root: {manifest}", path=rel_path)
+                elif not manifest_path.exists():
+                    _add_check(result, "knowledge.index_manifest_missing", "warning", f"Knowledge source {source_id!r} index manifest is missing: {manifest}", path=rel_path)
 
     if profile.id in {"orchestrated", "governed", "production"} and real_sources == 0:
         _add_check(

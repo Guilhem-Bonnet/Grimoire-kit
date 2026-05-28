@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from ruamel.yaml import YAML
 from typer.testing import CliRunner
 
@@ -51,6 +52,11 @@ def test_setup_sanitizes_project_name_before_template_rendering(tmp_path: Path) 
     assert data["metadata"]["project"] == 'Evil" malicious_key: true'
     assert "malicious_key" not in data["metadata"]
     assert "\n  malicious_key" not in mission
+
+
+def test_setup_rejects_task_id_path_traversal(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Invalid task_id"):
+        setup_standard_profile(tmp_path, profile_id="starter", task_id="../../outside")
 
 
 def test_verify_detects_missing_artifacts(tmp_path: Path) -> None:
@@ -117,6 +123,17 @@ def test_orchestrated_verify_reports_knowledge_placeholder(tmp_path: Path) -> No
 
     assert result.ok
     assert any(check.id == "knowledge.no_real_source" for check in result.checks)
+
+
+def test_verify_blocks_knowledge_locator_outside_project_root(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="orchestrated")
+    registry = tmp_path / "_grimoire/standard/knowledge-source-registry.yaml"
+    registry.write_text(registry.read_text(encoding="utf-8").replace('locator: ""', 'locator: "../../../etc/passwd"'), encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert not result.ok
+    assert any(check.id == "knowledge.locator_outside_root" for check in result.checks)
 
 
 def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
