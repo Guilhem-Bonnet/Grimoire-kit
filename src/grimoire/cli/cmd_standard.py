@@ -11,6 +11,7 @@ from rich.table import Table
 
 from grimoire.core.agentic_standard import (
     StandardVerificationResult,
+    detect_standard_providers,
     list_profiles,
     setup_standard_profile,
     verify_standard_profile,
@@ -41,6 +42,18 @@ def _checks(result: StandardVerificationResult) -> list[dict[str, str | None]]:
             "path": str(check.path) if check.path else None,
         }
         for check in result.checks
+    ]
+
+
+def _provider_detection_json() -> list[dict[str, object]]:
+    return [
+        {
+            "id": provider.id,
+            "available": provider.available,
+            "signals": list(provider.signals),
+            "note": provider.note,
+        }
+        for provider in detect_standard_providers()
     ]
 
 
@@ -106,22 +119,55 @@ def profiles(ctx: typer.Context) -> None:
     console.print(table)
 
 
+@standard_app.command("detect-providers")
+def detect_providers(ctx: typer.Context) -> None:
+    """Detect non-secret provider availability signals."""
+    detections = detect_standard_providers()
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(_provider_detection_json(), indent=2, ensure_ascii=False))
+        return
+
+    table = Table(title="Detected LLM provider signals")
+    table.add_column("Provider")
+    table.add_column("Available")
+    table.add_column("Signals")
+    table.add_column("Note")
+    for provider in detections:
+        table.add_row(
+            provider.id,
+            "yes" if provider.available else "no",
+            ", ".join(provider.signals) if provider.signals else "-",
+            provider.note,
+        )
+    console.print(table)
+
+
 @standard_app.command("init")
 def init_profile(
     ctx: typer.Context,
-    project_root: Path = typer.Argument(Path(), help="Target project root."),
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
     profile: str = typer.Option("orchestrated", "--profile", "-p", help="Profile to generate."),
     task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id for generated task artifacts."),
     project_name: str | None = typer.Option(None, "--project-name", help="Project name written into generated artifacts."),
+    provider: list[str] | None = typer.Option(None, "--provider", help="Provider to enable. Can be repeated."),  # noqa: B008
+    providers: str | None = typer.Option(None, "--providers", help="Comma-separated providers to enable."),
+    provider_policy: str = typer.Option("hosted-safe", "--provider-policy", help="hosted-safe | local-first | mixed."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing standard artifacts."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show generated paths without writing files."),
 ) -> None:
     """Generate standard-aware artifacts for a project."""
+    provider_ids: list[str] = []
+    if provider:
+        provider_ids.extend(provider)
+    if providers:
+        provider_ids.append(providers)
     result = setup_standard_profile(
         project_root,
         profile_id=profile,
         task_id=task_id,
         project_name=project_name,
+        provider_ids=provider_ids,
+        provider_policy=provider_policy,
         force=force,
         dry_run=dry_run,
     )
@@ -132,6 +178,8 @@ def init_profile(
             "profile": result.profile,
             "project_root": str(result.project_root),
             "dry_run": result.dry_run,
+            "providers": provider_ids,
+            "provider_policy": provider_policy,
             "written": _paths(result.written),
             "skipped": _paths(result.skipped),
         }, indent=2, ensure_ascii=False))
@@ -143,12 +191,14 @@ def init_profile(
         console.print(f"  [green]✓[/green] {path}")
     for path in result.skipped:
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
+    if provider_ids:
+        console.print(f"  [cyan]providers[/cyan] {', '.join(provider_ids)} ({provider_policy})")
 
 
 @standard_app.command("verify")
 def verify_profile(
     ctx: typer.Context,
-    project_root: Path = typer.Argument(Path(), help="Target project root."),
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
     task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id to verify."),
 ) -> None:
@@ -193,7 +243,7 @@ def verify_profile(
 @standard_app.command("audit")
 def audit_profile(
     ctx: typer.Context,
-    project_root: Path = typer.Argument(Path(), help="Target project root."),
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
     task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id to audit."),
     markdown: bool = typer.Option(False, "--markdown", help="Emit a markdown audit report."),

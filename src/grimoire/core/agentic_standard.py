@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +19,30 @@ PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 STANDARD_DIR = Path("_grimoire/standard")
 EVIDENCE_DIR = Path("_grimoire-output/evidence")
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
+LLM_PROVIDER_REGISTRY_FILE = STANDARD_DIR / "llm-provider-registry.yaml"
+SUPPORTED_PROVIDER_IDS = ("github-copilot", "openai", "anthropic", "google-gemini", "local")
+SUPPORTED_PROVIDER_POLICIES = ("hosted-safe", "local-first", "mixed")
+PROVIDER_ALIASES = {
+    "copilot": "github-copilot",
+    "github": "github-copilot",
+    "github-copilot": "github-copilot",
+    "codex": "openai",
+    "openai": "openai",
+    "claude": "anthropic",
+    "anthropic": "anthropic",
+    "gemini": "google-gemini",
+    "google": "google-gemini",
+    "google-gemini": "google-gemini",
+    "ollama": "local",
+    "local": "local",
+}
+PROVIDER_DEFAULT_MODELS = {
+    "github-copilot": ("copilot-integrated-models",),
+    "openai": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
+    "anthropic": ("claude-sonnet-4.6", "claude-opus-4.7", "claude-haiku-4.5"),
+    "google-gemini": ("gemini-family",),
+    "local": ("local-open-weight",),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +63,16 @@ class StandardArtifact:
     artifact_type: str
     source: Path
     destination: Path
+
+
+@dataclass(frozen=True, slots=True)
+class StandardProviderDetection:
+    """Non-secret signal showing whether a provider appears available locally."""
+
+    id: str
+    available: bool
+    signals: tuple[str, ...]
+    note: str
 
 
 @dataclass(slots=True)
@@ -101,6 +138,77 @@ def _yaml() -> YAML:
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     return yaml
+
+
+def normalize_provider_ids(provider_ids: Iterable[str]) -> tuple[str, ...]:
+    """Normalize user-facing provider names to registry ids."""
+    normalized: list[str] = []
+    for raw_provider in provider_ids:
+        for raw_part in str(raw_provider).split(","):
+            provider = raw_part.strip().lower()
+            if not provider:
+                continue
+            provider_id = PROVIDER_ALIASES.get(provider)
+            if provider_id is None:
+                available = ", ".join(SUPPORTED_PROVIDER_IDS)
+                msg = f"Unknown LLM provider {raw_part!r}. Available: {available}"
+                raise ValueError(msg)
+            if provider_id not in normalized:
+                normalized.append(provider_id)
+    return tuple(normalized)
+
+
+def _masked_env_signal(env: Mapping[str, str], *names: str) -> list[str]:
+    return [f"env:{name}=set" for name in names if env.get(name)]
+
+
+def detect_standard_providers(env: Mapping[str, str] | None = None) -> tuple[StandardProviderDetection, ...]:
+    """Detect provider availability without reading or logging secret values."""
+    environment = os.environ if env is None else env
+    provider_signals: dict[str, list[str]] = {
+        "github-copilot": [],
+        "openai": [],
+        "anthropic": [],
+        "google-gemini": [],
+        "local": [],
+    }
+
+    executable_signals = {
+        "github-copilot": ("gh",),
+        "openai": ("codex",),
+        "anthropic": ("claude",),
+        "google-gemini": ("gemini",),
+        "local": ("ollama",),
+    }
+    for provider_id, executables in executable_signals.items():
+        for executable in executables:
+            if shutil.which(executable):
+                provider_signals[provider_id].append(f"exe:{executable}")
+
+    provider_signals["github-copilot"].extend(
+        _masked_env_signal(environment, "GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN", "VSCODE_PID")
+    )
+    provider_signals["openai"].extend(_masked_env_signal(environment, "OPENAI_API_KEY", "OPENAI_BASE_URL"))
+    provider_signals["anthropic"].extend(_masked_env_signal(environment, "ANTHROPIC_API_KEY"))
+    provider_signals["google-gemini"].extend(_masked_env_signal(environment, "GEMINI_API_KEY", "GOOGLE_API_KEY"))
+    provider_signals["local"].extend(_masked_env_signal(environment, "OLLAMA_HOST"))
+
+    notes = {
+        "github-copilot": "Copilot availability still depends on the editor/CLI runtime authorization.",
+        "openai": "OpenAI/Codex availability requires project-approved credentials.",
+        "anthropic": "Claude availability requires project-approved credentials.",
+        "google-gemini": "Gemini availability requires project-approved credentials.",
+        "local": "Local providers still require explicit data classification.",
+    }
+    return tuple(
+        StandardProviderDetection(
+            id=provider_id,
+            available=bool(provider_signals[provider_id]),
+            signals=tuple(provider_signals[provider_id]),
+            note=notes[provider_id],
+        )
+        for provider_id in SUPPORTED_PROVIDER_IDS
+    )
 
 
 def _profile_map_file() -> Path:
@@ -269,12 +377,103 @@ def _manifest_content(profile: StandardProfile, project_name: str, task_id: str,
     return stream.getvalue()
 
 
+def _provider_data_policy(provider_id: str, provider_policy: str) -> dict[str, Any]:
+    if provider_policy not in SUPPORTED_PROVIDER_POLICIES:
+        available = ", ".join(SUPPORTED_PROVIDER_POLICIES)
+        msg = f"Unknown provider policy {provider_policy!r}. Available: {available}"
+        raise ValueError(msg)
+
+    hosted_allowed = ["public-docs", "project-source", "generated-artifacts", "non-secret-metadata"]
+    hosted_forbidden = ["secrets", "credentials", "personal-data", "regulated-data"]
+    if provider_id == "local":
+        allowed = [*hosted_allowed, "sensitive-local-only"]
+        forbidden = ["secrets-without-redaction", "regulated-data-without-approval"]
+        retention = "Local execution still requires explicit data classification."
+    else:
+        allowed = hosted_allowed
+        forbidden = hosted_forbidden
+        retention = "Hosted provider use requires project-approved credentials and data policy approval."
+
+    if provider_policy == "local-first" and provider_id != "local":
+        retention = "Disabled unless local execution cannot satisfy the declared capability."
+    elif provider_policy == "mixed":
+        retention = "Allowed only when capability and data-policy routing both match."
+    return {
+        "allowed_data_classes": allowed,
+        "forbidden_data_classes": forbidden,
+        "retention_notes": retention,
+    }
+
+
+def configure_provider_registry(
+    project_root: Path,
+    *,
+    provider_ids: Iterable[str],
+    provider_policy: str = "hosted-safe",
+) -> Path:
+    """Enable selected providers in an existing generated provider registry."""
+    selected = normalize_provider_ids(provider_ids)
+    if not selected:
+        msg = "At least one provider must be selected."
+        raise ValueError(msg)
+
+    root = project_root.resolve()
+    registry_path = root / LLM_PROVIDER_REGISTRY_FILE
+    if not registry_path.is_file():
+        msg = f"Selected profile has no provider registry to configure: {LLM_PROVIDER_REGISTRY_FILE}"
+        raise FileNotFoundError(msg)
+
+    data = _yaml().load(registry_path)
+    if not isinstance(data, dict):
+        msg = f"{LLM_PROVIDER_REGISTRY_FILE} must be a YAML mapping."
+        raise ValueError(msg)
+    providers = data.get("providers")
+    if not isinstance(providers, list):
+        msg = f"{LLM_PROVIDER_REGISTRY_FILE} must define a providers list."
+        raise ValueError(msg)
+
+    declared = {str(provider.get("id")) for provider in providers if isinstance(provider, dict) and provider.get("id")}
+    missing = [provider_id for provider_id in selected if provider_id not in declared]
+    if missing:
+        msg = f"Selected providers are not declared in the registry template: {', '.join(missing)}"
+        raise ValueError(msg)
+
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = str(provider.get("id", ""))
+        enabled = provider_id in selected
+        provider["enabled"] = enabled
+        if provider_id in PROVIDER_DEFAULT_MODELS:
+            provider["default_models"] = list(PROVIDER_DEFAULT_MODELS[provider_id])
+        provider["data_policy"] = _provider_data_policy(provider_id, provider_policy)
+        provider["fallback_order"] = [candidate for candidate in selected if candidate != provider_id]
+
+    routing = data.get("routing")
+    if not isinstance(routing, dict):
+        routing = {}
+        data["routing"] = routing
+    routing["default_provider"] = selected[0]
+    routing["default_fallback_chain"] = list(selected)
+    routing["require_capability_match"] = True
+    routing["require_data_policy_match"] = True
+
+    import io
+
+    stream = io.StringIO()
+    _yaml().dump(data, stream)
+    registry_path.write_text(stream.getvalue(), encoding="utf-8")
+    return LLM_PROVIDER_REGISTRY_FILE
+
+
 def setup_standard_profile(
     project_root: Path,
     *,
     profile_id: str,
     task_id: str = "bootstrap",
     project_name: str | None = None,
+    provider_ids: Iterable[str] = (),
+    provider_policy: str = "hosted-safe",
     force: bool = False,
     dry_run: bool = False,
 ) -> StandardSetupResult:
@@ -305,6 +504,19 @@ def setup_standard_profile(
             manifest_dst.parent.mkdir(parents=True, exist_ok=True)
             manifest_dst.write_text(_manifest_content(profile, name, task_id, artifacts), encoding="utf-8")
         result.written.append(STANDARD_PROFILE_FILE)
+
+    selected_providers = normalize_provider_ids(provider_ids)
+    if selected_providers:
+        if dry_run:
+            result.written.append(LLM_PROVIDER_REGISTRY_FILE)
+        else:
+            configured = configure_provider_registry(
+                root,
+                provider_ids=selected_providers,
+                provider_policy=provider_policy,
+            )
+            if configured not in result.written:
+                result.written.append(configured)
 
     return result
 
@@ -431,7 +643,17 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
         _add_check(result, "providers.none", "error", "Provider registry must declare at least one provider.", path=rel_path)
         return
 
+    provider_ids = {
+        str(provider.get("id"))
+        for provider in providers
+        if isinstance(provider, dict) and provider.get("id")
+    }
     enabled = [provider for provider in providers if isinstance(provider, dict) and provider.get("enabled") is True]
+    enabled_ids = {
+        str(provider.get("id"))
+        for provider in enabled
+        if provider.get("id")
+    }
     if profile.id in {"controlled", "orchestrated", "governed", "production"} and not enabled:
         _add_check(
             result,
@@ -454,15 +676,44 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
             capabilities = provider.get("allowed_capabilities")
             if not isinstance(capabilities, list) or not capabilities:
                 _add_check(result, "providers.capabilities_missing", "error", f"Enabled provider {provider_id!r} has no capabilities.", path=rel_path)
+            models = provider.get("default_models")
+            if not isinstance(models, list) or not models:
+                _add_check(result, "providers.models_missing", "warning", f"Enabled provider {provider_id!r} has no default models.", path=rel_path)
             data_policy = provider.get("data_policy")
             if not isinstance(data_policy, dict):
                 _add_check(result, "providers.data_policy_missing", "error", f"Enabled provider {provider_id!r} has no data policy.", path=rel_path)
+            else:
+                forbidden = data_policy.get("forbidden_data_classes")
+                if provider.get("provider_type") == "hosted" and (not isinstance(forbidden, list) or not forbidden):
+                    _add_check(result, "providers.hosted_forbidden_missing", "error", f"Hosted provider {provider_id!r} has no forbidden data classes.", path=rel_path)
+        fallback_order = provider.get("fallback_order", [])
+        if isinstance(fallback_order, list):
+            unknown_fallbacks = [str(candidate) for candidate in fallback_order if str(candidate) not in provider_ids]
+            if unknown_fallbacks:
+                _add_check(
+                    result,
+                    "providers.unknown_fallback",
+                    "error",
+                    f"Provider {provider_id!r} references unknown fallback(s): {', '.join(unknown_fallbacks)}.",
+                    path=rel_path,
+                )
 
     routing = data.get("routing")
     if not isinstance(routing, dict):
         _add_check(result, "providers.routing_missing", "warning", "Provider registry has no routing policy.", path=rel_path)
-    elif routing.get("require_capability_match") is not True or routing.get("require_data_policy_match") is not True:
-        _add_check(result, "providers.routing_policy_weak", "warning", "Routing should require capability and data-policy matches.", path=rel_path)
+    else:
+        default_provider = str(routing.get("default_provider", ""))
+        if enabled and default_provider not in provider_ids:
+            _add_check(result, "providers.default_unknown", "error", f"Default provider {default_provider!r} is not declared.", path=rel_path)
+        elif enabled and default_provider not in enabled_ids:
+            _add_check(result, "providers.default_not_enabled", "error", f"Default provider {default_provider!r} is not enabled.", path=rel_path)
+        fallback_chain = routing.get("default_fallback_chain", [])
+        if isinstance(fallback_chain, list):
+            unknown = [str(candidate) for candidate in fallback_chain if str(candidate) not in provider_ids]
+            if unknown:
+                _add_check(result, "providers.routing_unknown_fallback", "error", f"Routing references unknown fallback(s): {', '.join(unknown)}.", path=rel_path)
+        if routing.get("require_capability_match") is not True or routing.get("require_data_policy_match") is not True:
+            _add_check(result, "providers.routing_policy_weak", "warning", "Routing should require capability and data-policy matches.", path=rel_path)
 
 
 def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
@@ -496,11 +747,25 @@ def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: Sta
             real_sources += 1
         if source.get("enabled") is True and not locator:
             _add_check(result, "knowledge.locator_missing", "warning", "Enabled knowledge source has no locator.", path=rel_path)
+        local_locator = locator.startswith((".", "/", "~"))
+        if source.get("enabled") is True and locator and source_type == "folder":
+            local_locator = True
+        if source.get("enabled") is True and locator and local_locator:
+            locator_path = (root / locator).resolve()
+            if not locator_path.exists():
+                _add_check(result, "knowledge.locator_not_found", "warning", f"Knowledge source {source_id!r} locator does not exist: {locator}", path=rel_path)
         trust = source.get("trust")
         if source.get("enabled") is True and not isinstance(trust, dict):
             _add_check(result, "knowledge.trust_missing", "error", f"Knowledge source {source_id!r} has no trust block.", path=rel_path)
         elif isinstance(trust, dict) and not trust.get("level"):
             _add_check(result, "knowledge.trust_level_missing", "warning", f"Knowledge source {source_id!r} has no trust level.", path=rel_path)
+        elif isinstance(trust, dict) and trust.get("source_of_truth") is True and trust.get("level") not in {"high", "authoritative"}:
+            _add_check(result, "knowledge.truth_low_trust", "warning", f"Source of truth {source_id!r} should have high or authoritative trust.", path=rel_path)
+        evidence = source.get("evidence")
+        if source.get("enabled") is True and isinstance(evidence, dict):
+            manifest = str(evidence.get("index_manifest", "")).strip()
+            if manifest and manifest != "planned" and not (root / manifest).exists():
+                _add_check(result, "knowledge.index_manifest_missing", "warning", f"Knowledge source {source_id!r} index manifest is missing: {manifest}", path=rel_path)
 
     if profile.id in {"orchestrated", "governed", "production"} and real_sources == 0:
         _add_check(
@@ -510,6 +775,26 @@ def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: Sta
             "Profile expects indexed external knowledge, but only placeholder sources are present.",
             path=rel_path,
         )
+
+
+def _verify_task_envelope(root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult) -> None:
+    rel_path = EVIDENCE_DIR / task_id / "task-envelope.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+
+    strict_profile = profile.id in {"governed", "production"}
+    if "- Current state: `intake | planned | executing | validating | blocked | done`" in text:
+        severity = "error" if strict_profile else "warning"
+        _add_check(result, "task.state_placeholder", severity, "Task envelope still contains the state placeholder.", path=rel_path)
+    if "|  |  |  |  |  |" in text:
+        severity = "error" if strict_profile else "warning"
+        _add_check(result, "task.context_placeholder", severity, "Context orchestration table has no concrete selection.", path=rel_path)
+    if "|  | read-only |  |  |" in text:
+        severity = "error" if strict_profile else "warning"
+        _add_check(result, "task.tool_boundary_placeholder", severity, "Tool boundary is not concretely scoped.", path=rel_path)
+    if "pending |" in text.lower() and strict_profile:
+        _add_check(result, "task.pending_gate", "error", "Governed and production profiles cannot keep pending task gates.", path=rel_path)
 
 
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
@@ -543,6 +828,28 @@ def _verify_compliance_declaration(root: Path, result: StandardVerificationResul
         _add_check(result, "compliance.owner_missing", "warning", "Compliance declaration has no owner.", path=rel_path)
 
 
+def _verify_profile_specific_controls(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    if profile.id not in {"governed", "production"}:
+        return
+
+    compliance = _text_file(root, STANDARD_DIR / "compliance-declaration.md").lower()
+    mission = _text_file(root, STANDARD_DIR / "mission-brief.md").lower()
+    combined = f"{compliance}\n{mission}"
+    required_terms = {
+        "governed": ("environment", "workspace", "telemetry"),
+        "production": ("environment", "workspace", "telemetry", "dry-run", "rollback", "slo"),
+    }
+    for term in required_terms[profile.id]:
+        if term not in combined:
+            _add_check(
+                result,
+                f"profile.{term.replace('-', '_')}_missing",
+                "warning",
+                f"Profile {profile.id!r} should declare {term} controls.",
+                path=STANDARD_DIR / "compliance-declaration.md",
+            )
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -572,7 +879,9 @@ def verify_standard_profile(
     _verify_mission_brief(root, profile, result)
     _verify_provider_registry(root, profile, result)
     _verify_knowledge_registry(root, profile, result)
+    _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)
     _verify_compliance_declaration(root, result)
+    _verify_profile_specific_controls(root, profile, result)
 
     return result

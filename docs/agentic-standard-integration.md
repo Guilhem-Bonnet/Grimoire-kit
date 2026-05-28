@@ -48,6 +48,16 @@ Le flow ne doit pas dépendre implicitement d'un fournisseur unique. Le registre
 
 La règle est simple : pas d'appel récurrent à un provider ou modèle non déclaré.
 
+Le choix provider est maintenant explicite au moment de l'initialisation :
+
+```bash
+grimoire standard detect-providers
+grimoire standard init . --profile orchestrated --provider github-copilot
+grimoire standard init . --profile orchestrated --providers github-copilot,anthropic,openai --provider-policy mixed
+```
+
+La détection ne lit pas les secrets. Elle ne remonte que des signaux non sensibles comme la présence d'un exécutable (`gh`, `codex`, `claude`, `gemini`, `ollama`) ou le fait qu'une variable d'environnement connue soit définie.
+
 ## Installation dans un projet cible
 
 ```bash
@@ -55,7 +65,15 @@ grimoire init . --archetype minimal
 grimoire-init.sh install --archetype agentic-standard
 ```
 
-Ensuite, copier ou générer les templates selon le profil :
+Ensuite, générer les artefacts selon le profil :
+
+```bash
+grimoire standard init . --profile orchestrated --provider github-copilot
+grimoire standard verify . --profile orchestrated
+grimoire standard audit . --profile orchestrated --markdown
+```
+
+Le profil choisi détermine les artefacts requis :
 
 ```text
 _grimoire/standard/mission-brief.md
@@ -75,3 +93,9 @@ Le kit possède une première structure pour transformer le standard en flow act
 3. templates de mission, tâche, preuve, conformité, knowledge sources et providers ;
 4. distinction explicite mémoire / contexte / base de connaissance ;
 5. compatibilité provider-first pour Copilot, Codex/OpenAI, Claude, Gemini et modèles locaux.
+
+## Limites actuelles
+
+- Le registry provider est audité et vérifié, mais pas encore branché à un routeur runtime.
+- Les gates d'évidence sont visibles dans le task envelope et l'evidence pack, mais pas encore imposées par une FSM d'exécution.
+- Les sources knowledge sont déclarées ; le manifeste d'index automatique et le doc-to-graph pipeline restent à brancher.

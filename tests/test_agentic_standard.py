@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core.agentic_standard import (
     STANDARD_PROFILE_FILE,
+    detect_standard_providers,
     list_profiles,
     setup_standard_profile,
     verify_standard_profile,
@@ -51,6 +52,45 @@ def test_verify_passes_after_setup(tmp_path: Path) -> None:
     assert result.profile == "controlled"
     assert result.warning_count > 0
     assert any(check.id == "providers.none_enabled" for check in result.checks)
+
+
+def test_setup_can_enable_selected_provider(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="controlled", provider_ids=("github-copilot",))
+
+    registry = (tmp_path / "_grimoire/standard/llm-provider-registry.yaml").read_text(encoding="utf-8")
+    result = verify_standard_profile(tmp_path)
+
+    assert 'default_provider: github-copilot' in registry
+    assert result.ok
+    assert not any(check.id == "providers.none_enabled" for check in result.checks)
+
+
+def test_detect_standard_providers_masks_secret_values() -> None:
+    detections = {provider.id: provider for provider in detect_standard_providers({"OPENAI_API_KEY": "secret-value"})}
+
+    assert detections["openai"].available
+    assert "env:OPENAI_API_KEY=set" in detections["openai"].signals
+    assert "secret-value" not in str(detections["openai"])
+
+
+def test_verify_fails_when_default_provider_is_disabled(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="controlled", provider_ids=("github-copilot",))
+    registry = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
+    registry.write_text(registry.read_text(encoding="utf-8").replace("default_provider: github-copilot", "default_provider: openai"), encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert not result.ok
+    assert any(check.id == "providers.default_not_enabled" for check in result.checks)
+
+
+def test_governed_profile_fails_on_pending_task_gates(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+
+    result = verify_standard_profile(tmp_path)
+
+    assert not result.ok
+    assert any(check.id == "task.pending_gate" for check in result.checks)
 
 
 def test_orchestrated_verify_reports_knowledge_placeholder(tmp_path: Path) -> None:
@@ -101,6 +141,41 @@ def test_cli_standard_init_and_verify_json(tmp_path: Path) -> None:
     assert verify_data["ok"] is True
     assert verify_data["profile"] == "starter"
     assert "checks" in verify_data
+
+
+def test_cli_standard_init_accepts_provider_selection(tmp_path: Path) -> None:
+    runner = CliRunner()
+    init_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--profile",
+        "controlled",
+        "--providers",
+        "github-copilot,claude",
+        "--provider-policy",
+        "mixed",
+    ])
+
+    assert init_result.exit_code == 0
+    init_data = json.loads(init_result.output)
+    assert init_data["provider_policy"] == "mixed"
+
+    verify_result = runner.invoke(app, ["-o", "json", "standard", "verify", str(tmp_path)])
+    assert verify_result.exit_code == 0
+    verify_data = json.loads(verify_result.output)
+    assert not any(check["id"] == "providers.none_enabled" for check in verify_data["checks"])
+
+
+def test_cli_standard_detect_providers_json() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["-o", "json", "standard", "detect-providers"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert {provider["id"] for provider in data} >= {"github-copilot", "openai", "anthropic", "google-gemini", "local"}
 
 
 def test_cli_standard_audit_markdown(tmp_path: Path) -> None:
