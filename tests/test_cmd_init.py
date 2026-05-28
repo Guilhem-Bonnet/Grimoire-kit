@@ -101,6 +101,14 @@ class TestInitCLI:
         agent_names = {f.stem for f in agents_dir.glob("*.md")}
         assert "ops-engineer" in agent_names
 
+    def test_init_with_agentic_standard_archetype(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "standard"
+        result = runner.invoke(app, ["-y", "init", str(target), "--archetype", "agentic-standard"])
+        assert result.exit_code == 0
+        content = (target / "project-context.yaml").read_text()
+        assert "agentic-standard" in content
+        assert (target / "_grimoire" / "_config" / "archetype.dna.agentic-standard.yaml").is_file()
+
     def test_init_refuses_existing_without_force(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "existing"
         target.mkdir()
