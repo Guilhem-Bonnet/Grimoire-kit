@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ruamel.yaml import YAML
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
@@ -34,6 +35,22 @@ def test_setup_generates_orchestrated_artifacts(tmp_path: Path) -> None:
     mission = (tmp_path / "_grimoire/standard/mission-brief.md").read_text(encoding="utf-8")
     assert "- Project: Demo" in mission
     assert "- Selected profile: `orchestrated`" in mission
+
+
+def test_setup_sanitizes_project_name_before_template_rendering(tmp_path: Path) -> None:
+    setup_standard_profile(
+        tmp_path,
+        profile_id="controlled",
+        project_name='Evil"\n  malicious_key: true',
+    )
+
+    registry = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
+    data = YAML(typ="safe").load(registry)
+    mission = (tmp_path / "_grimoire/standard/mission-brief.md").read_text(encoding="utf-8")
+
+    assert data["metadata"]["project"] == 'Evil" malicious_key: true'
+    assert "malicious_key" not in data["metadata"]
+    assert "\n  malicious_key" not in mission
 
 
 def test_verify_detects_missing_artifacts(tmp_path: Path) -> None:

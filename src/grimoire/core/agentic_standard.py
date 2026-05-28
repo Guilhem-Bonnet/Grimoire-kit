@@ -308,6 +308,15 @@ def _format_destination(path_template: str, task_id: str) -> Path:
     return Path(path_template.replace("{task-id}", task_id))
 
 
+def _single_line_value(value: str) -> str:
+    normalized = " ".join(str(value).split()).strip()
+    return normalized or "Unnamed project"
+
+
+def _yaml_double_quoted_value(value: str) -> str:
+    return _single_line_value(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _planned_artifacts(profile_id: str, *, task_id: str = "bootstrap") -> tuple[StandardArtifact, ...]:
     profile = get_profile(profile_id)
     templates = _artifact_templates()
@@ -334,15 +343,17 @@ def _render_template(
     profile: StandardProfile,
     generated_at: str,
 ) -> str:
+    text_project_name = _single_line_value(project_name)
+    yaml_project_name = _yaml_double_quoted_value(project_name)
     rendered = template
-    rendered = rendered.replace("- Project:\n", f"- Project: {project_name}\n")
+    rendered = rendered.replace("- Project:\n", f"- Project: {text_project_name}\n")
     rendered = rendered.replace("- Selected profile: `starter | controlled | orchestrated | governed | production`\n", f"- Selected profile: `{profile.id}`\n")
     rendered = rendered.replace("- Declared profile: `starter | controlled | orchestrated | governed | production`\n", f"- Declared profile: `{profile.id}`\n")
     rendered = rendered.replace("- Upstream standard reference:\n", "- Upstream standard reference: processus-developpement-agentique/docs/norme-structure-agentique.md\n")
     rendered = rendered.replace("- Standard reference:\n", "- Standard reference: processus-developpement-agentique/docs/norme-structure-agentique.md\n")
     rendered = rendered.replace("- Date:\n", f"- Date: {generated_at}\n")
-    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{project_name}\"\n")
-    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{project_name}\"\n")
+    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{yaml_project_name}\"\n")
+    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{yaml_project_name}\"\n")
     return rendered
 
 
