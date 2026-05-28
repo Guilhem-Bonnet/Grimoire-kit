@@ -101,6 +101,10 @@ pipx install grimoire-kit
 python3 -m venv .venv && source .venv/bin/activate
 pip install grimoire-kit
 
+# Ou via npm (launcher Node vers la CLI Python)
+npm install -g grimoire-kit
+grimoire --help
+
 # Initialiser un nouveau projet
 grimoire init mon-projet --archetype web-app
 
@@ -888,4 +892,3 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
     <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/Grimoire-kit?style=social" alt="Stars">
   </a>
 </p>
-

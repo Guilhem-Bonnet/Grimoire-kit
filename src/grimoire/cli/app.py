@@ -2913,3 +2913,6 @@ def cli() -> None:
         elif _show_time:
             console.print(f"\n[dim]⏱  {total * 1000:.0f}ms[/dim]")
 
+
+if __name__ == "__main__":
+    cli()
