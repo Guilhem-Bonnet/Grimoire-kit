@@ -55,6 +55,21 @@ class StandardSetupResult:
 
 
 @dataclass(slots=True)
+class StandardCheck:
+    """One content or structure check emitted by verification."""
+
+    id: str
+    severity: str
+    message: str
+    path: Path | None = None
+
+    @property
+    def is_error(self) -> bool:
+        """True when this check must fail verification."""
+        return self.severity == "error"
+
+
+@dataclass(slots=True)
 class StandardVerificationResult:
     """Verification result for a standard-aware project."""
 
@@ -64,11 +79,22 @@ class StandardVerificationResult:
     missing: list[Path] = field(default_factory=list)
     invalid_yaml: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    checks: list[StandardCheck] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        """True when mandatory files exist and parseable YAML is valid."""
-        return not self.missing and not self.invalid_yaml
+        """True when mandatory files exist, parseable YAML is valid, and no check fails."""
+        return not self.missing and not self.invalid_yaml and not any(check.is_error for check in self.checks)
+
+    @property
+    def warning_count(self) -> int:
+        """Number of warning checks."""
+        return sum(1 for check in self.checks if check.severity == "warning") + len(self.warnings)
+
+    @property
+    def error_count(self) -> int:
+        """Number of error checks, including missing files and invalid YAML."""
+        return len(self.missing) + len(self.invalid_yaml) + sum(1 for check in self.checks if check.is_error)
 
 
 def _yaml() -> YAML:
@@ -295,6 +321,228 @@ def _read_manifest_profile(project_root: Path) -> str | None:
     return str(profile) if profile else None
 
 
+def _load_yaml_file(root: Path, rel_path: Path, result: StandardVerificationResult) -> Any | None:
+    path = root / rel_path
+    if not path.is_file():
+        return None
+    try:
+        data = _yaml().load(path)
+    except YAMLError as exc:
+        result.invalid_yaml.append(rel_path)
+        result.checks.append(StandardCheck(
+            id="yaml.invalid",
+            severity="error",
+            path=rel_path,
+            message=f"{rel_path}: {exc}",
+        ))
+        return None
+    if data is None:
+        result.invalid_yaml.append(rel_path)
+        result.checks.append(StandardCheck(
+            id="yaml.empty",
+            severity="error",
+            path=rel_path,
+            message=f"{rel_path}: empty YAML document",
+        ))
+    return data
+
+
+def _add_check(
+    result: StandardVerificationResult,
+    check_id: str,
+    severity: str,
+    message: str,
+    *,
+    path: Path | None = None,
+) -> None:
+    result.checks.append(StandardCheck(id=check_id, severity=severity, message=message, path=path))
+
+
+def _text_file(root: Path, rel_path: Path) -> str:
+    path = root / rel_path
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _verify_manifest(
+    root: Path,
+    profile: StandardProfile,
+    task_id: str,
+    result: StandardVerificationResult,
+) -> None:
+    rel_path = STANDARD_PROFILE_FILE
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    if data.get("profile") != profile.id:
+        _add_check(
+            result,
+            "manifest.profile_mismatch",
+            "error",
+            f"Manifest profile is {data.get('profile')!r}, expected {profile.id!r}.",
+            path=rel_path,
+        )
+    if not data.get("project"):
+        _add_check(result, "manifest.project_missing", "warning", "Manifest has no project name.", path=rel_path)
+    if data.get("task_id") != task_id:
+        _add_check(
+            result,
+            "manifest.task_id_mismatch",
+            "warning",
+            f"Manifest task_id is {data.get('task_id')!r}, expected {task_id!r}.",
+            path=rel_path,
+        )
+
+    declared = {str(item) for item in data.get("required_artifacts", ())}
+    expected = set(profile.required_artifacts)
+    if declared != expected:
+        _add_check(
+            result,
+            "manifest.required_artifacts_mismatch",
+            "warning",
+            "Manifest required_artifacts differs from the bundled profile map.",
+            path=rel_path,
+        )
+
+
+def _verify_mission_brief(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "mission-brief.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    if "- Project:" not in text or "- Project: \n" in text:
+        _add_check(result, "mission.project_missing", "warning", "Mission brief has no project name.", path=rel_path)
+    if f"- Selected profile: `{profile.id}`" not in text:
+        _add_check(result, "mission.profile_missing", "error", "Mission brief does not declare the selected profile.", path=rel_path)
+    if "processus-developpement-agentique/docs/norme-structure-agentique.md" not in text:
+        _add_check(result, "mission.upstream_missing", "warning", "Mission brief does not reference the upstream standard.", path=rel_path)
+
+
+def _verify_provider_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    providers = data.get("providers")
+    if not isinstance(providers, list) or not providers:
+        _add_check(result, "providers.none", "error", "Provider registry must declare at least one provider.", path=rel_path)
+        return
+
+    enabled = [provider for provider in providers if isinstance(provider, dict) and provider.get("enabled") is True]
+    if profile.id in {"controlled", "orchestrated", "governed", "production"} and not enabled:
+        _add_check(
+            result,
+            "providers.none_enabled",
+            "warning",
+            "No LLM provider is enabled; repeatable provider-neutral routing is not configured yet.",
+            path=rel_path,
+        )
+
+    for provider in providers:
+        if not isinstance(provider, dict):
+            _add_check(result, "providers.invalid_entry", "error", "Provider entries must be mappings.", path=rel_path)
+            continue
+        provider_id = provider.get("id")
+        if not provider_id:
+            _add_check(result, "providers.id_missing", "error", "Provider entry has no id.", path=rel_path)
+        if not isinstance(provider.get("enabled"), bool):
+            _add_check(result, "providers.enabled_not_bool", "error", f"Provider {provider_id!r} enabled flag must be boolean.", path=rel_path)
+        if provider.get("enabled") is True:
+            capabilities = provider.get("allowed_capabilities")
+            if not isinstance(capabilities, list) or not capabilities:
+                _add_check(result, "providers.capabilities_missing", "error", f"Enabled provider {provider_id!r} has no capabilities.", path=rel_path)
+            data_policy = provider.get("data_policy")
+            if not isinstance(data_policy, dict):
+                _add_check(result, "providers.data_policy_missing", "error", f"Enabled provider {provider_id!r} has no data policy.", path=rel_path)
+
+    routing = data.get("routing")
+    if not isinstance(routing, dict):
+        _add_check(result, "providers.routing_missing", "warning", "Provider registry has no routing policy.", path=rel_path)
+    elif routing.get("require_capability_match") is not True or routing.get("require_data_policy_match") is not True:
+        _add_check(result, "providers.routing_policy_weak", "warning", "Routing should require capability and data-policy matches.", path=rel_path)
+
+
+def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "knowledge-source-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    rules = data.get("rules")
+    if not isinstance(rules, dict):
+        _add_check(result, "knowledge.rules_missing", "error", "Knowledge registry must declare separation rules.", path=rel_path)
+    else:
+        for key in ("knowledge_is_not_memory", "knowledge_is_not_session_context", "explicit_source_of_truth_required"):
+            if rules.get(key) is not True:
+                _add_check(result, f"knowledge.{key}", "error", f"Rule {key} must be true.", path=rel_path)
+
+    sources = data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        _add_check(result, "knowledge.sources_missing", "warning", "No external knowledge source is declared.", path=rel_path)
+        return
+
+    real_sources = 0
+    for source in sources:
+        if not isinstance(source, dict):
+            _add_check(result, "knowledge.invalid_source", "error", "Knowledge source entries must be mappings.", path=rel_path)
+            continue
+        source_id = str(source.get("id", "")).strip()
+        locator = str(source.get("locator", "")).strip()
+        source_type = str(source.get("type", "")).strip()
+        if source_id and locator and "|" not in source_type:
+            real_sources += 1
+        if source.get("enabled") is True and not locator:
+            _add_check(result, "knowledge.locator_missing", "warning", "Enabled knowledge source has no locator.", path=rel_path)
+        trust = source.get("trust")
+        if source.get("enabled") is True and not isinstance(trust, dict):
+            _add_check(result, "knowledge.trust_missing", "error", f"Knowledge source {source_id!r} has no trust block.", path=rel_path)
+        elif isinstance(trust, dict) and not trust.get("level"):
+            _add_check(result, "knowledge.trust_level_missing", "warning", f"Knowledge source {source_id!r} has no trust level.", path=rel_path)
+
+    if profile.id in {"orchestrated", "governed", "production"} and real_sources == 0:
+        _add_check(
+            result,
+            "knowledge.no_real_source",
+            "warning",
+            "Profile expects indexed external knowledge, but only placeholder sources are present.",
+            path=rel_path,
+        )
+
+
+def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
+    rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    if "pending" in text.lower():
+        _add_check(result, "evidence.pending_gate", "warning", "Evidence pack still contains pending gates.", path=rel_path)
+    if "- Outcome:\n" in text or "- Final state:\n" in text:
+        _add_check(result, "evidence.summary_placeholder", "warning", "Evidence pack summary is still placeholder-only.", path=rel_path)
+    if "|  |  |  |  |" in text:
+        _add_check(result, "evidence.inventory_placeholder", "warning", "Evidence inventory has no concrete evidence rows.", path=rel_path)
+
+
+def _verify_compliance_declaration(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "compliance-declaration.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    unknown_count = text.count("| unknown |")
+    if unknown_count:
+        _add_check(
+            result,
+            "compliance.unknown_status",
+            "warning",
+            f"Compliance declaration still has {unknown_count} unknown status rows.",
+            path=rel_path,
+        )
+    if "- Declaration owner:\n" in text:
+        _add_check(result, "compliance.owner_missing", "warning", "Compliance declaration has no owner.", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -320,22 +568,11 @@ def verify_standard_profile(
         else:
             result.missing.append(rel_path)
 
-    yaml_paths = [
-        STANDARD_PROFILE_FILE,
-        STANDARD_DIR / "knowledge-source-registry.yaml",
-        STANDARD_DIR / "llm-provider-registry.yaml",
-    ]
-    for rel_path in yaml_paths:
-        path = root / rel_path
-        if path.is_file():
-            try:
-                data = _yaml().load(path)
-            except YAMLError as exc:
-                result.invalid_yaml.append(rel_path)
-                result.warnings.append(f"{rel_path}: {exc}")
-                continue
-            if data is None:
-                result.invalid_yaml.append(rel_path)
-                result.warnings.append(f"{rel_path}: empty YAML document")
+    _verify_manifest(root, profile, task_id, result)
+    _verify_mission_brief(root, profile, result)
+    _verify_provider_registry(root, profile, result)
+    _verify_knowledge_registry(root, profile, result)
+    _verify_evidence_pack(root, task_id, result)
+    _verify_compliance_declaration(root, result)
 
     return result
