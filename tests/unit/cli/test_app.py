@@ -12,7 +12,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, main, remove_agent
+from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, doctor, history_cmd, main, remove_agent
 
 runner = CliRunner()
 
@@ -1504,8 +1504,7 @@ class TestDoctorFix:
         assert "fixed" not in data or data.get("fixed") == []
 
     def test_fix_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["doctor", "--help"])
-        assert "--fix" in result.output
+        assert "--fix" in _command_option_decls(doctor, "fix")
 
 
 # ── --time flag ──────────────────────────────────────────────────────────────
@@ -1515,8 +1514,7 @@ class TestTimeFlag:
     """Tests for global --time flag."""
 
     def test_help_shows_time(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--time" in result.output
+        assert "--time" in _main_option_decls("show_time")
 
     def test_time_flag_accepted(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "time-test"])
@@ -3407,8 +3405,7 @@ class TestR35HistoryClear:
         assert "no audit" in result.output.lower() or "No audit" in result.output
 
     def test_clear_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["history", "--help"])
-        assert "--clear" in result.output
+        assert "--clear" in _command_option_decls(history_cmd, "clear")
 
 
 # ── R36 ─────────────────────────────────────────────────────────────────────────
