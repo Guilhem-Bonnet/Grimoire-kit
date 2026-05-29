@@ -97,13 +97,12 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 # Installation via pipx (recommandé)
 pipx install grimoire-kit
 
+# Installation recommandée pour le moment
+pipx install grimoire-kit
+
 # Ou via pip dans un venv
 python3 -m venv .venv && source .venv/bin/activate
 pip install grimoire-kit
-
-# Ou via npm (launcher Node vers la CLI Python)
-npm install -g grimoire-kit
-grimoire --help
 
 # Initialiser un nouveau projet
 grimoire init mon-projet --archetype web-app

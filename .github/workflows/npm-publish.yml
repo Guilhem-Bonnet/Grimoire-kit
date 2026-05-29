@@ -1,10 +1,6 @@
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "v*.*.*-*"
   workflow_dispatch:
 
 permissions:
@@ -14,6 +10,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
@@ -28,6 +26,10 @@ jobs:
           npm pack --dry-run
 
       - name: Publish package
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Explain skipped publish
+        if: ${{ env.NODE_AUTH_TOKEN == '' }}
+        run: |
+          echo "::notice::npm publish skipped: configure NPM_TOKEN or trusted publishing before enabling npm distribution."

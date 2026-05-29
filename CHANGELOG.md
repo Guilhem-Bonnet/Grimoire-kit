@@ -13,7 +13,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **Agentic Standard Bridge** — profils `minimal`, `orchestrated` et `governed`, génération des artefacts ISO/design-pattern, vérification/audit CLI et baseline de preuves.
 - **Provider onboarding** — détection non-secrète des providers, activation explicite via `standard init --provider/--providers`, politiques `hosted-safe`, `local-first` et `mixed`.
-- **Package npm** — publication du launcher `grimoire-kit` pour rendre le kit installable avec `npm install grimoire-kit`.
+- **Package npm préparé** — launcher `grimoire-kit` ajouté, publication npm différée en attendant l’authentification npm dédiée.
 
 ### Corrigé
 
