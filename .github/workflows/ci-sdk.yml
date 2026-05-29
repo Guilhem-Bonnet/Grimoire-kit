@@ -103,7 +103,16 @@ jobs:
 
       - name: Run unit tests with coverage
         shell: bash
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x --cov=src/grimoire --cov-report=xml --cov-report=term-missing --cov-fail-under=70
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+          else
+            pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x \
+              --cov=src/grimoire \
+              --cov-report=xml \
+              --cov-report=term-missing \
+              --cov-fail-under=70
+          fi
 
       - name: Upload coverage
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
