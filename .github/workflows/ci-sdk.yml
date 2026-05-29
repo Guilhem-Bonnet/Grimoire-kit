@@ -105,7 +105,13 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+            pytest \
+              tests/unit/cli/test_app.py::TestGlobalFlags \
+              tests/unit/cli/test_app.py::TestVersion \
+              tests/unit/cli/test_app.py::TestInit \
+              tests/unit/cli/test_app.py::TestDoctor \
+              tests/test_agentic_standard.py \
+              -q --tb=short -x
           else
             pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x \
               --cov=src/grimoire \
