@@ -1,0 +1,242 @@
+schema_version: "0.1.0"
+schema_id: "grimoire.agentic-standard.target-runtime"
+status: "target"
+description: >
+  Target architecture contract for turning the Grimoire normative corpus into an executable
+  governed agentic runtime.
+
+principles:
+  - id: normative_to_executable
+    statement: "Every normative rule must map to an artifact, check, gate, score dimension, or remediation."
+  - id: evidence_first
+    statement: "Task progress and release readiness must be justified by linked evidence."
+  - id: context_is_governed
+    statement: "Context assembly must be traceable to mission, task, memory, knowledge, and provider policies."
+  - id: progressive_profiles
+    statement: "minimal, orchestrated, and governed profiles must expose increasing obligations without breaking adoption."
+
+profiles:
+  minimal:
+    required_domains:
+      - artifacts
+      - provider_policy
+      - knowledge_registry
+      - audit
+    release_gate: advisory
+  orchestrated:
+    required_domains:
+      - artifacts
+      - provider_policy
+      - knowledge_registry
+      - task_board
+      - memory_policy
+      - context_contract
+      - evidence_gates
+      - audit
+    release_gate: warning
+  governed:
+    required_domains:
+      - artifacts
+      - provider_policy
+      - knowledge_registry
+      - task_board
+      - memory_policy
+      - context_contract
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+      - knowledge_graph
+      - compliance_score
+      - remediation
+      - ci_release_gate
+    release_gate: hard_fail
+
+target_artifacts:
+  task_board:
+    path: "_grimoire/standard/task-board.yaml"
+    purpose: "Normative kanban with backlog, task lifecycle, owners, blockers, gates, and evidence links."
+    checks:
+      - task_id_format
+      - status_is_allowed
+      - blockers_have_reason
+      - review_tasks_have_evidence
+      - release_tasks_pass_gates
+  memory_policy:
+    path: "_grimoire/standard/memory-policy.yaml"
+    purpose: "Rules for session, project, organization, procedural, semantic, episodic, and long-term memory."
+    checks:
+      - scopes_declared
+      - retention_declared
+      - freshness_thresholds_declared
+      - provider_compatibility_declared
+      - redaction_policy_declared
+  context_contract:
+    path: "_grimoire/standard/context-contract.yaml"
+    purpose: "Deterministic assembly contract for task context bundles."
+    checks:
+      - context_sources_declared
+      - source_priority_order_declared
+      - token_budget_declared
+      - freshness_rules_declared
+      - excluded_sources_declared
+  orchestration_policy:
+    path: "_grimoire/standard/orchestration-policy.yaml"
+    purpose: "Agent roles, routing, handoffs, escalation, arbitration, and review gates."
+    checks:
+      - routes_have_roles
+      - handoffs_have_contracts
+      - escalation_has_trigger
+      - provider_routes_match_registry
+  evidence_gates:
+    path: "_grimoire/standard/evidence-gates.yaml"
+    purpose: "Finite-state task lifecycle and minimum evidence by transition/profile."
+    states:
+      - proposed
+      - ready
+      - in_progress
+      - blocked
+      - review
+      - accepted
+      - released
+      - archived
+    checks:
+      - transition_is_allowed
+      - minimum_evidence_present
+      - governed_release_is_blocked_on_errors
+  pattern_catalog:
+    path: "_grimoire/standard/pattern-catalog.yaml"
+    purpose: "Machine-readable index of normative patterns and applicable project surfaces."
+    families:
+      - context
+      - memory
+      - orchestration
+      - workflow
+      - governance
+      - provider
+      - knowledge
+      - security
+      - quality
+      - runtime_ux
+    checks:
+      - pattern_ids_unique
+      - pattern_family_known
+      - pattern_has_source
+      - applied_patterns_have_evidence
+  knowledge_graph:
+    path: "_grimoire/standard/knowledge-graph-manifest.yaml"
+    purpose: "Index of normative documents, concepts, obligations, checks, and pattern links."
+    checks:
+      - source_documents_exist
+      - obligations_have_checks
+      - checks_reference_sources
+      - index_freshness_within_policy
+  compliance_score:
+    path: "_grimoire/standard/compliance-score.yaml"
+    purpose: "Weighted score across standard dimensions with profile-specific thresholds."
+    dimensions:
+      artifacts: 10
+      provider_policy: 10
+      knowledge_registry: 10
+      task_board: 10
+      memory_policy: 10
+      context_contract: 10
+      orchestration_policy: 10
+      evidence_gates: 10
+      pattern_catalog: 8
+      knowledge_graph: 6
+      ci_release_gate: 6
+    thresholds:
+      minimal:
+        warn_below: 70
+        fail_below: 50
+      orchestrated:
+        warn_below: 85
+        fail_below: 70
+      governed:
+        warn_below: 95
+        fail_below: 90
+  remediation_plan:
+    path: "_grimoire/standard/remediation-plan.yaml"
+    purpose: "Structured fixes produced by audit, applicable with dry-run/apply semantics."
+    checks:
+      - action_has_target
+      - destructive_actions_require_force
+      - generated_changes_are_inside_project_root
+
+target_cli:
+  existing:
+    - "grimoire standard profiles"
+    - "grimoire standard detect-providers"
+    - "grimoire standard init"
+    - "grimoire standard verify"
+    - "grimoire standard audit"
+  planned:
+    - command: "grimoire standard board verify"
+      artifact: task_board
+    - command: "grimoire standard task create"
+      artifact: task_board
+    - command: "grimoire standard memory verify"
+      artifact: memory_policy
+    - command: "grimoire standard context build"
+      artifact: context_contract
+    - command: "grimoire standard context verify"
+      artifact: context_contract
+    - command: "grimoire standard gate check"
+      artifact: evidence_gates
+    - command: "grimoire standard score"
+      artifact: compliance_score
+    - command: "grimoire standard fix --dry-run"
+      artifact: remediation_plan
+    - command: "grimoire standard fix --apply"
+      artifact: remediation_plan
+    - command: "grimoire pattern list"
+      artifact: pattern_catalog
+    - command: "grimoire pattern show"
+      artifact: pattern_catalog
+    - command: "grimoire pattern apply"
+      artifact: pattern_catalog
+
+runtime_flow:
+  - step: mission_load
+    inputs:
+      - "_grimoire/standard/mission-brief.md"
+      - "_grimoire/standard/standard-profile.yaml"
+  - step: task_select
+    inputs:
+      - "_grimoire/standard/task-board.yaml"
+      - "_grimoire-output/evidence/{task_id}/task-envelope.md"
+  - step: policy_resolve
+    inputs:
+      - "_grimoire/standard/memory-policy.yaml"
+      - "_grimoire/standard/knowledge-source-registry.yaml"
+      - "_grimoire/standard/llm-provider-registry.yaml"
+  - step: context_build
+    outputs:
+      - "_grimoire-output/context/{task_id}/context-bundle.yaml"
+  - step: orchestration_plan
+    inputs:
+      - "_grimoire/standard/orchestration-policy.yaml"
+      - "_grimoire/standard/pattern-catalog.yaml"
+  - step: gate_check
+    inputs:
+      - "_grimoire/standard/evidence-gates.yaml"
+      - "_grimoire-output/evidence/{task_id}/evidence-pack.md"
+  - step: audit_score
+    outputs:
+      - "_grimoire-output/audit/standard-audit.json"
+      - "_grimoire-output/audit/compliance-score.json"
+  - step: remediate
+    outputs:
+      - "_grimoire/standard/remediation-plan.yaml"
+
+validation:
+  kit:
+    - "pytest tests/test_agentic_standard.py"
+    - "ruff check src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py"
+    - "mypy src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py"
+    - "mkdocs build --strict"
+  consumer_project:
+    - "grimoire standard verify"
+    - "grimoire standard audit"
+    - "grimoire standard score"
+    - "grimoire standard gate check --task-id bootstrap"

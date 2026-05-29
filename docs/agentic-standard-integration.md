@@ -110,3 +110,12 @@ Les profils livrés par défaut vivent dans `framework/agentic-standard/profile-
 4. versionner les templates custom avec les autres artefacts de gouvernance.
 
 La commande `standard init` ne remplace pas les artefacts existants sauf avec `--force`, ce qui permet de faire évoluer la carte de profils sans écraser une baseline projet déjà remplie.
+
+## Cible d’évolution
+
+Le standard agentique a maintenant une cible de runtime normatif plus large :
+
+- [Plan cible du runtime normatif agentique](agentic-standard-target-plan.md)
+- [Schéma et documentation cible du standard agentique](agentic-standard-target-architecture.md)
+
+Le contrat machine-readable associé est versionné dans `framework/agentic-standard/target-schema.yaml`.

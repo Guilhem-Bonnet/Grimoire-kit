@@ -83,6 +83,8 @@ nav:
   - Concepts:
       - Architecture: concepts.md
       - Standard agentique: agentic-standard-integration.md
+      - Plan cible standard agentique: agentic-standard-target-plan.md
+      - Architecture cible standard agentique: agentic-standard-target-architecture.md
       - Mémoire: memory-system.md
       - Workflows: workflow-design-patterns.md
       - Taxonomie Workflows: workflow-taxonomy.md
