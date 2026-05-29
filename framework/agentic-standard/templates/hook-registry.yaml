@@ -40,3 +40,16 @@ hooks:
     action: block
     rule_ref: release.score-minimum
     reason: "Release requires profile-specific compliance score."
+  - id: release.governed-requires-all-gates
+    phase: pre_release
+    action: block
+    rule_ref: release.gates-satisfied
+    reason: "Governed and production releases require all evidence gates satisfied."
+    profiles:
+      - governed
+      - production
+  - id: knowledge.auto-graph-on-context-build
+    phase: post_context_build
+    action: create_remediation
+    rule_ref: knowledge.graph-current
+    reason: "Context builds should refresh the local doc-to-graph view when knowledge sources are enabled."

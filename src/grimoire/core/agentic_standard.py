@@ -29,6 +29,7 @@ SCORE_DIR = Path("_grimoire-output/standard")
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
 LLM_PROVIDER_REGISTRY_FILE = STANDARD_DIR / "llm-provider-registry.yaml"
 EVENT_JOURNAL_FILE = EVENT_DIR / "runtime-journal.jsonl"
+APPLIED_FIXES_FILE = EVENT_DIR / "applied-fixes.jsonl"
 SUPPORTED_PROVIDER_IDS = ("github-copilot", "openai", "anthropic", "google-gemini", "local")
 SUPPORTED_PROVIDER_POLICIES = ("hosted-safe", "local-first", "mixed")
 PROVIDER_ALIASES = {
@@ -108,6 +109,36 @@ KNOWN_HOOK_ACTIONS = {
     "escalate",
     "create_remediation",
     "rollback",
+}
+DIMENSION_CHECK_PREFIXES = {
+    "artifacts": ("artifact.", "yaml.", "manifest.", "mission."),
+    "provider_policy": ("providers.",),
+    "knowledge_registry": ("knowledge.", "knowledge_index."),
+    "task_board": ("board.", "task."),
+    "memory_policy": ("memory.",),
+    "context_contract": ("context.",),
+    "decision_graph": ("decision.",),
+    "rule_packs": ("rules.",),
+    "hook_registry": ("hooks.",),
+    "orchestration_policy": ("orchestration.",),
+    "evidence_gates": ("evidence.", "gate.",),
+    "runtime_journal": ("journal.",),
+    "ci_release_gate": ("release.",),
+}
+DEFAULT_SCORE_DIMENSIONS = {
+    "artifacts": 10,
+    "provider_policy": 10,
+    "knowledge_registry": 10,
+    "task_board": 10,
+    "memory_policy": 10,
+    "context_contract": 10,
+    "decision_graph": 6,
+    "rule_packs": 6,
+    "hook_registry": 6,
+    "orchestration_policy": 10,
+    "evidence_gates": 10,
+    "runtime_journal": 4,
+    "ci_release_gate": 6,
 }
 
 
@@ -231,6 +262,7 @@ class StandardScoreResult:
     warnings: int
     errors: int
     output_path: Path
+    dimensions: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +274,18 @@ class StandardRemediationAction:
     action: str
     path: Path | None
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class StandardRemediationApplyResult:
+    """Result of applying non-destructive standard remediations."""
+
+    profile: str
+    project_root: Path
+    actions: tuple[StandardRemediationAction, ...]
+    written: tuple[Path, ...]
+    skipped: tuple[str, ...]
+    audit_path: Path
 
 
 def _yaml() -> YAML:
@@ -1395,6 +1439,64 @@ def _task_from_board(board: dict[str, Any], task_id: str) -> dict[str, Any]:
     return {}
 
 
+def _task_required_capabilities(task: Mapping[str, Any]) -> list[str]:
+    declared = task.get("required_capabilities")
+    if isinstance(declared, list):
+        capabilities = [str(item) for item in declared if str(item).strip()]
+        if capabilities:
+            return capabilities
+    role_capabilities = {
+        "planner": "reasoning",
+        "context_orchestrator": "chat",
+        "reviewer": "review",
+        "implementer": "code",
+    }
+    roles = task.get("agent_roles")
+    if isinstance(roles, list):
+        inferred = [
+            role_capabilities[str(role)]
+            for role in roles
+            if str(role) in role_capabilities
+        ]
+        if inferred:
+            return sorted(set(inferred))
+    return ["chat"]
+
+
+def _provider_routes(provider_registry: Mapping[str, Any], required_capabilities: Iterable[str]) -> tuple[dict[str, Any], ...]:
+    required = tuple(required_capabilities)
+    routes: list[dict[str, Any]] = []
+    providers = provider_registry.get("providers")
+    if not isinstance(providers, list):
+        return ()
+    for provider in providers:
+        if not isinstance(provider, dict) or provider.get("enabled") is not True or not provider.get("id"):
+            continue
+        capabilities = [
+            str(capability)
+            for capability in provider.get("allowed_capabilities", [])
+            if str(capability).strip()
+        ]
+        missing_capabilities = [
+            capability
+            for capability in required
+            if capability not in capabilities
+        ]
+        data_policy = provider.get("data_policy", {})
+        routes.append({
+            "provider": str(provider["id"]),
+            "provider_type": str(provider.get("provider_type", "")),
+            "capabilities": capabilities,
+            "required_capabilities": list(required),
+            "capability_match": not missing_capabilities,
+            "missing_capabilities": missing_capabilities,
+            "allowed_data_classes": data_policy.get("allowed_data_classes", []) if isinstance(data_policy, dict) else [],
+            "forbidden_data_classes": data_policy.get("forbidden_data_classes", []) if isinstance(data_policy, dict) else [],
+            "fallback_order": provider.get("fallback_order", []) if isinstance(provider.get("fallback_order"), list) else [],
+        })
+    return tuple(routes)
+
+
 def build_context_bundle(
     project_root: Path,
     *,
@@ -1433,6 +1535,9 @@ def build_context_bundle(
         for entry in memory_policy.get("memory_types", [])
         if isinstance(entry, dict)
     ]
+    required_capabilities = _task_required_capabilities(task)
+    provider_routes = _provider_routes(provider_registry, required_capabilities)
+    matched_provider = next((route["provider"] for route in provider_routes if route["capability_match"]), None)
     data: dict[str, Any] = {
         "$schema": "grimoire-agentic-standard-context-bundle/v1",
         "task_id": normalized_task_id,
@@ -1450,11 +1555,16 @@ def build_context_bundle(
             {"source": "task_envelope", "path": str(EVIDENCE_DIR / normalized_task_id / "task-envelope.md")},
         ],
         "knowledge_nodes": enabled_sources,
+        "knowledge_graph_ref": str(KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml"),
         "memory_inclusions": memory_entries[: int(context_contract.get("budget", {}).get("max_memory_items", 8))],
         "memory_exclusions": [],
         "provider_constraints": {
             "enabled_providers": enabled_providers,
             "routing": provider_registry.get("routing", {}),
+            "required_capabilities": required_capabilities,
+            "routes": list(provider_routes),
+            "matched_provider": matched_provider,
+            "unmatched_capabilities": [] if matched_provider else required_capabilities,
         },
         "agent_role_constraints": [
             str(role.get("role_id"))
@@ -1482,6 +1592,17 @@ def build_context_bundle(
     rel_path = CONTEXT_DIR / normalized_task_id / "context-bundle.yaml"
     written = _write_yaml_mapping(root, rel_path, data)
     _append_runtime_event(root, event_type="context.built", task_id=normalized_task_id, profile=profile.id, details={"path": str(written)})
+    _append_runtime_event(
+        root,
+        event_type="provider.routing_evaluated",
+        task_id=normalized_task_id,
+        profile=profile.id,
+        details={
+            "matched_provider": matched_provider,
+            "enabled_providers": enabled_providers,
+            "required_capabilities": required_capabilities,
+        },
+    )
     return StandardRuntimeArtifact(path=written, data=data)
 
 
@@ -1618,6 +1739,132 @@ def build_knowledge_index(
     rel_path = KNOWLEDGE_DIR / normalized_task_id / "index-manifest.yaml"
     written = _write_yaml_mapping(root, rel_path, data)
     _append_runtime_event(root, event_type="knowledge.index_built", task_id=normalized_task_id, profile=profile.id, details={"path": str(written)})
+    return StandardRuntimeArtifact(path=written, data=data)
+
+
+def build_knowledge_graph(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+    source_ids: Iterable[str] = (),
+) -> StandardRuntimeArtifact:
+    """Build a local doc-to-graph index from declared knowledge and normative artifacts."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    selected_sources = {str(source_id) for source_id in source_ids}
+    profile = _selected_profile(root, profile_id)
+    registry = _read_yaml_mapping(root, STANDARD_DIR / "knowledge-source-registry.yaml")
+    patterns = list_standard_patterns(root)
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, str]] = []
+    skipped_sources: list[dict[str, str]] = []
+
+    normative_artifacts = [
+        STANDARD_DIR / "mission-brief.md",
+        STANDARD_DIR / "task-board.yaml",
+        STANDARD_DIR / "memory-policy.yaml",
+        STANDARD_DIR / "context-contract.yaml",
+        STANDARD_DIR / "decision-graph.yaml",
+        STANDARD_DIR / "rule-packs.yaml",
+        STANDARD_DIR / "hook-registry.yaml",
+        STANDARD_DIR / "orchestration-policy.yaml",
+        STANDARD_DIR / "evidence-gates.yaml",
+        STANDARD_DIR / "pattern-catalog.yaml",
+        STANDARD_DIR / "compliance-score.yaml",
+    ]
+    for rel_path in normative_artifacts:
+        if (root / rel_path).is_file():
+            node_id = f"artifact:{rel_path.as_posix()}"
+            nodes.append({
+                "id": node_id,
+                "type": "normative_artifact",
+                "path": rel_path.as_posix(),
+            })
+
+    sources = registry.get("sources")
+    if isinstance(sources, list):
+        for source in sources:
+            if not isinstance(source, dict) or source.get("enabled") is not True or not source.get("id"):
+                continue
+            source_id = str(source["id"])
+            if selected_sources and source_id not in selected_sources:
+                continue
+            source_type = str(source.get("type", ""))
+            locator = str(source.get("locator", "")).strip()
+            if source_type != "folder" or not locator:
+                skipped_sources.append({"id": source_id, "reason": "only enabled folder sources with local locators are indexed"})
+                continue
+            locator_path = (root / locator).resolve()
+            if not _is_inside_root(root, locator_path):
+                skipped_sources.append({"id": source_id, "reason": "locator resolves outside project root"})
+                continue
+            if not locator_path.exists():
+                skipped_sources.append({"id": source_id, "reason": "locator does not exist"})
+                continue
+            for path in sorted(locator_path.rglob("*")):
+                if not path.is_file() or path.suffix.lower() not in {".md", ".txt", ".yaml", ".yml", ".json"}:
+                    continue
+                rel_path = path.relative_to(root)
+                node_id = f"knowledge:{source_id}:{rel_path.as_posix()}"
+                nodes.append({
+                    "id": node_id,
+                    "type": "knowledge_document",
+                    "source_id": source_id,
+                    "path": rel_path.as_posix(),
+                })
+                edges.append({
+                    "from": node_id,
+                    "to": "artifact:_grimoire/standard/knowledge-source-registry.yaml",
+                    "type": "declared_by",
+                })
+
+    for pattern in patterns:
+        pattern_id = str(pattern.get("id", ""))
+        if not pattern_id:
+            continue
+        node_id = f"pattern:{pattern_id}"
+        nodes.append({
+            "id": node_id,
+            "type": "pattern",
+            "category": str(pattern.get("category", "")),
+            "maturity": str(pattern.get("maturity", "")),
+        })
+        source_normative = str(pattern.get("source_normative", ""))
+        if source_normative:
+            edges.append({
+                "from": node_id,
+                "to": source_normative,
+                "type": "derived_from",
+            })
+        check_refs = pattern.get("check_refs", [])
+        if isinstance(check_refs, list):
+            for check_ref in check_refs:
+                edges.append({
+                    "from": node_id,
+                    "to": f"check:{check_ref}",
+                    "type": "satisfies_check",
+                })
+
+    data = {
+        "$schema": "grimoire-agentic-standard-knowledge-graph/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_filter": sorted(selected_sources),
+        "nodes": nodes,
+        "edges": edges,
+        "skipped_sources": skipped_sources,
+    }
+    rel_path = KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(
+        root,
+        event_type="knowledge.graph_built",
+        task_id=normalized_task_id,
+        profile=profile.id,
+        details={"path": str(written), "nodes": len(nodes), "edges": len(edges)},
+    )
     return StandardRuntimeArtifact(path=written, data=data)
 
 
@@ -1760,6 +2007,65 @@ def audit_runtime_events(project_root: Path) -> dict[str, Any]:
     }
 
 
+def _dimension_for_check(check_id: str) -> str:
+    for dimension, prefixes in DIMENSION_CHECK_PREFIXES.items():
+        if check_id.startswith(prefixes):
+            return dimension
+    return "artifacts"
+
+
+def _score_dimensions(
+    result: StandardVerificationResult,
+    *,
+    score_policy: Mapping[str, Any],
+    root: Path,
+) -> dict[str, dict[str, int]]:
+    raw_dimensions = score_policy.get("dimensions", {})
+    if isinstance(raw_dimensions, dict) and raw_dimensions:
+        weights = {str(dimension): int(weight) for dimension, weight in raw_dimensions.items()}
+    else:
+        weights = dict(DEFAULT_SCORE_DIMENSIONS)
+    buckets = {
+        dimension: {"weight": weight, "errors": 0, "warnings": 0}
+        for dimension, weight in weights.items()
+    }
+    buckets.setdefault("artifacts", {"weight": 0, "errors": 0, "warnings": 0})
+
+    buckets["artifacts"]["errors"] += len(result.missing) + len(result.invalid_yaml)
+    buckets["artifacts"]["warnings"] += len(result.warnings)
+    for check in result.checks:
+        dimension = _dimension_for_check(check.id)
+        buckets.setdefault(dimension, {"weight": 0, "errors": 0, "warnings": 0})
+        if check.is_error:
+            buckets[dimension]["errors"] += 1
+        elif check.severity == "warning":
+            buckets[dimension]["warnings"] += 1
+
+    journal = audit_runtime_events(root)
+    journal_bucket = buckets.setdefault("runtime_journal", {"weight": 0, "errors": 0, "warnings": 0})
+    if not journal["ok"]:
+        journal_bucket["errors"] += 1
+    elif int(journal.get("event_count", 0)) == 0:
+        journal_bucket["warnings"] += 1
+
+    dimensions: dict[str, dict[str, int]] = {}
+    for dimension, bucket in buckets.items():
+        weight = max(0, bucket["weight"])
+        errors = bucket["errors"]
+        warnings = bucket["warnings"]
+        penalty = (errors * weight) + (warnings * max(1, weight // 2))
+        earned = max(0, weight - penalty)
+        percentage = int((earned / weight) * 100) if weight else 100
+        dimensions[dimension] = {
+            "weight": weight,
+            "earned": earned,
+            "percentage": percentage,
+            "errors": errors,
+            "warnings": warnings,
+        }
+    return dimensions
+
+
 def calculate_compliance_score(
     project_root: Path,
     *,
@@ -1775,7 +2081,10 @@ def calculate_compliance_score(
     thresholds = score_policy.get("thresholds", {})
     profile_thresholds = thresholds.get(profile.id, {}) if isinstance(thresholds, dict) else {}
     threshold = int(profile_thresholds.get("fail_below", 70)) if isinstance(profile_thresholds, dict) else 70
-    score = max(0, min(100, 100 - (result.error_count * 20) - (result.warning_count * 3)))
+    dimensions = _score_dimensions(result, score_policy=score_policy, root=root)
+    total_weight = sum(item["weight"] for item in dimensions.values())
+    total_earned = sum(item["earned"] for item in dimensions.values())
+    score = int((total_earned / total_weight) * 100) if total_weight else max(0, min(100, 100 - (result.error_count * 20) - (result.warning_count * 3)))
     data = {
         "$schema": "grimoire-agentic-standard-score-result/v1",
         "task_id": normalized_task_id,
@@ -1786,6 +2095,7 @@ def calculate_compliance_score(
         "errors": result.error_count,
         "warnings": result.warning_count,
         "generated_at": datetime.now(UTC).isoformat(),
+        "dimensions": dimensions,
     }
     rel_path = SCORE_DIR / normalized_task_id / "compliance-score.yaml"
     written = _write_yaml_mapping(root, rel_path, data)
@@ -1798,6 +2108,7 @@ def calculate_compliance_score(
         warnings=result.warning_count,
         errors=result.error_count,
         output_path=written,
+        dimensions=dimensions,
     )
 
 
@@ -1844,3 +2155,83 @@ def propose_remediation_actions(
             message=check.message,
         ))
     return tuple(actions)
+
+
+def _write_remediation_audit(
+    root: Path,
+    *,
+    task_id: str,
+    profile: str,
+    written: Iterable[Path],
+    skipped: Iterable[str],
+) -> Path:
+    audit_path = root / APPLIED_FIXES_FILE
+    _ensure_inside_root(root, audit_path, label="Applied remediation audit")
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": "grimoire-agentic-standard-remediation-apply/v1",
+        "task_id": task_id,
+        "profile": profile,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "written": [str(path) for path in written],
+        "skipped": list(skipped),
+    }
+    with audit_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    return APPLIED_FIXES_FILE
+
+
+def apply_remediation_actions(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> StandardRemediationApplyResult:
+    """Apply only non-destructive standard remediations."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    verification = verify_standard_profile(root, profile_id=profile_id, task_id=normalized_task_id)
+    actions = propose_remediation_actions(root, task_id=normalized_task_id, profile_id=verification.profile)
+    safe_missing = [
+        action
+        for action in actions
+        if action.action == "generate_missing_artifact" and action.path is not None
+    ]
+    written: tuple[Path, ...] = ()
+    skipped: list[str] = [
+        f"{action.action}:{action.check_id}"
+        for action in actions
+        if action not in safe_missing
+    ]
+    if safe_missing:
+        setup_result = setup_standard_profile(
+            root,
+            profile_id=verification.profile,
+            task_id=normalized_task_id,
+            force=False,
+            dry_run=False,
+        )
+        written = tuple(setup_result.written)
+        skipped.extend(str(path) for path in setup_result.skipped)
+    audit_path = _write_remediation_audit(
+        root,
+        task_id=normalized_task_id,
+        profile=verification.profile,
+        written=written,
+        skipped=skipped,
+    )
+    _append_runtime_event(
+        root,
+        event_type="remediation.applied",
+        task_id=normalized_task_id,
+        profile=verification.profile,
+        details={"written": [str(path) for path in written], "skipped": skipped, "audit_path": str(audit_path)},
+    )
+    return StandardRemediationApplyResult(
+        profile=verification.profile,
+        project_root=root,
+        actions=actions,
+        written=written,
+        skipped=tuple(skipped),
+        audit_path=audit_path,
+    )

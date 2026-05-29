@@ -10,9 +10,12 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core.agentic_standard import (
     STANDARD_PROFILE_FILE,
+    apply_remediation_actions,
     build_context_bundle,
     build_decision_trace,
+    build_knowledge_graph,
     build_knowledge_index,
+    calculate_compliance_score,
     detect_standard_providers,
     list_profiles,
     list_standard_patterns,
@@ -176,22 +179,47 @@ def test_verify_blocks_knowledge_index_manifest_outside_project_root(tmp_path: P
 
 
 def test_runtime_builders_create_context_decision_hooks_and_events(tmp_path: Path) -> None:
-    setup_standard_profile(tmp_path, profile_id="orchestrated", provider_ids=("github-copilot",))
+    setup_standard_profile(tmp_path, profile_id="orchestrated", provider_ids=("openai",))
 
     context = build_context_bundle(tmp_path)
     decision = build_decision_trace(tmp_path)
     knowledge = build_knowledge_index(tmp_path)
+    graph = build_knowledge_graph(tmp_path)
     hooks = simulate_standard_hooks(tmp_path, phase="pre_context_build")
 
     assert context.path == Path("_grimoire-output/context/bootstrap/context-bundle.yaml")
+    assert context.data["provider_constraints"]["matched_provider"] == "openai"
+    assert context.data["knowledge_graph_ref"] == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
     assert decision.path == Path("_grimoire-output/decisions/bootstrap/decision-trace.yaml")
     assert knowledge.path == Path("_grimoire-output/knowledge/bootstrap/index-manifest.yaml")
+    assert graph.path == Path("_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml")
+    assert graph.data["nodes"]
     assert hooks.path == Path("_grimoire-output/events/bootstrap/hook-simulation-pre_context_build.yaml")
     assert (tmp_path / context.path).is_file()
     assert (tmp_path / decision.path).is_file()
     assert (tmp_path / knowledge.path).is_file()
+    assert (tmp_path / graph.path).is_file()
     assert (tmp_path / hooks.path).is_file()
     assert (tmp_path / "_grimoire-output/events/runtime-journal.jsonl").is_file()
+
+
+def test_compliance_score_includes_dimensions(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="controlled", provider_ids=("github-copilot",))
+
+    result = calculate_compliance_score(tmp_path)
+
+    assert result.output_path == Path("_grimoire-output/standard/bootstrap/compliance-score.yaml")
+    assert "provider_policy" in result.dimensions
+    assert result.dimensions["provider_policy"]["percentage"] == 100
+
+
+def test_apply_remediation_generates_missing_artifacts(tmp_path: Path) -> None:
+    result = apply_remediation_actions(tmp_path, profile_id="starter")
+
+    assert result.profile == "starter"
+    assert STANDARD_PROFILE_FILE in result.written
+    assert (tmp_path / STANDARD_PROFILE_FILE).is_file()
+    assert (tmp_path / result.audit_path).is_file()
 
 
 def test_standard_pattern_catalog_lists_patterns(tmp_path: Path) -> None:
@@ -307,23 +335,28 @@ def test_cli_standard_runtime_commands_json(tmp_path: Path) -> None:
         "--profile",
         "orchestrated",
         "--provider",
-        "github-copilot",
+        "openai",
     ])
 
     context_result = runner.invoke(app, ["-o", "json", "standard", "context", "build", str(tmp_path)])
     decision_result = runner.invoke(app, ["-o", "json", "standard", "decision", "trace", str(tmp_path)])
     knowledge_result = runner.invoke(app, ["-o", "json", "standard", "knowledge", "index", str(tmp_path)])
+    graph_result = runner.invoke(app, ["-o", "json", "standard", "knowledge", "graph", str(tmp_path)])
     pattern_result = runner.invoke(app, ["-o", "json", "standard", "pattern", "list", str(tmp_path)])
     hooks_result = runner.invoke(app, ["-o", "json", "standard", "hooks", "simulate", str(tmp_path), "--phase", "pre_context_build"])
     gate_result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--target-state", "review"])
     events_result = runner.invoke(app, ["-o", "json", "standard", "events", "audit", str(tmp_path)])
     fix_result = runner.invoke(app, ["-o", "json", "standard", "fix", str(tmp_path)])
+    score_result = runner.invoke(app, ["-o", "json", "standard", "score", str(tmp_path)])
 
     assert context_result.exit_code == 0
     assert _posix_path(json.loads(context_result.output)["path"]) == "_grimoire-output/context/bootstrap/context-bundle.yaml"
+    assert json.loads(context_result.output)["data"]["provider_constraints"]["matched_provider"] == "openai"
     assert decision_result.exit_code == 0
     assert knowledge_result.exit_code == 0
     assert _posix_path(json.loads(knowledge_result.output)["path"]) == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
+    assert graph_result.exit_code == 0
+    assert _posix_path(json.loads(graph_result.output)["path"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
     assert pattern_result.exit_code == 0
     assert any(pattern["id"] == "advanced-context-orchestrator" for pattern in json.loads(pattern_result.output))
     assert hooks_result.exit_code == 0
@@ -332,3 +365,42 @@ def test_cli_standard_runtime_commands_json(tmp_path: Path) -> None:
     assert json.loads(events_result.output)["event_count"] >= 4
     assert fix_result.exit_code == 0
     assert "actions" in json.loads(fix_result.output)
+    assert score_result.exit_code in {0, 1}
+    assert "dimensions" in json.loads(score_result.output)
+
+
+def test_cli_standard_fix_apply_writes_safe_missing_artifacts(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "fix", str(tmp_path), "--profile", "starter", "--apply"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["applied"] is True
+    assert _posix_path(str(STANDARD_PROFILE_FILE)) in [_posix_path(path) for path in data["written"]]
+    assert (tmp_path / STANDARD_PROFILE_FILE).is_file()
+
+
+def test_cli_standard_gate_strict_uses_ci_blocking_exit_for_governed(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed", "--provider", "github-copilot"])
+
+    result = runner.invoke(
+        app,
+        [
+            "-o",
+            "json",
+            "standard",
+            "gate",
+            "check",
+            str(tmp_path),
+            "--profile",
+            "governed",
+            "--target-state",
+            "review",
+            "--strict",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert json.loads(result.output)["strict"] is True

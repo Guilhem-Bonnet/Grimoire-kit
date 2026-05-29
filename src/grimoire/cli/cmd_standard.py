@@ -14,11 +14,14 @@ from rich.table import Table
 from grimoire.core.agentic_standard import (
     StandardProviderDetection,
     StandardRemediationAction,
+    StandardRemediationApplyResult,
     StandardRuntimeArtifact,
     StandardVerificationResult,
+    apply_remediation_actions,
     audit_runtime_events,
     build_context_bundle,
     build_decision_trace,
+    build_knowledge_graph,
     build_knowledge_index,
     calculate_compliance_score,
     check_evidence_gates,
@@ -98,6 +101,18 @@ def _remediation_json(actions: Sequence[StandardRemediationAction]) -> list[dict
         }
         for action in actions
     ]
+
+
+def _remediation_apply_json(result: StandardRemediationApplyResult) -> dict[str, object]:
+    return {
+        "profile": result.profile,
+        "project_root": str(result.project_root),
+        "applied": True,
+        "actions": _remediation_json(result.actions),
+        "written": _paths(list(result.written)),
+        "skipped": list(result.skipped),
+        "audit_path": str(result.audit_path),
+    }
 
 
 def _filtered_result(result: StandardVerificationResult, prefixes: tuple[str, ...]) -> dict[str, Any]:
@@ -495,6 +510,7 @@ def gate_check(
     task_id: str = typer.Option("bootstrap", "--task-id", help="Task id to evaluate."),
     target_state: str | None = typer.Option(None, "--target-state", help="Optional target lifecycle state."),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
+    strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when governed/production gates fail."),
 ) -> None:
     """Check standard evidence gates for a task."""
     result = check_evidence_gates(project_root, task_id=task_id, target_state=target_state, profile_id=profile)
@@ -513,15 +529,18 @@ def gate_check(
             }
             for check in result.checks
         ],
+        "strict": strict,
     }
+    strict_failure = strict and result.profile in {"governed", "production"} and not result.ok
+    exit_code = 2 if strict_failure else 0 if result.ok else 1
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        raise typer.Exit(0 if result.ok else 1)
+        raise typer.Exit(exit_code)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} evidence gates for task {result.task_id}")
     for missing in result.missing:
         console.print(f"  [red]✗[/red] missing {missing}")
-    raise typer.Exit(0 if result.ok else 1)
+    raise typer.Exit(exit_code)
 
 
 @events_app.command("audit")
@@ -594,6 +613,24 @@ def knowledge_index(
     console.print(f"[green]✓[/green] knowledge index written to {artifact.path}")
 
 
+@knowledge_app.command("graph")
+def knowledge_graph(
+    ctx: typer.Context,
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
+    task_id: str = typer.Option("bootstrap", "--task-id", help="Task id for the knowledge graph."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
+    source: list[str] | None = typer.Option(None, "--source", help="Enabled knowledge source id to include. Can be repeated."),  # noqa: B008
+) -> None:
+    """Build a local doc-to-graph knowledge graph."""
+    artifact = build_knowledge_graph(project_root, task_id=task_id, profile_id=profile, source_ids=source or ())
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
+        return
+    nodes = artifact.data.get("nodes", [])
+    node_count = len(nodes) if isinstance(nodes, list) else 0
+    console.print(f"[green]✓[/green] knowledge graph with {node_count} node(s) written to {artifact.path}")
+
+
 @knowledge_app.command("verify")
 def knowledge_verify(
     ctx: typer.Context,
@@ -621,6 +658,7 @@ def score(
         "threshold": result.threshold,
         "warnings": result.warnings,
         "errors": result.errors,
+        "dimensions": result.dimensions,
         "output_path": str(result.output_path),
     }
     if _get_fmt(ctx) == "json":
@@ -628,6 +666,19 @@ def score(
         raise typer.Exit(0 if result.ok else 1)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} compliance score {result.score}/{result.threshold} written to {result.output_path}")
+    table = Table(title="Compliance dimensions")
+    table.add_column("Dimension")
+    table.add_column("Score")
+    table.add_column("Weight")
+    table.add_column("Issues")
+    for dimension, values in result.dimensions.items():
+        table.add_row(
+            dimension,
+            f"{values['percentage']}%",
+            str(values["weight"]),
+            f"{values['errors']} error(s), {values['warnings']} warning(s)",
+        )
+    console.print(table)
     raise typer.Exit(0 if result.ok else 1)
 
 
@@ -639,14 +690,24 @@ def fix(
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
     dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Plan remediations or apply safe fixes."),
 ) -> None:
-    """Plan remediation actions for standard audit findings."""
+    """Plan remediation actions or apply safe non-destructive fixes."""
     actions = propose_remediation_actions(project_root, task_id=task_id, profile_id=profile)
-    payload = {"dry_run": dry_run, "applied": False, "actions": _remediation_json(actions)}
+    apply_result: StandardRemediationApplyResult | None = None
+    if not dry_run:
+        apply_result = apply_remediation_actions(project_root, task_id=task_id, profile_id=profile)
+    payload: dict[str, object] = {"dry_run": dry_run, "applied": False, "actions": _remediation_json(actions)}
+    if apply_result is not None:
+        payload = {"dry_run": False, **_remediation_apply_json(apply_result)}
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    action_label = "Would apply" if dry_run else "Safe apply is not enabled yet; planned"
+    action_label = "Would apply" if dry_run else "Applied safe subset of"
     console.print(f"[cyan]{action_label}[/cyan] {len(actions)} remediation action(s)")
+    if apply_result is not None:
+        for path in apply_result.written:
+            console.print(f"  [green]✓[/green] wrote {path}")
+        for skipped in apply_result.skipped:
+            console.print(f"  [yellow]↷[/yellow] skipped {skipped}")
     for action in actions:
         path_text = f" ({action.path})" if action.path else ""
         console.print(f"  [yellow]![/yellow] {action.action}: {action.check_id}{path_text}")

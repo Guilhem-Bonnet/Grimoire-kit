@@ -108,22 +108,27 @@ grimoire standard rules verify .
 grimoire standard hooks verify .
 grimoire standard hooks simulate . --phase pre_context_build --task-id bootstrap
 grimoire standard gate check . --task-id bootstrap --target-state review
+grimoire standard gate check . --task-id bootstrap --target-state released --profile governed --strict
 grimoire standard knowledge index . --task-id bootstrap
+grimoire standard knowledge graph . --task-id bootstrap
 grimoire standard knowledge verify . --task-id bootstrap
 grimoire standard pattern list .
 grimoire standard pattern show advanced-context-orchestrator .
 grimoire standard events audit .
 grimoire standard score . --task-id bootstrap
 grimoire standard fix . --dry-run
+grimoire standard fix . --apply
 ```
 
 Les sorties opérationnelles restent dans `_grimoire-output/` :
 
-- `context/{task-id}/context-bundle.yaml` : sources sélectionnées, mémoire injectée, contraintes providers, redactions et preuves attendues ;
+- `context/{task-id}/context-bundle.yaml` : sources sélectionnées, mémoire injectée, contraintes providers, routage provider évalué, redactions et preuves attendues ;
 - `decisions/{task-id}/decision-trace.yaml` : traces task/context/memory/provider/agent/tool/state/release ;
 - `knowledge/{task-id}/index-manifest.yaml` : sources, artefacts normatifs, patterns et checks ;
+- `knowledge/{task-id}/knowledge-graph.yaml` : graphe local doc-to-graph des artefacts, sources folder autorisées et patterns ;
 - `events/runtime-journal.jsonl` : journal des événements context, decision, knowledge, hooks, gates et score ;
-- `standard/{task-id}/compliance-score.yaml` : score profil-aware.
+- `events/applied-fixes.jsonl` : audit trail des remédiations sûres appliquées ;
+- `standard/{task-id}/compliance-score.yaml` : score profil-aware avec dimensions pondérées.
 
 Les commandes sont volontairement sûres : la simulation de hooks n'exécute aucune action externe, la remediation reste en dry-run par défaut et les chemins générés sont contraints au project root.
 
@@ -137,13 +142,13 @@ Le kit possède une première structure pour transformer le standard en flow act
 4. templates runtime pour board, mémoire, contexte, décisions, rules/hooks, orchestration, evidence gates et patterns ;
 5. distinction explicite mémoire / contexte / base de connaissance ;
 6. compatibilité provider-first pour Copilot, Codex/OpenAI, Claude, Gemini et modèles locaux ;
-7. génération de context bundle, decision trace, knowledge index, hook simulation, gate check, event audit, score et plan de remediation.
+7. génération de context bundle, decision trace, knowledge index/graph, hook simulation, gate check strict, event audit, score dimensionnel et remediation sûre.
 
 ## Limites actuelles
 
-- Le registry provider est audité et vérifié, mais le routage LLM effectif reste à brancher aux appels providers réels.
-- Les gates d'évidence sont vérifiables par `standard gate check`, mais le blocage release global dépend encore de l'intégration CI de chaque projet.
-- Le knowledge index génère un manifeste traçable ; l'extraction doc-to-graph complète reste une étape ultérieure.
+- Le registry provider est audité, vérifié et évalué dans le context bundle ; le branchement aux appels providers réels reste l'étape suivante.
+- Les gates d'évidence peuvent bloquer explicitement les profils `governed`/`production` avec `standard gate check --strict`; l'intégration CI de chaque projet doit appeler cette commande.
+- Le knowledge graph indexe les artefacts locaux et sources `folder` autorisées ; les connecteurs MCP, URL, base de données et vector store restent à brancher.
 
 ## Étendre les profils
 
