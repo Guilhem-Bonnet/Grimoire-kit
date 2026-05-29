@@ -115,16 +115,35 @@ def _remediation_apply_json(result: StandardRemediationApplyResult) -> dict[str,
     }
 
 
+_FILTERED_REQUIRED_PATHS: dict[str, tuple[Path, ...]] = {
+    "board.": (Path("_grimoire/standard/task-board.yaml"),),
+    "memory.": (Path("_grimoire/standard/memory-policy.yaml"),),
+    "context.": (Path("_grimoire/standard/context-contract.yaml"),),
+    "decision.": (Path("_grimoire/standard/decision-graph.yaml"),),
+    "rules.": (Path("_grimoire/standard/rule-packs.yaml"),),
+    "hooks.": (Path("_grimoire/standard/hook-registry.yaml"),),
+}
+
+
 def _filtered_result(result: StandardVerificationResult, prefixes: tuple[str, ...]) -> dict[str, Any]:
     checks = [
         check
         for check in result.checks
         if check.id.startswith(prefixes)
     ]
+    required_paths = {
+        path
+        for prefix in prefixes
+        for path in _FILTERED_REQUIRED_PATHS.get(prefix, ())
+    }
+    missing = [path for path in result.missing if path in required_paths]
+    invalid_yaml = [path for path in result.invalid_yaml if path in required_paths]
     return {
-        "ok": result.ok and not any(check.is_error for check in checks),
+        "ok": not missing and not invalid_yaml and not any(check.is_error for check in checks),
         "profile": result.profile,
         "project_root": str(result.project_root),
+        "missing": _paths(missing),
+        "invalid_yaml": _paths(invalid_yaml),
         "checks": [
             {
                 "id": check.id,
@@ -134,7 +153,7 @@ def _filtered_result(result: StandardVerificationResult, prefixes: tuple[str, ..
             }
             for check in checks
         ],
-        "error_count": sum(1 for check in checks if check.is_error),
+        "error_count": len(missing) + len(invalid_yaml) + sum(1 for check in checks if check.is_error),
         "warning_count": sum(1 for check in checks if check.severity == "warning"),
     }
 

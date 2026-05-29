@@ -11,6 +11,7 @@ import contextlib
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -31,11 +32,10 @@ console = Console(stderr=True)
 # Valid values — keep in sync with config.py
 KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-    "agentic-standard",
+    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
 })
 
-KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
 # Archetype human descriptions for the wizard (order = display order)
 _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
@@ -49,31 +49,87 @@ _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
 # Minimal is always base — not shown in multi-select
 _ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())
 
+_QDRANT_DEFAULT_URL = "http://localhost:6333"
+_WEAVIATE_DEFAULT_URL = "http://localhost:8080"
+_QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
+
 
 # ── Memory backend detection ─────────────────────────────────────────────────
 
 
-def detect_memory_backend() -> str:
-    """Probe localhost for Qdrant or Ollama, return best backend."""
-    # Qdrant
+def _http_ok(url: str, *, timeout: float = 2.0) -> bool:
+    """Return True when a local HTTP probe responds successfully."""
     try:
-        req = urllib.request.Request("http://localhost:6333/healthz", method="GET")
-        with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
-            if resp.status == 200:
-                return "qdrant-local"
-    except (OSError, urllib.error.URLError):
-        pass
+        req = urllib.request.Request(url, method="GET")  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return 200 <= int(resp.status) < 300
+    except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError):
+        return False
+
+
+def _is_qdrant_reachable(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
+    """Probe Qdrant's local HTTP API."""
+    base = qdrant_url.rstrip("/")
+    return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/readyz", "/collections", "/healthz"))
+
+
+def _is_weaviate_reachable(weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
+    """Probe Weaviate's local HTTP API."""
+    base = weaviate_url.rstrip("/")
+    return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/v1/.well-known/ready", "/v1/meta"))
+
+
+def detect_memory_backend() -> str:
+    """Probe localhost for Memory OS services and return the best local backend."""
+    if _is_weaviate_reachable():
+        return "weaviate-server"
+
+    if _is_qdrant_reachable():
+        return "qdrant-local"
 
     # Ollama
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
-            if resp.status == 200:
-                return "ollama"
-    except (OSError, urllib.error.URLError):
-        pass
+    if _http_ok("http://localhost:11434/api/tags"):
+        return "ollama"
 
     return "local"
+
+
+def _wait_for_qdrant(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
+    """Wait briefly for a freshly started Qdrant service to answer."""
+    for _ in range(10):
+        if _is_qdrant_reachable(qdrant_url):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _start_qdrant_docker(target: Path) -> tuple[bool, str]:
+    """Start the generated Qdrant Docker Compose service."""
+    compose_file = target / _QDRANT_COMPOSE_FILE
+    if not compose_file.is_file():
+        return False, f"{_QDRANT_COMPOSE_FILE} introuvable dans le projet généré."
+
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "-f", compose_file.name, "up", "-d"],
+            cwd=target,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except FileNotFoundError:
+        return False, "Docker CLI introuvable. Lance `docker compose -f docker-compose.memory.yml up -d` après installation."
+    except subprocess.TimeoutExpired:
+        return False, "Docker Compose n'a pas répondu. Relance `docker compose -f docker-compose.memory.yml up -d`."
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "erreur inconnue"
+        return False, f"Docker Compose a échoué: {detail}"
+
+    if _wait_for_qdrant():
+        return True, "Qdrant est démarré sur http://localhost:6333."
+
+    return False, "Docker Compose est lancé, mais Qdrant ne répond pas encore sur http://localhost:6333."
 
 
 def _git_user_name() -> str:
@@ -98,6 +154,8 @@ def _run_wizard(
     scan: ScanResult | None,
     resolved: ResolvedArchetype,
     backend: str,
+    *,
+    offer_qdrant_docker: bool = False,
 ) -> dict[str, Any]:
     """Interactive wizard — multi-select archetypes, returns config dict."""
     console.print()
@@ -153,6 +211,17 @@ def _run_wizard(
     )
     skill_level = _skill_choices[skill_input]
 
+    qdrant_docker = False
+    if offer_qdrant_docker:
+        console.print()
+        console.print("  [bold]Memory:[/bold] Qdrant n'est pas encore disponible sur localhost:6333.")
+        qdrant_docker = Confirm.ask(
+            "  [bold]Initialiser Qdrant via Docker pour la mémoire sémantique ?[/bold]",
+            default=True,
+        )
+        if qdrant_docker:
+            backend = "qdrant-server"
+
     # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
     console.print()
     console.print("  [dim]\\[■■■□] 3/4 · Archetypes[/dim]")
@@ -207,6 +276,8 @@ def _run_wizard(
     console.print(f"    Skill level: {skill_level}")
     console.print(f"    Archetypes:  {arch_display}")
     console.print(f"    Backend:     {backend}")
+    if qdrant_docker:
+        console.print("    Qdrant:      Docker local auto-start")
     console.print()
 
     if not Confirm.ask("  [bold]Proceed with installation?[/bold]", default=True):
@@ -220,6 +291,7 @@ def _run_wizard(
         "archetypes": selected_archetypes,
         "archetype": selected_archetypes[0] if selected_archetypes else "minimal",
         "backend": backend,
+        "qdrant_docker": qdrant_docker,
     }
 
 
@@ -334,6 +406,9 @@ def _display_report(
     scan: ScanResult | None,
     backend: str,
     project_name: str,
+    *,
+    qdrant_docker_started: bool = False,
+    qdrant_docker_message: str = "",
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -360,11 +435,15 @@ def _display_report(
         "local": "Mémoire fichier locale — aucune dépendance requise",
         "qdrant-local": "Qdrant détecté sur localhost:6333 — recherche sémantique activée",
         "qdrant-server": "Qdrant distant configuré — vérifier avec grimoire doctor",
+        "weaviate-server": "Weaviate + Neo4j configurés — vérifier avec grimoire memory status et memory migrate verify",
         "ollama": "Ollama détecté — embeddings locaux activés",
     }
     _tip = _backend_tips.get(backend)
     if _tip:
         console.print(f"           [dim]{_tip}[/dim]")
+    if qdrant_docker_message:
+        status = "[green]OK[/green]" if qdrant_docker_started else "[yellow]WARN[/yellow]"
+        console.print(f"           {status} [dim]{qdrant_docker_message}[/dim]")
     console.print()
 
     # Agents deployed (categorized)
@@ -488,6 +567,8 @@ def _display_json(
     scan: ScanResult | None,
     backend: str,
     project_name: str,
+    *,
+    qdrant_docker: dict[str, Any] | None = None,
 ) -> None:
     """Output JSON result for scripting."""
     data: dict[str, Any] = {
@@ -507,6 +588,8 @@ def _display_json(
         "files_copied": len(result.copied_files),
         "configs_generated": len(result.rendered_files),
     }
+    if qdrant_docker is not None:
+        data["qdrant_docker"] = qdrant_docker
     for label in result.copied_files:
         if "/" in label:
             cat = label.split("/")[0]
@@ -526,6 +609,7 @@ def run_init(
     backend: str = "auto",
     force: bool = False,
     dry_run: bool = False,
+    qdrant_docker: bool = False,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
@@ -549,7 +633,11 @@ def run_init(
     scan = scanner.scan()
 
     # Phase 2: Resolve backend
-    if backend == "auto":
+    requested_backend = backend
+    qdrant_docker_requested = qdrant_docker
+    if qdrant_docker_requested:
+        backend = "qdrant-server"
+    elif backend == "auto":
         backend = detect_memory_backend()
 
     # Phase 3: Resolve archetype
@@ -572,12 +660,21 @@ def run_init(
 
     is_interactive = sys.stdin.isatty() and not yes and fmt != "json"
 
+    offer_qdrant_docker = requested_backend == "auto" and backend == "local"
+
     if is_interactive and not dry_run:
-        wizard_result = _run_wizard(target, scan, resolved, backend)
+        wizard_result = _run_wizard(
+            target,
+            scan,
+            resolved,
+            backend,
+            offer_qdrant_docker=offer_qdrant_docker,
+        )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
+        qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
         # Re-resolve if user changed archetypes or backend
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
         new_backend = wizard_result["backend"]
@@ -617,6 +714,7 @@ def run_init(
                 "stacks": [d.name for d in scan.stacks],
                 "stack_agents": list(resolved.stack_agents),
                 "feature_agents": list(resolved.feature_agents),
+                "qdrant_docker": qdrant_docker_requested,
             }, indent=2))
         else:
             _display_dry_run(plan, target, project_name, resolved.archetype, resolved)
@@ -625,8 +723,33 @@ def run_init(
     # Phase 6: Execute
     result = scaffolder.execute(plan)
 
+    qdrant_docker_started = False
+    qdrant_docker_message = ""
+    if qdrant_docker_requested:
+        if _is_qdrant_reachable():
+            qdrant_docker_started = True
+            qdrant_docker_message = "Qdrant est déjà disponible sur http://localhost:6333."
+        else:
+            qdrant_docker_started, qdrant_docker_message = _start_qdrant_docker(target)
+
     # Phase 7: Report
     if fmt == "json":
-        _display_json(target, result, resolved, scan, backend, project_name)
+        docker_status = None
+        if qdrant_docker_requested:
+            docker_status = {
+                "requested": True,
+                "started": qdrant_docker_started,
+                "message": qdrant_docker_message,
+            }
+        _display_json(target, result, resolved, scan, backend, project_name, qdrant_docker=docker_status)
     else:
-        _display_report(target, result, resolved, scan, backend, project_name)
+        _display_report(
+            target,
+            result,
+            resolved,
+            scan,
+            backend,
+            project_name,
+            qdrant_docker_started=qdrant_docker_started,
+            qdrant_docker_message=qdrant_docker_message,
+        )

@@ -24,6 +24,10 @@ class MemoryEntry:
     created_at: str = ""
     updated_at: str = ""
     score: float = 0.0
+    source: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+    freshness: str = "current"
+    task_ref: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +39,10 @@ class MemoryEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "score": self.score,
+            "source": self.source,
+            "provenance": dict(self.provenance),
+            "freshness": self.freshness,
+            "task_ref": self.task_ref,
         }
 
 
@@ -103,6 +111,18 @@ class MemoryBackend(abc.ABC):
     def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
         """Update an entry's text, tags, or metadata.  Returns updated entry or None."""
         raise NotImplementedError(f"{type(self).__name__} does not support update()")
+
+    def upsert(
+        self,
+        entry_id: str,
+        text: str,
+        *,
+        user_id: str = "",
+        tags: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryEntry:
+        """Create or replace an entry with a caller-provided ID."""
+        raise NotImplementedError(f"{type(self).__name__} does not support upsert()")
 
     def store_many(self, entries: list[dict[str, Any]]) -> list[MemoryEntry]:
         """Batch-store multiple entries.  Default: sequential ``store()`` calls."""

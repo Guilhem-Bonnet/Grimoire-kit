@@ -120,9 +120,16 @@ grimoire standard fix . --dry-run
 grimoire standard fix . --apply
 ```
 
+`grimoire standard memory verify` vérifie aussi le contrat Memory OS cible généré dans
+`_grimoire/standard/memory-policy.yaml` : Redis reste la mémoire chaude TTL/streams/locks,
+Weaviate devient la mémoire sémantique durable, Neo4j la projection graphe typée,
+SQLite le sidecar/fallback local et Qdrant une source legacy de migration/rollback.
+Les profils `governed` et `production` traitent une dérive de ce contrat comme une
+erreur bloquante dans `standard gate check --strict`.
+
 Les sorties opérationnelles restent dans `_grimoire-output/` :
 
-- `context/{task-id}/context-bundle.yaml` : sources sélectionnées, mémoire injectée, contraintes providers, routage provider évalué, redactions et preuves attendues ;
+- `context/{task-id}/context-bundle.yaml` : sources sélectionnées, mémoire injectée, contrat Memory OS, contraintes providers, routage provider évalué, redactions et preuves attendues ;
 - `decisions/{task-id}/decision-trace.yaml` : traces task/context/memory/provider/agent/tool/state/release ;
 - `knowledge/{task-id}/index-manifest.yaml` : sources, artefacts normatifs, patterns et checks ;
 - `knowledge/{task-id}/knowledge-graph.yaml` : graphe local doc-to-graph des artefacts, sources folder autorisées et patterns ;

@@ -209,6 +209,7 @@ Actions possibles :
 - Une tâche en `review`, `accepted` ou `released` doit référencer un evidence pack.
 - Un context bundle doit lister ses sources et leur ordre de priorité.
 - Une source memory ou knowledge doit respecter freshness, trust et scope.
+- Le contrat Memory OS doit séparer Redis hot memory, Weaviate durable, Neo4j graph, SQLite sidecar et Qdrant legacy/migration.
 - Une route d’orchestration doit pointer vers un provider déclaré.
 - Une décision doit pointer vers une règle ou une policy.
 - Un hook bloquant doit produire une remediation ou une justification.

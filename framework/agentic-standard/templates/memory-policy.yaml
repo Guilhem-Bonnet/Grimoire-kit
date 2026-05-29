@@ -9,6 +9,30 @@ defaults:
   provider_compatibility:
     hosted: "non-secret, approved project data only"
     local: "project-approved local data only"
+memory_os:
+  target:
+    hot_memory: "redis"
+    semantic_memory: "weaviate-server"
+    graph_projection: "neo4j"
+    sidecar: "sqlite"
+    legacy_vector_sources:
+      - "qdrant-local"
+      - "qdrant-server"
+  backend_roles:
+    redis: "Hot operational memory: TTL state, leases, locks, streams, and pub/sub; never the durable source of truth."
+    weaviate-server: "Durable semantic/vector memory target for accepted memories, knowledge facts, and code/task embeddings."
+    neo4j: "Durable typed graph projection for memories, facts, agents, tasks, evidence, files, symbols, and decisions."
+    sqlite: "Local sidecar and fallback for facts, diary entries, and offline-safe structured metadata."
+    qdrant: "Legacy vector source retained only for migration, rollback, and parity checks."
+  promotion_gates:
+    - "hot_memory_ttl_declared"
+    - "semantic_write_has_evidence"
+    - "graph_projection_has_source_refs"
+    - "qdrant_migration_bundle_verified"
+  runtime_commands:
+    - "grimoire memory gate"
+    - "grimoire memory migrate verify"
+    - "grimoire memory graph verify"
 memory_types:
   - memory_id: "session"
     type: "session"

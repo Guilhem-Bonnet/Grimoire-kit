@@ -271,7 +271,7 @@ reminders:
   - "⚠️  Module PCI-DSS — double review obligatoire"
 ```
 
-Référence : [framework/agent-rules.md](../framework/agent-rules.md)
+Référence : [framework/agent-rules.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/agent-rules.md)
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
@@ -304,7 +304,7 @@ bash grimoire-init.sh validate --dna archetypes/mon-archetype/archetype.dna.yaml
 bash grimoire-init.sh install --archetype mon-archetype
 ```
 
-Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.schema.yaml](../framework/archetype-dna.schema.yaml)
+Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.schema.yaml](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/archetype-dna.schema.yaml)
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
@@ -375,7 +375,7 @@ bash grimoire-init.sh evolve --report        # rapport sans modifier la DNA
 bash grimoire-init.sh evolve                 # proposer patch (revue humaine requise avant --apply)
 ```
 
-Voir [framework/tools/README.md](../framework/tools/README.md) pour la référence complète des outils.
+Voir [framework/tools/README.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/tools/README.md) pour la référence complète des outils.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
@@ -385,9 +385,9 @@ Voir [framework/tools/README.md](../framework/tools/README.md) pour la référen
 - [memory-system.md](memory-system.md) — Mémoire Qdrant multi-collection
 - [workflow-design-patterns.md](workflow-design-patterns.md) — 13 patterns universels
 - [creating-agents.md](creating-agents.md) — Créer un agent custom
-- [framework/archetype-dna.schema.yaml](../framework/archetype-dna.schema.yaml) — Schéma DNA complet
-- [framework/context-router.md](../framework/context-router.md) — Gestion du budget contexte
-- [framework/agent-rules.md](../framework/agent-rules.md) — Override DNA par dossier
+- [framework/archetype-dna.schema.yaml](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/archetype-dna.schema.yaml) — Schéma DNA complet
+- [framework/context-router.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/context-router.md) — Gestion du budget contexte
+- [framework/agent-rules.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/agent-rules.md) — Override DNA par dossier
 
 
 ### `web-app`

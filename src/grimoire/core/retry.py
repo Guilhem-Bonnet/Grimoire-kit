@@ -42,7 +42,8 @@ def with_retry(
         Exception types that trigger a retry.  All others propagate
         immediately.
 
-    Example::
+    Examples
+    --------
 
         from grimoire.core.retry import with_retry
 

@@ -115,6 +115,7 @@ DIMENSION_CHECK_PREFIXES = {
     "provider_policy": ("providers.",),
     "knowledge_registry": ("knowledge.", "knowledge_index."),
     "task_board": ("board.", "task."),
+    "memory_os": ("memory.os_",),
     "memory_policy": ("memory.",),
     "context_contract": ("context.",),
     "decision_graph": ("decision.",),
@@ -125,12 +126,31 @@ DIMENSION_CHECK_PREFIXES = {
     "runtime_journal": ("journal.",),
     "ci_release_gate": ("release.",),
 }
+MEMORY_OS_REQUIRED_TARGET = {
+    "hot_memory": "redis",
+    "semantic_memory": "weaviate-server",
+    "graph_projection": "neo4j",
+    "sidecar": "sqlite",
+}
+MEMORY_OS_LEGACY_VECTOR_SOURCES = {"qdrant-local", "qdrant-server"}
+MEMORY_OS_REQUIRED_PROMOTION_GATES = {
+    "hot_memory_ttl_declared",
+    "semantic_write_has_evidence",
+    "graph_projection_has_source_refs",
+    "qdrant_migration_bundle_verified",
+}
+MEMORY_OS_REQUIRED_RUNTIME_COMMANDS = {
+    "grimoire memory gate",
+    "grimoire memory migrate verify",
+    "grimoire memory graph verify",
+}
 DEFAULT_SCORE_DIMENSIONS = {
     "artifacts": 10,
     "provider_policy": 10,
     "knowledge_registry": 10,
     "task_board": 10,
     "memory_policy": 10,
+    "memory_os": 10,
     "context_contract": 10,
     "decision_graph": 6,
     "rule_packs": 6,
@@ -1106,7 +1126,112 @@ def _verify_task_board(root: Path, profile: StandardProfile, result: StandardVer
                 _add_check(result, f"board.{ref_key}_outside_root", "error", f"Task {task_id!r} {ref_key} escapes project root.", path=rel_path)
 
 
-def _verify_memory_policy(root: Path, result: StandardVerificationResult) -> None:
+def _strict_memory_os_profile(profile: StandardProfile) -> bool:
+    return profile.id in {"governed", "production"}
+
+
+def _memory_os_severity(profile: StandardProfile) -> str:
+    return "error" if _strict_memory_os_profile(profile) else "warning"
+
+
+def _verify_memory_os_contract(
+    memory_policy: Mapping[str, Any],
+    *,
+    profile: StandardProfile,
+    result: StandardVerificationResult,
+    path: Path,
+) -> None:
+    memory_os = memory_policy.get("memory_os")
+    if not isinstance(memory_os, dict):
+        _add_check(
+            result,
+            "memory.os_contract_missing",
+            _memory_os_severity(profile),
+            "Memory policy should declare a Memory OS contract for Redis, Weaviate, Neo4j, SQLite, and Qdrant migration.",
+            path=path,
+        )
+        return
+
+    target = memory_os.get("target")
+    if not isinstance(target, dict):
+        _add_check(
+            result,
+            "memory.os_target_missing",
+            _memory_os_severity(profile),
+            "Memory OS contract must declare target backends.",
+            path=path,
+        )
+        return
+
+    for key, expected in MEMORY_OS_REQUIRED_TARGET.items():
+        actual = str(target.get(key, "")).strip()
+        if actual != expected:
+            _add_check(
+                result,
+                f"memory.os_{key}_target",
+                _memory_os_severity(profile),
+                f"Memory OS target {key!r} should be {expected!r}, got {actual!r}.",
+                path=path,
+            )
+
+    legacy_sources = target.get("legacy_vector_sources")
+    declared_legacy = {str(source) for source in legacy_sources} if isinstance(legacy_sources, list) else set()
+    missing_legacy = sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES - declared_legacy)
+    if missing_legacy:
+        _add_check(
+            result,
+            "memory.os_legacy_sources_missing",
+            "warning",
+            f"Memory OS should keep Qdrant only as legacy/migration source(s): {', '.join(missing_legacy)}.",
+            path=path,
+        )
+
+    promotion_gates = memory_os.get("promotion_gates")
+    declared_gates = {str(gate) for gate in promotion_gates} if isinstance(promotion_gates, list) else set()
+    missing_gates = sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES - declared_gates)
+    if missing_gates:
+        _add_check(
+            result,
+            "memory.os_promotion_gates_missing",
+            _memory_os_severity(profile),
+            f"Memory OS promotion gates missing: {', '.join(missing_gates)}.",
+            path=path,
+        )
+
+    runtime_commands = memory_os.get("runtime_commands")
+    declared_commands = {str(command) for command in runtime_commands} if isinstance(runtime_commands, list) else set()
+    missing_commands = sorted(MEMORY_OS_REQUIRED_RUNTIME_COMMANDS - declared_commands)
+    if missing_commands:
+        _add_check(
+            result,
+            "memory.os_runtime_commands_missing",
+            "warning",
+            f"Memory OS runtime command evidence should include: {', '.join(missing_commands)}.",
+            path=path,
+        )
+
+
+def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
+    memory_os = memory_policy.get("memory_os")
+    if not isinstance(memory_os, dict):
+        return {
+            "contract_declared": False,
+            "target": dict(MEMORY_OS_REQUIRED_TARGET),
+            "legacy_vector_sources": sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES),
+            "promotion_gates": sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES),
+            "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+        }
+    target = memory_os.get("target")
+    return {
+        "contract_declared": True,
+        "target": target if isinstance(target, dict) else {},
+        "promotion_gates": memory_os.get("promotion_gates", []),
+        "runtime_commands": memory_os.get("runtime_commands", []),
+        "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+    }
+
+
+def _verify_memory_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "memory-policy.yaml"
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
@@ -1147,6 +1272,7 @@ def _verify_memory_policy(root: Path, result: StandardVerificationResult) -> Non
             _add_check(result, "memory.provider_compatibility_invalid", "error", "Memory provider compatibility must be a list.", path=rel_path)
         if not isinstance(entry.get("allowed_context_uses"), list):
             _add_check(result, "memory.context_uses_invalid", "error", "Memory allowed context uses must be a list.", path=rel_path)
+    _verify_memory_os_contract(data, profile=profile, result=result, path=rel_path)
 
 
 def _verify_context_contract(root: Path, result: StandardVerificationResult) -> None:
@@ -1372,7 +1498,7 @@ def verify_standard_profile(
     _verify_compliance_declaration(root, result)
     _verify_profile_specific_controls(root, profile, result)
     _verify_task_board(root, profile, result)
-    _verify_memory_policy(root, result)
+    _verify_memory_policy(root, profile, result)
     _verify_context_contract(root, result)
     _verify_decision_graph(root, result)
     _verify_rule_packs(root, result)
@@ -1558,6 +1684,7 @@ def build_context_bundle(
         "knowledge_graph_ref": str(KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml"),
         "memory_inclusions": memory_entries[: int(context_contract.get("budget", {}).get("max_memory_items", 8))],
         "memory_exclusions": [],
+        "memory_os": _memory_os_context(memory_policy),
         "provider_constraints": {
             "enabled_providers": enabled_providers,
             "routing": provider_registry.get("routing", {}),
@@ -1945,6 +2072,7 @@ def check_evidence_gates(
     checks: list[StandardCheck] = []
     required_paths = {
         "task_board": STANDARD_DIR / "task-board.yaml",
+        "memory_policy": STANDARD_DIR / "memory-policy.yaml",
         "task_envelope": EVIDENCE_DIR / normalized_task_id / "task-envelope.md",
         "evidence_pack": EVIDENCE_DIR / normalized_task_id / "evidence-pack.md",
         "context_bundle": CONTEXT_DIR / normalized_task_id / "context-bundle.yaml",
@@ -1957,6 +2085,13 @@ def check_evidence_gates(
                 missing.append(key)
     if state in {"in_progress", "review", "accepted", "released"} and not (root / required_paths["context_bundle"]).is_file():
         missing.append("context_bundle")
+    if profile.id in {"orchestrated", "governed", "production"} and state in {"in_progress", "review", "accepted", "released"}:
+        if not (root / required_paths["memory_policy"]).is_file():
+            missing.append("memory_policy")
+        else:
+            memory_result = StandardVerificationResult(profile=profile.id, project_root=root)
+            _verify_memory_policy(root, profile, memory_result)
+            checks.extend(memory_result.checks)
     if state in {"review", "accepted", "released"}:
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
@@ -1970,7 +2105,7 @@ def check_evidence_gates(
             message=f"Required gate artifact is missing: {key}.",
             path=required_paths.get(key),
         ))
-    ok = not checks
+    ok = not any(check.is_error for check in checks)
     _append_runtime_event(root, event_type="gate.checked", task_id=normalized_task_id, profile=profile.id, details={"ok": ok, "target_state": state, "missing": missing})
     return StandardGateResult(ok=ok, task_id=normalized_task_id, profile=profile.id, state=state or None, missing=tuple(missing), checks=tuple(checks))
 

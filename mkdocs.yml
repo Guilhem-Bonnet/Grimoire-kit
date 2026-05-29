@@ -87,6 +87,7 @@ nav:
       - Plan cible standard agentique: agentic-standard-target-plan.md
       - Architecture cible standard agentique: agentic-standard-target-architecture.md
       - Mémoire: memory-system.md
+      - Roadmap Memory OS: memory-os-roadmap.md
       - Workflows: workflow-design-patterns.md
       - Taxonomie Workflows: workflow-taxonomy.md
       - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md

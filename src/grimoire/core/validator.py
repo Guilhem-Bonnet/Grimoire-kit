@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.project_types import VALID_PROJECT_TYPES
+
 __all__ = ["ValidationError", "validate_config"]
 
 # ── Validation result ─────────────────────────────────────────────────────────
@@ -42,14 +44,16 @@ class ValidationError:
 
 # ── Known enums ───────────────────────────────────────────────────────────────
 
-_VALID_TYPES = frozenset({
-    "webapp", "api", "service", "infrastructure", "library", "cli", "generic",
-})
+_VALID_TYPES = frozenset(VALID_PROJECT_TYPES)
 
 _VALID_SKILL_LEVELS = frozenset({"beginner", "intermediate", "expert"})
 
 _VALID_BACKENDS = frozenset({
-    "auto", "local", "qdrant-local", "qdrant-server", "ollama",
+    "auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
+})
+_VALID_SHORT_TERM_BACKENDS = frozenset({"sqlite", "redis", "none"})
+_VALID_LAYER_MODES = frozenset({
+    "disabled", "planned", "sqlite-sidecar", "qdrant", "weaviate", "neo4j", "runtime-dashboard",
 })
 
 _KNOWN_ARCHETYPES = frozenset({
@@ -71,7 +75,13 @@ _KNOWN_USER_KEYS = frozenset({
 })
 
 _KNOWN_MEMORY_KEYS = frozenset({
-    "backend", "collection_prefix", "embedding_model", "qdrant_url", "ollama_url",
+    "backend", "collection_prefix", "embedding_model", "qdrant_url",
+    "weaviate_url", "weaviate_api_key_env", "weaviate_collection",
+    "neo4j_uri", "neo4j_user", "neo4j_password_env", "neo4j_database",
+    "migration_source_backend", "migration_target_backend", "migration_bundle_path",
+    "mempalace_path", "ollama_url",
+    "layer_profile", "short_term_backend", "redis_url", "knowledge_graph", "memory_graph", "code_graph",
+    "task_memory", "visualization",
 })
 
 _KNOWN_AGENTS_KEYS = frozenset({
@@ -249,6 +259,21 @@ def _validate_memory(section: Any, errors: list[ValidationError]) -> None:
             message=f"Unknown memory backend '{backend}'.",
             suggestion=f"Valid backends: {', '.join(sorted(_VALID_BACKENDS))}",
         ))
+    short_term_backend = section.get("short_term_backend")
+    if short_term_backend is not None and short_term_backend not in _VALID_SHORT_TERM_BACKENDS:
+        errors.append(ValidationError(
+            path="memory.short_term_backend",
+            message=f"Unknown short-term memory backend '{short_term_backend}'.",
+            suggestion=f"Valid short-term backends: {', '.join(sorted(_VALID_SHORT_TERM_BACKENDS))}",
+        ))
+    for key in ("knowledge_graph", "memory_graph", "code_graph", "task_memory", "visualization"):
+        mode = section.get(key)
+        if mode is not None and mode not in _VALID_LAYER_MODES:
+            errors.append(ValidationError(
+                path=f"memory.{key}",
+                message=f"Unknown memory layer mode '{mode}'.",
+                suggestion=f"Valid modes: {', '.join(sorted(_VALID_LAYER_MODES))}",
+            ))
 
     _check_unknown_keys(section, _KNOWN_MEMORY_KEYS, "memory", errors)
 

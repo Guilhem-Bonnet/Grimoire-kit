@@ -55,8 +55,12 @@ def test_setup_generates_orchestrated_artifacts(tmp_path: Path) -> None:
     assert (tmp_path / "_grimoire-output/evidence/bootstrap/evidence-pack.md").is_file()
 
     mission = (tmp_path / "_grimoire/standard/mission-brief.md").read_text(encoding="utf-8")
+    memory_policy = YAML(typ="safe").load(tmp_path / "_grimoire/standard/memory-policy.yaml")
     assert "- Project: Demo" in mission
     assert "- Selected profile: `orchestrated`" in mission
+    assert memory_policy["memory_os"]["target"]["hot_memory"] == "redis"
+    assert memory_policy["memory_os"]["target"]["semantic_memory"] == "weaviate-server"
+    assert memory_policy["memory_os"]["target"]["graph_projection"] == "neo4j"
 
 
 def test_setup_sanitizes_project_name_before_template_rendering(tmp_path: Path) -> None:
@@ -190,6 +194,7 @@ def test_runtime_builders_create_context_decision_hooks_and_events(tmp_path: Pat
     assert context.path == Path("_grimoire-output/context/bootstrap/context-bundle.yaml")
     assert context.data["provider_constraints"]["matched_provider"] == "openai"
     assert _posix_path(context.data["knowledge_graph_ref"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
+    assert context.data["memory_os"]["target"]["semantic_memory"] == "weaviate-server"
     assert decision.path == Path("_grimoire-output/decisions/bootstrap/decision-trace.yaml")
     assert knowledge.path == Path("_grimoire-output/knowledge/bootstrap/index-manifest.yaml")
     assert graph.path == Path("_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml")
@@ -210,6 +215,7 @@ def test_compliance_score_includes_dimensions(tmp_path: Path) -> None:
 
     assert result.output_path == Path("_grimoire-output/standard/bootstrap/compliance-score.yaml")
     assert "provider_policy" in result.dimensions
+    assert "memory_os" in result.dimensions
     assert result.dimensions["provider_policy"]["percentage"] == 100
 
 
@@ -385,6 +391,10 @@ def test_cli_standard_gate_strict_uses_ci_blocking_exit_for_governed(tmp_path: P
     runner = CliRunner()
     runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed", "--provider", "github-copilot"])
 
+    memory_result = runner.invoke(app, ["-o", "json", "standard", "memory", "verify", str(tmp_path), "--profile", "governed"])
+    assert memory_result.exit_code == 0
+    assert json.loads(memory_result.output)["ok"] is True
+
     result = runner.invoke(
         app,
         [
@@ -404,3 +414,34 @@ def test_cli_standard_gate_strict_uses_ci_blocking_exit_for_governed(tmp_path: P
 
     assert result.exit_code == 2
     assert json.loads(result.output)["strict"] is True
+
+
+def test_governed_gate_fails_when_memory_os_contract_drifted(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed", "--provider", "github-copilot"])
+    memory_policy = tmp_path / "_grimoire/standard/memory-policy.yaml"
+    memory_policy.write_text(
+        memory_policy.read_text(encoding="utf-8").replace('semantic_memory: "weaviate-server"', 'semantic_memory: "qdrant-server"'),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "-o",
+            "json",
+            "standard",
+            "gate",
+            "check",
+            str(tmp_path),
+            "--profile",
+            "governed",
+            "--target-state",
+            "review",
+            "--strict",
+        ],
+    )
+
+    assert result.exit_code == 2
+    data = json.loads(result.output)
+    assert any(check["id"] == "memory.os_semantic_memory_target" for check in data["checks"])

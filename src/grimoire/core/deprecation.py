@@ -29,7 +29,8 @@ def deprecated(
     alternative:
         Optional replacement function/method name.
 
-    Example::
+    Examples
+    --------
 
         @deprecated(reason="Replaced by new_func", version="3.2.0",
                     alternative="new_func")

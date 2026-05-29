@@ -17,15 +17,17 @@ class TestDetectMemoryBackend:
         assert result == "local"
 
     def test_returns_qdrant_local_when_qdrant_up(self) -> None:
-        class FakeResp:
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def read(self): return b""
-
-        with patch("grimoire.cli.cmd_init.urllib.request.urlopen", return_value=FakeResp()):
+        with (
+            patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=False),
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
+        ):
             result = detect_memory_backend()
         assert result == "qdrant-local"
+
+    def test_returns_weaviate_when_weaviate_up(self) -> None:
+        with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
+            result = detect_memory_backend()
+        assert result == "weaviate-server"
 
     def test_returns_local_on_timeout(self) -> None:
         with patch("grimoire.cli.cmd_init.urllib.request.urlopen", side_effect=TimeoutError("timeout")):
