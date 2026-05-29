@@ -102,12 +102,8 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run unit tests with coverage
-        run: |
-          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x \
-            --cov=src/grimoire \
-            --cov-report=xml \
-            --cov-report=term-missing \
-            --cov-fail-under=70
+        shell: bash
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x --cov=src/grimoire --cov-report=xml --cov-report=term-missing --cov-fail-under=70
 
       - name: Upload coverage
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
@@ -127,9 +123,10 @@ jobs:
 
       - name: Report
         if: always()
+        shell: bash
         run: |
           echo "### Python ${{ matrix.python-version }} Tests" >> $GITHUB_STEP_SUMMARY
-          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=line 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
+          echo "See the test step logs for the full result." >> $GITHUB_STEP_SUMMARY
 
   build:
     name: "Build package"
