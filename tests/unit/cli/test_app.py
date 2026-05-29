@@ -2399,7 +2399,7 @@ class TestConfigEdit:
             patch("shutil.which", return_value="/usr/bin/nano"),
             patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
-            runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
+            runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nano"})
         mock_exec.assert_called_once_with("nano", ["nano", str(cfg)])
 
     def test_config_edit_uses_visual(self, cli_project: Path) -> None:
@@ -2469,7 +2469,7 @@ class TestR29EditorValidation:
             patch("grimoire.cli.app._find_config", return_value=cfg),
             patch("shutil.which", return_value=None),
         ):
-            result = runner.invoke(app, ["config", "edit"], env={"EDITOR": "nonexistent-editor"})
+            result = runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nonexistent-editor"})
         assert result.exit_code == 2
         assert "not found" in result.output.lower()
 
@@ -2479,9 +2479,9 @@ class TestR29EditorValidation:
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
             patch("shutil.which", return_value="/usr/bin/nano"),
-            patch("os.execvp") as mock_exec,
+            patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
-            runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
+            runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nano"})
         mock_exec.assert_called_once()
 
 
