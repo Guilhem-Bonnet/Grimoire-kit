@@ -76,7 +76,10 @@ jobs:
           pip install pip-audit
 
       - name: Audit dependencies
-        run: pip-audit --strict --desc --skip-editable
+        shell: bash
+        run: |
+          pip freeze --exclude-editable | grep -v '^grimoire-kit==' > audit-requirements.txt
+          pip-audit --strict --desc -r audit-requirements.txt
 
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
