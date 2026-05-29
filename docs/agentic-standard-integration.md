@@ -22,8 +22,8 @@ Le pont vit dans :
 |---|---|---|
 | `starter` | Individu ou petit projet qui veut un flow standard-aware léger | Mission Brief, Task Envelope, Evidence Pack |
 | `controlled` | Équipe qui veut gouvernance répétable et routage LLM explicite | Starter + LLM Provider Registry + Compliance Declaration |
-| `orchestrated` | Multi-agents avec contexte avancé et documentation externe indexée | Controlled + Knowledge Source Registry |
-| `governed` | Organisation avec politiques par environnement et audit | Orchestrated + preuves d'isolation, télémétrie, guardrails |
+| `orchestrated` | Multi-agents avec contexte avancé et documentation externe indexée | Controlled + board, mémoire, contexte, décisions, rules/hooks, orchestration, evidence gates, patterns |
+| `governed` | Organisation avec politiques par environnement et audit | Orchestrated + score, remediation, risques acceptés et waivers |
 | `production` | Flow critique avec dry-run, rollback, SLO et coûts | Governed + preuves de release gates et métriques critiques |
 
 ## Knowledge Base Indexer
@@ -80,9 +80,52 @@ _grimoire/standard/mission-brief.md
 _grimoire/standard/compliance-declaration.md
 _grimoire/standard/knowledge-source-registry.yaml
 _grimoire/standard/llm-provider-registry.yaml
+_grimoire/standard/task-board.yaml
+_grimoire/standard/memory-policy.yaml
+_grimoire/standard/context-contract.yaml
+_grimoire/standard/decision-graph.yaml
+_grimoire/standard/rule-packs.yaml
+_grimoire/standard/hook-registry.yaml
+_grimoire/standard/orchestration-policy.yaml
+_grimoire/standard/evidence-gates.yaml
+_grimoire/standard/pattern-catalog.yaml
 _grimoire-output/evidence/{task-id}/task-envelope.md
 _grimoire-output/evidence/{task-id}/evidence-pack.md
 ```
+
+## Commandes runtime normatives
+
+Les profils `orchestrated`, `governed` et `production` ne se limitent plus aux templates de gouvernance : ils exposent une première tranche exécutable du runtime standard.
+
+```bash
+grimoire standard board verify .
+grimoire standard memory verify .
+grimoire standard context verify .
+grimoire standard context build . --task-id bootstrap
+grimoire standard decision trace . --task-id bootstrap
+grimoire standard decision explain . --task-id bootstrap
+grimoire standard rules verify .
+grimoire standard hooks verify .
+grimoire standard hooks simulate . --phase pre_context_build --task-id bootstrap
+grimoire standard gate check . --task-id bootstrap --target-state review
+grimoire standard knowledge index . --task-id bootstrap
+grimoire standard knowledge verify . --task-id bootstrap
+grimoire standard pattern list .
+grimoire standard pattern show advanced-context-orchestrator .
+grimoire standard events audit .
+grimoire standard score . --task-id bootstrap
+grimoire standard fix . --dry-run
+```
+
+Les sorties opérationnelles restent dans `_grimoire-output/` :
+
+- `context/{task-id}/context-bundle.yaml` : sources sélectionnées, mémoire injectée, contraintes providers, redactions et preuves attendues ;
+- `decisions/{task-id}/decision-trace.yaml` : traces task/context/memory/provider/agent/tool/state/release ;
+- `knowledge/{task-id}/index-manifest.yaml` : sources, artefacts normatifs, patterns et checks ;
+- `events/runtime-journal.jsonl` : journal des événements context, decision, knowledge, hooks, gates et score ;
+- `standard/{task-id}/compliance-score.yaml` : score profil-aware.
+
+Les commandes sont volontairement sûres : la simulation de hooks n'exécute aucune action externe, la remediation reste en dry-run par défaut et les chemins générés sont contraints au project root.
 
 ## Ce qui est maintenant prêt
 
@@ -91,14 +134,16 @@ Le kit possède une première structure pour transformer le standard en flow act
 1. cartographie profils -> artefacts ;
 2. archétype installable `agentic-standard` ;
 3. templates de mission, tâche, preuve, conformité, knowledge sources et providers ;
-4. distinction explicite mémoire / contexte / base de connaissance ;
-5. compatibilité provider-first pour Copilot, Codex/OpenAI, Claude, Gemini et modèles locaux.
+4. templates runtime pour board, mémoire, contexte, décisions, rules/hooks, orchestration, evidence gates et patterns ;
+5. distinction explicite mémoire / contexte / base de connaissance ;
+6. compatibilité provider-first pour Copilot, Codex/OpenAI, Claude, Gemini et modèles locaux ;
+7. génération de context bundle, decision trace, knowledge index, hook simulation, gate check, event audit, score et plan de remediation.
 
 ## Limites actuelles
 
-- Le registry provider est audité et vérifié, mais pas encore branché à un routeur runtime.
-- Les gates d'évidence sont visibles dans le task envelope et l'evidence pack, mais pas encore imposées par une FSM d'exécution.
-- Les sources knowledge sont déclarées ; le manifeste d'index automatique et le doc-to-graph pipeline restent à brancher.
+- Le registry provider est audité et vérifié, mais le routage LLM effectif reste à brancher aux appels providers réels.
+- Les gates d'évidence sont vérifiables par `standard gate check`, mais le blocage release global dépend encore de l'intégration CI de chaque projet.
+- Le knowledge index génère un manifeste traçable ; l'extraction doc-to-graph complète reste une étape ultérieure.
 
 ## Étendre les profils
 
