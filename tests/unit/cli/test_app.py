@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,10 @@ from typer.testing import CliRunner
 from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, doctor, history_cmd, main, remove_agent
 
 runner = CliRunner()
+skip_windows_process_replacement = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="config edit uses os.execvp-style process replacement, which is covered on Unix runners",
+)
 
 
 def _main_option_decls(parameter_name: str) -> tuple[str, ...]:
@@ -2391,6 +2396,7 @@ class TestR28FlattenDeduplicated:
 class TestConfigEdit:
     """Tests for 'grimoire config edit' command."""
 
+    @skip_windows_process_replacement
     def test_config_edit_calls_editor(self, cli_project: Path) -> None:
         """config edit should exec $EDITOR with the config path."""
         cfg = cli_project / "project-context.yaml"
@@ -2402,6 +2408,7 @@ class TestConfigEdit:
             runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nano"})
         mock_exec.assert_called_once_with("nano", ["nano", str(cfg)])
 
+    @skip_windows_process_replacement
     def test_config_edit_uses_visual(self, cli_project: Path) -> None:
         """config edit should prefer $VISUAL over $EDITOR."""
         cfg = cli_project / "project-context.yaml"
@@ -2462,6 +2469,7 @@ class TestConfigValidate:
 class TestR29EditorValidation:
     """Tests for config edit editor validation (R29 C2 fix)."""
 
+    @skip_windows_process_replacement
     def test_config_edit_missing_editor(self, cli_project: Path) -> None:
         """config edit should error if editor binary not found."""
         cfg = cli_project / "project-context.yaml"
@@ -2473,6 +2481,7 @@ class TestR29EditorValidation:
         assert result.exit_code == 2
         assert "not found" in result.output.lower()
 
+    @skip_windows_process_replacement
     def test_config_edit_valid_editor(self, cli_project: Path) -> None:
         """config edit should call execvp when editor exists."""
         cfg = cli_project / "project-context.yaml"
