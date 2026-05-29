@@ -1,6 +1,6 @@
 # Plan cible du runtime normatif agentique
 
-Ce plan décrit la cible projet pour transformer la documentation normative Grimoire en runtime agentique gouverné. Le socle actuel fournit déjà `grimoire standard init/verify/audit/detect-providers`, les profils `minimal`, `orchestrated`, `governed`, les registres provider/knowledge et les artefacts de conformité. La suite consiste à rendre les patterns de kanban, mémoire, orchestration, contexte et preuves exécutables.
+Ce plan décrit la trajectoire projet pour transformer la documentation normative Grimoire en runtime agentique gouverné. La cible maximale et idéale est définie dans [Cible finale standard agentique](agentic-standard-final-target.md). Le socle actuel fournit déjà `grimoire standard init/verify/audit/detect-providers`, les profils `minimal`, `orchestrated`, `governed`, les registres provider/knowledge et les artefacts de conformité. La suite consiste à rendre les patterns de kanban, mémoire, orchestration, contexte et preuves exécutables.
 
 ## Cible
 

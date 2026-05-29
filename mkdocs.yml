@@ -83,6 +83,7 @@ nav:
   - Concepts:
       - Architecture: concepts.md
       - Standard agentique: agentic-standard-integration.md
+      - Cible finale standard agentique: agentic-standard-final-target.md
       - Plan cible standard agentique: agentic-standard-target-plan.md
       - Architecture cible standard agentique: agentic-standard-target-architecture.md
       - Mémoire: memory-system.md

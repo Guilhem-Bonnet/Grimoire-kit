@@ -1,6 +1,6 @@
 # Schéma et documentation cible du standard agentique
 
-Cette page décrit la cible d’architecture du standard agentique Grimoire. Elle complète le guide d’intégration existant en décrivant les artefacts futurs, leurs relations et les règles de validation attendues.
+Cette page décrit l’architecture de convergence du standard agentique Grimoire. La cible maximale et idéale est définie dans [Cible finale standard agentique](agentic-standard-final-target.md). Cette page complète le guide d’intégration existant en décrivant les artefacts futurs, leurs relations et les règles de validation attendues.
 
 ## Contrat cible
 

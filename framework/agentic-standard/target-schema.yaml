@@ -5,6 +5,40 @@ description: >
   Target architecture contract for turning the Grimoire normative corpus into an executable
   governed agentic runtime.
 
+final_target:
+  document: "docs/agentic-standard-final-target.md"
+  intent: "Maximal north-star target for the normative agentic runtime."
+  maturity_levels:
+    - minimal
+    - orchestrated
+    - governed
+    - certified
+  traceability_chain:
+    - normative_source
+    - obligation
+    - schema_field
+    - project_artifact
+    - check
+    - rule
+    - hook
+    - event
+    - evidence
+    - score_dimension
+    - remediation
+  final_capabilities:
+    - governed_task_board
+    - governed_memory
+    - deterministic_context_orchestration
+    - explainable_decision_graph
+    - executable_rule_engine
+    - declarative_hook_lattice
+    - multi_agent_orchestration
+    - evidence_gated_fsm
+    - append_only_runtime_journal
+    - multidimensional_compliance_score
+    - controlled_remediation
+    - ci_release_governance
+
 principles:
   - id: normative_to_executable
     statement: "Every normative rule must map to an artifact, check, gate, score dimension, or remediation."
