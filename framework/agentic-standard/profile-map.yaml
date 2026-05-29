@@ -44,6 +44,45 @@ artifact_types:
   llm_provider_registry:
     template: "framework/agentic-standard/templates/llm-provider-registry.yaml"
     purpose: "Declare LLM providers, capabilities, data policy, routing, and fallback."
+  task_board:
+    template: "framework/agentic-standard/templates/task-board.yaml"
+    purpose: "Govern agentic work with states, owners, blockers, evidence, decisions, and remediation links."
+  memory_policy:
+    template: "framework/agentic-standard/templates/memory-policy.yaml"
+    purpose: "Declare memory types, scopes, retention, freshness, trust, redaction, and provider compatibility."
+  context_contract:
+    template: "framework/agentic-standard/templates/context-contract.yaml"
+    purpose: "Define deterministic context bundle assembly and validation rules."
+  decision_graph:
+    template: "framework/agentic-standard/templates/decision-graph.yaml"
+    purpose: "Declare explainable agentic decisions and decision record requirements."
+  rule_packs:
+    template: "framework/agentic-standard/templates/rule-packs.yaml"
+    purpose: "Declare executable normative rules mapped to checks, hooks, events, and remediation."
+  hook_registry:
+    template: "framework/agentic-standard/templates/hook-registry.yaml"
+    purpose: "Declare runtime hook phases, actions, and safety policies."
+  orchestration_policy:
+    template: "framework/agentic-standard/templates/orchestration-policy.yaml"
+    purpose: "Declare agents, personas, roles, autonomy limits, handoffs, escalation, and rollback."
+  evidence_gates:
+    template: "framework/agentic-standard/templates/evidence-gates.yaml"
+    purpose: "Declare evidence-gated task lifecycle transitions."
+  pattern_catalog:
+    template: "framework/agentic-standard/templates/pattern-catalog.yaml"
+    purpose: "Classify executable agentic patterns and map them to artifacts, rules, and checks."
+  compliance_score:
+    template: "framework/agentic-standard/templates/compliance-score.yaml"
+    purpose: "Declare multidimensional compliance scoring and profile thresholds."
+  remediation_plan:
+    template: "framework/agentic-standard/templates/remediation-plan.yaml"
+    purpose: "Declare remediation action semantics for audit findings."
+  accepted_risks:
+    template: "framework/agentic-standard/templates/accepted-risks.yaml"
+    purpose: "Declare governed risk acceptances and expiry policy."
+  waivers:
+    template: "framework/agentic-standard/templates/waivers.yaml"
+    purpose: "Declare temporary governance waivers and approval evidence."
 
 profiles:
   - id: starter
@@ -96,11 +135,20 @@ profiles:
     maturity: 3
     required_artifacts:
       - mission_brief
+      - task_board
       - task_envelope
       - evidence_pack
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -123,11 +171,24 @@ profiles:
     maturity: 4
     required_artifacts:
       - mission_brief
+      - task_board
       - task_envelope
       - evidence_pack
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+      - compliance_score
+      - remediation_plan
+      - accepted_risks
+      - waivers
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -150,11 +211,24 @@ profiles:
     maturity: 5
     required_artifacts:
       - mission_brief
+      - task_board
       - task_envelope
       - evidence_pack
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+      - compliance_score
+      - remediation_plan
+      - accepted_risks
+      - waivers
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -182,6 +256,32 @@ generation_targets:
       source_artifact: knowledge_source_registry
     - path: "_grimoire/standard/llm-provider-registry.yaml"
       source_artifact: llm_provider_registry
+    - path: "_grimoire/standard/task-board.yaml"
+      source_artifact: task_board
+    - path: "_grimoire/standard/memory-policy.yaml"
+      source_artifact: memory_policy
+    - path: "_grimoire/standard/context-contract.yaml"
+      source_artifact: context_contract
+    - path: "_grimoire/standard/decision-graph.yaml"
+      source_artifact: decision_graph
+    - path: "_grimoire/standard/rule-packs.yaml"
+      source_artifact: rule_packs
+    - path: "_grimoire/standard/hook-registry.yaml"
+      source_artifact: hook_registry
+    - path: "_grimoire/standard/orchestration-policy.yaml"
+      source_artifact: orchestration_policy
+    - path: "_grimoire/standard/evidence-gates.yaml"
+      source_artifact: evidence_gates
+    - path: "_grimoire/standard/pattern-catalog.yaml"
+      source_artifact: pattern_catalog
+    - path: "_grimoire/standard/compliance-score.yaml"
+      source_artifact: compliance_score
+    - path: "_grimoire/standard/remediation-plan.yaml"
+      source_artifact: remediation_plan
+    - path: "_grimoire/standard/accepted-risks.yaml"
+      source_artifact: accepted_risks
+    - path: "_grimoire/standard/waivers.yaml"
+      source_artifact: waivers
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

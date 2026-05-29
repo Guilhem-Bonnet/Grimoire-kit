@@ -1,0 +1,61 @@
+$schema: "grimoire-agentic-standard-pattern-catalog/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+categories:
+  - context
+  - memory
+  - orchestration
+  - workflow
+  - governance
+  - provider
+  - knowledge
+  - security
+  - quality
+  - runtime
+patterns:
+  - id: advanced-context-orchestrator
+    category: context
+    maturity: orchestrated
+    source_normative: context-orchestration.advanced
+    intent: "Build deterministic, budgeted, redacted context bundles."
+    required_artifacts: ["context-contract.yaml", "context-bundle.yaml"]
+    rule_refs: ["memory.freshness-required"]
+    hook_refs: ["context.require-task"]
+    check_refs: ["context.budget_invalid", "context.redaction_required"]
+  - id: governed-memory-policy
+    category: memory
+    maturity: orchestrated
+    source_normative: memory-governance.multi-level
+    intent: "Separate session, task, project, organization, semantic, episodic, and external cache memories."
+    required_artifacts: ["memory-policy.yaml"]
+    rule_refs: ["memory.freshness-required"]
+    hook_refs: []
+    check_refs: ["memory.required_types_missing"]
+  - id: evidence-gated-fsm
+    category: workflow
+    maturity: governed
+    source_normative: evidence-governance.state-machine
+    intent: "Block lifecycle transitions unless evidence is present."
+    required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
+    rule_refs: ["gate.requires-evidence"]
+    hook_refs: ["release.require-score"]
+    check_refs: ["gates.transitions_missing", "evidence.pending_gate"]
+  - id: provider-routing-contract
+    category: provider
+    maturity: controlled
+    source_normative: provider-governance.routing
+    intent: "Route provider calls through declared capability and data-policy constraints."
+    required_artifacts: ["llm-provider-registry.yaml"]
+    rule_refs: ["provider.no-undeclared-route"]
+    hook_refs: ["provider.require-declared-route"]
+    check_refs: ["providers.default_unknown", "providers.routing_policy_weak"]
+  - id: runtime-journal
+    category: runtime
+    maturity: governed
+    source_normative: runtime-observability.events
+    intent: "Record context, decision, hook, gate, and score events for auditability."
+    required_artifacts: ["runtime-journal.jsonl"]
+    rule_refs: []
+    hook_refs: []
+    check_refs: ["events.invalid_line"]

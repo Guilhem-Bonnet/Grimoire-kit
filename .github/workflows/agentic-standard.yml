@@ -49,5 +49,18 @@ jobs:
           python -m mypy src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py
           python -m ruff check src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py tests/test_agentic_standard.py
 
+      - name: Smoke runtime standard commands
+        run: |
+          project="$RUNNER_TEMP/standard-smoke"
+          grimoire -o json standard init "$project" --profile orchestrated --provider github-copilot
+          grimoire -o json standard verify "$project" --profile orchestrated
+          grimoire -o json standard context build "$project"
+          grimoire -o json standard decision trace "$project"
+          grimoire -o json standard knowledge index "$project"
+          grimoire -o json standard hooks simulate "$project" --phase pre_context_build
+          grimoire -o json standard gate check "$project" --target-state review
+          grimoire -o json standard events audit "$project"
+          grimoire -o json standard score "$project" --profile orchestrated
+
       - name: Build docs
         run: python -m mkdocs build --strict --quiet

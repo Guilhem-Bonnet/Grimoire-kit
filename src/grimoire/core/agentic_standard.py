@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import shutil
@@ -20,8 +21,14 @@ from grimoire.data import framework_path
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 STANDARD_DIR = Path("_grimoire/standard")
 EVIDENCE_DIR = Path("_grimoire-output/evidence")
+CONTEXT_DIR = Path("_grimoire-output/context")
+DECISION_DIR = Path("_grimoire-output/decisions")
+EVENT_DIR = Path("_grimoire-output/events")
+KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
+SCORE_DIR = Path("_grimoire-output/standard")
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
 LLM_PROVIDER_REGISTRY_FILE = STANDARD_DIR / "llm-provider-registry.yaml"
+EVENT_JOURNAL_FILE = EVENT_DIR / "runtime-journal.jsonl"
 SUPPORTED_PROVIDER_IDS = ("github-copilot", "openai", "anthropic", "google-gemini", "local")
 SUPPORTED_PROVIDER_POLICIES = ("hosted-safe", "local-first", "mixed")
 PROVIDER_ALIASES = {
@@ -46,6 +53,62 @@ PROVIDER_DEFAULT_MODELS = {
     "local": ("local-open-weight",),
 }
 TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+BOARD_STATES = {
+    "proposed",
+    "ready",
+    "in_progress",
+    "blocked",
+    "review",
+    "accepted",
+    "released",
+    "archived",
+}
+REQUIRED_MEMORY_TYPES = {
+    "session",
+    "task",
+    "project",
+    "workspace",
+    "organization",
+    "procedural",
+    "semantic",
+    "episodic",
+    "long_term",
+    "external_knowledge_cache",
+}
+REQUIRED_DECISION_TYPES = {
+    "task_prioritization",
+    "context_source_selection",
+    "memory_injection",
+    "provider_routing",
+    "agent_role_routing",
+    "tool_authorization",
+    "state_transition",
+    "release_authorization",
+}
+KNOWN_HOOK_PHASES = {
+    "pre_context_build",
+    "post_context_build",
+    "pre_provider_call",
+    "post_provider_call",
+    "pre_tool_call",
+    "post_tool_call",
+    "pre_state_transition",
+    "post_state_transition",
+    "pre_release",
+    "on_failure",
+    "on_rollback",
+}
+KNOWN_HOOK_ACTIONS = {
+    "allow",
+    "warn",
+    "block",
+    "redact",
+    "reroute",
+    "require_evidence",
+    "escalate",
+    "create_remediation",
+    "rollback",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +198,50 @@ class StandardVerificationResult:
     def error_count(self) -> int:
         """Number of error checks, including missing files and invalid YAML."""
         return len(self.missing) + len(self.invalid_yaml) + sum(1 for check in self.checks if check.is_error)
+
+
+@dataclass(frozen=True, slots=True)
+class StandardRuntimeArtifact:
+    """Generated runtime artifact path and data."""
+
+    path: Path
+    data: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class StandardGateResult:
+    """Result of evaluating evidence gates for a task."""
+
+    ok: bool
+    task_id: str
+    profile: str
+    state: str | None
+    missing: tuple[str, ...]
+    checks: tuple[StandardCheck, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class StandardScoreResult:
+    """Compliance score computed from the current standard verification result."""
+
+    ok: bool
+    profile: str
+    score: int
+    threshold: int
+    warnings: int
+    errors: int
+    output_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class StandardRemediationAction:
+    """Structured remediation action proposed by standard audit."""
+
+    check_id: str
+    severity: str
+    action: str
+    path: Path | None
+    message: str
 
 
 def _yaml() -> YAML:
@@ -894,6 +1001,298 @@ def _verify_profile_specific_controls(root: Path, profile: StandardProfile, resu
             )
 
 
+def _require_keys(
+    result: StandardVerificationResult,
+    *,
+    path: Path,
+    check_prefix: str,
+    data: dict[str, Any],
+    keys: Iterable[str],
+    severity: str = "error",
+) -> None:
+    for key in keys:
+        if key not in data or data[key] in (None, ""):
+            _add_check(result, f"{check_prefix}.{key}_missing", severity, f"{path}: required key {key!r} is missing.", path=path)
+
+
+def _verify_task_board(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "task-board.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    states = data.get("states")
+    if not isinstance(states, list) or not set(BOARD_STATES) <= {str(state) for state in states}:
+        _add_check(result, "board.states_incomplete", "error", "Task board must declare the normative lifecycle states.", path=rel_path)
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list):
+        _add_check(result, "board.tasks_missing", "error", "Task board must declare a tasks list.", path=rel_path)
+        return
+    if not tasks:
+        _add_check(result, "board.no_tasks", "warning", "Task board has no declared tasks yet.", path=rel_path)
+        return
+    for task in tasks:
+        if not isinstance(task, dict):
+            _add_check(result, "board.task_invalid", "error", "Task board entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(
+            result,
+            path=rel_path,
+            check_prefix="board.task",
+            data=task,
+            keys=("task_id", "title", "status", "acceptance_criteria", "evidence_pack_ref"),
+        )
+        task_id = str(task.get("task_id", "")).strip()
+        if task_id:
+            try:
+                normalize_task_id(task_id)
+            except ValueError as exc:
+                _add_check(result, "board.task_id_invalid", "error", str(exc), path=rel_path)
+        status = str(task.get("status", "")).strip()
+        if status and status not in BOARD_STATES:
+            _add_check(result, "board.status_invalid", "error", f"Task {task_id!r} has invalid status {status!r}.", path=rel_path)
+        if status == "blocked" and not task.get("blockers"):
+            _add_check(result, "board.blocker_reason_missing", "error", f"Task {task_id!r} is blocked without blocker details.", path=rel_path)
+        if profile.id in {"governed", "production"} and status in {"accepted", "released"} and not task.get("decision_trace_ref"):
+            _add_check(result, "board.decision_trace_missing", "error", f"Task {task_id!r} requires a decision trace.", path=rel_path)
+        for ref_key in ("context_bundle_ref", "decision_trace_ref", "evidence_pack_ref", "remediation_ref"):
+            ref = str(task.get(ref_key, "")).strip()
+            if ref and not _is_inside_root(root, root / ref):
+                _add_check(result, f"board.{ref_key}_outside_root", "error", f"Task {task_id!r} {ref_key} escapes project root.", path=rel_path)
+
+
+def _verify_memory_policy(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "memory-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    memory_types = data.get("memory_types")
+    if not isinstance(memory_types, list) or not memory_types:
+        _add_check(result, "memory.types_missing", "error", "Memory policy must declare memory_types.", path=rel_path)
+        return
+    declared = {str(entry.get("type")) for entry in memory_types if isinstance(entry, dict)}
+    missing = sorted(REQUIRED_MEMORY_TYPES - declared)
+    if missing:
+        _add_check(result, "memory.required_types_missing", "error", f"Memory policy misses required type(s): {', '.join(missing)}.", path=rel_path)
+    for entry in memory_types:
+        if not isinstance(entry, dict):
+            _add_check(result, "memory.type_invalid", "error", "Memory type entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(
+            result,
+            path=rel_path,
+            check_prefix="memory",
+            data=entry,
+            keys=(
+                "memory_id",
+                "type",
+                "scope",
+                "read_policy",
+                "write_policy",
+                "retention",
+                "freshness",
+                "trust_level",
+                "redaction_policy",
+                "provider_compatibility",
+                "allowed_context_uses",
+            ),
+        )
+        if not isinstance(entry.get("provider_compatibility"), list):
+            _add_check(result, "memory.provider_compatibility_invalid", "error", "Memory provider compatibility must be a list.", path=rel_path)
+        if not isinstance(entry.get("allowed_context_uses"), list):
+            _add_check(result, "memory.context_uses_invalid", "error", "Memory allowed context uses must be a list.", path=rel_path)
+
+
+def _verify_context_contract(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "context-contract.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    _require_keys(result, path=rel_path, check_prefix="context", data=data, keys=("inputs", "bundle_sections", "budget", "redaction", "checks"))
+    for key in ("inputs", "bundle_sections", "checks"):
+        if not isinstance(data.get(key), list) or not data.get(key):
+            _add_check(result, f"context.{key}_invalid", "error", f"Context contract {key} must be a non-empty list.", path=rel_path)
+    budget = data.get("budget")
+    if not isinstance(budget, dict):
+        _add_check(result, "context.budget_invalid", "error", "Context contract budget must be a mapping.", path=rel_path)
+    redaction = data.get("redaction")
+    if not isinstance(redaction, dict) or redaction.get("required") is not True:
+        _add_check(result, "context.redaction_required", "error", "Context contract must require redaction.", path=rel_path)
+
+
+def _verify_decision_graph(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "decision-graph.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    record_fields = data.get("required_decision_record")
+    if not isinstance(record_fields, list) or not record_fields:
+        _add_check(result, "decision.record_schema_missing", "error", "Decision graph must declare required_decision_record.", path=rel_path)
+    decision_types = data.get("decision_types")
+    if not isinstance(decision_types, list) or not decision_types:
+        _add_check(result, "decision.types_missing", "error", "Decision graph must declare decision_types.", path=rel_path)
+        return
+    declared = {str(entry.get("id")) for entry in decision_types if isinstance(entry, dict)}
+    missing = sorted(REQUIRED_DECISION_TYPES - declared)
+    if missing:
+        _add_check(result, "decision.required_types_missing", "error", f"Decision graph misses required type(s): {', '.join(missing)}.", path=rel_path)
+    for entry in decision_types:
+        if not isinstance(entry, dict):
+            _add_check(result, "decision.type_invalid", "error", "Decision type entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(result, path=rel_path, check_prefix="decision", data=entry, keys=("id", "inputs", "outputs"))
+
+
+def _verify_rule_packs(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "rule-packs.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    rules = data.get("rules")
+    if not isinstance(rules, list) or not rules:
+        _add_check(result, "rules.none", "error", "Rule packs must declare at least one rule.", path=rel_path)
+        return
+    for rule in rules:
+        if not isinstance(rule, dict):
+            _add_check(result, "rules.invalid", "error", "Rule entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(
+            result,
+            path=rel_path,
+            check_prefix="rules",
+            data=rule,
+            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation", "check_id"),
+        )
+        if str(rule.get("phase", "")) not in KNOWN_HOOK_PHASES:
+            _add_check(result, "rules.unknown_phase", "error", f"Rule {rule.get('id')!r} uses unknown phase {rule.get('phase')!r}.", path=rel_path)
+        if str(rule.get("action", "")) not in KNOWN_HOOK_ACTIONS:
+            _add_check(result, "rules.unknown_action", "error", f"Rule {rule.get('id')!r} uses unknown action {rule.get('action')!r}.", path=rel_path)
+
+
+def _verify_hook_registry(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "hook-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    hooks = data.get("hooks")
+    if not isinstance(hooks, list) or not hooks:
+        _add_check(result, "hooks.none", "error", "Hook registry must declare at least one hook.", path=rel_path)
+        return
+    for hook in hooks:
+        if not isinstance(hook, dict):
+            _add_check(result, "hooks.invalid", "error", "Hook entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(result, path=rel_path, check_prefix="hooks", data=hook, keys=("id", "phase", "action", "rule_ref", "reason"))
+        if str(hook.get("phase", "")) not in KNOWN_HOOK_PHASES:
+            _add_check(result, "hooks.unknown_phase", "error", f"Hook {hook.get('id')!r} uses unknown phase {hook.get('phase')!r}.", path=rel_path)
+        if str(hook.get("action", "")) not in KNOWN_HOOK_ACTIONS:
+            _add_check(result, "hooks.unknown_action", "error", f"Hook {hook.get('id')!r} uses unknown action {hook.get('action')!r}.", path=rel_path)
+
+
+def _verify_orchestration_policy(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "orchestration-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    roles = data.get("roles")
+    if not isinstance(roles, list) or not roles:
+        _add_check(result, "orchestration.roles_missing", "error", "Orchestration policy must declare roles.", path=rel_path)
+        return
+    for role in roles:
+        if not isinstance(role, dict):
+            _add_check(result, "orchestration.role_invalid", "error", "Role entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(
+            result,
+            path=rel_path,
+            check_prefix="orchestration.role",
+            data=role,
+            keys=(
+                "role_id",
+                "persona_or_archetype",
+                "responsibilities",
+                "allowed_tools",
+                "allowed_memory_types",
+                "allowed_providers",
+                "autonomy_level",
+                "handoff_contracts",
+                "escalation_triggers",
+                "review_gates",
+                "rollback_policy",
+            ),
+        )
+
+
+def _verify_evidence_gates(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "evidence-gates.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    transitions = data.get("transitions")
+    if not isinstance(transitions, list) or not transitions:
+        _add_check(result, "gates.transitions_missing", "error", "Evidence gates must declare transitions.", path=rel_path)
+        return
+    for transition in transitions:
+        if not isinstance(transition, dict):
+            _add_check(result, "gates.transition_invalid", "error", "Evidence gate transitions must be mappings.", path=rel_path)
+            continue
+        _require_keys(result, path=rel_path, check_prefix="gates.transition", data=transition, keys=("id", "from", "to", "required_evidence"))
+        if transition.get("from") not in BOARD_STATES or transition.get("to") not in BOARD_STATES:
+            _add_check(result, "gates.unknown_state", "error", f"Transition {transition.get('id')!r} references an unknown state.", path=rel_path)
+        if not isinstance(transition.get("required_evidence"), list) or not transition.get("required_evidence"):
+            _add_check(result, "gates.required_evidence_missing", "error", f"Transition {transition.get('id')!r} has no required evidence.", path=rel_path)
+
+
+def _verify_score_and_exceptions(root: Path, result: StandardVerificationResult) -> None:
+    score_path = STANDARD_DIR / "compliance-score.yaml"
+    score_data = _load_yaml_file(root, score_path, result)
+    if isinstance(score_data, dict):
+        for key in ("dimensions", "thresholds"):
+            if not isinstance(score_data.get(key), dict) or not score_data.get(key):
+                _add_check(result, f"score.{key}_missing", "error", f"Compliance score must declare {key}.", path=score_path)
+
+    for rel_path, list_key in (
+        (STANDARD_DIR / "accepted-risks.yaml", "risks"),
+        (STANDARD_DIR / "waivers.yaml", "waivers"),
+        (STANDARD_DIR / "remediation-plan.yaml", "actions"),
+    ):
+        data = _load_yaml_file(root, rel_path, result)
+        if isinstance(data, dict) and not isinstance(data.get(list_key), list):
+            _add_check(result, f"{list_key}.invalid", "error", f"{rel_path} must declare {list_key} as a list.", path=rel_path)
+
+
+def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "pattern-catalog.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    categories = data.get("categories")
+    if not isinstance(categories, list) or not categories:
+        _add_check(result, "patterns.categories_missing", "error", "Pattern catalog must declare categories.", path=rel_path)
+    patterns = data.get("patterns")
+    if not isinstance(patterns, list) or not patterns:
+        _add_check(result, "patterns.none", "error", "Pattern catalog must declare executable patterns.", path=rel_path)
+        return
+    declared_categories = {str(category) for category in categories} if isinstance(categories, list) else set()
+    for pattern in patterns:
+        if not isinstance(pattern, dict):
+            _add_check(result, "patterns.invalid", "error", "Pattern entries must be mappings.", path=rel_path)
+            continue
+        _require_keys(
+            result,
+            path=rel_path,
+            check_prefix="patterns",
+            data=pattern,
+            keys=("id", "category", "maturity", "source_normative", "intent", "required_artifacts", "check_refs"),
+        )
+        category = str(pattern.get("category", ""))
+        if declared_categories and category not in declared_categories:
+            _add_check(result, "patterns.unknown_category", "error", f"Pattern {pattern.get('id')!r} uses unknown category {category!r}.", path=rel_path)
+        if not isinstance(pattern.get("required_artifacts"), list):
+            _add_check(result, "patterns.required_artifacts_invalid", "error", f"Pattern {pattern.get('id')!r} required_artifacts must be a list.", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -927,5 +1326,520 @@ def verify_standard_profile(
     _verify_evidence_pack(root, task_id, result)
     _verify_compliance_declaration(root, result)
     _verify_profile_specific_controls(root, profile, result)
+    _verify_task_board(root, profile, result)
+    _verify_memory_policy(root, result)
+    _verify_context_contract(root, result)
+    _verify_decision_graph(root, result)
+    _verify_rule_packs(root, result)
+    _verify_hook_registry(root, result)
+    _verify_orchestration_policy(root, result)
+    _verify_evidence_gates(root, result)
+    _verify_pattern_catalog(root, result)
+    _verify_score_and_exceptions(root, result)
 
     return result
+
+
+def _selected_profile(project_root: Path, profile_id: str | None) -> StandardProfile:
+    selected_profile = profile_id or _read_manifest_profile(project_root) or "starter"
+    return get_profile(selected_profile)
+
+
+def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
+    path = root / rel_path
+    if not path.is_file():
+        return {}
+    data = _yaml().load(path)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        msg = f"{rel_path} must be a YAML mapping."
+        raise ValueError(msg)
+    return data
+
+
+def _write_yaml_mapping(root: Path, rel_path: Path, data: dict[str, Any]) -> Path:
+    dst = root / rel_path
+    _ensure_inside_root(root, dst, label=f"Runtime artifact {rel_path}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    stream = io.StringIO()
+    _yaml().dump(data, stream)
+    dst.write_text(stream.getvalue(), encoding="utf-8")
+    return rel_path
+
+
+def _append_runtime_event(root: Path, *, event_type: str, task_id: str, profile: str, details: dict[str, Any]) -> None:
+    event_path = root / EVENT_JOURNAL_FILE
+    _ensure_inside_root(root, event_path, label="Runtime event journal")
+    event_path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "schema": "grimoire-agentic-standard-runtime-event/v1",
+        "event_type": event_type,
+        "task_id": task_id,
+        "profile": profile,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "details": details,
+    }
+    with event_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _task_from_board(board: dict[str, Any], task_id: str) -> dict[str, Any]:
+    tasks = board.get("tasks", [])
+    if not isinstance(tasks, list):
+        return {}
+    for task in tasks:
+        if isinstance(task, dict) and str(task.get("task_id", "")) == task_id:
+            return task
+    return {}
+
+
+def build_context_bundle(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> StandardRuntimeArtifact:
+    """Build a deterministic context bundle from standard artifacts."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    profile = _selected_profile(root, profile_id)
+    board = _read_yaml_mapping(root, STANDARD_DIR / "task-board.yaml")
+    memory_policy = _read_yaml_mapping(root, STANDARD_DIR / "memory-policy.yaml")
+    knowledge_registry = _read_yaml_mapping(root, STANDARD_DIR / "knowledge-source-registry.yaml")
+    provider_registry = _read_yaml_mapping(root, STANDARD_DIR / "llm-provider-registry.yaml")
+    context_contract = _read_yaml_mapping(root, STANDARD_DIR / "context-contract.yaml")
+    orchestration_policy = _read_yaml_mapping(root, STANDARD_DIR / "orchestration-policy.yaml")
+    task = _task_from_board(board, normalized_task_id)
+
+    enabled_providers = [
+        str(provider.get("id"))
+        for provider in provider_registry.get("providers", [])
+        if isinstance(provider, dict) and provider.get("enabled") is True and provider.get("id")
+    ]
+    enabled_sources = [
+        str(source.get("id"))
+        for source in knowledge_registry.get("sources", [])
+        if isinstance(source, dict) and source.get("enabled") is True and source.get("id")
+    ]
+    memory_entries = [
+        {
+            "type": str(entry.get("type")),
+            "scope": str(entry.get("scope")),
+            "freshness": str(entry.get("freshness")),
+            "trust_level": str(entry.get("trust_level")),
+        }
+        for entry in memory_policy.get("memory_types", [])
+        if isinstance(entry, dict)
+    ]
+    data: dict[str, Any] = {
+        "$schema": "grimoire-agentic-standard-context-bundle/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_priority": context_contract.get("source_priority", []),
+        "task_summary": {
+            "title": task.get("title", "Undeclared task"),
+            "status": task.get("status", "proposed"),
+            "acceptance_criteria": task.get("acceptance_criteria", []),
+        },
+        "selected_sources": [
+            {"source": "mission_brief", "path": str(STANDARD_DIR / "mission-brief.md")},
+            {"source": "task_board", "path": str(STANDARD_DIR / "task-board.yaml")},
+            {"source": "task_envelope", "path": str(EVIDENCE_DIR / normalized_task_id / "task-envelope.md")},
+        ],
+        "knowledge_nodes": enabled_sources,
+        "memory_inclusions": memory_entries[: int(context_contract.get("budget", {}).get("max_memory_items", 8))],
+        "memory_exclusions": [],
+        "provider_constraints": {
+            "enabled_providers": enabled_providers,
+            "routing": provider_registry.get("routing", {}),
+        },
+        "agent_role_constraints": [
+            str(role.get("role_id"))
+            for role in orchestration_policy.get("roles", [])
+            if isinstance(role, dict) and role.get("role_id")
+        ],
+        "redactions": {
+            "required": True,
+            "forbidden_data_classes": context_contract.get("redaction", {}).get("forbidden_data_classes", []),
+        },
+        "decision_inputs": {
+            "task_ref": str(STANDARD_DIR / "task-board.yaml"),
+            "memory_policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+            "provider_registry_ref": str(STANDARD_DIR / "llm-provider-registry.yaml"),
+        },
+        "evidence_requirements": [
+            str(item)
+            for item in task.get("acceptance_criteria", [])
+        ],
+        "fingerprints": {
+            "contract": str(STANDARD_DIR / "context-contract.yaml"),
+            "board": str(STANDARD_DIR / "task-board.yaml"),
+        },
+    }
+    rel_path = CONTEXT_DIR / normalized_task_id / "context-bundle.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(root, event_type="context.built", task_id=normalized_task_id, profile=profile.id, details={"path": str(written)})
+    return StandardRuntimeArtifact(path=written, data=data)
+
+
+def build_decision_trace(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> StandardRuntimeArtifact:
+    """Build an explainable decision trace skeleton for a task."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    profile = _selected_profile(root, profile_id)
+    decision_graph = _read_yaml_mapping(root, STANDARD_DIR / "decision-graph.yaml")
+    decision_types = decision_graph.get("decision_types", [])
+    if not isinstance(decision_types, list):
+        decision_types = []
+    records: list[dict[str, Any]] = []
+    for entry in decision_types:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        decision_type = str(entry["id"])
+        records.append({
+            "decision_id": f"{normalized_task_id}.{decision_type}",
+            "task_id": normalized_task_id,
+            "decision_type": decision_type,
+            "profile": profile.id,
+            "inputs": entry.get("inputs", []),
+            "policy_refs": [str(STANDARD_DIR / "decision-graph.yaml")],
+            "rule_refs": [],
+            "result": "recorded",
+            "confidence": "not-scored",
+            "event": "decision.recorded",
+            "evidence_refs": [str(CONTEXT_DIR / normalized_task_id / "context-bundle.yaml")],
+            "remediation_ref": str(STANDARD_DIR / "remediation-plan.yaml"),
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
+    data = {
+        "$schema": "grimoire-agentic-standard-decision-trace/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "records": records,
+    }
+    rel_path = DECISION_DIR / normalized_task_id / "decision-trace.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(root, event_type="decision.trace_built", task_id=normalized_task_id, profile=profile.id, details={"path": str(written)})
+    return StandardRuntimeArtifact(path=written, data=data)
+
+
+def list_standard_patterns(project_root: Path, *, category: str | None = None) -> tuple[dict[str, Any], ...]:
+    """List executable patterns from the standard catalog."""
+    root = project_root.resolve()
+    catalog = _read_yaml_mapping(root, STANDARD_DIR / "pattern-catalog.yaml")
+    patterns = catalog.get("patterns", [])
+    if not isinstance(patterns, list):
+        return ()
+    selected: list[dict[str, Any]] = []
+    for pattern in patterns:
+        if not isinstance(pattern, dict):
+            continue
+        if category is not None and pattern.get("category") != category:
+            continue
+        selected.append(dict(pattern))
+    return tuple(selected)
+
+
+def show_standard_pattern(project_root: Path, pattern_id: str) -> dict[str, Any]:
+    """Return one executable pattern by id."""
+    for pattern in list_standard_patterns(project_root):
+        if pattern.get("id") == pattern_id:
+            return pattern
+    msg = f"Unknown standard pattern: {pattern_id}"
+    raise ValueError(msg)
+
+
+def build_knowledge_index(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> StandardRuntimeArtifact:
+    """Build a source-traceable knowledge index manifest for standard artifacts."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    profile = _selected_profile(root, profile_id)
+    registry = _read_yaml_mapping(root, STANDARD_DIR / "knowledge-source-registry.yaml")
+    patterns = list_standard_patterns(root)
+    declared_sources = [
+        {
+            "id": str(source.get("id")),
+            "type": str(source.get("type", "")),
+            "locator": str(source.get("locator", "")),
+            "enabled": bool(source.get("enabled")),
+            "trust": source.get("trust", {}),
+        }
+        for source in registry.get("sources", [])
+        if isinstance(source, dict) and source.get("id")
+    ]
+    normative_artifacts = [
+        str(path)
+        for path in (
+            STANDARD_DIR / "mission-brief.md",
+            STANDARD_DIR / "task-board.yaml",
+            STANDARD_DIR / "memory-policy.yaml",
+            STANDARD_DIR / "context-contract.yaml",
+            STANDARD_DIR / "decision-graph.yaml",
+            STANDARD_DIR / "rule-packs.yaml",
+            STANDARD_DIR / "hook-registry.yaml",
+            STANDARD_DIR / "orchestration-policy.yaml",
+            STANDARD_DIR / "evidence-gates.yaml",
+            STANDARD_DIR / "pattern-catalog.yaml",
+        )
+        if (root / path).exists()
+    ]
+    data = {
+        "$schema": "grimoire-agentic-standard-knowledge-index/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "rules": registry.get("rules", {}),
+        "sources": declared_sources,
+        "normative_artifacts": normative_artifacts,
+        "patterns": [
+            {
+                "id": str(pattern.get("id")),
+                "category": str(pattern.get("category")),
+                "source_normative": str(pattern.get("source_normative")),
+                "check_refs": pattern.get("check_refs", []),
+            }
+            for pattern in patterns
+        ],
+    }
+    rel_path = KNOWLEDGE_DIR / normalized_task_id / "index-manifest.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(root, event_type="knowledge.index_built", task_id=normalized_task_id, profile=profile.id, details={"path": str(written)})
+    return StandardRuntimeArtifact(path=written, data=data)
+
+
+def verify_knowledge_index(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+) -> StandardVerificationResult:
+    """Verify the generated knowledge index manifest."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    result = verify_standard_profile(root, task_id=normalized_task_id)
+    rel_path = KNOWLEDGE_DIR / normalized_task_id / "index-manifest.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        _add_check(result, "knowledge_index.missing", "error", "Knowledge index manifest is missing or invalid.", path=rel_path)
+        return result
+    for key in ("sources", "normative_artifacts", "patterns"):
+        if not isinstance(data.get(key), list):
+            _add_check(result, f"knowledge_index.{key}_invalid", "error", f"Knowledge index {key} must be a list.", path=rel_path)
+    return result
+
+
+def simulate_standard_hooks(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    phase: str | None = None,
+    profile_id: str | None = None,
+) -> StandardRuntimeArtifact:
+    """Simulate declared standard hooks without executing external actions."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    profile = _selected_profile(root, profile_id)
+    if phase is not None and phase not in KNOWN_HOOK_PHASES:
+        msg = f"Unknown hook phase {phase!r}. Available: {', '.join(sorted(KNOWN_HOOK_PHASES))}"
+        raise ValueError(msg)
+    registry = _read_yaml_mapping(root, STANDARD_DIR / "hook-registry.yaml")
+    hooks = [
+        hook
+        for hook in registry.get("hooks", [])
+        if isinstance(hook, dict) and (phase is None or hook.get("phase") == phase)
+    ]
+    data = {
+        "$schema": "grimoire-agentic-standard-hook-simulation/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "phase": phase or "all",
+        "simulated_at": datetime.now(UTC).isoformat(),
+        "hooks": hooks,
+        "executed_external_actions": False,
+    }
+    suffix = phase or "all"
+    rel_path = EVENT_DIR / normalized_task_id / f"hook-simulation-{suffix}.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(root, event_type="hooks.simulated", task_id=normalized_task_id, profile=profile.id, details={"path": str(written), "phase": phase or "all"})
+    return StandardRuntimeArtifact(path=written, data=data)
+
+
+def check_evidence_gates(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    target_state: str | None = None,
+    profile_id: str | None = None,
+) -> StandardGateResult:
+    """Evaluate task evidence gates against generated runtime artifacts."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    profile = _selected_profile(root, profile_id)
+    if target_state is not None and target_state not in BOARD_STATES:
+        msg = f"Unknown target state {target_state!r}. Available: {', '.join(sorted(BOARD_STATES))}"
+        raise ValueError(msg)
+    board = _read_yaml_mapping(root, STANDARD_DIR / "task-board.yaml")
+    task = _task_from_board(board, normalized_task_id)
+    state = str(target_state or task.get("status") or "")
+    missing: list[str] = []
+    checks: list[StandardCheck] = []
+    required_paths = {
+        "task_board": STANDARD_DIR / "task-board.yaml",
+        "task_envelope": EVIDENCE_DIR / normalized_task_id / "task-envelope.md",
+        "evidence_pack": EVIDENCE_DIR / normalized_task_id / "evidence-pack.md",
+        "context_bundle": CONTEXT_DIR / normalized_task_id / "context-bundle.yaml",
+        "decision_trace": DECISION_DIR / normalized_task_id / "decision-trace.yaml",
+        "compliance_score": SCORE_DIR / normalized_task_id / "compliance-score.yaml",
+    }
+    if state in {"ready", "in_progress", "review", "accepted", "released"}:
+        for key in ("task_board", "task_envelope"):
+            if not (root / required_paths[key]).is_file():
+                missing.append(key)
+    if state in {"in_progress", "review", "accepted", "released"} and not (root / required_paths["context_bundle"]).is_file():
+        missing.append("context_bundle")
+    if state in {"review", "accepted", "released"}:
+        for key in ("evidence_pack", "decision_trace"):
+            if not (root / required_paths[key]).is_file():
+                missing.append(key)
+    if state == "released" and not (root / required_paths["compliance_score"]).is_file():
+        missing.append("compliance_score")
+    for key in missing:
+        checks.append(StandardCheck(
+            id=f"gate.{key}_missing",
+            severity="error",
+            message=f"Required gate artifact is missing: {key}.",
+            path=required_paths.get(key),
+        ))
+    ok = not checks
+    _append_runtime_event(root, event_type="gate.checked", task_id=normalized_task_id, profile=profile.id, details={"ok": ok, "target_state": state, "missing": missing})
+    return StandardGateResult(ok=ok, task_id=normalized_task_id, profile=profile.id, state=state or None, missing=tuple(missing), checks=tuple(checks))
+
+
+def audit_runtime_events(project_root: Path) -> dict[str, Any]:
+    """Audit the standard runtime event journal."""
+    root = project_root.resolve()
+    journal = root / EVENT_JOURNAL_FILE
+    if not journal.is_file():
+        return {"ok": True, "path": str(EVENT_JOURNAL_FILE), "event_count": 0, "invalid_lines": []}
+    invalid_lines: list[int] = []
+    event_count = 0
+    event_types: dict[str, int] = {}
+    for line_no, line in enumerate(journal.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            invalid_lines.append(line_no)
+            continue
+        if not isinstance(event, dict) or not event.get("event_type") or not event.get("timestamp"):
+            invalid_lines.append(line_no)
+            continue
+        event_count += 1
+        event_type = str(event["event_type"])
+        event_types[event_type] = event_types.get(event_type, 0) + 1
+    return {
+        "ok": not invalid_lines,
+        "path": str(EVENT_JOURNAL_FILE),
+        "event_count": event_count,
+        "event_types": event_types,
+        "invalid_lines": invalid_lines,
+    }
+
+
+def calculate_compliance_score(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> StandardScoreResult:
+    """Calculate and persist a standard compliance score."""
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    result = verify_standard_profile(root, profile_id=profile_id, task_id=normalized_task_id)
+    profile = get_profile(result.profile)
+    score_policy = _read_yaml_mapping(root, STANDARD_DIR / "compliance-score.yaml")
+    thresholds = score_policy.get("thresholds", {})
+    profile_thresholds = thresholds.get(profile.id, {}) if isinstance(thresholds, dict) else {}
+    threshold = int(profile_thresholds.get("fail_below", 70)) if isinstance(profile_thresholds, dict) else 70
+    score = max(0, min(100, 100 - (result.error_count * 20) - (result.warning_count * 3)))
+    data = {
+        "$schema": "grimoire-agentic-standard-score-result/v1",
+        "task_id": normalized_task_id,
+        "profile": profile.id,
+        "score": score,
+        "threshold": threshold,
+        "ok": score >= threshold and result.ok,
+        "errors": result.error_count,
+        "warnings": result.warning_count,
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    rel_path = SCORE_DIR / normalized_task_id / "compliance-score.yaml"
+    written = _write_yaml_mapping(root, rel_path, data)
+    _append_runtime_event(root, event_type="score.calculated", task_id=normalized_task_id, profile=profile.id, details={"path": str(written), "score": score, "threshold": threshold})
+    return StandardScoreResult(
+        ok=bool(data["ok"]),
+        profile=profile.id,
+        score=score,
+        threshold=threshold,
+        warnings=result.warning_count,
+        errors=result.error_count,
+        output_path=written,
+    )
+
+
+def propose_remediation_actions(
+    project_root: Path,
+    *,
+    task_id: str = "bootstrap",
+    profile_id: str | None = None,
+) -> tuple[StandardRemediationAction, ...]:
+    """Return structured remediation actions from standard verification findings."""
+    root = project_root.resolve()
+    result = verify_standard_profile(root, profile_id=profile_id, task_id=task_id)
+    actions: list[StandardRemediationAction] = []
+    for missing in result.missing:
+        actions.append(StandardRemediationAction(
+            check_id="artifact.missing",
+            severity="error",
+            action="generate_missing_artifact",
+            path=missing,
+            message=f"Generate missing required artifact {missing}.",
+        ))
+    for check in result.checks:
+        if check.severity not in {"error", "warning"}:
+            continue
+        if check.id.endswith("_outside_root"):
+            action = "move_reference_inside_project_root"
+        elif "provider" in check.id:
+            action = "update_provider_registry"
+        elif "knowledge" in check.id:
+            action = "complete_knowledge_registry"
+        elif "memory" in check.id:
+            action = "complete_memory_policy"
+        elif "context" in check.id:
+            action = "complete_context_contract"
+        elif "gate" in check.id or "evidence" in check.id:
+            action = "attach_required_evidence"
+        else:
+            action = "complete_required_field"
+        actions.append(StandardRemediationAction(
+            check_id=check.id,
+            severity=check.severity,
+            action=action,
+            path=check.path,
+            message=check.message,
+        ))
+    return tuple(actions)

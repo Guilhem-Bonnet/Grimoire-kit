@@ -1,0 +1,20 @@
+$schema: "grimoire-agentic-standard-remediation-plan/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+defaults:
+  dry_run_first: true
+  destructive_requires_force: true
+  write_scope: project_root_only
+action_types:
+  - generate_missing_artifact
+  - complete_required_field
+  - link_evidence
+  - declare_provider
+  - add_rule
+  - add_hook
+  - refresh_knowledge_index
+  - redact_memory
+  - block_transition
+  - create_waiver
+actions: []

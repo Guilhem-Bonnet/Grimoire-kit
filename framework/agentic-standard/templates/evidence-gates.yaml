@@ -1,0 +1,40 @@
+$schema: "grimoire-agentic-standard-evidence-gates/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+states:
+  - proposed
+  - ready
+  - in_progress
+  - blocked
+  - review
+  - accepted
+  - released
+  - archived
+transitions:
+  - id: proposed_to_ready
+    from: proposed
+    to: ready
+    required_evidence: ["acceptance_criteria", "owner_or_agent_role"]
+  - id: ready_to_in_progress
+    from: ready
+    to: in_progress
+    required_evidence: ["context_bundle", "provider_policy"]
+  - id: in_progress_to_review
+    from: in_progress
+    to: review
+    required_evidence: ["evidence_pack", "decision_trace"]
+  - id: review_to_accepted
+    from: review
+    to: accepted
+    required_evidence: ["review_gate", "evidence_gate"]
+  - id: accepted_to_released
+    from: accepted
+    to: released
+    required_evidence: ["compliance_score", "release_authorization"]
+profile_strictness:
+  starter: advisory
+  controlled: warning
+  orchestrated: warning
+  governed: hard_fail
+  production: hard_fail

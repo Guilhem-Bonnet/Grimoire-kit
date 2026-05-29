@@ -1,0 +1,42 @@
+$schema: "grimoire-agentic-standard-hook-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+known_phases:
+  - pre_context_build
+  - post_context_build
+  - pre_provider_call
+  - post_provider_call
+  - pre_tool_call
+  - post_tool_call
+  - pre_state_transition
+  - post_state_transition
+  - pre_release
+  - on_failure
+  - on_rollback
+known_actions:
+  - allow
+  - warn
+  - block
+  - redact
+  - reroute
+  - require_evidence
+  - escalate
+  - create_remediation
+  - rollback
+hooks:
+  - id: context.require-task
+    phase: pre_context_build
+    action: block
+    rule_ref: task.exists
+    reason: "Context cannot be built for an undeclared task."
+  - id: provider.require-declared-route
+    phase: pre_provider_call
+    action: block
+    rule_ref: provider.no-undeclared-route
+    reason: "Provider routes must be declared before use."
+  - id: release.require-score
+    phase: pre_release
+    action: block
+    rule_ref: release.score-minimum
+    reason: "Release requires profile-specific compliance score."

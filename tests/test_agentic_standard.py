@@ -10,9 +10,14 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core.agentic_standard import (
     STANDARD_PROFILE_FILE,
+    build_context_bundle,
+    build_decision_trace,
+    build_knowledge_index,
     detect_standard_providers,
     list_profiles,
+    list_standard_patterns,
     setup_standard_profile,
+    simulate_standard_hooks,
     verify_standard_profile,
 )
 
@@ -30,6 +35,15 @@ def test_setup_generates_orchestrated_artifacts(tmp_path: Path) -> None:
     assert (tmp_path / "_grimoire/standard/mission-brief.md").is_file()
     assert (tmp_path / "_grimoire/standard/knowledge-source-registry.yaml").is_file()
     assert (tmp_path / "_grimoire/standard/llm-provider-registry.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/task-board.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/memory-policy.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/context-contract.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/decision-graph.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/rule-packs.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/hook-registry.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/orchestration-policy.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/evidence-gates.yaml").is_file()
+    assert (tmp_path / "_grimoire/standard/pattern-catalog.yaml").is_file()
     assert (tmp_path / "_grimoire-output/evidence/bootstrap/task-envelope.md").is_file()
     assert (tmp_path / "_grimoire-output/evidence/bootstrap/evidence-pack.md").is_file()
 
@@ -157,6 +171,33 @@ def test_verify_blocks_knowledge_index_manifest_outside_project_root(tmp_path: P
     assert any(check.id == "knowledge.index_manifest_outside_root" for check in result.checks)
 
 
+def test_runtime_builders_create_context_decision_hooks_and_events(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="orchestrated", provider_ids=("github-copilot",))
+
+    context = build_context_bundle(tmp_path)
+    decision = build_decision_trace(tmp_path)
+    knowledge = build_knowledge_index(tmp_path)
+    hooks = simulate_standard_hooks(tmp_path, phase="pre_context_build")
+
+    assert context.path == Path("_grimoire-output/context/bootstrap/context-bundle.yaml")
+    assert decision.path == Path("_grimoire-output/decisions/bootstrap/decision-trace.yaml")
+    assert knowledge.path == Path("_grimoire-output/knowledge/bootstrap/index-manifest.yaml")
+    assert hooks.path == Path("_grimoire-output/events/bootstrap/hook-simulation-pre_context_build.yaml")
+    assert (tmp_path / context.path).is_file()
+    assert (tmp_path / decision.path).is_file()
+    assert (tmp_path / knowledge.path).is_file()
+    assert (tmp_path / hooks.path).is_file()
+    assert (tmp_path / "_grimoire-output/events/runtime-journal.jsonl").is_file()
+
+
+def test_standard_pattern_catalog_lists_patterns(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="orchestrated")
+
+    patterns = list_standard_patterns(tmp_path, category="context")
+
+    assert any(pattern["id"] == "advanced-context-orchestrator" for pattern in patterns)
+
+
 def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="starter")
     manifest = tmp_path / "_grimoire" / "standard" / "standard-profile.yaml"
@@ -249,3 +290,41 @@ def test_cli_standard_audit_markdown(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "# Agentic Standard Audit" in result.output
     assert "knowledge.no_real_source" in result.output
+
+
+def test_cli_standard_runtime_commands_json(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--profile",
+        "orchestrated",
+        "--provider",
+        "github-copilot",
+    ])
+
+    context_result = runner.invoke(app, ["-o", "json", "standard", "context", "build", str(tmp_path)])
+    decision_result = runner.invoke(app, ["-o", "json", "standard", "decision", "trace", str(tmp_path)])
+    knowledge_result = runner.invoke(app, ["-o", "json", "standard", "knowledge", "index", str(tmp_path)])
+    pattern_result = runner.invoke(app, ["-o", "json", "standard", "pattern", "list", str(tmp_path)])
+    hooks_result = runner.invoke(app, ["-o", "json", "standard", "hooks", "simulate", str(tmp_path), "--phase", "pre_context_build"])
+    gate_result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--target-state", "review"])
+    events_result = runner.invoke(app, ["-o", "json", "standard", "events", "audit", str(tmp_path)])
+    fix_result = runner.invoke(app, ["-o", "json", "standard", "fix", str(tmp_path)])
+
+    assert context_result.exit_code == 0
+    assert json.loads(context_result.output)["path"] == "_grimoire-output/context/bootstrap/context-bundle.yaml"
+    assert decision_result.exit_code == 0
+    assert knowledge_result.exit_code == 0
+    assert json.loads(knowledge_result.output)["path"] == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
+    assert pattern_result.exit_code == 0
+    assert any(pattern["id"] == "advanced-context-orchestrator" for pattern in json.loads(pattern_result.output))
+    assert hooks_result.exit_code == 0
+    assert gate_result.exit_code == 0
+    assert events_result.exit_code == 0
+    assert json.loads(events_result.output)["event_count"] >= 4
+    assert fix_result.exit_code == 0
+    assert "actions" in json.loads(fix_result.output)

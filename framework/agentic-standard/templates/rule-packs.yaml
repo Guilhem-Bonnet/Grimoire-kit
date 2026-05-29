@@ -1,0 +1,48 @@
+$schema: "grimoire-agentic-standard-rule-packs/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+rule_families:
+  - security
+  - provider
+  - memory
+  - knowledge
+  - context
+  - orchestration
+  - evidence
+  - release
+  - remediation
+rules:
+  - id: provider.no-undeclared-route
+    family: provider
+    source_normative: provider-governance.require-declared-provider
+    severity: error
+    phase: pre_provider_call
+    condition:
+      provider_declared: false
+    action: block
+    event: provider.blocked
+    remediation: declare_provider_or_reroute
+    check_id: providers.default_unknown
+  - id: memory.freshness-required
+    family: memory
+    source_normative: memory-governance.require-freshness
+    severity: warning
+    phase: pre_context_build
+    condition:
+      freshness_missing: true
+    action: require_evidence
+    event: memory.excluded
+    remediation: refresh_memory_or_exclude
+    check_id: memory.freshness_missing
+  - id: gate.requires-evidence
+    family: evidence
+    source_normative: evidence-governance.require-minimum-evidence
+    severity: error
+    phase: pre_state_transition
+    condition:
+      evidence_missing: true
+    action: block
+    event: gate.failed
+    remediation: create_missing_evidence
+    check_id: evidence.minimum_missing

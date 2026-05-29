@@ -1,0 +1,55 @@
+$schema: "grimoire-agentic-standard-task-board/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Governed kanban for agentic work."
+states:
+  - proposed
+  - ready
+  - in_progress
+  - blocked
+  - review
+  - accepted
+  - released
+  - archived
+transitions:
+  proposed_to_ready:
+    requires:
+      - acceptance_criteria
+      - owner_or_agent_role
+  ready_to_in_progress:
+    requires:
+      - context_bundle
+      - provider_policy
+  in_progress_to_review:
+    requires:
+      - evidence_pack
+      - decision_trace
+  review_to_accepted:
+    requires:
+      - review_gate
+      - evidence_gate
+  accepted_to_released:
+    requires:
+      - compliance_score
+      - release_authorization
+  any_to_blocked:
+    requires:
+      - blocker_reason
+      - remediation_plan
+tasks:
+  - task_id: "bootstrap"
+    title: "Bootstrap agentic standard runtime"
+    status: "proposed"
+    priority: "medium"
+    owner: "project-maintainer"
+    agent_roles:
+      - planner
+      - context_orchestrator
+    acceptance_criteria:
+      - "Standard artifacts are generated and verified."
+    blockers: []
+    context_bundle_ref: "_grimoire-output/context/bootstrap/context-bundle.yaml"
+    decision_trace_ref: "_grimoire-output/decisions/bootstrap/decision-trace.yaml"
+    evidence_pack_ref: "_grimoire-output/evidence/bootstrap/evidence-pack.md"
+    remediation_ref: "_grimoire/standard/remediation-plan.yaml"
