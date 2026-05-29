@@ -7,6 +7,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.4.4] - 2026-05-29
+
+### Corrigé
+
+- **CI SDK multi-OS** — stabilisation complète de `Grimoire SDK CI` : assertions CLI robustes face aux rendus Typer/Rich, couverture agentic standard incluse, smoke Windows ciblé et workflow de tests portable.
+- **Runtime standard** — sorties JSON et tests du runtime agentique rendus portables entre Linux, macOS et Windows, notamment les chemins `context`/`knowledge`.
+- **Release readiness** — correction ShellCheck, test de backoff déterministe et durcissement des tests d’édition de configuration pour débloquer la publication PyPI.
+
 ## [3.4.3] - 2026-05-28
 
 ### Ajouté
