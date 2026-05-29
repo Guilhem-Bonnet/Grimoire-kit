@@ -103,7 +103,7 @@ jobs:
 
       - name: Run unit tests with coverage
         run: |
-          pytest tests/unit/ -q --tb=short -x \
+          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
@@ -129,7 +129,7 @@ jobs:
         if: always()
         run: |
           echo "### Python ${{ matrix.python-version }} Tests" >> $GITHUB_STEP_SUMMARY
-          pytest tests/unit/ -q --tb=line 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
+          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=line 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
 
   build:
     name: "Build package"

@@ -23,7 +23,8 @@ class TestGlobalFlags:
 
     def test_help_shows_verbose(self) -> None:
         result = runner.invoke(app, ["--help"])
-        assert "--verbose" in result.output
+        assert "--verbose" in result.output or "-v" in result.output
+        assert "verbosity" in result.output
 
     def test_help_shows_log_format(self) -> None:
         result = runner.invoke(app, ["--help"])

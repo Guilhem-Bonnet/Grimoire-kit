@@ -236,7 +236,7 @@ def memory_import(
         if fmt == "json":
             typer.echo(json.dumps({"dry_run": True, "count": len(entries)}, indent=2))
         else:
-            console.print(f"[bold]import --dry-run:[/bold] would import {len(entries)} entries.")
+            console.print(f"[bold]import --dry-run:[/bold] would import {len(entries)} entries.", highlight=False)
         return
 
     mgr = _load_manager()
@@ -245,7 +245,7 @@ def memory_import(
     if fmt == "json":
         typer.echo(json.dumps({"imported": len(result)}, indent=2))
     else:
-        console.print(f"[green]Imported {len(result)} entries.[/green]")
+        console.print(f"[green]Imported {len(result)} entries.[/green]", highlight=False)
 
 
 # ── grimoire memory gc ────────────────────────────────────────────────────────
@@ -262,7 +262,7 @@ def memory_gc(ctx: typer.Context) -> None:
         typer.echo(json.dumps({"consolidated": affected}, indent=2))
     else:
         if affected:
-            console.print(f"[green]Consolidated {affected} entries.[/green]")
+            console.print(f"[green]Consolidated {affected} entries.[/green]", highlight=False)
         else:
             console.print("[dim]Nothing to consolidate.[/dim]")
 

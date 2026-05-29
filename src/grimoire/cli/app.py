@@ -2086,7 +2086,7 @@ def self_update() -> None:
         console.print(f"  [dim]{hint}[/dim]")
         raise typer.Exit(1)
 
-    console.print(f"\n[green]✓ Updated to {latest}[/green]")
+    console.print(f"\n[green]✓ Updated to {latest}[/green]", highlight=False)
     console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
 
 
