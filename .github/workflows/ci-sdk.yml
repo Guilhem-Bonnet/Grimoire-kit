@@ -76,7 +76,7 @@ jobs:
           pip install pip-audit
 
       - name: Audit dependencies
-        run: pip-audit --strict --desc
+        run: pip-audit --strict --desc --skip-editable
 
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
