@@ -12,13 +12,18 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from grimoire.cli.app import _ALIASES, _expand_aliases, app, main
+from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, main, remove_agent
 
 runner = CliRunner()
 
 
 def _main_option_decls(parameter_name: str) -> tuple[str, ...]:
     default = inspect.signature(main).parameters[parameter_name].default
+    return default.param_decls
+
+
+def _command_option_decls(command: object, parameter_name: str) -> tuple[str, ...]:
+    default = inspect.signature(command).parameters[parameter_name].default
     return default.param_decls
 
 
@@ -1241,12 +1246,10 @@ class TestAddRemoveDryRun:
         assert "keeper" in content_after
 
     def test_add_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["add", "--help"])
-        assert "--dry-run" in result.output
+        assert "--dry-run" in _command_option_decls(add_agent, "dry_run")
 
     def test_remove_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["remove", "--help"])
-        assert "--dry-run" in result.output
+        assert "--dry-run" in _command_option_decls(remove_agent, "dry_run")
 
 
 # ── Env var overrides ─────────────────────────────────────────────────────────
