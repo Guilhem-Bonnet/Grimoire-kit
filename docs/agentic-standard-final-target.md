@@ -132,6 +132,26 @@ flowchart TD
 | Remediation | Corrections proposees ou appliquees | `remediation-plan.yaml` |
 | Release governance | Blocage ou autorisation release | CI gates |
 
+## Adaptation normative a Grimoire
+
+La cible finale doit etre adaptee aux surfaces reelles de Grimoire, pas seulement a des concepts generiques d'orchestration.
+
+| Domaine Grimoire | Norme cible | Artefact |
+|---|---|---|
+| Kanban / travail | Task board gouverne, statuts, blockers, evidence, transitions | `task-board.yaml` |
+| Agents | Roles, responsabilites, autonomie, outils, memoire autorisee | `orchestration-policy.yaml` |
+| Personas / archetypes | Mapping persona -> role -> droits -> gates | `orchestration-policy.yaml` |
+| Workflows | Handoffs, review gates, escalation, rollback | `orchestration-policy.yaml` |
+| Memoire | Types, scopes, retention, freshness, trust, redaction | `memory-policy.yaml` |
+| Contexte | Sources, budget, exclusions, redactions, fingerprints | `context-contract.yaml` |
+| Knowledge | Sources, index, freshness, graph, obligations | `knowledge-source-registry.yaml` |
+| Providers | Routes, fallback, data policy, compatibilites | `llm-provider-registry.yaml` |
+| Decisions | Provider, memoire, contexte, role, outil, transition, release | `decision-graph.yaml` |
+| Hooks | Interceptions runtime pre/post, failure, rollback | `hook-registry.yaml` |
+| Rules | Regles normatives executables | `rule-packs.yaml` |
+
+Le schéma cible `framework/agentic-standard/target-schema.yaml` represente ces domaines dans `grimoire_normative_domains`.
+
 ## Profils finaux
 
 | Profil | Intention | Niveau de contrainte |
@@ -226,6 +246,23 @@ flowchart LR
     Bundle --> Trace[Decision Trace]
 ```
 
+Sections obligatoires du context bundle :
+
+- resume de la tache ;
+- criteres d'acceptation ;
+- sources selectionnees ;
+- sources exclues ;
+- memoires incluses ;
+- memoires exclues ;
+- knowledge nodes ;
+- contraintes provider ;
+- contraintes de role agentique ;
+- budget contextuel ;
+- redactions ;
+- inputs de decision ;
+- exigences d'evidence ;
+- fingerprints.
+
 ## Systeme de decision final
 
 Le decision graph doit couvrir toutes les decisions qui influencent l'autonomie agentique.
@@ -242,6 +279,19 @@ Le decision graph doit couvrir toutes les decisions qui influencent l'autonomie 
 | Release authorization | score, risks, gates, journal | release, block, exception required |
 
 Chaque decision doit avoir un `decision_id`, une source policy, les inputs evalues, les regles appliquees, le resultat, la justification, le niveau de confiance, l'evenement emis et la remediation si bloquee.
+
+Les types de decisions adaptes a Grimoire sont :
+
+- priorisation de tache ;
+- selection de sources contextuelles ;
+- injection de memoire ;
+- routing provider ;
+- routing de role agentique ;
+- autorisation d'outil ;
+- transition d'etat ;
+- autorisation de release.
+
+Chaque record de decision doit inclure `task_id`, `profile`, `policy_refs`, `rule_refs`, `event`, `evidence_refs`, `remediation_ref` et `timestamp`.
 
 ## Rule engine final
 
@@ -607,4 +657,3 @@ La cible finale est atteinte quand :
 - chaque erreur bloquante produit une remediation ;
 - Forge consomme le standard comme projet reference ;
 - la documentation publique explique la norme, le runtime et la trajectoire.
-
