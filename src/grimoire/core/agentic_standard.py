@@ -247,6 +247,7 @@ class StandardRemediationAction:
 def _yaml() -> YAML:
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
+    yaml.width = 4096
     return yaml
 
 
