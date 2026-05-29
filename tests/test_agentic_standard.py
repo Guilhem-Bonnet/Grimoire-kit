@@ -22,6 +22,10 @@ from grimoire.core.agentic_standard import (
 )
 
 
+def _posix_path(value: str) -> str:
+    return value.replace("\\", "/")
+
+
 def test_profiles_include_orchestrated() -> None:
     profiles = {profile.id for profile in list_profiles()}
     assert {"starter", "controlled", "orchestrated", "governed", "production"} <= profiles
@@ -316,10 +320,10 @@ def test_cli_standard_runtime_commands_json(tmp_path: Path) -> None:
     fix_result = runner.invoke(app, ["-o", "json", "standard", "fix", str(tmp_path)])
 
     assert context_result.exit_code == 0
-    assert json.loads(context_result.output)["path"] == "_grimoire-output/context/bootstrap/context-bundle.yaml"
+    assert _posix_path(json.loads(context_result.output)["path"]) == "_grimoire-output/context/bootstrap/context-bundle.yaml"
     assert decision_result.exit_code == 0
     assert knowledge_result.exit_code == 0
-    assert json.loads(knowledge_result.output)["path"] == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
+    assert _posix_path(json.loads(knowledge_result.output)["path"]) == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
     assert pattern_result.exit_code == 0
     assert any(pattern["id"] == "advanced-context-orchestrator" for pattern in json.loads(pattern_result.output))
     assert hooks_result.exit_code == 0
