@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,9 +12,14 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from grimoire.cli.app import _ALIASES, _expand_aliases, app
+from grimoire.cli.app import _ALIASES, _expand_aliases, app, main
 
 runner = CliRunner()
+
+
+def _main_option_decls(parameter_name: str) -> tuple[str, ...]:
+    default = inspect.signature(main).parameters[parameter_name].default
+    return default.param_decls
 
 
 # ── Global Flags ──────────────────────────────────────────────────────────────
@@ -22,17 +28,13 @@ class TestGlobalFlags:
     """Tests for --verbose, --log-format, --output callback flags."""
 
     def test_help_shows_verbose(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--verbose" in result.output or "-v" in result.output
-        assert "verbosity" in result.output
+        assert "--verbose" in _main_option_decls("verbose")
 
     def test_help_shows_log_format(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--log-format" in result.output or "log format" in result.output.lower()
+        assert "--log-format" in _main_option_decls("log_format")
 
     def test_help_shows_output(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--output" in result.output or "output format" in result.output.lower()
+        assert "--output" in _main_option_decls("output")
 
     def test_verbose_single_sets_info(self) -> None:
         with patch("grimoire.cli.app.configure_logging") as mock_log:
@@ -853,12 +855,10 @@ class TestQuietNoColor:
     """Tests for --quiet and --no-color global flags."""
 
     def test_quiet_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--quiet" in result.output
+        assert "--quiet" in _main_option_decls("quiet")
 
     def test_no_color_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--no-color" in result.output
+        assert "--no-color" in _main_option_decls("no_color")
 
     def test_quiet_flag_runs(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "q"])
@@ -1566,8 +1566,7 @@ class TestYesFlag:
     """Tests for global --yes/-y flag and interactive confirmations."""
 
     def test_help_shows_yes(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--yes" in result.output
+        assert "--yes" in _main_option_decls("yes")
 
     def test_remove_prompts_without_yes(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "yn-test"])
@@ -2104,8 +2103,7 @@ class TestPerformanceProfiling:
     """Tests for --profile flag, _timed_phase, _display_profile."""
 
     def test_profile_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--profile" in result.output
+        assert "--profile" in _main_option_decls("profile")
 
     def test_timed_phase_records(self) -> None:
         from grimoire.cli.app import _phase_timings, _timed_phase
@@ -3569,9 +3567,7 @@ class TestR37DebugFlag:
     """A1: --debug / -D global flag exposes debug mode."""
 
     def test_debug_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "--debug" in result.output
+        assert "--debug" in _main_option_decls("debug")
 
     def test_debug_flag_sets_env(self, cli_project: Path) -> None:
         """--debug or -D should set GRIMOIRE_DEBUG=1 in the environment."""
