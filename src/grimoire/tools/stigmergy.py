@@ -22,11 +22,20 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import pow as mpow
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from grimoire.tools._common import GrimoireTool
 
 # ── Constants ─────────────────────────────────────────────────────────────────
+
+
+class BulkSignal(TypedDict):
+    ptype: str
+    location: NotRequired[str]
+    text: NotRequired[str]
+    emitter: NotRequired[str]
+    tags: NotRequired[list[str]]
+    intensity: NotRequired[float]
 
 PHEROMONE_FILE = "pheromone-board.json"
 VALID_TYPES = frozenset({"NEED", "ALERT", "OPPORTUNITY", "PROGRESS", "COMPLETE", "BLOCK"})
@@ -298,7 +307,7 @@ def deposit_pheromone(
 
 def bulk_deposit(
     project_root: Path,
-    signals: list[dict],
+    signals: list[BulkSignal],
 ) -> int:
     """Deposit multiple pheromones atomically (1 load + N emits + 1 save).
 

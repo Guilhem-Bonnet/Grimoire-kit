@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -23,7 +23,7 @@ console = Console(stderr=True)
 
 
 def _get_fmt(ctx: typer.Context) -> str:
-    return (ctx.obj or {}).get("output", "text")
+    return cast(str, (ctx.obj or {}).get("output", "text"))
 
 
 def _load_manager(path: Path = Path()) -> MemoryManager:

@@ -1780,12 +1780,13 @@ class TestAutoDiscovery:
 
     def test_find_config_missing_exits(self, tmp_path: Path) -> None:
         """_find_config exits when no config found anywhere."""
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
-        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError), pytest.raises(Exit):
-                _find_config(tmp_path)
+        with (
+            patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError),
+            pytest.raises(typer.Exit),
+        ):
+            _find_config(tmp_path)
 
     def test_add_works_from_subdirectory(self, cli_project: Path) -> None:
         """grimoire add finds config when invoked from a subdirectory."""
@@ -2376,8 +2377,9 @@ class TestR28FlattenDeduplicated:
 
         assert _flatten({}) == {}
 
-    def test_config_list_uses_flatten(self, cli_project: Path) -> None:
+    def test_config_list_uses_flatten(self, cli_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """config list uses _flatten (not the removed _flatten_dict)."""
+        monkeypatch.chdir(cli_project)
         result = runner.invoke(app, ["-o", "json", "config", "list"])
         # If _flatten_dict was still referenced, this would crash with NameError
         assert result.exit_code == 0
@@ -2628,27 +2630,21 @@ class TestR30FindConfigPermissionError:
 
     def test_find_config_permission_error(self, tmp_path: Path) -> None:
         """_find_config should exit cleanly on PermissionError."""
-        import pytest
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
         with (
             patch("grimoire.tools._common.find_project_root", side_effect=PermissionError("access denied")),
-            pytest.raises(Exit),
+            pytest.raises(typer.Exit),
         ):
             _find_config(tmp_path / "nonexistent")
 
     def test_find_config_os_error(self, tmp_path: Path) -> None:
         """_find_config should exit cleanly on generic OSError."""
-        import pytest
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
         with (
             patch("grimoire.tools._common.find_project_root", side_effect=OSError("disk error")),
-            pytest.raises(Exit),
+            pytest.raises(typer.Exit),
         ):
             _find_config(tmp_path / "nonexistent")
 

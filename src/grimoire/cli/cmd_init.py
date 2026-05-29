@@ -378,8 +378,8 @@ def _display_report(
         console.print("  [cyan]🤖 Agents deployed:[/cyan]")
         for cat, agents in agents_by_cat.items():
             icon = _cat_icons.get(cat, "🤖")
-            names = ", ".join(f"[bold]{a}[/bold]" for a in agents)
-            console.print(f"    {icon} [dim]{cat}:[/dim] {names}")
+            agent_names = ", ".join(f"[bold]{a}[/bold]" for a in agents)
+            console.print(f"    {icon} [dim]{cat}:[/dim] {agent_names}")
         console.print()
 
     # Summary counts
@@ -490,7 +490,7 @@ def _display_json(
     project_name: str,
 ) -> None:
     """Output JSON result for scripting."""
-    data = {
+    data: dict[str, Any] = {
         "ok": True,
         "project": project_name,
         "path": str(target),

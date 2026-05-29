@@ -285,9 +285,11 @@ class TestParseArchetypeSelection:
         assert result == [_ARCHETYPE_KEYS[0]]
 
     def test_zero_triggers_guided(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
         # "0" calls _guided_discovery which needs user input — for unit test, we mock
         from unittest.mock import patch
+
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+
         with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
             result = _parse_archetype_selection("0")
         assert result == ["web-app"]
