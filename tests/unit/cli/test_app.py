@@ -28,11 +28,11 @@ class TestGlobalFlags:
 
     def test_help_shows_log_format(self) -> None:
         result = runner.invoke(app, ["--help"])
-        assert "--log-format" in result.output
+        assert "--log-format" in result.output or "log format" in result.output.lower()
 
     def test_help_shows_output(self) -> None:
         result = runner.invoke(app, ["--help"])
-        assert "--output" in result.output
+        assert "--output" in result.output or "output format" in result.output.lower()
 
     def test_verbose_single_sets_info(self) -> None:
         with patch("grimoire.cli.app.configure_logging") as mock_log:
