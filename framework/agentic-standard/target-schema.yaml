@@ -31,6 +31,9 @@ profiles:
       - task_board
       - memory_policy
       - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
       - evidence_gates
       - audit
     release_gate: warning
@@ -42,10 +45,14 @@ profiles:
       - task_board
       - memory_policy
       - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
       - orchestration_policy
       - evidence_gates
       - pattern_catalog
       - knowledge_graph
+      - runtime_journal
       - compliance_score
       - remediation
       - ci_release_gate
@@ -87,6 +94,73 @@ target_artifacts:
       - handoffs_have_contracts
       - escalation_has_trigger
       - provider_routes_match_registry
+  decision_graph:
+    path: "_grimoire/standard/decision-graph.yaml"
+    purpose: "Traceable runtime decisions for provider routing, context inclusion, memory use, agent routing, gates, and release."
+    decisions:
+      - provider_selection
+      - memory_inclusion
+      - knowledge_inclusion
+      - agent_role_selection
+      - review_requirement
+      - escalation
+      - gate_block
+      - remediation_selection
+      - release_authorization
+    checks:
+      - decision_ids_unique
+      - decisions_reference_policies
+      - decisions_emit_events
+      - blocking_decisions_have_remediation
+  rule_packs:
+    path: "_grimoire/standard/rule-packs.yaml"
+    purpose: "Executable normative rules connected to checks, hook phases, events, and remediation."
+    families:
+      - security
+      - provider
+      - memory
+      - knowledge
+      - context
+      - orchestration
+      - evidence
+      - release
+      - remediation
+    checks:
+      - rule_ids_unique
+      - rules_reference_normative_sources
+      - blocking_rules_have_remediation
+      - rules_have_check_ids
+  hook_registry:
+    path: "_grimoire/standard/hook-registry.yaml"
+    purpose: "Runtime interception points for context, provider, tools, state transitions, release, failures, and rollback."
+    phases:
+      - pre_context_build
+      - post_context_build
+      - pre_provider_call
+      - post_provider_call
+      - pre_tool_call
+      - post_tool_call
+      - pre_state_transition
+      - post_state_transition
+      - pre_release
+      - on_failure
+      - on_rollback
+    actions:
+      - allow
+      - warn
+      - block
+      - redact
+      - reroute
+      - require_evidence
+      - escalate
+      - create_remediation
+      - rollback
+    checks:
+      - hook_ids_unique
+      - hook_phases_known
+      - hook_actions_known
+      - blocking_hooks_have_reason
+      - destructive_hooks_require_force
   evidence_gates:
     path: "_grimoire/standard/evidence-gates.yaml"
     purpose: "Finite-state task lifecycle and minimum evidence by transition/profile."
@@ -130,6 +204,29 @@ target_artifacts:
       - obligations_have_checks
       - checks_reference_sources
       - index_freshness_within_policy
+  runtime_journal:
+    path: "_grimoire-output/events/runtime-journal.jsonl"
+    purpose: "Append-only observable trace of context builds, decisions, hooks, provider routing, gates, transitions, and remediation."
+    events:
+      - context.built
+      - decision.evaluated
+      - hook.triggered
+      - provider.routed
+      - memory.included
+      - memory.excluded
+      - knowledge.used
+      - gate.passed
+      - gate.failed
+      - task.transitioned
+      - remediation.created
+      - remediation.applied
+      - release.authorized
+      - release.blocked
+    checks:
+      - events_are_valid_jsonl
+      - events_have_task_id
+      - events_have_timestamp
+      - governed_release_has_journal_events
   compliance_score:
     path: "_grimoire/standard/compliance-score.yaml"
     purpose: "Weighted score across standard dimensions with profile-specific thresholds."
@@ -143,6 +240,10 @@ target_artifacts:
       orchestration_policy: 10
       evidence_gates: 10
       pattern_catalog: 8
+      decision_graph: 6
+      rule_packs: 6
+      hook_registry: 6
+      runtime_journal: 4
       knowledge_graph: 6
       ci_release_gate: 6
     thresholds:
@@ -181,8 +282,20 @@ target_cli:
       artifact: context_contract
     - command: "grimoire standard context verify"
       artifact: context_contract
+    - command: "grimoire standard decision explain"
+      artifact: decision_graph
+    - command: "grimoire standard decision trace"
+      artifact: decision_graph
+    - command: "grimoire standard rules verify"
+      artifact: rule_packs
+    - command: "grimoire standard hooks verify"
+      artifact: hook_registry
+    - command: "grimoire standard hooks simulate"
+      artifact: hook_registry
     - command: "grimoire standard gate check"
       artifact: evidence_gates
+    - command: "grimoire standard events audit"
+      artifact: runtime_journal
     - command: "grimoire standard score"
       artifact: compliance_score
     - command: "grimoire standard fix --dry-run"
@@ -213,6 +326,16 @@ runtime_flow:
   - step: context_build
     outputs:
       - "_grimoire-output/context/{task_id}/context-bundle.yaml"
+  - step: decision_evaluate
+    inputs:
+      - "_grimoire/standard/decision-graph.yaml"
+      - "_grimoire-output/context/{task_id}/context-bundle.yaml"
+  - step: rules_apply
+    inputs:
+      - "_grimoire/standard/rule-packs.yaml"
+  - step: hooks_trigger
+    inputs:
+      - "_grimoire/standard/hook-registry.yaml"
   - step: orchestration_plan
     inputs:
       - "_grimoire/standard/orchestration-policy.yaml"
@@ -225,6 +348,9 @@ runtime_flow:
     outputs:
       - "_grimoire-output/audit/standard-audit.json"
       - "_grimoire-output/audit/compliance-score.json"
+  - step: event_journal
+    outputs:
+      - "_grimoire-output/events/runtime-journal.jsonl"
   - step: remediate
     outputs:
       - "_grimoire/standard/remediation-plan.yaml"
@@ -240,3 +366,7 @@ validation:
     - "grimoire standard audit"
     - "grimoire standard score"
     - "grimoire standard gate check --task-id bootstrap"
+    - "grimoire standard decision explain --task-id bootstrap"
+    - "grimoire standard rules verify"
+    - "grimoire standard hooks verify"
+    - "grimoire standard events audit --task-id bootstrap"
