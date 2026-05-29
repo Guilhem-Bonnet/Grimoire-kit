@@ -189,7 +189,7 @@ def test_runtime_builders_create_context_decision_hooks_and_events(tmp_path: Pat
 
     assert context.path == Path("_grimoire-output/context/bootstrap/context-bundle.yaml")
     assert context.data["provider_constraints"]["matched_provider"] == "openai"
-    assert context.data["knowledge_graph_ref"] == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
+    assert _posix_path(context.data["knowledge_graph_ref"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
     assert decision.path == Path("_grimoire-output/decisions/bootstrap/decision-trace.yaml")
     assert knowledge.path == Path("_grimoire-output/knowledge/bootstrap/index-manifest.yaml")
     assert graph.path == Path("_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml")
