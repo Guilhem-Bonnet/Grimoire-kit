@@ -2396,6 +2396,7 @@ class TestConfigEdit:
         cfg = cli_project / "project-context.yaml"
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("shutil.which", return_value="/usr/bin/nano"),
             patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
@@ -2406,6 +2407,7 @@ class TestConfigEdit:
         cfg = cli_project / "project-context.yaml"
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("shutil.which", return_value="/usr/bin/code"),
             patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"VISUAL": "code", "EDITOR": "nano"})
