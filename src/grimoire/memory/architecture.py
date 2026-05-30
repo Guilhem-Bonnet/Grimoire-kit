@@ -93,7 +93,7 @@ def build_memory_architecture_status(
     sidecar_path = root / "_grimoire" / "_memory" / "palace_sidecar.sqlite3"
 
     layers = (
-        _short_term_layer(config),
+        _short_term_layer(config, backend_status=backend_status),
         _semantic_memory_layer(config, backend_status=backend_status),
         _semantic_knowledge_layer(config, sidecar_path=sidecar_path),
         _memory_graph_layer(config, sidecar_path=sidecar_path, root=root, backend_status=backend_status),
@@ -110,7 +110,7 @@ def build_memory_architecture_status(
     )
 
 
-def _short_term_layer(config: GrimoireConfig) -> MemoryLayerStatus:
+def _short_term_layer(config: GrimoireConfig, *, backend_status: BackendStatus | None) -> MemoryLayerStatus:
     backend = config.memory.short_term_backend
     if backend == "none":
         return MemoryLayerStatus(
@@ -122,20 +122,58 @@ def _short_term_layer(config: GrimoireConfig) -> MemoryLayerStatus:
             implemented=False,
         )
     if backend == "redis":
+        hot_status = _hot_memory_detail(backend_status)
+        if hot_status.get("healthy") is True:
+            detail = hot_status.get("detail", {})
+            return MemoryLayerStatus(
+                id="short_term",
+                label="Short-term working memory",
+                state=_STATE_READY,
+                backend="redis",
+                purpose="Hold transient session state in a TTL-bound hot memory before durable promotion.",
+                implemented=True,
+                next_actions=(
+                    "Keep Redis data non-authoritative and promote selected entries into durable memory explicitly.",
+                    "Use leases for multi-agent coordination, not as permanent task state.",
+                ),
+                evidence={
+                    "redis_url": config.memory.redis_url,
+                    "namespace": detail.get("namespace", config.memory.collection_prefix),
+                    "default_ttl_seconds": detail.get("default_ttl_seconds"),
+                    "lease_ttl_seconds": detail.get("lease_ttl_seconds"),
+                },
+            )
+        if hot_status:
+            detail = hot_status.get("detail", {})
+            reason = detail.get("reason", "Redis hot-memory health is not ready.")
+            return MemoryLayerStatus(
+                id="short_term",
+                label="Short-term working memory",
+                state=_STATE_PARTIAL,
+                backend="redis",
+                purpose="Hold transient session state in a TTL-bound hot memory before durable promotion.",
+                implemented=True,
+                gaps=(str(reason),),
+                next_actions=(
+                    "Install grimoire-kit[redis] and provide a reachable Redis URL when hot memory is required.",
+                    "Keep durable memory gates independent from Redis availability.",
+                ),
+                evidence={"redis_url": config.memory.redis_url, **detail},
+            )
         return MemoryLayerStatus(
             id="short_term",
             label="Short-term working memory",
-            state=_STATE_PLANNED,
+            state=_STATE_PARTIAL if config.memory.redis_url else _STATE_PLANNED,
             backend="redis",
-            purpose="Replace prompt-context pressure with a hot TTL memory and pub/sub stream.",
-            implemented=False,
+            purpose="Hold transient session state in a TTL-bound hot memory before durable promotion.",
+            implemented=True,
             gaps=(
-                "Redis adapter is not implemented yet.",
-                "Promotion policy from hot memory to semantic memory is not implemented yet.",
+                "Redis hot-memory adapter exists, but runtime health has not been checked.",
+                "Promotion policy from hot memory to durable semantic memory is explicit and still project-owned.",
             ),
             next_actions=(
-                "Add a Redis short-term backend with TTL, namespaces, and session leases.",
-                "Add promotion rules that persist selected hot entries into Qdrant and the graph sidecar.",
+                "Run grimoire memory status with a reachable Redis URL to prove the hot layer.",
+                "Promote selected hot entries into Weaviate/Neo4j/SQLite through governed evidence gates.",
             ),
             evidence={"redis_url": config.memory.redis_url},
         )
@@ -538,6 +576,13 @@ def _recommendations(layers: tuple[MemoryLayerStatus, ...]) -> tuple[str, ...]:
     if "visualization" in missing:
         recommendations.append("Build the visualization from this layer contract so the UI cannot drift from runtime capabilities.")
     return tuple(recommendations)
+
+
+def _hot_memory_detail(backend_status: BackendStatus | None) -> dict[str, Any]:
+    if backend_status is None:
+        return {}
+    detail = backend_status.detail.get("hot_memory", {})
+    return detail if isinstance(detail, dict) else {}
 
 
 def _neo4j_graph_detail(backend_status: BackendStatus | None) -> dict[str, Any]:

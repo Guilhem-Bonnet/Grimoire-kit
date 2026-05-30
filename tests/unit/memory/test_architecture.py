@@ -90,7 +90,7 @@ def test_reports_neo4j_memory_graph_partial_when_migration_bundle_exists(tmp_pat
     assert "runtime writes are not synchronized" not in " ".join(memory_graph.gaps)
 
 
-def test_reports_redis_short_term_as_planned_until_adapter_exists(tmp_path: Path) -> None:
+def test_reports_redis_short_term_as_partial_until_health_is_checked(tmp_path: Path) -> None:
     cfg = _config({
         "backend": "local",
         "short_term_backend": "redis",
@@ -100,8 +100,9 @@ def test_reports_redis_short_term_as_planned_until_adapter_exists(tmp_path: Path
 
     short_term = {layer.id: layer for layer in status.layers}["short_term"]
     assert short_term.backend == "redis"
-    assert short_term.state == "planned"
-    assert "Redis adapter" in short_term.gaps[0]
+    assert short_term.state == "partial"
+    assert short_term.implemented is True
+    assert "runtime health has not been checked" in short_term.gaps[0]
 
 
 def test_status_is_json_serializable(tmp_path: Path) -> None:

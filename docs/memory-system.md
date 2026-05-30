@@ -10,6 +10,7 @@ Le système combine trois éléments complémentaires :
 - une taxonomie de palais pour normaliser les métadonnées et les filtres
 - un sidecar SQLite pour les faits temporels et les journaux d'agents
 - une projection Neo4j optionnelle pour relier souvenirs, tags, faits et journaux
+- une couche Redis optionnelle pour la mémoire chaude TTL, les leases et les flux transitoires
 
 ## Vue d'ensemble
 
@@ -25,6 +26,7 @@ flowchart TD
     MM --> OLLAMA[Backend Ollama]
     MM --> SIDECAR[Sidecar SQLite]
     MM --> NEO4J[Projection Neo4j]
+    MM --> REDIS[Redis hot memory]
     SIDECAR --> WAL[WAL JSONL]
     SIDECAR --> NEO4J
 ```
@@ -35,6 +37,7 @@ flowchart TD
 - Le backend configuré reste la source de vérité pour les souvenirs textuels et la recherche.
 - Le sidecar `MemorySidecar` ajoute des structures complémentaires sans remplacer le backend principal.
 - La projection `Neo4jMemoryGraph` est un write-through optionnel. Elle ne bloque pas le backend principal si Neo4j est indisponible.
+- La couche `RedisHotMemory` est optionnelle, TTL-bound et non autoritative. Elle sert aux états de session, aux leases et aux flux transitoires avant promotion explicite vers les stores durables.
 - La taxonomie [wing, hall, room] normalise les filtres sur tous les backends qui passent par le manager.
 - Le backend `mempalace` est une compatibilité expérimentale avec un stockage de type palais. Il n'embarque pas toute la stack MemPalace.
 
@@ -47,6 +50,7 @@ flowchart TD
 | Taxonomie palais | Normalise `wing`, `hall`, `room`, `palace_key` | [memory/taxonomy.py](api-reference.md) |
 | Sidecar structuré | Stocke faits temporels et journaux d'agents | [memory/sidecar.py](api-reference.md) |
 | Projection Neo4j | Synchronise souvenirs, tags, faits, journaux, code et tâches | [memory/neo4j_graph.py](api-reference.md) |
+| Mémoire chaude Redis | Stocke état transitoire TTL, leases et publications de session | [memory/hot.py](api-reference.md) |
 | Projections Agent OS | Alimente Neo4j depuis le code graph, MissionLedger et EvidenceService | [memory/projections.py](api-reference.md) |
 | CLI | Expose l'inspection et les opérations d'import/export | [cli/cmd_memory.py](cli-reference.md) |
 
@@ -83,6 +87,19 @@ Les halls normalisés actuellement sont les suivants :
 
 Le manager enrichit automatiquement les écritures via `normalize_palace_metadata()`. Les commandes `search`, `list` et `taxonomy` acceptent ensuite les filtres `--wing`, `--hall` et `--room`.
 
+## Couche chaude Redis
+
+Quand `memory.short_term_backend` vaut `redis`, `MemoryManager` initialise une couche chaude `RedisHotMemory` si `redis_url` est défini et que l'extra Python `grimoire-kit[redis]` est installé.
+
+Cette couche ne remplace pas le backend principal. Elle sert uniquement à :
+
+- stocker des fragments de contexte avec TTL ;
+- gérer des leases courts pour coordonner plusieurs agents ou workers ;
+- publier des événements transitoires namespacés ;
+- exposer son état dans `grimoire memory status` et dans le contrat Memory OS.
+
+Redis doit rester dégradable : si la dépendance ou le service Redis est absent, `grimoire memory status` signale une couche partielle, mais les stores durables Weaviate, Neo4j et SQLite restent la source de vérité.
+
 ## Sidecar structuré
 
 Le sidecar vit dans `_grimoire/_memory/palace_sidecar.sqlite3`. Il est créé automatiquement par `MemoryManager.from_config()` et journalise ses écritures dans `_grimoire/_memory/palace_sidecar.wal.jsonl`.
@@ -115,13 +132,14 @@ Les couches `code_graph` et `task_memory` utilisent des producteurs explicites :
 
 1. La CLI ou le code Python charge `project-context.yaml` via `GrimoireConfig`.
 2. `MemoryManager` résout le backend demandé et initialise le sidecar.
-3. Lors d'un `store()`, le manager enrichit les métadonnées avec la taxonomie palais.
-4. Le backend principal persiste le souvenir et sert les opérations de recherche ou de listing.
-5. Si Neo4j est configuré, le manager projette le souvenir et ses tags dans le graphe.
-6. Les commandes `facts` et `diary` écrivent dans le sidecar SQLite puis, si disponible, dans Neo4j.
-7. Les commandes `memory graph` projettent code, missions, tâches, incidents et preuves vers Neo4j.
-8. Les commandes `memory vector` projettent code et task memory vers Weaviate avec des IDs stables et des hashes de contenu.
-9. Les commandes `taxonomy`, `search` et `list` réutilisent les champs `wing`, `hall` et `room` pour agréger et filtrer les résultats.
+3. Si Redis est configuré, le manager expose une couche chaude TTL séparée pour l'état de session.
+4. Lors d'un `store()`, le manager enrichit les métadonnées avec la taxonomie palais.
+5. Le backend principal persiste le souvenir et sert les opérations de recherche ou de listing.
+6. Si Neo4j est configuré, le manager projette le souvenir et ses tags dans le graphe.
+7. Les commandes `facts` et `diary` écrivent dans le sidecar SQLite puis, si disponible, dans Neo4j.
+8. Les commandes `memory graph` projettent code, missions, tâches, incidents et preuves vers Neo4j.
+9. Les commandes `memory vector` projettent code et task memory vers Weaviate avec des IDs stables et des hashes de contenu.
+10. Les commandes `taxonomy`, `search` et `list` réutilisent les champs `wing`, `hall` et `room` pour agréger et filtrer les résultats.
 
 ## Progressive search
 
@@ -181,6 +199,15 @@ memory:
   memory_graph: "neo4j"
 ```
 
+Configuration optionnelle Redis pour la mémoire chaude :
+
+```yaml
+memory:
+  short_term_backend: "redis"
+  redis_url: "redis://localhost:6379/0"
+  collection_prefix: "grimoire_kit"
+```
+
 Configuration pour expérimenter le backend MemPalace :
 
 ```yaml
@@ -196,6 +223,7 @@ Extras Python utiles :
 pip install "grimoire-kit[qdrant]"
 pip install "grimoire-kit[weaviate]"
 pip install "grimoire-kit[neo4j]"
+pip install "grimoire-kit[redis]"
 pip install "grimoire-kit[mempalace]"
 pip install "grimoire-kit[qdrant,ollama]"
 ```
@@ -210,6 +238,7 @@ pip install "grimoire-kit[qdrant,ollama]"
 | Répertoire Qdrant local ou serveur Qdrant | Stockage des backends `qdrant-local`, `qdrant-server`, `ollama` |
 | Collection Weaviate | Stockage vectoriel du backend `weaviate-server` |
 | Base Neo4j | Projection graphe des souvenirs, tags, faits et journaux |
+| Redis | Mémoire chaude TTL, leases et événements transitoires |
 | `_grimoire/_memory/mempalace/` | Répertoire ChromaDB du backend `mempalace` |
 
 ## Compatibilité legacy

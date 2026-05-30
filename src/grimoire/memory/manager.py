@@ -22,6 +22,7 @@ from typing import Any, ClassVar, cast
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 
@@ -161,6 +162,22 @@ def _create_memory_graph(config: GrimoireConfig) -> tuple[Any | None, str]:
         return None, f"Neo4j graph sync unavailable: {exc}"
 
 
+def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, str]:
+    """Create optional hot-memory adapter without making it a durable dependency."""
+    mem = config.memory
+    if mem.short_term_backend != "redis":
+        return None, ""
+    if not mem.redis_url:
+        return None, "Redis hot memory disabled: memory.redis_url is empty"
+    try:
+        return RedisHotMemory(
+            mem.redis_url,
+            namespace=mem.collection_prefix,
+        ), ""
+    except (RuntimeError, ValueError) as exc:
+        return None, f"Redis hot memory unavailable: {exc}"
+
+
 class MemoryManager:
     """Unified API wrapping whichever backend the project configures.
 
@@ -176,6 +193,8 @@ class MemoryManager:
         sidecar: MemorySidecar | None = None,
         memory_graph: Any | None = None,
         graph_sync_issue: str = "",
+        hot_memory: RedisHotMemory | None = None,
+        hot_memory_issue: str = "",
     ) -> None:
         self._backend = backend
         self._project_name = project_name
@@ -183,6 +202,8 @@ class MemoryManager:
         self._sidecar = sidecar
         self._memory_graph = memory_graph
         self._graph_sync_issue = graph_sync_issue
+        self._hot_memory = hot_memory
+        self._hot_memory_issue = hot_memory_issue
 
     @classmethod
     def from_config(cls, config: GrimoireConfig, *, project_root: Path | None = None) -> MemoryManager:
@@ -207,6 +228,7 @@ class MemoryManager:
         root = (project_root or Path()).resolve()
         sidecar = MemorySidecar(root / "_grimoire" / "_memory" / "palace_sidecar.sqlite3")
         memory_graph, graph_sync_issue = _create_memory_graph(config)
+        hot_memory, hot_memory_issue = _create_hot_memory(config)
         return cls(
             backend,
             project_name=config.project.name,
@@ -214,6 +236,8 @@ class MemoryManager:
             sidecar=sidecar,
             memory_graph=memory_graph,
             graph_sync_issue=graph_sync_issue,
+            hot_memory=hot_memory,
+            hot_memory_issue=hot_memory_issue,
         )
 
     @classmethod
@@ -237,6 +261,11 @@ class MemoryManager:
     def memory_graph(self) -> Any | None:
         """The optional Neo4j graph projection adapter."""
         return self._memory_graph
+
+    @property
+    def hot_memory(self) -> RedisHotMemory | None:
+        """The optional Redis hot-memory adapter."""
+        return self._hot_memory
 
     def _prepare_metadata(
         self,
@@ -332,6 +361,16 @@ class MemoryManager:
     def health_check(self) -> BackendStatus:
         status = self._backend.health_check()
         detail = dict(status.detail)
+        if self._hot_memory is not None:
+            hot_status = self._hot_memory.health_check()
+            detail["hot_memory"] = hot_status.to_dict()
+        elif self._hot_memory_issue:
+            detail["hot_memory"] = HotMemoryStatus(
+                backend="redis",
+                enabled=True,
+                healthy=False,
+                detail={"reason": self._hot_memory_issue},
+            ).to_dict()
         if self._sidecar is not None:
             detail.update({
                 "palace_sidecar": str(self._sidecar.db_path),
@@ -359,6 +398,34 @@ class MemoryManager:
 
     def consolidate(self) -> int:
         return self._backend.consolidate()
+
+    def _require_hot_memory(self) -> RedisHotMemory:
+        if self._hot_memory is None:
+            reason = self._hot_memory_issue or "memory.short_term_backend is not 'redis'"
+            raise GrimoireMemoryError(f"Redis hot memory is not available: {reason}")
+        return self._hot_memory
+
+    def hot_store(
+        self,
+        key: str,
+        value: str,
+        *,
+        ttl_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._require_hot_memory().store(key, value, ttl_seconds=ttl_seconds, metadata=metadata)
+
+    def hot_recall(self, key: str) -> dict[str, Any] | None:
+        return self._require_hot_memory().recall(key)
+
+    def hot_delete(self, key: str) -> bool:
+        return self._require_hot_memory().delete(key)
+
+    def hot_acquire_lease(self, key: str, *, ttl_seconds: int | None = None) -> str | None:
+        return self._require_hot_memory().acquire_lease(key, ttl_seconds=ttl_seconds)
+
+    def hot_release_lease(self, key: str, token: str) -> bool:
+        return self._require_hot_memory().release_lease(key, token)
 
     def delete(self, entry_id: str) -> bool:
         deleted = self._backend.delete(entry_id)
