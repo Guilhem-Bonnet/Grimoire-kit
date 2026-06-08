@@ -23,7 +23,7 @@ _DEFAULT_COLLECTION = "mempalace_drawers"
 
 def _require_chromadb() -> Any:
     try:
-        import chromadb  # type: ignore[import-not-found]
+        import chromadb
 
         return chromadb
     except ImportError:

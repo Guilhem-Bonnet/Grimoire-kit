@@ -54,7 +54,7 @@ def _batches[T](items: list[T], size: int = _BATCH_SIZE) -> list[list[T]]:
 def _require_neo4j() -> Any:
     """Import the Neo4j driver, raising a clear optional-dependency error."""
     try:
-        from neo4j import GraphDatabase  # type: ignore[import-not-found]
+        from neo4j import GraphDatabase
 
         return GraphDatabase
     except ImportError:

@@ -16,7 +16,7 @@ __all__ = ["Neo4jCodeGraphBackend"]
 
 _NEO4J_AVAILABLE = False
 try:
-    import neo4j as _neo4j_mod  # type: ignore[import-not-found]  # noqa: F401
+    import neo4j as _neo4j_mod  # noqa: F401
 
     _NEO4J_AVAILABLE = True
 except ImportError:

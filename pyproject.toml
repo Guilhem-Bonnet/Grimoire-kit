@@ -104,6 +104,22 @@ module = "tests.*"
 disallow_untyped_defs = false
 disallow_untyped_decorators = false
 
+# Optional backend SDKs (installed only via extras: neo4j, mempalace/chromadb,
+# weaviate, qdrant, redis, ollama, mcp). In CI the [all] extra is installed so
+# these imports resolve; in a minimal contributor env they are absent, so we
+# suppress import-not-found here instead of scattering inline `type: ignore`s.
+[[tool.mypy.overrides]]
+module = [
+    "neo4j.*",
+    "chromadb.*",
+    "weaviate.*",
+    "qdrant_client.*",
+    "sentence_transformers.*",
+    "redis.*",
+    "ollama.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

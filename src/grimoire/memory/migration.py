@@ -660,7 +660,7 @@ def import_neo4j_cypher(
     if not uri:
         raise ValueError("neo4j uri is required")
     try:
-        from neo4j import GraphDatabase  # type: ignore[import-not-found]
+        from neo4j import GraphDatabase
     except ImportError:
         raise ImportError("neo4j is not installed. Run:\n  pip install grimoire-kit[neo4j]") from None
 
