@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.core.agentic_standard import (
+    InstallPlan,
     StandardProviderDetection,
     StandardRemediationAction,
     StandardRemediationApplyResult,
@@ -28,7 +29,10 @@ from grimoire.core.agentic_standard import (
     detect_standard_providers,
     list_profiles,
     list_standard_patterns,
+    load_capability_map,
+    load_needs_catalog,
     propose_remediation_actions,
+    resolve_install_plan,
     setup_standard_profile,
     show_standard_pattern,
     simulate_standard_hooks,
@@ -269,11 +273,236 @@ def detect_providers(ctx: typer.Context) -> None:
     console.print(table)
 
 
+_EXTRA_IMPORT_PROBES: dict[str, tuple[str, ...]] = {
+    "redis": ("redis",),
+    "weaviate": ("weaviate", "sentence_transformers"),
+    "neo4j": ("neo4j",),
+    "qdrant": ("qdrant_client", "sentence_transformers"),
+    "mempalace": ("chromadb",),
+    "ollama": ("ollama",),
+    "mcp": ("mcp",),
+}
+
+
+def _split_csv(values: list[str] | None) -> list[str]:
+    collected: list[str] = []
+    for value in values or []:
+        for part in str(value).split(","):
+            cleaned = part.strip()
+            if cleaned and cleaned not in collected:
+                collected.append(cleaned)
+    return collected
+
+
+def _plan_to_json(plan: InstallPlan) -> dict[str, object]:
+    return {
+        "profile": plan.profile,
+        "needs": list(plan.needs),
+        "patterns": list(plan.patterns),
+        "memory_capabilities": list(plan.memory_capabilities),
+        "artifacts": list(plan.artifacts),
+        "extra_artifacts": list(plan.extra_artifacts),
+        "tech_extras": list(plan.tech_extras),
+        "pip_target": plan.pip_target,
+        "pip_command": plan.pip_command,
+        "warnings": list(plan.warnings),
+    }
+
+
+def _print_plan(plan: InstallPlan) -> None:
+    console.print(f"[bold]Install plan[/bold] → profile [cyan]{plan.profile}[/cyan]")
+    if plan.needs:
+        console.print(f"  [bold]needs[/bold]: {', '.join(plan.needs)}")
+    console.print(f"  [bold]patterns[/bold]: {', '.join(plan.patterns) or '-'}")
+    if plan.memory_capabilities:
+        console.print(f"  [bold]memory[/bold]: {', '.join(plan.memory_capabilities)}")
+    if plan.extra_artifacts:
+        console.print(f"  [bold]extra artifacts[/bold]: {', '.join(plan.extra_artifacts)}")
+    console.print(f"  [bold]tech extras[/bold]: {', '.join(plan.tech_extras) or 'none (core only)'}")
+    console.print(f"  [bold]install[/bold]: [green]{plan.pip_command}[/green]")
+    for warning in plan.warnings:
+        console.print(f"  [yellow]![/yellow] {warning}")
+
+
+def _install_manifest_text(plan: InstallPlan, project_name: str | None, task_id: str) -> str:
+    def _flow(items: tuple[str, ...]) -> str:
+        return "[" + ", ".join(items) + "]"
+
+    return "\n".join([
+        '$schema: "grimoire-agentic-standard-install-manifest/v1"',
+        "metadata:",
+        f"  project: {json.dumps(project_name or '')}",
+        '  generated_by: "grimoire standard init"',
+        f"  task_id: {json.dumps(task_id)}",
+        f"  profile: {plan.profile}",
+        "selection:",
+        f"  needs: {_flow(plan.needs)}",
+        f"  patterns: {_flow(plan.patterns)}",
+        f"  memory_capabilities: {_flow(plan.memory_capabilities)}",
+        "install:",
+        f"  tech_extras: {_flow(plan.tech_extras)}",
+        f"  pip_target: {json.dumps(plan.pip_target)}",
+        f"  pip_command: {json.dumps(plan.pip_command)}",
+        "",
+    ])
+
+
+def _interactive_install_plan(project_name: str | None) -> tuple[InstallPlan, str | None]:
+    catalog = load_needs_catalog()
+    needs = [n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n]
+    console.print("[bold]Grimoire custom install[/bold] — select the needs that match your project.\n")
+    table = Table(title="Available needs")
+    table.add_column("#")
+    table.add_column("Need")
+    table.add_column("Profile")
+    table.add_column("What it adds")
+    for index, need in enumerate(needs, start=1):
+        table.add_row(
+            str(index),
+            str(need.get("label", need["id"])),
+            str(need.get("recommended_profile", "-")),
+            str(need.get("rationale", "")),
+        )
+    console.print(table)
+
+    if project_name is None:
+        project_name = typer.prompt("Project name", default="").strip() or None
+    raw = typer.prompt("Select needs (comma-separated numbers or ids)", default="")
+    selected: list[str] = []
+    for token in str(raw).replace(",", " ").split():
+        token = token.strip()
+        if token.isdigit():
+            position = int(token)
+            if 1 <= position <= len(needs):
+                selected.append(str(needs[position - 1]["id"]))
+        elif token:
+            selected.append(token)
+    plan = resolve_install_plan(needs=selected)
+    return plan, project_name
+
+
+@standard_app.command("needs")
+def list_needs(ctx: typer.Context) -> None:
+    """List user-facing project needs that drive a custom install."""
+    catalog = load_needs_catalog()
+    needs = [n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n]
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps([
+            {
+                "id": need["id"],
+                "label": need.get("label", need["id"]),
+                "recommended_profile": need.get("recommended_profile"),
+                "patterns": list(need.get("patterns", [])),
+                "memory_capabilities": list(need.get("memory_capabilities", [])),
+                "rationale": need.get("rationale", ""),
+            }
+            for need in needs
+        ], indent=2, ensure_ascii=False))
+        return
+    table = Table(title="Agentic standard needs")
+    table.add_column("ID")
+    table.add_column("Need")
+    table.add_column("Profile")
+    table.add_column("Patterns")
+    for need in needs:
+        table.add_row(
+            str(need["id"]),
+            str(need.get("label", need["id"])),
+            str(need.get("recommended_profile", "-")),
+            ", ".join(str(p) for p in need.get("patterns", [])),
+        )
+    console.print(table)
+
+
+@standard_app.command("plan")
+def plan_install(
+    ctx: typer.Context,
+    needs: list[str] | None = typer.Option(None, "--needs", "-n", help="Need id(s). Repeatable or comma-separated."),  # noqa: B008
+    pattern: list[str] | None = typer.Option(None, "--pattern", help="Pattern id(s). Repeatable or comma-separated."),  # noqa: B008
+    memory: list[str] | None = typer.Option(None, "--memory", help="Memory capability id(s): semantic-memory, graph-memory, hot-memory, legacy-migration."),  # noqa: B008
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Force a profile floor instead of the resolved one."),
+) -> None:
+    """Preview the resolved install plan (profile, patterns, tech extras) without writing files."""
+    plan = resolve_install_plan(
+        needs=_split_csv(needs),
+        patterns=_split_csv(pattern),
+        memory_capabilities=_split_csv(memory),
+        profile=profile,
+    )
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(_plan_to_json(plan), indent=2, ensure_ascii=False))
+        return
+    _print_plan(plan)
+
+
+@standard_app.command("doctor")
+def doctor(
+    ctx: typer.Context,
+    needs: list[str] | None = typer.Option(None, "--needs", "-n", help="Only check extras implied by these needs."),  # noqa: B008
+    pattern: list[str] | None = typer.Option(None, "--pattern", help="Only check extras implied by these patterns."),  # noqa: B008
+) -> None:
+    """Check whether selected technology extras are importable and report safe degradation."""
+    import importlib.util
+
+    capability_map = load_capability_map()
+    tech_meta = capability_map.get("tech_extras", {})
+    tech_meta = tech_meta if isinstance(tech_meta, dict) else {}
+
+    if _split_csv(needs) or _split_csv(pattern):
+        plan = resolve_install_plan(needs=_split_csv(needs), patterns=_split_csv(pattern))
+        extras = list(plan.tech_extras)
+    else:
+        extras = list(tech_meta)
+
+    rows: list[dict[str, object]] = []
+    all_ok = True
+    for extra in extras:
+        probes = _EXTRA_IMPORT_PROBES.get(extra, (extra,))
+        missing = [m for m in probes if importlib.util.find_spec(m) is None]
+        available = not missing
+        if not available:
+            all_ok = False
+        meta = tech_meta.get(extra, {}) if isinstance(tech_meta.get(extra), dict) else {}
+        rows.append({
+            "extra": extra,
+            "available": available,
+            "missing_modules": missing,
+            "role": str(meta.get("role", "")),
+            "degrades_to": str(meta.get("degrades_to", "")),
+        })
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"ok": all_ok, "extras": rows}, indent=2, ensure_ascii=False))
+        return
+
+    table = Table(title="Grimoire tech extras doctor")
+    table.add_column("Extra")
+    table.add_column("Available")
+    table.add_column("Install")
+    table.add_column("Degrades to")
+    for row in rows:
+        available = bool(row["available"])
+        table.add_row(
+            str(row["extra"]),
+            "[green]yes[/green]" if available else "[yellow]no[/yellow]",
+            "-" if available else f"pip install 'grimoire-kit[{row['extra']}]'",
+            "-" if available else str(row["degrades_to"]),
+        )
+    console.print(table)
+    if not all_ok:
+        console.print("[yellow]Some extras are absent; affected patterns degrade safely (no durable data loss).[/yellow]")
+
+
 @standard_app.command("init")
 def init_profile(
     ctx: typer.Context,
     project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
-    profile: str = typer.Option("orchestrated", "--profile", "-p", help="Profile to generate."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to generate. Defaults to orchestrated, or the resolved profile when --needs/--pattern are used."),
+    needs: list[str] | None = typer.Option(None, "--needs", "-n", help="Need id(s) for a custom install. Repeatable or comma-separated."),  # noqa: B008
+    pattern: list[str] | None = typer.Option(None, "--pattern", help="Pattern id(s) to include. Repeatable or comma-separated."),  # noqa: B008
+    memory: list[str] | None = typer.Option(None, "--memory", help="Memory capability id(s): semantic-memory, graph-memory, hot-memory, legacy-migration."),  # noqa: B008
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="Run the guided needs wizard."),
+    install_extras: bool = typer.Option(False, "--install-extras", help="Run pip to install the resolved technology extras."),
     task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id for generated task artifacts."),
     project_name: str | None = typer.Option(None, "--project-name", help="Project name written into generated artifacts."),
     provider: list[str] | None = typer.Option(None, "--provider", help="Provider to enable. Can be repeated."),  # noqa: B008
@@ -282,25 +511,70 @@ def init_profile(
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing standard artifacts."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show generated paths without writing files."),
 ) -> None:
-    """Generate standard-aware artifacts for a project."""
+    """Generate standard-aware artifacts for a project.
+
+    With --needs/--pattern/--interactive, the profile, pattern set and technology
+    extras are resolved from the needs catalog and only the relevant artifacts are
+    scaffolded; an install-manifest.yaml records the selection.
+    """
     provider_ids: list[str] = []
     if provider:
         provider_ids.extend(provider)
     if providers:
         provider_ids.append(providers)
+
+    need_ids = _split_csv(needs)
+    pattern_ids = _split_csv(pattern)
+    memory_ids = _split_csv(memory)
+    plan: InstallPlan | None = None
+
+    if interactive:
+        plan, project_name = _interactive_install_plan(project_name)
+    elif need_ids or pattern_ids or memory_ids:
+        plan = resolve_install_plan(
+            needs=need_ids,
+            patterns=pattern_ids,
+            memory_capabilities=memory_ids,
+            profile=profile,
+        )
+
+    if plan is not None:
+        resolved_profile = plan.profile
+        extra_artifacts = list(plan.extra_artifacts)
+    else:
+        resolved_profile = profile or "orchestrated"
+        extra_artifacts = []
+
     result = setup_standard_profile(
         project_root,
-        profile_id=profile,
+        profile_id=resolved_profile,
         task_id=task_id,
         project_name=project_name,
         provider_ids=provider_ids,
         provider_policy=provider_policy,
+        extra_artifacts=extra_artifacts,
         force=force,
         dry_run=dry_run,
     )
 
+    manifest_rel = Path("_grimoire/standard/install-manifest.yaml")
+    if plan is not None and not dry_run:
+        manifest_path = result.project_root / manifest_rel
+        if manifest_path.exists() and not force:
+            result.skipped.append(manifest_rel)
+        else:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(_install_manifest_text(plan, project_name, task_id), encoding="utf-8")
+            result.written.append(manifest_rel)
+    elif plan is not None and dry_run:
+        result.written.append(manifest_rel)
+
+    installed_extras_ok: bool | None = None
+    if plan is not None and install_extras and plan.tech_extras and not dry_run:
+        installed_extras_ok = _run_pip_install(plan.pip_target)
+
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({
+        payload: dict[str, object] = {
             "ok": True,
             "profile": result.profile,
             "project_root": str(result.project_root),
@@ -309,7 +583,11 @@ def init_profile(
             "provider_policy": provider_policy,
             "written": _paths(result.written),
             "skipped": _paths(result.skipped),
-        }, indent=2, ensure_ascii=False))
+        }
+        if plan is not None:
+            payload["plan"] = _plan_to_json(plan)
+            payload["install_extras_ran"] = installed_extras_ok
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
     action = "Would write" if dry_run else "Written"
@@ -320,6 +598,30 @@ def init_profile(
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
     if provider_ids:
         console.print(f"  [cyan]providers[/cyan] {', '.join(provider_ids)} ({provider_policy})")
+    if plan is not None:
+        console.print()
+        _print_plan(plan)
+        if plan.tech_extras:
+            if installed_extras_ok is True:
+                console.print("  [green]✓[/green] technology extras installed")
+            elif installed_extras_ok is False:
+                console.print("  [red]✗[/red] extra install failed; run the command above manually")
+            else:
+                console.print(f"  [cyan]next[/cyan] install technology extras: [green]{plan.pip_command}[/green]")
+
+
+def _run_pip_install(pip_target: str) -> bool:
+    import subprocess
+    import sys
+
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "pip", "install", pip_target],
+            check=False,
+        )
+    except OSError:
+        return False
+    return completed.returncode == 0
 
 
 @standard_app.command("verify")

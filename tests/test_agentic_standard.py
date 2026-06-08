@@ -19,6 +19,9 @@ from grimoire.core.agentic_standard import (
     detect_standard_providers,
     list_profiles,
     list_standard_patterns,
+    load_capability_map,
+    load_needs_catalog,
+    resolve_install_plan,
     setup_standard_profile,
     simulate_standard_hooks,
     verify_standard_profile,
@@ -445,3 +448,146 @@ def test_governed_gate_fails_when_memory_os_contract_drifted(tmp_path: Path) -> 
     assert result.exit_code == 2
     data = json.loads(result.output)
     assert any(check["id"] == "memory.os_semantic_memory_target" for check in data["checks"])
+
+
+def test_resolve_install_plan_unions_needs_patterns_and_extras() -> None:
+    plan = resolve_install_plan(needs=["semantic-memory-rag", "hot-session-cache"])
+
+    assert plan.profile == "governed"
+    assert "redis" in plan.tech_extras
+    assert "weaviate" in plan.tech_extras
+    assert "redis-hot-memory-soft-gate" in plan.patterns
+    assert "governed-memory-policy" in plan.patterns
+    assert plan.pip_target == "grimoire-kit[redis,weaviate]"
+    assert plan.warnings == ()
+
+
+def test_resolve_install_plan_unknown_need_is_ignored_with_warning() -> None:
+    plan = resolve_install_plan(needs=["does-not-exist"])
+
+    assert plan.profile == "starter"
+    assert any("does-not-exist" in warning for warning in plan.warnings)
+
+
+def test_resolve_install_plan_explicit_profile_overrides_floor() -> None:
+    plan = resolve_install_plan(patterns=["redis-hot-memory-soft-gate"], profile="production")
+
+    assert plan.profile == "production"
+
+
+def test_resolve_install_plan_dedups_tech_extras() -> None:
+    plan = resolve_install_plan(
+        patterns=["redis-hot-memory-soft-gate"],
+        extra_tech_extras=["redis", "redis"],
+    )
+
+    assert plan.tech_extras.count("redis") == 1
+
+
+def test_cli_standard_needs_json_lists_catalog() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "needs"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    ids = {entry["id"] for entry in data}
+    assert {"solo-prototyping", "semantic-memory-rag", "hot-session-cache"} <= ids
+
+
+def test_cli_standard_plan_json_resolves_extras() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "plan", "--needs", "semantic-memory-rag"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["profile"] == "orchestrated"
+    assert "weaviate" in data["tech_extras"]
+    assert data["pip_target"] == "grimoire-kit[weaviate]"
+
+
+def test_cli_standard_doctor_json_reports_extras() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "doctor"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "ok" in data
+    assert isinstance(data["extras"], list)
+    assert all({"extra", "available"} <= set(entry) for entry in data["extras"])
+
+
+def test_cli_standard_init_with_needs_writes_manifest(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    init_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--needs",
+        "semantic-memory-rag",
+        "--project-name",
+        "RagApp",
+    ])
+
+    assert init_result.exit_code == 0
+    init_data = json.loads(init_result.output)
+    assert init_data["profile"] == "orchestrated"
+    assert "weaviate" in init_data["plan"]["tech_extras"]
+
+    manifest_path = tmp_path / "_grimoire" / "standard" / "install-manifest.yaml"
+    assert manifest_path.is_file()
+    manifest = YAML(typ="safe").load(manifest_path)
+    assert manifest["selection"]["needs"] == ["semantic-memory-rag"]
+    assert manifest["install"]["tech_extras"] == ["weaviate"]
+
+    verify_result = runner.invoke(app, ["-o", "json", "standard", "verify", str(tmp_path)])
+    assert verify_result.exit_code == 0
+    assert json.loads(verify_result.output)["ok"] is True
+
+
+_EXPECTED_PATTERNS = frozenset({
+    "advanced-context-orchestrator",
+    "governed-memory-policy",
+    "evidence-gated-fsm",
+    "provider-routing-contract",
+    "runtime-journal",
+    "redis-hot-memory-soft-gate",
+    "governed-hook-gateway",
+    "skill-classification-matrix",
+    "governed-observability-cockpit",
+    "code-graph-projection",
+    "governed-agent-orchestration",
+    "governed-knowledge-indexing",
+    "mission-evidence-ledger",
+    "tool-mediation-gate",
+    "provider-cost-slo",
+})
+
+
+def test_capability_map_covers_all_expected_patterns() -> None:
+    capability_map = load_capability_map()
+
+    assert set(capability_map["patterns"]) == _EXPECTED_PATTERNS
+
+
+def test_scaffolded_catalog_matches_capability_map(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    catalog = YAML(typ="safe").load(tmp_path / "_grimoire/standard/pattern-catalog.yaml")
+    catalog_ids = {pattern["id"] for pattern in catalog["patterns"]}
+
+    assert catalog_ids == set(load_capability_map()["patterns"])
+    assert catalog_ids == _EXPECTED_PATTERNS
+
+
+def test_every_need_resolves_without_warnings() -> None:
+    known_patterns = set(load_capability_map()["patterns"])
+
+    for need in load_needs_catalog()["needs"]:
+        plan = resolve_install_plan(needs=[need["id"]])
+        assert plan.warnings == (), f"{need['id']} produced warnings: {plan.warnings}"
+        assert set(plan.patterns) <= known_patterns

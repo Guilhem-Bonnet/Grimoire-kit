@@ -83,6 +83,9 @@ artifact_types:
   waivers:
     template: "framework/agentic-standard/templates/waivers.yaml"
     purpose: "Declare temporary governance waivers and approval evidence."
+  observability_policy:
+    template: "framework/agentic-standard/templates/observability-policy.yaml"
+    purpose: "Declare reproducible cockpit inputs, outputs, views, redaction, and non-authoritative projection rules."
 
 profiles:
   - id: starter
@@ -189,6 +192,7 @@ profiles:
       - remediation_plan
       - accepted_risks
       - waivers
+      - observability_policy
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -229,6 +233,7 @@ profiles:
       - remediation_plan
       - accepted_risks
       - waivers
+      - observability_policy
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -282,6 +287,8 @@ generation_targets:
       source_artifact: accepted_risks
     - path: "_grimoire/standard/waivers.yaml"
       source_artifact: waivers
+    - path: "_grimoire/standard/observability-policy.yaml"
+      source_artifact: observability_policy
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

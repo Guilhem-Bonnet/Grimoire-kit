@@ -13,6 +13,7 @@ dimensions:
   decision_graph: 6
   rule_packs: 6
   hook_registry: 6
+  observability_cockpit: 6
   orchestration_policy: 10
   evidence_gates: 10
   runtime_journal: 4

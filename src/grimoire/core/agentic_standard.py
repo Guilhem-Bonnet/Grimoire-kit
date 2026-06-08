@@ -19,6 +19,9 @@ from ruamel.yaml.error import YAMLError
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
+CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
+NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
+PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
 STANDARD_DIR = Path("_grimoire/standard")
 EVIDENCE_DIR = Path("_grimoire-output/evidence")
 CONTEXT_DIR = Path("_grimoire-output/context")
@@ -190,6 +193,22 @@ class StandardProviderDetection:
     available: bool
     signals: tuple[str, ...]
     note: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstallPlan:
+    """Resolved custom install: needs -> patterns -> profile + artifacts + tech extras."""
+
+    profile: str
+    needs: tuple[str, ...]
+    patterns: tuple[str, ...]
+    memory_capabilities: tuple[str, ...]
+    artifacts: tuple[str, ...]
+    extra_artifacts: tuple[str, ...]
+    tech_extras: tuple[str, ...]
+    pip_target: str
+    pip_command: str
+    warnings: tuple[str, ...]
 
 
 @dataclass(slots=True)
@@ -479,6 +498,176 @@ def _generation_targets() -> dict[str, str]:
     return targets
 
 
+def _capability_map_file() -> Path:
+    path = framework_path() / CAPABILITY_MAP_PATH
+    if not path.is_file():
+        msg = f"Agentic standard capability map not found: {path}"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def load_capability_map() -> dict[str, Any]:
+    """Load the bundled pattern -> artifacts/rules/checks/tech capability map."""
+    data = _yaml().load(_capability_map_file())
+    if not isinstance(data, dict):
+        msg = "Agentic standard capability map must be a YAML mapping."
+        raise ValueError(msg)
+    return data
+
+
+def _needs_catalog_file() -> Path:
+    path = framework_path() / NEEDS_CATALOG_PATH
+    if not path.is_file():
+        msg = f"Agentic standard needs catalog not found: {path}"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def load_needs_catalog() -> dict[str, Any]:
+    """Load the bundled user-facing needs/flows catalog."""
+    data = _yaml().load(_needs_catalog_file())
+    if not isinstance(data, dict):
+        msg = "Agentic standard needs catalog must be a YAML mapping."
+        raise ValueError(msg)
+    return data
+
+
+def _profile_rank(profile_id: str) -> int:
+    try:
+        return PROFILE_LADDER.index(profile_id)
+    except ValueError:
+        return -1
+
+
+def _highest_profile(profile_ids: Iterable[str]) -> str:
+    best = "starter"
+    best_rank = 0
+    for profile_id in profile_ids:
+        rank = _profile_rank(profile_id)
+        if rank > best_rank:
+            best, best_rank = profile_id, rank
+    return best
+
+
+def resolve_install_plan(
+    *,
+    needs: Iterable[str] = (),
+    patterns: Iterable[str] = (),
+    memory_capabilities: Iterable[str] = (),
+    profile: str | None = None,
+    extra_tech_extras: Iterable[str] = (),
+) -> InstallPlan:
+    """Resolve selected needs/patterns into a profile, artifact set and tech extras."""
+    capability_map = load_capability_map()
+    catalog = load_needs_catalog()
+
+    pattern_specs = capability_map.get("patterns")
+    if not isinstance(pattern_specs, dict):
+        msg = "capability-map.yaml must define a patterns mapping."
+        raise ValueError(msg)
+    mem_specs = capability_map.get("memory_capabilities")
+    mem_specs = mem_specs if isinstance(mem_specs, dict) else {}
+    need_specs = {str(n["id"]): n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n}
+
+    warnings: list[str] = []
+    selected_needs: list[str] = []
+    selected_patterns: list[str] = []
+    selected_mem: list[str] = []
+    extras: list[str] = []
+    profile_floors: list[str] = []
+
+    def _add_unique(target: list[str], value: str) -> None:
+        if value and value not in target:
+            target.append(value)
+
+    for raw_need in needs:
+        need_id = str(raw_need).strip()
+        if not need_id:
+            continue
+        spec = need_specs.get(need_id)
+        if spec is None:
+            warnings.append(f"Unknown need {need_id!r}; ignored.")
+            continue
+        _add_unique(selected_needs, need_id)
+        for pattern_id in spec.get("patterns", []):
+            _add_unique(selected_patterns, str(pattern_id))
+        for cap in spec.get("memory_capabilities", []):
+            _add_unique(selected_mem, str(cap))
+        for extra in spec.get("extra_tech_extras", []):
+            _add_unique(extras, str(extra))
+        recommended = spec.get("recommended_profile")
+        if recommended:
+            profile_floors.append(str(recommended))
+
+    for raw_pattern in patterns:
+        _add_unique(selected_patterns, str(raw_pattern).strip())
+    for raw_cap in memory_capabilities:
+        _add_unique(selected_mem, str(raw_cap).strip())
+    for raw_extra in extra_tech_extras:
+        _add_unique(extras, str(raw_extra).strip())
+
+    # A selected memory tier pulls in its backing pattern and tech extra.
+    for cap in list(selected_mem):
+        cap_spec = mem_specs.get(cap)
+        if not isinstance(cap_spec, dict):
+            warnings.append(f"Unknown memory capability {cap!r}; ignored.")
+            selected_mem.remove(cap)
+            continue
+        backing = cap_spec.get("backs_pattern")
+        if backing:
+            _add_unique(selected_patterns, str(backing))
+        for extra in cap_spec.get("tech_extras", []):
+            _add_unique(extras, str(extra))
+
+    artifact_set: list[str] = []
+    pattern_artifacts: list[str] = []
+    for pattern_id in selected_patterns:
+        spec = pattern_specs.get(pattern_id)
+        if not isinstance(spec, dict):
+            warnings.append(f"Unknown pattern {pattern_id!r}; ignored.")
+            continue
+        for artifact in spec.get("artifacts", []):
+            _add_unique(pattern_artifacts, str(artifact))
+        for extra in spec.get("tech_extras", []):
+            _add_unique(extras, str(extra))
+        floor = spec.get("profile_min")
+        if floor:
+            profile_floors.append(str(floor))
+
+    selected_patterns = [p for p in selected_patterns if p in pattern_specs]
+
+    resolved_profile = profile if profile is not None else _highest_profile([*profile_floors, "starter"])
+
+    profile_obj = get_profile(resolved_profile)
+    for artifact in profile_obj.required_artifacts:
+        _add_unique(artifact_set, str(artifact))
+    extra_artifacts = [a for a in pattern_artifacts if a not in artifact_set]
+    for artifact in extra_artifacts:
+        _add_unique(artifact_set, artifact)
+
+    # Order tech extras by their declaration order in the capability map.
+    declared = capability_map.get("tech_extras")
+    declared_order = list(declared) if isinstance(declared, dict) else []
+    ordered_extras = [e for e in declared_order if e in extras]
+    ordered_extras.extend(e for e in extras if e not in ordered_extras)
+
+    pip_target = f"grimoire-kit[{','.join(ordered_extras)}]" if ordered_extras else "grimoire-kit"
+    pip_command = f"pip install '{pip_target}'"
+
+    return InstallPlan(
+        profile=resolved_profile,
+        needs=tuple(selected_needs),
+        patterns=tuple(selected_patterns),
+        memory_capabilities=tuple(selected_mem),
+        artifacts=tuple(artifact_set),
+        extra_artifacts=tuple(extra_artifacts),
+        tech_extras=tuple(ordered_extras),
+        pip_target=pip_target,
+        pip_command=pip_command,
+        warnings=tuple(warnings),
+    )
+
+
 def normalize_task_id(task_id: str) -> str:
     """Validate task ids before using them in generated paths."""
     normalized = str(task_id).strip()
@@ -519,13 +708,23 @@ def _yaml_double_quoted_value(value: str) -> str:
     return _single_line_value(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _planned_artifacts(profile_id: str, *, task_id: str = "bootstrap") -> tuple[StandardArtifact, ...]:
+def _planned_artifacts(
+    profile_id: str,
+    *,
+    task_id: str = "bootstrap",
+    extra_artifacts: Iterable[str] = (),
+) -> tuple[StandardArtifact, ...]:
     profile = get_profile(profile_id)
     templates = _artifact_templates()
     targets = _generation_targets()
     artifacts: list[StandardArtifact] = []
 
-    for artifact_type in profile.required_artifacts:
+    planned_types: list[str] = list(profile.required_artifacts)
+    for artifact_type in extra_artifacts:
+        if artifact_type not in planned_types:
+            planned_types.append(str(artifact_type))
+
+    for artifact_type in planned_types:
         if artifact_type not in targets:
             msg = f"No generation target declared for artifact {artifact_type!r}."
             raise ValueError(msg)
@@ -683,13 +882,14 @@ def setup_standard_profile(
     project_name: str | None = None,
     provider_ids: Iterable[str] = (),
     provider_policy: str = "hosted-safe",
+    extra_artifacts: Iterable[str] = (),
     force: bool = False,
     dry_run: bool = False,
 ) -> StandardSetupResult:
     """Generate standard-aware project artifacts for one profile."""
     root = project_root.resolve()
     profile = get_profile(profile_id)
-    artifacts = _planned_artifacts(profile_id, task_id=task_id)
+    artifacts = _planned_artifacts(profile_id, task_id=task_id, extra_artifacts=extra_artifacts)
     name = project_name or root.name
     generated_at = datetime.now(UTC).date().isoformat()
     result = StandardSetupResult(profile=profile.id, project_root=root, dry_run=dry_run)
