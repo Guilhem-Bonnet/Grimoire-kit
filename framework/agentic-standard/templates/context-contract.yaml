@@ -19,6 +19,7 @@ bundle_sections:
   - excluded_sources
   - memory_inclusions
   - memory_exclusions
+  - memory_os
   - knowledge_nodes
   - provider_constraints
   - agent_role_constraints
@@ -48,6 +49,7 @@ checks:
   - context_is_reproducible
   - selected_sources_are_allowed
   - memory_injections_match_policy
+  - memory_os_contract_is_declared
   - provider_constraints_match_registry
   - context_budget_is_enforced
   - redactions_are_recorded

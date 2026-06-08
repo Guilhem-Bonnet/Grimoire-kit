@@ -83,10 +83,12 @@ nav:
   - Concepts:
       - Architecture: concepts.md
       - Standard agentique: agentic-standard-integration.md
+      - Installation par besoins: agentic-standard-install-by-needs.md
       - Cible finale standard agentique: agentic-standard-final-target.md
       - Plan cible standard agentique: agentic-standard-target-plan.md
       - Architecture cible standard agentique: agentic-standard-target-architecture.md
       - Mémoire: memory-system.md
+      - Roadmap Memory OS: memory-os-roadmap.md
       - Workflows: workflow-design-patterns.md
       - Taxonomie Workflows: workflow-taxonomy.md
       - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md

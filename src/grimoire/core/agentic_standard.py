@@ -19,6 +19,9 @@ from ruamel.yaml.error import YAMLError
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
+CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
+NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
+PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
 STANDARD_DIR = Path("_grimoire/standard")
 EVIDENCE_DIR = Path("_grimoire-output/evidence")
 CONTEXT_DIR = Path("_grimoire-output/context")
@@ -115,6 +118,7 @@ DIMENSION_CHECK_PREFIXES = {
     "provider_policy": ("providers.",),
     "knowledge_registry": ("knowledge.", "knowledge_index."),
     "task_board": ("board.", "task."),
+    "memory_os": ("memory.os_",),
     "memory_policy": ("memory.",),
     "context_contract": ("context.",),
     "decision_graph": ("decision.",),
@@ -125,12 +129,31 @@ DIMENSION_CHECK_PREFIXES = {
     "runtime_journal": ("journal.",),
     "ci_release_gate": ("release.",),
 }
+MEMORY_OS_REQUIRED_TARGET = {
+    "hot_memory": "redis",
+    "semantic_memory": "weaviate-server",
+    "graph_projection": "neo4j",
+    "sidecar": "sqlite",
+}
+MEMORY_OS_LEGACY_VECTOR_SOURCES = {"qdrant-local", "qdrant-server"}
+MEMORY_OS_REQUIRED_PROMOTION_GATES = {
+    "hot_memory_ttl_declared",
+    "semantic_write_has_evidence",
+    "graph_projection_has_source_refs",
+    "qdrant_migration_bundle_verified",
+}
+MEMORY_OS_REQUIRED_RUNTIME_COMMANDS = {
+    "grimoire memory gate",
+    "grimoire memory migrate verify",
+    "grimoire memory graph verify",
+}
 DEFAULT_SCORE_DIMENSIONS = {
     "artifacts": 10,
     "provider_policy": 10,
     "knowledge_registry": 10,
     "task_board": 10,
     "memory_policy": 10,
+    "memory_os": 10,
     "context_contract": 10,
     "decision_graph": 6,
     "rule_packs": 6,
@@ -170,6 +193,22 @@ class StandardProviderDetection:
     available: bool
     signals: tuple[str, ...]
     note: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstallPlan:
+    """Resolved custom install: needs -> patterns -> profile + artifacts + tech extras."""
+
+    profile: str
+    needs: tuple[str, ...]
+    patterns: tuple[str, ...]
+    memory_capabilities: tuple[str, ...]
+    artifacts: tuple[str, ...]
+    extra_artifacts: tuple[str, ...]
+    tech_extras: tuple[str, ...]
+    pip_target: str
+    pip_command: str
+    warnings: tuple[str, ...]
 
 
 @dataclass(slots=True)
@@ -459,6 +498,176 @@ def _generation_targets() -> dict[str, str]:
     return targets
 
 
+def _capability_map_file() -> Path:
+    path = framework_path() / CAPABILITY_MAP_PATH
+    if not path.is_file():
+        msg = f"Agentic standard capability map not found: {path}"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def load_capability_map() -> dict[str, Any]:
+    """Load the bundled pattern -> artifacts/rules/checks/tech capability map."""
+    data = _yaml().load(_capability_map_file())
+    if not isinstance(data, dict):
+        msg = "Agentic standard capability map must be a YAML mapping."
+        raise ValueError(msg)
+    return data
+
+
+def _needs_catalog_file() -> Path:
+    path = framework_path() / NEEDS_CATALOG_PATH
+    if not path.is_file():
+        msg = f"Agentic standard needs catalog not found: {path}"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def load_needs_catalog() -> dict[str, Any]:
+    """Load the bundled user-facing needs/flows catalog."""
+    data = _yaml().load(_needs_catalog_file())
+    if not isinstance(data, dict):
+        msg = "Agentic standard needs catalog must be a YAML mapping."
+        raise ValueError(msg)
+    return data
+
+
+def _profile_rank(profile_id: str) -> int:
+    try:
+        return PROFILE_LADDER.index(profile_id)
+    except ValueError:
+        return -1
+
+
+def _highest_profile(profile_ids: Iterable[str]) -> str:
+    best = "starter"
+    best_rank = 0
+    for profile_id in profile_ids:
+        rank = _profile_rank(profile_id)
+        if rank > best_rank:
+            best, best_rank = profile_id, rank
+    return best
+
+
+def resolve_install_plan(
+    *,
+    needs: Iterable[str] = (),
+    patterns: Iterable[str] = (),
+    memory_capabilities: Iterable[str] = (),
+    profile: str | None = None,
+    extra_tech_extras: Iterable[str] = (),
+) -> InstallPlan:
+    """Resolve selected needs/patterns into a profile, artifact set and tech extras."""
+    capability_map = load_capability_map()
+    catalog = load_needs_catalog()
+
+    pattern_specs = capability_map.get("patterns")
+    if not isinstance(pattern_specs, dict):
+        msg = "capability-map.yaml must define a patterns mapping."
+        raise ValueError(msg)
+    mem_specs = capability_map.get("memory_capabilities")
+    mem_specs = mem_specs if isinstance(mem_specs, dict) else {}
+    need_specs = {str(n["id"]): n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n}
+
+    warnings: list[str] = []
+    selected_needs: list[str] = []
+    selected_patterns: list[str] = []
+    selected_mem: list[str] = []
+    extras: list[str] = []
+    profile_floors: list[str] = []
+
+    def _add_unique(target: list[str], value: str) -> None:
+        if value and value not in target:
+            target.append(value)
+
+    for raw_need in needs:
+        need_id = str(raw_need).strip()
+        if not need_id:
+            continue
+        spec = need_specs.get(need_id)
+        if spec is None:
+            warnings.append(f"Unknown need {need_id!r}; ignored.")
+            continue
+        _add_unique(selected_needs, need_id)
+        for pattern_id in spec.get("patterns", []):
+            _add_unique(selected_patterns, str(pattern_id))
+        for cap in spec.get("memory_capabilities", []):
+            _add_unique(selected_mem, str(cap))
+        for extra in spec.get("extra_tech_extras", []):
+            _add_unique(extras, str(extra))
+        recommended = spec.get("recommended_profile")
+        if recommended:
+            profile_floors.append(str(recommended))
+
+    for raw_pattern in patterns:
+        _add_unique(selected_patterns, str(raw_pattern).strip())
+    for raw_cap in memory_capabilities:
+        _add_unique(selected_mem, str(raw_cap).strip())
+    for raw_extra in extra_tech_extras:
+        _add_unique(extras, str(raw_extra).strip())
+
+    # A selected memory tier pulls in its backing pattern and tech extra.
+    for cap in list(selected_mem):
+        cap_spec = mem_specs.get(cap)
+        if not isinstance(cap_spec, dict):
+            warnings.append(f"Unknown memory capability {cap!r}; ignored.")
+            selected_mem.remove(cap)
+            continue
+        backing = cap_spec.get("backs_pattern")
+        if backing:
+            _add_unique(selected_patterns, str(backing))
+        for extra in cap_spec.get("tech_extras", []):
+            _add_unique(extras, str(extra))
+
+    artifact_set: list[str] = []
+    pattern_artifacts: list[str] = []
+    for pattern_id in selected_patterns:
+        spec = pattern_specs.get(pattern_id)
+        if not isinstance(spec, dict):
+            warnings.append(f"Unknown pattern {pattern_id!r}; ignored.")
+            continue
+        for artifact in spec.get("artifacts", []):
+            _add_unique(pattern_artifacts, str(artifact))
+        for extra in spec.get("tech_extras", []):
+            _add_unique(extras, str(extra))
+        floor = spec.get("profile_min")
+        if floor:
+            profile_floors.append(str(floor))
+
+    selected_patterns = [p for p in selected_patterns if p in pattern_specs]
+
+    resolved_profile = profile if profile is not None else _highest_profile([*profile_floors, "starter"])
+
+    profile_obj = get_profile(resolved_profile)
+    for artifact in profile_obj.required_artifacts:
+        _add_unique(artifact_set, str(artifact))
+    extra_artifacts = [a for a in pattern_artifacts if a not in artifact_set]
+    for artifact in extra_artifacts:
+        _add_unique(artifact_set, artifact)
+
+    # Order tech extras by their declaration order in the capability map.
+    declared = capability_map.get("tech_extras")
+    declared_order = list(declared) if isinstance(declared, dict) else []
+    ordered_extras = [e for e in declared_order if e in extras]
+    ordered_extras.extend(e for e in extras if e not in ordered_extras)
+
+    pip_target = f"grimoire-kit[{','.join(ordered_extras)}]" if ordered_extras else "grimoire-kit"
+    pip_command = f"pip install '{pip_target}'"
+
+    return InstallPlan(
+        profile=resolved_profile,
+        needs=tuple(selected_needs),
+        patterns=tuple(selected_patterns),
+        memory_capabilities=tuple(selected_mem),
+        artifacts=tuple(artifact_set),
+        extra_artifacts=tuple(extra_artifacts),
+        tech_extras=tuple(ordered_extras),
+        pip_target=pip_target,
+        pip_command=pip_command,
+        warnings=tuple(warnings),
+    )
+
+
 def normalize_task_id(task_id: str) -> str:
     """Validate task ids before using them in generated paths."""
     normalized = str(task_id).strip()
@@ -499,13 +708,23 @@ def _yaml_double_quoted_value(value: str) -> str:
     return _single_line_value(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _planned_artifacts(profile_id: str, *, task_id: str = "bootstrap") -> tuple[StandardArtifact, ...]:
+def _planned_artifacts(
+    profile_id: str,
+    *,
+    task_id: str = "bootstrap",
+    extra_artifacts: Iterable[str] = (),
+) -> tuple[StandardArtifact, ...]:
     profile = get_profile(profile_id)
     templates = _artifact_templates()
     targets = _generation_targets()
     artifacts: list[StandardArtifact] = []
 
-    for artifact_type in profile.required_artifacts:
+    planned_types: list[str] = list(profile.required_artifacts)
+    for artifact_type in extra_artifacts:
+        if artifact_type not in planned_types:
+            planned_types.append(str(artifact_type))
+
+    for artifact_type in planned_types:
         if artifact_type not in targets:
             msg = f"No generation target declared for artifact {artifact_type!r}."
             raise ValueError(msg)
@@ -663,13 +882,14 @@ def setup_standard_profile(
     project_name: str | None = None,
     provider_ids: Iterable[str] = (),
     provider_policy: str = "hosted-safe",
+    extra_artifacts: Iterable[str] = (),
     force: bool = False,
     dry_run: bool = False,
 ) -> StandardSetupResult:
     """Generate standard-aware project artifacts for one profile."""
     root = project_root.resolve()
     profile = get_profile(profile_id)
-    artifacts = _planned_artifacts(profile_id, task_id=task_id)
+    artifacts = _planned_artifacts(profile_id, task_id=task_id, extra_artifacts=extra_artifacts)
     name = project_name or root.name
     generated_at = datetime.now(UTC).date().isoformat()
     result = StandardSetupResult(profile=profile.id, project_root=root, dry_run=dry_run)
@@ -1106,7 +1326,112 @@ def _verify_task_board(root: Path, profile: StandardProfile, result: StandardVer
                 _add_check(result, f"board.{ref_key}_outside_root", "error", f"Task {task_id!r} {ref_key} escapes project root.", path=rel_path)
 
 
-def _verify_memory_policy(root: Path, result: StandardVerificationResult) -> None:
+def _strict_memory_os_profile(profile: StandardProfile) -> bool:
+    return profile.id in {"governed", "production"}
+
+
+def _memory_os_severity(profile: StandardProfile) -> str:
+    return "error" if _strict_memory_os_profile(profile) else "warning"
+
+
+def _verify_memory_os_contract(
+    memory_policy: Mapping[str, Any],
+    *,
+    profile: StandardProfile,
+    result: StandardVerificationResult,
+    path: Path,
+) -> None:
+    memory_os = memory_policy.get("memory_os")
+    if not isinstance(memory_os, dict):
+        _add_check(
+            result,
+            "memory.os_contract_missing",
+            _memory_os_severity(profile),
+            "Memory policy should declare a Memory OS contract for Redis, Weaviate, Neo4j, SQLite, and Qdrant migration.",
+            path=path,
+        )
+        return
+
+    target = memory_os.get("target")
+    if not isinstance(target, dict):
+        _add_check(
+            result,
+            "memory.os_target_missing",
+            _memory_os_severity(profile),
+            "Memory OS contract must declare target backends.",
+            path=path,
+        )
+        return
+
+    for key, expected in MEMORY_OS_REQUIRED_TARGET.items():
+        actual = str(target.get(key, "")).strip()
+        if actual != expected:
+            _add_check(
+                result,
+                f"memory.os_{key}_target",
+                _memory_os_severity(profile),
+                f"Memory OS target {key!r} should be {expected!r}, got {actual!r}.",
+                path=path,
+            )
+
+    legacy_sources = target.get("legacy_vector_sources")
+    declared_legacy = {str(source) for source in legacy_sources} if isinstance(legacy_sources, list) else set()
+    missing_legacy = sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES - declared_legacy)
+    if missing_legacy:
+        _add_check(
+            result,
+            "memory.os_legacy_sources_missing",
+            "warning",
+            f"Memory OS should keep Qdrant only as legacy/migration source(s): {', '.join(missing_legacy)}.",
+            path=path,
+        )
+
+    promotion_gates = memory_os.get("promotion_gates")
+    declared_gates = {str(gate) for gate in promotion_gates} if isinstance(promotion_gates, list) else set()
+    missing_gates = sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES - declared_gates)
+    if missing_gates:
+        _add_check(
+            result,
+            "memory.os_promotion_gates_missing",
+            _memory_os_severity(profile),
+            f"Memory OS promotion gates missing: {', '.join(missing_gates)}.",
+            path=path,
+        )
+
+    runtime_commands = memory_os.get("runtime_commands")
+    declared_commands = {str(command) for command in runtime_commands} if isinstance(runtime_commands, list) else set()
+    missing_commands = sorted(MEMORY_OS_REQUIRED_RUNTIME_COMMANDS - declared_commands)
+    if missing_commands:
+        _add_check(
+            result,
+            "memory.os_runtime_commands_missing",
+            "warning",
+            f"Memory OS runtime command evidence should include: {', '.join(missing_commands)}.",
+            path=path,
+        )
+
+
+def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
+    memory_os = memory_policy.get("memory_os")
+    if not isinstance(memory_os, dict):
+        return {
+            "contract_declared": False,
+            "target": dict(MEMORY_OS_REQUIRED_TARGET),
+            "legacy_vector_sources": sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES),
+            "promotion_gates": sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES),
+            "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+        }
+    target = memory_os.get("target")
+    return {
+        "contract_declared": True,
+        "target": target if isinstance(target, dict) else {},
+        "promotion_gates": memory_os.get("promotion_gates", []),
+        "runtime_commands": memory_os.get("runtime_commands", []),
+        "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+    }
+
+
+def _verify_memory_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "memory-policy.yaml"
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
@@ -1147,6 +1472,7 @@ def _verify_memory_policy(root: Path, result: StandardVerificationResult) -> Non
             _add_check(result, "memory.provider_compatibility_invalid", "error", "Memory provider compatibility must be a list.", path=rel_path)
         if not isinstance(entry.get("allowed_context_uses"), list):
             _add_check(result, "memory.context_uses_invalid", "error", "Memory allowed context uses must be a list.", path=rel_path)
+    _verify_memory_os_contract(data, profile=profile, result=result, path=rel_path)
 
 
 def _verify_context_contract(root: Path, result: StandardVerificationResult) -> None:
@@ -1372,7 +1698,7 @@ def verify_standard_profile(
     _verify_compliance_declaration(root, result)
     _verify_profile_specific_controls(root, profile, result)
     _verify_task_board(root, profile, result)
-    _verify_memory_policy(root, result)
+    _verify_memory_policy(root, profile, result)
     _verify_context_contract(root, result)
     _verify_decision_graph(root, result)
     _verify_rule_packs(root, result)
@@ -1558,6 +1884,7 @@ def build_context_bundle(
         "knowledge_graph_ref": str(KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml"),
         "memory_inclusions": memory_entries[: int(context_contract.get("budget", {}).get("max_memory_items", 8))],
         "memory_exclusions": [],
+        "memory_os": _memory_os_context(memory_policy),
         "provider_constraints": {
             "enabled_providers": enabled_providers,
             "routing": provider_registry.get("routing", {}),
@@ -1945,6 +2272,7 @@ def check_evidence_gates(
     checks: list[StandardCheck] = []
     required_paths = {
         "task_board": STANDARD_DIR / "task-board.yaml",
+        "memory_policy": STANDARD_DIR / "memory-policy.yaml",
         "task_envelope": EVIDENCE_DIR / normalized_task_id / "task-envelope.md",
         "evidence_pack": EVIDENCE_DIR / normalized_task_id / "evidence-pack.md",
         "context_bundle": CONTEXT_DIR / normalized_task_id / "context-bundle.yaml",
@@ -1957,6 +2285,13 @@ def check_evidence_gates(
                 missing.append(key)
     if state in {"in_progress", "review", "accepted", "released"} and not (root / required_paths["context_bundle"]).is_file():
         missing.append("context_bundle")
+    if profile.id in {"orchestrated", "governed", "production"} and state in {"in_progress", "review", "accepted", "released"}:
+        if not (root / required_paths["memory_policy"]).is_file():
+            missing.append("memory_policy")
+        else:
+            memory_result = StandardVerificationResult(profile=profile.id, project_root=root)
+            _verify_memory_policy(root, profile, memory_result)
+            checks.extend(memory_result.checks)
     if state in {"review", "accepted", "released"}:
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
@@ -1970,7 +2305,7 @@ def check_evidence_gates(
             message=f"Required gate artifact is missing: {key}.",
             path=required_paths.get(key),
         ))
-    ok = not checks
+    ok = not any(check.is_error for check in checks)
     _append_runtime_event(root, event_type="gate.checked", task_id=normalized_task_id, profile=profile.id, details={"ok": ok, "target_state": state, "missing": missing})
     return StandardGateResult(ok=ok, task_id=normalized_task_id, profile=profile.id, state=state or None, missing=tuple(missing), checks=tuple(checks))
 

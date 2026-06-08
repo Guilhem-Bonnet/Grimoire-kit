@@ -540,6 +540,10 @@ grimoire standard memory verify
 grimoire standard knowledge verify
 grimoire standard providers verify
 
+La vérification mémoire cible le contrat Memory OS complet : Redis pour la mémoire
+chaude, Weaviate pour les vecteurs durables, Neo4j pour les graphes mémoire/code/tâches,
+SQLite comme sidecar local, et Qdrant uniquement comme source legacy de migration ou rollback.
+
 grimoire standard context build --task-id <task>
 grimoire standard context verify --task-id <task>
 

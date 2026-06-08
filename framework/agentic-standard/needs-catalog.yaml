@@ -1,0 +1,135 @@
+$schema: "grimoire-agentic-standard-needs-catalog/v1"
+
+metadata:
+  id: agentic-standard-needs-catalog
+  version: "0.1.0"
+  owner: grimoire-kit
+  intent: >
+    User-facing project needs/flows. Each need maps to a recommended profile and
+    a set of patterns. A custom install resolves the union of selected needs into
+    a profile, an artifact set and the technology extras to install.
+
+# Each need:
+#   id                 stable selector used by `grimoire standard init --needs <id>`
+#   label              human-readable choice shown in the interactive wizard
+#   recommended_profile  profile ladder floor for this need
+#   patterns           catalog pattern ids pulled in by this need
+#   memory_capabilities optional memory tiers (semantic/graph/hot/legacy)
+#   extra_tech_extras  tech extras pulled in beyond those implied by patterns
+#   rationale          why this need maps to these patterns
+needs:
+  - id: solo-prototyping
+    label: "Solo dev / quick prototype (minimal governance)"
+    recommended_profile: starter
+    patterns: [evidence-gated-fsm]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: "A lightweight evidence-gated flow with no external services."
+
+  - id: provider-neutral
+    label: "Provider-neutral / local-first LLM routing"
+    recommended_profile: controlled
+    patterns: [provider-routing-contract]
+    memory_capabilities: []
+    extra_tech_extras: [ollama]
+    rationale: "Route every model call through a declared registry; allow local models."
+
+  - id: semantic-memory-rag
+    label: "Semantic memory / RAG over your documents"
+    recommended_profile: orchestrated
+    patterns: [governed-memory-policy, advanced-context-orchestrator]
+    memory_capabilities: [semantic-memory]
+    extra_tech_extras: []
+    rationale: "Durable vector recall with orchestrated, budgeted context bundles."
+
+  - id: knowledge-graph
+    label: "Verifiable knowledge / code graph"
+    recommended_profile: orchestrated
+    patterns: [governed-memory-policy, advanced-context-orchestrator, code-graph-projection, governed-knowledge-indexing]
+    memory_capabilities: [graph-memory]
+    extra_tech_extras: []
+    rationale: "Graph projection of memory, code, task and evidence relationships, bound to indexed sources."
+
+  - id: hot-session-cache
+    label: "Fast session / hot memory cache"
+    recommended_profile: governed
+    patterns: [redis-hot-memory-soft-gate]
+    memory_capabilities: [hot-memory]
+    extra_tech_extras: []
+    rationale: "Redis-backed session state that degrades safely when absent."
+
+  - id: multi-agent-orchestration
+    label: "Multiple agents with handoff / escalation"
+    recommended_profile: orchestrated
+    patterns: [advanced-context-orchestrator, skill-classification-matrix, governed-agent-orchestration]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: "Orchestrated context, classified skills and declared roles/handoffs for safe multi-agent flows."
+
+  - id: tool-mediation-security
+    label: "Mediate tools / MCP calls (OWASP agentic threats)"
+    recommended_profile: governed
+    patterns: [tool-mediation-gate, governed-hook-gateway]
+    memory_capabilities: []
+    extra_tech_extras: [mcp]
+    rationale: "Route tool/MCP calls through a trust gate mapped to OWASP agentic threats before execution."
+
+  - id: hooks-skills-governance
+    label: "Govern hooks and skills (gateway + classification)"
+    recommended_profile: governed
+    patterns: [governed-hook-gateway, skill-classification-matrix]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: "Route hooks through a policy gateway and classify skills before use."
+
+  - id: observability-cockpit
+    label: "Observability cockpit / governed dashboards"
+    recommended_profile: governed
+    patterns: [governed-observability-cockpit, runtime-journal]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: "Reproducible read-only cockpit projected from governed artifacts."
+
+  - id: enterprise-governance
+    label: "Organization-grade governance (full controls)"
+    recommended_profile: governed
+    patterns:
+      - advanced-context-orchestrator
+      - governed-memory-policy
+      - evidence-gated-fsm
+      - provider-routing-contract
+      - runtime-journal
+      - governed-hook-gateway
+      - skill-classification-matrix
+      - governed-observability-cockpit
+      - governed-agent-orchestration
+      - governed-knowledge-indexing
+      - mission-evidence-ledger
+      - tool-mediation-gate
+      - code-graph-projection
+    memory_capabilities: [semantic-memory, graph-memory]
+    extra_tech_extras: []
+    rationale: "All governed patterns with durable semantic + graph memory, mediated tools and a mission evidence ledger."
+
+  - id: production-release-gating
+    label: "Production critical flow with release gates"
+    recommended_profile: production
+    patterns:
+      - advanced-context-orchestrator
+      - governed-memory-policy
+      - evidence-gated-fsm
+      - provider-routing-contract
+      - runtime-journal
+      - redis-hot-memory-soft-gate
+      - governed-hook-gateway
+      - skill-classification-matrix
+      - governed-observability-cockpit
+      - governed-agent-orchestration
+      - governed-knowledge-indexing
+      - mission-evidence-ledger
+      - tool-mediation-gate
+      - code-graph-projection
+      - provider-cost-slo
+    memory_capabilities: [semantic-memory, graph-memory, hot-memory]
+    extra_tech_extras: []
+    rationale: "Full pattern set with hot, semantic and graph memory, cost/SLO budgeting and mediated tools for critical releases."

@@ -8,10 +8,12 @@ dimensions:
   knowledge_registry: 10
   task_board: 10
   memory_policy: 10
+  memory_os: 10
   context_contract: 10
   decision_graph: 6
   rule_packs: 6
   hook_registry: 6
+  observability_cockpit: 6
   orchestration_policy: 10
   evidence_gates: 10
   runtime_journal: 4

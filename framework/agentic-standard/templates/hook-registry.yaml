@@ -53,3 +53,51 @@ hooks:
     action: create_remediation
     rule_ref: knowledge.graph-current
     reason: "Context builds should refresh the local doc-to-graph view when knowledge sources are enabled."
+  - id: memory.hot-soft-gate
+    phase: pre_context_build
+    action: require_evidence
+    rule_ref: memory.hot-degrades-safely
+    reason: "Redis hot memory may be absent, but the degradation must be recorded and durable stores remain authoritative."
+    implementation_ref: ".github/hooks/grimoire-memory-gate.json"
+    script_ref: ".github/hooks/scripts/grimoire-memory-gate.sh"
+  - id: tools.terminal-guard
+    phase: pre_tool_call
+    action: block
+    rule_ref: hooks.no-destructive-bypass
+    reason: "Terminal and tool calls that can mutate state must pass safety/evidence checks."
+    implementation_ref: ".github/hooks/grimoire-terminal-guard.json"
+    script_ref: ".github/hooks/scripts/grimoire-terminal-guard.sh"
+  - id: hooks.gateway-required
+    phase: pre_tool_call
+    action: block
+    rule_ref: hooks.must-use-gateway
+    reason: "Project hooks should execute through the Grimoire hook gateway for traceability and policy mediation."
+    implementation_ref: ".github/hooks/scripts/grimoire-hook-gateway.sh"
+  - id: skills.require-classification
+    phase: pre_context_build
+    action: require_evidence
+    rule_ref: skills.classified-before-use
+    reason: "Skills must be classified before being promoted into core Kit templates or governed project packs."
+    implementation_ref: ".github/skills"
+# managed_sources classifies project hooks and skills before they are promoted.
+# core_template_candidates: reusable, governance-relevant assets shipped/recommended by the Kit.
+# project_pack: assets specific to one consumer project (fill in per project).
+# incubator: experimental assets not yet eligible for governed promotion.
+managed_sources:
+  hooks:
+    core_template_candidates:
+      - ".github/hooks/grimoire-memory-gate.json"
+      - ".github/hooks/grimoire-terminal-guard.json"
+      - ".github/hooks/grimoire-doc-drift.json"
+      - ".github/hooks/scripts/grimoire-hook-gateway.sh"
+    project_pack: []
+    incubator: []
+  skills:
+    core_template_candidates:
+      - ".github/skills/grimoire-code-review/SKILL.md"
+      - ".github/skills/grimoire-security-review/SKILL.md"
+      - ".github/skills/grimoire-verification/SKILL.md"
+      - ".github/skills/grimoire-writing-plans/SKILL.md"
+      - ".github/skills/grimoire-test-architecture/SKILL.md"
+    project_pack: []
+    incubator: []

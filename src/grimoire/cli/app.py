@@ -236,7 +236,7 @@ _KNOWN_ARCHETYPES = frozenset({
     "agentic-standard",
 })
 
-_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
@@ -259,6 +259,14 @@ user:
 
 memory:
   backend: "{backend}"
+  layer_profile: "standard"
+  short_term_backend: "sqlite"
+  redis_url: ""
+  knowledge_graph: "sqlite-sidecar"
+  memory_graph: "sqlite-sidecar"
+  code_graph: "planned"
+  task_memory: "planned"
+  visualization: "runtime-dashboard"
 
 agents:
   archetype: "{archetype}"
@@ -280,7 +288,7 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
@@ -291,7 +299,7 @@ def init(
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
       [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
-      [cyan]grimoire init . -a infra-ops -b qdrant-local[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """

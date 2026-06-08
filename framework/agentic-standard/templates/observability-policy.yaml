@@ -1,0 +1,86 @@
+$schema: "grimoire-agentic-standard-observability-policy/v1"
+metadata:
+  project: ""
+  profile: ""
+  generated_by: "grimoire standard init"
+  purpose: "Define the reproducible cockpit inputs, outputs and safety rules."
+principles:
+  - id: read_only_projection
+    statement: "The cockpit is a projection of governed artifacts and runtime events, never a source of truth."
+  - id: declared_inputs_only
+    statement: "Every cockpit input must be declared with owner, freshness and trust level."
+  - id: redacted_exports
+    statement: "Cockpit exports must not contain secrets, credentials, personal data or regulated data."
+declared_inputs:
+  - id: task_board
+    path: "_grimoire/standard/task-board.yaml"
+    owner: "maintainers"
+    trust_level: "authoritative"
+    freshness: "on-change"
+    dimensions: ["task_status", "evidence_refs", "blockers"]
+  - id: memory_policy
+    path: "_grimoire/standard/memory-policy.yaml"
+    owner: "maintainers"
+    trust_level: "authoritative"
+    freshness: "on-change"
+    dimensions: ["hot_memory", "semantic_memory", "graph_projection", "sidecar"]
+  - id: compliance_score
+    path: "_grimoire/standard/compliance-score.yaml"
+    owner: "maintainers"
+    trust_level: "authoritative"
+    freshness: "on-change"
+    dimensions: ["thresholds", "score_dimensions"]
+  - id: runtime_journal
+    path: "_grimoire-output/events/runtime-journal.jsonl"
+    owner: "automation"
+    trust_level: "medium"
+    freshness: "per-run"
+    dimensions: ["context_builds", "decision_traces", "hook_events", "gate_events"]
+  - id: evidence_packs
+    path: "_grimoire-output/evidence/**/evidence-pack.md"
+    owner: "maintainers"
+    trust_level: "high"
+    freshness: "per-task"
+    dimensions: ["validation", "controls", "accepted_gaps"]
+outputs:
+  - id: cockpit_report
+    path: "_grimoire-output/evidence/cockpit/cockpit-report.md"
+    format: "markdown"
+    mode: "read_only_projection"
+  - id: cockpit_evidence_pack
+    path: "_grimoire-output/evidence/cockpit/evidence-pack.md"
+    format: "markdown"
+    mode: "governed_evidence"
+views:
+  - id: memory_os_health
+    inputs: ["memory_policy", "runtime_journal", "evidence_packs"]
+    required_sections: ["hot", "semantic", "graph", "sidecar", "legacy"]
+  - id: task_and_evidence_overlay
+    inputs: ["task_board", "evidence_packs"]
+    required_sections: ["task_status", "evidence_refs", "open_gaps"]
+  - id: governance_status
+    inputs: ["compliance_score", "runtime_journal", "evidence_packs"]
+    required_sections: ["score_dimensions", "gate_events", "risk_or_waiver_refs"]
+redaction:
+  forbidden_data_classes:
+    - secrets
+    - credentials
+    - personal-data
+    - regulated-data
+  export_requires_redaction_check: true
+non_authoritative:
+  authoritative_sources:
+    - "_grimoire/standard/*.yaml"
+    - "_grimoire-output/evidence/**/evidence-pack.md"
+  advisory_sources:
+    - "_grimoire-output/events/runtime-journal.jsonl"
+  cockpit_may_not_update:
+    - "task status"
+    - "memory facts"
+    - "evidence gates"
+    - "compliance score"
+    - "accepted risks"
+checks:
+  - observability.cockpit_mutation
+  - observability.input_undeclared
+  - observability.secret_export

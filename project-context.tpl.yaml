@@ -80,12 +80,26 @@ user:
 #   architecture_doc: "docs/architecture.md"   # chemin vers la source de vérité architecture
 
 memory:
-  backend: "auto"                      # auto | local | qdrant-local | qdrant-server | ollama
-  # qdrant_url: "http://localhost:6333"  # si qdrant-server
-  # qdrant_api_key: ""                    # optionnel; préférer Grimoire_QDRANT_API_KEY en environnement
-  # ollama_url: "http://localhost:11434"  # si ollama
-  # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # modèle d'embedding
-  # collection_prefix: "grimoire"          # préfixe des collections Qdrant
+  backend: "auto"                      # auto | local | qdrant-local | qdrant-server | weaviate-server | mempalace | ollama
+  # qdrant_url: "http://localhost:6333"    # source legacy / rollback Qdrant
+  # weaviate_url: "http://localhost:8080"  # cible sémantique durable Weaviate
+  # weaviate_collection: "GrimoireMemory"
+  # neo4j_uri: "bolt://localhost:7687"     # graphe durable Neo4j
+  # neo4j_user: "neo4j"
+  # neo4j_password_env: "GRIMOIRE_NEO4J_PASSWORD"
+  # neo4j_database: "neo4j"
+  # migration_source_backend: "qdrant-server"
+  # migration_target_backend: "weaviate-server"
+  # migration_bundle_path: "_grimoire/_memory/migration/weaviate-neo4j"
+  # short_term_backend: "sqlite"           # sqlite | redis | none
+  # redis_url: "redis://localhost:6379/0"  # mémoire chaude optionnelle
+  # knowledge_graph: "sqlite-sidecar"      # sqlite-sidecar | neo4j | planned | disabled
+  # memory_graph: "sqlite-sidecar"
+  # code_graph: "planned"
+  # task_memory: "planned"
+  # ollama_url: "http://localhost:11434"   # si ollama
+  # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  # collection_prefix: "grimoire"
 
 # ── MCP (Model Context Protocol) ────────────────────────────────────────────
 # Configuration du serveur MCP Grimoire — exposé dans VS Code Copilot
