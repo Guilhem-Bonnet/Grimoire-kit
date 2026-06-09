@@ -92,7 +92,7 @@ jobs:
       # ── Alerte si trop de failures ────────────────────────────────────────
       - name: Alert on high failures
         if: ${{ steps.bench.outputs.failures != '' && fromJSON(steps.bench.outputs.failures) >= 10 }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const failures = ${{ steps.bench.outputs.failures }};
