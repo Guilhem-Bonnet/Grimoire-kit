@@ -14,7 +14,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import typer
 from rich.console import Console
@@ -23,6 +23,7 @@ from rich.table import Table
 from grimoire.__version__ import __version__
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_standard import standard_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
 from grimoire.core.log import configure_logging
@@ -112,6 +113,14 @@ app = typer.Typer(
 
 console = Console(stderr=True)
 
+_WORKFLOW_PATH_ARGUMENT = typer.Argument(Path(), help="Project root (optional).")
+
+
+class _WorkflowDiffPayload(TypedDict):
+    file: str
+    slug: str
+    diff: list[str]
+
 # ── Semantic exit codes ────────────────────────────────────────────────────────
 _EXIT_OK = 0
 _EXIT_USER = 1      # user/input error (missing file, bad arg, validation fail)
@@ -120,7 +129,7 @@ _EXIT_CONFIG = 2    # configuration error (parse error, missing key)
 
 def _get_fmt(ctx: typer.Context) -> str:
     """Return the output format from context — 'text' or 'json'."""
-    return (ctx.obj or {}).get("output", "text")
+    return cast(str, (ctx.obj or {}).get("output", "text"))
 
 
 def _version_callback(value: bool) -> None:
@@ -192,10 +201,11 @@ def version_cmd(ctx: typer.Context) -> None:
 
     project_name: str | None = None
     try:
-        ctx_file = _find_config(Path())
-        cfg = GrimoireConfig.from_yaml(ctx_file)
-        project_name = cfg.project.name
-    except (typer.Exit, GrimoireError):
+        ctx_file = _find_config_quiet(Path.cwd())
+        if ctx_file is not None:
+            cfg = GrimoireConfig.from_yaml(ctx_file)
+            project_name = cfg.project.name
+    except GrimoireError:
         pass
 
     if fmt == "json":
@@ -223,9 +233,10 @@ def version_cmd(ctx: typer.Context) -> None:
 _KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
+    "agentic-standard",
 })
 
-_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
@@ -248,6 +259,14 @@ user:
 
 memory:
   backend: "{backend}"
+  layer_profile: "standard"
+  short_term_backend: "sqlite"
+  redis_url: ""
+  knowledge_graph: "sqlite-sidecar"
+  memory_graph: "sqlite-sidecar"
+  code_graph: "planned"
+  task_memory: "planned"
+  visualization: "runtime-dashboard"
 
 agents:
   archetype: "{archetype}"
@@ -269,7 +288,7 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
@@ -280,7 +299,7 @@ def init(
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
       [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
-      [cyan]grimoire init . -a infra-ops -b qdrant-local[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """
@@ -561,6 +580,20 @@ def _find_config(path: Path) -> Path:
     except (FileNotFoundError, PermissionError, OSError):
         console.print("[red]Not a Grimoire project[/red] — run [bold]grimoire init[/bold] first.")
         raise typer.Exit(_EXIT_USER) from None
+
+
+def _find_config_quiet(path: Path) -> Path | None:
+    """Resolve project-context.yaml without printing user-facing errors."""
+    from grimoire.tools._common import find_project_root
+
+    target = path.resolve()
+    config_path = target / "project-context.yaml"
+    if config_path.is_file():
+        return config_path
+    try:
+        return find_project_root(target) / "project-context.yaml"
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
 
 
 _add_agent_id = typer.Argument(..., help="Agent identifier to add.")
@@ -871,6 +904,7 @@ app.add_typer(registry_app, name="registry", rich_help_panel="Agents")
 workflows_app = typer.Typer(help="Inspect available Copilot workflows.")
 app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
 app.add_typer(workflows_app, name="wf", hidden=True)
+app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 
 
 _WF_DESCRIPTIONS: dict[str, str] = {
@@ -978,7 +1012,7 @@ def _collect_workflow_rows(project_root: Path) -> list[dict[str, str]]:
 @workflows_app.command("list")
 def workflows_list(
     ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
 ) -> None:
     """List available Copilot workflows from project and/or framework."""
     root = path.resolve()
@@ -1007,7 +1041,7 @@ def workflows_list(
 def workflows_search(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Keyword to search in workflows."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     include_content: bool = typer.Option(True, "--content/--no-content", help="Also search inside prompt content."),
 ) -> None:
     """Search workflows by slug, description, and optionally file content."""
@@ -1047,7 +1081,7 @@ def workflows_search(
 def workflows_show(
     ctx: typer.Context,
     workflow: str = typer.Argument(..., help="Workflow slug or prompt filename."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
 ) -> None:
     """Show the content and source of a workflow prompt."""
     root = path.resolve()
@@ -1083,7 +1117,7 @@ def workflows_show(
 def workflows_install(
     ctx: typer.Context,
     workflow: str = typer.Argument(..., help="Workflow slug or prompt filename."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite project version if it already exists."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview the installation without writing files."),
 ) -> None:
@@ -1134,7 +1168,7 @@ def workflows_install(
 @workflows_app.command("prune")
 def workflows_prune(
     ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview deletions without removing files."),
 ) -> None:
     """Remove project-only workflows not found in framework defaults."""
@@ -1182,7 +1216,7 @@ def workflows_prune(
 @workflows_app.command("doctor")
 def workflows_doctor(
     ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     strict: bool = typer.Option(False, "--strict", help="Treat extra project workflows as failures."),
 ) -> None:
     """Audit project workflows against framework defaults."""
@@ -1250,7 +1284,7 @@ def workflows_doctor(
 @workflows_app.command("sync")
 def workflows_sync(
     ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite modified project workflows."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing files."),
 ) -> None:
@@ -1314,7 +1348,7 @@ def workflows_sync(
 @workflows_app.command("diff")
 def workflows_diff(
     ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
+    path: Path = _WORKFLOW_PATH_ARGUMENT,
     workflow: str | None = typer.Argument(None, help="Workflow slug or prompt filename."),
 ) -> None:
     """Show diffs between framework workflows and project workflows."""
@@ -1334,7 +1368,7 @@ def workflows_diff(
     else:
         targets = modified
 
-    payload: list[dict[str, object]] = []
+    payload: list[_WorkflowDiffPayload] = []
     for name in targets:
         diff_lines = _workflow_unified_diff(expected[name], actual[name])
         if not diff_lines:
@@ -1357,7 +1391,7 @@ def workflows_diff(
     for item in payload:
         console.print(f"\n[bold]{item['file']}[/bold]")
         for line in item["diff"]:
-            if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            if line.startswith(("+++", "---", "@@")):
                 console.print(line, style="cyan")
             elif line.startswith("+"):
                 console.print(line, style="green")
@@ -2045,21 +2079,22 @@ def self_update() -> None:
         except Exception:  # noqa: S110
             pass  # pipx detection is best-effort
 
-    if use_pipx:
+    cmd: list[str]
+    if use_pipx and pipx_bin is not None:
         cmd = [pipx_bin, "upgrade", "grimoire-kit"]
         console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
     else:
         cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "grimoire-kit"]
         console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
 
-    result = subprocess.run(cmd, timeout=120)
-    if result.returncode != 0:
+    update_result = subprocess.run(cmd, timeout=120)
+    if update_result.returncode != 0:
         console.print("\n[red]Update failed.[/red] Try manually:")
         hint = "pipx upgrade grimoire-kit" if use_pipx else "pip install --upgrade grimoire-kit"
         console.print(f"  [dim]{hint}[/dim]")
         raise typer.Exit(1)
 
-    console.print(f"\n[green]✓ Updated to {latest}[/green]")
+    console.print(f"\n[green]✓ Updated to {latest}[/green]", highlight=False)
     console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
 
 
@@ -2459,10 +2494,11 @@ def env_cmd(ctx: typer.Context) -> None:
 
     project_info: dict[str, str] | None = None
     try:
-        ctx_file = _find_config(Path())
-        cfg = GrimoireConfig.from_yaml(ctx_file)
-        project_info = {"root": str(ctx_file.parent), "name": cfg.project.name}
-    except (typer.Exit, GrimoireError):
+        ctx_file = _find_config_quiet(Path.cwd())
+        if ctx_file is not None:
+            cfg = GrimoireConfig.from_yaml(ctx_file)
+            project_info = {"root": str(ctx_file.parent), "name": cfg.project.name}
+    except GrimoireError:
         project_info = None
 
     if fmt == "json":
@@ -2910,3 +2946,6 @@ def cli() -> None:
         elif _show_time:
             console.print(f"\n[dim]⏱  {total * 1000:.0f}ms[/dim]")
 
+
+if __name__ == "__main__":
+    cli()

@@ -40,6 +40,7 @@ STACK_AGENT_MAP: dict[str, str] = {
 _VALID_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
+    "agentic-standard",
 })
 
 # Archetype selection rules — evaluated top to bottom, first match wins.
@@ -63,7 +64,7 @@ class ArchetypeResolver:
     """Resolve a ScanResult into archetype + agent selections."""
 
     # Archetypes exposed for wizard display (exclude internal dirs)
-    _USER_ARCHETYPES = ("minimal", "web-app", "infra-ops", "platform-engineering", "creative-studio", "fix-loop")
+    _USER_ARCHETYPES = ("minimal", "web-app", "infra-ops", "platform-engineering", "agentic-standard", "creative-studio", "fix-loop")
 
     def resolve(
         self,

@@ -1,0 +1,13 @@
+$schema: "grimoire-agentic-standard-accepted-risks/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+risks: []
+required_fields:
+  - risk_id
+  - description
+  - accepted_by
+  - reason
+  - expires_at
+  - evidence_refs
+  - score_impact

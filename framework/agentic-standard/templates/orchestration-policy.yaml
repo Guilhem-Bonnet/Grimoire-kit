@@ -1,0 +1,57 @@
+$schema: "grimoire-agentic-standard-orchestration-policy/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+autonomy_levels:
+  - observe
+  - propose
+  - draft
+  - execute_with_evidence
+  - execute_with_release_gate
+roles:
+  - role_id: planner
+    persona_or_archetype: agentic-standard-planner
+    responsibilities:
+      - "Decompose mission into governed tasks."
+    allowed_tools: ["read", "search"]
+    allowed_memory_types: ["session", "task", "project", "procedural"]
+    allowed_providers: ["declared-default"]
+    autonomy_level: propose
+    handoff_contracts:
+      outputs: ["task-board", "acceptance-criteria"]
+    escalation_triggers: ["scope-conflict", "missing-owner"]
+    review_gates: ["task-board-valid"]
+    rollback_policy: "revert task proposal only"
+  - role_id: context_orchestrator
+    persona_or_archetype: agentic-context-orchestrator
+    responsibilities:
+      - "Build deterministic context bundles."
+    allowed_tools: ["read", "search"]
+    allowed_memory_types: ["session", "task", "project", "semantic", "external_knowledge_cache"]
+    allowed_providers: ["declared-default"]
+    autonomy_level: execute_with_evidence
+    handoff_contracts:
+      outputs: ["context-bundle", "decision-inputs"]
+    escalation_triggers: ["memory-policy-conflict", "source-freshness-failure"]
+    review_gates: ["context-verify"]
+    rollback_policy: "discard generated context bundle"
+  - role_id: release_governor
+    persona_or_archetype: agentic-release-governor
+    responsibilities:
+      - "Authorize or block release based on evidence and score."
+    allowed_tools: ["read", "audit"]
+    allowed_memory_types: ["task", "project", "episodic", "organization"]
+    allowed_providers: ["declared-default"]
+    autonomy_level: execute_with_release_gate
+    handoff_contracts:
+      outputs: ["release-decision", "remediation-plan"]
+    escalation_triggers: ["score-below-threshold", "accepted-risk-required"]
+    review_gates: ["pre-release"]
+    rollback_policy: "block release and create remediation"
+handoffs:
+  - from: planner
+    to: context_orchestrator
+    requires: ["task_id", "acceptance_criteria"]
+  - from: context_orchestrator
+    to: release_governor
+    requires: ["context_bundle", "decision_trace", "evidence_pack"]

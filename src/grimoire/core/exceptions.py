@@ -10,12 +10,16 @@ __all__ = [
     "GrimoireAgentError",
     "GrimoireConfigError",
     "GrimoireError",
+    "GrimoireEvidenceError",
     "GrimoireMemoryError",
     "GrimoireMergeConflictError",
     "GrimoireMergeError",
+    "GrimoireMissionError",
     "GrimoireNetworkError",
+    "GrimoirePolicyError",
     "GrimoireProjectError",
     "GrimoireRegistryError",
+    "GrimoireRuntimeError",
     "GrimoireTimeoutError",
     "GrimoireToolError",
     "GrimoireValidationError",
@@ -134,4 +138,36 @@ class GrimoireNetworkError(GrimoireError):
 
     Raised when HTTP requests, MCP transport, or registry API calls
     fail due to connectivity or protocol errors.
+    """
+
+
+class GrimoireMissionError(GrimoireError):
+    """Mission or task lifecycle error.
+
+    Raised when a mission/task state transition is invalid, the ledger
+    is corrupt, or a required evidence constraint is violated.
+    """
+
+
+class GrimoireEvidenceError(GrimoireError):
+    """Evidence collection or verification failure.
+
+    Raised when an EvidencePack is incomplete, a digest is invalid,
+    or a verification verdict cannot be produced.
+    """
+
+
+class GrimoirePolicyError(GrimoireError):
+    """Policy evaluation failure.
+
+    Raised when the policy engine cannot evaluate a request due to
+    missing rules, configuration errors, or a hard block with no retry.
+    """
+
+
+class GrimoireRuntimeError(GrimoireError):
+    """Runtime kernel error.
+
+    Raised when a workflow instance cannot advance (checkpoint corrupt,
+    idempotency violation, tool mediation failure, replay error).
     """

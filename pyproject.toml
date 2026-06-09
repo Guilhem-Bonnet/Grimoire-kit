@@ -32,8 +32,12 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
 qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0"]
+weaviate = ["sentence-transformers>=3.0"]
+neo4j = ["neo4j>=5.0"]
+redis = ["redis>=5.0"]
+mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
-all = ["grimoire-kit[mcp,qdrant,ollama]"]
+all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama]"]
 dev = [
     "grimoire-kit[all]",
     "pytest>=8.0",
@@ -99,6 +103,22 @@ exclude = ["_grimoire/"]
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_untyped_decorators = false
+
+# Optional backend SDKs (installed only via extras: neo4j, mempalace/chromadb,
+# weaviate, qdrant, redis, ollama, mcp). In CI the [all] extra is installed so
+# these imports resolve; in a minimal contributor env they are absent, so we
+# suppress import-not-found here instead of scattering inline `type: ignore`s.
+[[tool.mypy.overrides]]
+module = [
+    "neo4j.*",
+    "chromadb.*",
+    "weaviate.*",
+    "qdrant_client.*",
+    "sentence_transformers.*",
+    "redis.*",
+    "ollama.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

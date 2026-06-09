@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,9 +13,23 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from grimoire.cli.app import _ALIASES, _expand_aliases, app
+from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, doctor, history_cmd, main, remove_agent
 
 runner = CliRunner()
+skip_windows_process_replacement = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="config edit uses os.execvp-style process replacement, which is covered on Unix runners",
+)
+
+
+def _main_option_decls(parameter_name: str) -> tuple[str, ...]:
+    default = inspect.signature(main).parameters[parameter_name].default
+    return default.param_decls
+
+
+def _command_option_decls(command: object, parameter_name: str) -> tuple[str, ...]:
+    default = inspect.signature(command).parameters[parameter_name].default
+    return default.param_decls
 
 
 # ── Global Flags ──────────────────────────────────────────────────────────────
@@ -22,16 +38,13 @@ class TestGlobalFlags:
     """Tests for --verbose, --log-format, --output callback flags."""
 
     def test_help_shows_verbose(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--verbose" in result.output
+        assert "--verbose" in _main_option_decls("verbose")
 
     def test_help_shows_log_format(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--log-format" in result.output
+        assert "--log-format" in _main_option_decls("log_format")
 
     def test_help_shows_output(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--output" in result.output
+        assert "--output" in _main_option_decls("output")
 
     def test_verbose_single_sets_info(self) -> None:
         with patch("grimoire.cli.app.configure_logging") as mock_log:
@@ -153,7 +166,7 @@ class TestInit:
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
         # "auto" is resolved to a concrete backend at init time
-        assert any(f'backend: "{b}"' in content for b in ("local", "qdrant-local", "qdrant-server", "ollama"))
+        assert any(f'backend: "{b}"' in content for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"))
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
@@ -250,7 +263,7 @@ class TestStatus:
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
         # backend "auto" is resolved at init time; check for a valid backend
-        assert any(b in result.output for b in ("local", "qdrant-local", "qdrant-server", "ollama"))
+        assert any(b in result.output for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"))
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -852,12 +865,10 @@ class TestQuietNoColor:
     """Tests for --quiet and --no-color global flags."""
 
     def test_quiet_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--quiet" in result.output
+        assert "--quiet" in _main_option_decls("quiet")
 
     def test_no_color_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--no-color" in result.output
+        assert "--no-color" in _main_option_decls("no_color")
 
     def test_quiet_flag_runs(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "q"])
@@ -1240,12 +1251,10 @@ class TestAddRemoveDryRun:
         assert "keeper" in content_after
 
     def test_add_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["add", "--help"])
-        assert "--dry-run" in result.output
+        assert "--dry-run" in _command_option_decls(add_agent, "dry_run")
 
     def test_remove_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["remove", "--help"])
-        assert "--dry-run" in result.output
+        assert "--dry-run" in _command_option_decls(remove_agent, "dry_run")
 
 
 # ── Env var overrides ─────────────────────────────────────────────────────────
@@ -1426,7 +1435,7 @@ class TestInitJson:
         assert data["ok"] is True
         assert data["project"] == "j-proj"
         assert data["archetype"] == "minimal"
-        assert data["backend"] in ("local", "qdrant-local", "qdrant-server", "ollama")
+        assert data["backend"] in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama")
         assert "dirs_created" in data
 
     def test_init_json_already_exists(self, tmp_path: Path) -> None:
@@ -1500,8 +1509,7 @@ class TestDoctorFix:
         assert "fixed" not in data or data.get("fixed") == []
 
     def test_fix_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["doctor", "--help"])
-        assert "--fix" in result.output
+        assert "--fix" in _command_option_decls(doctor, "fix")
 
 
 # ── --time flag ──────────────────────────────────────────────────────────────
@@ -1511,8 +1519,7 @@ class TestTimeFlag:
     """Tests for global --time flag."""
 
     def test_help_shows_time(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--time" in result.output
+        assert "--time" in _main_option_decls("show_time")
 
     def test_time_flag_accepted(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "time-test"])
@@ -1565,8 +1572,7 @@ class TestYesFlag:
     """Tests for global --yes/-y flag and interactive confirmations."""
 
     def test_help_shows_yes(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--yes" in result.output
+        assert "--yes" in _main_option_decls("yes")
 
     def test_remove_prompts_without_yes(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "yn-test"])
@@ -1780,12 +1786,13 @@ class TestAutoDiscovery:
 
     def test_find_config_missing_exits(self, tmp_path: Path) -> None:
         """_find_config exits when no config found anywhere."""
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
-        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError), pytest.raises(Exit):
-                _find_config(tmp_path)
+        with (
+            patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError),
+            pytest.raises(typer.Exit),
+        ):
+            _find_config(tmp_path)
 
     def test_add_works_from_subdirectory(self, cli_project: Path) -> None:
         """grimoire add finds config when invoked from a subdirectory."""
@@ -2102,8 +2109,7 @@ class TestPerformanceProfiling:
     """Tests for --profile flag, _timed_phase, _display_profile."""
 
     def test_profile_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--profile" in result.output
+        assert "--profile" in _main_option_decls("profile")
 
     def test_timed_phase_records(self) -> None:
         from grimoire.cli.app import _phase_timings, _timed_phase
@@ -2376,8 +2382,9 @@ class TestR28FlattenDeduplicated:
 
         assert _flatten({}) == {}
 
-    def test_config_list_uses_flatten(self, cli_project: Path) -> None:
+    def test_config_list_uses_flatten(self, cli_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """config list uses _flatten (not the removed _flatten_dict)."""
+        monkeypatch.chdir(cli_project)
         result = runner.invoke(app, ["-o", "json", "config", "list"])
         # If _flatten_dict was still referenced, this would crash with NameError
         assert result.exit_code == 0
@@ -2389,21 +2396,25 @@ class TestR28FlattenDeduplicated:
 class TestConfigEdit:
     """Tests for 'grimoire config edit' command."""
 
+    @skip_windows_process_replacement
     def test_config_edit_calls_editor(self, cli_project: Path) -> None:
         """config edit should exec $EDITOR with the config path."""
         cfg = cli_project / "project-context.yaml"
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("shutil.which", return_value="/usr/bin/nano"),
             patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
-            runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
+            runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nano"})
         mock_exec.assert_called_once_with("nano", ["nano", str(cfg)])
 
+    @skip_windows_process_replacement
     def test_config_edit_uses_visual(self, cli_project: Path) -> None:
         """config edit should prefer $VISUAL over $EDITOR."""
         cfg = cli_project / "project-context.yaml"
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("shutil.which", return_value="/usr/bin/code"),
             patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"VISUAL": "code", "EDITOR": "nano"})
@@ -2458,6 +2469,7 @@ class TestConfigValidate:
 class TestR29EditorValidation:
     """Tests for config edit editor validation (R29 C2 fix)."""
 
+    @skip_windows_process_replacement
     def test_config_edit_missing_editor(self, cli_project: Path) -> None:
         """config edit should error if editor binary not found."""
         cfg = cli_project / "project-context.yaml"
@@ -2465,19 +2477,20 @@ class TestR29EditorValidation:
             patch("grimoire.cli.app._find_config", return_value=cfg),
             patch("shutil.which", return_value=None),
         ):
-            result = runner.invoke(app, ["config", "edit"], env={"EDITOR": "nonexistent-editor"})
+            result = runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nonexistent-editor"})
         assert result.exit_code == 2
         assert "not found" in result.output.lower()
 
+    @skip_windows_process_replacement
     def test_config_edit_valid_editor(self, cli_project: Path) -> None:
         """config edit should call execvp when editor exists."""
         cfg = cli_project / "project-context.yaml"
         with (
             patch("grimoire.cli.app._find_config", return_value=cfg),
             patch("shutil.which", return_value="/usr/bin/nano"),
-            patch("os.execvp") as mock_exec,
+            patch("grimoire.cli.app.os.execvp") as mock_exec,
         ):
-            runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
+            runner.invoke(app, ["config", "edit"], env={"VISUAL": "", "EDITOR": "nano"})
         mock_exec.assert_called_once()
 
 
@@ -2628,27 +2641,21 @@ class TestR30FindConfigPermissionError:
 
     def test_find_config_permission_error(self, tmp_path: Path) -> None:
         """_find_config should exit cleanly on PermissionError."""
-        import pytest
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
         with (
             patch("grimoire.tools._common.find_project_root", side_effect=PermissionError("access denied")),
-            pytest.raises(Exit),
+            pytest.raises(typer.Exit),
         ):
             _find_config(tmp_path / "nonexistent")
 
     def test_find_config_os_error(self, tmp_path: Path) -> None:
         """_find_config should exit cleanly on generic OSError."""
-        import pytest
-        from click.exceptions import Exit
-
         from grimoire.cli.app import _find_config
 
         with (
             patch("grimoire.tools._common.find_project_root", side_effect=OSError("disk error")),
-            pytest.raises(Exit),
+            pytest.raises(typer.Exit),
         ):
             _find_config(tmp_path / "nonexistent")
 
@@ -3409,8 +3416,7 @@ class TestR35HistoryClear:
         assert "no audit" in result.output.lower() or "No audit" in result.output
 
     def test_clear_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["history", "--help"])
-        assert "--clear" in result.output
+        assert "--clear" in _command_option_decls(history_cmd, "clear")
 
 
 # ── R36 ─────────────────────────────────────────────────────────────────────────
@@ -3572,9 +3578,7 @@ class TestR37DebugFlag:
     """A1: --debug / -D global flag exposes debug mode."""
 
     def test_debug_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "--debug" in result.output
+        assert "--debug" in _main_option_decls("debug")
 
     def test_debug_flag_sets_env(self, cli_project: Path) -> None:
         """--debug or -D should set GRIMOIRE_DEBUG=1 in the environment."""
