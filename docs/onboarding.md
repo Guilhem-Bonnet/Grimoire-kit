@@ -1,15 +1,15 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
+# <img src="../assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
 
 > **J1** → Première session en 10 minutes 
 > **S1** → Première semaine productive 
 > **M1** → Premier mois, maîtrise complète
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
 
 ### 1. Installation
 
@@ -72,9 +72,9 @@ votre-projet/
 
 **C'est tout pour J1.** Vous avez un projet Grimoire fonctionnel.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> S1 — Première Semaine
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> S1 — Première Semaine
 
 ### Jour 2-3 : Comprendre les agents
 
@@ -114,9 +114,9 @@ Avant chaque "fait" :
 
 Si CC FAIL → l'agent corrige automatiquement avant de rendre la main.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> M1 — Premier Mois
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> M1 — Premier Mois
 
 ### Semaine 2 : Mémoire et contexte
 
@@ -203,9 +203,9 @@ python3 framework/tools/nso.py --project-root . retro
 6.        Le NSO fait une rétrospective
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
+## <img src="../assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
 
 | Besoin | Commande |
 |--------|---------|

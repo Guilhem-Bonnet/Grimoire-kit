@@ -1,0 +1,12 @@
+$schema: "grimoire-agentic-standard-waivers/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+waivers: []
+required_fields:
+  - waiver_id
+  - check_id
+  - reason
+  - approved_by
+  - expires_at
+  - evidence_refs

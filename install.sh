@@ -25,7 +25,6 @@ REPO_URL="https://github.com/Guilhem-Bonnet/Grimoire-kit.git"
 BRANCH="main"
 KEEP_KIT=false
 KIT_DIR=""
-TARGET_DIR="$(pwd)"
 
 # ─── Couleurs ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'

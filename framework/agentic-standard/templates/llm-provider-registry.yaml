@@ -1,0 +1,83 @@
+$schema: "grimoire-llm-provider-registry/v1"
+
+metadata:
+  project: ""
+  owner: ""
+  policy: "No provider/model call outside this registry."
+
+providers:
+  - id: "github-copilot"
+    enabled: false
+    provider_type: "hosted"
+    allowed_capabilities: ["chat", "code", "review"]
+    default_models: []
+    data_policy:
+      allowed_data_classes: []
+      forbidden_data_classes: []
+      retention_notes: ""
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+
+  - id: "openai"
+    enabled: false
+    provider_type: "hosted"
+    allowed_capabilities: ["chat", "code", "reasoning", "embeddings"]
+    default_models: []
+    data_policy:
+      allowed_data_classes: []
+      forbidden_data_classes: []
+      retention_notes: ""
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+
+  - id: "anthropic"
+    enabled: false
+    provider_type: "hosted"
+    allowed_capabilities: ["chat", "code", "reasoning"]
+    default_models: []
+    data_policy:
+      allowed_data_classes: []
+      forbidden_data_classes: []
+      retention_notes: ""
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+
+  - id: "google-gemini"
+    enabled: false
+    provider_type: "hosted"
+    allowed_capabilities: ["chat", "code", "multimodal", "reasoning"]
+    default_models: []
+    data_policy:
+      allowed_data_classes: []
+      forbidden_data_classes: []
+      retention_notes: ""
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+
+  - id: "local"
+    enabled: false
+    provider_type: "local"
+    allowed_capabilities: ["chat", "code", "embeddings"]
+    default_models: []
+    data_policy:
+      allowed_data_classes: []
+      forbidden_data_classes: []
+      retention_notes: "Local execution still requires explicit data classification."
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+
+routing:
+  default_provider: ""
+  default_fallback_chain: []
+  require_capability_match: true
+  require_data_policy_match: true

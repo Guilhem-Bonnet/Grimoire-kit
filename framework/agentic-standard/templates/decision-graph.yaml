@@ -1,0 +1,43 @@
+$schema: "grimoire-agentic-standard-decision-graph/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+required_decision_record:
+  - decision_id
+  - task_id
+  - decision_type
+  - profile
+  - inputs
+  - policy_refs
+  - rule_refs
+  - result
+  - confidence
+  - event
+  - evidence_refs
+  - remediation_ref
+  - timestamp
+decision_types:
+  - id: task_prioritization
+    inputs: [task_board, priority, blockers, mission_brief]
+    outputs: [selected_task, blocked_reason]
+  - id: context_source_selection
+    inputs: [context_contract, memory_policy, knowledge_registry]
+    outputs: [include, exclude, redact, refresh_required]
+  - id: memory_injection
+    inputs: [memory_type, task_scope, trust_level, freshness]
+    outputs: [inject, redact, reject]
+  - id: provider_routing
+    inputs: [provider_registry, task_risk, data_policy, capability_requirements]
+    outputs: [provider, fallback, block]
+  - id: agent_role_routing
+    inputs: [task_type, role_matrix, autonomy_level]
+    outputs: [assigned_role, handoff, escalation]
+  - id: tool_authorization
+    inputs: [requested_tool, agent_role, task_scope, risk]
+    outputs: [allow, require_evidence, block]
+  - id: state_transition
+    inputs: [current_state, target_state, evidence_pack]
+    outputs: [advance, block, remediation_required]
+  - id: release_authorization
+    inputs: [compliance_score, evidence_gates, runtime_journal, accepted_risks]
+    outputs: [authorize, block, exception_required]

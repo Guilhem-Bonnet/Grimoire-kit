@@ -20,6 +20,7 @@ Le Registry permet d'installer des archétypes supplémentaires dans un projet e
 | `infra-ops` | Infra Ops | Forge, Vault, Flow, Hawk, Helm, Phoenix, Systems-Debugger | Infrastructure DevOps complète |
 | `web-app` | Web App | Frontend Specialist, Fullstack Dev + stack auto | Applications web |
 | `fix-loop` | Fix Loop | Loop (orchestrateur) + workflow 9 phases | Boucle de correction certifiée |
+| `agentic-standard` | Agentic Standard | Atlas, Sentinel, Mnemo + templates standard-aware | Pont norme agentique → artefacts Grimoire |
 | `stack/go` | Go Expert | Gopher | Backend Go |
 | `stack/typescript` | TypeScript | Pixel | Frontend TS/React |
 | `stack/python` | Python | Serpent | Backend Python |
@@ -52,6 +53,7 @@ grimoire-init.sh install --archetype stack/go
 
 # Installer plusieurs archétypes
 grimoire-init.sh install --archetype fix-loop
+grimoire-init.sh install --archetype agentic-standard
 grimoire-init.sh install --archetype features/vector-memory
 
 # Forcer la réinstallation (écraser les fichiers existants)

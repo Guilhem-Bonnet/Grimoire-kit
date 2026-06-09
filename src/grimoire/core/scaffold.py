@@ -94,7 +94,8 @@ user:
   skill_level: "$skill_level"
 
 memory:
-  backend: "$backend"
+  backend: "$backend"$memory_extra
+$memory_layers
 
 agents:
   archetype: "$archetype"
@@ -341,6 +342,42 @@ class ProjectScaffolder:
         stack_list = ", ".join(f'"{s}"' for s in stacks) if stacks else ""
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
+        memory_extra = ""
+        memory_layers = """  layer_profile: "standard"
+  short_term_backend: "sqlite"
+  redis_url: ""
+  knowledge_graph: "sqlite-sidecar"
+  memory_graph: "sqlite-sidecar"
+  code_graph: "planned"
+  task_memory: "planned"
+  visualization: "runtime-dashboard"
+"""
+        if self._backend == "ollama":
+            memory_extra = '\n  ollama_url: "http://localhost:11434"'
+        elif self._backend == "qdrant-server":
+            memory_extra = '\n  qdrant_url: "http://localhost:6333"'
+        elif self._backend == "weaviate-server":
+            memory_extra = (
+                '\n  qdrant_url: "http://localhost:6333"'
+                '\n  weaviate_url: "http://localhost:8080"'
+                '\n  weaviate_collection: "GrimoireMemory"'
+                '\n  neo4j_uri: "bolt://localhost:7687"'
+                '\n  neo4j_user: "neo4j"'
+                '\n  neo4j_password_env: "GRIMOIRE_NEO4J_PASSWORD"'
+                '\n  neo4j_database: "neo4j"'
+                '\n  migration_source_backend: "qdrant-server"'
+                '\n  migration_target_backend: "weaviate-server"'
+                '\n  migration_bundle_path: "_grimoire/_memory/migration/weaviate-neo4j"'
+            )
+            memory_layers = """  layer_profile: "weaviate-neo4j"
+  short_term_backend: "sqlite"
+  redis_url: ""
+  knowledge_graph: "neo4j"
+  memory_graph: "neo4j"
+  code_graph: "neo4j"
+  task_memory: "neo4j"
+  visualization: "runtime-dashboard"
+"""
         return {
             "project_name": self._project_name,
             "user_name": self._user_name,
@@ -351,6 +388,8 @@ class ProjectScaffolder:
             "archetype": ", ".join(archetypes),
             "archetype_list": archetype_list,
             "backend": self._backend,
+            "memory_extra": memory_extra,
+            "memory_layers": memory_layers,
             "version": _grimoire_version,
         }
 
@@ -519,6 +558,23 @@ class ProjectScaffolder:
             if src.is_file():
                 dst_name = tpl_name.replace(".tpl", "")
                 p.copies.append(FileCopy(src=src, dst=mem_dst / dst_name, label=f"memory/{dst_name}"))
+
+        if self._backend == "qdrant-server":
+            src = fw / "memory" / "docker-compose.memory.tpl.yml"
+            if src.is_file():
+                p.copies.append(FileCopy(
+                    src=src,
+                    dst=self._target / "docker-compose.memory.yml",
+                    label="memory/docker-compose.memory.yml",
+                ))
+        if self._backend == "weaviate-server":
+            src = fw / "memory" / "docker-compose.memory-target.tpl.yml"
+            if src.is_file():
+                p.copies.append(FileCopy(
+                    src=src,
+                    dst=self._target / "docker-compose.memory-target.yml",
+                    label="memory/docker-compose.memory-target.yml",
+                ))
 
     def _plan_templates(self, p: ScaffoldPlan) -> None:
         v = self._tpl_vars()

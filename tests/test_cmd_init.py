@@ -17,15 +17,17 @@ class TestDetectMemoryBackend:
         assert result == "local"
 
     def test_returns_qdrant_local_when_qdrant_up(self) -> None:
-        class FakeResp:
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def read(self): return b""
-
-        with patch("grimoire.cli.cmd_init.urllib.request.urlopen", return_value=FakeResp()):
+        with (
+            patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=False),
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
+        ):
             result = detect_memory_backend()
         assert result == "qdrant-local"
+
+    def test_returns_weaviate_when_weaviate_up(self) -> None:
+        with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
+            result = detect_memory_backend()
+        assert result == "weaviate-server"
 
     def test_returns_local_on_timeout(self) -> None:
         with patch("grimoire.cli.cmd_init.urllib.request.urlopen", side_effect=TimeoutError("timeout")):
@@ -100,6 +102,14 @@ class TestInitCLI:
         agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
         agent_names = {f.stem for f in agents_dir.glob("*.md")}
         assert "ops-engineer" in agent_names
+
+    def test_init_with_agentic_standard_archetype(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "standard"
+        result = runner.invoke(app, ["-y", "init", str(target), "--archetype", "agentic-standard"])
+        assert result.exit_code == 0
+        content = (target / "project-context.yaml").read_text()
+        assert "agentic-standard" in content
+        assert (target / "_grimoire" / "_config" / "archetype.dna.agentic-standard.yaml").is_file()
 
     def test_init_refuses_existing_without_force(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "existing"
@@ -277,9 +287,11 @@ class TestParseArchetypeSelection:
         assert result == [_ARCHETYPE_KEYS[0]]
 
     def test_zero_triggers_guided(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
         # "0" calls _guided_discovery which needs user input — for unit test, we mock
         from unittest.mock import patch
+
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+
         with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
             result = _parse_archetype_selection("0")
         assert result == ["web-app"]

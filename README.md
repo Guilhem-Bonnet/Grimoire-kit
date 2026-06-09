@@ -33,6 +33,7 @@
   <a href="#-architecture">Architecture</a> •
   <a href="#-features">Features</a> •
   <a href="#-outils-cli">Outils CLI</a> •
+  <a href="docs/agentic-standard-integration.md">Standard agentique</a> •
   <a href="docs/concepts.md">Concepts</a> •
   <a href="docs/getting-started.md">Guide complet</a> •
   <a href="CHANGELOG.md">Changelog</a>
@@ -94,6 +95,9 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 ```bash
 # Installation via pipx (recommandé)
+pipx install grimoire-kit
+
+# Installation recommandée pour le moment
 pipx install grimoire-kit
 
 # Ou via pip dans un venv
@@ -887,4 +891,3 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
     <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/Grimoire-kit?style=social" alt="Stars">
   </a>
 </p>
-

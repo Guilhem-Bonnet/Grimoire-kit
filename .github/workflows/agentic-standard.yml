@@ -1,0 +1,79 @@
+name: Agentic standard
+
+on:
+  pull_request:
+    paths:
+      - "archetypes/agentic-standard/**"
+      - "framework/agentic-standard/**"
+      - "src/grimoire/core/agentic_standard.py"
+      - "src/grimoire/cli/cmd_standard.py"
+      - "tests/test_agentic_standard.py"
+      - "docs/agentic-standard-integration.md"
+      - ".github/workflows/agentic-standard.yml"
+  push:
+    branches: [main, feat/agentic-standard-bridge]
+    paths:
+      - "archetypes/agentic-standard/**"
+      - "framework/agentic-standard/**"
+      - "src/grimoire/core/agentic_standard.py"
+      - "src/grimoire/cli/cmd_standard.py"
+      - "tests/test_agentic_standard.py"
+      - "docs/agentic-standard-integration.md"
+      - ".github/workflows/agentic-standard.yml"
+
+jobs:
+  standard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install targeted dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,docs]"
+
+      - name: Test standard bridge
+        run: |
+          python -m pytest \
+            tests/test_agentic_standard.py \
+            tests/test_archetype_resolver.py::TestArchetypeResolver::test_archetypes_override_accepts_agentic_standard \
+            tests/test_cmd_init.py::TestInitCLI::test_init_with_agentic_standard_archetype \
+            -q --tb=short
+
+      - name: Type and lint standard bridge
+        run: |
+          python -m mypy src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py
+          python -m ruff check src/grimoire/core/agentic_standard.py src/grimoire/cli/cmd_standard.py tests/test_agentic_standard.py
+
+      - name: Smoke runtime standard commands
+        run: |
+          project="$RUNNER_TEMP/standard-smoke"
+          grimoire -o json standard init "$project" --profile orchestrated --provider openai
+          grimoire -o json standard verify "$project" --profile orchestrated
+          grimoire -o json standard context build "$project"
+          grimoire -o json standard decision trace "$project"
+          grimoire -o json standard knowledge index "$project"
+          grimoire -o json standard knowledge graph "$project"
+          grimoire -o json standard hooks simulate "$project" --phase pre_context_build
+          grimoire -o json standard gate check "$project" --target-state review
+          grimoire -o json standard events audit "$project"
+          set +e
+          score_output="$(grimoire -o json standard score "$project" --profile orchestrated)"
+          score_status="$?"
+          set -e
+          echo "$score_output"
+          test "$score_status" -eq 0 -o "$score_status" -eq 1
+          SCORE_OUTPUT="$score_output" python - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["SCORE_OUTPUT"])
+          assert "dimensions" in payload
+          PY
+
+      - name: Build docs
+        run: python -m mkdocs build --quiet

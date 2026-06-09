@@ -1,13 +1,13 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/microscope.svg" width="32" height="32" alt=""> Troubleshooting — Grimoire Custom Kit
+# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Troubleshooting — Grimoire Custom Kit
 
 Solutions aux problèmes les plus fréquents.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="assets/icons/brain.svg" width="28" height="28" alt=""> 1. La mémoire sémantique ne fonctionne pas
+## <img src="../assets/icons/brain.svg" width="28" height="28" alt=""> 1. La mémoire sémantique ne fonctionne pas
 
 **Symptôme** : `**Attention** Mémoire sémantique indisponible` ou recherche peu pertinente
 
@@ -41,9 +41,9 @@ pip install -r _grimoire/_memory/requirements.txt
 python3 _grimoire/_memory/mem0-bridge.py status
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 2. cc-verify.sh ne trouve pas le bon stack
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 2. cc-verify.sh ne trouve pas le bon stack
 
 **Symptôme** : `**Attention** Aucun stack reconnu` sur un projet Go/TypeScript/etc.
 
@@ -67,9 +67,9 @@ bash _grimoire/_config/custom/cc-verify.sh --stack typescript
 bash _grimoire/_config/custom/cc-verify.sh --stack go,docker
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 3. Le pre-commit hook bloque le commit
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 3. Le pre-commit hook bloque le commit
 
 **Symptôme** : ` Commit bloqué — CC FAIL détecté`
 
@@ -101,9 +101,9 @@ chmod -x .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> 4. grimoire-init.sh écrase mon installation existante
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> 4. grimoire-init.sh écrase mon installation existante
 
 **Symptôme** : Prompt `Continuer et écraser ? (y/N)` à chaque lancement
 
@@ -119,9 +119,9 @@ bash grimoire-init.sh --name "..." --user "..." --force
 bash grimoire-init.sh --name "..." --user "..." --target /chemin/vers/projet
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 5. sil-collect.sh ne génère rien
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 5. sil-collect.sh ne génère rien
 
 **Symptôme** : `Aucune source de données disponible` / rapport vide
 
@@ -142,9 +142,9 @@ Sources attendues (toutes vides sur un projet neuf) :
 bash _grimoire/_config/custom/sil-collect.sh --force-empty
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 6. Les agents ne se souviennent pas du contexte entre sessions
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 6. Les agents ne se souviennent pas du contexte entre sessions
 
 **Symptôme** : L'agent ne connaît pas le projet au démarrage
 
@@ -164,9 +164,9 @@ ls _grimoire/_memory/agent-learnings/
 python3 _grimoire/_memory/mem0-bridge.py search "nom du projet"
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/puzzle.svg" width="28" height="28" alt=""> 7. auto_select_archetype détecte le mauvais archétype
+## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> 7. auto_select_archetype détecte le mauvais archétype
 
 **Symptôme** : `--auto` sélectionne `minimal` au lieu de `web-app` ou `infra-ops`
 
@@ -190,9 +190,9 @@ echo "Archétype : $(auto_select_archetype "$stacks")"
 bash grimoire-init.sh --name "..." --user "..." --archetype web-app
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
 
 ```bash
 chmod +x _grimoire/_config/custom/cc-verify.sh
@@ -200,9 +200,9 @@ chmod +x _grimoire/_config/custom/sil-collect.sh
 chmod +x .git/hooks/pre-commit
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 9. `python3 maintenance.py health-check` échoue
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 9. `python3 maintenance.py health-check` échoue
 
 ```bash
 # Vérifier Python
@@ -216,9 +216,9 @@ source .venv/bin/activate 2>/dev/null || true
 pip3 install -r requirements.txt
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 10. `guard` ne trouve aucun agent
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 10. `guard` ne trouve aucun agent
 
 ```bash
 # Vérifier depuis le bon répertoire (doit être la racine du kit ou du projet)
@@ -235,9 +235,9 @@ python3 framework/tools/context-guard.py --project-root /chemin/vers/projet
 
 Si aucun agent trouvé, vérifiez que `<activation` ou `NEVER break character` est présent dans les fichiers `.md`.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/dna.svg" width="28" height="28" alt=""> 11. `evolve` génère 0 mutations
+## <img src="../assets/icons/dna.svg" width="28" height="28" alt=""> 11. `evolve` génère 0 mutations
 
 C'est **normal** pour un projet neuf ou le repo kit lui-même (pas de Grimoire_TRACE).
 
@@ -256,9 +256,9 @@ bash grimoire-init.sh evolve --report
 
 Après quelques semaines d'usage réel (5+ interactions par agent), les mutations apparaîtront.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 12. `forge` génère un agent avec de mauvais tags / nommage incorrect
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 12. `forge` génère un agent avec de mauvais tags / nommage incorrect
 
 ```bash
 # Vérifier la description (éviter les caractères spéciaux)
@@ -273,9 +273,9 @@ bash grimoire-init.sh forge --install db-migrator
 
 Les tags sont dérivés des 12 domaines prédéfinis (database, security, frontend, api, testing, data, devops, monitoring, networking, storage, documentation, performance). Si le domaine n'est pas reconnu, `forge` utilise `custom`.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> 13. `bench` ne trouve pas de données / rapport vide
+## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 13. `bench` ne trouve pas de données / rapport vide
 
 ```bash
 # Vérifier que des sessions existent
@@ -290,9 +290,9 @@ bash grimoire-init.sh bench --report
 
 `bench` analyse les fichiers dans `_grimoire-output/bench-sessions/`. Si ce dossier est vide, le rapport affichera "Données insuffisantes" — c'est normal pour une installation fraîche.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/cognition.svg" width="28" height="28" alt=""> 14. Rate limit Copilot — « exhausted this model's rate limit »
+## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> 14. Rate limit Copilot — « exhausted this model's rate limit »
 
 Ce message vient du provider (GitHub / OpenAI / Anthropic) quand le quota de requêtes ou tokens par période est dépassé.
 
@@ -334,9 +334,9 @@ Ajouter dans User Settings pour basculer automatiquement sur GPT-4.1 quand le mo
    bash grimoire-init.sh doctor
    ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/flask.svg" width="28" height="28" alt=""> 15. Fuite de processus Python — VS Code test auto-discovery
+## <img src="../assets/icons/flask.svg" width="28" height="28" alt=""> 15. Fuite de processus Python — VS Code test auto-discovery
 
 **Symptôme** : Des centaines de processus `python3 -m unittest discover` apparaissent dans le gestionnaire de tâches, consommant des Go de RAM. La machine devient inutilisable (swap massif).
 
@@ -384,9 +384,9 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 > **Note** : ce problème est spécifique aux workspaces multi-root ou aux projets avec un grand nombre de fichiers de test. Les projets avec < 10 fichiers de test ne sont généralement pas affectés.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/network.svg" width="28" height="28" alt=""> 16. Erreurs réseau — ERR_CONNECTION_CLOSED
+## <img src="../assets/icons/network.svg" width="28" height="28" alt=""> 16. Erreurs réseau — ERR_CONNECTION_CLOSED
 
 **Symptôme** : `net::ERR_CONNECTION_CLOSED` ou `Désolé, erreur au niveau du réseau` dans Copilot Chat. Les agents sont interrompus en pleine exécution.
 
@@ -416,9 +416,9 @@ nordvpn allowlist add app /usr/share/code/code
 
 > **Voir aussi** : [docs/vscode-setup.md](vscode-setup.md#7-réseau-et-vpn) pour la configuration réseau complète.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> 17. Confirmations bloquantes — agents interrompus
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 17. Confirmations bloquantes — agents interrompus
 
 **Symptôme** : L'agent demande confirmation à chaque commande terminal, chaque lecture de fichier, chaque outil — rendant les workflows inutilisables.
 
@@ -434,9 +434,9 @@ nordvpn allowlist add app /usr/share/code/code
 
 > **Voir aussi** : [docs/vscode-setup.md](vscode-setup.md) pour les options de contrôle fin (approuver sélectivement, bloquer les commandes à risque).
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
+## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
 
 Si le problème persiste :
 
