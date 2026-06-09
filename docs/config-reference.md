@@ -95,16 +95,20 @@ Valeurs acceptées :
 | `collection_prefix` | `string` | `"grimoire"` | Préfixe des collections mémoire. |
 | `embedding_model` | `string` | `""` | Modèle d'embeddings (si applicable). |
 | `qdrant_url` | `string` | `""` | URL du serveur Qdrant (requis si `backend: qdrant-server`). |
+| `weaviate_url` | `string` | `""` | URL du serveur Weaviate (requis si `backend: weaviate-server`). |
+| `neo4j_uri` | `string` | `""` | URI Neo4j pour les projections graph mémoire/code/tâches. |
 | `ollama_url` | `string` | `""` | URL du serveur Ollama (requis si `backend: ollama`). |
 
 ### `memory.backend`
 
 | Valeur | Description | Dépendances |
 |---|---|---|
-| `auto` | Détection automatique du meilleur backend disponible | — |
+| `auto` | Détection automatique : Weaviate local, puis Qdrant local, Ollama, local | — |
 | `local` | Stockage fichier local (JSON) | — |
 | `qdrant-local` | Qdrant embarqué en mémoire | `pip install grimoire-kit[qdrant]` |
 | `qdrant-server` | Serveur Qdrant distant | `pip install grimoire-kit[qdrant]` + `qdrant_url` |
+| `weaviate-server` | Weaviate comme store vectoriel durable cible | `pip install grimoire-kit[weaviate]` + `weaviate_url` |
+| `mempalace` | Backend MemPalace expérimental | `pip install grimoire-kit[mempalace]` |
 | `ollama` | Embeddings via Ollama local | `pip install grimoire-kit[ollama]` + `ollama_url` |
 
 ---

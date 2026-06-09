@@ -1,0 +1,152 @@
+$schema: "grimoire-agentic-standard-pattern-catalog/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+categories:
+  - context
+  - memory
+  - orchestration
+  - workflow
+  - governance
+  - provider
+  - knowledge
+  - security
+  - quality
+  - runtime
+  - observability
+patterns:
+  - id: advanced-context-orchestrator
+    category: context
+    maturity: orchestrated
+    source_normative: context-orchestration.advanced
+    intent: "Build deterministic, budgeted, redacted context bundles."
+    required_artifacts: ["context-contract.yaml", "context-bundle.yaml"]
+    rule_refs: ["memory.freshness-required"]
+    hook_refs: ["context.require-task"]
+    check_refs: ["context.budget_invalid", "context.redaction_required"]
+  - id: governed-memory-policy
+    category: memory
+    maturity: orchestrated
+    source_normative: memory-governance.multi-level
+    intent: "Separate session, task, project, organization, semantic, episodic, and external cache memories."
+    required_artifacts: ["memory-policy.yaml"]
+    rule_refs: ["memory.freshness-required"]
+    hook_refs: []
+    check_refs: ["memory.required_types_missing"]
+  - id: evidence-gated-fsm
+    category: workflow
+    maturity: governed
+    source_normative: evidence-governance.state-machine
+    intent: "Block lifecycle transitions unless evidence is present."
+    required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
+    rule_refs: ["gate.requires-evidence"]
+    hook_refs: ["release.require-score"]
+    check_refs: ["gates.transitions_missing", "evidence.pending_gate"]
+  - id: provider-routing-contract
+    category: provider
+    maturity: controlled
+    source_normative: provider-governance.routing
+    intent: "Route provider calls through declared capability and data-policy constraints."
+    required_artifacts: ["llm-provider-registry.yaml"]
+    rule_refs: ["provider.no-undeclared-route"]
+    hook_refs: ["provider.require-declared-route"]
+    check_refs: ["providers.default_unknown", "providers.routing_policy_weak"]
+  - id: runtime-journal
+    category: runtime
+    maturity: governed
+    source_normative: runtime-observability.events
+    intent: "Record context, decision, hook, gate, and score events for auditability."
+    required_artifacts: ["runtime-journal.jsonl"]
+    rule_refs: []
+    hook_refs: []
+    check_refs: ["events.invalid_line"]
+  - id: redis-hot-memory-soft-gate
+    category: memory
+    maturity: governed
+    source_normative: memory-os.hot-memory-non-authoritative
+    intent: "Use Redis for TTL-bound session state, leases and transient events without making it a durable source of truth."
+    required_artifacts: ["memory-policy.yaml", "evidence-pack.md"]
+    rule_refs: ["memory.hot-degrades-safely"]
+    hook_refs: ["memory.hot-soft-gate"]
+    check_refs: ["memory.hot_memory_partial"]
+  - id: governed-hook-gateway
+    category: governance
+    maturity: governed
+    source_normative: hook-governance.gateway-required
+    intent: "Route hooks through a policy gateway so tool mediation, traces and evidence gates stay auditable."
+    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
+    rule_refs: ["hooks.must-use-gateway", "hooks.no-destructive-bypass"]
+    hook_refs: ["hooks.gateway-required", "tools.terminal-guard"]
+    check_refs: ["hooks.gateway_missing", "hooks.destructive_bypass"]
+  - id: skill-classification-matrix
+    category: orchestration
+    maturity: governed
+    source_normative: skill-governance.classification-required
+    intent: "Classify skills as core templates, project packs or incubator assets before promotion."
+    required_artifacts: ["hook-registry.yaml", "pattern-catalog.yaml"]
+    rule_refs: ["skills.classified-before-use"]
+    hook_refs: ["skills.require-classification"]
+    check_refs: ["skills.classification_missing"]
+  - id: governed-observability-cockpit
+    category: observability
+    maturity: governed
+    source_normative: observability-governance.cockpit-consumes-evidence
+    intent: "Generate a reproducible cockpit from governed artifacts and runtime events without making the cockpit authoritative."
+    required_artifacts: ["observability-policy.yaml", "runtime-journal.jsonl", "cockpit-report.md", "evidence-pack.md"]
+    rule_refs: ["observability.cockpit-read-only", "observability.inputs-are-declared", "observability.no-secret-export"]
+    hook_refs: []
+    check_refs: ["observability.cockpit_mutation", "observability.input_undeclared", "observability.secret_export"]
+  - id: code-graph-projection
+    category: memory
+    maturity: orchestrated
+    source_normative: memory-os.code-graph-projection
+    intent: "Project code, tasks and evidence into a verifiable graph (TOUCHES_CODE/COVERS_CODE/MEMORY_FOR) for traceable recall."
+    required_artifacts: ["memory-policy.yaml"]
+    rule_refs: ["memory.freshness-required"]
+    hook_refs: []
+    check_refs: ["memory.graph_projection_unverified"]
+  - id: governed-agent-orchestration
+    category: orchestration
+    maturity: orchestrated
+    source_normative: orchestration-governance.roles-handoff-escalation
+    intent: "Declare agent roles, handoffs, escalation and fallback so multi-agent routing cannot drift undeclared."
+    required_artifacts: ["orchestration-policy.yaml"]
+    rule_refs: ["orchestration.no-undeclared-handoff"]
+    hook_refs: []
+    check_refs: ["orchestration.role_undeclared", "orchestration.handoff_unverified"]
+  - id: governed-knowledge-indexing
+    category: knowledge
+    maturity: orchestrated
+    source_normative: knowledge-governance.index-to-source
+    intent: "Index normative documents and patterns and bind each governed check back to its normative source."
+    required_artifacts: ["knowledge-source-registry.yaml"]
+    rule_refs: ["knowledge.source-declared"]
+    hook_refs: []
+    check_refs: ["knowledge.source_unindexed"]
+  - id: mission-evidence-ledger
+    category: workflow
+    maturity: governed
+    source_normative: evidence-governance.mission-ledger
+    intent: "Bind missions, tasks and verification verdicts into an append-only evidence ledger that gates release."
+    required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
+    rule_refs: ["gate.requires-evidence"]
+    hook_refs: ["release.require-score"]
+    check_refs: ["ledger.mission_unlinked"]
+  - id: tool-mediation-gate
+    category: security
+    maturity: governed
+    source_normative: security-governance.tool-mediation-owasp
+    intent: "Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution."
+    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
+    rule_refs: ["tools.mediated-before-use"]
+    hook_refs: ["tools.terminal-guard"]
+    check_refs: ["tools.unmediated_call", "tools.threat_unmapped"]
+  - id: provider-cost-slo
+    category: provider
+    maturity: production
+    source_normative: provider-governance.cost-and-slo
+    intent: "Budget provider cost and declare SLOs so production routing reports overruns and latency breaches."
+    required_artifacts: ["llm-provider-registry.yaml"]
+    rule_refs: ["provider.cost-budgeted"]
+    hook_refs: []
+    check_refs: ["provider.cost_unbudgeted", "provider.slo_undeclared"]

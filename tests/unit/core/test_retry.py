@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -57,7 +58,7 @@ class TestWithRetry:
         assert len(calls) == 1  # No retry
 
     def test_backoff_increases_delay(self) -> None:
-        times: list[float] = []
+        delays: list[float] = []
 
         @with_retry(
             max_attempts=3,
@@ -67,17 +68,12 @@ class TestWithRetry:
             retryable=(RuntimeError,),
         )
         def slow_fail() -> None:
-            times.append(time.monotonic())
             raise RuntimeError("fail")
 
-        with pytest.raises(RuntimeError):
+        with patch("grimoire.core.retry.time.sleep", side_effect=delays.append), pytest.raises(RuntimeError):
             slow_fail()
 
-        assert len(times) == 3
-        # Second delay should be roughly >= 2x first delay
-        d1 = times[1] - times[0]
-        d2 = times[2] - times[1]
-        assert d2 >= d1 * 1.5  # Allow margin for OS scheduling
+        assert delays == [pytest.approx(0.05), pytest.approx(0.1)]
 
     def test_jitter_varies_delay(self) -> None:
         """When jitter=True, consecutive delays should not be identical."""

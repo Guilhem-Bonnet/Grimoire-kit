@@ -177,6 +177,12 @@ class TestArchetypeResolver:
         assert result.archetypes == ("web-app", "infra-ops")
         assert result.is_composite
 
+    def test_archetypes_override_accepts_agentic_standard(self) -> None:
+        result = self.resolver.resolve(_scan(), archetypes_override=["minimal", "agentic-standard"])
+        assert result.archetype == "minimal"
+        assert result.archetypes == ("minimal", "agentic-standard")
+        assert result.is_composite
+
     def test_archetypes_override_three(self) -> None:
         result = self.resolver.resolve(
             _scan(),

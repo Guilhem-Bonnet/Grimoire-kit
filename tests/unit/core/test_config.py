@@ -143,7 +143,7 @@ class TestMemoryConfig:
         with pytest.raises(GrimoireConfigError, match="Invalid memory backend"):
             MemoryConfig.from_dict({"backend": "redis"})
 
-    @pytest.mark.parametrize("backend", ["auto", "local", "qdrant-local", "qdrant-server", "ollama"])
+    @pytest.mark.parametrize("backend", ["auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"])
     def test_all_valid_backends(self, backend: str) -> None:
         mc = MemoryConfig.from_dict({"backend": backend})
         assert mc.backend == backend

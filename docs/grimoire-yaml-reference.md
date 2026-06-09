@@ -76,16 +76,20 @@ agents:
 | `collection_prefix` | string | `"grimoire"` | Préfixe des collections |
 | `embedding_model` | string | `""` | Modèle d'embedding (optionnel) |
 | `qdrant_url` | string | `""` | URL Qdrant (mode `qdrant-server`) |
+| `weaviate_url` | string | `""` | URL Weaviate (mode `weaviate-server`) |
+| `neo4j_uri` | string | `""` | URI Neo4j pour projections graph |
 | `ollama_url` | string | `""` | URL Ollama (mode `ollama`) |
 
 ### Backends disponibles
 
 | Backend | Description |
 |---------|-------------|
-| `auto` | Détection automatique du meilleur backend disponible |
+| `auto` | Détection automatique : Weaviate local, puis Qdrant local, Ollama, local |
 | `local` | Stockage fichier local (pas de dépendance externe) |
 | `qdrant-local` | Qdrant en mode local (in-memory) |
 | `qdrant-server` | Qdrant serveur distant |
+| `weaviate-server` | Weaviate comme store vectoriel durable cible |
+| `mempalace` | Backend MemPalace expérimental |
 | `ollama` | Ollama pour les embeddings |
 
 ## Section `agents`

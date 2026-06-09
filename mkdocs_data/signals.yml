@@ -1,4 +1,12 @@
 signals:
+  - title: Runtime standard agentique publié
+    path: agentic-standard-integration.md
+    date: 2026-05-29
+    kicker: v3.4.4 · PyPI · governed runtime
+    summary: Le socle exécutable du standard agentique est publié dans Grimoire Kit avec artefacts, vérifications, audit, gates et score.
+    featured: true
+    proof: true
+
   - title: Guardrails runtime agentiques
     path: grimoire-game-runtime-guardrails.md
     date: 2026-04-09

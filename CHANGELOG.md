@@ -7,6 +7,41 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-06-08
+
+### Ajouté
+
+- **Installation par besoins** — nouvelle couche d'installation custom : `grimoire standard needs`, `standard plan --needs ...`, `standard init --needs/--pattern/--memory/--interactive` et `standard doctor`. Deux fichiers déclaratifs (`framework/agentic-standard/capability-map.yaml`, `needs-catalog.yaml`) résolvent un besoin projet en profil + patterns + artefacts + extras technologiques, et écrivent un `install-manifest.yaml` auditable. Auto-install des extras opt-in via `--install-extras`.
+- **Parité patterns R8/R9/R10** — back-port dans les templates Kit des patterns `redis-hot-memory-soft-gate`, `governed-hook-gateway`, `skill-classification-matrix`, `governed-observability-cockpit`, des familles de règles `hooks`/`skills`/`observability`, du contrat `observability-policy.yaml`, de la taxonomie `managed_sources` et de la dimension de score `observability_cockpit`.
+- **Catalogue de patterns étendu (9 → 15)** — ajout de `code-graph-projection` (neo4j), `governed-agent-orchestration`, `governed-knowledge-indexing`, `mission-evidence-ledger`, `tool-mediation-gate` (mcp) et `provider-cost-slo`, câblés dans `capability-map.yaml` et `needs-catalog.yaml`.
+- **Memory OS cible** — portage du socle Weaviate + Neo4j + SQLite sidecar, migration Qdrant -> Weaviate/Neo4j, projections graph/vector, commandes `grimoire memory graph`, `memory vector`, `memory gate` et noyaux missions/evidence/policies/runtime/traces/bridges/evals.
+- **Standard Memory OS** — `grimoire standard init/verify/audit/score/gate` vérifie maintenant un contrat Memory OS cible : Redis hot memory, Weaviate mémoire sémantique durable, Neo4j projection graphe, SQLite sidecar/fallback et Qdrant en source legacy/migration uniquement.
+
+### Changé
+
+- **Détection mémoire** — `grimoire init --backend auto` privilégie désormais Weaviate quand il est disponible localement, conserve Qdrant comme fallback compatible (`qdrant-local`), puis Ollama et le backend local.
+
+## [3.4.4] - 2026-05-29
+
+### Corrigé
+
+- **CI SDK multi-OS** — stabilisation complète de `Grimoire SDK CI` : assertions CLI robustes face aux rendus Typer/Rich, couverture agentic standard incluse, smoke Windows ciblé et workflow de tests portable.
+- **Runtime standard** — sorties JSON et tests du runtime agentique rendus portables entre Linux, macOS et Windows, notamment les chemins `context`/`knowledge`.
+- **Release readiness** — correction ShellCheck, test de backoff déterministe et durcissement des tests d’édition de configuration pour débloquer la publication PyPI.
+
+## [3.4.3] - 2026-05-28
+
+### Ajouté
+
+- **Agentic Standard Bridge** — profils `minimal`, `orchestrated` et `governed`, génération des artefacts ISO/design-pattern, vérification/audit CLI et baseline de preuves.
+- **Provider onboarding** — détection non-secrète des providers, activation explicite via `standard init --provider/--providers`, politiques `hosted-safe`, `local-first` et `mixed`.
+- **Package npm préparé** — launcher `grimoire-kit` ajouté, publication npm différée en attendant l’authentification npm dédiée.
+
+### Corrigé
+
+- **Sécurité standard** — durcissement des chemins générés, rejet des `task_id` traversants, confinement des locators knowledge locaux et échappement des valeurs projet injectées dans les templates.
+- **CI/Docs** — workflow ciblé agentic standard, documentation d’extension des profils et pin explicite du bridge consommé par Forge.
+
 ## [3.4.2] - 2026-03-30
 
 ### Corrigé

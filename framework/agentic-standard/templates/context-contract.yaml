@@ -1,0 +1,55 @@
+$schema: "grimoire-agentic-standard-context-contract/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+inputs:
+  - mission_brief
+  - standard_profile
+  - task_board
+  - task_envelope
+  - memory_policy
+  - knowledge_registry
+  - provider_registry
+  - orchestration_policy
+  - accepted_risks
+bundle_sections:
+  - task_summary
+  - acceptance_criteria
+  - selected_sources
+  - excluded_sources
+  - memory_inclusions
+  - memory_exclusions
+  - memory_os
+  - knowledge_nodes
+  - provider_constraints
+  - agent_role_constraints
+  - token_or_context_budget
+  - redactions
+  - decision_inputs
+  - evidence_requirements
+  - fingerprints
+source_priority:
+  - task_envelope
+  - mission_brief
+  - task_board
+  - project_memory
+  - knowledge_sources
+budget:
+  max_context_items: 24
+  max_memory_items: 8
+  max_knowledge_sources: 8
+redaction:
+  required: true
+  forbidden_data_classes:
+    - secrets
+    - credentials
+    - personal-data
+    - regulated-data
+checks:
+  - context_is_reproducible
+  - selected_sources_are_allowed
+  - memory_injections_match_policy
+  - memory_os_contract_is_declared
+  - provider_constraints_match_registry
+  - context_budget_is_enforced
+  - redactions_are_recorded

@@ -6,6 +6,8 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -19,7 +21,7 @@ OPEN_BROWSER_OPTION = typer.Option(False, "--open-browser", help="Open browser a
 
 
 def _get_fmt(ctx: typer.Context) -> str:
-    return (ctx.obj or {}).get("output", "text")
+    return cast(str, (ctx.obj or {}).get("output", "text"))
 
 
 def _project_root(path: Path = Path()) -> Path:
@@ -35,7 +37,7 @@ def _project_root(path: Path = Path()) -> Path:
         raise typer.Exit(1) from None
 
 
-def _load_debugger_module(project_root: Path):
+def _load_debugger_module(project_root: Path) -> ModuleType:
     tool = project_root / "framework" / "tools" / "agent-debugger.py"
     if not tool.exists():
         console.print(f"[red]Debugger tool not found:[/red] {tool}")
