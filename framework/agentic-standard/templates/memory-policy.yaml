@@ -1,0 +1,146 @@
+$schema: "grimoire-agentic-standard-memory-policy/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+defaults:
+  retention: "project-defined"
+  freshness: "review-before-critical-use"
+  redaction_policy: "redact secrets, credentials, personal data, and regulated data before provider use"
+  provider_compatibility:
+    hosted: "non-secret, approved project data only"
+    local: "project-approved local data only"
+memory_os:
+  target:
+    hot_memory: "redis"
+    semantic_memory: "weaviate-server"
+    graph_projection: "neo4j"
+    sidecar: "sqlite"
+    legacy_vector_sources:
+      - "qdrant-local"
+      - "qdrant-server"
+  backend_roles:
+    redis: "Hot operational memory: TTL state, leases, locks, streams, and pub/sub; never the durable source of truth."
+    weaviate-server: "Durable semantic/vector memory target for accepted memories, knowledge facts, and code/task embeddings."
+    neo4j: "Durable typed graph projection for memories, facts, agents, tasks, evidence, files, symbols, and decisions."
+    sqlite: "Local sidecar and fallback for facts, diary entries, and offline-safe structured metadata."
+    qdrant: "Legacy vector source retained only for migration, rollback, and parity checks."
+  promotion_gates:
+    - "hot_memory_ttl_declared"
+    - "semantic_write_has_evidence"
+    - "graph_projection_has_source_refs"
+    - "qdrant_migration_bundle_verified"
+  runtime_commands:
+    - "grimoire memory gate"
+    - "grimoire memory migrate verify"
+    - "grimoire memory graph verify"
+memory_types:
+  - memory_id: "session"
+    type: "session"
+    scope: "Current interactive or automation session."
+    read_policy: "task-bound"
+    write_policy: "ephemeral"
+    retention: "short"
+    freshness: "current-session"
+    trust_level: "medium"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["task-summary", "recent-decisions"]
+  - memory_id: "task"
+    type: "task"
+    scope: "Task-specific state and evidence references."
+    read_policy: "same-task"
+    write_policy: "state-transition"
+    retention: "project"
+    freshness: "current-task"
+    trust_level: "high"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["acceptance-criteria", "evidence-links"]
+  - memory_id: "project"
+    type: "project"
+    scope: "Repository-local persistent memory."
+    read_policy: "project-root"
+    write_policy: "reviewed"
+    retention: "project"
+    freshness: "review-before-critical-use"
+    trust_level: "high"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["architecture", "standards", "constraints"]
+  - memory_id: "workspace"
+    type: "workspace"
+    scope: "Multi-project workspace context."
+    read_policy: "explicit-allowlist"
+    write_policy: "reviewed"
+    retention: "workspace"
+    freshness: "review-before-cross-project-use"
+    trust_level: "medium"
+    redaction_policy: "required"
+    provider_compatibility: ["local"]
+    allowed_context_uses: ["cross-project-reference"]
+  - memory_id: "organization"
+    type: "organization"
+    scope: "Organization-level conventions and accepted risks."
+    read_policy: "source-authority"
+    write_policy: "approved"
+    retention: "long"
+    freshness: "scheduled-review"
+    trust_level: "authoritative"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["policy", "governance"]
+  - memory_id: "procedural"
+    type: "procedural"
+    scope: "How-to memory for recurring workflows."
+    read_policy: "applicability-match"
+    write_policy: "reviewed"
+    retention: "versioned"
+    freshness: "on-change"
+    trust_level: "high"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["workflow-steps"]
+  - memory_id: "semantic"
+    type: "semantic"
+    scope: "Conceptual/domain knowledge extracted from docs or code."
+    read_policy: "source-traceable"
+    write_policy: "indexed"
+    retention: "project"
+    freshness: "index-freshness"
+    trust_level: "medium"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["domain-concepts"]
+  - memory_id: "episodic"
+    type: "episodic"
+    scope: "Historical decisions, failures, and remediations."
+    read_policy: "task-or-release-audit"
+    write_policy: "event-journal"
+    retention: "auditable"
+    freshness: "append-only"
+    trust_level: "high"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["decision-history", "incident-history"]
+  - memory_id: "long-term"
+    type: "long_term"
+    scope: "Durable learnings accepted for future sessions."
+    read_policy: "approved-learning"
+    write_policy: "explicit-approval"
+    retention: "long"
+    freshness: "scheduled-review"
+    trust_level: "high"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["durable-constraints"]
+  - memory_id: "external-knowledge-cache"
+    type: "external_knowledge_cache"
+    scope: "Indexed knowledge used by retrieval."
+    read_policy: "locator-contained"
+    write_policy: "indexer"
+    retention: "cache"
+    freshness: "index-freshness"
+    trust_level: "source-dependent"
+    redaction_policy: "required"
+    provider_compatibility: ["hosted", "local"]
+    allowed_context_uses: ["retrieval-context"]

@@ -1,0 +1,171 @@
+$schema: "grimoire-agentic-standard-capability-map/v1"
+
+metadata:
+  id: agentic-standard-capability-map
+  version: "0.1.0"
+  owner: grimoire-kit
+  intent: >
+    Map each executable pattern to the artifacts, rules, checks and optional
+    technology extras it requires, so a custom install can select only what a
+    project's flow actually needs.
+
+# Technology extras mirror [project.optional-dependencies] in pyproject.toml.
+# `pip_extra` is the name used in `pip install 'grimoire-kit[<extra>]'`.
+tech_extras:
+  redis:
+    pip_extra: redis
+    role: "Hot memory: TTL, leases, locks, streams/pubsub. Never a durable source of truth."
+    degrades_to: "local SQLite sidecar"
+  weaviate:
+    pip_extra: weaviate
+    role: "Durable semantic/vector memory (target backend)."
+    degrades_to: "local SQLite sidecar"
+  neo4j:
+    pip_extra: neo4j
+    role: "Durable graph projection: memory, code, task, evidence, decision."
+    degrades_to: "no graph projection"
+  qdrant:
+    pip_extra: qdrant
+    role: "Legacy vector backend, limited to migration/rollback."
+    degrades_to: "weaviate or local"
+  mempalace:
+    pip_extra: mempalace
+    role: "Experimental local vector store (chromadb)."
+    degrades_to: "local SQLite sidecar"
+  ollama:
+    pip_extra: ollama
+    role: "Local LLM provider for local-first / offline routing."
+    degrades_to: "hosted provider routing"
+  mcp:
+    pip_extra: mcp
+    role: "Model Context Protocol server, tools and bridges."
+    degrades_to: "no MCP tool mediation"
+
+# profile_min uses the profile ladder: starter < controlled < orchestrated < governed < production.
+# artifacts reference artifact_type keys declared in profile-map.yaml.
+patterns:
+  advanced-context-orchestrator:
+    category: context
+    artifacts: [context_contract]
+    rules: [memory.freshness-required]
+    checks: [context.budget_invalid, context.redaction_required]
+    tech_extras: []
+    profile_min: orchestrated
+  governed-memory-policy:
+    category: memory
+    artifacts: [memory_policy]
+    rules: [memory.freshness-required]
+    checks: [memory.required_types_missing]
+    tech_extras: []
+    profile_min: orchestrated
+  evidence-gated-fsm:
+    category: workflow
+    artifacts: [evidence_gates]
+    rules: [gate.requires-evidence]
+    checks: [gates.transitions_missing, evidence.pending_gate]
+    tech_extras: []
+    profile_min: starter
+  provider-routing-contract:
+    category: provider
+    artifacts: [llm_provider_registry]
+    rules: [provider.no-undeclared-route]
+    checks: [providers.default_unknown]
+    tech_extras: []
+    profile_min: controlled
+  runtime-journal:
+    category: runtime
+    artifacts: []
+    rules: []
+    checks: [events.invalid_line]
+    tech_extras: []
+    profile_min: governed
+  redis-hot-memory-soft-gate:
+    category: memory
+    artifacts: [memory_policy]
+    rules: [memory.hot-degrades-safely]
+    checks: [memory.hot_memory_partial]
+    tech_extras: [redis]
+    profile_min: governed
+  governed-hook-gateway:
+    category: governance
+    artifacts: [hook_registry, rule_packs]
+    rules: [hooks.must-use-gateway, hooks.no-destructive-bypass]
+    checks: [hooks.gateway_missing, hooks.destructive_bypass]
+    tech_extras: []
+    profile_min: governed
+  skill-classification-matrix:
+    category: orchestration
+    artifacts: [hook_registry, pattern_catalog]
+    rules: [skills.classified-before-use]
+    checks: [skills.classification_missing]
+    tech_extras: []
+    profile_min: governed
+  governed-observability-cockpit:
+    category: observability
+    artifacts: [observability_policy]
+    rules: [observability.cockpit-read-only, observability.inputs-are-declared, observability.no-secret-export]
+    checks: [observability.cockpit_mutation, observability.input_undeclared, observability.secret_export]
+    tech_extras: []
+    profile_min: governed
+  code-graph-projection:
+    category: memory
+    artifacts: [memory_policy]
+    rules: [memory.freshness-required]
+    checks: [memory.graph_projection_unverified]
+    tech_extras: [neo4j]
+    profile_min: orchestrated
+  governed-agent-orchestration:
+    category: orchestration
+    artifacts: [orchestration_policy]
+    rules: [orchestration.no-undeclared-handoff]
+    checks: [orchestration.role_undeclared, orchestration.handoff_unverified]
+    tech_extras: []
+    profile_min: orchestrated
+  governed-knowledge-indexing:
+    category: knowledge
+    artifacts: [knowledge_source_registry]
+    rules: [knowledge.source-declared]
+    checks: [knowledge.source_unindexed]
+    tech_extras: []
+    profile_min: orchestrated
+  mission-evidence-ledger:
+    category: workflow
+    artifacts: [evidence_gates, evidence_pack]
+    rules: [gate.requires-evidence]
+    checks: [ledger.mission_unlinked]
+    tech_extras: []
+    profile_min: governed
+  tool-mediation-gate:
+    category: security
+    artifacts: [hook_registry, rule_packs]
+    rules: [tools.mediated-before-use]
+    checks: [tools.unmediated_call, tools.threat_unmapped]
+    tech_extras: [mcp]
+    profile_min: governed
+  provider-cost-slo:
+    category: provider
+    artifacts: [llm_provider_registry]
+    rules: [provider.cost-budgeted]
+    checks: [provider.cost_unbudgeted, provider.slo_undeclared]
+    tech_extras: []
+    profile_min: production
+
+# Memory tiers are capabilities layered onto governed-memory-policy. Selecting a
+# tier pulls its backing tech extra without changing the core (SQLite) baseline.
+memory_capabilities:
+  semantic-memory:
+    tech_extras: [weaviate]
+    backs_pattern: governed-memory-policy
+    role: "RAG / durable semantic recall."
+  graph-memory:
+    tech_extras: [neo4j]
+    backs_pattern: governed-memory-policy
+    role: "Verifiable knowledge/code graph."
+  hot-memory:
+    tech_extras: [redis]
+    backs_pattern: redis-hot-memory-soft-gate
+    role: "Session/hot cache, leases, transient events."
+  legacy-migration:
+    tech_extras: [qdrant]
+    backs_pattern: governed-memory-policy
+    role: "Migrate/rollback from a legacy Qdrant store."

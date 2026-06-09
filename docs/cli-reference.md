@@ -22,7 +22,7 @@ grimoire init [PATH] [OPTIONS]
 |--------|-------------|--------|
 | `--name TEXT` | Nom du projet | Nom du répertoire |
 | `--archetype, -a` | Archétype d'agents | `minimal` |
-| `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `ollama`) | `auto` |
+| `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |

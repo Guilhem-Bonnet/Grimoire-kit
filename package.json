@@ -1,0 +1,47 @@
+{
+  "name": "grimoire-kit",
+  "version": "3.4.3",
+  "description": "Composable AI agent platform — personas, memory, workflows, and quality automation for any project.",
+  "license": "MIT",
+  "homepage": "https://guilhem-bonnet.github.io/Grimoire-kit/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guilhem-Bonnet/Grimoire-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues"
+  },
+  "bin": {
+    "grimoire": "npm/bin/grimoire-kit.js",
+    "grimoire-kit": "npm/bin/grimoire-kit.js"
+  },
+  "files": [
+    "archetypes/",
+    "framework/",
+    "npm/",
+    "src/grimoire/",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml"
+  ],
+  "scripts": {
+    "pack:dry-run": "npm pack --dry-run",
+    "verify:node-wrapper": "node npm/bin/grimoire-kit.js --node-wrapper-version"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "llm",
+    "workflow",
+    "copilot",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

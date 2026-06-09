@@ -183,7 +183,10 @@ def _apply_copilot(path: Path, vals: UserValues) -> bool:
     ]
     updated = text
     for pat, value in replacements:
-        updated = re.sub(pat, lambda m, v=value: m.group(1) + v, updated)
+        def replace_value(match: re.Match[str], replacement: str = value) -> str:
+            return match.group(1) + replacement
+
+        updated = re.sub(pat, replace_value, updated)
     if updated != text:
         path.write_text(updated, encoding="utf-8")
         return True

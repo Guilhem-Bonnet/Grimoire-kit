@@ -1,0 +1,296 @@
+$schema: "grimoire-agentic-standard-profile-map/v1"
+
+metadata:
+  id: agentic-standard-profile-map
+  version: "0.1.0"
+  owner: grimoire-kit
+  upstream_standard:
+    name: "Standard de structure agentique"
+    repository: "processus-developpement-agentique"
+    canonical_entrypoint: "docs/norme-structure-agentique.md"
+    normative_matrix: "docs/matrice-normative-maitresse.md"
+  intent: >
+    Map an external normative corpus to concrete Grimoire Kit profiles,
+    templates, checks, and evidence packs.
+
+principles:
+  - id: standard-is-upstream
+    rule: "Grimoire Kit consumes and traces the standard; it does not redefine it."
+  - id: evidence-gated-flow
+    rule: "A task is not complete until required evidence for the selected profile exists."
+  - id: provider-neutral-llm
+    rule: "Provider/model usage is declared through a registry before execution."
+  - id: knowledge-is-not-memory
+    rule: "Indexed external documentation is a knowledge base source, not agent memory."
+  - id: context-is-orchestrated
+    rule: "Context is selected, ranked, bounded, and justified before reaching an agent."
+
+artifact_types:
+  mission_brief:
+    template: "framework/agentic-standard/templates/mission-brief.md"
+    purpose: "Declare project scope, profile, risk level, and upstream standard references."
+  task_envelope:
+    template: "framework/agentic-standard/templates/task-envelope.md"
+    purpose: "Wrap an agentic task with state, context inputs, tools, checks, and evidence gates."
+  evidence_pack:
+    template: "framework/agentic-standard/templates/evidence-pack.md"
+    purpose: "Collect proof that a task, workflow, or release satisfied its declared controls."
+  compliance_declaration:
+    template: "framework/agentic-standard/templates/compliance-declaration.md"
+    purpose: "Declare profile-level conformance with explicit gaps and accepted deviations."
+  knowledge_source_registry:
+    template: "framework/agentic-standard/templates/knowledge-source-registry.yaml"
+    purpose: "Declare external documentation sources to index and their trust boundaries."
+  llm_provider_registry:
+    template: "framework/agentic-standard/templates/llm-provider-registry.yaml"
+    purpose: "Declare LLM providers, capabilities, data policy, routing, and fallback."
+  task_board:
+    template: "framework/agentic-standard/templates/task-board.yaml"
+    purpose: "Govern agentic work with states, owners, blockers, evidence, decisions, and remediation links."
+  memory_policy:
+    template: "framework/agentic-standard/templates/memory-policy.yaml"
+    purpose: "Declare memory types, scopes, retention, freshness, trust, redaction, and provider compatibility."
+  context_contract:
+    template: "framework/agentic-standard/templates/context-contract.yaml"
+    purpose: "Define deterministic context bundle assembly and validation rules."
+  decision_graph:
+    template: "framework/agentic-standard/templates/decision-graph.yaml"
+    purpose: "Declare explainable agentic decisions and decision record requirements."
+  rule_packs:
+    template: "framework/agentic-standard/templates/rule-packs.yaml"
+    purpose: "Declare executable normative rules mapped to checks, hooks, events, and remediation."
+  hook_registry:
+    template: "framework/agentic-standard/templates/hook-registry.yaml"
+    purpose: "Declare runtime hook phases, actions, and safety policies."
+  orchestration_policy:
+    template: "framework/agentic-standard/templates/orchestration-policy.yaml"
+    purpose: "Declare agents, personas, roles, autonomy limits, handoffs, escalation, and rollback."
+  evidence_gates:
+    template: "framework/agentic-standard/templates/evidence-gates.yaml"
+    purpose: "Declare evidence-gated task lifecycle transitions."
+  pattern_catalog:
+    template: "framework/agentic-standard/templates/pattern-catalog.yaml"
+    purpose: "Classify executable agentic patterns and map them to artifacts, rules, and checks."
+  compliance_score:
+    template: "framework/agentic-standard/templates/compliance-score.yaml"
+    purpose: "Declare multidimensional compliance scoring and profile thresholds."
+  remediation_plan:
+    template: "framework/agentic-standard/templates/remediation-plan.yaml"
+    purpose: "Declare remediation action semantics for audit findings."
+  accepted_risks:
+    template: "framework/agentic-standard/templates/accepted-risks.yaml"
+    purpose: "Declare governed risk acceptances and expiry policy."
+  waivers:
+    template: "framework/agentic-standard/templates/waivers.yaml"
+    purpose: "Declare temporary governance waivers and approval evidence."
+  observability_policy:
+    template: "framework/agentic-standard/templates/observability-policy.yaml"
+    purpose: "Declare reproducible cockpit inputs, outputs, views, redaction, and non-authoritative projection rules."
+
+profiles:
+  - id: starter
+    display_name: "Starter"
+    target: "Individual or small project adopting a minimal standard-aware flow."
+    maturity: 1
+    required_artifacts:
+      - mission_brief
+      - task_envelope
+      - evidence_pack
+    recommended_archetypes:
+      - minimal
+      - agentic-standard
+    mapped_capabilities:
+      - workflow-state-engine
+      - evidence-gated-workflow
+      - tool-blast-radius-limiter
+    minimum_evidence:
+      - "Selected profile and task state are declared."
+      - "Tools and writable paths are bounded."
+      - "Completion includes validation evidence or an explicit non-applicability note."
+
+  - id: controlled
+    display_name: "Controlled"
+    target: "Team project requiring repeatable governance and provider-neutral LLM routing."
+    maturity: 2
+    required_artifacts:
+      - mission_brief
+      - task_envelope
+      - evidence_pack
+      - llm_provider_registry
+      - compliance_declaration
+    recommended_archetypes:
+      - minimal
+      - agentic-standard
+      - fix-loop
+    mapped_capabilities:
+      - llm-provider-abstraction
+      - guardrail-contract
+      - mcp-trust-gate
+      - prompt-version-observability
+    minimum_evidence:
+      - "Every provider/model call is declared in the provider registry."
+      - "Guardrails define allow, deny, and escalation behavior."
+      - "Prompt, instruction, and capability changes are traceable."
+
+  - id: orchestrated
+    display_name: "Orchestrated"
+    target: "Multi-agent flow with advanced context routing and external knowledge grafting."
+    maturity: 3
+    required_artifacts:
+      - mission_brief
+      - task_board
+      - task_envelope
+      - evidence_pack
+      - knowledge_source_registry
+      - llm_provider_registry
+      - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+    recommended_archetypes:
+      - minimal
+      - agentic-standard
+      - features/vector-memory
+      - platform-engineering
+    mapped_capabilities:
+      - advanced-context-orchestrator
+      - knowledge-base-indexer
+      - memory-integrity-validator
+      - runtime-provider-contract
+      - trajectory-logging
+    minimum_evidence:
+      - "Context selections cite their source, freshness, and reason for inclusion."
+      - "Knowledge sources have indexing mode, trust level, and refresh policy."
+      - "Memory and knowledge base writes are separated."
+
+  - id: governed
+    display_name: "Governed"
+    target: "Organization-grade flow with policy, audit, and environment-aware controls."
+    maturity: 4
+    required_artifacts:
+      - mission_brief
+      - task_board
+      - task_envelope
+      - evidence_pack
+      - knowledge_source_registry
+      - llm_provider_registry
+      - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+      - compliance_score
+      - remediation_plan
+      - accepted_risks
+      - waivers
+      - observability_policy
+    recommended_archetypes:
+      - minimal
+      - agentic-standard
+      - infra-ops
+      - platform-engineering
+    mapped_capabilities:
+      - policy-by-environment
+      - workspace-isolation
+      - browser-tool-contract
+      - agent-telemetry-plane
+      - session-reliability-slo-reporter
+    minimum_evidence:
+      - "Environment policy states what changes between local, CI, staging, and production."
+      - "Workspace isolation and network/tool boundaries are declared."
+      - "Telemetry and audit trails cover workflow state transitions."
+
+  - id: production
+    display_name: "Production"
+    target: "Enterprise or public critical flow with SLOs, dry-runs, cost controls, and release gates."
+    maturity: 5
+    required_artifacts:
+      - mission_brief
+      - task_board
+      - task_envelope
+      - evidence_pack
+      - knowledge_source_registry
+      - llm_provider_registry
+      - compliance_declaration
+      - memory_policy
+      - context_contract
+      - decision_graph
+      - rule_packs
+      - hook_registry
+      - orchestration_policy
+      - evidence_gates
+      - pattern_catalog
+      - compliance_score
+      - remediation_plan
+      - accepted_risks
+      - waivers
+      - observability_policy
+    recommended_archetypes:
+      - minimal
+      - agentic-standard
+      - infra-ops
+      - platform-engineering
+      - features/vector-memory
+    mapped_capabilities:
+      - kubernetes-agent-control-plane
+      - cluster-action-dry-run
+      - llm-cost-registry
+      - doc-to-graph-pipeline
+      - flow-dsl-minimal
+    minimum_evidence:
+      - "High-risk actions support dry-run and rollback proof."
+      - "Cost, latency, reliability, and quality signals are recorded for critical runs."
+      - "Release gates fail closed when mandatory evidence is missing."
+
+generation_targets:
+  project_root:
+    - path: "_grimoire/standard/mission-brief.md"
+      source_artifact: mission_brief
+    - path: "_grimoire/standard/compliance-declaration.md"
+      source_artifact: compliance_declaration
+    - path: "_grimoire/standard/knowledge-source-registry.yaml"
+      source_artifact: knowledge_source_registry
+    - path: "_grimoire/standard/llm-provider-registry.yaml"
+      source_artifact: llm_provider_registry
+    - path: "_grimoire/standard/task-board.yaml"
+      source_artifact: task_board
+    - path: "_grimoire/standard/memory-policy.yaml"
+      source_artifact: memory_policy
+    - path: "_grimoire/standard/context-contract.yaml"
+      source_artifact: context_contract
+    - path: "_grimoire/standard/decision-graph.yaml"
+      source_artifact: decision_graph
+    - path: "_grimoire/standard/rule-packs.yaml"
+      source_artifact: rule_packs
+    - path: "_grimoire/standard/hook-registry.yaml"
+      source_artifact: hook_registry
+    - path: "_grimoire/standard/orchestration-policy.yaml"
+      source_artifact: orchestration_policy
+    - path: "_grimoire/standard/evidence-gates.yaml"
+      source_artifact: evidence_gates
+    - path: "_grimoire/standard/pattern-catalog.yaml"
+      source_artifact: pattern_catalog
+    - path: "_grimoire/standard/compliance-score.yaml"
+      source_artifact: compliance_score
+    - path: "_grimoire/standard/remediation-plan.yaml"
+      source_artifact: remediation_plan
+    - path: "_grimoire/standard/accepted-risks.yaml"
+      source_artifact: accepted_risks
+    - path: "_grimoire/standard/waivers.yaml"
+      source_artifact: waivers
+    - path: "_grimoire/standard/observability-policy.yaml"
+      source_artifact: observability_policy
+  task_runtime:
+    - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
+      source_artifact: task_envelope
+    - path: "_grimoire-output/evidence/{task-id}/evidence-pack.md"
+      source_artifact: evidence_pack
