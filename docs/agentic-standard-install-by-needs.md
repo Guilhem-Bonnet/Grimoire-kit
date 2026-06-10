@@ -21,11 +21,41 @@ Trois fichiers déclaratifs sous `framework/agentic-standard/` pilotent le tout 
 - `capability-map.yaml` — la matrice pattern → exigences + technologies ;
 - `install-manifest.yaml` — généré par projet, trace la sélection pour audit et ré-exécution.
 
+## Commencer petit (rampe progressive)
+
+Le catalogue est **tiéré** pour ne pas noyer un nouvel arrivant : on commence petit,
+on grandit au besoin.
+
+| Tier | Pour qui | Exemples | Empreinte typique |
+|---|---|---|---|
+| **Essentials — start here** | premier projet, prototypage | `solo-prototyping` ▶, `provider-neutral`, `semantic-memory-rag` | 1–2 patterns, 0–1 service |
+| **Advanced — add when needed** | un besoin précis qui émerge | `hot-session-cache`, `knowledge-graph`, `multi-agent-orchestration`, `tool-mediation-security`, `hooks-skills-governance`, `observability-cockpit` | 1–4 patterns |
+| **Enterprise — full governance** | organisation, production critique | `enterprise-governance`, `production-release-gating` | 13–15 patterns, 3–4 services |
+
+Principes UX :
+
+- **Point de départ recommandé** — `solo-prototyping` (marqué `▶`), profil `starter`,
+  **un seul pattern**, zéro service externe. C'est aussi le défaut de l'assistant
+  interactif (Entrée = besoin recommandé).
+- **Défaut minimal** — `grimoire standard init` sans `--needs`/`--profile` scaffolde le
+  profil `starter` (pas un profil lourd), avec un rappel pour choisir par besoin.
+- **Empreinte visible** — `grimoire standard needs` affiche, par besoin, le profil, le
+  **nombre de patterns** et le **nombre de services externes** : le coût est lisible
+  *avant* de choisir.
+- **Divulgation progressive** — la liste des 15 patterns reste repliée ;
+  `grimoire standard needs --explain` révèle les patterns derrière chaque besoin
+  seulement quand on le demande.
+- **Grandir plus tard** — on ré-exécute `grimoire standard init` avec la liste de besoins
+  enrichie ; le profil plancher s'ajuste automatiquement (ajouter un pattern lourd fait
+  monter le profil) et l'`install-manifest.yaml` retrace la sélection courante pour audit
+  et rejouabilité.
+
 ## Commandes
 
 | Commande | Rôle |
 |---|---|
-| `grimoire standard needs` | Liste les besoins disponibles et leurs patterns. |
+| `grimoire standard needs` | Liste les besoins **groupés par tier**, avec leur empreinte (profil · patterns · services) ; `▶` marque le point de départ recommandé. |
+| `grimoire standard needs --explain` | Ajoute le détail des patterns activés par chaque besoin. |
 | `grimoire standard plan --needs a,b,c` | Affiche le plan résolu (profil, patterns, extras, commande `pip`) sans rien écrire. |
 | `grimoire standard init <dir> --needs a,b,c` | Résout le plan, scaffolde les artefacts, écrit `install-manifest.yaml` et imprime la commande `pip`. |
 | `grimoire standard init <dir> --interactive` | Assistant interactif : sélection des besoins, aperçu du plan, confirmation. |
@@ -59,19 +89,21 @@ $ grimoire standard init ./my-project --needs semantic-memory-rag
 
 ## Catalogue de besoins
 
-| Besoin | Description | Profil | Mémoire |
-|---|---|---|---|
-| `solo-prototyping` | Solo dev / quick prototype (minimal governance) | `starter` | — |
-| `provider-neutral` | Provider-neutral / local-first LLM routing | `controlled` | — |
-| `semantic-memory-rag` | Semantic memory / RAG over your documents | `orchestrated` | semantic-memory |
-| `knowledge-graph` | Verifiable knowledge / code graph | `orchestrated` | graph-memory |
-| `hot-session-cache` | Fast session / hot memory cache | `governed` | hot-memory |
-| `multi-agent-orchestration` | Multiple agents with handoff / escalation | `orchestrated` | — |
-| `tool-mediation-security` | Mediate tools / MCP calls (OWASP agentic threats) | `governed` | — |
-| `hooks-skills-governance` | Govern hooks and skills (gateway + classification) | `governed` | — |
-| `observability-cockpit` | Observability cockpit / governed dashboards | `governed` | — |
-| `enterprise-governance` | Organization-grade governance (full controls) | `governed` | semantic-memory, graph-memory |
-| `production-release-gating` | Production critical flow with release gates | `production` | semantic-memory, graph-memory, hot-memory |
+| Tier | Besoin | Description | Profil | Mémoire |
+|---|---|---|---|---|
+| Essentials | `solo-prototyping` ▶ | Solo dev / quick prototype (minimal governance) | `starter` | — |
+| Essentials | `provider-neutral` | Provider-neutral / local-first LLM routing | `controlled` | — |
+| Essentials | `semantic-memory-rag` | Semantic memory / RAG over your documents | `orchestrated` | semantic-memory |
+| Advanced | `knowledge-graph` | Verifiable knowledge / code graph | `orchestrated` | graph-memory |
+| Advanced | `hot-session-cache` | Fast session / hot memory cache | `governed` | hot-memory |
+| Advanced | `multi-agent-orchestration` | Multiple agents with handoff / escalation | `orchestrated` | — |
+| Advanced | `tool-mediation-security` | Mediate tools / MCP calls (OWASP agentic threats) | `governed` | — |
+| Advanced | `hooks-skills-governance` | Govern hooks and skills (gateway + classification) | `governed` | — |
+| Advanced | `observability-cockpit` | Observability cockpit / governed dashboards | `governed` | — |
+| Enterprise | `enterprise-governance` | Organization-grade governance (full controls) | `governed` | semantic-memory, graph-memory |
+| Enterprise | `production-release-gating` | Production critical flow with release gates | `production` | semantic-memory, graph-memory, hot-memory |
+
+`▶` = point de départ recommandé pour un nouvel utilisateur.
 
 ## Matrice patterns → profil → technologie
 
