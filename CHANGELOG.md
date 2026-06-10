@@ -7,6 +7,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Rampe « commencer petit » pour l'installation par besoins** — le `needs-catalog.yaml` est désormais **tiéré** (`essential` / `advanced` / `enterprise`) avec un besoin de départ recommandé (`solo-prototyping`, marqué `▶`). `grimoire standard needs` regroupe les besoins par tier et affiche leur **empreinte** (profil · nombre de patterns · nombre de services externes) ; `grimoire standard needs --explain` révèle à la demande les patterns derrière chaque besoin (divulgation progressive). L'assistant `standard init --interactive` ordonne les besoins essentiels d'abord et pré-sélectionne le besoin recommandé (Entrée = recommandé). Documentation : section « Commencer petit (rampe progressive) » dans `docs/agentic-standard-install-by-needs.md`.
+
+### Changé
+
+- **Défaut minimal de `grimoire standard init`** — sans `--needs`/`--profile`, l'init scaffolde désormais le profil **`starter`** (au lieu de `orchestrated`), avec un rappel pour choisir par besoin. Le comportement résolu via `--needs`/`--pattern` est inchangé.
+
 ## [3.5.0] - 2026-06-08
 
 ### Ajouté

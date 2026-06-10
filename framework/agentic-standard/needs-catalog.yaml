@@ -12,6 +12,8 @@ metadata:
 # Each need:
 #   id                 stable selector used by `grimoire standard init --needs <id>`
 #   label              human-readable choice shown in the interactive wizard
+#   tier               discovery tier for progressive disclosure: essential | advanced | enterprise
+#   recommended        optional bool; the single "start here" entry surfaced first to newcomers
 #   recommended_profile  profile ladder floor for this need
 #   patterns           catalog pattern ids pulled in by this need
 #   memory_capabilities optional memory tiers (semantic/graph/hot/legacy)
@@ -20,6 +22,8 @@ metadata:
 needs:
   - id: solo-prototyping
     label: "Solo dev / quick prototype (minimal governance)"
+    tier: essential
+    recommended: true
     recommended_profile: starter
     patterns: [evidence-gated-fsm]
     memory_capabilities: []
@@ -28,6 +32,7 @@ needs:
 
   - id: provider-neutral
     label: "Provider-neutral / local-first LLM routing"
+    tier: essential
     recommended_profile: controlled
     patterns: [provider-routing-contract]
     memory_capabilities: []
@@ -36,6 +41,7 @@ needs:
 
   - id: semantic-memory-rag
     label: "Semantic memory / RAG over your documents"
+    tier: essential
     recommended_profile: orchestrated
     patterns: [governed-memory-policy, advanced-context-orchestrator]
     memory_capabilities: [semantic-memory]
@@ -44,6 +50,7 @@ needs:
 
   - id: knowledge-graph
     label: "Verifiable knowledge / code graph"
+    tier: advanced
     recommended_profile: orchestrated
     patterns: [governed-memory-policy, advanced-context-orchestrator, code-graph-projection, governed-knowledge-indexing]
     memory_capabilities: [graph-memory]
@@ -52,6 +59,7 @@ needs:
 
   - id: hot-session-cache
     label: "Fast session / hot memory cache"
+    tier: advanced
     recommended_profile: governed
     patterns: [redis-hot-memory-soft-gate]
     memory_capabilities: [hot-memory]
@@ -60,6 +68,7 @@ needs:
 
   - id: multi-agent-orchestration
     label: "Multiple agents with handoff / escalation"
+    tier: advanced
     recommended_profile: orchestrated
     patterns: [advanced-context-orchestrator, skill-classification-matrix, governed-agent-orchestration]
     memory_capabilities: []
@@ -68,6 +77,7 @@ needs:
 
   - id: tool-mediation-security
     label: "Mediate tools / MCP calls (OWASP agentic threats)"
+    tier: advanced
     recommended_profile: governed
     patterns: [tool-mediation-gate, governed-hook-gateway]
     memory_capabilities: []
@@ -76,6 +86,7 @@ needs:
 
   - id: hooks-skills-governance
     label: "Govern hooks and skills (gateway + classification)"
+    tier: advanced
     recommended_profile: governed
     patterns: [governed-hook-gateway, skill-classification-matrix]
     memory_capabilities: []
@@ -84,6 +95,7 @@ needs:
 
   - id: observability-cockpit
     label: "Observability cockpit / governed dashboards"
+    tier: advanced
     recommended_profile: governed
     patterns: [governed-observability-cockpit, runtime-journal]
     memory_capabilities: []
@@ -92,6 +104,7 @@ needs:
 
   - id: enterprise-governance
     label: "Organization-grade governance (full controls)"
+    tier: enterprise
     recommended_profile: governed
     patterns:
       - advanced-context-orchestrator
@@ -113,6 +126,7 @@ needs:
 
   - id: production-release-gating
     label: "Production critical flow with release gates"
+    tier: enterprise
     recommended_profile: production
     patterns:
       - advanced-context-orchestrator

@@ -294,6 +294,36 @@ def _split_csv(values: list[str] | None) -> list[str]:
     return collected
 
 
+_TIER_ORDER: tuple[str, ...] = ("essential", "advanced", "enterprise")
+_TIER_HEADING: dict[str, str] = {
+    "essential": "Essentials — start here",
+    "advanced": "Advanced — add when needed",
+    "enterprise": "Enterprise — full governance",
+}
+
+
+def _need_tier(need: dict[str, Any]) -> str:
+    tier = str(need.get("tier", "")).strip().lower()
+    return tier if tier in _TIER_ORDER else "advanced"
+
+
+def _sorted_needs(needs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order needs essentials-first, recommended-first within a tier."""
+
+    def sort_key(need: dict[str, Any]) -> tuple[int, int, str]:
+        tier_rank = _TIER_ORDER.index(_need_tier(need))
+        recommended_rank = 0 if need.get("recommended") else 1
+        return (tier_rank, recommended_rank, str(need.get("id", "")))
+
+    return sorted(needs, key=sort_key)
+
+
+def _need_footprint(need_id: str) -> tuple[str, int, int]:
+    """Return (profile, pattern_count, external_service_count) for a single need."""
+    plan = resolve_install_plan(needs=[need_id])
+    return (plan.profile, len(plan.patterns), len(plan.tech_extras))
+
+
 def _plan_to_json(plan: InstallPlan) -> dict[str, object]:
     return {
         "profile": plan.profile,
@@ -314,6 +344,10 @@ def _print_plan(plan: InstallPlan) -> None:
     if plan.needs:
         console.print(f"  [bold]needs[/bold]: {', '.join(plan.needs)}")
     console.print(f"  [bold]patterns[/bold]: {', '.join(plan.patterns) or '-'}")
+    console.print(
+        f"  [bold]footprint[/bold]: {len(plan.patterns)} pattern(s) · "
+        f"{len(plan.tech_extras)} external service(s)"
+    )
     if plan.memory_capabilities:
         console.print(f"  [bold]memory[/bold]: {', '.join(plan.memory_capabilities)}")
     if plan.extra_artifacts:
@@ -349,25 +383,39 @@ def _install_manifest_text(plan: InstallPlan, project_name: str | None, task_id:
 
 def _interactive_install_plan(project_name: str | None) -> tuple[InstallPlan, str | None]:
     catalog = load_needs_catalog()
-    needs = [n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n]
-    console.print("[bold]Grimoire custom install[/bold] — select the needs that match your project.\n")
-    table = Table(title="Available needs")
+    needs = _sorted_needs([n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n])
+    console.print("[bold]Grimoire custom install[/bold] — start small, pick the needs that match your project.\n")
+    table = Table(title="Available needs (Essentials first)")
     table.add_column("#")
+    table.add_column(" ", justify="center")
+    table.add_column("Tier")
     table.add_column("Need")
     table.add_column("Profile")
-    table.add_column("What it adds")
+    table.add_column("Patterns", justify="right")
+    last_tier: str | None = None
+    default_choice = "1"
     for index, need in enumerate(needs, start=1):
+        tier = _need_tier(need)
+        profile, n_patterns, _services = _need_footprint(str(need["id"]))
+        if need.get("recommended"):
+            default_choice = str(index)
         table.add_row(
             str(index),
+            "[green]▶[/green]" if need.get("recommended") else "",
+            _TIER_HEADING[tier] if tier != last_tier else "",
             str(need.get("label", need["id"])),
-            str(need.get("recommended_profile", "-")),
-            str(need.get("rationale", "")),
+            str(profile),
+            str(n_patterns),
         )
+        last_tier = tier
     console.print(table)
 
     if project_name is None:
         project_name = typer.prompt("Project name", default="").strip() or None
-    raw = typer.prompt("Select needs (comma-separated numbers or ids)", default="")
+    raw = typer.prompt(
+        "Select needs (comma-separated numbers or ids; Enter = recommended)",
+        default=default_choice,
+    )
     selected: list[str] = []
     for token in str(raw).replace(",", " ").split():
         token = token.strip()
@@ -382,36 +430,71 @@ def _interactive_install_plan(project_name: str | None) -> tuple[InstallPlan, st
 
 
 @standard_app.command("needs")
-def list_needs(ctx: typer.Context) -> None:
-    """List user-facing project needs that drive a custom install."""
+def list_needs(
+    ctx: typer.Context,
+    explain: bool = typer.Option(False, "--explain", help="Also show the patterns each need activates."),
+) -> None:
+    """List user-facing project needs that drive a custom install (grouped by tier)."""
     catalog = load_needs_catalog()
-    needs = [n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n]
+    needs = _sorted_needs([n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n])
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps([
-            {
+        payload: list[dict[str, object]] = []
+        for need in needs:
+            profile, n_patterns, n_services = _need_footprint(str(need["id"]))
+            payload.append({
                 "id": need["id"],
                 "label": need.get("label", need["id"]),
+                "tier": _need_tier(need),
+                "recommended": bool(need.get("recommended", False)),
                 "recommended_profile": need.get("recommended_profile"),
                 "patterns": list(need.get("patterns", [])),
                 "memory_capabilities": list(need.get("memory_capabilities", [])),
+                "footprint": {"profile": profile, "patterns": n_patterns, "services": n_services},
                 "rationale": need.get("rationale", ""),
-            }
-            for need in needs
-        ], indent=2, ensure_ascii=False))
+            })
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    table = Table(title="Agentic standard needs")
+    table = Table(title="Agentic standard needs — pick by intent, grow later")
+    table.add_column(" ", justify="center")
+    table.add_column("Tier")
     table.add_column("ID")
     table.add_column("Need")
     table.add_column("Profile")
-    table.add_column("Patterns")
+    table.add_column("Patterns", justify="right")
+    table.add_column("Services", justify="right")
+    last_tier: str | None = None
     for need in needs:
+        tier = _need_tier(need)
+        profile, n_patterns, n_services = _need_footprint(str(need["id"]))
         table.add_row(
+            "[green]▶[/green]" if need.get("recommended") else "",
+            _TIER_HEADING[tier] if tier != last_tier else "",
             str(need["id"]),
             str(need.get("label", need["id"])),
-            str(need.get("recommended_profile", "-")),
-            ", ".join(str(p) for p in need.get("patterns", [])),
+            str(profile),
+            str(n_patterns),
+            str(n_services) if n_services else "—",
         )
+        last_tier = tier
     console.print(table)
+    console.print(
+        "[dim]▶ = recommended starting point. Preview a need with[/dim] "
+        "[cyan]grimoire standard plan --needs <id>[/cyan]"
+    )
+    if explain:
+        detail = Table(title="What each need activates")
+        detail.add_column("Need")
+        detail.add_column("Patterns")
+        for need in needs:
+            detail.add_row(
+                str(need["id"]),
+                ", ".join(str(p) for p in need.get("patterns", [])) or "—",
+            )
+        console.print(detail)
+    else:
+        console.print(
+            "[dim]Add[/dim] [cyan]--explain[/cyan] [dim]to see the patterns behind each need.[/dim]"
+        )
 
 
 @standard_app.command("plan")
@@ -497,7 +580,7 @@ def doctor(
 def init_profile(
     ctx: typer.Context,
     project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
-    profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to generate. Defaults to orchestrated, or the resolved profile when --needs/--pattern are used."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to generate. Defaults to the minimal 'starter' profile, or the resolved profile when --needs/--pattern are used."),
     needs: list[str] | None = typer.Option(None, "--needs", "-n", help="Need id(s) for a custom install. Repeatable or comma-separated."),  # noqa: B008
     pattern: list[str] | None = typer.Option(None, "--pattern", help="Pattern id(s) to include. Repeatable or comma-separated."),  # noqa: B008
     memory: list[str] | None = typer.Option(None, "--memory", help="Memory capability id(s): semantic-memory, graph-memory, hot-memory, legacy-migration."),  # noqa: B008
@@ -542,8 +625,15 @@ def init_profile(
         resolved_profile = plan.profile
         extra_artifacts = list(plan.extra_artifacts)
     else:
-        resolved_profile = profile or "orchestrated"
+        resolved_profile = profile or "starter"
         extra_artifacts = []
+        if profile is None and not dry_run and _get_fmt(ctx) != "json":
+            console.print(
+                "[dim]No --needs/--profile given → scaffolding the minimal[/dim] "
+                "[cyan]starter[/cyan] [dim]profile. Run[/dim] "
+                "[cyan]grimoire standard needs[/cyan] [dim]to pick by need, or[/dim] "
+                "[cyan]grimoire standard init --interactive[/cyan][dim].[/dim]"
+            )
 
     result = setup_standard_profile(
         project_root,

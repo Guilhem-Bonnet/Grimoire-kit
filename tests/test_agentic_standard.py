@@ -495,6 +495,48 @@ def test_cli_standard_needs_json_lists_catalog() -> None:
     assert {"solo-prototyping", "semantic-memory-rag", "hot-session-cache"} <= ids
 
 
+def test_needs_catalog_has_tiers_and_single_recommended() -> None:
+    catalog = load_needs_catalog()
+    needs = [n for n in catalog.get("needs", []) if isinstance(n, dict) and "id" in n]
+
+    allowed_tiers = {"essential", "advanced", "enterprise"}
+    assert needs, "needs catalog must not be empty"
+    assert all(need.get("tier") in allowed_tiers for need in needs), "every need needs a valid tier"
+
+    recommended = [str(need["id"]) for need in needs if need.get("recommended")]
+    assert recommended == ["solo-prototyping"], "exactly one recommended start-here need expected"
+
+
+def test_cli_standard_needs_json_exposes_tier_recommended_and_footprint() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "needs"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    # Essentials are surfaced first; the recommended need leads.
+    assert data[0]["id"] == "solo-prototyping"
+    assert data[0]["tier"] == "essential"
+    assert data[0]["recommended"] is True
+    for entry in data:
+        assert entry["tier"] in {"essential", "advanced", "enterprise"}
+        footprint = entry["footprint"]
+        assert {"profile", "patterns", "services"} <= set(footprint)
+        assert isinstance(footprint["patterns"], int)
+    # The recommended starter has the smallest footprint: one pattern, no external service.
+    assert data[0]["footprint"] == {"profile": "starter", "patterns": 1, "services": 0}
+
+
+def test_cli_standard_init_bare_defaults_to_starter(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "init", str(tmp_path)])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["profile"] == "starter"
+
+
 def test_cli_standard_plan_json_resolves_extras() -> None:
     runner = CliRunner()
 
