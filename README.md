@@ -97,9 +97,6 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 # Installation via pipx (recommandé)
 pipx install grimoire-kit
 
-# Installation recommandée pour le moment
-pipx install grimoire-kit
-
 # Ou via pip dans un venv
 python3 -m venv .venv && source .venv/bin/activate
 pip install grimoire-kit
@@ -118,6 +115,32 @@ grimoire doctor
 grimoire upgrade --dry-run   # aperçu
 grimoire upgrade             # exécuter
 ```
+
+### Installation par besoins (commencer petit)
+
+Plutôt que de tout activer, déclarez **ce que votre projet doit faire** : Grimoire
+résout le bon profil, les patterns à activer et les technologies à installer. On
+commence par l'essentiel, on grandit au besoin.
+
+```bash
+# 1. Voir les besoins, groupés par tier, avec leur empreinte (profil · patterns · services)
+grimoire standard needs
+
+# 2. Prévisualiser le plan d'un besoin sans rien écrire (profil + patterns + techno + pip)
+grimoire standard plan --needs solo-prototyping
+
+# 3. Scaffolder le projet pour ce besoin (point de départ minimal recommandé)
+grimoire standard init . --needs solo-prototyping
+
+# Assistant interactif : essentials d'abord, départ recommandé pré-sélectionné
+grimoire standard init . --interactive
+
+# Vérifier que les technologies optionnelles sont disponibles (dégradation sûre sinon)
+grimoire standard doctor
+```
+
+> Détails et matrice complète besoins → patterns → technologie :
+> [docs/agentic-standard-install-by-needs.md](docs/agentic-standard-install-by-needs.md).
 
 <details>
 <summary><b>Installation classique (clone)</b></summary>
@@ -281,6 +304,7 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 
 | Feature | Description |
 |:--------|:-----------|
+| **Installation par besoins** | Déclarez le besoin du projet → profil, patterns et technos résolus ; commencer petit, grandir au besoin (`grimoire standard needs`) |
 | **Adversarial Consensus** | Protocole BFT : 3 votants + 1 avocat du diable pour les décisions critiques |
 | **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
 | **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
