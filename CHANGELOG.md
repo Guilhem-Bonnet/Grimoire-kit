@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-06-25
+
+### Corrigé
+
+- **Parcours getting-started complété** — ajout des sections « Adopter le standard agentique gouverné » (`grimoire standard needs/init/verify/audit/score/gate`) et « Portabilité multi-assistant » (entrypoints CLAUDE/AGENTS/GEMINI/.cursorrules + `.mcp.json`), absentes du guide de démarrage malgré les releases v3.5–v3.11.
+
 ## [3.11.0] - 2026-06-25
 
 ### Ajouté

@@ -128,6 +128,35 @@ Sortie attendue :
 ✔ Memory directory exists
 ```
 
+## Adopter le standard agentique gouverné
+
+Au-delà du scaffold, Grimoire fournit un **standard agentique** : un besoin projet mappe sur
+un profil (`starter → controlled → orchestrated → governed → production`) qui active des
+**patterns gouvernés vérifiables** (36 au catalogue).
+
+```bash
+# Choisir par besoin (commencer petit)
+grimoire standard needs
+grimoire standard init . --needs solo-prototyping
+
+# Vérifier / auditer / scorer / gater la conformité (fail-closed)
+grimoire standard verify
+grimoire standard audit
+grimoire standard score
+grimoire standard gate
+```
+
+Référence des contrôles : [Contrôles gouvernés](governed-controls.md) · intégration :
+[Standard agentique](agentic-standard-integration.md) · installation par besoins :
+[Installation par besoins](agentic-standard-install-by-needs.md).
+
+## Portabilité multi-assistant
+
+`grimoire init` génère des entrypoints portables — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`,
+`.cursorrules` (pointant vers `.github/copilot-instructions.md`) et un `.mcp.json` OS-neutre —
+pour que le projet fonctionne avec Copilot, Claude Code, Codex, Gemini CLI et Cursor sans
+configuration manuelle.
+
 ## Utiliser le SDK Python
 
 ```python
