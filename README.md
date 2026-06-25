@@ -116,6 +116,11 @@ grimoire upgrade --dry-run   # aperçu
 grimoire upgrade             # exécuter
 ```
 
+> **Multi-assistant** — `grimoire init` génère des entrypoints portables
+> (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`) pointant vers
+> `.github/copilot-instructions.md` : le projet fonctionne avec Copilot, Claude Code,
+> Codex, Gemini CLI et Cursor sans duplication.
+
 ### Installation par besoins (commencer petit)
 
 Plutôt que de tout activer, déclarez **ce que votre projet doit faire** : Grimoire

@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-06-25
+
+### Ajouté
+
+- **Entrypoints multi-assistant portables** — `grimoire init` génère désormais, à côté de `.github/copilot-instructions.md`, des entrypoints `CLAUDE.md` (Claude Code, via import `@`), `AGENTS.md` (standard cross-tool : Codex et autres), `GEMINI.md` (Gemini CLI) et `.cursorrules` (Cursor), tous pointant vers le fichier canonique (source unique, zéro drift, non écrasés s'ils existent). Un projet Grimoire fonctionne ainsi avec Copilot, Claude, Codex, Gemini et Cursor sans configuration manuelle. Comble le gap d'adaptivité multi-assistant (jusqu'ici Copilot/VS Code-first + MCP uniquement).
+
 ## [3.8.0] - 2026-06-25
 
 ### Ajouté

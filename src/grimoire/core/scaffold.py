@@ -303,6 +303,7 @@ class ProjectScaffolder:
         self._plan_copilot_prompts(p)
         self._plan_copilot_instruction_files(p)
         self._plan_copilot_instructions(p)
+        self._plan_assistant_bridges(p)
         self._plan_gitignore(p)
         return p
 
@@ -754,6 +755,44 @@ class ProjectScaffolder:
             content=Template(_COPILOT_INSTRUCTIONS_TPL).safe_substitute(v),
             label=".github/copilot-instructions.md",
         ))
+
+    def _plan_assistant_bridges(self, p: ScaffoldPlan) -> None:
+        """Emit portable per-assistant entrypoints pointing at the canonical
+        ``.github/copilot-instructions.md`` so a Grimoire project works across
+        Copilot, Claude Code, Codex, Gemini CLI and Cursor without drift."""
+        v = self._tpl_vars()
+        name = v["project_name"]
+        canonical = ".github/copilot-instructions.md"
+        bridges = {
+            "CLAUDE.md": (
+                f"# {name} — Claude Code\n\n"
+                "Ce projet utilise **Grimoire Kit**. Les instructions agent canoniques "
+                f"sont dans `{canonical}` (importées ci-dessous).\n\n"
+                f"@{canonical}\n"
+            ),
+            "AGENTS.md": (
+                f"# {name} — Agent instructions\n\n"
+                "Ce projet utilise **Grimoire Kit**. Source de vérité des instructions "
+                f"agent : [`{canonical}`]({canonical}).\n\n"
+                "Tout assistant (Codex, Claude, Gemini, Copilot, Cursor) suit ce fichier : "
+                "agents, workflows, mémoire et standard agentique gouverné y sont décrits.\n"
+            ),
+            "GEMINI.md": (
+                f"# {name} — Gemini CLI\n\n"
+                "Ce projet utilise **Grimoire Kit**. Instructions agent canoniques : "
+                f"[`{canonical}`]({canonical}).\n"
+            ),
+            ".cursorrules": (
+                f"# {name} — Grimoire Kit (Cursor)\n"
+                f"# Source de vérité : {canonical}\n"
+                "# Suivre les agents, workflows, mémoire et standard agentique décrits.\n"
+            ),
+        }
+        for filename, content in bridges.items():
+            dst = self._target / filename
+            if dst.is_file():
+                continue  # don't overwrite a user-customised entrypoint
+            p.templates.append(TemplateRender(dst=dst, content=content, label=filename))
 
     def _plan_gitignore(self, p: ScaffoldPlan) -> None:
         """Add grimoire-specific patterns to .gitignore."""

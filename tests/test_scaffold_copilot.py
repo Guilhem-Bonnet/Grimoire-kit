@@ -390,3 +390,15 @@ class TestTemplateVariableSubstitution:
         for template in plan.templates:
             assert "{{project_name}}" not in template.content
             assert "{{language}}" not in template.content
+
+    def test_assistant_bridges_point_to_canonical(self, scaffolder):
+        """Portable per-assistant entrypoints reference the canonical instructions."""
+        plan = ScaffoldPlan()
+        scaffolder._plan_assistant_bridges(plan)
+
+        labels = {t.label for t in plan.templates}
+        assert {"CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"} <= labels
+        for template in plan.templates:
+            assert ".github/copilot-instructions.md" in template.content
+        agents = next(t for t in plan.templates if t.label == "AGENTS.md")
+        assert "test-project" in agents.content
