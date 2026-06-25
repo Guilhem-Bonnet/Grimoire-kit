@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-06-25
+
+### Ajouté
+
+- **`.mcp.json` portable généré par `grimoire init`** — enregistre le serveur MCP Grimoire via l'entrypoint console `grimoire-mcp` (OS-neutre, aucun chemin absolu codé en dur), lu par Claude Code, Cursor et autres clients MCP. Complète l'adaptivité multi-assistant : le MCP fonctionne out-of-the-box après `pip install 'grimoire-kit[mcp]'`. Non écrasé s'il existe déjà.
+
 ## [3.9.0] - 2026-06-25
 
 ### Ajouté

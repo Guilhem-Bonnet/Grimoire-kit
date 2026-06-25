@@ -402,3 +402,11 @@ class TestTemplateVariableSubstitution:
             assert ".github/copilot-instructions.md" in template.content
         agents = next(t for t in plan.templates if t.label == "AGENTS.md")
         assert "test-project" in agents.content
+
+    def test_mcp_config_registers_grimoire_server(self, scaffolder):
+        """A portable .mcp.json registers the grimoire MCP server (OS-neutral)."""
+        plan = ScaffoldPlan()
+        scaffolder._plan_mcp_config(plan)
+        mcp = next(t for t in plan.templates if t.label == ".mcp.json")
+        assert "mcpServers" in mcp.content
+        assert "grimoire-mcp" in mcp.content

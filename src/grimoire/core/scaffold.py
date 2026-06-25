@@ -11,6 +11,7 @@ This separation makes ``--dry-run`` trivial and unit testing straightforward.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -304,6 +305,7 @@ class ProjectScaffolder:
         self._plan_copilot_instruction_files(p)
         self._plan_copilot_instructions(p)
         self._plan_assistant_bridges(p)
+        self._plan_mcp_config(p)
         self._plan_gitignore(p)
         return p
 
@@ -793,6 +795,19 @@ class ProjectScaffolder:
             if dst.is_file():
                 continue  # don't overwrite a user-customised entrypoint
             p.templates.append(TemplateRender(dst=dst, content=content, label=filename))
+
+    def _plan_mcp_config(self, p: ScaffoldPlan) -> None:
+        """Register the Grimoire MCP server in a portable ``.mcp.json`` (read by
+        Claude Code, Cursor and other MCP clients). OS-neutral: relies on the
+        ``grimoire-mcp`` console entrypoint on PATH after ``pip install``."""
+        dst = self._target / ".mcp.json"
+        if dst.is_file():
+            return  # don't overwrite an existing MCP configuration
+        content = json.dumps(
+            {"mcpServers": {"grimoire": {"command": "grimoire-mcp", "args": [], "env": {}}}},
+            indent=2,
+        )
+        p.templates.append(TemplateRender(dst=dst, content=content + "\n", label=".mcp.json"))
 
     def _plan_gitignore(self, p: ScaffoldPlan) -> None:
         """Add grimoire-specific patterns to .gitignore."""
