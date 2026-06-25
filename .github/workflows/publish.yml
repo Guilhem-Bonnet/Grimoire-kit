@@ -80,6 +80,9 @@ jobs:
   publish-testpypi:
     name: "Publish to TestPyPI"
     runs-on: ubuntu-latest
+    # PyPI publishing is opt-in: set repo variable GRIMOIRE_ENABLE_PYPI=true to enable.
+    # Disabled by default so a release tag produces a GitHub Release only.
+    if: ${{ vars.GRIMOIRE_ENABLE_PYPI == 'true' }}
     needs: [build, test]
     environment: testpypi
     # TestPyPI is optional — don't block PyPI publish if it fails
@@ -99,6 +102,9 @@ jobs:
   publish-pypi:
     name: "Publish to PyPI"
     runs-on: ubuntu-latest
+    # PyPI publishing is opt-in: set repo variable GRIMOIRE_ENABLE_PYPI=true to enable.
+    # Disabled by default so a release tag produces a GitHub Release only (release.yml).
+    if: ${{ vars.GRIMOIRE_ENABLE_PYPI == 'true' }}
     needs: [build, test]
     environment: pypi
     steps:
