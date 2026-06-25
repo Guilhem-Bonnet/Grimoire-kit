@@ -21,6 +21,7 @@ from grimoire.core.agentic_standard import (
     list_standard_patterns,
     load_capability_map,
     load_needs_catalog,
+    load_profile_map,
     resolve_install_plan,
     setup_standard_profile,
     simulate_standard_hooks,
@@ -746,6 +747,18 @@ def test_scaffolded_catalog_matches_capability_map(tmp_path: Path) -> None:
 
     assert catalog_ids == set(load_capability_map()["patterns"])
     assert catalog_ids == _EXPECTED_PATTERNS
+
+
+def test_profile_mapped_capabilities_are_real_patterns() -> None:
+    patterns = set(load_capability_map()["patterns"])
+    profile_map = load_profile_map()
+    for profile in profile_map["profiles"]:
+        mapped = set(profile.get("mapped_capabilities", []))
+        unknown = mapped - patterns
+        assert not unknown, f"{profile['id']}: mapped_capabilities not implemented as patterns: {sorted(unknown)}"
+        planned = set(profile.get("planned_capabilities", []))
+        already = planned & patterns
+        assert not already, f"{profile['id']}: planned_capabilities already implemented (promote them): {sorted(already)}"
 
 
 def test_every_need_resolves_without_warnings() -> None:

@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-06-25
+
+### Corrigé
+
+- **Cohérence capability-map ↔ profils** — `mapped_capabilities` de chaque profil ne référence plus que des patterns réels ; les capacités encore non implémentées sont déplacées dans un nouveau champ `planned_capabilities`. Les 11 contrôles v3.6.0 sont rattachés aux bons profils (ex. `agent-privilege-boundary`/`decision-council-gate` → governed, `prompt-injection-firewall`/`guardrail-contract` → controlled). Test garde-fou `test_profile_mapped_capabilities_are_real_patterns` (mapped ⊆ patterns ; planned ∩ patterns = ∅) — l'incohérence ne peut plus réapparaître.
+- **Vérificateur Completion Contract (`framework/cc-verify.sh`)** — résout désormais l'interpréteur du virtualenv projet (`.venv/bin/python`) pour pytest/ruff, avec fallback PATH et saut gracieux si indisponible (corrige un `ModuleNotFoundError` bloquant quand pytest n'est pas installé globalement).
+
 ## [3.6.0] - 2026-06-25
 
 ### Ajouté

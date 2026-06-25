@@ -133,9 +133,10 @@ profiles:
       - minimal
       - agentic-standard
     mapped_capabilities:
-      - workflow-state-engine
-      - evidence-gated-workflow
+      - evidence-gated-fsm
       - tool-blast-radius-limiter
+    planned_capabilities:
+      - workflow-state-engine
     minimum_evidence:
       - "Selected profile and task state are declared."
       - "Tools and writable paths are bounded."
@@ -156,9 +157,12 @@ profiles:
       - agentic-standard
       - fix-loop
     mapped_capabilities:
-      - llm-provider-abstraction
+      - provider-routing-contract
       - guardrail-contract
-      - mcp-trust-gate
+      - tool-mediation-gate
+      - prompt-injection-firewall
+      - remote-hygiene-guard
+    planned_capabilities:
       - prompt-version-observability
     minimum_evidence:
       - "Every provider/model call is declared in the provider registry."
@@ -192,10 +196,12 @@ profiles:
       - platform-engineering
     mapped_capabilities:
       - advanced-context-orchestrator
-      - knowledge-base-indexer
+      - governed-knowledge-indexing
       - memory-integrity-validator
+      - context-compression-gate
+      - code-graph-projection
+    planned_capabilities:
       - runtime-provider-contract
-      - trajectory-logging
     minimum_evidence:
       - "Context selections cite their source, freshness, and reason for inclusion."
       - "Knowledge sources have indexing mode, trust level, and refresh policy."
@@ -232,11 +238,18 @@ profiles:
       - infra-ops
       - platform-engineering
     mapped_capabilities:
-      - policy-by-environment
+      - governed-observability-cockpit
+      - runtime-journal
+      - governed-hook-gateway
+      - governed-agent-orchestration
+      - agent-privilege-boundary
+      - decision-council-gate
+      - merge-lane-fault-classifier
+      - visual-evidence-gate
+    planned_capabilities:
       - workspace-isolation
+      - policy-by-environment
       - browser-tool-contract
-      - agent-telemetry-plane
-      - session-reliability-slo-reporter
     minimum_evidence:
       - "Environment policy states what changes between local, CI, staging, and production."
       - "Workspace isolation and network/tool boundaries are declared."
@@ -274,9 +287,11 @@ profiles:
       - platform-engineering
       - features/vector-memory
     mapped_capabilities:
+      - llm-cost-registry
+      - provider-cost-slo
+    planned_capabilities:
       - kubernetes-agent-control-plane
       - cluster-action-dry-run
-      - llm-cost-registry
       - doc-to-graph-pipeline
       - flow-dsl-minimal
     minimum_evidence:

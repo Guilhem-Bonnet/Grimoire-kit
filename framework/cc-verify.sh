@@ -238,18 +238,39 @@ verify_python() {
   STACKS_RUN+=("python")
   local ok=true
 
-  if command -v pytest &>/dev/null; then
-    info "pytest"
-    if pytest --tb=short 2>&1; then
+  # Prefer the project virtualenv so tooling resolves even when not on PATH.
+  local pybin=""
+  for cand in ".venv/bin/python" ".venv/bin/python3" "venv/bin/python"; do
+    [[ -x "$cand" ]] && { pybin="$cand"; break; }
+  done
+  [[ -z "$pybin" ]] && pybin="$(command -v python3 || command -v python || true)"
+
+  local pytest_cmd="" ruff_cmd=""
+  if [[ -n "$pybin" ]] && "$pybin" -m pytest --version &>/dev/null; then
+    pytest_cmd="$pybin -m pytest"
+  elif command -v pytest &>/dev/null; then
+    pytest_cmd="pytest"
+  fi
+  if [[ -n "$pybin" ]] && "$pybin" -m ruff --version &>/dev/null; then
+    ruff_cmd="$pybin -m ruff"
+  elif command -v ruff &>/dev/null; then
+    ruff_cmd="ruff"
+  fi
+
+  if [[ -n "$pytest_cmd" ]]; then
+    info "pytest (${pytest_cmd})"
+    if $pytest_cmd --tb=short 2>&1; then
       echo -e "  ${GREEN}→ pytest OK${NC}"
     else
       echo -e "  ${RED}→ pytest FAILED${NC}"; ok=false
     fi
+  else
+    warn "pytest indisponible (venv ou PATH) — étape sautée"
   fi
 
-  if command -v ruff &>/dev/null; then
+  if [[ -n "$ruff_cmd" ]]; then
     info "ruff check ."
-    if ruff check . 2>&1; then
+    if $ruff_cmd check . 2>&1; then
       echo -e "  ${GREEN}→ ruff OK${NC}"
     else
       echo -e "  ${YELLOW}→ ruff: warnings (voir ci-dessus)${NC}"
