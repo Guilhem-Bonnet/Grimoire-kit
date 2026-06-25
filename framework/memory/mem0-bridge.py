@@ -31,9 +31,9 @@ import logging
 import os
 import sys
 import warnings
-from pathlib import Path
 from datetime import datetime
 from difflib import SequenceMatcher
+from pathlib import Path
 
 # Supprimer le bruit HF/safetensors AVANT tout import ML
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -184,7 +184,7 @@ class LocalMemory:
 
     def _load(self):
         if self.db_path.exists():
-            with open(self.db_path, "r", encoding="utf-8") as f:
+            with open(self.db_path, encoding="utf-8") as f:
                 return json.load(f)
         return []
 
@@ -241,9 +241,9 @@ class SemanticMemory:
     """Mémoire sémantique locale via sentence-transformers + Qdrant. Zéro API key."""
 
     def __init__(self):
-        from sentence_transformers import SentenceTransformer
         from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams, PointStruct
+        from qdrant_client.models import Distance, PointStruct, VectorParams
+        from sentence_transformers import SentenceTransformer
 
         self._PointStruct = PointStruct
         devnull_fd = os.open(os.devnull, os.O_WRONLY)
@@ -344,9 +344,9 @@ class StructuredMemory:
     TYPES = MEMORY_TYPES
 
     def __init__(self):
-        from sentence_transformers import SentenceTransformer
         from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams, PointStruct
+        from qdrant_client.models import PointStruct
+        from sentence_transformers import SentenceTransformer
 
         self._PointStruct = PointStruct
         devnull_fd = os.open(os.devnull, os.O_WRONLY)
@@ -405,7 +405,7 @@ class StructuredMemory:
 
     def recall(self, query: str, type_: str = None, agent: str = None, limit: int = 5) -> list:
         """Recherche sémantique — une ou toutes les collections."""
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
         vector = self.model.encode(query).tolist()
         collections = [self._col(type_)] if type_ else [self._col(t) for t in self.TYPES]
         filt = None
@@ -519,7 +519,9 @@ def get_semantic_client():
 
     # Essai 2 : chargement direct via importlib.util (mode script)
     try:
-        import importlib.util, sys, os
+        import importlib.util
+        import os
+        import sys
         backends_dir = os.path.join(os.path.dirname(__file__), "backends")
         backends_init = os.path.join(backends_dir, "__init__.py")
         if os.path.exists(backends_init):
@@ -536,7 +538,7 @@ def get_semantic_client():
             return backend
     except Exception as e:
         print(f"⚠️  Backend sémantique indisponible ({e}), fallback mode local")
-        print(f"   → Diagnostiquer : python mem0-bridge.py status")
+        print("   → Diagnostiquer : python mem0-bridge.py status")
 
     return None
 
@@ -674,7 +676,7 @@ def cmd_export(args):
 
 
 def cmd_status(args):
-    print(f"🧠 mem0 Bridge — Grimoire")
+    print("🧠 mem0 Bridge — Grimoire")
     print(f"   User: {USER_ID}")
     print(f"   App: {APP_ID}")
     print(f"   DB locale: {LOCAL_DB_PATH}")
@@ -701,20 +703,20 @@ def cmd_status(args):
             import os as _os
             has_env = _os.environ.get("Grimoire_OLLAMA_URL") or _os.environ.get("Grimoire_QDRANT_URL")
             if has_env:
-                print(f"   Sémantique: ⚠️  backend non disponible (voir logs ci-dessus)")
+                print("   Sémantique: ⚠️  backend non disponible (voir logs ci-dessus)")
             else:
-                print(f"   Sémantique: ⚠️  non configuré")
-                print(f"              → Définir Grimoire_OLLAMA_URL ou Grimoire_QDRANT_URL")
-                print(f"              → Ou configurer memory: dans project-context.yaml")
-            print(f"              → Mode fallback JSON actif automatiquement")
+                print("   Sémantique: ⚠️  non configuré")
+                print("              → Définir Grimoire_OLLAMA_URL ou Grimoire_QDRANT_URL")
+                print("              → Ou configurer memory: dans project-context.yaml")
+            print("              → Mode fallback JSON actif automatiquement")
     except Exception as e:
         print(f"   Sémantique: ❌ {e}")
 
     mode = "sémantique" if semantic_ok else "local JSON (fallback)"
     print(f"   Mode actif: {'🚀' if semantic_ok else '📁'} {mode}")
     if not semantic_ok:
-        print(f"   ℹ️  Mode JSON fonctionnel — recherche sémantique non active.")
-        print(f"      → Activer : Grimoire_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
+        print("   ℹ️  Mode JSON fonctionnel — recherche sémantique non active.")
+        print("      → Activer : Grimoire_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
 
     # Afficher les agents détectés
     print(f"\n   Agents configurés ({len(AGENT_PROFILES)}):")
@@ -776,7 +778,7 @@ def cmd_stats(args):
         return
 
     events = []
-    with open(ACTIVITY_LOG_PATH, "r", encoding="utf-8") as f:
+    with open(ACTIVITY_LOG_PATH, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -811,7 +813,7 @@ def cmd_stats(args):
     first = events[0].get("ts", "?")[:10]
     last = events[-1].get("ts", "?")[:10]
 
-    print(f"📊 Métriques d'activité mem0 Bridge")
+    print("📊 Métriques d'activité mem0 Bridge")
     print(f"   Période: {first} → {last}")
     print(f"   Events: {len(events)}")
     print()
@@ -830,13 +832,13 @@ def cmd_stats(args):
     if searches["total"]:
         avg = sum(searches["scores"]) / len(searches["scores"]) if searches["scores"] else 0
         hit_rate = searches["high_score"] / searches["total"] * 100 if searches["total"] else 0
-        print(f"   Recherche sémantique:")
+        print("   Recherche sémantique:")
         print(f"     Total: {searches['total']}")
         print(f"     Score moyen: {avg:.3f}")
         print(f"     Hit rate (score>=0.3): {hit_rate:.0f}% ({searches['high_score']}/{searches['total']})")
         print(f"     Misses (score<0.3): {searches['low_score']}")
         if hit_rate < 50 and searches["total"] >= 5:
-            print(f"     ⚠️  Hit rate faible — enrichir la mémoire sémantique avec plus de 'add'")
+            print("     ⚠️  Hit rate faible — enrichir la mémoire sémantique avec plus de 'add'")
 
 
 # ─── Dispatch sémantique d'agents ────────────────────────────────────────────

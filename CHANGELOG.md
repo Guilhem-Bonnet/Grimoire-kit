@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-06-25
+
+### Corrigé
+
+- **Hygiène lint `framework/memory`** — corrections ruff *sans impact comportemental* (tri d'imports, f-strings sans placeholder, mode `open()` redondant) sur le bridge mémoire legacy. Les patterns intentionnels (probing backend `S110`/`S310`) et les items risqués à toucher en code non testé (`B904`/`E741`) restent en dette tracée.
+- **Flag : convention d'env var `framework/memory`** — le code lit `Grimoire_*` (casse mixte), divergente de `GRIMOIRE_*` (reste de l'écosystème) → un override `GRIMOIRE_QDRANT_URL` n'y est pas pris en compte. Cohérent dans tout `framework/memory` (legacy, non testé) ; **non corrigé** (casserait les setups existants) — signalé en code + backlog.
+
 ## [3.10.1] - 2026-06-25
 
 ### Corrigé

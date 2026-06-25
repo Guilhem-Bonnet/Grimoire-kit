@@ -20,7 +20,7 @@ Usage:
 import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -91,7 +91,7 @@ def save_memories(memories: list[dict]) -> None:
 def status():
     """Affiche l'état de la mémoire."""
     memories = load_memories()
-    print(f"📊 État de la mémoire Grimoire")
+    print("📊 État de la mémoire Grimoire")
     print(f"   Entrées mémoire : {len(memories)}")
     print(f"   Fichier          : {MEMORIES_FILE}")
     print(f"   Taille           : {MEMORIES_FILE.stat().st_size if MEMORIES_FILE.exists() else 0} octets")
@@ -136,7 +136,7 @@ def archive(days: int = 30):
         print("Aucune entrée à archiver.")
         return
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     keep = []
     to_archive = []
 
@@ -328,7 +328,7 @@ def prune_learnings():
 
     print(f"⚠️  {len(duplicates)} groupes de doublons détectés :\n")
     for group in duplicates:
-        print(f"  Groupe (similarité > 85%) :")
+        print("  Groupe (similarité > 85%) :")
         for fname, lnum, raw in group:
             print(f"    📄 {fname}:{lnum} → {raw[:80]}...")
         print()
@@ -345,7 +345,7 @@ def prune_activity(days: int = 90):
         return
 
     events = []
-    with open(ACTIVITY_LOG, "r", encoding="utf-8") as f:
+    with open(ACTIVITY_LOG, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -371,13 +371,11 @@ def prune_activity(days: int = 90):
     archive_file = ARCHIVE_DIR / f"activity-archive-{datetime.now().strftime('%Y%m%d')}.jsonl"
     old_events = [e for e in events if e.get("ts", "") < cutoff]
     with open(archive_file, "w", encoding="utf-8") as f:
-        for e in old_events:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in old_events)
 
     # Réécrire le fichier principal
     with open(ACTIVITY_LOG, "w", encoding="utf-8") as f:
-        for e in keep:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in keep)
 
     print(f"✅ Archivé {archived} events → {archive_file.name}")
     print(f"   Restants : {len(keep)}")
@@ -488,7 +486,7 @@ def health_check(force: bool = False):
     # 5. Vérifier activity.jsonl (compacter si > 90j)
     if ACTIVITY_LOG.exists():
         try:
-            with open(ACTIVITY_LOG, "r", encoding="utf-8") as f:
+            with open(ACTIVITY_LOG, encoding="utf-8") as f:
                 events = [json.loads(l) for l in f if l.strip()]
             if events:
                 cutoff_ts = (datetime.now() - timedelta(days=90)).isoformat()
@@ -502,7 +500,7 @@ def health_check(force: bool = False):
     # 6. Stats rapides si activity log existe
     if ACTIVITY_LOG.exists():
         try:
-            with open(ACTIVITY_LOG, "r", encoding="utf-8") as f:
+            with open(ACTIVITY_LOG, encoding="utf-8") as f:
                 events = [json.loads(l) for l in f if l.strip()]
             searches = [e for e in events if e.get("cmd") == "search"]
             if len(searches) >= 5:
@@ -552,7 +550,7 @@ def _detect_context_drift() -> list[str]:
 
     # Extraire les agents du manifest
     manifest_agents = set()
-    with open(AGENT_MANIFEST, "r", encoding="utf-8") as f:
+    with open(AGENT_MANIFEST, encoding="utf-8") as f:
         import csv
         reader = csv.DictReader(f)
         for row in reader:
@@ -610,15 +608,15 @@ def memory_audit():
         compact()
 
     # 3. Contradictions potentielles (mêmes sujets, valeurs différentes)
-    print(f"\n── 3. Contradictions potentielles :")
+    print("\n── 3. Contradictions potentielles :")
     contradiction_count = _detect_memory_contradictions(memories)
 
     # 4. Learnings
-    print(f"\n── 4. Agent Learnings :")
+    print("\n── 4. Agent Learnings :")
     prune_learnings()
 
     # 5. Drift shared-context
-    print(f"\n── 5. Drift shared-context :")
+    print("\n── 5. Drift shared-context :")
     drifts = _detect_context_drift()
     if drifts:
         for d in drifts:
@@ -627,7 +625,7 @@ def memory_audit():
         print("   ✅ Aucun drift détecté.")
 
     # 6. Résumé
-    print(f"\n── Résumé ──")
+    print("\n── Résumé ──")
     score = 10
     if dupes > 0:
         score -= 1

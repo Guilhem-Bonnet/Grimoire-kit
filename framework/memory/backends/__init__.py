@@ -59,6 +59,10 @@ def get_backend(config_override: dict | None = None) -> tuple:
     mem_cfg = ctx.get("memory", {})
 
     # ENV vars priment toujours
+    # KNOWN (dette tracée): ces variables utilisent la casse `Grimoire_*`, divergente
+    # du reste de l'écosystème (`GRIMOIRE_*`, ex. .mcp.json/SDK) — un override
+    # `GRIMOIRE_QDRANT_URL` n'est donc PAS lu ici. Convention cohérente dans tout
+    # framework/memory (legacy, non testé) ; corriger casserait les setups existants.
     env_ollama = os.environ.get("Grimoire_OLLAMA_URL", "")
     env_qdrant = os.environ.get("Grimoire_QDRANT_URL", "")
 

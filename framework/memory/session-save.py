@@ -30,7 +30,7 @@ def _load_valid_agents() -> set[str]:
     manifest = MEMORY_DIR.parent / "_config" / "agent-manifest.csv"
     agents = set()
     if manifest.exists():
-        with open(manifest, "r", encoding="utf-8") as f:
+        with open(manifest, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 name = row.get("name", "").strip()
@@ -126,7 +126,7 @@ def save_session(
 
     # Write current session state
     SESSION_FILE.write_text(content)
-    print(f"✅ Session sauvegardée dans session-state.md")
+    print("✅ Session sauvegardée dans session-state.md")
     print(f"   Agent: {agent} | Date: {date_str}")
 
     # Archive in session-summaries/
