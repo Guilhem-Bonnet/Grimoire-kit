@@ -1,0 +1,13 @@
+$schema: "grimoire-agentic-standard-workspace-isolation/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: security-governance.workspace-isolation
+intent: >
+  Declare workspace isolation: where the agent may write, what network egress is
+  allowed, and which environment variables pass through. Fail closed.
+isolation_mode: container   # container | venv | sandbox | process
+writable_roots: ["_grimoire-output/"]
+network: deny               # deny | allowlist
+network_allowlist: []
+env_passthrough: []

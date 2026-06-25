@@ -1,0 +1,12 @@
+$schema: "grimoire-agentic-standard-browser-tool-contract/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: quality-governance.browser-tool-contract
+intent: >
+  Require DOM, screenshot and console logs from browser tools, and bound which
+  domains they may reach. Fail closed: domains not listed are denied.
+require_dom: true
+require_screenshot: true
+require_console_logs: true
+allowed_domains: []

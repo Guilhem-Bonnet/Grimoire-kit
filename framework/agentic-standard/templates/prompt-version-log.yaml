@@ -1,0 +1,15 @@
+$schema: "grimoire-agentic-standard-prompt-version-observability/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: observability-governance.prompt-version
+intent: >
+  Track prompt, skill, provider and model versions and link them to evals so
+  regressions can be attributed to a specific change.
+track:
+  - prompt
+  - skill
+  - provider
+  - model
+link_to_evals: true
+version_required: true

@@ -1,0 +1,23 @@
+$schema: "grimoire-agentic-standard-environment-policy/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: governance.policy-by-environment
+intent: >
+  Declare what changes between environments (local, CI, staging, production):
+  write scope, network, dry-run and approval. Production fails closed.
+environments:
+  local:
+    writes: allow
+    network: open
+  ci:
+    writes: allow
+    network: allowlist
+  staging:
+    writes: gated
+    network: allowlist
+  production:
+    writes: gated
+    network: allowlist
+    dry_run: true
+    approval: true

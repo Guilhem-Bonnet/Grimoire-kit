@@ -620,6 +620,14 @@ _EXPECTED_PATTERNS = frozenset({
     "llm-cost-registry",
     "guardrail-contract",
     "visual-evidence-gate",
+    "workspace-isolation",
+    "policy-by-environment",
+    "browser-tool-contract",
+    "runtime-provider-contract",
+    "prompt-version-observability",
+    "cluster-action-dry-run",
+    "doc-to-graph-pipeline",
+    "flow-dsl-minimal",
 })
 
 
@@ -677,6 +685,14 @@ _CONTROL_TEMPLATES = {
     "cost-registry.yaml": "cost.",
     "guardrail-contract.yaml": "guardrail.",
     "visual-evidence.yaml": "visual.",
+    "workspace-isolation.yaml": "workspace.",
+    "environment-policy.yaml": "env.",
+    "browser-tool-contract.yaml": "browser.",
+    "runtime-provider-contract.yaml": "runtime.",
+    "prompt-version-log.yaml": "promptver.",
+    "cluster-action-policy.yaml": "cluster.",
+    "doc-graph-pipeline.yaml": "docgraph.",
+    "flow-dsl-manifest.yaml": "flowdsl.",
 }
 
 

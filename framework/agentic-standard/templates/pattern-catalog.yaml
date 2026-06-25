@@ -249,3 +249,75 @@ patterns:
     rule_refs: ["quality.visual-evidence-required"]
     hook_refs: []
     check_refs: ["visual.missing_artifact_kinds", "visual.no_triggers"]
+  - id: workspace-isolation
+    category: security
+    maturity: governed
+    source_normative: security-governance.workspace-isolation
+    intent: "Declare writable roots, network egress and env passthrough; fail closed."
+    required_artifacts: ["workspace-isolation.yaml"]
+    rule_refs: ["security.workspace-isolated"]
+    hook_refs: ["tools.terminal-guard"]
+    check_refs: ["workspace.network_open", "workspace.writable_unbounded"]
+  - id: policy-by-environment
+    category: governance
+    maturity: governed
+    source_normative: governance.policy-by-environment
+    intent: "Declare what changes across local/CI/staging/production; production fails closed."
+    required_artifacts: ["environment-policy.yaml"]
+    rule_refs: ["governance.env-policy-declared"]
+    hook_refs: []
+    check_refs: ["env.environments_missing", "env.production_unguarded"]
+  - id: browser-tool-contract
+    category: quality
+    maturity: governed
+    source_normative: quality-governance.browser-tool-contract
+    intent: "Require DOM/screenshot/console logs from browser tools and bound reachable domains."
+    required_artifacts: ["browser-tool-contract.yaml"]
+    rule_refs: ["quality.browser-evidence-required"]
+    hook_refs: []
+    check_refs: ["browser.dom_required", "browser.screenshot_required"]
+  - id: runtime-provider-contract
+    category: runtime
+    maturity: orchestrated
+    source_normative: runtime-governance.provider-contract
+    intent: "Uniform lifecycle/resources/logs/cleanup contract so runtimes are interchangeable."
+    required_artifacts: ["runtime-provider-contract.yaml"]
+    rule_refs: ["runtime.provider-contract-uniform"]
+    hook_refs: []
+    check_refs: ["runtime.lifecycle_incomplete", "runtime.logs_undeclared"]
+  - id: prompt-version-observability
+    category: observability
+    maturity: controlled
+    source_normative: observability-governance.prompt-version
+    intent: "Track prompt/skill/provider/model versions linked to evals for regression attribution."
+    required_artifacts: ["prompt-version-log.yaml"]
+    rule_refs: ["observability.prompt-version-tracked"]
+    hook_refs: []
+    check_refs: ["promptver.tracking_incomplete", "promptver.evals_unlinked"]
+  - id: cluster-action-dry-run
+    category: governance
+    maturity: production
+    source_normative: governance.cluster-action-dry-run
+    intent: "High-risk cluster actions require dry-run, rollback proof and approval before execution."
+    required_artifacts: ["cluster-action-policy.yaml"]
+    rule_refs: ["governance.cluster-action-dry-run"]
+    hook_refs: []
+    check_refs: ["cluster.dry_run_required", "cluster.rollback_required"]
+  - id: doc-to-graph-pipeline
+    category: knowledge
+    maturity: production
+    source_normative: knowledge-governance.doc-to-graph
+    intent: "Extract sourced relations and contradictions into a documentary graph with provenance."
+    required_artifacts: ["doc-graph-pipeline.yaml"]
+    rule_refs: ["knowledge.doc-to-graph-sourced"]
+    hook_refs: []
+    check_refs: ["docgraph.sources_missing", "docgraph.relations_disabled"]
+  - id: flow-dsl-minimal
+    category: orchestration
+    maturity: production
+    source_normative: orchestration-governance.flow-dsl-minimal
+    intent: "Tool-neutral flow manifest: ordered steps, exportable diagram, determinism flag."
+    required_artifacts: ["flow-dsl-manifest.yaml"]
+    rule_refs: ["orchestration.flow-manifest-exportable"]
+    hook_refs: []
+    check_refs: ["flowdsl.steps_missing", "flowdsl.export_undeclared"]

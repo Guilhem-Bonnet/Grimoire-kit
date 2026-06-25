@@ -226,6 +226,62 @@ patterns:
     checks: [visual.missing_artifact_kinds, visual.no_triggers]
     tech_extras: []
     profile_min: governed
+  workspace-isolation:
+    category: security
+    artifacts: [workspace_isolation]
+    rules: [security.workspace-isolated]
+    checks: [workspace.network_open, workspace.writable_unbounded]
+    tech_extras: []
+    profile_min: governed
+  policy-by-environment:
+    category: governance
+    artifacts: [environment_policy]
+    rules: [governance.env-policy-declared]
+    checks: [env.environments_missing, env.production_unguarded]
+    tech_extras: []
+    profile_min: governed
+  browser-tool-contract:
+    category: quality
+    artifacts: [browser_tool_contract]
+    rules: [quality.browser-evidence-required]
+    checks: [browser.dom_required, browser.screenshot_required]
+    tech_extras: []
+    profile_min: governed
+  runtime-provider-contract:
+    category: runtime
+    artifacts: [runtime_provider_contract]
+    rules: [runtime.provider-contract-uniform]
+    checks: [runtime.lifecycle_incomplete, runtime.logs_undeclared]
+    tech_extras: []
+    profile_min: orchestrated
+  prompt-version-observability:
+    category: observability
+    artifacts: [prompt_version_log]
+    rules: [observability.prompt-version-tracked]
+    checks: [promptver.tracking_incomplete, promptver.evals_unlinked]
+    tech_extras: []
+    profile_min: controlled
+  cluster-action-dry-run:
+    category: governance
+    artifacts: [cluster_action_policy]
+    rules: [governance.cluster-action-dry-run]
+    checks: [cluster.dry_run_required, cluster.rollback_required]
+    tech_extras: []
+    profile_min: production
+  doc-to-graph-pipeline:
+    category: knowledge
+    artifacts: [doc_graph_pipeline]
+    rules: [knowledge.doc-to-graph-sourced]
+    checks: [docgraph.sources_missing, docgraph.relations_disabled]
+    tech_extras: []
+    profile_min: production
+  flow-dsl-minimal:
+    category: orchestration
+    artifacts: [flow_dsl_manifest]
+    rules: [orchestration.flow-manifest-exportable]
+    checks: [flowdsl.steps_missing, flowdsl.export_undeclared]
+    tech_extras: []
+    profile_min: production
 
 # Memory tiers are capabilities layered onto governed-memory-policy. Selecting a
 # tier pulls its backing tech extra without changing the core (SQLite) baseline.

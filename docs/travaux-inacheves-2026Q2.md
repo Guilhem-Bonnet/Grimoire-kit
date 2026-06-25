@@ -3,31 +3,41 @@
 > Statut : annexe d'ingénierie. Inventaire du travail restant après la slice v3.6.0
 > (11 contrôles gouvernés). Voir aussi [Benchmark corpus & écarts](agentic-standard-benchmark-corpus-2026Q2.md).
 
-## 1. Suite directe de la slice v3.6.0 (→ v3.6.1)
+## 1. Réconciliation & enrôlement — FAIT (v3.6.1)
 
-Les 11 nouveaux contrôles sont **disponibles** (patterns sélectionnables via `--pattern`/needs,
-vérifiés fail-closed quand l'artefact est présent) mais **pas encore enrôlés par défaut** :
+- **Taxonomie réconciliée** ✅ — `mapped_capabilities` ne référence plus que des patterns réels ;
+  capacités futures isolées en `planned_capabilities` ; test garde-fou
+  `test_profile_mapped_capabilities_are_real_patterns` (mapped ⊆ patterns ; planned ∩ patterns = ∅).
+- **Enrôlement par profil** ✅ — chaque contrôle est rattaché à son profil via `mapped_capabilities`
+  (et non `required_artifacts`, choix délibéré pour préserver l'UX « start small » : on n'impose pas
+  des dizaines de fichiers de policy à chaque projet ; les contrôles restent sélectionnables).
+- **`cc-verify.sh`** ✅ — résolution de l'interpréteur venv (fix du blocage pre-commit).
 
-- **Enrôlement par profil** — aucun n'est dans `required_artifacts` d'un profil, donc non généré
-  automatiquement par `grimoire standard init`. À ajouter (ex. `agent-privilege-boundary`,
-  `guardrail-contract` au profil `governed`) en complétant en parallèle les templates pour que
-  les scaffolds restent verts (`test_verify_passes_after_setup`).
-- **Câblage rules/hooks** — les `rule_refs`/`hook_refs` des nouveaux patterns ne sont pas encore
-  matérialisés dans `rule-packs.yaml` / `hook-registry.yaml` (références documentaires).
-- **Scoring** — les nouveaux contrôles n'alimentent pas encore `compliance-score.yaml`
-  (dimensions de score) ni `remediation-plan.yaml`.
+Restant (non bloquant) :
+
+- **Câblage rules/hooks** — `rule_refs`/`hook_refs` des nouveaux patterns pas encore matérialisés dans
+  `rule-packs.yaml` / `hook-registry.yaml` (références documentaires).
+- **Scoring** — nouveaux contrôles non encore branchés sur `compliance-score.yaml` / `remediation-plan.yaml`.
 - **Mapping normatif** — relier les check codes aux IDs de la norme amont (GOV-12/13/14, QUA-12).
 
-## 2. Sous-systèmes runtime lourds (→ v3.7.0+, profil production)
+## 2. Contrats déclaratifs — FAIT (v3.7.0) + reste runtime/adapter
 
-Identifiés par le benchmark, non self-contained (au-delà du moteur capability-map + checks) :
+**Livrés v3.7.0 (8 contrats déclaratifs, recette capability-map + template + check + test)** ✅ :
+`workspace-isolation`, `policy-by-environment`, `browser-tool-contract`, `runtime-provider-contract`,
+`prompt-version-observability`, `cluster-action-dry-run`, `doc-to-graph-pipeline`, `flow-dsl-minimal`.
+Catalogue de patterns : 26 → 34.
 
-- **Workflow State Engine durable** (checkpoint/interrupt, type LangGraph/Conductor)
-- **Local Agent Worker Pool** (slots, retries, cancellation)
-- **Agent Backend Boundary** (séparation node → backend → events → runtime)
-- **Kubernetes Agent Control Plane** (CRD, admission policies, provider client-go, OTel)
-- **Orders Exec/Formula Dispatcher** (shell-only vs workflow agentique)
-- **Agent Telemetry Plane OTel complet** (au-delà du cockpit actuel)
+**Restant — sous-systèmes runtime/adapter** (au-delà du moteur déclaratif, demandent du code d'exécution
+ou un adapter externe) :
+
+- **Workflow State Engine durable** (checkpoint/interrupt) — contrat `flow-dsl-minimal` posé ; reste
+  l'exécution durable, à **déléguer** via adapter LangGraph/Conductor (pas de moteur maison).
+- **Kubernetes Agent Control Plane** — reste l'adapter kagent + provider client-go (le contrat
+  `cluster-action-dry-run` couvre déjà la garde dry-run/rollback côté déclaratif).
+- **Local Agent Worker Pool** (slots, retries, cancellation) — runtime.
+- **Agent Backend Boundary** (node → backend → events → runtime) — refactor runtime.
+- **Orders Exec/Formula Dispatcher** (shell-only vs workflow agentique) — runtime.
+- **Agent Telemetry Plane OTel complet** (au-delà du cockpit actuel).
 
 ## 3. Memory OS — couches à construire
 

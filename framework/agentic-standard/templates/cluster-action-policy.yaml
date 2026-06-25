@@ -1,0 +1,15 @@
+$schema: "grimoire-agentic-standard-cluster-action-dry-run/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: governance.cluster-action-dry-run
+intent: >
+  High-risk cluster actions must support dry-run and rollback proof, and require
+  approval, before they execute against a live cluster.
+high_risk_actions:
+  - delete
+  - scale-down
+  - rollout-restart
+require_dry_run: true
+require_rollback: true
+require_approval: true

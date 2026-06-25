@@ -1,0 +1,19 @@
+$schema: "grimoire-agentic-standard-runtime-provider-contract/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: runtime-governance.provider-contract
+intent: >
+  Uniform lifecycle, resources, logs and cleanup contract for any agent runtime
+  (local, IDE, remote or K8s) so providers are interchangeable and observable.
+lifecycle:
+  start: declared
+  stop: declared
+  health: declared
+  cleanup: declared
+resources:
+  cpu: "1"
+  memory: "1Gi"
+logs:
+  destination: stdout
+  retention_days: 7

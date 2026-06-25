@@ -1,0 +1,14 @@
+$schema: "grimoire-agentic-standard-flow-dsl-minimal/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: orchestration-governance.flow-dsl-minimal
+intent: >
+  Minimal, tool-neutral flow manifest: ordered steps, an exportable diagram
+  format, and a determinism flag — visible without depending on a visual tool.
+flow:
+  - step: intake
+  - step: execute
+  - step: verify
+export_format: mermaid
+deterministic: true

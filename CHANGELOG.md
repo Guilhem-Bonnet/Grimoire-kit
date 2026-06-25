@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-06-25
+
+### Ajouté
+
+- **8 contrats déclaratifs (lot benchmark v3.7)** — concrétisation des capacités `planned_capabilities` purement déclaratives, recette `capability-map` + template + `_verify_*` fail-closed + test : `workspace-isolation`, `policy-by-environment`, `browser-tool-contract`, `runtime-provider-contract`, `prompt-version-observability`, `cluster-action-dry-run`, `doc-to-graph-pipeline`, `flow-dsl-minimal`. Catalogue de patterns **26 → 34**. Chaque template vérifie *clean* (test paramétré `test_control_template_verifies_clean`). Promotion `planned_capabilities` → `mapped_capabilities` dans les profils concernés (controlled/orchestrated/governed/production) ; restent en `planned` les 2 sous-systèmes à adapter externe (`workflow-state-engine`/LangGraph, `kubernetes-agent-control-plane`/kagent).
+
 ## [3.6.1] - 2026-06-25
 
 ### Corrigé

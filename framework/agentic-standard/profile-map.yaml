@@ -119,6 +119,30 @@ artifact_types:
   visual_evidence:
     template: "framework/agentic-standard/templates/visual-evidence.yaml"
     purpose: "Require DOM, screenshot, and journey proof when a delivery touches UI/UX."
+  workspace_isolation:
+    template: "framework/agentic-standard/templates/workspace-isolation.yaml"
+    purpose: "Declare writable roots, network egress and env passthrough (fail closed)."
+  environment_policy:
+    template: "framework/agentic-standard/templates/environment-policy.yaml"
+    purpose: "Declare what changes across local/CI/staging/production environments."
+  browser_tool_contract:
+    template: "framework/agentic-standard/templates/browser-tool-contract.yaml"
+    purpose: "Require DOM/screenshot/console logs from browser tools and bound domains."
+  runtime_provider_contract:
+    template: "framework/agentic-standard/templates/runtime-provider-contract.yaml"
+    purpose: "Uniform runtime lifecycle/resources/logs/cleanup contract."
+  prompt_version_log:
+    template: "framework/agentic-standard/templates/prompt-version-log.yaml"
+    purpose: "Track prompt/skill/provider/model versions linked to evals."
+  cluster_action_policy:
+    template: "framework/agentic-standard/templates/cluster-action-policy.yaml"
+    purpose: "High-risk cluster actions require dry-run, rollback and approval."
+  doc_graph_pipeline:
+    template: "framework/agentic-standard/templates/doc-graph-pipeline.yaml"
+    purpose: "Extract sourced relations/contradictions into a documentary graph."
+  flow_dsl_manifest:
+    template: "framework/agentic-standard/templates/flow-dsl-manifest.yaml"
+    purpose: "Tool-neutral flow manifest: steps, exportable diagram, determinism."
 
 profiles:
   - id: starter
@@ -162,7 +186,6 @@ profiles:
       - tool-mediation-gate
       - prompt-injection-firewall
       - remote-hygiene-guard
-    planned_capabilities:
       - prompt-version-observability
     minimum_evidence:
       - "Every provider/model call is declared in the provider registry."
@@ -200,7 +223,6 @@ profiles:
       - memory-integrity-validator
       - context-compression-gate
       - code-graph-projection
-    planned_capabilities:
       - runtime-provider-contract
     minimum_evidence:
       - "Context selections cite their source, freshness, and reason for inclusion."
@@ -246,7 +268,6 @@ profiles:
       - decision-council-gate
       - merge-lane-fault-classifier
       - visual-evidence-gate
-    planned_capabilities:
       - workspace-isolation
       - policy-by-environment
       - browser-tool-contract
@@ -289,11 +310,11 @@ profiles:
     mapped_capabilities:
       - llm-cost-registry
       - provider-cost-slo
-    planned_capabilities:
-      - kubernetes-agent-control-plane
       - cluster-action-dry-run
       - doc-to-graph-pipeline
       - flow-dsl-minimal
+    planned_capabilities:
+      - kubernetes-agent-control-plane
     minimum_evidence:
       - "High-risk actions support dry-run and rollback proof."
       - "Cost, latency, reliability, and quality signals are recorded for critical runs."
@@ -359,6 +380,22 @@ generation_targets:
       source_artifact: guardrail_contract
     - path: "_grimoire/standard/visual-evidence.yaml"
       source_artifact: visual_evidence
+    - path: "_grimoire/standard/workspace-isolation.yaml"
+      source_artifact: workspace_isolation
+    - path: "_grimoire/standard/environment-policy.yaml"
+      source_artifact: environment_policy
+    - path: "_grimoire/standard/browser-tool-contract.yaml"
+      source_artifact: browser_tool_contract
+    - path: "_grimoire/standard/runtime-provider-contract.yaml"
+      source_artifact: runtime_provider_contract
+    - path: "_grimoire/standard/prompt-version-log.yaml"
+      source_artifact: prompt_version_log
+    - path: "_grimoire/standard/cluster-action-policy.yaml"
+      source_artifact: cluster_action_policy
+    - path: "_grimoire/standard/doc-graph-pipeline.yaml"
+      source_artifact: doc_graph_pipeline
+    - path: "_grimoire/standard/flow-dsl-manifest.yaml"
+      source_artifact: flow_dsl_manifest
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

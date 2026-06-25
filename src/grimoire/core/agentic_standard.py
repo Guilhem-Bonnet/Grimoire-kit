@@ -1903,6 +1903,115 @@ def _verify_visual_evidence(root: Path, result: StandardVerificationResult) -> N
         _add_check(result, "visual.journey_not_required", "warning", "Visual evidence gate does not require a user journey.", path=rel_path)
 
 
+def _verify_workspace_isolation(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "workspace-isolation.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    if str(data.get("isolation_mode", "")).strip() not in {"container", "venv", "sandbox", "process"}:
+        _add_check(result, "workspace.isolation_undeclared", "warning", "Workspace isolation_mode must be container/venv/sandbox/process.", path=rel_path)
+    writable = data.get("writable_roots")
+    if not isinstance(writable, list) or not writable:
+        _add_check(result, "workspace.writable_unbounded", "warning", "Workspace must declare bounded writable_roots.", path=rel_path)
+    if str(data.get("network", "")).strip() not in {"deny", "allowlist"}:
+        _add_check(result, "workspace.network_open", "error", "Workspace network must be 'deny' or 'allowlist'.", path=rel_path)
+
+
+def _verify_environment_policy(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "environment-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    environments = data.get("environments")
+    if not isinstance(environments, dict) or not {"local", "ci", "staging", "production"} <= set(environments):
+        _add_check(result, "env.environments_missing", "error", "Environment policy must declare local, ci, staging and production.", path=rel_path)
+        return
+    production = environments.get("production")
+    if not isinstance(production, dict) or not (production.get("dry_run") is True or production.get("approval") is True):
+        _add_check(result, "env.production_unguarded", "warning", "Production environment must require dry-run or approval.", path=rel_path)
+
+
+def _verify_browser_tool_contract(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "browser-tool-contract.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    if data.get("require_dom") is not True:
+        _add_check(result, "browser.dom_required", "error", "Browser tool contract must require DOM capture.", path=rel_path)
+    if data.get("require_screenshot") is not True:
+        _add_check(result, "browser.screenshot_required", "error", "Browser tool contract must require screenshots.", path=rel_path)
+    if not isinstance(data.get("allowed_domains"), list):
+        _add_check(result, "browser.domains_invalid", "error", "Browser tool contract allowed_domains must be a list.", path=rel_path)
+
+
+def _verify_runtime_provider_contract(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "runtime-provider-contract.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    lifecycle = data.get("lifecycle")
+    if not isinstance(lifecycle, dict) or not {"start", "stop", "health", "cleanup"} <= set(lifecycle):
+        _add_check(result, "runtime.lifecycle_incomplete", "error", "Runtime provider contract must declare start/stop/health/cleanup.", path=rel_path)
+    if not isinstance(data.get("resources"), dict):
+        _add_check(result, "runtime.resources_unbounded", "warning", "Runtime provider contract should declare resource limits.", path=rel_path)
+    if not isinstance(data.get("logs"), dict):
+        _add_check(result, "runtime.logs_undeclared", "warning", "Runtime provider contract should declare a logs policy.", path=rel_path)
+
+
+def _verify_prompt_version_log(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "prompt-version-log.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    track = data.get("track")
+    track_set = {str(item) for item in track} if isinstance(track, list) else set()
+    if not {"prompt", "provider"} <= track_set:
+        _add_check(result, "promptver.tracking_incomplete", "warning", "Prompt version tracking should include at least prompt and provider.", path=rel_path)
+    if data.get("link_to_evals") is not True:
+        _add_check(result, "promptver.evals_unlinked", "warning", "Prompt versions should be linked to evals.", path=rel_path)
+
+
+def _verify_cluster_action_policy(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "cluster-action-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    actions = data.get("high_risk_actions")
+    if not isinstance(actions, list) or not actions:
+        _add_check(result, "cluster.actions_missing", "warning", "Cluster action policy declares no high-risk actions.", path=rel_path)
+    if data.get("require_dry_run") is not True:
+        _add_check(result, "cluster.dry_run_required", "error", "High-risk cluster actions must require dry-run.", path=rel_path)
+    if data.get("require_rollback") is not True:
+        _add_check(result, "cluster.rollback_required", "error", "High-risk cluster actions must require rollback proof.", path=rel_path)
+
+
+def _verify_doc_graph_pipeline(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "doc-graph-pipeline.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    sources = data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        _add_check(result, "docgraph.sources_missing", "warning", "Doc-to-graph pipeline declares no sources.", path=rel_path)
+    extract = data.get("extract")
+    if not isinstance(extract, dict) or extract.get("relations") is not True:
+        _add_check(result, "docgraph.relations_disabled", "warning", "Doc-to-graph pipeline should extract relations.", path=rel_path)
+    if data.get("provenance_required") is not True:
+        _add_check(result, "docgraph.provenance_optional", "warning", "Doc-to-graph nodes/edges should require provenance.", path=rel_path)
+
+
+def _verify_flow_dsl_manifest(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "flow-dsl-manifest.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    flow = data.get("flow")
+    if not isinstance(flow, list) or not flow:
+        _add_check(result, "flowdsl.steps_missing", "error", "Flow manifest must declare at least one step.", path=rel_path)
+    if not str(data.get("export_format", "")).strip():
+        _add_check(result, "flowdsl.export_undeclared", "warning", "Flow manifest should declare an export_format.", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -1956,6 +2065,14 @@ def verify_standard_profile(
     _verify_cost_registry(root, result)
     _verify_guardrail_contract(root, result)
     _verify_visual_evidence(root, result)
+    _verify_workspace_isolation(root, result)
+    _verify_environment_policy(root, result)
+    _verify_browser_tool_contract(root, result)
+    _verify_runtime_provider_contract(root, result)
+    _verify_prompt_version_log(root, result)
+    _verify_cluster_action_policy(root, result)
+    _verify_doc_graph_pipeline(root, result)
+    _verify_flow_dsl_manifest(root, result)
     _verify_score_and_exceptions(root, result)
 
     return result

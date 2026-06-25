@@ -1,0 +1,16 @@
+$schema: "grimoire-agentic-standard-doc-to-graph-pipeline/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: knowledge-governance.doc-to-graph
+intent: >
+  Build a sourced documentary graph: extract relations and contradictions from
+  declared sources, with provenance preserved for every node and edge.
+sources:
+  - id: docs
+    type: folder
+    locator: "docs/"
+extract:
+  relations: true
+  contradictions: true
+provenance_required: true
