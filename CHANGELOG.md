@@ -7,6 +7,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-06-25
+
+### Ajouté
+
+- **2 contrats déclaratifs (clôture du backlog déclaratif)** — `workflow-state-manifest` (machine à états de mission durable : états, transitions gardées, interrupts ; exécution déléguée à LangGraph/Conductor) et `k8s-agent-manifest` (contrat K8s déclaratif : CRD, resource limits, network allowlist, service account, OTel ; provider natif délégué à kagent). Catalogue de patterns **34 → 36** ; **`planned_capabilities` désormais vide** — tout le déclarable est implémenté, ne restent que les adapters runtime externes (LangGraph, kagent).
+
+### Corrigé
+
+- **README à jour** — badge de version corrigé (3.1.0 → 3.8.0) et ajout de la section « Standard agentique gouverné » (profils, 36 patterns, `verify`/`audit`/`score`/`gate`) qui manquait totalement malgré les releases v3.5–v3.7.
+- **CITATION.cff** — version et date alignées (3.1.0/2025 → 3.8.0/2026).
+
 ## [3.7.0] - 2026-06-25
 
 ### Ajouté

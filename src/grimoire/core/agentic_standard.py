@@ -2012,6 +2012,44 @@ def _verify_flow_dsl_manifest(root: Path, result: StandardVerificationResult) ->
         _add_check(result, "flowdsl.export_undeclared", "warning", "Flow manifest should declare an export_format.", path=rel_path)
 
 
+def _verify_workflow_state_manifest(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "workflow-state-manifest.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    states = data.get("states")
+    state_set = {str(state) for state in states} if isinstance(states, list) else set()
+    if not state_set:
+        _add_check(result, "wsm.states_missing", "error", "Workflow state manifest must declare states.", path=rel_path)
+        return
+    if str(data.get("initial_state", "")).strip() not in state_set:
+        _add_check(result, "wsm.initial_undeclared", "error", "Workflow initial_state must be one of the declared states.", path=rel_path)
+    transitions = data.get("transitions")
+    if not isinstance(transitions, list) or not transitions:
+        _add_check(result, "wsm.transitions_missing", "warning", "Workflow state manifest declares no transitions.", path=rel_path)
+        return
+    for transition in transitions:
+        if not isinstance(transition, dict) or str(transition.get("from", "")) not in state_set or str(transition.get("to", "")) not in state_set:
+            _add_check(result, "wsm.transition_invalid", "error", "Each transition must reference declared from/to states.", path=rel_path)
+
+
+def _verify_k8s_agent_manifest(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "k8s-agent-manifest.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    if not str(data.get("crd_kind", "")).strip():
+        _add_check(result, "k8s.crd_missing", "error", "K8s agent manifest must declare a crd_kind.", path=rel_path)
+    resource_limits = data.get("resource_limits")
+    if not isinstance(resource_limits, dict) or not resource_limits:
+        _add_check(result, "k8s.resource_limits_missing", "error", "K8s agent manifest must declare resource_limits.", path=rel_path)
+    if not str(data.get("service_account", "")).strip():
+        _add_check(result, "k8s.service_account_missing", "warning", "K8s agent manifest should declare a service_account.", path=rel_path)
+    telemetry = data.get("telemetry")
+    if not isinstance(telemetry, dict) or telemetry.get("otel") is not True:
+        _add_check(result, "k8s.telemetry_missing", "warning", "K8s agent manifest should enable OTel telemetry.", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -2073,6 +2111,8 @@ def verify_standard_profile(
     _verify_cluster_action_policy(root, result)
     _verify_doc_graph_pipeline(root, result)
     _verify_flow_dsl_manifest(root, result)
+    _verify_workflow_state_manifest(root, result)
+    _verify_k8s_agent_manifest(root, result)
     _verify_score_and_exceptions(root, result)
 
     return result

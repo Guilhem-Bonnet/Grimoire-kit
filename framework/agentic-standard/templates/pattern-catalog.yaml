@@ -321,3 +321,21 @@ patterns:
     rule_refs: ["orchestration.flow-manifest-exportable"]
     hook_refs: []
     check_refs: ["flowdsl.steps_missing", "flowdsl.export_undeclared"]
+  - id: workflow-state-manifest
+    category: workflow
+    maturity: starter
+    source_normative: orchestration-governance.workflow-state
+    intent: "Declare a durable mission state machine (states/guards/interrupts); execution delegated to LangGraph/Conductor."
+    required_artifacts: ["workflow-state-manifest.yaml"]
+    rule_refs: ["orchestration.workflow-state-declared"]
+    hook_refs: []
+    check_refs: ["wsm.states_missing", "wsm.transition_invalid"]
+  - id: k8s-agent-manifest
+    category: runtime
+    maturity: production
+    source_normative: runtime-governance.k8s-agent-control-plane
+    intent: "Declarative K8s agent/sandbox contract (CRD/limits/network/SA/OTel); native provider delegated to kagent/client-go."
+    required_artifacts: ["k8s-agent-manifest.yaml"]
+    rule_refs: ["runtime.k8s-agent-declared"]
+    hook_refs: []
+    check_refs: ["k8s.resource_limits_missing", "k8s.telemetry_missing"]

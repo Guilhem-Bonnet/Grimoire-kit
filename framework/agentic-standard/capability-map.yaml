@@ -282,6 +282,20 @@ patterns:
     checks: [flowdsl.steps_missing, flowdsl.export_undeclared]
     tech_extras: []
     profile_min: production
+  workflow-state-manifest:
+    category: workflow
+    artifacts: [workflow_state_manifest]
+    rules: [orchestration.workflow-state-declared]
+    checks: [wsm.states_missing, wsm.transition_invalid]
+    tech_extras: []
+    profile_min: starter
+  k8s-agent-manifest:
+    category: runtime
+    artifacts: [k8s_agent_manifest]
+    rules: [runtime.k8s-agent-declared]
+    checks: [k8s.resource_limits_missing, k8s.telemetry_missing]
+    tech_extras: []
+    profile_min: production
 
 # Memory tiers are capabilities layered onto governed-memory-policy. Selecting a
 # tier pulls its backing tech extra without changing the core (SQLite) baseline.

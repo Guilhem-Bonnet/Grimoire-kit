@@ -143,6 +143,12 @@ artifact_types:
   flow_dsl_manifest:
     template: "framework/agentic-standard/templates/flow-dsl-manifest.yaml"
     purpose: "Tool-neutral flow manifest: steps, exportable diagram, determinism."
+  workflow_state_manifest:
+    template: "framework/agentic-standard/templates/workflow-state-manifest.yaml"
+    purpose: "Durable mission state machine: states, guarded transitions, interrupts."
+  k8s_agent_manifest:
+    template: "framework/agentic-standard/templates/k8s-agent-manifest.yaml"
+    purpose: "Declarative K8s agent contract: CRD, limits, network allowlist, SA, OTel."
 
 profiles:
   - id: starter
@@ -159,8 +165,7 @@ profiles:
     mapped_capabilities:
       - evidence-gated-fsm
       - tool-blast-radius-limiter
-    planned_capabilities:
-      - workflow-state-engine
+      - workflow-state-manifest
     minimum_evidence:
       - "Selected profile and task state are declared."
       - "Tools and writable paths are bounded."
@@ -313,8 +318,7 @@ profiles:
       - cluster-action-dry-run
       - doc-to-graph-pipeline
       - flow-dsl-minimal
-    planned_capabilities:
-      - kubernetes-agent-control-plane
+      - k8s-agent-manifest
     minimum_evidence:
       - "High-risk actions support dry-run and rollback proof."
       - "Cost, latency, reliability, and quality signals are recorded for critical runs."
@@ -396,6 +400,10 @@ generation_targets:
       source_artifact: doc_graph_pipeline
     - path: "_grimoire/standard/flow-dsl-manifest.yaml"
       source_artifact: flow_dsl_manifest
+    - path: "_grimoire/standard/workflow-state-manifest.yaml"
+      source_artifact: workflow_state_manifest
+    - path: "_grimoire/standard/k8s-agent-manifest.yaml"
+      source_artifact: k8s_agent_manifest
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

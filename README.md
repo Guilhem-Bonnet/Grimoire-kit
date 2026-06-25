@@ -8,7 +8,7 @@
   <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/workflows/ci-sdk.yml"><img src="https://img.shields.io/github/actions/workflow/status/Guilhem-Bonnet/Grimoire-kit/ci-sdk.yml?branch=main&style=for-the-badge&logo=github-actions&logoColor=white&label=CI" alt="CI"></a>
   <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
   <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
-  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.1.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.8.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
   <a href="#-tests"><img src="https://img.shields.io/badge/tests-4430+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
@@ -141,6 +141,25 @@ grimoire standard doctor
 
 > Détails et matrice complète besoins → patterns → technologie :
 > [docs/agentic-standard-install-by-needs.md](docs/agentic-standard-install-by-needs.md).
+
+### <img src="docs/assets/icons/seal.svg" width="24" height="24" alt=""> Standard agentique gouverné (depuis v3.5)
+
+Le besoin choisi mappe sur un **profil** (`starter → controlled → orchestrated → governed → production`)
+qui active des **patterns gouvernés vérifiables** — **36 au catalogue** (sécurité, gouvernance, contexte,
+mémoire, observabilité, runtime, qualité…). Chaque pattern pose un artefact déclaratif
+(`_grimoire/standard/*.yaml`) et un contrôle *fail-closed* vérifié en continu :
+
+```bash
+grimoire standard verify   # artefacts présents + conformes au profil
+grimoire standard audit    # rapport de conformité
+grimoire standard score    # score de conformité multidimensionnel
+grimoire standard gate     # gate CI : échoue si une preuve obligatoire manque
+```
+
+Exemples de contrôles : blast-radius outil, séparation de privilèges controller/agent (ScrubTokenEnv),
+firewall d'injection de prompt, council de décision, intégrité mémoire, registre de coût LLM + SLO,
+contrat de guardrails (input/output/tool/model), preuve visuelle, isolation workspace, policy par
+environnement. Voir [docs/agentic-standard-integration.md](docs/agentic-standard-integration.md).
 
 <details>
 <summary><b>Installation classique (clone)</b></summary>

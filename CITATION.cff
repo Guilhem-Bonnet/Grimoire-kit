@@ -6,8 +6,8 @@ authors:
   - family-names: "Bonnet"
     given-names: "Guilhem"
 license: MIT
-version: "3.1.0"
-date-released: "2025-03-13"
+version: "3.8.0"
+date-released: "2026-06-25"
 repository-code: "https://github.com/Guilhem-Bonnet/Grimoire-kit"
 url: "https://guilhem-bonnet.github.io/Grimoire-kit/"
 keywords:

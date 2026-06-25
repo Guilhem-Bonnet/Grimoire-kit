@@ -1,0 +1,17 @@
+$schema: "grimoire-agentic-standard-k8s-agent-manifest/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: runtime-governance.k8s-agent-control-plane
+intent: >
+  Declarative contract for agents/sandboxes as Kubernetes resources: CRD kind,
+  resource limits, network allowlist, service account, and OTel telemetry. The
+  native control-plane provider (e.g. kagent / client-go) is delegated.
+crd_kind: GrimoireAgent
+resource_limits:
+  cpu: "1"
+  memory: "1Gi"
+network_allowlist: []
+service_account: grimoire-agent
+telemetry:
+  otel: true

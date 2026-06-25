@@ -1,0 +1,29 @@
+$schema: "grimoire-agentic-standard-workflow-state-manifest/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: orchestration-governance.workflow-state
+intent: >
+  Declare a durable, auditable mission workflow as an explicit state machine:
+  states, the initial state, guarded transitions, and interrupt states. The
+  execution engine (e.g. LangGraph/Conductor) is delegated; this is the contract.
+states:
+  - intake
+  - executing
+  - validating
+  - done
+initial_state: intake
+transitions:
+  - from: intake
+    to: executing
+    guard: definition-of-ready-met
+  - from: executing
+    to: validating
+    guard: evidence-present
+  - from: validating
+    to: done
+    guard: verification-verdict-pass
+interrupts:
+  - blocked
+  - cancelled
+durable: true

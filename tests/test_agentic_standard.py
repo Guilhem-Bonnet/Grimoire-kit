@@ -628,6 +628,8 @@ _EXPECTED_PATTERNS = frozenset({
     "cluster-action-dry-run",
     "doc-to-graph-pipeline",
     "flow-dsl-minimal",
+    "workflow-state-manifest",
+    "k8s-agent-manifest",
 })
 
 
@@ -693,6 +695,8 @@ _CONTROL_TEMPLATES = {
     "cluster-action-policy.yaml": "cluster.",
     "doc-graph-pipeline.yaml": "docgraph.",
     "flow-dsl-manifest.yaml": "flowdsl.",
+    "workflow-state-manifest.yaml": "wsm.",
+    "k8s-agent-manifest.yaml": "k8s.",
 }
 
 
