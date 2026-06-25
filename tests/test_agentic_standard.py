@@ -781,6 +781,13 @@ def test_profile_mapped_capabilities_are_real_patterns() -> None:
         assert not already, f"{profile['id']}: planned_capabilities already implemented (promote them): {sorted(already)}"
 
 
+def test_governed_controls_doc_covers_all_patterns() -> None:
+    patterns = set(load_capability_map()["patterns"])
+    doc = (Path(__file__).resolve().parents[1] / "docs/governed-controls.md").read_text(encoding="utf-8")
+    missing = {pid for pid in patterns if f"`{pid}`" not in doc}
+    assert not missing, f"patterns absents de docs/governed-controls.md (régénérer): {sorted(missing)}"
+
+
 def test_new_control_checks_route_to_dimensions() -> None:
     from grimoire.core.agentic_standard import _dimension_for_check
 

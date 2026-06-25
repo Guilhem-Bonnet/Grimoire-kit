@@ -83,6 +83,7 @@ nav:
   - Concepts:
       - Architecture: concepts.md
       - Standard agentique: agentic-standard-integration.md
+      - Contrôles gouvernés (référence): governed-controls.md
       - Installation par besoins: agentic-standard-install-by-needs.md
       - Cible finale standard agentique: agentic-standard-final-target.md
       - Plan cible standard agentique: agentic-standard-target-plan.md

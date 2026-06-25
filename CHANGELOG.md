@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-06-25
+
+### Ajouté
+
+- **Page de référence des contrôles gouvernés** (`docs/governed-controls.md`) — les 36 patterns regroupés par catégorie (intention, profil minimal, artefact, checks clés), **générée** depuis `pattern-catalog.yaml` via `docs/gen-governed-controls.py` (source unique, zéro drift) et ajoutée à la navigation. Test anti-drift `test_governed_controls_doc_covers_all_patterns` : tout pattern de `capability-map.yaml` doit être documenté. Comble le manque de documentation par-contrôle (jusqu'ici seulement dans les YAML).
+
 ## [3.10.2] - 2026-06-25
 
 ### Corrigé
