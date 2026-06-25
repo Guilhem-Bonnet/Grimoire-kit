@@ -1714,6 +1714,195 @@ def _verify_blast_radius_policy(root: Path, profile: StandardProfile, result: St
                     _add_check(result, "tools.blast_radius_writable_outside_root", "error", f"Blast-radius limit {limit_id!r} writable path escapes project root: {raw}", path=rel_path)
 
 
+def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "privilege-boundary.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    strict_profile = profile.id in {"governed", "production"}
+    if data.get("controller_token_scrub") is not True:
+        _add_check(result, "privilege.scrub_disabled", "error" if strict_profile else "warning", "Controller token scrub must be enabled before agent spawn.", path=rel_path)
+    boundaries = data.get("boundaries")
+    if not isinstance(boundaries, list) or not boundaries:
+        _add_check(result, "privilege.boundary_undeclared", "warning", "No controller/agent privilege boundary is declared.", path=rel_path)
+        return
+    for boundary in boundaries:
+        if not isinstance(boundary, dict):
+            _add_check(result, "privilege.boundary_invalid", "error", "Privilege boundary entries must be mappings.", path=rel_path)
+            continue
+        if boundary.get("infra_tokens_denied") is not True:
+            boundary_id = str(boundary.get("id", "")).strip()
+            _add_check(result, "privilege.infra_token_exposed", "error", f"Boundary {boundary_id!r} does not deny infrastructure tokens.", path=rel_path)
+
+
+def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "prompt-firewall.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    strict_profile = profile.id in {"governed", "production"}
+    if data.get("isolate_external_content") is not True:
+        _add_check(result, "firewall.isolation_disabled", "error" if strict_profile else "warning", "External content must be isolated from control instructions.", path=rel_path)
+    if data.get("instruction_override_blocked") is not True:
+        _add_check(result, "firewall.override_allowed", "error" if strict_profile else "warning", "Instruction override by external content must be blocked.", path=rel_path)
+    sources = data.get("untrusted_sources")
+    if not isinstance(sources, list) or not sources:
+        _add_check(result, "firewall.no_sources", "warning", "No untrusted content source is declared.", path=rel_path)
+        return
+    for source in sources:
+        if isinstance(source, dict) and source.get("quarantine") is not True:
+            source_id = str(source.get("id", "")).strip()
+            _add_check(result, "firewall.source_not_quarantined", "error", f"Untrusted source {source_id!r} is not quarantined.", path=rel_path)
+
+
+def _verify_remote_hygiene(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "remote-hygiene.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    if data.get("check_stale_refs") is not True:
+        _add_check(result, "remote.stale_check_disabled", "warning", "Stale ref detection is disabled.", path=rel_path)
+    if data.get("require_remote_reachable") is not True:
+        _add_check(result, "remote.reachability_unchecked", "warning", "Remote reachability is not verified before audit.", path=rel_path)
+    age = data.get("max_branch_age_days")
+    if not isinstance(age, int) or isinstance(age, bool) or age <= 0:
+        _add_check(result, "remote.age_unbounded", "warning", "max_branch_age_days must be a positive integer.", path=rel_path)
+    branches = data.get("max_open_branches")
+    if not isinstance(branches, int) or isinstance(branches, bool) or branches <= 0:
+        _add_check(result, "remote.branches_unbounded", "warning", "max_open_branches must be a positive integer.", path=rel_path)
+
+
+def _verify_decision_council(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "decision-council.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    quorum = data.get("quorum")
+    if not isinstance(quorum, int) or isinstance(quorum, bool) or quorum < 2:
+        _add_check(result, "council.quorum_too_low", "error", "Decision council quorum must be at least 2.", path=rel_path)
+    veto_roles = data.get("veto_roles")
+    if not isinstance(veto_roles, list) or not veto_roles:
+        _add_check(result, "council.no_veto", "error", "Decision council must declare at least one veto role.", path=rel_path)
+    if data.get("budget_cap_usd") is None:
+        _add_check(result, "council.no_budget_cap", "warning", "Decision council has no budget cap.", path=rel_path)
+    triggers = data.get("triggers")
+    if not isinstance(triggers, list) or not triggers:
+        _add_check(result, "council.no_triggers", "warning", "Decision council declares no escalation triggers.", path=rel_path)
+
+
+def _verify_compression_gate(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "compression-gate.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    preserve_checks = (
+        ("preserve_provenance", "compression.provenance_dropped", "provenance"),
+        ("preserve_constraints", "compression.constraints_dropped", "constraints"),
+        ("preserve_tool_atomicity", "compression.atomicity_dropped", "tool-call/tool-result atomicity"),
+        ("preserve_evidence", "compression.evidence_dropped", "evidence"),
+    )
+    for key, code, label in preserve_checks:
+        if data.get(key) is not True:
+            _add_check(result, code, "error", f"Context compression must preserve {label}.", path=rel_path)
+    ratio = data.get("max_compression_ratio")
+    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not 0 < ratio <= 1:
+        _add_check(result, "compression.ratio_invalid", "warning", "max_compression_ratio must be a number in (0, 1].", path=rel_path)
+
+
+def _verify_memory_integrity(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "memory-integrity.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    integrity_checks = (
+        ("check_provenance", "integrity.provenance_unchecked", "provenance"),
+        ("check_drift", "integrity.drift_unchecked", "drift"),
+        ("check_poisoning", "integrity.poisoning_unchecked", "poisoning"),
+    )
+    for key, code, label in integrity_checks:
+        if data.get(key) is not True:
+            _add_check(result, code, "error", f"Memory integrity validator must check {label}.", path=rel_path)
+    if data.get("expiry_required") is not True:
+        _add_check(result, "integrity.no_expiry", "warning", "Promoted memories must declare expiry.", path=rel_path)
+
+
+def _verify_merge_lane(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "merge-lane.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    classes = data.get("classes")
+    transient = classes.get("transient") if isinstance(classes, dict) else None
+    hard = classes.get("hard") if isinstance(classes, dict) else None
+    if not (isinstance(transient, list) and transient and isinstance(hard, list) and hard):
+        _add_check(result, "merge.classes_incomplete", "error", "Merge lane must declare non-empty transient and hard fault classes.", path=rel_path)
+    budget = data.get("transient_retry_budget")
+    if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+        _add_check(result, "merge.no_retry_budget", "warning", "Transient retry budget must be a positive integer.", path=rel_path)
+    if data.get("escalate_on_hard") is not True:
+        _add_check(result, "merge.hard_not_escalated", "error", "Hard merge faults must escalate instead of retrying.", path=rel_path)
+
+
+def _verify_cost_registry(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "cost-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    pricing = data.get("pricing")
+    if not isinstance(pricing, list) or not pricing:
+        _add_check(result, "cost.no_pricing", "error", "Cost registry must declare per-model pricing.", path=rel_path)
+    else:
+        for entry in pricing:
+            if not (isinstance(entry, dict) and str(entry.get("model", "")).strip() and str(entry.get("provider", "")).strip()):
+                _add_check(result, "cost.pricing_incomplete", "error", "Each pricing entry must declare model and provider.", path=rel_path)
+    budgets = data.get("budgets")
+    if not isinstance(budgets, dict) or budgets.get("per_mission_usd") is None:
+        _add_check(result, "cost.no_budget", "warning", "Cost registry has no per-mission budget.", path=rel_path)
+    slo = data.get("slo")
+    if not isinstance(slo, dict) or slo.get("max_crash_rate_pct") is None or slo.get("max_unhealthy_rate_pct") is None:
+        _add_check(result, "cost.no_slo", "warning", "Cost registry has no session reliability SLO (crash/unhealthy rate).", path=rel_path)
+
+
+def _verify_guardrail_contract(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "guardrail-contract.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    if not str(data.get("version", "")).strip():
+        _add_check(result, "guardrail.unversioned", "error", "Guardrail contract must declare a version.", path=rel_path)
+    guardrails = data.get("guardrails")
+    if not isinstance(guardrails, dict):
+        _add_check(result, "guardrail.faces_missing", "error", "Guardrail contract must declare input/output/tool/model guardrails.", path=rel_path)
+        return
+    valid_modes = {"enforce", "monitor"}
+    valid_actions = {"block", "escalate", "log"}
+    for face in ("input", "output", "tool", "model"):
+        spec = guardrails.get(face)
+        if not isinstance(spec, dict):
+            _add_check(result, f"guardrail.{face}_missing", "error", f"Guardrail face {face!r} is missing.", path=rel_path)
+            continue
+        if spec.get("mode") not in valid_modes:
+            _add_check(result, "guardrail.invalid_mode", "error", f"Guardrail face {face!r} mode must be 'enforce' or 'monitor'.", path=rel_path)
+        if spec.get("on_violation") not in valid_actions:
+            _add_check(result, "guardrail.no_violation_action", "error", f"Guardrail face {face!r} must declare a violation action.", path=rel_path)
+
+
+def _verify_visual_evidence(root: Path, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "visual-evidence.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    require_for = data.get("require_for")
+    if not isinstance(require_for, list) or not require_for:
+        _add_check(result, "visual.no_triggers", "warning", "Visual evidence gate declares no UI/UX triggers.", path=rel_path)
+    kinds = data.get("required_artifact_kinds")
+    kind_set = {str(kind) for kind in kinds} if isinstance(kinds, list) else set()
+    if not {"screenshot", "dom"} <= kind_set:
+        _add_check(result, "visual.missing_artifact_kinds", "error", "Visual evidence must require at least screenshot and dom artifacts.", path=rel_path)
+    if data.get("journey_required") is not True:
+        _add_check(result, "visual.journey_not_required", "warning", "Visual evidence gate does not require a user journey.", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -1757,6 +1946,16 @@ def verify_standard_profile(
     _verify_evidence_gates(root, result)
     _verify_pattern_catalog(root, result)
     _verify_blast_radius_policy(root, profile, result)
+    _verify_privilege_boundary(root, profile, result)
+    _verify_prompt_firewall(root, profile, result)
+    _verify_remote_hygiene(root, result)
+    _verify_decision_council(root, result)
+    _verify_compression_gate(root, result)
+    _verify_memory_integrity(root, result)
+    _verify_merge_lane(root, result)
+    _verify_cost_registry(root, result)
+    _verify_guardrail_contract(root, result)
+    _verify_visual_evidence(root, result)
     _verify_score_and_exceptions(root, result)
 
     return result

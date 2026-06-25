@@ -1,0 +1,19 @@
+$schema: "grimoire-agentic-standard-decision-council/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: governance.decision-council-gate
+intent: >
+  Escalate critical or high-uncertainty decisions to a multi-agent quorum with
+  critical veto, a budget cap, and a recorded trace of disagreements before any
+  irreversible action.
+quorum: 2
+veto_roles:
+  - security
+  - architecture
+budget_cap_usd: 5.0
+triggers:
+  - irreversible-action
+  - high-uncertainty
+  - security-impact
+record_disagreements: true

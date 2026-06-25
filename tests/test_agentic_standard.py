@@ -609,6 +609,16 @@ _EXPECTED_PATTERNS = frozenset({
     "tool-mediation-gate",
     "provider-cost-slo",
     "tool-blast-radius-limiter",
+    "agent-privilege-boundary",
+    "prompt-injection-firewall",
+    "remote-hygiene-guard",
+    "decision-council-gate",
+    "context-compression-gate",
+    "memory-integrity-validator",
+    "merge-lane-fault-classifier",
+    "llm-cost-registry",
+    "guardrail-contract",
+    "visual-evidence-gate",
 })
 
 
@@ -652,6 +662,75 @@ def test_verify_accepts_bounded_blast_radius(tmp_path: Path) -> None:
     result = verify_standard_profile(tmp_path, profile_id="governed")
     codes = {check.id for check in result.checks}
     assert not {code for code in codes if code.startswith("tools.blast_radius")}
+
+
+_CONTROL_TEMPLATES = {
+    "blast-radius-policy.yaml": "tools.blast_radius",
+    "privilege-boundary.yaml": "privilege.",
+    "prompt-firewall.yaml": "firewall.",
+    "remote-hygiene.yaml": "remote.",
+    "decision-council.yaml": "council.",
+    "compression-gate.yaml": "compression.",
+    "memory-integrity.yaml": "integrity.",
+    "merge-lane.yaml": "merge.",
+    "cost-registry.yaml": "cost.",
+    "guardrail-contract.yaml": "guardrail.",
+    "visual-evidence.yaml": "visual.",
+}
+
+
+@pytest.mark.parametrize(("template_name", "prefix"), list(_CONTROL_TEMPLATES.items()))
+def test_control_template_verifies_clean(tmp_path: Path, template_name: str, prefix: str) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    src = Path(__file__).resolve().parents[1] / "framework/agentic-standard/templates" / template_name
+    dst = tmp_path / "_grimoire/standard" / template_name
+    dst.write_bytes(src.read_bytes())
+    result = verify_standard_profile(tmp_path, profile_id="governed")
+    offending = {check.id for check in result.checks if check.id.startswith(prefix)}
+    assert not offending, f"{template_name} produced unexpected checks: {offending}"
+
+
+def test_detects_bad_privilege_boundary(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "_grimoire/standard/privilege-boundary.yaml").write_text(
+        '$schema: "grimoire-agentic-standard-privilege-boundary/v1"\n'
+        "controller_token_scrub: false\n"
+        "boundaries:\n"
+        "  - id: leaky-agent\n"
+        "    infra_tokens_denied: false\n",
+        encoding="utf-8",
+    )
+    codes = {check.id for check in verify_standard_profile(tmp_path, profile_id="governed").checks}
+    assert "privilege.scrub_disabled" in codes
+    assert "privilege.infra_token_exposed" in codes
+
+
+def test_detects_bad_decision_council(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "_grimoire/standard/decision-council.yaml").write_text(
+        '$schema: "grimoire-agentic-standard-decision-council/v1"\n'
+        "quorum: 1\n"
+        "veto_roles: []\n",
+        encoding="utf-8",
+    )
+    codes = {check.id for check in verify_standard_profile(tmp_path, profile_id="governed").checks}
+    assert "council.quorum_too_low" in codes
+    assert "council.no_veto" in codes
+
+
+def test_detects_bad_guardrail_contract(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "_grimoire/standard/guardrail-contract.yaml").write_text(
+        '$schema: "grimoire-agentic-standard-guardrail-contract/v1"\n'
+        "guardrails:\n"
+        "  input:\n"
+        "    mode: enforce\n"
+        "    on_violation: block\n",
+        encoding="utf-8",
+    )
+    codes = {check.id for check in verify_standard_profile(tmp_path, profile_id="governed").checks}
+    assert "guardrail.unversioned" in codes
+    assert "guardrail.tool_missing" in codes
 
 
 def test_capability_map_covers_all_expected_patterns() -> None:

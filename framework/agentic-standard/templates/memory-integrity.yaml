@@ -1,0 +1,13 @@
+$schema: "grimoire-agentic-standard-memory-integrity/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: memory-governance.integrity-validator
+intent: >
+  Validate provenance, drift, poisoning, and expiry of promoted memories so the
+  recall layer cannot silently surface tampered or stale knowledge.
+check_provenance: true
+check_drift: true
+check_poisoning: true
+expiry_required: true
+max_age_days: 180

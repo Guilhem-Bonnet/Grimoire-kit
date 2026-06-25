@@ -159,3 +159,93 @@ patterns:
     rule_refs: ["tools.blast-radius-bounded"]
     hook_refs: ["tools.terminal-guard"]
     check_refs: ["tools.blast_radius_undeclared", "tools.blast_radius_production_allow"]
+  - id: agent-privilege-boundary
+    category: security
+    maturity: governed
+    source_normative: security-governance.controller-agent-privilege
+    intent: "Separate controller/agent privileges and scrub infrastructure tokens before agent spawn (fail closed)."
+    required_artifacts: ["privilege-boundary.yaml"]
+    rule_refs: ["privilege.controller-agent-separated"]
+    hook_refs: ["tools.terminal-guard"]
+    check_refs: ["privilege.scrub_disabled", "privilege.infra_token_exposed"]
+  - id: prompt-injection-firewall
+    category: security
+    maturity: controlled
+    source_normative: security-governance.prompt-injection-firewall
+    intent: "Isolate external/untrusted content so it cannot override control instructions."
+    required_artifacts: ["prompt-firewall.yaml"]
+    rule_refs: ["prompt.external-content-isolated"]
+    hook_refs: []
+    check_refs: ["firewall.isolation_disabled", "firewall.override_allowed"]
+  - id: remote-hygiene-guard
+    category: governance
+    maturity: controlled
+    source_normative: audit-governance.remote-source-freshness
+    intent: "Detect stale refs, oversized branch sets, and unreachable remotes before auditing source."
+    required_artifacts: ["remote-hygiene.yaml"]
+    rule_refs: ["remote.freshness-verified"]
+    hook_refs: []
+    check_refs: ["remote.stale_check_disabled", "remote.reachability_unchecked"]
+  - id: decision-council-gate
+    category: governance
+    maturity: governed
+    source_normative: governance.decision-council-gate
+    intent: "Escalate critical/high-uncertainty decisions to a quorum with veto, budget cap, and recorded disagreements."
+    required_artifacts: ["decision-council.yaml"]
+    rule_refs: ["decision.council-before-irreversible"]
+    hook_refs: []
+    check_refs: ["council.quorum_too_low", "council.no_veto"]
+  - id: context-compression-gate
+    category: context
+    maturity: orchestrated
+    source_normative: context-governance.compression-without-loss
+    intent: "Allow context compression only if provenance, constraints, tool atomicity, and evidence remain verifiable."
+    required_artifacts: ["compression-gate.yaml"]
+    rule_refs: ["context.compression-preserves-provenance"]
+    hook_refs: []
+    check_refs: ["compression.provenance_dropped", "compression.atomicity_dropped"]
+  - id: memory-integrity-validator
+    category: memory
+    maturity: orchestrated
+    source_normative: memory-governance.integrity-validator
+    intent: "Validate provenance, drift, poisoning, and expiry of promoted memories before recall."
+    required_artifacts: ["memory-integrity.yaml"]
+    rule_refs: ["memory.integrity-validated"]
+    hook_refs: []
+    check_refs: ["integrity.provenance_unchecked", "integrity.poisoning_unchecked"]
+  - id: merge-lane-fault-classifier
+    category: governance
+    maturity: governed
+    source_normative: governance.merge-lane-fault-classifier
+    intent: "Classify merge/review failures as transient (retryable) or hard (escalate) before any automatic retry."
+    required_artifacts: ["merge-lane.yaml"]
+    rule_refs: ["merge.fault-classified-before-retry"]
+    hook_refs: []
+    check_refs: ["merge.classes_incomplete", "merge.hard_not_escalated"]
+  - id: llm-cost-registry
+    category: provider
+    maturity: production
+    source_normative: provider-governance.cost-and-reliability
+    intent: "Track LLM cost per model/provider and report session reliability SLOs (CrashRate / UnhealthyRate)."
+    required_artifacts: ["cost-registry.yaml"]
+    rule_refs: ["provider.cost-and-slo-declared"]
+    hook_refs: []
+    check_refs: ["cost.no_pricing", "cost.no_slo"]
+  - id: guardrail-contract
+    category: security
+    maturity: controlled
+    source_normative: security-governance.guardrail-contract
+    intent: "Version input/output/tool/model guardrails with explicit modes and violation actions; fail closed."
+    required_artifacts: ["guardrail-contract.yaml"]
+    rule_refs: ["guardrail.versioned-four-faces"]
+    hook_refs: []
+    check_refs: ["guardrail.unversioned", "guardrail.no_violation_action"]
+  - id: visual-evidence-gate
+    category: quality
+    maturity: governed
+    source_normative: quality-governance.visual-evidence-gate
+    intent: "Require DOM, screenshot, and journey proof when a delivery touches UI/UX."
+    required_artifacts: ["visual-evidence.yaml"]
+    rule_refs: ["quality.visual-evidence-required"]
+    hook_refs: []
+    check_refs: ["visual.missing_artifact_kinds", "visual.no_triggers"]

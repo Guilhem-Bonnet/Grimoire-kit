@@ -1,0 +1,14 @@
+$schema: "grimoire-agentic-standard-prompt-firewall/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: security-governance.prompt-injection-firewall
+intent: >
+  Isolate external/untrusted content so it cannot override control instructions.
+  Untrusted sources are quarantined and treated as data, never as directives.
+isolate_external_content: true
+instruction_override_blocked: true
+untrusted_sources:
+  - id: web-fetch
+    description: "Replace with a real untrusted content source."
+    quarantine: true

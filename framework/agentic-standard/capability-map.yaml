@@ -156,6 +156,76 @@ patterns:
     checks: [tools.blast_radius_undeclared, tools.blast_radius_production_allow]
     tech_extras: []
     profile_min: starter
+  agent-privilege-boundary:
+    category: security
+    artifacts: [privilege_boundary]
+    rules: [privilege.controller-agent-separated]
+    checks: [privilege.scrub_disabled, privilege.infra_token_exposed]
+    tech_extras: []
+    profile_min: governed
+  prompt-injection-firewall:
+    category: security
+    artifacts: [prompt_firewall]
+    rules: [prompt.external-content-isolated]
+    checks: [firewall.isolation_disabled, firewall.override_allowed]
+    tech_extras: []
+    profile_min: controlled
+  remote-hygiene-guard:
+    category: governance
+    artifacts: [remote_hygiene]
+    rules: [remote.freshness-verified]
+    checks: [remote.stale_check_disabled, remote.reachability_unchecked]
+    tech_extras: []
+    profile_min: controlled
+  decision-council-gate:
+    category: governance
+    artifacts: [decision_council]
+    rules: [decision.council-before-irreversible]
+    checks: [council.quorum_too_low, council.no_veto]
+    tech_extras: []
+    profile_min: governed
+  context-compression-gate:
+    category: context
+    artifacts: [compression_gate]
+    rules: [context.compression-preserves-provenance]
+    checks: [compression.provenance_dropped, compression.atomicity_dropped]
+    tech_extras: []
+    profile_min: orchestrated
+  memory-integrity-validator:
+    category: memory
+    artifacts: [memory_integrity]
+    rules: [memory.integrity-validated]
+    checks: [integrity.provenance_unchecked, integrity.poisoning_unchecked]
+    tech_extras: []
+    profile_min: orchestrated
+  merge-lane-fault-classifier:
+    category: governance
+    artifacts: [merge_lane]
+    rules: [merge.fault-classified-before-retry]
+    checks: [merge.classes_incomplete, merge.hard_not_escalated]
+    tech_extras: []
+    profile_min: governed
+  llm-cost-registry:
+    category: provider
+    artifacts: [cost_registry]
+    rules: [provider.cost-and-slo-declared]
+    checks: [cost.no_pricing, cost.no_slo]
+    tech_extras: []
+    profile_min: production
+  guardrail-contract:
+    category: security
+    artifacts: [guardrail_contract]
+    rules: [guardrail.versioned-four-faces]
+    checks: [guardrail.unversioned, guardrail.no_violation_action]
+    tech_extras: []
+    profile_min: controlled
+  visual-evidence-gate:
+    category: quality
+    artifacts: [visual_evidence]
+    rules: [quality.visual-evidence-required]
+    checks: [visual.missing_artifact_kinds, visual.no_triggers]
+    tech_extras: []
+    profile_min: governed
 
 # Memory tiers are capabilities layered onto governed-memory-policy. Selecting a
 # tier pulls its backing tech extra without changing the core (SQLite) baseline.

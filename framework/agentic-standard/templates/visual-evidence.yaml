@@ -1,0 +1,15 @@
+$schema: "grimoire-agentic-standard-visual-evidence/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: quality-governance.visual-evidence-gate
+intent: >
+  Require visual proof (DOM, screenshot, journey) when a delivery touches UI/UX,
+  so verification verdicts cover what a user actually sees.
+require_for:
+  - ui
+  - ux
+required_artifact_kinds:
+  - screenshot
+  - dom
+journey_required: true

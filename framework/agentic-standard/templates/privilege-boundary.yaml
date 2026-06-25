@@ -1,0 +1,19 @@
+$schema: "grimoire-agentic-standard-privilege-boundary/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: security-governance.controller-agent-privilege
+intent: >
+  Separate controller and agent privileges. Infrastructure tokens stay with the
+  controller and are scrubbed from the environment before any agent spawn
+  (ScrubTokenEnv). Fail closed: an agent that needs infra access escalates.
+controller_token_scrub: true
+infra_token_names:
+  - AWS_SECRET_ACCESS_KEY
+  - GH_TOKEN
+  - KUBECONFIG
+boundaries:
+  - id: default-agent
+    description: "Replace with a real controller/agent privilege boundary."
+    infra_tokens_denied: true
+    allowed_scopes: ["workspace"]

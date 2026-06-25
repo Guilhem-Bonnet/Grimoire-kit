@@ -1,0 +1,20 @@
+$schema: "grimoire-agentic-standard-cost-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: provider-governance.cost-and-reliability
+intent: >
+  Track LLM cost per model/provider and report session reliability SLOs
+  (CrashRate / UnhealthyRate) so overruns and unhealthy rigs are observable
+  without an external billing API.
+pricing:
+  - model: "example-model"
+    provider: "example-provider"
+    input_per_1k_usd: 0.0
+    output_per_1k_usd: 0.0
+budgets:
+  per_mission_usd: 5.0
+  alert_threshold_pct: 80
+slo:
+  max_crash_rate_pct: 5
+  max_unhealthy_rate_pct: 10

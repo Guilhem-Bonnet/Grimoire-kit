@@ -89,6 +89,36 @@ artifact_types:
   blast_radius_policy:
     template: "framework/agentic-standard/templates/blast-radius-policy.yaml"
     purpose: "Bound per-task tool blast radius: writable paths, network egress, environment, cost, and production reach."
+  privilege_boundary:
+    template: "framework/agentic-standard/templates/privilege-boundary.yaml"
+    purpose: "Separate controller/agent privileges and scrub infrastructure tokens before agent spawn."
+  prompt_firewall:
+    template: "framework/agentic-standard/templates/prompt-firewall.yaml"
+    purpose: "Isolate external/untrusted content so it cannot override control instructions."
+  remote_hygiene:
+    template: "framework/agentic-standard/templates/remote-hygiene.yaml"
+    purpose: "Verify remote freshness (stale refs, branch volume, reachability) before auditing source."
+  decision_council:
+    template: "framework/agentic-standard/templates/decision-council.yaml"
+    purpose: "Escalate critical decisions to a quorum with veto, budget cap, and recorded disagreements."
+  compression_gate:
+    template: "framework/agentic-standard/templates/compression-gate.yaml"
+    purpose: "Allow context compression only if provenance, constraints, tool atomicity, and evidence survive."
+  memory_integrity:
+    template: "framework/agentic-standard/templates/memory-integrity.yaml"
+    purpose: "Validate provenance, drift, poisoning, and expiry of promoted memories."
+  merge_lane:
+    template: "framework/agentic-standard/templates/merge-lane.yaml"
+    purpose: "Classify merge/review failures as transient (retryable) or hard (escalate) before retry."
+  cost_registry:
+    template: "framework/agentic-standard/templates/cost-registry.yaml"
+    purpose: "Track LLM cost per model/provider and report session reliability SLOs."
+  guardrail_contract:
+    template: "framework/agentic-standard/templates/guardrail-contract.yaml"
+    purpose: "Version input/output/tool/model guardrails with modes and violation actions."
+  visual_evidence:
+    template: "framework/agentic-standard/templates/visual-evidence.yaml"
+    purpose: "Require DOM, screenshot, and journey proof when a delivery touches UI/UX."
 
 profiles:
   - id: starter
@@ -294,6 +324,26 @@ generation_targets:
       source_artifact: observability_policy
     - path: "_grimoire/standard/blast-radius-policy.yaml"
       source_artifact: blast_radius_policy
+    - path: "_grimoire/standard/privilege-boundary.yaml"
+      source_artifact: privilege_boundary
+    - path: "_grimoire/standard/prompt-firewall.yaml"
+      source_artifact: prompt_firewall
+    - path: "_grimoire/standard/remote-hygiene.yaml"
+      source_artifact: remote_hygiene
+    - path: "_grimoire/standard/decision-council.yaml"
+      source_artifact: decision_council
+    - path: "_grimoire/standard/compression-gate.yaml"
+      source_artifact: compression_gate
+    - path: "_grimoire/standard/memory-integrity.yaml"
+      source_artifact: memory_integrity
+    - path: "_grimoire/standard/merge-lane.yaml"
+      source_artifact: merge_lane
+    - path: "_grimoire/standard/cost-registry.yaml"
+      source_artifact: cost_registry
+    - path: "_grimoire/standard/guardrail-contract.yaml"
+      source_artifact: guardrail_contract
+    - path: "_grimoire/standard/visual-evidence.yaml"
+      source_artifact: visual_evidence
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

@@ -1,0 +1,22 @@
+$schema: "grimoire-agentic-standard-guardrail-contract/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: security-governance.guardrail-contract
+intent: >
+  Version input/output/tool/model guardrails with explicit modes and violation
+  actions so guardrail changes are traceable and fail closed.
+version: "1.0.0"
+guardrails:
+  input:
+    mode: enforce
+    on_violation: block
+  output:
+    mode: enforce
+    on_violation: block
+  tool:
+    mode: enforce
+    on_violation: escalate
+  model:
+    mode: monitor
+    on_violation: log

@@ -1,0 +1,19 @@
+$schema: "grimoire-agentic-standard-merge-lane/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: governance.merge-lane-fault-classifier
+intent: >
+  Classify merge/review failures as transient (retryable: rate limit, provider
+  timeout) or hard (escalate) before any automatic retry, to avoid useless
+  retries and silent queue lockouts.
+classes:
+  transient:
+    - rate-limit
+    - provider-timeout
+  hard:
+    - compile-error
+    - test-failure
+    - policy-violation
+transient_retry_budget: 3
+escalate_on_hard: true

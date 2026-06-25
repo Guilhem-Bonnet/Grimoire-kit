@@ -1,0 +1,13 @@
+$schema: "grimoire-agentic-standard-compression-gate/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: context-governance.compression-without-loss
+intent: >
+  Allow context compression only if provenance, constraints, tool-call/tool-result
+  atomicity, and evidence remain verifiable after reduction.
+preserve_provenance: true
+preserve_constraints: true
+preserve_tool_atomicity: true
+preserve_evidence: true
+max_compression_ratio: 0.6

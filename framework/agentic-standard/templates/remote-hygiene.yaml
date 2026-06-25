@@ -1,0 +1,12 @@
+$schema: "grimoire-agentic-standard-remote-hygiene/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: audit-governance.remote-source-freshness
+intent: >
+  Verify remote freshness before auditing source: detect stale refs, oversized
+  branch/tag sets, and unreachable remotes so audits never run on obsolete state.
+check_stale_refs: true
+require_remote_reachable: true
+max_branch_age_days: 90
+max_open_branches: 50
