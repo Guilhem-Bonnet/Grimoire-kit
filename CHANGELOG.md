@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-06-25
+
+### Corrigé
+
+- **Attribution de score des contrôles gouvernés** — les checks des contrôles ajoutés en v3.6–v3.8 sont désormais routés vers leur dimension de score naturelle (`compression.`→context_contract, `integrity.`→memory_policy, `cost.`→provider_policy, `council.`→decision_graph, `guardrail.`→rule_packs, `merge.`/`cluster.`/`env.`→ci_release_gate, `wsm.`/`flowdsl.`/`runtime.`/`k8s.`→orchestration_policy, `visual.`/`browser.`→evidence_gates, `privilege.`/`firewall.`/`workspace.`/`tools.blast_radius`→hook_registry, `promptver.`→observability_cockpit) au lieu du bucket générique `artifacts`. `grimoire standard score` reflète ainsi correctement ces contrôles. Aucun impact sur les profils par défaut (contrôles optionnels, non scaffoldés).
+
 ## [3.10.0] - 2026-06-25
 
 ### Ajouté

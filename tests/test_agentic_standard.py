@@ -781,6 +781,22 @@ def test_profile_mapped_capabilities_are_real_patterns() -> None:
         assert not already, f"{profile['id']}: planned_capabilities already implemented (promote them): {sorted(already)}"
 
 
+def test_new_control_checks_route_to_dimensions() -> None:
+    from grimoire.core.agentic_standard import _dimension_for_check
+
+    assert _dimension_for_check("compression.provenance_dropped") == "context_contract"
+    assert _dimension_for_check("integrity.poisoning_unchecked") == "memory_policy"
+    assert _dimension_for_check("cost.no_slo") == "provider_policy"
+    assert _dimension_for_check("council.quorum_too_low") == "decision_graph"
+    assert _dimension_for_check("guardrail.unversioned") == "rule_packs"
+    assert _dimension_for_check("merge.hard_not_escalated") == "ci_release_gate"
+    assert _dimension_for_check("wsm.states_missing") == "orchestration_policy"
+    assert _dimension_for_check("visual.missing_artifact_kinds") == "evidence_gates"
+    assert _dimension_for_check("tools.blast_radius_production_allow") == "hook_registry"
+    # tool-mediation checks keep their previous bucket (specific prefix only)
+    assert _dimension_for_check("tools.unmediated_call") == "artifacts"
+
+
 def test_every_need_resolves_without_warnings() -> None:
     known_patterns = set(load_capability_map()["patterns"])
 
