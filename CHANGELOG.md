@@ -7,8 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-06-25
+
 ### Ajouté
 
+- **11 contrôles gouvernés benchmark-driven** — issus de la comparaison avec le corpus agentique de référence (37 projets), concrétisant des capacités jusqu'ici seulement nommées dans `profile-map.yaml` : `tool-blast-radius-limiter`, `agent-privilege-boundary` (ScrubTokenEnv controller/agent), `prompt-injection-firewall` (GOV-12), `remote-hygiene-guard` (GOV-13), `decision-council-gate` (GOV-14), `context-compression-gate`, `memory-integrity-validator`, `merge-lane-fault-classifier`, `llm-cost-registry` (coût + SLO CrashRate/UnhealthyRate), `guardrail-contract` (input/output/tool/model versionnés), `visual-evidence-gate` (QUA-12). Chacun : pattern (`capability-map.yaml` + `pattern-catalog.yaml`), artefact + template, vérification `_verify_*` fail-closed dans `grimoire standard verify`. Catalogue de patterns 15 → 26.
+- **Benchmark corpus & matrice d'écarts** — `docs/agentic-standard-benchmark-corpus-2026Q2.md` (22 patterns + 15 contrôles cibles vs couverture réelle) et `docs/travaux-inacheves-2026Q2.md` (backlog priorisé : v3.7.0+, Memory OS, R&D à porter, dette repo, branches/PR en attente).
 - **Rampe « commencer petit » pour l'installation par besoins** — le `needs-catalog.yaml` est désormais **tiéré** (`essential` / `advanced` / `enterprise`) avec un besoin de départ recommandé (`solo-prototyping`, marqué `▶`). `grimoire standard needs` regroupe les besoins par tier et affiche leur **empreinte** (profil · nombre de patterns · nombre de services externes) ; `grimoire standard needs --explain` révèle à la demande les patterns derrière chaque besoin (divulgation progressive). L'assistant `standard init --interactive` ordonne les besoins essentiels d'abord et pré-sélectionne le besoin recommandé (Entrée = recommandé). Documentation : section « Commencer petit (rampe progressive) » dans `docs/agentic-standard-install-by-needs.md`.
 
 ### Changé
