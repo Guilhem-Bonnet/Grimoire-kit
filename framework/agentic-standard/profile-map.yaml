@@ -86,6 +86,9 @@ artifact_types:
   observability_policy:
     template: "framework/agentic-standard/templates/observability-policy.yaml"
     purpose: "Declare reproducible cockpit inputs, outputs, views, redaction, and non-authoritative projection rules."
+  blast_radius_policy:
+    template: "framework/agentic-standard/templates/blast-radius-policy.yaml"
+    purpose: "Bound per-task tool blast radius: writable paths, network egress, environment, cost, and production reach."
 
 profiles:
   - id: starter
@@ -289,6 +292,8 @@ generation_targets:
       source_artifact: waivers
     - path: "_grimoire/standard/observability-policy.yaml"
       source_artifact: observability_policy
+    - path: "_grimoire/standard/blast-radius-policy.yaml"
+      source_artifact: blast_radius_policy
   task_runtime:
     - path: "_grimoire-output/evidence/{task-id}/task-envelope.md"
       source_artifact: task_envelope

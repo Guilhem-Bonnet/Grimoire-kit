@@ -608,7 +608,50 @@ _EXPECTED_PATTERNS = frozenset({
     "mission-evidence-ledger",
     "tool-mediation-gate",
     "provider-cost-slo",
+    "tool-blast-radius-limiter",
 })
+
+
+def test_verify_detects_unbounded_blast_radius(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    policy_path = tmp_path / "_grimoire/standard/blast-radius-policy.yaml"
+    policy_path.write_text(
+        '$schema: "grimoire-agentic-standard-blast-radius-policy/v1"\n'
+        "defaults:\n"
+        "  enforce: false\n"
+        "limits:\n"
+        "  - id: risky-task\n"
+        "    network: allowlist\n"
+        "    network_allowlist: []\n"
+        "    production_touch: allow\n"
+        '    writable_paths: ["../escape"]\n',
+        encoding="utf-8",
+    )
+    result = verify_standard_profile(tmp_path, profile_id="governed")
+    codes = {check.id for check in result.checks}
+    assert "tools.blast_radius_unenforced" in codes
+    assert "tools.blast_radius_allowlist_empty" in codes
+    assert "tools.blast_radius_production_allow" in codes
+    assert "tools.blast_radius_writable_outside_root" in codes
+
+
+def test_verify_accepts_bounded_blast_radius(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed")
+    policy_path = tmp_path / "_grimoire/standard/blast-radius-policy.yaml"
+    policy_path.write_text(
+        '$schema: "grimoire-agentic-standard-blast-radius-policy/v1"\n'
+        "defaults:\n"
+        "  enforce: true\n"
+        "limits:\n"
+        "  - id: safe-task\n"
+        '    writable_paths: ["_grimoire-output/"]\n'
+        "    network: deny\n"
+        "    production_touch: deny\n",
+        encoding="utf-8",
+    )
+    result = verify_standard_profile(tmp_path, profile_id="governed")
+    codes = {check.id for check in result.checks}
+    assert not {code for code in codes if code.startswith("tools.blast_radius")}
 
 
 def test_capability_map_covers_all_expected_patterns() -> None:

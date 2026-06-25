@@ -1,0 +1,25 @@
+$schema: "grimoire-agentic-standard-blast-radius-policy/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  source_normative: security-governance.tool-blast-radius
+intent: >
+  Bound the maximum impact of each tool or task: writable paths, network egress,
+  environment access, cost ceiling, and production reachability. A limit fails
+  closed: anything not explicitly granted is denied.
+defaults:
+  enforce: true
+  network: deny            # deny | allowlist
+  production_touch: deny   # deny | dry-run | allow
+  max_cost_usd: 0.0
+  writable_paths: []
+limits:
+  - id: example-task
+    description: "Replace with a real task/tool blast-radius limit."
+    enforce: true
+    writable_paths: ["_grimoire-output/"]
+    network: deny
+    network_allowlist: []
+    env_access: []          # explicit environment variable names allowed
+    max_cost_usd: 0.0
+    production_touch: deny

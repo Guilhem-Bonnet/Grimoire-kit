@@ -1664,6 +1664,56 @@ def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> N
             _add_check(result, "patterns.required_artifacts_invalid", "error", f"Pattern {pattern.get('id')!r} required_artifacts must be a list.", path=rel_path)
 
 
+def _verify_blast_radius_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    rel_path = STANDARD_DIR / "blast-radius-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    strict_profile = profile.id in {"governed", "production"}
+    defaults = data.get("defaults")
+    if not isinstance(defaults, dict):
+        _add_check(result, "tools.blast_radius_defaults_missing", "error", "Blast-radius policy must declare defaults.", path=rel_path)
+    elif defaults.get("enforce") is not True:
+        severity = "error" if strict_profile else "warning"
+        _add_check(result, "tools.blast_radius_unenforced", severity, "Blast-radius policy defaults must enforce limits (fail closed).", path=rel_path)
+
+    limits = data.get("limits")
+    if not isinstance(limits, list) or not limits:
+        _add_check(result, "tools.blast_radius_undeclared", "warning", "Blast-radius policy declares no per-task tool limits.", path=rel_path)
+        return
+
+    for limit in limits:
+        if not isinstance(limit, dict):
+            _add_check(result, "tools.blast_radius_invalid", "error", "Blast-radius limit entries must be mappings.", path=rel_path)
+            continue
+        limit_id = str(limit.get("id", "")).strip()
+        if not limit_id:
+            _add_check(result, "tools.blast_radius_id_missing", "error", "Blast-radius limit has no id.", path=rel_path)
+
+        network = str(limit.get("network", "")).strip()
+        if network not in {"deny", "allowlist"}:
+            _add_check(result, "tools.blast_radius_network_invalid", "error", f"Blast-radius limit {limit_id!r} network must be 'deny' or 'allowlist'.", path=rel_path)
+        elif network == "allowlist" and not (isinstance(limit.get("network_allowlist"), list) and limit.get("network_allowlist")):
+            _add_check(result, "tools.blast_radius_allowlist_empty", "error", f"Blast-radius limit {limit_id!r} uses a network allowlist but declares no hosts.", path=rel_path)
+
+        production_touch = str(limit.get("production_touch", "")).strip()
+        if production_touch not in {"deny", "dry-run", "allow"}:
+            _add_check(result, "tools.blast_radius_production_invalid", "error", f"Blast-radius limit {limit_id!r} production_touch must be 'deny', 'dry-run' or 'allow'.", path=rel_path)
+        elif production_touch == "allow":
+            severity = "error" if strict_profile else "warning"
+            _add_check(result, "tools.blast_radius_production_allow", severity, f"Blast-radius limit {limit_id!r} allows unguarded production access.", path=rel_path)
+
+        writable = limit.get("writable_paths")
+        if not isinstance(writable, list):
+            _add_check(result, "tools.blast_radius_writable_invalid", "error", f"Blast-radius limit {limit_id!r} writable_paths must be a list.", path=rel_path)
+        else:
+            for raw in writable:
+                candidate = (root / str(raw)).resolve()
+                if not _is_inside_root(root, candidate):
+                    _add_check(result, "tools.blast_radius_writable_outside_root", "error", f"Blast-radius limit {limit_id!r} writable path escapes project root: {raw}", path=rel_path)
+
+
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -1706,6 +1756,7 @@ def verify_standard_profile(
     _verify_orchestration_policy(root, result)
     _verify_evidence_gates(root, result)
     _verify_pattern_catalog(root, result)
+    _verify_blast_radius_policy(root, profile, result)
     _verify_score_and_exceptions(root, result)
 
     return result

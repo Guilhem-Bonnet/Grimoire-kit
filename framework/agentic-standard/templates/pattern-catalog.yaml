@@ -150,3 +150,12 @@ patterns:
     rule_refs: ["provider.cost-budgeted"]
     hook_refs: []
     check_refs: ["provider.cost_unbudgeted", "provider.slo_undeclared"]
+  - id: tool-blast-radius-limiter
+    category: security
+    maturity: starter
+    source_normative: security-governance.tool-blast-radius
+    intent: "Bound each tool/task blast radius: writable paths, network egress, environment, cost, and production reach; fail closed."
+    required_artifacts: ["blast-radius-policy.yaml"]
+    rule_refs: ["tools.blast-radius-bounded"]
+    hook_refs: ["tools.terminal-guard"]
+    check_refs: ["tools.blast_radius_undeclared", "tools.blast_radius_production_allow"]

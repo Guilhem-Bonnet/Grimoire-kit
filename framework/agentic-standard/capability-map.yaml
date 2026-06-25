@@ -149,6 +149,13 @@ patterns:
     checks: [provider.cost_unbudgeted, provider.slo_undeclared]
     tech_extras: []
     profile_min: production
+  tool-blast-radius-limiter:
+    category: security
+    artifacts: [blast_radius_policy]
+    rules: [tools.blast-radius-bounded]
+    checks: [tools.blast_radius_undeclared, tools.blast_radius_production_allow]
+    tech_extras: []
+    profile_min: starter
 
 # Memory tiers are capabilities layered onto governed-memory-policy. Selecting a
 # tier pulls its backing tech extra without changing the core (SQLite) baseline.
