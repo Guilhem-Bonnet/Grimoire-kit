@@ -1043,8 +1043,8 @@ body.gp-onepager .gp-sprite--ember {
 
 body.gp-onepager .gp-runtime-lenses {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
+  grid-template-columns: 1fr;
+  gap: 0.8rem;
 }
 
 body.gp-onepager .gp-runtime-lenses article:nth-child(2) {
@@ -1297,33 +1297,25 @@ body.gp-onepager .gp-machine-preview__agents .gp-sprite {
 body.gp-onepager .gp-flow-rail {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.9rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
   margin: 2rem 0 0;
-  padding: 1.25rem 0 0;
+  padding: 0.5rem 0 0;
   list-style: none;
   counter-reset: gp-flow;
 }
 
 body.gp-onepager .gp-flow-rail::before {
-  content: "";
-  position: absolute;
-  top: 2.8rem;
-  left: 5%;
-  right: 5%;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(var(--gp-accent-rgb), 0.22), rgba(var(--gp-accent-alt-rgb), 0.28), rgba(var(--gp-proof-rgb), 0.2));
-  transform: scaleX(0);
-  transform-origin: left center;
-  opacity: 0;
+  /* connecteur désactivé : la grille est sur plusieurs rangées (3×2) */
+  display: none;
 }
 
 body.gp-onepager .gp-flow-rail li {
   position: relative;
   display: grid;
   align-content: start;
-  min-height: 17rem;
-  padding: 1.3rem 1rem 1rem;
+  min-height: 12rem;
+  padding: 1.3rem 1.3rem 1.2rem;
   border-radius: 1.4rem;
   border: 1px solid var(--gp-line);
   background: var(--gp-panel-strong);
@@ -1359,7 +1351,9 @@ body.gp-onepager .gp-flow-rail li::after {
   box-shadow: 0 0 0 0.3rem rgba(var(--gp-accent-alt-rgb), 0.12);
 }
 
-body.gp-onepager .gp-flow-rail li:last-child::after {
+body.gp-onepager .gp-flow-rail li:last-child::after,
+body.gp-onepager .gp-flow-rail li:nth-child(3n)::after {
+  /* pas de point « étape suivante » en fin de rangée (grille 3 colonnes) */
   display: none;
 }
 
