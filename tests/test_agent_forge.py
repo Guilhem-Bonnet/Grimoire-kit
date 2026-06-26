@@ -39,7 +39,7 @@ class TestDetectDomain(unittest.TestCase):
     def test_database_domain(self):
         key, profile = self.forge.detect_domain("je veux un agent pour les migrations PostgreSQL")
         self.assertEqual(key, "database")
-        self.assertIn("🗄", profile["icon"])
+        self.assertEqual(profile["icon"], "server")
 
     def test_security_domain(self):
         key, _profile = self.forge.detect_domain("audit de sécurité et scan de vulnérabilités")

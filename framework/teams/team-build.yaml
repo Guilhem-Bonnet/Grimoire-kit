@@ -1,7 +1,7 @@
 team:
   name: "team-build"
   display_name: "Team Build — Engineering & Quality"
-  icon: "🔨"
+  icon: "wrench"
   version: "1.0.0"
   description: "Transforme les specs validées de Team Vision en code fonctionnel, testé, et documenté. Propriétaire du COMMENT."
 

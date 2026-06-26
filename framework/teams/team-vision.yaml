@@ -1,7 +1,7 @@
 team:
   name: "team-vision"
   display_name: "Team Vision — Product & Strategy"
-  icon: "🔭"
+  icon: "lightbulb"
   version: "1.0.0"
   description: "Transforme les idées bruites en specs validées prêtes pour Team Build. Propriétaire du WHY et du QUOI."
 

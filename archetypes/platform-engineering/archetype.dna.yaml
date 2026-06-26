@@ -4,7 +4,7 @@ id: platform-engineering
 name: "Platform Engineering"
 version: "1.0.0"
 description: "Ingénierie de plateforme end-to-end — Architecture système, backend, déploiement, fiabilité. De l'idée au service observable en production."
-icon: "🏗️"
+icon: "temple"
 author: "grimoire-kit"
 tags: [platform, architecture, backend, sre, reliability, observability, deployment, gitops, ddd, microservices, event-driven]
 

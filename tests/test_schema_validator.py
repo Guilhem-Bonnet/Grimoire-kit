@@ -46,7 +46,7 @@ id: test
 name: "Test"
 version: "1.0.0"
 description: "Test archetype"
-icon: "🧪"
+icon: "flask"
 author: "test"
 tags: [test]
 inherits: minimal
@@ -74,7 +74,7 @@ id: test
 name: ""
 version: "1.0.0"
 description: "Test"
-icon: "🧪"
+icon: "flask"
 author: "test"
 """)
         data, err = self.mod._load_yaml(dna)
@@ -89,7 +89,7 @@ id: test
 name: "Test"
 version: "1.0.0"
 description: "Test"
-icon: "🧪"
+icon: "flask"
 author: "test"
 constraints:
   - id: c1
@@ -109,7 +109,7 @@ id: test
 name: "Test"
 version: "1"
 description: "Test"
-icon: "🧪"
+icon: "flask"
 author: "test"
 """)
         data, err = self.mod._load_yaml(dna)
@@ -124,7 +124,7 @@ id: test
 name: "Test"
 version: "1.0.0"
 description: "Test"
-icon: "🧪"
+icon: "flask"
 author: "test"
 auto_detect:
   confidence_boost: 150
@@ -317,7 +317,7 @@ id: test
 name: "Test"
 version: "1.0.0"
 description: "Test"
-icon: "🧪"
+icon: "flask"
 author: "test"
 """)
         report = self.mod.validate_all(self.tmpdir)

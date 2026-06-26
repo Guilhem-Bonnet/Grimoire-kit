@@ -4,7 +4,7 @@ id: stack/go
 name: "Stack — Go Expert"
 version: "1.0.0"
 description: "Agent spécialisé Go — backend performant, tests table-driven, gestion des goroutines"
-icon: "🐹"
+icon: "hexagon"
 author: "grimoire-kit"
 tags: [go, golang, backend, api, grpc, performance, concurrency]
 

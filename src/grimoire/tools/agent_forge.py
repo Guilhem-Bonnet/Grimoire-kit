@@ -26,61 +26,61 @@ from grimoire.tools._common import GrimoireTool
 
 DOMAIN_TAXONOMY: dict[str, dict[str, Any]] = {
     "database": {
-        "icon": "🗄️", "tag_prefix": "db",
+        "icon": "server", "tag_prefix": "db",
         "keywords": ["database", "db", "sql", "migration", "schema", "postgres",
                       "mysql", "mongodb", "redis", "orm"],
         "role": "Database & Migration Specialist",
     },
     "security": {
-        "icon": "🛡️", "tag_prefix": "sec",
+        "icon": "shield-pulse", "tag_prefix": "sec",
         "keywords": ["security", "sécurité", "vulnérabilité", "audit", "secrets",
                       "cve", "owasp", "rbac", "auth"],
         "role": "Security & Hardening Specialist",
     },
     "frontend": {
-        "icon": "🎨", "tag_prefix": "ui",
+        "icon": "sparkle", "tag_prefix": "ui",
         "keywords": ["frontend", "ui", "ux", "react", "vue", "next", "angular",
                       "css", "html", "component", "accessibility"],
         "role": "Frontend & UI Specialist",
     },
     "api": {
-        "icon": "🔌", "tag_prefix": "api",
+        "icon": "plug", "tag_prefix": "api",
         "keywords": ["api", "rest", "graphql", "grpc", "endpoint", "swagger",
                       "openapi", "webhook"],
         "role": "API Design & Integration Specialist",
     },
     "testing": {
-        "icon": "🧪", "tag_prefix": "qa",
+        "icon": "flask", "tag_prefix": "qa",
         "keywords": ["test", "qa", "quality", "coverage", "e2e", "tdd", "bdd",
                       "regression"],
         "role": "QA & Testing Specialist",
     },
     "devops": {
-        "icon": "⚙️", "tag_prefix": "ops",
+        "icon": "wrench", "tag_prefix": "ops",
         "keywords": ["ci", "cd", "pipeline", "deploy", "release", "automation",
                       "build"],
         "role": "CI/CD & Automation Specialist",
     },
     "monitoring": {
-        "icon": "📡", "tag_prefix": "obs",
+        "icon": "network", "tag_prefix": "obs",
         "keywords": ["monitoring", "observability", "metrics", "logs", "traces",
                       "alerts", "grafana", "prometheus"],
         "role": "Observability & Monitoring Specialist",
     },
     "data": {
-        "icon": "📊", "tag_prefix": "data",
+        "icon": "chart", "tag_prefix": "data",
         "keywords": ["data", "pipeline", "etl", "analytics", "ml", "dbt",
                       "spark", "dataset"],
         "role": "Data Pipeline & Analytics Specialist",
     },
     "documentation": {
-        "icon": "📝", "tag_prefix": "doc",
+        "icon": "clipboard", "tag_prefix": "doc",
         "keywords": ["documentation", "doc", "readme", "wiki", "guide",
                       "tutorial", "api-doc"],
         "role": "Documentation & Knowledge Specialist",
     },
     "performance": {
-        "icon": "⚡", "tag_prefix": "perf",
+        "icon": "bolt", "tag_prefix": "perf",
         "keywords": ["performance", "optimization", "latency", "throughput",
                       "profiling", "benchmark"],
         "role": "Performance & Profiling Specialist",
@@ -88,7 +88,7 @@ DOMAIN_TAXONOMY: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_DOMAIN: dict[str, Any] = {
-    "icon": "🤖", "tag_prefix": "agent",
+    "icon": "grimoire", "tag_prefix": "agent",
     "keywords": [],
     "role": "Custom Domain Specialist",
 }

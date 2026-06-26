@@ -34,7 +34,7 @@ _log = logging.getLogger("grimoire.agent_forge")
 
 DOMAIN_TAXONOMY: dict[str, dict] = {
     "database": {
-        "icon": "🗄️", "tag_prefix": "db",
+        "icon": "server", "tag_prefix": "db",
         "tools": ["psql", "mysql", "sqlite3", "pg_dump", "flyway", "liquibase", "alembic"],
         "keywords": ["database", "db", "sql", "migration", "schema", "postgres", "mysql", "mongodb", "redis", "requête", "query", "orm"],
         "role": "Database & Migration Specialist",
@@ -43,7 +43,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "db connection check",
     },
     "security": {
-        "icon": "🛡️", "tag_prefix": "sec",
+        "icon": "shield-pulse", "tag_prefix": "sec",
         "tools": ["trivy", "grype", "snyk", "semgrep", "bandit", "gitleaks", "trufflehog"],
         "keywords": ["security", "sécurité", "vulnérabilité", "audit", "secrets", "cve", "hardening", "pentest", "owasp", "rbac", "auth", "authentification", "autorisation"],
         "role": "Security & Hardening Specialist",
@@ -52,7 +52,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "security scan",
     },
     "frontend": {
-        "icon": "🎨", "tag_prefix": "ui",
+        "icon": "sparkle", "tag_prefix": "ui",
         "tools": ["node", "pnpm", "npm", "vite", "storybook", "playwright", "cypress"],
         "keywords": ["frontend", "ui", "ux", "react", "vue", "next", "angular", "css", "html", "component", "composant", "accessibilité", "accessibility", "responsive"],
         "role": "Frontend & UI Specialist",
@@ -61,7 +61,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "npx tsc --noEmit && npm test",
     },
     "api": {
-        "icon": "🔌", "tag_prefix": "api",
+        "icon": "plug", "tag_prefix": "api",
         "tools": ["curl", "httpie", "postman", "swagger", "openapi-generator", "grpc"],
         "keywords": ["api", "rest", "graphql", "grpc", "endpoint", "route", "swagger", "openapi", "webhook", "contrat", "contract", "interface"],
         "role": "API Design & Integration Specialist",
@@ -70,7 +70,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "API health check",
     },
     "testing": {
-        "icon": "🧪", "tag_prefix": "qa",
+        "icon": "flask", "tag_prefix": "qa",
         "tools": ["pytest", "jest", "vitest", "playwright", "k6", "go test", "rspec"],
         "keywords": ["test", "qa", "qualité", "quality", "coverage", "couverture", "e2e", "unitaire", "integration", "bdd", "tdd", "regression"],
         "role": "QA & Testing Specialist",
@@ -79,7 +79,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "test suite pass rate",
     },
     "data": {
-        "icon": "📊", "tag_prefix": "data",
+        "icon": "chart", "tag_prefix": "data",
         "tools": ["dbt", "airflow", "spark", "pandas", "polars", "dask", "great-expectations"],
         "keywords": ["data", "pipeline", "etl", "elt", "analytics", "ml", "machine learning", "dbt", "airflow", "spark", "feature", "dataset", "modèle"],
         "role": "Data Pipeline & Analytics Specialist",
@@ -88,7 +88,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "dbt test && dbt compile",
     },
     "devops": {
-        "icon": "⚙️", "tag_prefix": "ops",
+        "icon": "wrench", "tag_prefix": "ops",
         "tools": ["github-actions", "gitlab-ci", "jenkins", "taskfile", "make", "earthly"],
         "keywords": ["ci", "cd", "pipeline", "cicd", "deploy", "déploiement", "release", "workflow", "automation", "build", "artifact", "registry"],
         "role": "CI/CD & Automation Specialist",
@@ -97,7 +97,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "CI pipeline pass",
     },
     "monitoring": {
-        "icon": "📡", "tag_prefix": "obs",
+        "icon": "network", "tag_prefix": "obs",
         "tools": ["prometheus", "grafana", "alertmanager", "loki", "jaeger", "opentelemetry"],
         "keywords": ["monitoring", "observabilité", "observability", "métriques", "metrics", "logs", "traces", "alertes", "alerts", "slo", "sla", "grafana", "prometheus"],
         "role": "Observability & Monitoring Specialist",
@@ -106,7 +106,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "Prometheus/Grafana health check",
     },
     "networking": {
-        "icon": "🌐", "tag_prefix": "net",
+        "icon": "network", "tag_prefix": "net",
         "tools": ["nmap", "tcpdump", "iptables", "wireguard", "nginx", "traefik", "envoy"],
         "keywords": ["réseau", "network", "dns", "proxy", "load balancer", "firewall", "vpn", "tls", "certificat", "certificate", "nginx", "traefik", "ingress"],
         "role": "Network & Infrastructure Specialist",
@@ -115,7 +115,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "network connectivity",
     },
     "storage": {
-        "icon": "💾", "tag_prefix": "storage",
+        "icon": "server", "tag_prefix": "storage",
         "tools": ["restic", "rclone", "s3cmd", "aws-cli", "minio"],
         "keywords": ["stockage", "storage", "backup", "s3", "blob", "filesystem", "volume", "persistent", "objectstorage", "minio", "restic"],
         "role": "Storage & Backup Specialist",
@@ -124,7 +124,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "backup integrity check",
     },
     "documentation": {
-        "icon": "📝", "tag_prefix": "doc",
+        "icon": "clipboard", "tag_prefix": "doc",
         "tools": ["mkdocs", "docusaurus", "pandoc", "sphinx", "vale"],
         "keywords": ["documentation", "doc", "readme", "wiki", "guide", "tutoriel", "tutorial", "rédaction", "writing", "api-doc"],
         "role": "Documentation & Knowledge Specialist",
@@ -133,7 +133,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
         "cc_check": "documentation build",
     },
     "performance": {
-        "icon": "⚡", "tag_prefix": "perf",
+        "icon": "bolt", "tag_prefix": "perf",
         "tools": ["k6", "wrk", "ab", "pprof", "py-spy", "clinic", "flamegraph"],
         "keywords": ["performance", "perf", "optimisation", "optimization", "latence", "latency", "throughput", "profiling", "benchmark", "slow", "lent"],
         "role": "Performance & Profiling Specialist",
@@ -145,7 +145,7 @@ DOMAIN_TAXONOMY: dict[str, dict] = {
 
 # Domaine par défaut si aucune correspondance
 DEFAULT_DOMAIN = {
-    "icon": "🤖", "tag_prefix": "agent",
+    "icon": "grimoire", "tag_prefix": "agent",
     "tools": [],
     "keywords": [],
     "role": "Custom Domain Specialist",

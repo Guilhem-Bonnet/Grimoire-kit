@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-06-25
+
+### Changé
+
+- **Icônes maison pour les champs `icon:` (zéro emoji) — étape 1 de la purge emoji** — les valeurs `icon:` des archétypes, agents et de la taxonomie `agent_forge` ne sont plus des emojis Unicode mais des **noms d'icônes maison** (réf `docs/assets/icons/*.svg` : `server`, `shield-pulse`, `sparkle`, `plug`, `flask`, `wrench`, `network`, `chart`, `clipboard`, `bolt`, `grimoire`, `hexagon`, `temple`, `microscope`, `lightbulb`, `boomerang`, `seal`). 16 fichiers DNA + taxonomie SDK & framework + tests alignés. Politique : aucun emoji Unicode, icônes maison uniquement.
+
 ## [3.11.5] - 2026-06-25
 
 ### Corrigé

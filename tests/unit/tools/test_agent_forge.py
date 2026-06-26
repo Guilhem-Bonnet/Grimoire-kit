@@ -38,7 +38,7 @@ class TestDetectDomain:
     def test_database_domain(self) -> None:
         key, profile = detect_domain("I need an agent to handle database migrations and SQL schemas")
         assert key == "database"
-        assert profile["icon"] == "🗄️"
+        assert profile["icon"] == "server"
 
     def test_security_domain(self) -> None:
         key, _ = detect_domain("Agent pour gérer la sécurité et les vulnérabilités")
@@ -79,7 +79,7 @@ class TestDetectDomain:
     def test_unknown_domain(self) -> None:
         key, profile = detect_domain("something completely random xyz abc")
         assert key == "custom"
-        assert profile["icon"] == "🤖"
+        assert profile["icon"] == "grimoire"
 
     def test_all_taxonomy_domains_exist(self) -> None:
         expected = {"database", "security", "frontend", "api", "testing",
@@ -174,7 +174,7 @@ class TestAgentProposal:
         p = AgentProposal(
             source="description", description="test", domain_key="api",
             agent_name="ApiGateway", agent_tag="api-gateway",
-            agent_icon="🔌", agent_role="API Specialist",
+            agent_icon="plug", agent_role="API Specialist",
             overlap=["api-old"],
         )
         d = p.to_dict()

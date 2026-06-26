@@ -1,7 +1,7 @@
 team:
   name: "team-ops"
   display_name: "Team Ops — Infrastructure & Reliability"
-  icon: "⚙️"
+  icon: "wrench"
   version: "1.0.0"
   description: "Déploie, opère et sécurise ce que Team Build a livré. Propriétaire du reliabilité en production et de la sécurité."
 

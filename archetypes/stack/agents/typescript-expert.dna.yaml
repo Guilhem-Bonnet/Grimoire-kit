@@ -4,7 +4,7 @@ id: stack/typescript
 name: "Stack — TypeScript Expert"
 version: "1.0.0"
 description: "Agent spécialisé TypeScript/JavaScript — React, Vue, Next.js, Node, types stricts"
-icon: "⚛️"
+icon: "hexagon"
 author: "grimoire-kit"
 tags: [typescript, javascript, react, nextjs, vue, frontend, node, types]
 

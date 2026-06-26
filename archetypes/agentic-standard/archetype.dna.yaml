@@ -4,7 +4,7 @@ id: agentic-standard
 name: "Agentic Standard"
 version: "0.1.0"
 description: "Pont installable entre un corpus normatif agentique externe et les artefacts consommables Grimoire Kit."
-icon: "⚖️"
+icon: "seal"
 author: "grimoire-kit"
 tags: [standard, governance, compliance, context, knowledge, llm-provider, evidence]
 
