@@ -122,6 +122,7 @@ grimoire upgrade             # exécuter
 > Codex, Gemini CLI et Cursor sans duplication. Un `.mcp.json` enregistre aussi le
 > serveur MCP Grimoire (OS-neutre, via `grimoire-mcp`).
 
+
 ### Installation par besoins (commencer petit)
 
 Plutôt que de tout activer, déclarez **ce que votre projet doit faire** : Grimoire
@@ -228,7 +229,7 @@ flowchart TB
 
 ## <img src="docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Features
 
-> **Maturité** : 🧪 = expérimental / R&D (fonctionne et testé, mais surface exploratoire) ; sans marqueur = cœur mûr.
+> **Maturité** : l'icône <img src="docs/assets/icons/flask.svg" width="14" height="14" alt=""> marque les features expérimentales / R&D (fonctionnent et testées, mais surface exploratoire) ; sans icône = cœur mûr.
 > Le différenciateur le plus mûr est le **[standard agentique gouverné](docs/governed-controls.md)** — 36 patterns
 > vérifiés (`grimoire standard verify` / `audit` / `score` / `gate`), cf. la section Quick Start ci-dessus.
 
@@ -266,7 +267,7 @@ L'orchestrateur décompose, **délègue en parallèle** à des sous-agents, et a
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/branch.svg" width="24" height="24" alt=""> Session Branching 🧪
+### <img src="docs/assets/icons/branch.svg" width="24" height="24" alt=""> Session Branching <img src="docs/assets/icons/flask.svg" width="18" height="18" alt="expérimental">
 
 Explorez plusieurs approches en parallèle — comme des branches Git, mais pour vos sessions d'agents. Diff, merge, cherry-pick.
 
@@ -289,14 +290,14 @@ Système immunitaire : détecte les anomalies, diagnostique, et propose des rép
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/dna.svg" width="24" height="24" alt=""> Agent Darwinism 🧪
+### <img src="docs/assets/icons/dna.svg" width="24" height="24" alt=""> Agent Darwinism <img src="docs/assets/icons/flask.svg" width="18" height="18" alt="expérimental">
 
 Sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation.
 
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/network.svg" width="24" height="24" alt=""> Stigmergy 🧪
+### <img src="docs/assets/icons/network.svg" width="24" height="24" alt=""> Stigmergy <img src="docs/assets/icons/flask.svg" width="18" height="18" alt="expérimental">
 
 Coordination **indirecte** par phéromones numériques : émission, détection, amplification, évaporation. Coordination émergente.
 
@@ -305,7 +306,7 @@ Coordination **indirecte** par phéromones numériques : émission, détection, 
 <tr>
 <td align="center">
 
-### <img src="docs/assets/icons/moon.svg" width="24" height="24" alt=""> Dream Mode 🧪
+### <img src="docs/assets/icons/moon.svg" width="24" height="24" alt=""> Dream Mode <img src="docs/assets/icons/flask.svg" width="18" height="18" alt="expérimental">
 
 Consolidation **hors-session** : croise mémoire, trace, décisions et failure museum pour produire des insights émergents.
 
@@ -319,7 +320,7 @@ Expose Grimoire comme serveur MCP local. Compatible **Cursor, Cline, Claude Desk
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/microscope.svg" width="24" height="24" alt=""> R&D Engine v2.1 🧪
+### <img src="docs/assets/icons/microscope.svg" width="24" height="24" alt=""> R&D Engine v2.1 <img src="docs/assets/icons/flask.svg" width="18" height="18" alt="expérimental">
 
 Boucle d'innovation : **bandit ε-greedy** à reward closed-loop, prototypage automatique, seed memory, gap-analysis.
 
@@ -328,7 +329,7 @@ Boucle d'innovation : **bandit ε-greedy** à reward closed-loop, prototypage au
 </table>
 
 <details>
-<summary><b>Et bien plus encore... (15+ features avancées 🧪 expérimentales)</b></summary>
+<summary><b>Et bien plus encore... (15+ features avancées expérimentales)</b></summary>
 <br>
 
 | Feature | Description |
@@ -358,7 +359,7 @@ Boucle d'innovation : **bandit ε-greedy** à reward closed-loop, prototypage au
 
 <br>
 
-## 🐍 SDK Python (v3)
+## <img src="docs/assets/icons/server.svg" width="28" height="28" alt=""> SDK Python (v3)
 
 Le SDK v3 expose **toute la puissance de Grimoire** en tant que package Python installable :
 
