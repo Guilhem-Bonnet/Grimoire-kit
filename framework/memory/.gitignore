@@ -1,0 +1,4 @@
+# Stores mémoire générés au runtime (reconstructibles) — ne pas committer.
+memory.json
+memory-lexical.sqlite
+*.sqlite

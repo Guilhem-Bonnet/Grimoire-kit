@@ -5,7 +5,9 @@ Sélectionne le backend mémoire selon project-context.yaml et les variables
 d'environnement. Priorité : ENV vars > config fichier > auto-détection > local.
 
 Backends disponibles :
-  local          — JSON fichier, zéro dépendance (défaut)
+  local          — JSON fichier, zéro dépendance (recherche mots-clés naïve)
+  lexical        — sqlite FTS5 BM25, zéro dépendance, ZÉRO DB vectorielle
+                   (sélectionné par memory.vector_database=false)
   qdrant-local   — Qdrant en process, pip install qdrant-client required
   qdrant-server  — Qdrant distant (URL), circuit breaker intégré
   ollama         — Ollama embeddings + Qdrant (local ou distant)
@@ -63,6 +65,13 @@ def get_backend(config_override: dict | None = None) -> tuple:
     ctx = config_override or _load_project_context()
     mem_cfg = ctx.get("memory", {})
 
+    # Option de setup : base de données vectorielle ON/OFF.
+    # vector_database=false (ou retrieval_mode=lexical) force le backend lexical et
+    # COURT-CIRCUITE toute auto-détection réseau (pas de sonde ollama/qdrant) — requis
+    # pour les environnements qui interdisent une DB vectorielle locale.
+    if not _vector_enabled(mem_cfg):
+        return _instantiate("lexical", mem_cfg, "", "")
+
     # ENV vars priment toujours (casse canonique GRIMOIRE_*, repli legacy Grimoire_*)
     env_ollama = _env_url("OLLAMA_URL")
     env_qdrant = _env_url("QDRANT_URL")
@@ -80,6 +89,19 @@ def get_backend(config_override: dict | None = None) -> tuple:
 
     # Instancier
     return _instantiate(backend_name, mem_cfg, env_ollama, env_qdrant)
+
+
+def _vector_enabled(mem_cfg: dict) -> bool:
+    """Option de setup : DB vectorielle activée ? Défaut True (rétro-compatible).
+
+    Désactivée si vector_database=false, retrieval_mode in {lexical,none}, ou
+    backend=lexical|local.
+    """
+    if mem_cfg.get("vector_database") is False:
+        return False
+    if str(mem_cfg.get("retrieval_mode", "vector")).lower() in {"lexical", "none"}:
+        return False
+    return mem_cfg.get("backend") not in {"lexical", "local"}
 
 
 def _auto_detect(mem_cfg: dict) -> str:
@@ -169,6 +191,13 @@ def _instantiate(backend_name: str, mem_cfg: dict, env_ollama: str, env_qdrant: 
             _warn_install("qdrant-local", "qdrant-client sentence-transformers")
         except Exception as e:
             print(f"⚠️  Backend qdrant-local échoué ({e}) → fallback local JSON")
+
+    if backend_name == "lexical":
+        try:
+            from .backend_lexical import LexicalBackend
+            return LexicalBackend(), "lexical"
+        except Exception as e:
+            print(f"⚠️  Backend lexical échoué ({e}) → fallback local JSON")
 
     # Fallback
     from .backend_local import LocalBackend
