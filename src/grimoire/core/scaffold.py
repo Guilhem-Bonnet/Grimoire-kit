@@ -347,6 +347,8 @@ class ProjectScaffolder:
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
         memory_extra = ""
         memory_layers = """  layer_profile: "standard"
+  vector_database: true
+  retrieval_mode: "vector"
   short_term_backend: "sqlite"
   redis_url: ""
   knowledge_graph: "sqlite-sidecar"
@@ -373,6 +375,8 @@ class ProjectScaffolder:
                 '\n  migration_bundle_path: "_grimoire/_memory/migration/weaviate-neo4j"'
             )
             memory_layers = """  layer_profile: "weaviate-neo4j"
+  vector_database: true
+  retrieval_mode: "vector"
   short_term_backend: "sqlite"
   redis_url: ""
   knowledge_graph: "neo4j"

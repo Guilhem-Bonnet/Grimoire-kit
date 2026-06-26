@@ -10,6 +10,17 @@ defaults:
     hosted: "non-secret, approved project data only"
     local: "project-approved local data only"
 memory_os:
+  # Option de setup gouvernee : avec ou sans base de donnees vectorielle.
+  # Pilotee par project-context.yaml -> memory.vector_database.
+  retrieval:
+    vector_database: true          # false -> profil sans vecteur (no_vector_target)
+    mode: "vector"                 # vector | lexical
+    no_vector_backend: "sqlite-fts5"
+    rationale: >-
+      Si vector_database=false (ex: environnement interdisant une DB vectorielle locale),
+      le retrieval semantique est remplace par sqlite FTS5 (BM25, lexical, accent-insensible,
+      sans service ni vecteur ni reseau). La source-of-truth reste le markdown ; le store
+      n'est qu'un index derive reconstructible.
   target:
     hot_memory: "redis"
     semantic_memory: "weaviate-server"
@@ -18,6 +29,11 @@ memory_os:
     legacy_vector_sources:
       - "qdrant-local"
       - "qdrant-server"
+  no_vector_target:                # profil alternatif gouverne (vector_database=false)
+    hot_memory: "sqlite"
+    semantic_memory: "sqlite-fts5"
+    graph_projection: "sqlite"
+    note: "Aucune dependance reseau ni vecteur ; lexical BM25 only (pas de similarite semantique)."
   backend_roles:
     redis: "Hot operational memory: TTL state, leases, locks, streams, and pub/sub; never the durable source of truth."
     weaviate-server: "Durable semantic/vector memory target for accepted memories, knowledge facts, and code/task embeddings."

@@ -49,7 +49,7 @@ _VALID_TYPES = frozenset(VALID_PROJECT_TYPES)
 _VALID_SKILL_LEVELS = frozenset({"beginner", "intermediate", "expert"})
 
 _VALID_BACKENDS = frozenset({
-    "auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
+    "auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
 })
 _VALID_SHORT_TERM_BACKENDS = frozenset({"sqlite", "redis", "none"})
 _VALID_LAYER_MODES = frozenset({
@@ -75,7 +75,7 @@ _KNOWN_USER_KEYS = frozenset({
 })
 
 _KNOWN_MEMORY_KEYS = frozenset({
-    "backend", "collection_prefix", "embedding_model", "qdrant_url",
+    "backend", "vector_database", "retrieval_mode", "collection_prefix", "embedding_model", "qdrant_url",
     "weaviate_url", "weaviate_api_key_env", "weaviate_collection",
     "neo4j_uri", "neo4j_user", "neo4j_password_env", "neo4j_database",
     "migration_source_backend", "migration_target_backend", "migration_bundle_path",

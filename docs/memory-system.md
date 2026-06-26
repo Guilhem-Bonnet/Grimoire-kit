@@ -60,11 +60,38 @@ flowchart TD
 | --- | --- | --- | --- |
 | `auto` | Résolution automatique | Selon la cible choisie | Sélectionne `weaviate-server` si `weaviate_url` est défini, sinon `ollama`, sinon `qdrant-server`, sinon `local` |
 | `local` | Stockage JSON simple | Aucune | Écrit dans `_grimoire/_memory/{collection_prefix}.json` |
+| `lexical` | Recherche lexicale sans vecteur | Aucune | sqlite FTS5 (BM25, accent-insensible) dans `_grimoire/_memory/memory-lexical.sqlite`. Zéro DB vectorielle, zéro service, zéro réseau |
 | `qdrant-local` | Recherche sémantique locale | `grimoire-kit[qdrant]` | Utilise `qdrant-client` et `sentence-transformers` |
 | `qdrant-server` | Recherche sémantique via serveur Qdrant | `grimoire-kit[qdrant]` | Requiert `qdrant_url` |
 | `weaviate-server` | Recherche sémantique via serveur Weaviate | `grimoire-kit[weaviate]` | Requiert `weaviate_url`; peut être couplé à Neo4j |
 | `mempalace` | Backend palais expérimental | `grimoire-kit[mempalace]` | Repose sur ChromaDB et conserve les métadonnées `wing/hall/room` |
 | `ollama` | Embeddings Ollama + stockage Qdrant | `grimoire-kit[qdrant,ollama]` | Utilise Ollama pour les vecteurs et Qdrant pour le stockage |
+
+## Sans base de données vectorielle
+
+Certains environnements (entreprises régulées, air-gapped) interdisent l'usage d'une base
+de données vectorielle locale. Deux clés de `project-context.yaml` couvrent ce cas :
+
+```yaml
+memory:
+  vector_database: false   # désactive toute DB vectorielle
+  retrieval_mode: lexical  # vector | lexical
+```
+
+Avec `vector_database: false`, `get_backend()` force le backend `lexical` et
+court-circuite toute auto-détection réseau (aucune sonde Ollama ou Qdrant). La recherche
+repose alors sur sqlite FTS5 (BM25, accent-insensible), un index dérivé reconstructible
+stocké dans un unique fichier `.sqlite`.
+
+Compromis : le mode lexical est purement textuel (BM25), sans similarité sémantique
+(synonymes, paraphrase). La source de vérité reste le markdown ; un backend vectoriel
+approuvé peut être réactivé plus tard sans migration de la source de vérité.
+
+Pour peupler le store à partir de la connaissance déjà sur disque :
+
+```bash
+python framework/memory/mem0-bridge.py seed --no-vector
+```
 
 ## Taxonomie palais
 
