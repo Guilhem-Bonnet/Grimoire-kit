@@ -1008,6 +1008,21 @@ def cmd_init_collections(args):
         print(f"⚠️  Qdrant indisponible ({e}) — collections non créées (fallback local actif)")
 
 
+def cmd_seed(args):
+    """Peuple le backend depuis la source-of-truth markdown (memory_seed.py)."""
+    cmd = [sys.executable, str(Path(__file__).parent / "memory_seed.py")]
+    if getattr(args, "no_vector", False):
+        cmd.append("--no-vector")
+    if getattr(args, "dry_run", False):
+        cmd.append("--dry-run")
+    if getattr(args, "agent_memory", None):
+        cmd += ["--agent-memory", args.agent_memory]
+    if getattr(args, "search", None):
+        cmd += ["--search", args.search]
+    import subprocess
+    subprocess.run(cmd, check=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description="mem0 Bridge — Mémoire partagée Grimoire")
     sub = parser.add_subparsers(dest="command")
@@ -1078,6 +1093,13 @@ def main():
 
     p = sub.add_parser("init-collections", help="Initialiser toutes les collections Qdrant (idempotent)")
     p.set_defaults(func=cmd_init_collections)
+
+    p = sub.add_parser("seed", help="Peupler le backend depuis la source-of-truth markdown")
+    p.add_argument("--no-vector", action="store_true", help="force le backend lexical (offline)")
+    p.add_argument("--agent-memory", help="dossier *.md externe additionnel")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--search", type=str, help="démo lecture après seed")
+    p.set_defaults(func=cmd_seed)
 
     args = parser.parse_args()
     if not args.command:
