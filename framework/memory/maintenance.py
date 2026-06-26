@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E741  -- script legacy: `l` = variable de boucle locale; renommage reporté (code non testé)
 """
 Grimoire Memory Maintenance — Archivage, pruning et health-check automatique.
 

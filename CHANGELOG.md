@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.11.2] - 2026-06-25
+
+### Corrigé
+
+- **`framework/memory` : env var canonique `GRIMOIRE_*`** — la sélection de backend lit désormais `GRIMOIRE_QDRANT_URL`/`GRIMOIRE_OLLAMA_URL` (casse de l'écosystème) avec repli **rétro-compatible** sur l'ancienne casse `Grimoire_*` (helper `_env_url`). Corrige le non-respect silencieux des overrides d'environnement sans casser les setups existants. Couvert par `tests/unit/test_framework_memory_backends.py`.
+- **Durcissement lint `framework/memory`** — chaînage `raise … from None` sur les ré-émissions d'`ImportError` (B904), nettoyage `F401`/`RUF013`/`F541`/`E401`, `E741` reporté (script legacy non testé). Les patterns de probing tolérant aux pannes (`S110`/`S310`) sont conservés intentionnellement.
+
 ## [3.11.1] - 2026-06-25
 
 ### Corrigé

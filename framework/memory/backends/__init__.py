@@ -14,16 +14,21 @@ Backends disponibles :
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+
+def _env_url(suffix: str, default: str = "") -> str:
+    """Lit ``GRIMOIRE_<SUFFIX>`` (casse canonique de l'écosystème) avec repli sur
+    l'ancienne casse ``Grimoire_<SUFFIX>`` pour ne pas casser les setups existants."""
+    return os.environ.get(f"GRIMOIRE_{suffix}") or os.environ.get(f"Grimoire_{suffix}", default)
 
 
 @runtime_checkable
 class MemoryBackend(Protocol):
     """Contrat minimal que tout backend doit respecter."""
 
-    def add(self, text: str, user_id: str = "", metadata: dict = None) -> dict: ...
+    def add(self, text: str, user_id: str = "", metadata: dict | None = None) -> dict: ...
     def search(self, query: str, user_id: str = "", limit: int = 5) -> list[dict]: ...
     def get_all(self, user_id: str = "") -> list[dict]: ...
     def count(self) -> int: ...
@@ -49,8 +54,8 @@ def get_backend(config_override: dict | None = None) -> tuple:
     Retourne (backend_instance, backend_name).
 
     Ordre de priorité :
-    1. ENV Grimoire_OLLAMA_URL → ollama
-    2. ENV Grimoire_QDRANT_URL → qdrant-server
+    1. ENV GRIMOIRE_OLLAMA_URL (repli Grimoire_OLLAMA_URL) → ollama
+    2. ENV GRIMOIRE_QDRANT_URL (repli Grimoire_QDRANT_URL) → qdrant-server
     3. project-context.yaml memory.backend
     4. Auto-détection
     5. Fallback local
@@ -58,13 +63,9 @@ def get_backend(config_override: dict | None = None) -> tuple:
     ctx = config_override or _load_project_context()
     mem_cfg = ctx.get("memory", {})
 
-    # ENV vars priment toujours
-    # KNOWN (dette tracée): ces variables utilisent la casse `Grimoire_*`, divergente
-    # du reste de l'écosystème (`GRIMOIRE_*`, ex. .mcp.json/SDK) — un override
-    # `GRIMOIRE_QDRANT_URL` n'est donc PAS lu ici. Convention cohérente dans tout
-    # framework/memory (legacy, non testé) ; corriger casserait les setups existants.
-    env_ollama = os.environ.get("Grimoire_OLLAMA_URL", "")
-    env_qdrant = os.environ.get("Grimoire_QDRANT_URL", "")
+    # ENV vars priment toujours (casse canonique GRIMOIRE_*, repli legacy Grimoire_*)
+    env_ollama = _env_url("OLLAMA_URL")
+    env_qdrant = _env_url("QDRANT_URL")
 
     backend_name = mem_cfg.get("backend", "auto")
 
@@ -87,8 +88,8 @@ def _auto_detect(mem_cfg: dict) -> str:
     import urllib.request
 
     # 1. Qdrant distant configuré ?
-    qdrant_url = mem_cfg.get("qdrant_url", os.environ.get("Grimoire_QDRANT_URL", ""))
-    ollama_url = mem_cfg.get("ollama_url", os.environ.get("Grimoire_OLLAMA_URL", "http://localhost:11434"))
+    qdrant_url = mem_cfg.get("qdrant_url", _env_url("QDRANT_URL"))
+    ollama_url = mem_cfg.get("ollama_url", _env_url("OLLAMA_URL", "http://localhost:11434"))
 
     # 2. Ollama accessible avec nomic-embed-text ?
     try:
@@ -125,10 +126,7 @@ def _instantiate(backend_name: str, mem_cfg: dict, env_ollama: str, env_qdrant: 
     """Instancie le backend avec fallback sur local en cas d'erreur."""
     ollama_url = env_ollama or mem_cfg.get("ollama_url", "http://localhost:11434")
     qdrant_url = env_qdrant or mem_cfg.get("qdrant_url", "")
-    qdrant_api_key = os.environ.get(
-        "Grimoire_QDRANT_API_KEY",
-        os.environ.get("GRIMOIRE_QDRANT_API_KEY", mem_cfg.get("qdrant_api_key", "")),
-    )
+    qdrant_api_key = _env_url("QDRANT_API_KEY") or mem_cfg.get("qdrant_api_key", "")
     embedding_model = mem_cfg.get("embedding_model", "nomic-embed-text")
     collection = mem_cfg.get("collection_prefix", "grimoire")
 
@@ -186,5 +184,5 @@ def _warn_install(backend: str, packages: str) -> None:
 def _warn_connection(backend: str, url: str, err: Exception) -> None:
     print(f"⚠️  Backend {backend} inaccessible ({err})")
     print(f"   → URL tentée : {url}")
-    print("   → Vérifier Grimoire_OLLAMA_URL / Grimoire_QDRANT_URL ou lancer le service")
+    print("   → Vérifier GRIMOIRE_OLLAMA_URL / GRIMOIRE_QDRANT_URL ou lancer le service")
     print("   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")

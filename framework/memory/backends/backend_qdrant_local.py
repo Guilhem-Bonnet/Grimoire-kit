@@ -40,14 +40,14 @@ class QdrantLocalBackend:
             raise ImportError(
                 "qdrant-client non installé. Exécuter :\n"
                 "  pip install qdrant-client sentence-transformers"
-            )
+            ) from None
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
             raise ImportError(
                 "sentence-transformers non installé. Exécuter :\n"
                 "  pip install sentence-transformers"
-            )
+            ) from None
 
         model_short = embedding_model.split("/")[-1]
         vector_size = self.VECTOR_SIZE.get(model_short, 384)

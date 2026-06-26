@@ -79,7 +79,7 @@ class OllamaBackend:
             raise ImportError(
                 "qdrant-client non installé. Exécuter :\n"
                 "  pip install qdrant-client"
-            )
+            ) from None
         from qdrant_client.models import Distance, VectorParams
 
         self._ollama_url = os.environ.get("Grimoire_OLLAMA_URL", ollama_url)
