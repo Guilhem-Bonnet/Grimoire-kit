@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Game UI — Grimoire Kit</title>
+  <meta name="description" content="Le runtime Grimoire Kit rendu visible : chaque agent un personnage, chaque relation un flux, chaque trace une archive. Scène isométrique pilotée par observatory.py." />
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
@@ -10,6 +11,8 @@
     body { padding-top: 56px; }
     /* ── Hero ── */
     #hero { padding: 80px 0 60px; text-align: center; }
+    .obs-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     /* ── Stage container ── */
     #stage-section { padding: 0 0 80px; }
     .stage-wrap {
@@ -41,27 +44,6 @@
     .iso-tile:hover { background: var(--elev-3); }
     .iso-tile.accent-tile { background: rgba(255,107,61,0.07); }
 
-    /* Tile walls (south face) */
-    .iso-tile-s {
-      position: absolute;
-      width: 40px; height: 14px;
-      background: var(--elev-1);
-      clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
-    }
-    .iso-tile-e {
-      position: absolute;
-      width: 40px; height: 14px;
-      background: rgba(0,0,0,0.3);
-    }
-
-    /* Desk (flat rect on tile) */
-    .iso-desk {
-      position: absolute;
-      width: 52px; height: 26px;
-      clip-path: polygon(50% 0%, 100% 25%, 50% 50%, 0% 25%);
-      border: 1px solid rgba(255,107,61,0.2);
-    }
-
     /* Agent character */
     .iso-agent {
       position: absolute;
@@ -81,13 +63,11 @@
     }
     .agent-tag.working { color: var(--accent); border-color: rgba(255,107,61,0.3); }
 
-    /* Idle float animation */
     @keyframes float-a { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)} }
     @keyframes float-b { 0%,100%{transform:translateY(-1px)} 50%{transform:translateY(1px)} }
     @keyframes float-c { 0%,100%{transform:translateY(1px)} 50%{transform:translateY(-1px)} }
-
-    /* Work animation */
     @keyframes work-bob { 0%,100%{transform:translateY(0)} 30%{transform:translateY(-3px)} 60%{transform:translateY(0)} }
+    @keyframes ticker { to { stroke-dashoffset: -16; } }
 
     /* Task badge */
     .task-badge {
@@ -123,18 +103,13 @@
     .panel-close:hover { border-color: var(--accent); color: var(--accent); }
     .panel-agent-name { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; color: var(--ink); margin: 32px 0 4px; }
     .panel-role { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); margin-bottom: 20px; letter-spacing: 0.08em; }
-    .panel-stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.65rem; }
-    .panel-stat .k { color: var(--ink-muted); } .panel-stat .v { color: var(--ink); }
+    .panel-stat { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.65rem; }
+    .panel-stat .k { color: var(--ink-muted); } .panel-stat .v { color: var(--ink); text-align: right; }
     .panel-timeline { margin-top: 20px; }
     .panel-timeline h4 { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 12px; }
     .panel-ev { padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-soft); display: flex; gap: 8px; }
     .panel-ev .t { color: var(--ink-muted); flex-shrink: 0; }
     .panel-ev .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 4px; }
-
-    /* ── Scrubber ── */
-    .scrubber-wrap { padding: 20px 48px; background: var(--bg); border-top: 1px solid var(--line); }
-    .scrubber-label { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); letter-spacing: 0.08em; margin-bottom: 8px; display: flex; justify-content: space-between; }
-    .scrubber { width: 100%; accent-color: var(--accent); }
 
     /* ── Legend ── */
     .game-legend { display: grid; grid-template-columns: repeat(3,1fr); gap: var(--gap); margin-top: 60px; }
@@ -160,9 +135,10 @@
 <!-- ═══ HERO ═══ -->
 <section id="hero">
   <div class="container">
-    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:20px"><span class="num">FORGE-05</span> · GAME UI · BETA</div>
+    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:20px"><span class="num">FORGE-05</span> · GAME UI</div>
     <h1 class="grad-text reveal" data-delay="60">Le runtime, rendu visible.</h1>
-    <p class="reveal" data-delay="120" style="color:var(--ink-soft);margin-top:14px;font-size:1rem;max-width:520px;margin-left:auto;margin-right:auto">Chaque agent devient un personnage. Chaque tâche, une scène. Chaque trace, une archive.</p>
+    <p class="reveal" data-delay="120" style="color:var(--ink-soft);margin-top:14px;font-size:1rem;max-width:540px;margin-left:auto;margin-right:auto">Chaque agent devient un personnage. Chaque relation, un flux. Chaque trace, une archive. La scène est peuplée par les vraies données de <code>observatory.py</code>.</p>
+    <span class="obs-badge reveal" data-delay="160" id="gu-badge"><span class="dot"></span>CHARGEMENT…</span>
   </div>
 </section>
 
@@ -170,13 +146,6 @@
 <section id="stage-section">
   <div class="stage-wrap">
     <div id="iso-stage" role="application" aria-label="Scène isométrique des agents Grimoire Kit"></div>
-    <div class="scrubber-wrap">
-      <div class="scrubber-label">
-        <span>TIMELINE — 60 DERNIÈRES SECONDES</span>
-        <span id="scrubber-time" aria-live="polite">T+0s</span>
-      </div>
-      <input type="range" class="scrubber" id="scrubber" min="0" max="60" value="60" aria-label="Position temporelle"/>
-    </div>
   </div>
 </section>
 
@@ -188,15 +157,15 @@
     <div class="game-legend">
       <div class="legend-block reveal" data-delay="0">
         <h3>Agents</h3>
-        <p>Chaque personnage représente un agent actif. Sa couleur indique son rôle. Son animation indique son état : idle, working, waiting, done.</p>
+        <p>Chaque personnage est un agent du registre (persona + capacités). Son badge indique son nombre de traces ; son halo, son activité récente.</p>
       </div>
       <div class="legend-block reveal" data-delay="80">
-        <h3>Artefacts</h3>
-        <p>Les artefacts apparaissent sur le bureau de l'agent qui les a forgés. Un flash orange indique l'émission. L'artefact reste jusqu'au prochain cycle.</p>
+        <h3>Flux</h3>
+        <p>Les lignes entre agents sont les relations du graphe d'agents : handoff, spec, mémoire, escalade. L'épaisseur reflète la force du lien.</p>
       </div>
       <div class="legend-block reveal" data-delay="160">
         <h3>Traces</h3>
-        <p>Les lignes entre agents représentent les appels actifs. Chaque flux correspond à un event dans le trace ledger, visible dans l'Observatory.</p>
+        <p>Chaque agent porte ses traces réelles (ACTION, DECISION, HANDOFF…). Ouvre un personnage pour voir ses dernières traces — les mêmes que dans l'Observatory.</p>
       </div>
     </div>
   </div>
@@ -221,7 +190,7 @@
       <div class="why-card reveal" data-delay="160">
         <div class="why-num">03</div>
         <h3>Onboarding accéléré</h3>
-        <p>Comprendre qu'un agent "passe le résultat" à un autre agent, c'est abstrait. Le voir marcher entre deux bureaux, c'est immédiat. La courbe d'apprentissage s'effondre.</p>
+        <p>Comprendre qu'un agent « passe le résultat » à un autre, c'est abstrait. Le voir relié par un flux, c'est immédiat. La courbe d'apprentissage s'effondre.</p>
       </div>
     </div>
   </div>
@@ -231,7 +200,7 @@
 <section id="cta-final">
   <div class="container" style="position:relative;z-index:1;text-align:center">
     <h2 class="reveal grad-text" style="margin-bottom:12px">Observer le runtime en temps réel.</h2>
-    <p class="reveal" data-delay="80" style="color:var(--ink-soft);margin-bottom:32px;font-size:.95rem">Passe à l'Observatory pour les métriques de production.</p>
+    <p class="reveal" data-delay="80" style="color:var(--ink-soft);margin-bottom:32px;font-size:.95rem">Passe à l'Observatory pour les métriques détaillées.</p>
     <div class="reveal" data-delay="160" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
       <a href="observability.html" class="btn btn-primary">VOIR L'OBSERVABILITY</a>
       <a href="index.html#cta-final" class="btn btn-ghost">OUVRIR LE COCKPIT</a>
@@ -249,169 +218,137 @@
 </div>
 
 <script src="forge-nav.js"></script>
+<script src="forge-motion.js"></script>
 <script>
-/* ── Isometric stage ── */
-const TILE_W = 80, TILE_H = 40;
-const COLS = 9, ROWS = 9;
-const stage = document.getElementById('iso-stage');
-const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
+/* ── Game UI — scène iso peuplée par data/observatory.json ── */
+(function () {
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const TILE_W = 80, TILE_H = 40, COLS = 9, ROWS = 9;
+  const stage = document.getElementById('iso-stage');
+  const tip = document.getElementById('agent-tooltip');
+  const panel = document.getElementById('agent-panel');
+  const panelContent = document.getElementById('panel-content');
+  const COLORS = ['#FF6B3D', '#6EE7FF', '#34D399', '#A78BFA', '#F6B83A', '#9BA0A8', '#FCD34D'];
+  const SLOTS = [[2, 2], [4, 2], [6, 2], [2, 4], [6, 4], [3, 6], [5, 6], [4, 4], [7, 3]];
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  document.getElementById('panel-close').addEventListener('click', () => panel.classList.remove('open'));
 
-function isoPos(col, row) {
-  return {
-    x: (col - row) * TILE_W/2 + 320,
-    y: (col + row) * TILE_H/4 + 20
-  };
-}
-
-/* ── Render tiles ── */
-const ACCENTS = [[2,2],[2,4],[4,2],[4,4],[6,2],[6,4],[3,6]];
-for(let c=0;c<COLS;c++) for(let r=0;r<ROWS;r++){
-  const {x,y} = isoPos(c,r);
-  const tile = document.createElement('div');
-  tile.className = 'iso-tile' + (ACCENTS.some(([ac,ar])=>ac===c&&ar===r) ? ' accent-tile' : '');
-  tile.style.left = x+'px'; tile.style.top = y+'px';
-  stage.appendChild(tile);
-}
-
-/* ── Agent fixtures ── */
-const AGENTS = [
-  { id:'pm',          role:'Product Manager',  col:2, row:2, color:'#F6B83A', tasks:['Roadmap v3','Brief RFC-09','PRD app notes'], tokens:14200, done:23, working:true,  anim:'float-a' },
-  { id:'dev',         role:'Developer',         col:4, row:2, color:'#6EE7FF', tasks:['Impl. parser','Code review'], tokens:28400, done:31, working:true,  anim:'float-b' },
-  { id:'qa',          role:'QA Engineer',       col:6, row:2, color:'#34D399', tasks:['Test suite'], tokens:9800,  done:18, working:false, anim:'float-c' },
-  { id:'architect',   role:'Architect',         col:3, row:6, color:'#A78BFA', tasks:['ADR-07','Schema v3'], tokens:19600, done:12, working:true,  anim:'float-a' },
-  { id:'tech-writer', role:'Technical Writer',  col:2, row:4, color:'#9BA0A8', tasks:['Doc API v2'], tokens:11200, done:28, working:false, anim:'float-b' },
-  { id:'analyst',     role:'Analyst',           col:6, row:4, color:'#FF6B3D', tasks:['Marché notes','Perf audit'], tokens:16800, done:19, working:true,  anim:'float-c' },
-];
-
-/* ── SVG sprite per role ── */
-function agentSVG(color) {
-  return `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <!-- Head -->
-    <rect x="9" y="2" width="10" height="9" rx="2" fill="${color}" opacity=".9"/>
-    <!-- Body -->
-    <rect x="7" y="12" width="14" height="14" rx="1" fill="${color}" opacity=".75"/>
-    <!-- Legs -->
-    <rect x="8"  y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
-    <rect x="15" y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
-    <!-- Screen glow (desk monitor) -->
-    <rect x="1" y="0" width="6" height="4" rx="1" fill="rgba(110,231,255,.4)"/>
-  </svg>`;
-}
-
-const tip = document.getElementById('agent-tooltip');
-const panel = document.getElementById('agent-panel');
-const panelContent = document.getElementById('panel-content');
-document.getElementById('panel-close').addEventListener('click', ()=>panel.classList.remove('open'));
-
-AGENTS.forEach(ag=>{
-  const {x,y} = isoPos(ag.col, ag.row);
-  const wrapper = document.createElement('div');
-  wrapper.className = 'iso-agent' + (ag.working ? ' working' : '');
-  wrapper.setAttribute('tabindex','0');
-  wrapper.setAttribute('role','button');
-  wrapper.setAttribute('aria-label',`${ag.id} · ${ag.role}${ag.working?' · en cours':''}`);
-  wrapper.style.left = (x-14)+'px';
-  wrapper.style.top  = (y-20)+'px';
-  if(!reduced) wrapper.style.animation = `${ag.anim} ${2+Math.random()}s ease-in-out infinite`;
-
-  const tag = document.createElement('div');
-  tag.className = 'agent-tag' + (ag.working ? ' working' : '');
-  tag.textContent = ag.id.toUpperCase();
-
-  const badge = document.createElement('div');
-  badge.className = 'task-badge';
-  badge.textContent = ag.tasks[0].slice(0,10)+'…';
-
-  wrapper.innerHTML = agentSVG(ag.color);
-  wrapper.appendChild(tag);
-  wrapper.appendChild(badge);
-
-  // Tooltip
-  wrapper.addEventListener('mouseenter', e=>{
-    tip.style.display='block';
-    tip.innerHTML=`
-      <div class="tt-name">${ag.id}</div>
-      <div class="tt-role">${ag.role}</div>
-      <div class="tt-stat"><span class="lbl">TÂCHE</span><span class="val">${ag.tasks[0]}</span></div>
-      <div class="tt-stat"><span class="lbl">TOKENS</span><span class="val">${ag.tokens.toLocaleString('fr-FR')}</span></div>
-      <div class="tt-stat"><span class="lbl">DONE</span><span class="val">${ag.done} tâches</span></div>
-      <div class="tt-stat"><span class="lbl">ÉTAT</span><span class="val" style="color:${ag.working?'var(--data-green)':'var(--ink-muted)'}">${ag.working?'WORKING':'IDLE'}</span></div>`;
-    positionTip(e);
-  });
-  wrapper.addEventListener('mousemove', positionTip);
-  wrapper.addEventListener('mouseleave', ()=>tip.style.display='none');
-
-  // Panel
-  function openPanel(){
-    const events=[
-      {t:'09:14:32', msg:'Artefact '+ag.tasks[0]+' émis'},
-      {t:'09:12:01', msg:'LLM call claude-opus · 2.1s'},
-      {t:'09:10:44', msg:'Tâche assignée par SOG'},
-      {t:'09:08:12', msg:'Agent spawned · contrat signé'},
-    ];
-    panelContent.innerHTML=`
-      <div class="panel-agent-name">${ag.id}</div>
-      <div class="panel-role">${ag.role.toUpperCase()}</div>
-      <div class="panel-stat"><span class="k">ÉTAT</span><span class="v" style="color:${ag.working?'var(--data-green)':'var(--ink-muted)'}">${ag.working?'WORKING':'IDLE'}</span></div>
-      <div class="panel-stat"><span class="k">TÂCHE COURANTE</span><span class="v">${ag.tasks[0]}</span></div>
-      <div class="panel-stat"><span class="k">TOKENS CONSOMMÉS</span><span class="v">${ag.tokens.toLocaleString('fr-FR')}</span></div>
-      <div class="panel-stat"><span class="k">TÂCHES TERMINÉES</span><span class="v">${ag.done}</span></div>
-      <div class="panel-stat"><span class="k">TRUST SCORE</span><span class="v">${(0.88+Math.random()*.1).toFixed(2)}</span></div>
-      <div class="panel-timeline"><h4>TIMELINE RÉCENTE</h4>
-        ${events.map(ev=>`<div class="panel-ev"><span class="dot"></span><span class="t">${ev.t}</span><span>${ev.msg}</span></div>`).join('')}
-      </div>`;
-    panel.classList.add('open');
+  function isoPos(col, row) {
+    return { x: 360 + (col - row) * (TILE_W / 2), y: 30 + (col + row) * (TILE_H / 2) };
   }
-  wrapper.addEventListener('click', openPanel);
-  wrapper.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') openPanel(); });
+  function agentSVG(color) {
+    return `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="${SVGNS}" aria-hidden="true">
+      <rect x="9" y="2" width="10" height="9" rx="2" fill="${color}" opacity=".9"/>
+      <rect x="7" y="12" width="14" height="14" rx="1" fill="${color}" opacity=".75"/>
+      <rect x="8" y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
+      <rect x="15" y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
+      <rect x="1" y="0" width="6" height="4" rx="1" fill="rgba(110,231,255,.4)"/></svg>`;
+  }
+  function positionTip(e) {
+    const m = 14; let tx = e.clientX + m, ty = e.clientY - 10;
+    if (tx + 220 > window.innerWidth) tx = e.clientX - 220 - m;
+    tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+  }
 
-  stage.appendChild(wrapper);
-});
+  // Tile grid
+  const ACCENTS = new Set(SLOTS.map(([c, r]) => c + ',' + r));
+  for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS; r++) {
+    const { x, y } = isoPos(c, r);
+    const t = document.createElement('div');
+    t.className = 'iso-tile' + (ACCENTS.has(c + ',' + r) ? ' accent-tile' : '');
+    t.style.left = (x - TILE_W / 2) + 'px'; t.style.top = y + 'px';
+    stage.appendChild(t);
+  }
 
-function positionTip(e){
-  const margin=14;
-  let tx=e.clientX+margin, ty=e.clientY-10;
-  if(tx+220>window.innerWidth) tx=e.clientX-220-margin;
-  tip.style.left=tx+'px'; tip.style.top=ty+'px';
-}
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
+  stage.insertBefore(svg, stage.firstChild);
 
-/* ── SVG connection lines ── */
-const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-svg.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
-stage.insertBefore(svg,stage.firstChild);
+  fetch('data/observatory.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(renderScene)
+    .catch(() => { const b = document.getElementById('gu-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; });
 
-function agentCenter(ag){
-  const {x,y}=isoPos(ag.col,ag.row);
-  return {x:x,y:y+10};
-}
+  function renderScene(data) {
+    const traces = data.traces || [], rels = data.relationships || [];
+    const byAgent = {}; traces.forEach((t) => { if (t.agent) byAgent[t.agent] = (byAgent[t.agent] || 0) + 1; });
+    let raw = (data.agents && data.agents.length) ? data.agents : (data.agent_ids || Object.keys(byAgent)).map((id) => ({ id }));
+    raw = raw.slice(0, SLOTS.length);
 
-// Draw connections between working agents (pm→analyst, dev→qa)
-const connections=[[AGENTS[0],AGENTS[5]],[AGENTS[1],AGENTS[2]]];
-connections.forEach(([a,b])=>{
-  const ac=agentCenter(a), bc=agentCenter(b);
-  const line=document.createElementNS('http://www.w3.org/2000/svg','line');
-  line.setAttribute('x1',ac.x); line.setAttribute('y1',ac.y);
-  line.setAttribute('x2',bc.x); line.setAttribute('y2',bc.y);
-  line.setAttribute('stroke','var(--accent)'); line.setAttribute('stroke-width','1');
-  line.setAttribute('stroke-dasharray','4 4'); line.setAttribute('opacity','0.35');
-  if(!reduced){ line.setAttribute('stroke-dashoffset','0'); line.style.animation='ticker 1.5s linear infinite'; }
-  svg.appendChild(line);
-});
+    const badge = document.getElementById('gu-badge');
+    badge.innerHTML = `<span class="dot" style="background:${data.is_demo ? 'var(--accent)' : 'var(--data-green)'}"></span>` +
+      (data.is_demo ? 'SNAPSHOT DÉMO' : 'LIVE · observatory.py') + ` · ${raw.length} agents · ${traces.length} traces`;
 
-/* ── Scrubber ── */
-const scrubberEl = document.getElementById('scrubber');
-const scrubberTime = document.getElementById('scrubber-time');
-scrubberEl.addEventListener('input', function(){
-  const v=+this.value;
-  scrubberTime.textContent = v===60 ? 'LIVE' : 'T-'+(60-v)+'s';
-  // Toggle agent states based on time
-  AGENTS.forEach((ag, i)=>{
-    const agEl=stage.querySelectorAll('.iso-agent')[i];
-    if(!agEl) return;
-    const wasWorking = v>30 ? ag.working : (i%2===0);
-    agEl.classList.toggle('working', wasWorking);
-  });
-});
+    const pos = {};
+    const agents = raw.map((a, i) => {
+      const [col, row] = SLOTS[i];
+      pos[a.id] = { col, row };
+      return {
+        id: a.id, persona: a.persona || '', capabilities: a.capabilities || [],
+        traces: byAgent[a.id] || (a.metrics && a.metrics.traces) || 0,
+        working: (byAgent[a.id] || 0) > 0, col, row, color: COLORS[i % COLORS.length],
+        recent: traces.filter((t) => t.agent === a.id).slice(-4).reverse(),
+      };
+    });
+
+    // Relationship flows
+    const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
+    rels.forEach((r) => {
+      const a = pos[r.from_agent], b = pos[r.to_agent]; if (!a || !b) return;
+      const ac = isoPos(a.col, a.row), bc = isoPos(b.col, b.row);
+      const line = document.createElementNS(SVGNS, 'line');
+      line.setAttribute('x1', ac.x); line.setAttribute('y1', ac.y + 10);
+      line.setAttribute('x2', bc.x); line.setAttribute('y2', bc.y + 10);
+      line.setAttribute('stroke', 'var(--accent)');
+      line.setAttribute('stroke-width', (0.6 + (r.strength || 0) / maxStr * 1.8).toFixed(2));
+      line.setAttribute('stroke-dasharray', '4 4');
+      line.setAttribute('opacity', (0.2 + (r.strength || 0) / maxStr * 0.45).toFixed(2));
+      if (!reduced) line.style.animation = 'ticker 1.5s linear infinite';
+      svg.appendChild(line);
+    });
+
+    // Agents
+    agents.forEach((ag, i) => {
+      const { x, y } = isoPos(ag.col, ag.row);
+      const w = document.createElement('div');
+      w.className = 'iso-agent' + (ag.working ? ' working' : '');
+      w.tabIndex = 0; w.setAttribute('role', 'button');
+      w.setAttribute('aria-label', `${ag.id}${ag.persona ? ' · ' + ag.persona : ''}`);
+      w.style.left = (x - 14) + 'px'; w.style.top = (y - 20) + 'px';
+      if (!reduced) w.style.animation = `float-${['a', 'b', 'c'][i % 3]} ${2 + (i % 3) * 0.4}s ease-in-out infinite`;
+      const tag = document.createElement('div'); tag.className = 'agent-tag' + (ag.working ? ' working' : ''); tag.textContent = ag.id.toUpperCase();
+      const badge2 = document.createElement('div'); badge2.className = 'task-badge'; badge2.textContent = ag.traces + ' tr.';
+      w.innerHTML = agentSVG(ag.color); w.appendChild(tag); w.appendChild(badge2);
+      w.addEventListener('mouseenter', (e) => { tip.style.display = 'block'; tip.innerHTML = tipHTML(ag); positionTip(e); });
+      w.addEventListener('mousemove', positionTip);
+      w.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      const open = () => { panelContent.innerHTML = panelHTML(ag); panel.classList.add('open'); };
+      w.addEventListener('click', open);
+      w.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      stage.appendChild(w);
+    });
+
+    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
+  }
+
+  function tipHTML(ag) {
+    return `<div class="tt-name">${esc(ag.id)}</div><div class="tt-role">${esc(ag.persona || 'agent')}</div>
+      <div class="tt-stat"><span class="lbl">CAPACITÉS</span><span class="val">${esc((ag.capabilities || []).slice(0, 3).join(', ') || '—')}</span></div>
+      <div class="tt-stat"><span class="lbl">TRACES</span><span class="val">${ag.traces}</span></div>
+      <div class="tt-stat"><span class="lbl">ÉTAT</span><span class="val" style="color:${ag.working ? 'var(--data-green)' : 'var(--ink-muted)'}">${ag.working ? 'ACTIF' : 'IDLE'}</span></div>`;
+  }
+  function panelHTML(ag) {
+    const ev = ag.recent.length
+      ? ag.recent.map((t) => `<div class="panel-ev"><span class="dot"></span><span class="t">${esc((t.timestamp || '').replace('T', ' ').slice(11, 19))}</span><span>${esc(t.event_type)} · ${esc(t.session || '')}</span></div>`).join('')
+      : '<div class="panel-ev"><span class="t">—</span><span>aucune trace</span></div>';
+    return `<div class="panel-agent-name">${esc(ag.id)}</div><div class="panel-role">${esc((ag.persona || 'AGENT').toUpperCase())}</div>
+      <div class="panel-stat"><span class="k">ÉTAT</span><span class="v" style="color:${ag.working ? 'var(--data-green)' : 'var(--ink-muted)'}">${ag.working ? 'ACTIF' : 'IDLE'}</span></div>
+      <div class="panel-stat"><span class="k">CAPACITÉS</span><span class="v">${esc((ag.capabilities || []).join(', ') || '—')}</span></div>
+      <div class="panel-stat"><span class="k">TRACES</span><span class="v">${ag.traces}</span></div>
+      <div class="panel-timeline"><h4>TRACES RÉCENTES</h4>${ev}</div>`;
+  }
+})();
 </script>
 </body>
 </html>
