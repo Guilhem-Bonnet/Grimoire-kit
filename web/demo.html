@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Démo — Grimoire Kit</title>
+  <meta property="og:type" content="website"/>
+  <meta property="og:title" content="Démo — Grimoire Kit"/>
+  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
+  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/demo.html"/>
+  <meta name="twitter:card" content="summary"/>
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
@@ -534,16 +539,15 @@ document.getElementById('forge-btn').addEventListener('click',()=>{
 /* ── VIZ 9: Terminal typing ── */
 let termDone=false;
 const TERMINAL_LINES=[
-  {type:'cmd', text:'git clone https://github.com/grimoire/forge.git'},
-  {type:'out', text:'Cloning into forge... done.'},
-  {type:'cmd', text:'cd forge && cp .env.example .env'},
-  {type:'cmd', text:'forge init --runtime local --agents pm,analyst,writer'},
-  {type:'out', text:'  ↳ runtime READY'},
-  {type:'out', text:'  ↳ SOG MOUNTED  gateway/ws'},
-  {type:'out', text:'  ↳ 3 agents spawned'},
-  {type:'cmd', text:'forge run "Crée un PRD pour une app de notes"'},
-  {type:'out', text:'  ↳ artefact/prd-app-notes-v1.md ÉMIS'},
-  {type:'dim', text:'  Temps total : 3.4s · 14k tokens · coût $0.04'},
+  {type:'cmd', text:'pip install grimoire-kit'},
+  {type:'out', text:'Successfully installed grimoire-kit-3.16.0'},
+  {type:'cmd', text:'grimoire init mon-projet --archetype web-app'},
+  {type:'out', text:'  ↳ project-context.yaml · _grimoire/ · agents déployés'},
+  {type:'cmd', text:'grimoire standard init . --needs solo-prototyping'},
+  {type:'out', text:'  ↳ profil starter · patterns + artefacts générés'},
+  {type:'cmd', text:'grimoire standard verify'},
+  {type:'out', text:'  [OK] conformité vérifiée (fail-closed)'},
+  {type:'dim', text:'  Premier projet gouverné en quelques minutes.'},
 ];
 
 function startTerminal(){

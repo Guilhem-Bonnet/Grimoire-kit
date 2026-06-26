@@ -28,7 +28,7 @@
             <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCUMENTATION</a></li>
             <li><a href="anatomy.html"       class="${isActive('anatomy.html') ? 'active' : ''}">ANATOMIE</a></li>
           </ul>
-          <a href="#cta-final" class="nav-cta">OUVRIR LE COCKPIT →</a>
+          <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" class="nav-cta" target="_blank" rel="noopener">VOIR LE PROJET →</a>
         </div>
       </div>`;
   }
@@ -47,9 +47,9 @@
             <h4>RUNTIME</h4>
             <ul>
               <li><a href="documentation.html">Documentation</a></li>
-              <li><a href="#">API Reference</a></li>
-              <li><a href="#">Contrats</a></li>
-              <li><a href="#">Changelog</a></li>
+              <li><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener">GitHub</a></li>
+              <li><a href="https://pypi.org/project/grimoire-kit/" target="_blank" rel="noopener">PyPI</a></li>
+              <li><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
             </ul>
           </div>
           <div class="footer-col">
@@ -57,8 +57,8 @@
             <ul>
               <li><a href="game-ui.html">Game UI</a></li>
               <li><a href="observability.html">Observatory</a></li>
-              <li><a href="#">Cockpit</a></li>
-              <li><a href="#">War Room</a></li>
+              <li><a href="kanban.html">Kanban</a></li>
+              <li><a href="documentation.html">Documentation</a></li>
             </ul>
           </div>
           <div class="footer-col">
@@ -66,8 +66,8 @@
             <ul>
               <li><a href="demo.html">Démo</a></li>
               <li><a href="anatomy.html">Anatomie</a></li>
-              <li><a href="#">Early Access</a></li>
-              <li><a href="#">Roadmap</a></li>
+              <li><a href="https://pypi.org/project/grimoire-kit/" target="_blank" rel="noopener">Installer (pip)</a></li>
+              <li><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Roadmap</a></li>
             </ul>
           </div>
         </div>
