@@ -228,6 +228,10 @@ flowchart TB
 
 ## <img src="docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Features
 
+> **Maturité** : 🧪 = expérimental / R&D (fonctionne et testé, mais surface exploratoire) ; sans marqueur = cœur mûr.
+> Le différenciateur le plus mûr est le **[standard agentique gouverné](docs/governed-controls.md)** — 36 patterns
+> vérifiés (`grimoire standard verify` / `audit` / `score` / `gate`), cf. la section Quick Start ci-dessus.
+
 <table>
 <tr>
 <td align="center" width="33%">
@@ -262,7 +266,7 @@ L'orchestrateur décompose, **délègue en parallèle** à des sous-agents, et a
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/branch.svg" width="24" height="24" alt=""> Session Branching
+### <img src="docs/assets/icons/branch.svg" width="24" height="24" alt=""> Session Branching 🧪
 
 Explorez plusieurs approches en parallèle — comme des branches Git, mais pour vos sessions d'agents. Diff, merge, cherry-pick.
 
@@ -285,23 +289,23 @@ Système immunitaire : détecte les anomalies, diagnostique, et propose des rép
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/dna.svg" width="24" height="24" alt=""> Agent Darwinism
+### <img src="docs/assets/icons/dna.svg" width="24" height="24" alt=""> Agent Darwinism 🧪
 
 Sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation.
 
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/network.svg" width="24" height="24" alt=""> Stigmergy
+### <img src="docs/assets/icons/network.svg" width="24" height="24" alt=""> Stigmergy 🧪
 
-Coordination **indirecte** par phéromones numériques : émission, détection, amplification, évaporation. Intelligence émergente.
+Coordination **indirecte** par phéromones numériques : émission, détection, amplification, évaporation. Coordination émergente.
 
 </td>
 </tr>
 <tr>
 <td align="center">
 
-### <img src="docs/assets/icons/moon.svg" width="24" height="24" alt=""> Dream Mode
+### <img src="docs/assets/icons/moon.svg" width="24" height="24" alt=""> Dream Mode 🧪
 
 Consolidation **hors-session** : croise mémoire, trace, décisions et failure museum pour produire des insights émergents.
 
@@ -315,22 +319,22 @@ Expose Grimoire comme serveur MCP local. Compatible **Cursor, Cline, Claude Desk
 </td>
 <td align="center">
 
-### <img src="docs/assets/icons/microscope.svg" width="24" height="24" alt=""> R&D Engine v2.1
+### <img src="docs/assets/icons/microscope.svg" width="24" height="24" alt=""> R&D Engine v2.1 🧪
 
-Innovation autonome : reinforcement learning, closed-loop reward, prototypage automatique, seed memory, gap-analysis.
+Boucle d'innovation : **bandit ε-greedy** à reward closed-loop, prototypage automatique, seed memory, gap-analysis.
 
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>Et bien plus encore... (15+ features avancées)</b></summary>
+<summary><b>Et bien plus encore... (15+ features avancées 🧪 expérimentales)</b></summary>
 <br>
 
 | Feature | Description |
 |:--------|:-----------|
 | **Installation par besoins** | Déclarez le besoin du projet → profil, patterns et technos résolus ; commencer petit, grandir au besoin (`grimoire standard needs`) |
-| **Adversarial Consensus** | Protocole BFT : 3 votants + 1 avocat du diable pour les décisions critiques |
+| **Adversarial Consensus** | Quorum à 3 votants + 1 avocat du diable pour les décisions critiques |
 | **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
 | **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
 | **Cross-Project Migration** | Exporte/importe learnings, rules, DNA, agents entre projets |
@@ -338,7 +342,7 @@ Innovation autonome : reinforcement learning, closed-loop reward, prototypage au
 | **Quantum Branch** | Timelines parallèles : fork, compare, merge de configurations alternatives |
 | **Time-Travel** | Archéologie temporelle : checkpoints, replay, restore, bisect |
 | **CRISPR** | Édition chirurgicale de workflows : scan, splice, excise, transplant |
-| **Decision Log** | Blockchain légère de décisions architecturales avec vérification d'intégrité |
+| **Decision Log** | Journal de décisions architecturales **hash-chaîné** (sha256, `prev_hash`) avec vérification d'intégrité |
 | **Mirror Agent** | Neurones miroirs : observation et transfert de patterns inter-agents |
 | **Sensory Buffer** | Mémoire sensorielle court terme à décroissance exponentielle |
 | **Self-Improvement Loop** | Analyse les patterns d'échec → améliore le framework automatiquement |

@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.11.3] - 2026-06-25
+
+### Corrigé
+
+- **Passe d'honnêteté + maturité sur le README** — marqueurs 🧪 (expérimental / R&D) sur les features exploratoires (Session Branching, Agent Darwinism, Stigmergy, Dream Mode, R&D Engine, les 15+ avancées) + légende de maturité ; reformulation des claims sur-vendus (« blockchain légère » → journal **hash-chaîné** sha256 ; « reinforcement learning » → **bandit ε-greedy** ; « Protocole BFT » → quorum ; « intelligence émergente » → coordination émergente) ; mise en avant du **standard agentique gouverné** comme différenciateur mûr. Aucune feature retirée — toutes sont réelles et testées.
+
 ## [3.11.2] - 2026-06-25
 
 ### Corrigé
