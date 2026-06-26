@@ -35,7 +35,7 @@ KNOWN_ARCHETYPES = frozenset({
     "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
 })
 
-KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
+KNOWN_BACKENDS = frozenset({"auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
 # Archetype human descriptions for the wizard (order = display order)
 _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {

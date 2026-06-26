@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Mémoire sans base de données vectorielle** — nouveau backend `lexical` (sqlite FTS5
+  BM25, accent-insensible) offrant une recherche sans aucune DB vectorielle, service ni
+  réseau. Pour les environnements (corpo, régulés, air-gapped) qui interdisent une base
+  vectorielle locale.
+  - Option de setup `memory.vector_database` (true|false) et `memory.retrieval_mode`
+    (vector|lexical) dans `project-context.yaml`, émises par `grimoire init` et validées
+    par le schéma. `vector_database: false` force le backend `lexical` et court-circuite
+    l'auto-détection réseau (aucune sonde ollama/qdrant).
+  - Profil gouverné `no_vector_target` (sqlite-fts5) dans le template `memory-policy.yaml`.
+  - `mem0-bridge seed` — peuple le backend depuis la source-of-truth markdown (mémoire
+    projet + dossier optionnel), avec gate evidence/redaction et idempotence.
+
 ## [3.16.0] - 2026-06-26
 
 ### Changé

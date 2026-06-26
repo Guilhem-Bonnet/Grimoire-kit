@@ -104,7 +104,7 @@ class UserConfig:
 
 
 _VALID_BACKENDS = frozenset({
-    "auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
+    "auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
 })
 _VALID_SHORT_TERM_BACKENDS = frozenset({"sqlite", "redis", "none"})
 _VALID_LAYER_MODES = frozenset({
@@ -117,6 +117,8 @@ class MemoryConfig:
     """The ``memory:`` section."""
 
     backend: str = "auto"
+    vector_database: bool = True
+    retrieval_mode: str = "vector"
     collection_prefix: str = "grimoire"
     embedding_model: str = ""
     qdrant_url: str = ""
@@ -157,6 +159,8 @@ class MemoryConfig:
             )
         return cls(
             backend=backend,
+            vector_database=bool(data.get("vector_database", True)),
+            retrieval_mode=str(data.get("retrieval_mode", "vector")),
             collection_prefix=str(data.get("collection_prefix", "grimoire")),
             embedding_model=str(data.get("embedding_model", "")),
             qdrant_url=str(data.get("qdrant_url", "")),
