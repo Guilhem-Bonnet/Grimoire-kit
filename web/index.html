@@ -263,7 +263,7 @@
       <div class="manifeste-block reveal" data-delay="200">
         <div class="manifeste-num">03 · COMPOSABLE PAR NATURE</div>
         <h3>Agents, skills, workflows, instructions : tout est modulaire, tout est forgeable.</h3>
-        <p>Les modules BMM, BMB, CIS, TEA se combinent librement. Les surfaces exposent des contrats ouverts. Tout est remplaçable sans toucher au runtime.</p>
+        <p>Archétypes, agents, workflows et skills se combinent librement, et le standard agentique gouverné active 36 patterns vérifiables. Tout est remplaçable sans toucher au runtime.</p>
       </div>
     </div>
   </div>
@@ -279,8 +279,8 @@
     <div class="surfaces-grid">
       <div class="surface-card reveal" data-delay="0">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-01</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
-          <div class="surface-body"><h3>Cockpit</h3><p>Interface opérationnelle temps réel. Contrôle agents, inspection pipelines, émission de directives.</p><div class="surface-meta">runtime/cockpit · ws:// · &lt;40ms</div></div>
+          <div class="surface-card-head"><span class="surface-badge">FORGE-01</span><span class="surface-status partial"><span class="dot"></span>CONCEPT</span></div>
+          <div class="surface-body"><h3>Cockpit</h3><p>Interface opérationnelle temps réel. Contrôle agents, inspection pipelines, émission de directives.</p><div class="surface-meta">vue de pilotage · vision</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
               <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent/pm</span><span class="mini-val">RUNNING</span></div>
@@ -293,7 +293,7 @@
       <div class="surface-card reveal" data-delay="60">
         <div class="surface-card-inner">
           <div class="surface-card-head"><span class="surface-badge">FORGE-02</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
-          <div class="surface-body"><h3>Observatory</h3><p>Vue longitudinale des traces. Inspection artefacts, diff versions, audit contrats, télémétrie.</p><div class="surface-meta">runtime/observatory · REST+SSE · lecture</div></div>
+          <div class="surface-body"><h3>Observatory</h3><p>Vue longitudinale des traces. Inspection artefacts, diff versions, audit contrats, télémétrie.</p><div class="surface-meta">observatory.py · HTML autoporté · traces</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
               <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">artefact/prd-v3.md</span><span class="mini-val">09:14</span></div>
@@ -305,13 +305,13 @@
       </div>
       <div class="surface-card reveal" data-delay="120">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-03</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
-          <div class="surface-body"><h3>Kanban</h3><p>Gestion des tâches agentiques. Colonnes par état de contrat, drag-to-assign, SLA par lane.</p><div class="surface-meta">runtime/kanban · WS bidir · écriture</div></div>
+          <div class="surface-card-head"><span class="surface-badge">FORGE-03</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
+          <div class="surface-body"><h3>Kanban gouverné</h3><p>Tableau agentique : 8 états, transitions gated par la preuve. <a href="kanban.html" style="color:var(--accent)">→ voir le board</a></p><div class="surface-meta">task-board.yaml · 8 états · evidence-gated</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
-              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">DRAFT · 3 tâches</span><span class="mini-val">→ pm</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">IN PROGRESS · 2</span><span class="mini-val">→ dev</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">DONE · 11</span><span class="mini-val">sprint</span></div>
+              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">EN COURS · 2</span><span class="mini-val">→ dev</span></div>
+              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">REVUE · 1</span><span class="mini-val">evidence</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">ACCEPTÉ · 1</span><span class="mini-val">gate ✓</span></div>
             </div>
           </div>
         </div>
@@ -344,7 +344,7 @@
       <div class="surface-card reveal" data-delay="120">
         <div class="surface-card-inner">
           <div class="surface-card-head"><span class="surface-badge">FORGE-06</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
-          <div class="surface-body"><h3>Proofs</h3><p>Registre des preuves. Hash d'artefacts, signatures de contrats, replay de sessions, export audit.</p><div class="surface-meta">runtime/proofs · REST · immuable</div></div>
+          <div class="surface-body"><h3>Proofs</h3><p>Registre des preuves. Hash d'artefacts, signatures de contrats, replay de sessions, export audit.</p><div class="surface-meta">ledger JSONL · sha256 · immuable</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
               <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">sha256:a3f…</span><span class="mini-val">prd-v1</span></div>
