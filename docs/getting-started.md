@@ -85,6 +85,8 @@ mon-projet/
 | `grimoire add <agent>` | Ajouter un agent |
 | `grimoire remove <agent>` | Retirer un agent |
 | `grimoire validate` | Valider `project-context.yaml` |
+| `grimoire check` | Lint + validate + doctor en une passe |
+| `grimoire standard <cmd>` | Standard agentique gouverné (`needs`, `init`, `verify`, `audit`, `score`, `gate`) |
 | `grimoire up` | Déployer les agents configurés |
 | `grimoire merge <source>` | Fusionner des fichiers Grimoire |
 | `grimoire merge --undo` | Annuler le dernier merge |
@@ -120,11 +122,11 @@ grimoire doctor
 Sortie attendue :
 
 ```
-✔ project-context.yaml found
-✔ YAML valid
-✔ _grimoire directory exists
-✔ At least one agent configured
-✔ Memory directory exists
+[OK] project-context.yaml found
+[OK] YAML valid
+[OK] _grimoire directory exists
+[OK] At least one agent configured
+[OK] Memory directory exists
 ```
 
 ## Adopter le standard agentique gouverné

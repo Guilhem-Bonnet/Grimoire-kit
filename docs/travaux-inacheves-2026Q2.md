@@ -5,13 +5,13 @@
 
 ## 1. Réconciliation & enrôlement — FAIT (v3.6.1)
 
-- **Taxonomie réconciliée** ✅ — `mapped_capabilities` ne référence plus que des patterns réels ;
+- **Taxonomie réconciliée** [OK] — `mapped_capabilities` ne référence plus que des patterns réels ;
   capacités futures isolées en `planned_capabilities` ; test garde-fou
   `test_profile_mapped_capabilities_are_real_patterns` (mapped ⊆ patterns ; planned ∩ patterns = ∅).
-- **Enrôlement par profil** ✅ — chaque contrôle est rattaché à son profil via `mapped_capabilities`
+- **Enrôlement par profil** [OK] — chaque contrôle est rattaché à son profil via `mapped_capabilities`
   (et non `required_artifacts`, choix délibéré pour préserver l'UX « start small » : on n'impose pas
   des dizaines de fichiers de policy à chaque projet ; les contrôles restent sélectionnables).
-- **`cc-verify.sh`** ✅ — résolution de l'interpréteur venv (fix du blocage pre-commit).
+- **`cc-verify.sh`** [OK] — résolution de l'interpréteur venv (fix du blocage pre-commit).
 
 Restant (non bloquant) :
 
@@ -22,7 +22,7 @@ Restant (non bloquant) :
 
 ## 2. Contrats déclaratifs — FAIT (v3.7.0) + reste runtime/adapter
 
-**Livrés v3.7.0 (8 contrats déclaratifs, recette capability-map + template + check + test)** ✅ :
+**Livrés v3.7.0 (8 contrats déclaratifs, recette capability-map + template + check + test)** [OK] :
 `workspace-isolation`, `policy-by-environment`, `browser-tool-contract`, `runtime-provider-contract`,
 `prompt-version-observability`, `cluster-action-dry-run`, `doc-to-graph-pipeline`, `flow-dsl-minimal`.
 Catalogue de patterns : 26 → 34.

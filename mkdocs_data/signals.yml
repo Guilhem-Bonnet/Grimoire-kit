@@ -1,8 +1,40 @@
 signals:
+  - title: Kit gouverné — héritage BMAD retiré, sortie CLI normalisée
+    path: changelog.md
+    date: 2026-06-26
+    kicker: v3.16 · zéro BMAD · marqueurs ASCII
+    summary: Suppression complète de l'héritage BMAD (code, outillage, layout) et purge des emojis de la sortie terminal au profit de marqueurs ASCII lisibles et stables.
+    featured: true
+    proof: false
+
+  - title: Overhaul benchmark — standard agentique durci
+    path: agentic-standard-benchmark-corpus-2026Q2.md
+    date: 2026-06-25
+    kicker: v3.6→v3.16 · benchmark corpus · écarts P1
+    summary: Vague de durcissement pilotée par un corpus de frameworks agentiques — capability-map, profils par besoins et vérification fail-closed alignés sur l'état de l'art.
+    featured: true
+    proof: true
+
+  - title: Contrôles gouvernés — référence complète
+    path: governed-controls.md
+    date: 2026-06-25
+    kicker: 36 patterns · 11 catégories · verify/audit/score/gate
+    summary: Référence des 36 patterns gouvernés répartis sur 11 catégories, chacun posant un contrôle vérifiable fail-closed (verify, audit, score, gate).
+    featured: true
+    proof: true
+
+  - title: Installation par besoins
+    path: agentic-standard-install-by-needs.md
+    date: 2026-06-10
+    kicker: needs → profil → patterns
+    summary: Choisir un profil (starter → controlled → orchestrated → governed → production) à partir d'un besoin projet et activer les patterns gouvernés correspondants.
+    featured: true
+    proof: false
+
   - title: Runtime standard agentique publié
     path: agentic-standard-integration.md
     date: 2026-05-29
-    kicker: v3.4.4 · PyPI · governed runtime
+    kicker: governed runtime · artefacts · gates
     summary: Le socle exécutable du standard agentique est publié dans Grimoire Kit avec artefacts, vérifications, audit, gates et score.
     featured: true
     proof: true

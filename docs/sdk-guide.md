@@ -107,7 +107,7 @@ for issue in report.issues:
 pf = PreflightCheck(project_root=Path("."))
 result = pf.run()
 for check in result.checks:
-    print(f"  {'✔' if check.passed else '✘'} {check.name}")
+    print(f"  {'[OK]' if check.passed else '[x]'} {check.name}")
 
 # Memory Lint — vérifie l'intégrité de la mémoire
 ml = MemoryLint(project_root=Path("."))

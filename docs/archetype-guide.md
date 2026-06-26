@@ -268,7 +268,7 @@ rules:
 auto_load:
   - "docs/pci-dss-checklist.md"
 reminders:
-  - "⚠️  Module PCI-DSS — double review obligatoire"
+  - "[!] Module PCI-DSS — double review obligatoire"
 ```
 
 Référence : [framework/agent-rules.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/agent-rules.md)
