@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documentation — Grimoire Kit</title>
+  <meta name="description" content="Documentation du runtime Grimoire Kit, rendue en direct depuis le dépôt Grimoire-kit. Diagrammes Mermaid, code colorisé, recherche et table des matières." />
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="forge-motion.css" />
+  <link rel="stylesheet" href="forge-docs.css" />
+  <style>
+    /* Page dédiée : application plein écran, pas de scroll de page */
+    html, body { height: 100%; }
+    body { padding-top: 56px; overflow: hidden; }
+    #documentation { height: calc(100vh - 56px); padding: 0; margin: 0; }
+    #documentation > .container {
+      max-width: none; padding: 0; margin: 0;
+      height: 100%; position: relative; z-index: 1;
+    }
+
+    /* ── Tweaks panel (local) ── */
+    #tweaks-panel {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--elev-2); border: 1px solid rgba(255,107,61,0.3); border-radius: var(--r-md);
+      padding: 20px; width: 232px; z-index: 9999; display: none;
+      font-family: var(--font-mono); font-size: 0.72rem;
+    }
+    #tweaks-panel.open { display: block; }
+    #tweaks-panel h4 { color: var(--accent); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .tw-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+    .tw-row label { color: var(--ink-muted); font-size: 0.62rem; letter-spacing: 0.06em; }
+    .tw-row input[type=range] { width: 100%; accent-color: var(--accent); }
+    .tw-row select { background: var(--bg); border: 1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: var(--r-sm); font-family: inherit; font-size: 0.68rem; }
+    .tw-row input[type=color] { width: 32px; height: 22px; border: none; background: none; cursor: pointer; }
+    .tw-sep { border: none; border-top: 1px solid var(--line); margin: 8px 0 12px; }
+  </style>
+</head>
+<body>
+<a href="#docs-article" class="skip-link">Aller au contenu</a>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+
+<!-- ═══ DOCUMENTATION — plein écran ═══ -->
+<section id="documentation">
+  <div class="container">
+    <div class="docs-shell is-fullpage" data-doc-layout="cockpit" id="docs-shell">
+      <div class="docs-bar">
+        <span class="ctl-dot r"></span><span class="ctl-dot y"></span><span class="ctl-dot g"></span>
+        <span class="cockpit-label">GRIMOIRE-KIT · /docs · main</span>
+        <div class="docs-focus-pick"><span class="cockpit-label" style="margin-left:0">PAGE</span><select id="docs-focus-select" aria-label="Choisir un document"></select></div>
+        <a class="docs-source" id="docs-source-link" href="#" target="_blank" rel="noopener"><span class="sync"></span>SOURCE GITHUB ↗</a>
+      </div>
+      <div class="docs-body">
+        <aside class="docs-nav" aria-label="Sommaire de la documentation">
+          <div class="docs-nav-head">
+            <span class="docs-nav-title">DOCUMENTATION</span>
+            <span class="docs-nav-sync"><span class="sync"></span>LIVE</span>
+          </div>
+          <div class="docs-search">
+            <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M11 11l3 3"/></svg>
+            <input id="docs-search-input" type="search" placeholder="Rechercher…" aria-label="Rechercher dans la documentation" />
+          </div>
+          <div class="docs-tree" id="docs-tree"></div>
+        </aside>
+        <div class="docs-main">
+          <nav class="docs-crumb" id="docs-crumb" aria-label="Fil d'Ariane"></nav>
+          <article class="docs-article md-body" id="docs-article" aria-live="polite"></article>
+        </div>
+        <aside class="docs-toc" aria-label="Table des matières">
+          <div class="docs-toc-label">Sur cette page</div>
+          <nav id="docs-toc-nav"></nav>
+        </aside>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- Tweaks panel -->
+<div id="tweaks-panel" role="complementary" aria-label="Panneau de configuration">
+  <h4>⚙ TWEAKS</h4>
+  <div class="tw-row"><label>Disposition doc</label>
+    <select id="tw-doc"><option value="cockpit">Cockpit (3 colonnes)</option><option value="large">Large (sans TOC)</option><option value="focus">Focus (lecture centrée)</option></select>
+  </div>
+  <hr class="tw-sep"/>
+  <div class="tw-row"><label>Couleur accent</label><input type="color" id="tw-accent" value="#FF6B3D"/></div>
+  <div class="tw-row"><label>Taille de texte</label><input type="range" id="tw-size" min="14" max="20" step="1" value="16"/></div>
+</div>
+
+<!-- Markdown + diagrammes + coloration -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="forge-nav.js"></script>
+<script src="forge-docs.js"></script>
+
+<script>
+/* ── Tweaks panel ── */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "docLayout": "cockpit",
+  "accent": "#FF6B3D",
+  "size": 16
+}/*EDITMODE-END*/;
+(function(){
+  window.addEventListener('message', e => {
+    if (e.data?.type === '__activate_edit_mode')   document.getElementById('tweaks-panel').classList.add('open');
+    if (e.data?.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('open');
+  });
+  window.parent.postMessage({type:'__edit_mode_available'},'*');
+
+  const r = document.documentElement;
+  const d = TWEAK_DEFAULTS;
+  function apply(v) {
+    r.style.setProperty('--accent', v.accent);
+    r.style.fontSize = v.size + 'px';
+    const ds = document.getElementById('docs-shell');
+    if (ds && v.docLayout) ds.dataset.docLayout = v.docLayout;
+  }
+  apply(d);
+
+  function send(k,v) { window.parent.postMessage({type:'__edit_mode_set_keys',edits:{[k]:v}},'*'); }
+
+  document.getElementById('tw-doc').value = d.docLayout;
+  document.getElementById('tw-accent').value = d.accent;
+  document.getElementById('tw-size').value = d.size;
+
+  document.getElementById('tw-doc').addEventListener('change', function(){ d.docLayout=this.value; apply(d); send('docLayout',this.value); });
+  document.getElementById('tw-accent').addEventListener('input', function(){ d.accent=this.value; apply(d); send('accent',this.value); });
+  document.getElementById('tw-size').addEventListener('input', function(){ d.size=+this.value; apply(d); send('size',+this.value); });
+})();
+</script>
+</body>
+</html>

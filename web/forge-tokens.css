@@ -1,0 +1,80 @@
+/* ═══════════════════════════════════════════════
+   GRIMOIRE KIT — Design Tokens
+   Source unique de vérité. Ne jamais hardcoder
+   de couleur, taille ou durée hors de ce fichier.
+   ═══════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ── Élévations ── */
+  --bg:          #0B0C0E;
+  --elev-1:      #121418;
+  --elev-2:      #1A1D22;
+  --elev-3:      #22262C;
+
+  /* ── Encre ── */
+  --ink:         #F6F7F8;
+  --ink-soft:    #9BA0A8;
+  --ink-muted:   #5B6068;
+
+  /* ── Lignes ── */
+  --line:        rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.14);
+
+  /* ── Accent unique ── */
+  --accent:      #FF6B3D;
+  --accent-hot:  #FF2A00;
+  --accent-soft: rgba(255,107,61,0.12);
+  --accent-glow: rgba(255,107,61,0.40);
+  --accent-dim:  rgba(255,107,61,0.20);
+
+  /* ── Data viz — observability only ── */
+  --data-cyan:   #6EE7FF;
+  --data-violet: #A78BFA;
+  --data-amber:  #FCD34D;
+  --data-green:  #34D399;
+  --data-red:    #F87171;
+
+  /* ── Typographie ── */
+  --font-sans:   'Geist', system-ui, sans-serif;
+  --font-mono:   'Geist Mono', 'Courier New', monospace;
+
+  /* ── Échelle type ── */
+  --text-xs:   0.75rem;   /* 12px */
+  --text-sm:   0.875rem;  /* 14px */
+  --text-base: 1rem;      /* 16px */
+  --text-md:   1.125rem;  /* 18px */
+  --text-lg:   1.25rem;   /* 20px */
+  --text-xl:   1.5rem;    /* 24px */
+  --text-2xl:  2rem;      /* 32px */
+  --text-3xl:  2.5rem;    /* 40px */
+  --text-4xl:  3.5rem;    /* 56px */
+  --text-5xl:  4.5rem;    /* 72px */
+  --text-6xl:  6rem;      /* 96px */
+
+  /* ── Line heights ── */
+  --lh-tight:  1.0;
+  --lh-title:  1.2;
+  --lh-body:   1.55;
+  --lh-mono:   1.4;
+
+  /* ── Layout ── */
+  --gap:        24px;
+  --gap-sm:     16px;
+  --max-w:      1240px;
+
+  /* ── Radius ── */
+  --r-sm:  4px;
+  --r-md:  8px;
+  --r-lg:  16px;
+
+  /* ── Motion ── */
+  --ease-forge:  cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+  --ease-out:    cubic-bezier(0, 0, 0.2, 1);
+  --dur-fast:    120ms;
+  --dur-base:    240ms;
+  --dur-slow:    640ms;
+  --dur-draw:    800ms;
+}

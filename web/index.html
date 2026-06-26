@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grimoire Kit — Noyau Agentique</title>
+  <meta name="description" content="Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace." />
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="forge-motion.css" />
+  <style>
+    /* ── Hero layout ── */
+    #hero { padding: 148px 0 100px; position: relative; overflow: hidden; }
+    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: center; }
+    @media (max-width: 960px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
+
+    /* Hero blueprint overlay */
+    #hero::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.08'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    .hero-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+    .hero-h1 { margin-bottom: 18px; }
+    .hero-sub { font-size: 1rem; color: var(--ink-soft); line-height: 1.7; margin-bottom: 36px; max-width: 460px; }
+    .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+    .hero-embed { position: relative; }
+    .embed-badge {
+      position: absolute; top: 12px; right: 12px; z-index: 2;
+      font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em;
+      color: var(--data-green); background: rgba(52,211,153,0.12);
+      border: 1px solid rgba(52,211,153,0.25); border-radius: 2px; padding: 3px 8px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .embed-badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--data-green); box-shadow: 0 0 5px var(--data-green); }
+
+    /* ── ChatOrchestrator ── */
+    #orchestration { padding: 120px 0; }
+    .sog-demo {
+      background: var(--elev-1); border: 1px solid var(--line);
+      border-radius: var(--r-md); padding: 40px;
+      max-width: 720px; margin: 52px auto 0;
+      position: relative; overflow: hidden;
+    }
+    .sog-demo::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.06'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    .sog-stage { position: relative; height: 340px; }
+    .sog-node {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--elev-2); border: 1.5px solid var(--accent);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; z-index: 2; transition: box-shadow 400ms;
+    }
+    .sog-node.pulse { box-shadow: 0 0 0 8px var(--accent-soft), 0 0 32px -4px var(--accent-glow); }
+    .sog-node-label { font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent); letter-spacing: 0.08em; font-weight: 600; }
+    .sog-node-sub   { font-family: var(--font-mono); font-size: 0.5rem; color: var(--ink-muted); }
+
+    /* User bubble */
+    .sog-user {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      background: var(--elev-2); border: 1px solid var(--line-strong);
+      border-radius: var(--r-md); padding: 10px 16px;
+      font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-soft);
+      white-space: nowrap; opacity: 0; transition: opacity 300ms, transform 300ms;
+    }
+    .sog-user.show { opacity: 1; }
+
+    /* Agent bubbles */
+    .sog-agent {
+      position: absolute; width: 80px;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      opacity: 0; transition: opacity 400ms, transform 400ms;
+    }
+    .sog-agent.show { opacity: 1; }
+    .agent-avatar {
+      width: 44px; height: 44px; border-radius: var(--r-sm);
+      background: var(--elev-3); border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft);
+      position: relative; overflow: hidden;
+      transition: border-color 300ms;
+    }
+    .agent-avatar.working { border-color: var(--accent); }
+    .agent-avatar .working-bar {
+      position: absolute; bottom: 0; left: 0; height: 2px;
+      background: var(--accent); width: 0%; transition: width 1.2s linear;
+    }
+    .agent-avatar.working .working-bar { width: 100%; }
+    .agent-name { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.06em; }
+
+    /* Artefact output */
+    .sog-artefact {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: var(--accent-soft); border: 1px solid var(--accent-dim);
+      border-radius: var(--r-sm); padding: 8px 20px;
+      font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent);
+      white-space: nowrap; letter-spacing: 0.06em;
+      opacity: 0; transition: opacity 400ms, transform 400ms;
+      transform: translateX(-50%) translateY(8px);
+    }
+    .sog-artefact.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* SVG connections */
+    .sog-svg { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: visible; }
+    .sog-line { stroke: var(--accent); stroke-width: 1; fill: none; opacity: 0.5; stroke-dasharray: 6 4; }
+
+    /* Controls */
+    .sog-controls { display: flex; align-items: center; gap: 14px; margin-top: 24px; position: relative; z-index: 2; }
+    .sog-input-wrap { flex: 1; display: flex; gap: 8px; }
+    .sog-input {
+      flex: 1; background: var(--elev-2); border: 1px solid var(--line);
+      border-radius: var(--r-sm); padding: 9px 14px;
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
+      outline: none; transition: border-color 200ms;
+    }
+    .sog-input:focus { border-color: var(--accent); }
+    .sog-send {
+      font-family: var(--font-mono); font-size: 0.7rem; padding: 9px 18px;
+      background: var(--accent); color: var(--bg); border: none; border-radius: var(--r-sm);
+      cursor: pointer; letter-spacing: 0.06em; transition: filter 200ms;
+      position: relative; overflow: hidden;
+    }
+    .sog-send:hover { filter: brightness(1.08); }
+    .sog-send:disabled { opacity: 0.5; cursor: default; }
+    .sog-replay {
+      font-family: var(--font-mono); font-size: 0.68rem; padding: 9px 14px;
+      background: transparent; color: var(--ink-muted); border: 1px solid var(--line);
+      border-radius: var(--r-sm); cursor: pointer;
+      transition: all 200ms; display: none;
+    }
+    .sog-replay.show { display: block; }
+    .sog-replay:hover { color: var(--ink); border-color: var(--line-strong); }
+    .sog-status { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); }
+
+    /* ── Preuves grid ── */
+    .preuves-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 64px; align-items: start; margin-top: 52px; }
+    .metrics-row { display: flex; gap: 48px; margin-bottom: 40px; }
+    @media (max-width: 960px) { .preuves-grid { grid-template-columns: 1fr; gap: 40px; } .metrics-row { flex-wrap: wrap; gap: 32px; } }
+
+    /* ── Tweaks ── */
+    #tweaks-panel {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--elev-2); border: 1px solid rgba(255,107,61,0.3); border-radius: var(--r-md);
+      padding: 20px; width: 232px; z-index: 9999; display: none;
+      font-family: var(--font-mono); font-size: 0.72rem;
+    }
+    #tweaks-panel.open { display: block; }
+    #tweaks-panel h4 { color: var(--accent); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .tw-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+    .tw-row label { color: var(--ink-muted); font-size: 0.62rem; letter-spacing: 0.06em; }
+    .tw-row input[type=range] { width: 100%; accent-color: var(--accent); }
+    .tw-row select { background: var(--bg); border: 1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: var(--r-sm); font-family: inherit; font-size: 0.68rem; }
+    .tw-row input[type=color] { width: 32px; height: 22px; border: none; background: none; cursor: pointer; }
+    .tw-sep { border: none; border-top: 1px solid var(--line); margin: 8px 0 12px; }
+
+    /* ── Mini preview rows ── */
+    .mini-rows { padding: 8px 10px; }
+    .mini-row { display: flex; align-items: center; gap: 7px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+    .mini-row:last-child { border-bottom: none; }
+    .mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-muted); flex-shrink: 0; }
+    .mini-dot.on { background: var(--data-green); }
+    .mini-dot.wn { background: var(--data-amber); }
+    .mini-lbl { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); flex: 1; }
+    .mini-val { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-soft); }
+  </style>
+</head>
+<body>
+<a href="#main" class="skip-link">Aller au contenu</a>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+
+<!-- ═══ HERO ═══ -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="hero-content">
+        <div class="hero-eyebrow" data-hero="0">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="eyebrow">NOYAU AGENTIQUE &nbsp;·&nbsp; v2026</span>
+        </div>
+        <h1 class="hero-h1 grad-text" data-hero="1">Un noyau agentique.<br>Frappé, pas assemblé.</h1>
+        <p class="hero-sub" data-hero="2">Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace.</p>
+        <div class="hero-ctas" data-hero="3">
+          <a href="#cta-final" class="btn btn-primary">OUVRIR LE COCKPIT</a>
+          <a href="demo.html"  class="btn btn-ghost">VOIR LA DÉMO</a>
+        </div>
+      </div>
+      <div class="hero-embed" data-hero="4">
+        <span class="embed-badge"><span class="dot"></span>LIVE</span>
+        <div class="cockpit-frame" role="img" aria-label="Cockpit Grimoire Kit">
+          <div class="cockpit-bar">
+            <span class="ctl-dot r"></span><span class="ctl-dot y"></span><span class="ctl-dot g"></span>
+            <span class="cockpit-label">GRIMOIRE KIT · COCKPIT · session-4a2f</span>
+          </div>
+          <div class="cockpit-body">
+            <div class="term"><span class="p">▶ </span><span class="v">grimoire init --session 4a2f --agents 3</span></div>
+            <div class="term"><span class="d">  ↳ runtime</span> <span class="ok">READY</span></div>
+            <div class="term"><span class="d">  ↳ SOG</span> <span class="ok">MOUNTED</span> <span class="d">gateway/ws</span></div>
+            <div class="term"><span class="d">  ↳ surface/cockpit</span> <span class="ok">LIVE</span></div>
+            <div class="term"><span class="d">  ↳ surface/observatory</span> <span class="wn">PARTIAL</span></div>
+            <div class="term">&nbsp;</div>
+            <div class="term"><span class="p">▶ </span><span class="v">sog.dispatch("Crée un PRD app notes")</span></div>
+            <div class="term"><span class="d">  ↳ agent/pm</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f1</span></div>
+            <div class="term"><span class="d">  ↳ agent/analyst</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f2</span></div>
+            <div class="term"><span class="d">  ↳ agent/tech-writer</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f3</span></div>
+            <div class="term">&nbsp;</div>
+            <div class="term"><span class="d">  ↳ artefact/prd-app-notes-v1.md</span> <span class="ok">ÉMIS</span></div>
+            <div class="term"><span class="p">▶ </span><span class="v">_</span><span class="cursor-blink" aria-hidden="true" style="display:inline-block;width:7px;height:1em;background:var(--accent);vertical-align:middle;margin-left:1px;"></span></div>
+          </div>
+          <div class="agent-bar" aria-hidden="true">
+            <span class="agent-pill on"><span class="dot"></span>pm</span>
+            <span class="agent-pill on"><span class="dot"></span>analyst</span>
+            <span class="agent-pill on"><span class="dot"></span>tech-writer</span>
+            <span style="flex:1"></span>
+            <span class="agent-pill" style="color:var(--ink-muted)">3 agents · SOG</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PROOF BAR ═══ -->
+<div id="proof-bar" aria-label="Références">
+  <div class="container">
+    <div class="proof-inner">
+      <span class="proof-item">47 BUILDERS · EARLY ACCESS</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">12 400 ARTEFACTS FORGÉS</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">ZERO HALLUCINATION NON TRACÉE</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">RUNTIME OPEN SOURCE</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">TRACE COMPLÈTE · JSONL</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MANIFESTE ═══ -->
+<section id="manifeste">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">01</span> · MANIFESTE</div>
+    <div class="manifeste-grid">
+      <div class="manifeste-block reveal" data-delay="0">
+        <div class="manifeste-num">01 · LA TRACE OU RIEN</div>
+        <h3>Chaque action produit une preuve auditable.</h3>
+        <p>Pas de magie, pas de boîte noire. Chaque décision d'agent, chaque artefact émis, chaque contrat signé est enregistré dans le ledger immutable du runtime.</p>
+      </div>
+      <div class="manifeste-block reveal" data-delay="100">
+        <div class="manifeste-num">02 · UN SEUL POINT D'ENTRÉE</div>
+        <h3>Le SOG orchestre. Tu parles à une interface, pas à trente bots.</h3>
+        <p>Le Smart Orchestrator Gateway dispatche vers des sub-agents invisibles. L'opérateur contrôle un système cohérent, pas une collection d'appels API.</p>
+      </div>
+      <div class="manifeste-block reveal" data-delay="200">
+        <div class="manifeste-num">03 · COMPOSABLE PAR NATURE</div>
+        <h3>Agents, skills, workflows, instructions : tout est modulaire, tout est forgeable.</h3>
+        <p>Les modules BMM, BMB, CIS, TEA se combinent librement. Les surfaces exposent des contrats ouverts. Tout est remplaçable sans toucher au runtime.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SURFACES ═══ -->
+<section id="surfaces">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">02</span> · SURFACES</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:580px">Le control plane, surface par surface.</h2>
+    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:500px">Six interfaces spécialisées. Un runtime sous-jacent. Chaque surface expose un contrat strict.</p>
+    <div class="surfaces-grid">
+      <div class="surface-card reveal" data-delay="0">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-01</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
+          <div class="surface-body"><h3>Cockpit</h3><p>Interface opérationnelle temps réel. Contrôle agents, inspection pipelines, émission de directives.</p><div class="surface-meta">runtime/cockpit · ws:// · &lt;40ms</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent/pm</span><span class="mini-val">RUNNING</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent/analyst</span><span class="mini-val">RUNNING</span></div>
+              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">agent/critic</span><span class="mini-val">WAITING</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="60">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-02</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
+          <div class="surface-body"><h3>Observatory</h3><p>Vue longitudinale des traces. Inspection artefacts, diff versions, audit contrats, télémétrie.</p><div class="surface-meta">runtime/observatory · REST+SSE · lecture</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">artefact/prd-v3.md</span><span class="mini-val">09:14</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">trace/session-4a2f</span><span class="mini-val">874 ev.</span></div>
+              <div class="mini-row"><span class="mini-dot"></span><span class="mini-lbl">contrat/RFC-09</span><span class="mini-val">signé</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="120">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-03</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
+          <div class="surface-body"><h3>Kanban</h3><p>Gestion des tâches agentiques. Colonnes par état de contrat, drag-to-assign, SLA par lane.</p><div class="surface-meta">runtime/kanban · WS bidir · écriture</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">DRAFT · 3 tâches</span><span class="mini-val">→ pm</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">IN PROGRESS · 2</span><span class="mini-val">→ dev</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">DONE · 11</span><span class="mini-val">sprint</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="0">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-04</span><span class="surface-status roadmap"><span class="dot"></span>Q3 2026</span></div>
+          <div class="surface-body"><h3>War Room</h3><p>Coordination multi-sessions. Tableaux croisés, escalade inter-agents, débats PCE, conflits ressources.</p><div class="surface-meta">runtime/warroom · multi-tenant · RBAC</div></div>
+          <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;" aria-hidden="true"><span style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);letter-spacing:.08em">ROADMAP · Q3 2026</span></div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="60">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-05</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
+          <div class="surface-body"><h3>Game UI</h3><p>Runtime rendu en pixel art isométrique. Chaque agent devient un personnage. Chaque tâche, une scène.</p><div class="surface-meta">runtime/gameui · canvas+CSS · temps réel</div></div>
+          <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;gap:8px;" aria-hidden="true">
+            <!-- Mini isometric preview -->
+            <svg width="80" height="50" viewBox="0 0 80 50" aria-hidden="true">
+              <g transform="translate(40,10)">
+                <polygon points="0,-8 16,0 0,8 -16,0" fill="#1A1D22" stroke="rgba(255,107,61,0.3)" stroke-width="1"/>
+                <polygon points="0,8 16,0 16,16 0,24" fill="#121418" stroke="rgba(255,107,61,0.2)" stroke-width="1"/>
+                <polygon points="0,8 -16,0 -16,16 0,24" fill="#22262C" stroke="rgba(255,107,61,0.2)" stroke-width="1"/>
+                <circle cx="0" cy="-2" r="4" fill="#FF6B3D" opacity="0.8"/>
+              </g>
+            </svg>
+            <a href="game-ui.html" style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted)">→ VOIR</a>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="120">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">FORGE-06</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
+          <div class="surface-body"><h3>Proofs</h3><p>Registre des preuves. Hash d'artefacts, signatures de contrats, replay de sessions, export audit.</p><div class="surface-meta">runtime/proofs · REST · immuable</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">sha256:a3f…</span><span class="mini-val">prd-v1</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">sig:RFC-09</span><span class="mini-val">✓ valid</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ORCHESTRATION / SOG ═══ -->
+<section id="orchestration">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">03</span> · ORCHESTRATION</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:600px">Un seul point d'entrée. Des dizaines de sub-agents invisibles.</h2>
+    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:520px">Le SOG reçoit la requête, dispatche vers les agents spécialisés, agrège les résultats, livre l'artefact. L'opérateur ne voit qu'une interface.</p>
+
+    <div class="sog-demo reveal" data-delay="160" role="region" aria-label="Démonstration du Smart Orchestrator Gateway">
+      <div class="sog-stage" id="sog-stage" aria-live="polite">
+        <!-- User bubble -->
+        <div class="sog-user" id="sog-user">"Crée un PRD pour une app de notes"</div>
+        <!-- SVG lines -->
+        <svg class="sog-svg" id="sog-svg" aria-hidden="true"></svg>
+        <!-- SOG node -->
+        <div class="sog-node" id="sog-node" aria-label="Smart Orchestrator Gateway">
+          <span class="sog-node-label">SOG</span>
+          <span class="sog-node-sub" id="sog-subtext">EN ATTENTE</span>
+        </div>
+        <!-- Agents -->
+        <div class="sog-agent" id="ag-pm"    style="left:80px;top:50%;transform:translateY(-50%)">
+          <div class="agent-avatar" id="av-pm"><span>pm</span><div class="working-bar"></div></div>
+          <span class="agent-name">PM</span>
+        </div>
+        <div class="sog-agent" id="ag-analyst" style="left:50%;top:20px;transform:translateX(-50%)">
+          <div class="agent-avatar" id="av-analyst"><span>analyst</span><div class="working-bar"></div></div>
+          <span class="agent-name">ANALYST</span>
+        </div>
+        <div class="sog-agent" id="ag-writer"  style="right:80px;top:50%;transform:translateY(-50%)">
+          <div class="agent-avatar" id="av-writer"><span>writer</span><div class="working-bar"></div></div>
+          <span class="agent-name">TECH-WRITER</span>
+        </div>
+        <!-- Artefact -->
+        <div class="sog-artefact" id="sog-artefact">FORGE-0342 · prd-app-notes-v1.md · ÉMIS &amp; SCELLÉ</div>
+      </div>
+      <div class="sog-controls">
+        <div class="sog-input-wrap">
+          <input class="sog-input" id="sog-input" value="Crée un PRD pour une app de notes" readonly aria-label="Requête utilisateur" />
+          <button class="sog-send" id="sog-send">FORGER →</button>
+        </div>
+        <button class="sog-replay" id="sog-replay" aria-label="Rejouer la démonstration">REJOUER</button>
+        <span class="sog-status" id="sog-status" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TIMELINE ═══ -->
+<section id="section-timeline">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">05</span> · FLUX</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:500px">De l'intention à l'artefact.</h2>
+    <div class="timeline-track reveal" data-delay="100" aria-hidden="true"><div class="timeline-track-fill"></div></div>
+    <div class="timeline-steps" role="list">
+      <div class="timeline-step reveal" data-delay="0" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">01</div><h3>Contrat</h3><p>L'opérateur définit l'objectif, les outils autorisés et les critères. Le runtime valide la signature avant exécution.</p></div>
+      <div class="timeline-step reveal" data-delay="80"  role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">02</div><h3>Orchestration</h3><p>Le SOG sélectionne et spawne les agents selon le contrat. Chaque agent reçoit un contexte mémoire délimité.</p></div>
+      <div class="timeline-step reveal" data-delay="160" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">03</div><h3>Frappe</h3><p>Le runtime orchestre la séquence, gère les dépendances et enregistre chaque décision dans le trace ledger.</p></div>
+      <div class="timeline-step reveal" data-delay="240" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">04</div><h3>Artefact tracé</h3><p>L'artefact est versioné, adressable par hash et signé. Disponible dans l'Observatory, exportable via API.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FEATURES ═══ -->
+<section id="capacites">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">06</span> · CAPACITÉS</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:560px">Neuf surfaces de précision.</h2>
+    <div class="feature-grid">
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-01</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="14" cy="14" r="10"/><path d="M14 8v7l4 2.5"/></svg>
+        <h3>Sub-agents invisibles</h3><p>Le SOG dispatche vers des agents spécialisés sans exposer la complexité à l'opérateur. Un point d'entrée, des dizaines de capacités.</p>
+        <a href="demo.html" class="feature-link">VOIR LA DÉMO →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-02</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="1.5"/><path d="M9 11h10M9 15h6"/></svg>
+        <h3>Artefacts UDF</h3><p>Unified Dynamic Factory : agents, workflows, skills, instructions créés dynamiquement avec triage éphémère/permanent intégré.</p>
+        <a href="#" class="feature-link">SPEC UDF →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-03</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 20h20M4 14h12M4 8h8"/></svg>
+        <h3>Memory tiered</h3><p>Contexte mémoire structuré en niveaux : working, episodic, semantic. Isolation par namespace, TTL configurable par tier.</p>
+        <a href="#" class="feature-link">MÉMOIRE API →</a></div>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-04</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4l4 8h6l-5 4 2 7-7-4-7 4 2-7-5-4h6z"/></svg>
+        <h3>Hooks sécurisés</h3><p>Points d'interception pré/post exécution avec validation de contrat. Aucun agent ne peut contourner les hooks déclarés.</p>
+        <a href="#" class="feature-link">HOOKS SPEC →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-05</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 14h18M14 5v18"/><circle cx="14" cy="14" r="10"/></svg>
+        <h3>Multi-LLM routing</h3><p>Anthropic, OpenAI, Mistral, Ollama. Le runtime abstrait le modèle. Les contrats restent valides quelle que soit la coulée.</p>
+        <a href="#" class="feature-link">ADAPTATEURS →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-06</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 22L14 4l4 10 4-5 2 13"/><circle cx="24" cy="22" r="2"/></svg>
+        <h3>CVTL cross-validation</h3><p>Cross-Validation Trust Layer : chaque artefact est soumis à un agent critique indépendant avant scellement. Taux d'erreur mesuré.</p>
+        <a href="#" class="feature-link">CVTL DOC →</a></div>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-07</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M7 14h4l3-8 4 16 3-8h4"/></svg>
+        <h3>PCE debates</h3><p>Productive Conflict Engine : agents configurables en opposition pour forcer l'émergence des hypothèses faibles avant livraison.</p>
+        <a href="#" class="feature-link">PCE SPEC →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-08</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4a10 10 0 0 1 0 20M14 4A10 10 0 0 0 4 14M14 24V4"/><path d="M4 14h20"/></svg>
+        <h3>AORA iteration loop</h3><p>Assess → Orchestrate → Run → Audit : boucle d'itération autonome avec critères d'arrêt déclarés dans le contrat.</p>
+        <a href="#" class="feature-link">AORA DOC →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-09</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/><rect x="16" y="4" width="8" height="8" rx="1.5"/><rect x="4" y="16" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="8" height="8" rx="1.5"/></svg>
+        <h3>Trust scoring</h3><p>Score de confiance par agent, par session et par type d'artefact. Alerte automatique si le score descend sous le seuil du contrat.</p>
+        <a href="observability.html" class="feature-link">VOIR OBSERVABILITY →</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PREUVES ═══ -->
+<section id="preuves" style="background:var(--elev-1);border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">07</span> · PREUVES</div>
+    <div class="preuves-grid">
+      <div>
+        <div class="metrics-row">
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="99" data-dec="1" data-suffix="%">99%</span></div><div class="metric-label">TRAÇABILITÉ</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="3.4" data-dec="1" data-suffix="s">3.4s</span></div><div class="metric-label">LATENCE MÉDIANE SOG</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="0">0</span></div><div class="metric-label">HALLUCINATION NON DÉTECTÉE</div></div>
+        </div>
+        <div class="metrics-row">
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="12400">12 400</span></div><div class="metric-label">ARTEFACTS FORGÉS · 30J</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="47">47</span></div><div class="metric-label">BUILDERS EARLY ACCESS</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="6">6</span></div><div class="metric-label">SURFACES · CONTROL PLANE</div></div>
+        </div>
+      </div>
+      <div class="quote-block reveal" data-delay="200">
+        <p class="quote-text">"Pour la première fois, je peux auditer exactement pourquoi un agent a pris une décision — et rejouer la séquence à l'identique. C'est ce que j'attendais depuis trois ans."</p>
+        <div class="quote-author">THOMAS V. · STAFF ENGINEER · EARLY ACCESS</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CTA FINAL ═══ -->
+<section id="cta-final">
+  <div class="container" style="position:relative;z-index:1">
+    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:28px"><span class="num">↓</span>&nbsp;&nbsp;ACCÈS RESTREINT · EARLY ACCESS</div>
+    <h2 class="reveal grad-text" data-delay="80" style="margin-bottom:12px">Forge ton propre noyau.</h2>
+    <p class="reveal" data-delay="140" style="color:var(--ink-soft);margin-bottom:36px;font-size:.95rem">Open source. Traçable. Composable. Prêt.</p>
+    <div class="reveal" data-delay="200" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
+      <a href="#" class="btn btn-primary">OUVRIR LE COCKPIT</a>
+      <a href="demo.html" class="btn btn-ghost">VOIR LA DÉMO</a>
+    </div>
+    <p class="reveal" data-delay="280" style="margin-top:20px;font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);letter-spacing:.08em;text-align:center">runtime/session · contrat signé · trace immédiate</p>
+  </div>
+</section>
+
+</main>
+<footer id="forge-footer"></footer>
+
+<!-- Tweaks panel -->
+<div id="tweaks-panel" role="complementary" aria-label="Panneau de configuration">
+  <h4>⚙ TWEAKS</h4>
+  <div class="tw-row"><label>Couleur accent</label><input type="color" id="tw-accent" value="#FF6B3D"/></div>
+  <hr class="tw-sep"/>
+  <div class="tw-row"><label>Taille de texte</label><input type="range" id="tw-size" min="14" max="20" step="1" value="16"/></div>
+  <div class="tw-row"><label>Densité sections</label>
+    <select id="tw-density"><option value="120">Normale</option><option value="80">Dense</option><option value="160">Aérée</option></select>
+  </div>
+  <hr class="tw-sep"/>
+  <div class="tw-row"><label>Blueprint grid</label>
+    <select id="tw-grid"><option value="1">Visible</option><option value="0">Masquée</option></select>
+  </div>
+</div>
+
+<script src="forge-nav.js"></script>
+<script>
+/* ── SOG ChatOrchestrator animation ── */
+(function() {
+  const stage = document.getElementById('sog-stage');
+  const sogNode = document.getElementById('sog-node');
+  const sogSub = document.getElementById('sog-subtext');
+  const userBubble = document.getElementById('sog-user');
+  const artefact = document.getElementById('sog-artefact');
+  const sendBtn = document.getElementById('sog-send');
+  const replayBtn = document.getElementById('sog-replay');
+  const statusEl = document.getElementById('sog-status');
+  const svg = document.getElementById('sog-svg');
+  const agents = ['ag-pm','ag-analyst','ag-writer'];
+  const avatars = ['av-pm','av-analyst','av-writer'];
+  let running = false;
+
+  function getCenter(el) {
+    const sr = stage.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    return { x: er.left - sr.left + er.width/2, y: er.top - sr.top + er.height/2 };
+  }
+
+  function drawLine(x1,y1,x2,y2,id,col) {
+    let line = document.getElementById(id);
+    if (!line) { line = document.createElementNS('http://www.w3.org/2000/svg','line'); line.id = id; svg.appendChild(line); }
+    line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('class','sog-line');
+    line.style.opacity = col === 'on' ? '0.7' : '0.25';
+    line.style.stroke = col === 'on' ? 'var(--accent)' : 'var(--ink-muted)';
+  }
+
+  function clearLines() { svg.innerHTML = ''; }
+
+  function reset() {
+    running = false;
+    userBubble.classList.remove('show');
+    artefact.classList.remove('show');
+    sogNode.classList.remove('pulse');
+    sogSub.textContent = 'EN ATTENTE';
+    agents.forEach(id => document.getElementById(id).classList.remove('show'));
+    avatars.forEach(id => { const av = document.getElementById(id); av.classList.remove('working'); });
+    clearLines();
+    sendBtn.disabled = false;
+    replayBtn.classList.remove('show');
+    statusEl.textContent = '';
+  }
+
+  async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function run() {
+    if (running) return;
+    running = true;
+    sendBtn.disabled = true;
+    clearLines();
+
+    // Step 1: user bubble
+    userBubble.classList.add('show');
+    statusEl.textContent = 'Requête reçue...';
+    await delay(700);
+
+    // Step 2: SOG pulse
+    sogNode.classList.add('pulse');
+    sogSub.textContent = 'DISPATCH...';
+    statusEl.textContent = 'SOG analyse et dispatche...';
+    await delay(600);
+
+    // Step 3: fan-out
+    agents.forEach(id => document.getElementById(id).classList.add('show'));
+    await delay(200);
+
+    // Draw lines SOG→agents
+    const sogC = getCenter(sogNode);
+    agents.forEach((id, i) => {
+      const ac = getCenter(document.getElementById(id));
+      drawLine(sogC.x, sogC.y, ac.x, ac.y, 'line-'+i, 'on');
+    });
+    await delay(800);
+
+    // Step 4: agents working
+    avatars.forEach(id => document.getElementById(id).classList.add('working'));
+    sogSub.textContent = 'EN COURS';
+    statusEl.textContent = '3 agents en parallèle...';
+    await delay(1600);
+
+    // Step 5: results back
+    const sogC2 = getCenter(sogNode);
+    agents.forEach((id, i) => {
+      const ac = getCenter(document.getElementById(id));
+      drawLine(ac.x, ac.y, sogC2.x, sogC2.y, 'line-ret-'+i, 'dim');
+    });
+    sogSub.textContent = 'AGRÉGATION';
+    statusEl.textContent = 'Agrégation des résultats...';
+    await delay(900);
+
+    // Step 6: artefact
+    clearLines();
+    sogNode.classList.remove('pulse');
+    sogSub.textContent = 'SCELLÉ';
+    artefact.classList.add('show');
+    statusEl.textContent = '';
+    replayBtn.classList.add('show');
+  }
+
+  sendBtn.addEventListener('click', run);
+  replayBtn.addEventListener('click', () => { reset(); setTimeout(run, 300); });
+})();
+
+/* ── Tweaks panel ── */
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "#FF6B3D",
+  "size": 16,
+  "density": "120",
+  "grid": "1"
+}/*EDITMODE-END*/;
+(function(){
+  window.addEventListener('message', e => {
+    if (e.data?.type === '__activate_edit_mode')   document.getElementById('tweaks-panel').classList.add('open');
+    if (e.data?.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('open');
+  });
+  window.parent.postMessage({type:'__edit_mode_available'},'*');
+
+  const r = document.documentElement;
+  const d = TWEAK_DEFAULTS;
+  function apply(v) {
+    r.style.setProperty('--accent', v.accent);
+    document.documentElement.style.fontSize = v.size + 'px';
+    document.querySelectorAll('section:not(#hero):not(#cta-final)').forEach(s => {
+      s.style.paddingTop = v.density + 'px'; s.style.paddingBottom = v.density + 'px';
+    });
+    document.body.style.setProperty('--grid-vis', v.grid === '1' ? 'block' : 'none');
+  }
+  apply(d);
+
+  function send(k,v) { window.parent.postMessage({type:'__edit_mode_set_keys',edits:{[k]:v}},'*'); }
+
+  document.getElementById('tw-accent').value = d.accent;
+  document.getElementById('tw-size').value = d.size;
+  document.getElementById('tw-density').value = d.density;
+  document.getElementById('tw-grid').value = d.grid;
+
+  document.getElementById('tw-accent').addEventListener('input', function(){ d.accent=this.value; apply(d); send('accent',this.value); });
+  document.getElementById('tw-size').addEventListener('input', function(){ d.size=+this.value; apply(d); send('size',+this.value); });
+  document.getElementById('tw-density').addEventListener('change', function(){ d.density=this.value; apply(d); send('density',this.value); });
+  document.getElementById('tw-grid').addEventListener('change', function(){ d.grid=this.value; apply(d); send('grid',this.value); });
+})();
+</script>
+</body>
+</html>

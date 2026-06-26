@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Game UI — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+    /* ── Hero ── */
+    #hero { padding: 80px 0 60px; text-align: center; }
+    /* ── Stage container ── */
+    #stage-section { padding: 0 0 80px; }
+    .stage-wrap {
+      background: var(--elev-1); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      position: relative; overflow: hidden; padding: 48px 0;
+    }
+    .stage-wrap::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.06'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    /* ── Isometric stage ── */
+    #iso-stage {
+      position: relative; margin: 0 auto;
+      width: 720px; height: 420px;
+      transform-style: preserve-3d;
+    }
+    @media(max-width:800px){ #iso-stage { transform: scale(0.7); transform-origin: top center; } }
+    @media(max-width:500px){ #iso-stage { transform: scale(0.5); transform-origin: top center; } }
+
+    /* Tiles */
+    .iso-tile {
+      position: absolute;
+      width: 80px; height: 40px;
+      clip-path: polygon(50% 0%, 100% 25%, 50% 50%, 0% 25%);
+      background: var(--elev-2);
+      transition: background 200ms;
+    }
+    .iso-tile:hover { background: var(--elev-3); }
+    .iso-tile.accent-tile { background: rgba(255,107,61,0.07); }
+
+    /* Tile walls (south face) */
+    .iso-tile-s {
+      position: absolute;
+      width: 40px; height: 14px;
+      background: var(--elev-1);
+      clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    }
+    .iso-tile-e {
+      position: absolute;
+      width: 40px; height: 14px;
+      background: rgba(0,0,0,0.3);
+    }
+
+    /* Desk (flat rect on tile) */
+    .iso-desk {
+      position: absolute;
+      width: 52px; height: 26px;
+      clip-path: polygon(50% 0%, 100% 25%, 50% 50%, 0% 25%);
+      border: 1px solid rgba(255,107,61,0.2);
+    }
+
+    /* Agent character */
+    .iso-agent {
+      position: absolute;
+      cursor: pointer;
+      transition: filter 200ms;
+      z-index: 10;
+    }
+    .iso-agent:hover { filter: brightness(1.3); }
+    .iso-agent:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* Agent name label */
+    .agent-tag {
+      position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+      font-family: var(--font-mono); font-size: 0.55rem; color: var(--ink-muted);
+      letter-spacing: 0.06em; white-space: nowrap; background: rgba(11,12,14,0.8);
+      padding: 1px 5px; border-radius: 2px; border: 1px solid var(--line);
+    }
+    .agent-tag.working { color: var(--accent); border-color: rgba(255,107,61,0.3); }
+
+    /* Idle float animation */
+    @keyframes float-a { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)} }
+    @keyframes float-b { 0%,100%{transform:translateY(-1px)} 50%{transform:translateY(1px)} }
+    @keyframes float-c { 0%,100%{transform:translateY(1px)} 50%{transform:translateY(-1px)} }
+
+    /* Work animation */
+    @keyframes work-bob { 0%,100%{transform:translateY(0)} 30%{transform:translateY(-3px)} 60%{transform:translateY(0)} }
+
+    /* Task badge */
+    .task-badge {
+      position: absolute; top: -22px; right: -10px;
+      font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.06em;
+      background: var(--accent); color: var(--bg); padding: 1px 5px; border-radius: 2px;
+      opacity: 0; transition: opacity 300ms;
+    }
+    .iso-agent.working .task-badge { opacity: 1; }
+    .iso-agent.working svg { animation: work-bob 0.6s ease-in-out infinite; }
+
+    /* ── Tooltip ── */
+    #agent-tooltip {
+      position: fixed; z-index: 100;
+      background: var(--elev-2); border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm); padding: 12px 16px; min-width: 200px;
+      display: none; pointer-events: none;
+    }
+    .tt-name { font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+    .tt-role { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-bottom: 10px; }
+    .tt-stat { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 0.6rem; margin-bottom: 4px; }
+    .tt-stat .lbl { color: var(--ink-muted); } .tt-stat .val { color: var(--ink); }
+
+    /* ── Agent panel ── */
+    #agent-panel {
+      position: fixed; right: 0; top: 56px; bottom: 0; width: 280px;
+      background: var(--elev-1); border-left: 1px solid var(--line);
+      transform: translateX(100%); transition: transform 300ms var(--ease-forge);
+      z-index: 500; overflow-y: auto; padding: 20px;
+    }
+    #agent-panel.open { transform: translateX(0); }
+    .panel-close { background: none; border: 1px solid var(--line); color: var(--ink-muted); border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer; font-family: var(--font-mono); font-size: 0.65rem; float: right; }
+    .panel-close:hover { border-color: var(--accent); color: var(--accent); }
+    .panel-agent-name { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; color: var(--ink); margin: 32px 0 4px; }
+    .panel-role { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); margin-bottom: 20px; letter-spacing: 0.08em; }
+    .panel-stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.65rem; }
+    .panel-stat .k { color: var(--ink-muted); } .panel-stat .v { color: var(--ink); }
+    .panel-timeline { margin-top: 20px; }
+    .panel-timeline h4 { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 12px; }
+    .panel-ev { padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-soft); display: flex; gap: 8px; }
+    .panel-ev .t { color: var(--ink-muted); flex-shrink: 0; }
+    .panel-ev .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 4px; }
+
+    /* ── Scrubber ── */
+    .scrubber-wrap { padding: 20px 48px; background: var(--bg); border-top: 1px solid var(--line); }
+    .scrubber-label { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); letter-spacing: 0.08em; margin-bottom: 8px; display: flex; justify-content: space-between; }
+    .scrubber { width: 100%; accent-color: var(--accent); }
+
+    /* ── Legend ── */
+    .game-legend { display: grid; grid-template-columns: repeat(3,1fr); gap: var(--gap); margin-top: 60px; }
+    .legend-block { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 24px; }
+    .legend-block h3 { font-size: 0.92rem; margin-bottom: 8px; }
+    .legend-block p { font-size: 0.78rem; color: var(--ink-soft); line-height: 1.6; }
+    @media(max-width:640px){ .game-legend{grid-template-columns:1fr;} }
+
+    /* ── Why blocks ── */
+    .why-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: var(--gap); margin-top: 52px; }
+    @media(max-width:640px){ .why-grid{grid-template-columns:1fr;} }
+    .why-card { padding: 24px; background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); }
+    .why-num { font-family: var(--font-mono); font-size: 0.62rem; color: var(--accent); letter-spacing: .1em; margin-bottom: 12px; }
+    .why-card h3 { font-size: .92rem; margin-bottom: 8px; }
+    .why-card p { font-size: .78rem; color: var(--ink-soft); line-height: 1.6; }
+  </style>
+</head>
+<body>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav"></nav>
+
+<main id="main">
+<!-- ═══ HERO ═══ -->
+<section id="hero">
+  <div class="container">
+    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:20px"><span class="num">FORGE-05</span> · GAME UI · BETA</div>
+    <h1 class="grad-text reveal" data-delay="60">Le runtime, rendu visible.</h1>
+    <p class="reveal" data-delay="120" style="color:var(--ink-soft);margin-top:14px;font-size:1rem;max-width:520px;margin-left:auto;margin-right:auto">Chaque agent devient un personnage. Chaque tâche, une scène. Chaque trace, une archive.</p>
+  </div>
+</section>
+
+<!-- ═══ ISO STAGE ═══ -->
+<section id="stage-section">
+  <div class="stage-wrap">
+    <div id="iso-stage" role="application" aria-label="Scène isométrique des agents Grimoire Kit"></div>
+    <div class="scrubber-wrap">
+      <div class="scrubber-label">
+        <span>TIMELINE — 60 DERNIÈRES SECONDES</span>
+        <span id="scrubber-time" aria-live="polite">T+0s</span>
+      </div>
+      <input type="range" class="scrubber" id="scrubber" min="0" max="60" value="60" aria-label="Position temporelle"/>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LÉGENDE ═══ -->
+<section class="dense">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">01</span> · LÉGENDE</div>
+    <div class="game-legend">
+      <div class="legend-block reveal" data-delay="0">
+        <h3>Agents</h3>
+        <p>Chaque personnage représente un agent actif. Sa couleur indique son rôle. Son animation indique son état : idle, working, waiting, done.</p>
+      </div>
+      <div class="legend-block reveal" data-delay="80">
+        <h3>Artefacts</h3>
+        <p>Les artefacts apparaissent sur le bureau de l'agent qui les a forgés. Un flash orange indique l'émission. L'artefact reste jusqu'au prochain cycle.</p>
+      </div>
+      <div class="legend-block reveal" data-delay="160">
+        <h3>Traces</h3>
+        <p>Les lignes entre agents représentent les appels actifs. Chaque flux correspond à un event dans le trace ledger, visible dans l'Observatory.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ POURQUOI ═══ -->
+<section class="dense">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">02</span> · POURQUOI UN GAME UI</div>
+    <div class="why-grid">
+      <div class="why-card reveal" data-delay="0">
+        <div class="why-num">01</div>
+        <h3>Lisibilité émotionnelle</h3>
+        <p>Un tableau de bord texte demande de l'interprétation. Une scène isométrique se lit d'un coup d'œil. L'état du runtime devient intuitif, même pour un non-technicien.</p>
+      </div>
+      <div class="why-card reveal" data-delay="80">
+        <div class="why-num">02</div>
+        <h3>Détection d'anomalies</h3>
+        <p>Un agent immobile trop longtemps, un bureau vide alors que le pipeline tourne — ces signaux visuels alertent avant même que l'Observatory les détecte en métrique.</p>
+      </div>
+      <div class="why-card reveal" data-delay="160">
+        <div class="why-num">03</div>
+        <h3>Onboarding accéléré</h3>
+        <p>Comprendre qu'un agent "passe le résultat" à un autre agent, c'est abstrait. Le voir marcher entre deux bureaux, c'est immédiat. La courbe d'apprentissage s'effondre.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CTA ═══ -->
+<section id="cta-final">
+  <div class="container" style="position:relative;z-index:1;text-align:center">
+    <h2 class="reveal grad-text" style="margin-bottom:12px">Observer le runtime en temps réel.</h2>
+    <p class="reveal" data-delay="80" style="color:var(--ink-soft);margin-bottom:32px;font-size:.95rem">Passe à l'Observatory pour les métriques de production.</p>
+    <div class="reveal" data-delay="160" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
+      <a href="observability.html" class="btn btn-primary">VOIR L'OBSERVABILITY</a>
+      <a href="index.html#cta-final" class="btn btn-ghost">OUVRIR LE COCKPIT</a>
+    </div>
+  </div>
+</section>
+</main>
+<footer id="forge-footer"></footer>
+
+<!-- Tooltip & Panel -->
+<div id="agent-tooltip" role="tooltip" aria-live="polite"></div>
+<div id="agent-panel" aria-label="Détail agent" role="complementary">
+  <button class="panel-close" id="panel-close" aria-label="Fermer">✕ FERMER</button>
+  <div id="panel-content"></div>
+</div>
+
+<script src="forge-nav.js"></script>
+<script>
+/* ── Isometric stage ── */
+const TILE_W = 80, TILE_H = 40;
+const COLS = 9, ROWS = 9;
+const stage = document.getElementById('iso-stage');
+const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+function isoPos(col, row) {
+  return {
+    x: (col - row) * TILE_W/2 + 320,
+    y: (col + row) * TILE_H/4 + 20
+  };
+}
+
+/* ── Render tiles ── */
+const ACCENTS = [[2,2],[2,4],[4,2],[4,4],[6,2],[6,4],[3,6]];
+for(let c=0;c<COLS;c++) for(let r=0;r<ROWS;r++){
+  const {x,y} = isoPos(c,r);
+  const tile = document.createElement('div');
+  tile.className = 'iso-tile' + (ACCENTS.some(([ac,ar])=>ac===c&&ar===r) ? ' accent-tile' : '');
+  tile.style.left = x+'px'; tile.style.top = y+'px';
+  stage.appendChild(tile);
+}
+
+/* ── Agent fixtures ── */
+const AGENTS = [
+  { id:'pm',          role:'Product Manager',  col:2, row:2, color:'#F6B83A', tasks:['Roadmap v3','Brief RFC-09','PRD app notes'], tokens:14200, done:23, working:true,  anim:'float-a' },
+  { id:'dev',         role:'Developer',         col:4, row:2, color:'#6EE7FF', tasks:['Impl. parser','Code review'], tokens:28400, done:31, working:true,  anim:'float-b' },
+  { id:'qa',          role:'QA Engineer',       col:6, row:2, color:'#34D399', tasks:['Test suite'], tokens:9800,  done:18, working:false, anim:'float-c' },
+  { id:'architect',   role:'Architect',         col:3, row:6, color:'#A78BFA', tasks:['ADR-07','Schema v3'], tokens:19600, done:12, working:true,  anim:'float-a' },
+  { id:'tech-writer', role:'Technical Writer',  col:2, row:4, color:'#9BA0A8', tasks:['Doc API v2'], tokens:11200, done:28, working:false, anim:'float-b' },
+  { id:'analyst',     role:'Analyst',           col:6, row:4, color:'#FF6B3D', tasks:['Marché notes','Perf audit'], tokens:16800, done:19, working:true,  anim:'float-c' },
+];
+
+/* ── SVG sprite per role ── */
+function agentSVG(color) {
+  return `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <!-- Head -->
+    <rect x="9" y="2" width="10" height="9" rx="2" fill="${color}" opacity=".9"/>
+    <!-- Body -->
+    <rect x="7" y="12" width="14" height="14" rx="1" fill="${color}" opacity=".75"/>
+    <!-- Legs -->
+    <rect x="8"  y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
+    <rect x="15" y="27" width="5" height="9" rx="1" fill="${color}" opacity=".6"/>
+    <!-- Screen glow (desk monitor) -->
+    <rect x="1" y="0" width="6" height="4" rx="1" fill="rgba(110,231,255,.4)"/>
+  </svg>`;
+}
+
+const tip = document.getElementById('agent-tooltip');
+const panel = document.getElementById('agent-panel');
+const panelContent = document.getElementById('panel-content');
+document.getElementById('panel-close').addEventListener('click', ()=>panel.classList.remove('open'));
+
+AGENTS.forEach(ag=>{
+  const {x,y} = isoPos(ag.col, ag.row);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'iso-agent' + (ag.working ? ' working' : '');
+  wrapper.setAttribute('tabindex','0');
+  wrapper.setAttribute('role','button');
+  wrapper.setAttribute('aria-label',`${ag.id} · ${ag.role}${ag.working?' · en cours':''}`);
+  wrapper.style.left = (x-14)+'px';
+  wrapper.style.top  = (y-20)+'px';
+  if(!reduced) wrapper.style.animation = `${ag.anim} ${2+Math.random()}s ease-in-out infinite`;
+
+  const tag = document.createElement('div');
+  tag.className = 'agent-tag' + (ag.working ? ' working' : '');
+  tag.textContent = ag.id.toUpperCase();
+
+  const badge = document.createElement('div');
+  badge.className = 'task-badge';
+  badge.textContent = ag.tasks[0].slice(0,10)+'…';
+
+  wrapper.innerHTML = agentSVG(ag.color);
+  wrapper.appendChild(tag);
+  wrapper.appendChild(badge);
+
+  // Tooltip
+  wrapper.addEventListener('mouseenter', e=>{
+    tip.style.display='block';
+    tip.innerHTML=`
+      <div class="tt-name">${ag.id}</div>
+      <div class="tt-role">${ag.role}</div>
+      <div class="tt-stat"><span class="lbl">TÂCHE</span><span class="val">${ag.tasks[0]}</span></div>
+      <div class="tt-stat"><span class="lbl">TOKENS</span><span class="val">${ag.tokens.toLocaleString('fr-FR')}</span></div>
+      <div class="tt-stat"><span class="lbl">DONE</span><span class="val">${ag.done} tâches</span></div>
+      <div class="tt-stat"><span class="lbl">ÉTAT</span><span class="val" style="color:${ag.working?'var(--data-green)':'var(--ink-muted)'}">${ag.working?'WORKING':'IDLE'}</span></div>`;
+    positionTip(e);
+  });
+  wrapper.addEventListener('mousemove', positionTip);
+  wrapper.addEventListener('mouseleave', ()=>tip.style.display='none');
+
+  // Panel
+  function openPanel(){
+    const events=[
+      {t:'09:14:32', msg:'Artefact '+ag.tasks[0]+' émis'},
+      {t:'09:12:01', msg:'LLM call claude-opus · 2.1s'},
+      {t:'09:10:44', msg:'Tâche assignée par SOG'},
+      {t:'09:08:12', msg:'Agent spawned · contrat signé'},
+    ];
+    panelContent.innerHTML=`
+      <div class="panel-agent-name">${ag.id}</div>
+      <div class="panel-role">${ag.role.toUpperCase()}</div>
+      <div class="panel-stat"><span class="k">ÉTAT</span><span class="v" style="color:${ag.working?'var(--data-green)':'var(--ink-muted)'}">${ag.working?'WORKING':'IDLE'}</span></div>
+      <div class="panel-stat"><span class="k">TÂCHE COURANTE</span><span class="v">${ag.tasks[0]}</span></div>
+      <div class="panel-stat"><span class="k">TOKENS CONSOMMÉS</span><span class="v">${ag.tokens.toLocaleString('fr-FR')}</span></div>
+      <div class="panel-stat"><span class="k">TÂCHES TERMINÉES</span><span class="v">${ag.done}</span></div>
+      <div class="panel-stat"><span class="k">TRUST SCORE</span><span class="v">${(0.88+Math.random()*.1).toFixed(2)}</span></div>
+      <div class="panel-timeline"><h4>TIMELINE RÉCENTE</h4>
+        ${events.map(ev=>`<div class="panel-ev"><span class="dot"></span><span class="t">${ev.t}</span><span>${ev.msg}</span></div>`).join('')}
+      </div>`;
+    panel.classList.add('open');
+  }
+  wrapper.addEventListener('click', openPanel);
+  wrapper.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') openPanel(); });
+
+  stage.appendChild(wrapper);
+});
+
+function positionTip(e){
+  const margin=14;
+  let tx=e.clientX+margin, ty=e.clientY-10;
+  if(tx+220>window.innerWidth) tx=e.clientX-220-margin;
+  tip.style.left=tx+'px'; tip.style.top=ty+'px';
+}
+
+/* ── SVG connection lines ── */
+const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+svg.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible;';
+stage.insertBefore(svg,stage.firstChild);
+
+function agentCenter(ag){
+  const {x,y}=isoPos(ag.col,ag.row);
+  return {x:x,y:y+10};
+}
+
+// Draw connections between working agents (pm→analyst, dev→qa)
+const connections=[[AGENTS[0],AGENTS[5]],[AGENTS[1],AGENTS[2]]];
+connections.forEach(([a,b])=>{
+  const ac=agentCenter(a), bc=agentCenter(b);
+  const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+  line.setAttribute('x1',ac.x); line.setAttribute('y1',ac.y);
+  line.setAttribute('x2',bc.x); line.setAttribute('y2',bc.y);
+  line.setAttribute('stroke','var(--accent)'); line.setAttribute('stroke-width','1');
+  line.setAttribute('stroke-dasharray','4 4'); line.setAttribute('opacity','0.35');
+  if(!reduced){ line.setAttribute('stroke-dashoffset','0'); line.style.animation='ticker 1.5s linear infinite'; }
+  svg.appendChild(line);
+});
+
+/* ── Scrubber ── */
+const scrubberEl = document.getElementById('scrubber');
+const scrubberTime = document.getElementById('scrubber-time');
+scrubberEl.addEventListener('input', function(){
+  const v=+this.value;
+  scrubberTime.textContent = v===60 ? 'LIVE' : 'T-'+(60-v)+'s';
+  // Toggle agent states based on time
+  AGENTS.forEach((ag, i)=>{
+    const agEl=stage.querySelectorAll('.iso-agent')[i];
+    if(!agEl) return;
+    const wasWorking = v>30 ? ag.working : (i%2===0);
+    agEl.classList.toggle('working', wasWorking);
+  });
+});
+</script>
+</body>
+</html>

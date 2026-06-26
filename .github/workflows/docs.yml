@@ -1,4 +1,8 @@
-name: Deploy docs
+name: Deploy site
+
+# Publie le site statique Grimoire Kit (web/) sur GitHub Pages.
+# La page Documentation rend les fichiers docs/*.md en direct (raw.githubusercontent),
+# donc aucune étape de build n'est nécessaire — on uploade web/ tel quel.
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -7,10 +11,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "mkdocs_data/**"
-      - "mkdocs_hooks/**"
+      - "web/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -23,32 +24,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: Install docs dependencies
-        run: pip install ".[docs]"
-
-      - name: Build site
-        run: mkdocs build --clean
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site/
-
   deploy:
-    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/
+
       - id: deployment
         uses: actions/deploy-pages@v5

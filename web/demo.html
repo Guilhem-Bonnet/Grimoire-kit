@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Démo — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+    /* ── Demo hero ── */
+    #demo-hero { padding: 80px 0 60px; text-align: center; }
+    /* ── Scrollytelling layout ── */
+    .demo-layout {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0; max-width: var(--max-w); margin: 0 auto; padding: 0 var(--gap);
+      align-items: start;
+    }
+    @media(max-width:900px){ .demo-layout { grid-template-columns: 1fr; } }
+
+    /* Left: narrative + spine */
+    .demo-left { position: relative; padding-left: 48px; }
+    .progress-spine {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      display: flex; flex-direction: column; align-items: center; gap: 0;
+      padding-top: 24px;
+    }
+    .spine-track {
+      position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+      background: var(--line); transform: translateX(-50%);
+    }
+    .spine-dot {
+      position: relative; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--ink-muted); border: 2px solid var(--elev-1);
+      z-index: 1; flex-shrink: 0; margin: 52px 0; transition: background 300ms;
+      cursor: default;
+    }
+    .spine-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
+    @media(max-width:900px){ .demo-left { padding-left: 0; } .progress-spine { display: none; } }
+
+    /* Demo sections */
+    .demo-section { padding: 60px 0; border-bottom: 1px solid var(--line); }
+    .demo-section:last-child { border-bottom: none; }
+    .ds-num { font-family: var(--font-mono); font-size: 0.62rem; color: var(--accent); letter-spacing: .12em; margin-bottom: 16px; }
+    .demo-section h2 { font-size: clamp(1.3rem,2.5vw,2rem); margin-bottom: 12px; max-width: 400px; }
+    .demo-section p { font-size: var(--text-sm); color: var(--ink-soft); line-height: 1.7; max-width: 420px; }
+    .demo-section .ds-sub { margin-top: 10px; }
+
+    /* Right: sticky viz */
+    .demo-right { position: sticky; top: 80px; padding: 40px 0 40px 40px; }
+    @media(max-width:900px){ .demo-right { position: static; padding: 0; margin-bottom: 40px; } }
+    .viz-wrap { position: relative; height: 440px; }
+    .viz {
+      position: absolute; inset: 0;
+      background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-md);
+      overflow: hidden; padding: 24px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 400ms var(--ease-forge);
+    }
+    .viz.active { opacity: 1; pointer-events: auto; }
+    .viz-label { font-family: var(--font-mono); font-size: .6rem; letter-spacing: .1em; color: var(--ink-muted); margin-bottom: 16px; }
+
+    /* ── VIZ 1: Chaos graph ── */
+    #viz-1 .chaos-node {
+      position: absolute; border-radius: 50%;
+      background: var(--elev-3); border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: .52rem; color: var(--ink-muted);
+      transition: all 800ms var(--ease-forge);
+    }
+    .chaos-line { stroke: rgba(255,255,255,.06); stroke-width: 1; }
+    .chaos-line.blink { animation: lblink 1.2s step-end infinite; }
+    @keyframes lblink { 0%,100%{opacity:.4} 50%{opacity:.05} }
+
+    /* ── VIZ 2: Convergence ── */
+    #viz-2 .conv-node { transition: all 1200ms var(--ease-forge); }
+    .sog-center { position: absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:56px; height:56px; border-radius:50%; background:var(--elev-2); border:1.5px solid var(--accent); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:.65rem; color:var(--accent); font-weight:600; opacity:0; transition:opacity 600ms; z-index:2; }
+
+    /* ── VIZ 3: ChatOrchestrator mini ── */
+    .mini-sog { display:flex; flex-direction:column; gap:16px; align-items:center; padding-top:20px; }
+    .mini-sog-node { width:56px; height:56px; border-radius:50%; background:var(--elev-2); border:1.5px solid var(--accent); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:.6rem; color:var(--accent); font-weight:600; }
+    .mini-agents { display:flex; gap:20px; }
+    .mini-agent { display:flex; flex-direction:column; align-items:center; gap:6px; font-family:var(--font-mono); font-size:.56rem; color:var(--ink-muted); }
+    .mini-agent-icon { width:36px; height:36px; border-radius:var(--r-sm); background:var(--elev-3); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:.56rem; color:var(--ink-soft); transition:border-color 300ms; }
+    .mini-agent-icon.working { border-color:var(--accent); animation:var(--anim, none); }
+    @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 var(--accent-soft)} 100%{box-shadow:0 0 0 8px transparent} }
+    .mini-sog-node.active { animation:pulse-ring .8s infinite; }
+    .mini-artefact { font-family:var(--font-mono); font-size:.65rem; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent-dim); border-radius:var(--r-sm); padding:8px 16px; opacity:0; transition:opacity 400ms; }
+
+    /* ── VIZ 4: ArtifactForge ── */
+    .forge-stage { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:24px; }
+    .hammer-wrap { position:relative; width:80px; height:80px; }
+    @keyframes hammer-swing { 0%{transform:rotate(0deg)} 40%{transform:rotate(-40deg)} 60%{transform:rotate(5deg)} 80%{transform:rotate(-10deg)} 100%{transform:rotate(0deg)} }
+    .hammer-svg { transform-origin: 70% 20%; }
+    .hammer-svg.swing { animation: hammer-swing .5s var(--ease-forge) forwards; }
+    @keyframes impact-flash { 0%,100%{opacity:0} 50%{opacity:1} }
+    .forge-impact { position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:60px; height:4px; border-radius:2px; background:var(--accent); opacity:0; }
+    .forge-impact.flash { animation: impact-flash 120ms forwards; }
+    .forge-artefact-badge { font-family:var(--font-mono); font-size:.72rem; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent-dim); border-radius:var(--r-sm); padding:10px 20px; letter-spacing:.08em; transform:scale(.7) translateY(10px); opacity:0; transition:all 400ms var(--ease-forge); }
+    .forge-artefact-badge.show { transform:scale(1) translateY(0); opacity:1; }
+    @keyframes ring-expand { 0%{transform:translate(-50%,-50%) scale(0.5);opacity:.6} 100%{transform:translate(-50%,-50%) scale(2.5);opacity:0} }
+    .forge-ring { position:absolute; top:50%; left:50%; width:60px; height:60px; border-radius:50%; border:1.5px solid var(--accent); opacity:0; }
+    .forge-ring.expand { animation: ring-expand 400ms var(--ease-forge) forwards; }
+    .forge-btn { font-family:var(--font-mono); font-size:.68rem; padding:8px 20px; background:var(--accent); color:var(--bg); border:none; border-radius:var(--r-sm); cursor:pointer; letter-spacing:.06em; transition:filter 200ms; }
+    .forge-btn:hover { filter:brightness(1.08); }
+
+    /* ── VIZ 5: Trace ── */
+    .trace-rows { display:flex; flex-direction:column; gap:0; }
+    .trace-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); }
+    .trace-row:last-child { border-bottom:none; }
+    .trace-lbl { font-family:var(--font-mono); font-size:.58rem; color:var(--ink-muted); width:100px; flex-shrink:0; }
+    .trace-track { flex:1; position:relative; height:16px; }
+    .trace-bar { position:absolute; top:1px; height:14px; border-radius:2px; }
+    .trace-bar.llm { background:var(--data-cyan); opacity:.75; }
+    .trace-bar.sog { background:var(--accent); opacity:.8; }
+    .trace-bar.tool { background:var(--data-violet); opacity:.75; }
+    .trace-bar.io { background:var(--data-amber); opacity:.75; }
+    .trace-dur { font-family:var(--font-mono); font-size:.56rem; color:var(--ink-muted); width:36px; text-align:right; flex-shrink:0; }
+
+    /* ── VIZ 6-8: Previews ── */
+    .preview-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+    .preview-tile { background:var(--elev-2); border:1px solid var(--line); border-radius:var(--r-sm); padding:12px; }
+    .preview-tile h4 { font-family:var(--font-mono); font-size:.6rem; color:var(--ink-soft); margin-bottom:6px; }
+    .preview-tile p { font-size:.68rem; color:var(--ink-muted); line-height:1.5; }
+    .preview-status { font-family:var(--font-mono); font-size:.55rem; letter-spacing:.06em; color:var(--data-green); margin-top:6px; }
+
+    /* ── VIZ 9: Personas ── */
+    .persona-cards { display:flex; flex-direction:column; gap:12px; }
+    .persona-card { background:var(--elev-2); border:1px solid var(--line); border-radius:var(--r-sm); padding:14px; }
+    .persona-title { font-family:var(--font-mono); font-size:.65rem; color:var(--accent); letter-spacing:.08em; margin-bottom:6px; }
+    .persona-desc { font-size:.75rem; color:var(--ink-soft); line-height:1.55; }
+    .persona-use { font-family:var(--font-mono); font-size:.58rem; color:var(--ink-muted); margin-top:6px; }
+
+    /* ── VIZ 10: Terminal ── */
+    .term-wrap { background:var(--bg); border:1px solid var(--line); border-radius:var(--r-sm); padding:16px; font-family:var(--font-mono); font-size:.7rem; }
+    .term-line-out { color:var(--data-green); line-height:1.8; }
+    .term-line-cmd { color:var(--ink); line-height:1.8; }
+    .term-line-dim { color:var(--ink-muted); line-height:1.8; }
+    #term-cursor { display:inline-block; width:8px; height:1em; background:var(--accent); vertical-align:middle; animation:blink 1s step-end infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── Final CTA section ── */
+    #demo-cta { padding:100px 0; text-align:center; }
+  </style>
+</head>
+<body>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav"></nav>
+<main id="main">
+
+<!-- Hero -->
+<section id="demo-hero">
+  <div class="container">
+    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:20px"><span class="num">DÉMO</span> · PITCH PRODUIT</div>
+    <h1 class="grad-text reveal" data-delay="60">De l'intention à l'artefact.<br>En une frappe.</h1>
+    <p class="reveal" data-delay="120" style="color:var(--ink-soft);margin-top:14px;font-size:1rem;max-width:500px;margin-left:auto;margin-right:auto">Suis le parcours d'une demande, de ta phrase jusqu'à la preuve scellée.</p>
+  </div>
+</section>
+
+<!-- Scrollytelling -->
+<div style="max-width:var(--max-w);margin:0 auto;padding:0 var(--gap) 80px;">
+  <div class="demo-layout">
+
+    <!-- Left: narrative -->
+    <div class="demo-left">
+      <div class="progress-spine" aria-hidden="true">
+        <div class="spine-track"></div>
+        <div class="spine-dot active" data-spine="0"></div>
+        <div class="spine-dot" data-spine="1"></div>
+        <div class="spine-dot" data-spine="2"></div>
+        <div class="spine-dot" data-spine="3"></div>
+        <div class="spine-dot" data-spine="4"></div>
+        <div class="spine-dot" data-spine="5"></div>
+        <div class="spine-dot" data-spine="6"></div>
+        <div class="spine-dot" data-spine="7"></div>
+        <div class="spine-dot" data-spine="8"></div>
+        <div class="spine-dot" data-spine="9"></div>
+      </div>
+
+      <div class="demo-section" data-section="0">
+        <div class="ds-num">01 · LE PROBLÈME</div>
+        <h2>Les agents IA sont devenus une soupe.</h2>
+        <p>30 outils. 0 traçabilité. 0 reproductibilité. Chaque agent répond dans sa propre bulle, sans mémoire partagée, sans contrat, sans preuve.</p>
+        <p class="ds-sub">Le résultat : des pipelines qu'on ne peut pas auditer, des artefacts qu'on ne peut pas rejouer, des équipes qui recommencent à zéro à chaque run.</p>
+      </div>
+
+      <div class="demo-section" data-section="1">
+        <div class="ds-num">02 · LA CONVICTION</div>
+        <h2>"Un noyau. Une trace. Une forge."</h2>
+        <p>Grimoire Kit part d'un principe simple : le runtime doit être le seul point de vérité. Tous les agents opèrent sous son contrôle. Tous les artefacts sortent par son registre.</p>
+        <p class="ds-sub">Pas d'appels API dispersés. Pas de mémoire locale non partagée. Un noyau unique, traçable, composable.</p>
+      </div>
+
+      <div class="demo-section" data-section="2">
+        <div class="ds-num">03 · LE SOG</div>
+        <h2>Un seul point d'entrée. Des dizaines de sub-agents invisibles.</h2>
+        <p>Le Smart Orchestrator Gateway reçoit la demande, analyse le contrat, dispatche vers les agents spécialisés, agrège les résultats.</p>
+        <p class="ds-sub">L'opérateur parle à une interface cohérente. La complexité d'orchestration est entièrement encapsulée dans le runtime.</p>
+      </div>
+
+      <div class="demo-section" data-section="3">
+        <div class="ds-num">04 · LA FRAPPE</div>
+        <h2>Chaque artefact est forgé, pas généré.</h2>
+        <p>Une frappe d'artefact n'est pas un texte retourné par un LLM. C'est un objet versioned, adressable par hash, signé par le contrat qui l'a produit.</p>
+        <p class="ds-sub">L'artefact porte en lui la preuve de sa fabrication : qui l'a produit, quand, avec quels outils, sous quel contrat.</p>
+      </div>
+
+      <div class="demo-section" data-section="4">
+        <div class="ds-num">05 · LA TRACE</div>
+        <h2>Chaque milliseconde est enregistrée.</h2>
+        <p>Le trace ledger capture chaque appel LLM, chaque outil invoqué, chaque transfert entre agents, chaque décision du SOG.</p>
+        <p class="ds-sub">La trace est immutable, exportable en JSONL, rejoutable à l'identique. C'est la preuve que les auditeurs attendent.</p>
+      </div>
+
+      <div class="demo-section" data-section="5">
+        <div class="ds-num">06 · LES SURFACES</div>
+        <h2>Six interfaces. Un runtime.</h2>
+        <p>Cockpit pour le pilotage temps réel. Observatory pour l'audit. Kanban pour le flux. War Room pour la crise. Game UI pour la lisibilité. Proofs pour l'audit.</p>
+        <p class="ds-sub">Toutes exposent le même runtime via des contrats différents. Toutes sont remplaçables sans toucher au noyau.</p>
+      </div>
+
+      <div class="demo-section" data-section="6">
+        <div class="ds-num">07 · L'OBSERVABILITÉ</div>
+        <h2>Observer, pas deviner.</h2>
+        <p>Latence, coût, tokens, hallucinations, profondeur d'orchestration. Métriques temps réel, rétention longue, alertes configurables.</p>
+        <p class="ds-sub">Une observability conçue pour un runtime agentique, pas pour des VMs. Chaque métrique a un sens dans le contexte du SOG.</p>
+      </div>
+
+      <div class="demo-section" data-section="7">
+        <div class="ds-num">08 · LE GAME UI</div>
+        <h2>Le runtime rendu visible.</h2>
+        <p>Chaque agent est un personnage dans un bureau isométrique. Chaque tâche devient une animation. Ce n'est pas du cosmétique : c'est une vraie surface d'observation.</p>
+        <p class="ds-sub">Les anomalies se voient avant que les métriques les capturent. L'onboarding s'accélère. L'abstraction disparaît.</p>
+      </div>
+
+      <div class="demo-section" data-section="8">
+        <div class="ds-num">09 · POUR QUI</div>
+        <h2>Trois profils. Un noyau.</h2>
+        <p>Solo builder qui veut un runtime prêt en 48h. Équipe produit qui exige la traçabilité. Plateforme interne qui doit exposer des agents à des équipes métier.</p>
+        <p class="ds-sub">Grimoire Kit s'adapte au contexte sans changer de paradigme. Le contrat est toujours le même : trace, artefact, preuve.</p>
+      </div>
+
+      <div class="demo-section" data-section="9">
+        <div class="ds-num">10 · DÉMARRER</div>
+        <h2>Trois étapes. Premier artefact en 15 minutes.</h2>
+        <p>Clone, configure, forge. La CLI prend en charge l'initialisation du runtime, la définition du premier contrat et le spawn des agents.</p>
+        <p class="ds-sub" style="margin-top:16px;">
+          <a href="index.html#cta-final" class="btn btn-primary" style="font-size:.72rem">ACCÈS EARLY ACCESS</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Right: sticky viz -->
+    <div class="demo-right" aria-live="polite">
+      <div class="viz-wrap">
+
+        <!-- VIZ 0: Chaos graph -->
+        <div class="viz active" id="viz-0" aria-label="Graphe de chaos — agents non coordonnés">
+          <div class="viz-label">LE PROBLÈME · AGENTS NON COORDONNÉS</div>
+          <svg id="chaos-svg" style="position:absolute;inset:0;width:100%;height:100%;" aria-hidden="true"></svg>
+          <div id="chaos-nodes" style="position:absolute;inset:24px;"></div>
+        </div>
+
+        <!-- VIZ 1: Convergence -->
+        <div class="viz" id="viz-1" aria-label="Convergence vers le SOG">
+          <div class="viz-label">LA CONVICTION · CONVERGENCE</div>
+          <svg id="conv-svg" style="position:absolute;inset:0;width:100%;height:100%;" aria-hidden="true"></svg>
+          <div id="conv-nodes" style="position:absolute;inset:24px;"></div>
+          <div class="sog-center" id="sog-center">SOG</div>
+        </div>
+
+        <!-- VIZ 2: Mini SOG -->
+        <div class="viz" id="viz-2" aria-label="Démonstration Smart Orchestrator Gateway">
+          <div class="viz-label">LE SOG · DISPATCH ORCHESTRÉ</div>
+          <div class="mini-sog">
+            <div style="font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 16px;">"Crée un PRD pour une app de notes"</div>
+            <div id="mini-sog-node" class="mini-sog-node">SOG</div>
+            <div class="mini-agents">
+              <div class="mini-agent"><div class="mini-agent-icon" id="mai-pm">pm</div><span>PM</span></div>
+              <div class="mini-agent"><div class="mini-agent-icon" id="mai-analyst">analyst</div><span>ANALYST</span></div>
+              <div class="mini-agent"><div class="mini-agent-icon" id="mai-writer">writer</div><span>WRITER</span></div>
+            </div>
+            <div class="mini-artefact" id="mini-artefact">FORGE-0342 · prd-app-notes-v1.md ✓</div>
+          </div>
+        </div>
+
+        <!-- VIZ 3: ArtifactForge -->
+        <div class="viz" id="viz-3" aria-label="Animation de frappe d'artefact">
+          <div class="viz-label">LA FRAPPE · ÉMISSION D'ARTEFACT</div>
+          <div class="forge-stage">
+            <div class="hammer-wrap" style="position:relative">
+              <div class="forge-ring" id="forge-ring"></div>
+              <svg class="hammer-svg" id="hammer-svg" width="80" height="80" viewBox="0 0 80 80" aria-hidden="true">
+                <rect x="34" y="10" width="14" height="40" rx="3" fill="var(--ink-muted)" opacity=".7"/>
+                <rect x="20" y="8" width="42" height="22" rx="4" fill="var(--ink-soft)"/>
+                <rect x="20" y="8" width="42" height="10" rx="3" fill="var(--ink)" opacity=".8"/>
+              </svg>
+              <div class="forge-impact" id="forge-impact"></div>
+            </div>
+            <div class="forge-artefact-badge" id="forge-badge">FORGE-0342 · prd-app-notes-v1.md</div>
+            <button class="forge-btn" id="forge-btn">FORGER →</button>
+          </div>
+        </div>
+
+        <!-- VIZ 4: Trace waterfall -->
+        <div class="viz" id="viz-4" aria-label="Trace waterfall statique">
+          <div class="viz-label">LA TRACE · WATERFALL SESSION-4A2F</div>
+          <div class="trace-rows" id="trace-rows"></div>
+        </div>
+
+        <!-- VIZ 5: Surfaces preview -->
+        <div class="viz" id="viz-5" aria-label="Aperçu des surfaces">
+          <div class="viz-label">LES SURFACES · CONTROL PLANE</div>
+          <div class="preview-grid">
+            <div class="preview-tile"><h4>COCKPIT</h4><p>Pilotage temps réel</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>OBSERVATORY</h4><p>Audit &amp; télémétrie</p><div class="preview-status" style="color:var(--data-amber)">PARTIAL</div></div>
+            <div class="preview-tile"><h4>KANBAN</h4><p>Flux de travail</p><div class="preview-status" style="color:var(--data-amber)">BETA</div></div>
+            <div class="preview-tile"><h4>WAR ROOM</h4><p>Crise &amp; débat</p><div class="preview-status" style="color:var(--ink-muted)">Q3 2026</div></div>
+            <div class="preview-tile"><h4>GAME UI</h4><p>Rendu isométrique</p><div class="preview-status" style="color:var(--data-amber)">BETA</div></div>
+            <div class="preview-tile"><h4>PROOFS</h4><p>Registre audit</p><div class="preview-status" style="color:var(--data-amber)">PARTIAL</div></div>
+          </div>
+        </div>
+
+        <!-- VIZ 6: Observability preview -->
+        <div class="viz" id="viz-6" aria-label="Aperçu observability">
+          <div class="viz-label">OBSERVABILITY · MÉTRIQUES RUNTIME</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">P50 LATENCY</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">318ms</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">HALLUC. RATE</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">0.02%</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">TOKENS / MIN</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">8.4k</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">AGENTS ACTIFS</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--accent)">5</div></div>
+          </div>
+          <div style="margin-top:12px;text-align:center"><a href="observability.html" style="font-family:var(--font-mono);font-size:.65rem;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim)">VOIR L'OBSERVABILITY →</a></div>
+        </div>
+
+        <!-- VIZ 7: Game UI preview -->
+        <div class="viz" id="viz-7" aria-label="Aperçu Game UI">
+          <div class="viz-label">GAME UI · SCÈNE ISOMÉTRIQUE</div>
+          <svg viewBox="0 0 360 260" style="width:100%;height:220px;" aria-hidden="true">
+            <rect width="360" height="260" fill="var(--elev-2)"/>
+            <!-- Isometric tiles -->
+            <g id="iso-preview"></g>
+          </svg>
+          <div style="margin-top:8px;text-align:center"><a href="game-ui.html" style="font-family:var(--font-mono);font-size:.65rem;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim)">VOIR LE GAME UI →</a></div>
+        </div>
+
+        <!-- VIZ 8: Personas -->
+        <div class="viz" id="viz-8" aria-label="Personas utilisateurs">
+          <div class="viz-label">POUR QUI · TROIS PROFILS</div>
+          <div class="persona-cards">
+            <div class="persona-card"><div class="persona-title">SOLO BUILDER</div><div class="persona-desc">Veut un runtime prêt en 48h, sans ops, sans infrastructure. Un config.yaml et ça forge.</div><div class="persona-use">USE CASE → Automatisation personnelle, side-project, MVP agentique.</div></div>
+            <div class="persona-card"><div class="persona-title">ÉQUIPE PRODUIT</div><div class="persona-desc">Exige la traçabilité, l'audit, la reproductibilité. Chaque artefact doit avoir une preuve.</div><div class="persona-use">USE CASE → Pipeline de création de contenu, génération de specs, QA automatique.</div></div>
+            <div class="persona-card"><div class="persona-title">PLATEFORME INTERNE</div><div class="persona-desc">Expose des agents à des équipes métier non-techniques via des surfaces configurables.</div><div class="persona-use">USE CASE → Assistant interne, copilote RH, agent compliance.</div></div>
+          </div>
+        </div>
+
+        <!-- VIZ 9: Terminal -->
+        <div class="viz" id="viz-9" aria-label="Terminal de démarrage">
+          <div class="viz-label">DÉMARRER · PREMIÈRE FORGE EN 15 MIN</div>
+          <div class="term-wrap" id="term-demo" aria-label="Exemple de commandes CLI"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer CTA -->
+<section id="demo-cta" style="background:var(--elev-2);border-top:1px solid var(--line);">
+  <div class="container">
+    <div class="eyebrow" style="justify-content:center;margin-bottom:20px"><span class="num">↓</span>&nbsp;&nbsp;PRÊT À FORGER</div>
+    <h2 class="reveal grad-text" style="margin-bottom:12px;text-align:center">Forge ton propre noyau.</h2>
+    <div class="reveal" data-delay="100" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:28px;">
+      <a href="index.html#cta-final" class="btn btn-primary">OUVRIR LE COCKPIT</a>
+      <a href="anatomy.html" class="btn btn-ghost">LIRE L'ANATOMIE</a>
+    </div>
+  </div>
+</section>
+</main>
+<footer id="forge-footer"></footer>
+<script src="forge-nav.js"></script>
+<script>
+/* ── Scrollytelling observer ── */
+const sections = document.querySelectorAll('.demo-section');
+const vizEls   = document.querySelectorAll('.viz');
+const spineDots = document.querySelectorAll('.spine-dot');
+const reduced  = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+function activateViz(idx){
+  vizEls.forEach((v,i)=>v.classList.toggle('active', i===idx));
+  spineDots.forEach((d,i)=>d.classList.toggle('active', i===idx));
+  if(idx===2) initMiniSOG();
+  if(idx===9 && !termDone) startTerminal();
+}
+
+const sObs = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(!e.isIntersecting) return;
+    const idx = +e.target.dataset.section;
+    activateViz(idx);
+  });
+},{threshold:0.5, rootMargin:'-20% 0px -20% 0px'});
+sections.forEach(s=>sObs.observe(s));
+
+/* ── VIZ 0: Chaos nodes ── */
+(function(){
+  const wrap = document.getElementById('chaos-nodes');
+  const svg  = document.getElementById('chaos-svg');
+  const nodes= [];
+  const labels=['tool-A','agent-1','model-B','chain-3','API-X','bot-2','GPT-?','agent-7','tool-C','hook-4','LLM-Z','agent-9'];
+  labels.forEach((lbl,i)=>{
+    const x=10+Math.random()*80, y=5+Math.random()*85;
+    const n=document.createElement('div'); n.className='chaos-node';
+    n.style.cssText=`left:${x}%;top:${y}%;width:36px;height:36px;transform:translate(-50%,-50%);font-size:.46rem;`;
+    n.textContent=lbl; wrap.appendChild(n);
+    nodes.push({el:n,x,y});
+  });
+  // Random connections
+  const ns='http://www.w3.org/2000/svg';
+  const wR=wrap.offsetWidth||320, hR=wrap.offsetHeight||360;
+  for(let i=0;i<14;i++){
+    const a=nodes[Math.floor(Math.random()*nodes.length)];
+    const b=nodes[Math.floor(Math.random()*nodes.length)];
+    if(a===b) continue;
+    const line=document.createElementNS(ns,'line');
+    line.setAttribute('x1',(a.x/100)*100+'%'); line.setAttribute('y1',(a.y/100)*100+'%');
+    line.setAttribute('x2',(b.x/100)*100+'%'); line.setAttribute('y2',(b.y/100)*100+'%');
+    line.className='chaos-line blink'; svg.appendChild(line);
+  }
+  // Chaotic flicker
+  if(!reduced) setInterval(()=>{
+    const active = document.getElementById('viz-0').classList.contains('active');
+    if(!active) return;
+    nodes.forEach(n=>{ if(Math.random()<.2) n.el.style.opacity = (0.3+Math.random()*.7).toString(); });
+  },400);
+})();
+
+/* ── VIZ 1: Convergence ── */
+(function(){
+  const wrap=document.getElementById('conv-nodes');
+  const svg=document.getElementById('conv-svg');
+  const center=document.getElementById('sog-center');
+  const labels=['tool-A','agent-1','model-B','chain-3','API-X','bot-2','GPT-?','agent-9'];
+  const positions=labels.map(()=>({x:10+Math.random()*80, y:5+Math.random()*85}));
+  const divs=[];
+  labels.forEach((lbl,i)=>{
+    const p=positions[i];
+    const n=document.createElement('div'); n.className='chaos-node conv-node';
+    n.style.cssText=`left:${p.x}%;top:${p.y}%;width:32px;height:32px;transform:translate(-50%,-50%);font-size:.44rem;`;
+    n.textContent=lbl; wrap.appendChild(n); divs.push({el:n, ox:p.x, oy:p.y});
+  });
+  let converged=false;
+  const viz1=document.getElementById('viz-1');
+  const vizObs=new IntersectionObserver(([e])=>{
+    if(!e.isIntersecting||converged) return;
+    converged=true;
+    setTimeout(()=>{
+      divs.forEach(d=>{ d.el.style.left='50%'; d.el.style.top='50%'; d.el.style.opacity='0'; d.el.style.transform='translate(-50%,-50%) scale(.5)'; });
+      center.style.opacity='1';
+    },300);
+  },{threshold:.5});
+  vizObs.observe(viz1);
+})();
+
+/* ── VIZ 2: Mini SOG animation ── */
+let sogDone=false;
+function initMiniSOG(){
+  if(sogDone) return; sogDone=true;
+  const sogNode=document.getElementById('mini-sog-node');
+  const agents=['mai-pm','mai-analyst','mai-writer'];
+  const art=document.getElementById('mini-artefact');
+  setTimeout(()=>sogNode.classList.add('active'),300);
+  setTimeout(()=>agents.forEach(id=>document.getElementById(id).classList.add('working')),700);
+  setTimeout(()=>{ sogNode.classList.remove('active'); art.style.opacity='1'; },2200);
+}
+
+/* ── VIZ 3: ArtifactForge ── */
+document.getElementById('forge-btn').addEventListener('click',()=>{
+  if(reduced){ document.getElementById('forge-badge').classList.add('show'); return; }
+  const hammer=document.getElementById('hammer-svg');
+  const impact=document.getElementById('forge-impact');
+  const ring=document.getElementById('forge-ring');
+  const badge=document.getElementById('forge-badge');
+  badge.classList.remove('show');
+  hammer.classList.remove('swing'); ring.classList.remove('expand'); impact.classList.remove('flash');
+  void hammer.offsetWidth;
+  hammer.classList.add('swing');
+  setTimeout(()=>{ impact.classList.add('flash'); ring.classList.add('expand'); },350);
+  setTimeout(()=>badge.classList.add('show'),500);
+  setTimeout(()=>{ impact.classList.remove('flash'); ring.classList.remove('expand'); },700);
+});
+
+/* ── VIZ 4: Trace waterfall ── */
+(function(){
+  const wrap=document.getElementById('trace-rows');
+  const TOTAL=1420;
+  [{lbl:'user · prompt',start:0,end:50,type:'io'},{lbl:'SOG · dispatch',start:50,end:180,type:'sog'},{lbl:'agent/pm',start:180,end:720,type:'llm'},{lbl:'agent/analyst',start:180,end:540,type:'llm'},{lbl:'sub-agent/dev',start:320,end:620,type:'tool'},{lbl:'agent/writer',start:540,end:1260,type:'llm'},{lbl:'SOG · aggregate',start:1260,end:1380,type:'sog'},{lbl:'artefact · emit',start:1380,end:1420,type:'io'}].forEach(r=>{
+    const row=document.createElement('div'); row.className='trace-row';
+    const dur=r.end-r.start;
+    row.innerHTML=`<div class="trace-lbl">${r.lbl}</div><div class="trace-track"><div class="trace-bar ${r.type}" style="left:${r.start/TOTAL*100}%;width:${dur/TOTAL*100}%"></div></div><div class="trace-dur">${dur}ms</div>`;
+    wrap.appendChild(row);
+  });
+})();
+
+/* ── VIZ 7: Iso preview SVG ── */
+(function(){
+  const g=document.getElementById('iso-preview');
+  const ns='http://www.w3.org/2000/svg';
+  const TW=48, TH=24;
+  const colors={'.':'#1A1D22','a':'#FF6B3D','b':'#F6B83A','c':'#6EE7FF'};
+  // Simple 6×6 isometric grid
+  for(let c=0;c<7;c++) for(let r=0;r<7;r++){
+    const x=(c-r)*TW/2+180, y=(c+r)*TH/4+40;
+    const poly=document.createElementNS(ns,'polygon');
+    poly.setAttribute('points',`${x},${y} ${x+TW/2},${y+TH/4} ${x},${y+TH/2} ${x-TW/2},${y+TH/4}`);
+    poly.setAttribute('fill','#1A1D22'); poly.setAttribute('stroke','rgba(255,107,61,0.15)'); poly.setAttribute('stroke-width','0.5');
+    g.appendChild(poly);
+  }
+  // Agent dots
+  [{c:1,r:2,col:'#F6B83A',lbl:'pm'},{c:3,r:1,col:'#6EE7FF',lbl:'dev'},{c:5,r:3,col:'#FF6B3D',lbl:'analyst'},{c:2,r:5,col:'#A78BFA',lbl:'arch'}].forEach(ag=>{
+    const x=(ag.c-ag.r)*TW/2+180, y=(ag.c+ag.r)*TH/4+40;
+    const circle=document.createElementNS(ns,'circle');
+    circle.setAttribute('cx',x); circle.setAttribute('cy',y-8);
+    circle.setAttribute('r','6'); circle.setAttribute('fill',ag.col); circle.setAttribute('opacity','0.85');
+    g.appendChild(circle);
+    const text=document.createElementNS(ns,'text');
+    text.setAttribute('x',x); text.setAttribute('y',y-18);
+    text.setAttribute('text-anchor','middle'); text.setAttribute('font-family','Geist Mono,monospace');
+    text.setAttribute('font-size','7'); text.setAttribute('fill',ag.col);
+    text.textContent=ag.lbl; g.appendChild(text);
+  });
+})();
+
+/* ── VIZ 9: Terminal typing ── */
+let termDone=false;
+const TERMINAL_LINES=[
+  {type:'cmd', text:'git clone https://github.com/grimoire/forge.git'},
+  {type:'out', text:'Cloning into forge... done.'},
+  {type:'cmd', text:'cd forge && cp .env.example .env'},
+  {type:'cmd', text:'forge init --runtime local --agents pm,analyst,writer'},
+  {type:'out', text:'  ↳ runtime READY'},
+  {type:'out', text:'  ↳ SOG MOUNTED  gateway/ws'},
+  {type:'out', text:'  ↳ 3 agents spawned'},
+  {type:'cmd', text:'forge run "Crée un PRD pour une app de notes"'},
+  {type:'out', text:'  ↳ artefact/prd-app-notes-v1.md ÉMIS'},
+  {type:'dim', text:'  Temps total : 3.4s · 14k tokens · coût $0.04'},
+];
+
+function startTerminal(){
+  termDone=true;
+  const wrap=document.getElementById('term-demo');
+  wrap.innerHTML='';
+  if(reduced){ TERMINAL_LINES.forEach(l=>{ const d=document.createElement('div'); d.className=`term-line-${l.type}`; d.textContent=(l.type==='cmd'?'▶ ':'')+l.text; wrap.appendChild(d); }); return; }
+  let li=0;
+  function nextLine(){
+    if(li>=TERMINAL_LINES.length){ const cur=document.createElement('span'); cur.id='term-cursor'; wrap.appendChild(cur); return; }
+    const line=TERMINAL_LINES[li++];
+    const div=document.createElement('div'); div.className=`term-line-${line.type}`;
+    const prefix=line.type==='cmd'?'▶ ':'';
+    const full=prefix+line.text;
+    wrap.appendChild(div);
+    let ci=0;
+    function typeChar(){
+      if(ci<full.length){ div.textContent+=full[ci++]; setTimeout(typeChar, line.type==='cmd'?28:8); }
+      else setTimeout(nextLine, line.type==='cmd'?200:80);
+    }
+    typeChar();
+  }
+  nextLine();
+}
+</script>
+</body>
+</html>
