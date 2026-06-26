@@ -122,6 +122,67 @@ def build_meta(root: Path, with_tests: bool) -> dict:
     }
 
 
+# Representative demo cards for the vitrine board (only used when no real
+# task-board.yaml exists). Local "view mode" replaces these with the real board.
+_DEMO_TASKS = [
+    {"task_id": "kb-index", "title": "Indexer la base de connaissances externe", "status": "proposed",
+     "priority": "medium", "owner": "project-maintainer", "agent_roles": ["planner", "context_orchestrator"],
+     "blockers": []},
+    {"task_id": "verify-failclosed", "title": "Verify fail-closed sur capability-map", "status": "ready",
+     "priority": "high", "owner": "qa", "agent_roles": ["qa", "planner"],
+     "acceptance_criteria": ["verify retourne non-zéro si un pattern requis manque"], "blockers": []},
+    {"task_id": "mcp-bridge", "title": "Bridge MCP pour Claude Desktop", "status": "ready",
+     "priority": "medium", "owner": "dev", "agent_roles": ["dev"], "blockers": []},
+    {"task_id": "mem-weaviate", "title": "Migration mémoire Weaviate (depuis qdrant)", "status": "in_progress",
+     "priority": "high", "owner": "dev", "agent_roles": ["dev", "memory_keeper"],
+     "evidence_pack_ref": "_grimoire-output/evidence/mem-weaviate/evidence-pack.md", "blockers": []},
+    {"task_id": "obs-graph", "title": "Observatory — export du graphe d'agents", "status": "in_progress",
+     "priority": "medium", "owner": "dev", "agent_roles": ["dev"], "blockers": []},
+    {"task_id": "release-gates", "title": "Release gates v3.17", "status": "blocked",
+     "priority": "high", "owner": "dev", "agent_roles": ["dev", "qa"],
+     "blockers": ["compliance_score sous le seuil governed"],
+     "remediation_ref": "_grimoire/standard/remediation-plan.yaml"},
+    {"task_id": "adv-review-cli", "title": "Revue adversariale du fix CLI (marqueurs [OK])", "status": "review",
+     "priority": "medium", "owner": "challenger", "agent_roles": ["challenger", "qa"],
+     "evidence_pack_ref": "_grimoire-output/evidence/cli-markers/evidence-pack.md",
+     "decision_trace_ref": "_grimoire-output/decisions/cli-markers/decision-trace.yaml", "blockers": []},
+    {"task_id": "governed-policies", "title": "Profil governed — politiques par environnement", "status": "accepted",
+     "priority": "medium", "owner": "planner", "agent_roles": ["planner"], "blockers": []},
+    {"task_id": "rel-3160", "title": "v3.16 — purge BMAD + standard agentique gouverné", "status": "released",
+     "priority": "high", "owner": "project-maintainer", "agent_roles": ["dev", "qa"], "blockers": []},
+    {"task_id": "scaffold-v2v3", "title": "Scaffold migration v2 → v3", "status": "archived",
+     "priority": "low", "owner": "dev", "agent_roles": ["dev"], "blockers": []},
+]
+
+
+def build_taskboard(root: Path) -> dict | None:
+    """Governed agentic kanban — from the project's task-board.yaml if present,
+    else the standard template (flagged is_demo for the vitrine)."""
+    if yaml is None:
+        return None
+    candidates = [
+        root / "_grimoire/standard/task-board.yaml",
+        root / "_grimoire/_config/standard/task-board.yaml",
+        *sorted(root.glob("_grimoire-output/**/task-board.yaml")),
+        root / "framework/agentic-standard/templates/task-board.yaml",  # fallback = template/demo
+    ]
+    src = next((c for c in candidates if c.is_file()), None)
+    if src is None:
+        return None
+    data = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
+    is_demo = "templates/" in src.as_posix()
+    tasks = data.get("tasks", [])
+    if is_demo:  # populate the showcase board (the template ships only a bootstrap task)
+        tasks = tasks + _DEMO_TASKS
+    return {
+        "source": str(src.relative_to(root)),
+        "is_demo": is_demo,
+        "states": data.get("states", []),
+        "transitions": data.get("transitions", {}),
+        "tasks": tasks,
+    }
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
@@ -135,6 +196,12 @@ def main(argv: list[str]) -> int:
     meta = build_meta(root, args.with_tests)
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[OK] web/data/meta.json — v{meta['version']} · {meta['counts']}")
+
+    board = build_taskboard(root)
+    if board is not None:
+        (out_dir / "taskboard.json").write_text(json.dumps(board, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tag = "demo" if board["is_demo"] else "live"
+        print(f"[OK] web/data/taskboard.json — {tag} · {len(board['states'])} états · {len(board['tasks'])} tâches · {board['source']}")
     return 0
 
 

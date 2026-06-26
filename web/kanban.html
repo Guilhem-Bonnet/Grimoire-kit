@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Kanban gouverné — Grimoire Kit</title>
+  <meta name="description" content="Le tableau agentique gouverné de Grimoire Kit : 8 états, transitions gated par la preuve. Une carte n'avance que si l'artefact requis existe." />
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+
+    #hero { padding: 72px 0 28px; }
+    #hero .container { max-width: var(--max-w); }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 640px; line-height: var(--lh-body); }
+    .board-badge {
+      display: inline-flex; align-items: center; gap: 7px; margin-top: 18px;
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em;
+      padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft);
+    }
+    .board-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+    /* ── Transitions gated (signature) ── */
+    #gates { padding: 8px 0 28px; }
+    #gates .container { max-width: var(--max-w); }
+    .gates-label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 14px; }
+    .gates-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .gate {
+      background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-md);
+      padding: 13px 15px; border-left: 2px solid var(--accent-dim);
+    }
+    .gate-flow { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink); margin-bottom: 8px; }
+    .gate-flow .arrow { color: var(--accent); margin: 0 4px; }
+    .gate-req { display: flex; flex-wrap: wrap; gap: 5px; }
+    .gate-req span {
+      font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em;
+      color: var(--data-green); background: rgba(52,211,153,0.10);
+      border: 1px solid rgba(52,211,153,0.22); border-radius: var(--r-sm); padding: 2px 7px;
+    }
+
+    /* ── Board ── */
+    #board { padding: 0 0 80px; }
+    #board .container { max-width: none; padding-left: 32px; padding-right: 32px; }
+    .columns { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 18px; scroll-snap-type: x proximity; }
+    .columns::-webkit-scrollbar { height: 9px; }
+    .columns::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+    .col { flex: 0 0 268px; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 200px; }
+    .col-head { display: flex; align-items: center; gap: 9px; padding: 0 4px 12px; position: sticky; top: 0; }
+    .col-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .col-name { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; color: var(--ink); text-transform: uppercase; }
+    .col-count { margin-left: auto; font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted); background: var(--elev-2); border-radius: 999px; padding: 1px 9px; }
+    .col-cards { display: flex; flex-direction: column; gap: 10px; }
+    .col-empty { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); opacity: 0.6; padding: 14px 4px; }
+
+    .card {
+      background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md);
+      padding: 13px 14px; position: relative; overflow: hidden;
+      transition: border-color 200ms, transform 200ms;
+    }
+    .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prio, var(--ink-muted)); }
+    .card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .card-title { font-size: 0.86rem; line-height: 1.35; color: var(--ink); font-weight: 500; margin-bottom: 10px; }
+    .card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .chip {
+      font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.03em;
+      border-radius: var(--r-sm); padding: 2px 7px; border: 1px solid var(--line);
+      color: var(--ink-soft); background: var(--elev-3);
+    }
+    .chip.role { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-soft); }
+    .chip.owner { color: var(--ink-soft); }
+    .card-blockers { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
+    .blocker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--data-red); display: flex; gap: 6px; align-items: flex-start; }
+    .blocker::before { content: '▲'; font-size: 0.5rem; margin-top: 2px; }
+    .card-refs { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 5px; }
+    .ref { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.04em; color: var(--data-cyan); border: 1px solid rgba(110,231,255,0.22); background: rgba(110,231,255,0.08); border-radius: var(--r-sm); padding: 1px 6px; }
+
+    #board-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 4px; }
+
+    @media (max-width: 640px) { .col { flex-basis: 80vw; } }
+  </style>
+</head>
+<body>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+  <section id="hero">
+    <div class="container">
+      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-06</span> · KANBAN GOUVERNÉ</div>
+      <h1 class="grad-text reveal" data-delay="60">Le tableau agentique.</h1>
+      <p class="hero-sub reveal" data-delay="120">
+        Huit états, des transitions <strong>gated par la preuve</strong>. Une carte n'avance pas parce qu'un agent
+        le décide — elle avance quand l'artefact requis existe : critères d'acceptation, contexte, evidence pack,
+        decision trace, gate de revue. Le travail des agents devient gouverné et rejouable.
+      </p>
+      <span class="board-badge reveal" data-delay="160" id="board-badge"><span class="dot"></span>CHARGEMENT…</span>
+    </div>
+  </section>
+
+  <section id="gates">
+    <div class="container">
+      <div class="gates-label reveal">Transitions gouvernées — chaque passage exige son artefact</div>
+      <div class="gates-row reveal" data-delay="60" id="gates-row"></div>
+    </div>
+  </section>
+
+  <section id="board">
+    <div class="container">
+      <div class="columns" id="columns" role="list" aria-label="Colonnes du tableau"></div>
+      <div id="board-empty">Aucun tableau trouvé. Lance <code>grimoire standard init</code> (profil orchestrated+) pour générer un <code>task-board.yaml</code>.</div>
+    </div>
+  </section>
+</main>
+
+<footer id="forge-footer"></footer>
+
+<script src="forge-nav.js"></script>
+<script src="forge-motion.js"></script>
+<script>
+/* ── Kanban renderer — lit data/taskboard.json (réel en local, démo sur la vitrine) ── */
+(function () {
+  const STATE = {
+    proposed:   { label: 'Proposé',  c: 'var(--ink-muted)' },
+    ready:      { label: 'Prêt',     c: 'var(--data-cyan)' },
+    in_progress:{ label: 'En cours', c: 'var(--accent)' },
+    blocked:    { label: 'Bloqué',   c: 'var(--data-red)' },
+    review:     { label: 'Revue',    c: 'var(--data-amber)' },
+    accepted:   { label: 'Accepté',  c: 'var(--data-green)' },
+    released:   { label: 'Publié',   c: 'var(--data-violet)' },
+    archived:   { label: 'Archivé',  c: 'var(--ink-muted)' },
+  };
+  const PRIO = { high: 'var(--data-red)', medium: 'var(--data-amber)', low: 'var(--ink-muted)' };
+  const REF_LABEL = {
+    acceptance_criteria: 'critères', context_bundle_ref: 'contexte',
+    evidence_pack_ref: 'evidence', decision_trace_ref: 'décision', remediation_ref: 'remédiation',
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+
+  fetch('data/taskboard.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(render)
+    .catch(() => {
+      document.getElementById('board-empty').style.display = 'block';
+      const b = document.getElementById('board-badge');
+      if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted);box-shadow:none"></span>AUCUN TABLEAU';
+    });
+
+  function render(board) {
+    // Badge démo / live
+    const badge = document.getElementById('board-badge');
+    if (badge) {
+      const live = !board.is_demo;
+      badge.innerHTML =
+        `<span class="dot" style="background:${live ? 'var(--data-green)' : 'var(--accent)'}"></span>` +
+        (live ? `LIVE · ${esc(board.source || 'task-board.yaml')}` : 'DÉMO · standard task-board') +
+        ` · ${board.tasks.length} TÂCHES`;
+    }
+
+    // Transitions gated
+    const gates = document.getElementById('gates-row');
+    if (gates && board.transitions) {
+      gates.innerHTML = Object.entries(board.transitions).map(([key, val]) => {
+        const parts = key.replace(/_to_/, ' → ').split(' → ');
+        const flow = parts.map((p) => (STATE[p] ? STATE[p].label : p.replace(/_/g, ' '))).join('<span class="arrow">→</span>');
+        const reqs = (val && val.requires || []).map((r) => `<span>${esc(r.replace(/_/g, ' '))}</span>`).join('');
+        return `<div class="gate"><div class="gate-flow">${flow}</div><div class="gate-req">${reqs}</div></div>`;
+      }).join('');
+    }
+
+    // Colonnes
+    const byState = {};
+    (board.tasks || []).forEach((t) => { (byState[t.status] = byState[t.status] || []).push(t); });
+    const cols = document.getElementById('columns');
+    cols.innerHTML = (board.states || []).map((st) => {
+      const meta = STATE[st] || { label: st, c: 'var(--ink-muted)' };
+      const tasks = byState[st] || [];
+      const cards = tasks.length
+        ? tasks.map(card).join('')
+        : '<div class="col-empty">—</div>';
+      return `<div class="col" role="listitem">
+        <div class="col-head">
+          <span class="col-dot" style="background:${meta.c}"></span>
+          <span class="col-name">${esc(meta.label)}</span>
+          <span class="col-count">${tasks.length}</span>
+        </div>
+        <div class="col-cards">${cards}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function card(t) {
+    const prio = PRIO[t.priority] || 'var(--ink-muted)';
+    const roles = (t.agent_roles || []).map((r) => `<span class="chip role">${esc(r)}</span>`).join('');
+    const owner = t.owner ? `<span class="chip owner">@${esc(t.owner)}</span>` : '';
+    const blockers = (t.blockers || []).length
+      ? `<div class="card-blockers">${t.blockers.map((b) => `<span class="blocker">${esc(b)}</span>`).join('')}</div>` : '';
+    const refs = Object.keys(REF_LABEL)
+      .filter((k) => t[k])
+      .map((k) => `<span class="ref">${REF_LABEL[k]}</span>`).join('');
+    return `<div class="card" style="--prio:${prio}">
+      <div class="card-title">${esc(t.title)}</div>
+      <div class="card-meta">${owner}${roles}</div>
+      ${blockers}
+      ${refs ? `<div class="card-refs">${refs}</div>` : ''}
+    </div>`;
+  }
+})();
+</script>
+</body>
+</html>

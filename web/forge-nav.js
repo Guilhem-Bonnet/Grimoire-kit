@@ -24,6 +24,7 @@
             <li><a href="demo.html"         class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>
             <li><a href="game-ui.html"       class="${isActive('game-ui.html') ? 'active' : ''}">GAME UI</a></li>
             <li><a href="observability.html" class="${isActive('observability.html') ? 'active' : ''}">OBSERVABILITY</a></li>
+            <li><a href="kanban.html"        class="${isActive('kanban.html') ? 'active' : ''}">KANBAN</a></li>
             <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCUMENTATION</a></li>
             <li><a href="anatomy.html"       class="${isActive('anatomy.html') ? 'active' : ''}">ANATOMIE</a></li>
           </ul>
