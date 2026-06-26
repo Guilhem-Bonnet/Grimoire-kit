@@ -183,6 +183,82 @@ def build_taskboard(root: Path) -> dict | None:
     }
 
 
+# Representative runtime snapshot for the vitrine (real grimoire agents + event types).
+# Local "view mode" replaces this with the live `observatory.py export`.
+_DEMO_OBSERVATORY = {
+    "agents": [
+        {"id": "atlas", "persona": "Project Navigator", "capabilities": ["navigation", "coordination"], "metrics": {"traces": 9}},
+        {"id": "mnemo", "persona": "Memory Keeper", "capabilities": ["memory", "contradiction-detection"], "metrics": {"traces": 6}},
+        {"id": "sentinel", "persona": "Agent Optimizer", "capabilities": ["quality", "self-healing"], "metrics": {"traces": 4}},
+        {"id": "dev", "persona": "Amelia", "capabilities": ["implement", "refactor", "test"], "metrics": {"traces": 12}},
+        {"id": "qa", "persona": "Quinn", "capabilities": ["test", "review"], "metrics": {"traces": 7}},
+        {"id": "pm", "persona": "John", "capabilities": ["spec", "prd"], "metrics": {"traces": 5}},
+        {"id": "tech-writer", "persona": "Paige", "capabilities": ["docs"], "metrics": {"traces": 3}},
+    ],
+    "relationships": [
+        {"from_agent": "atlas", "to_agent": "dev", "type": "handoff", "strength": 0.9, "interactions": 8, "avg_trust": 0.92},
+        {"from_agent": "dev", "to_agent": "qa", "type": "handoff", "strength": 0.85, "interactions": 6, "avg_trust": 0.88},
+        {"from_agent": "pm", "to_agent": "dev", "type": "spec", "strength": 0.7, "interactions": 4, "avg_trust": 0.8},
+        {"from_agent": "dev", "to_agent": "mnemo", "type": "memory", "strength": 0.6, "interactions": 5, "avg_trust": 0.9},
+        {"from_agent": "qa", "to_agent": "sentinel", "type": "escalation", "strength": 0.5, "interactions": 2, "avg_trust": 0.75},
+        {"from_agent": "dev", "to_agent": "tech-writer", "type": "handoff", "strength": 0.5, "interactions": 3, "avg_trust": 0.82},
+    ],
+    "event_types": ["ACTION", "DECISION", "HANDOFF", "CHECKPOINT", "REMEMBER", "WARN", "ERROR"],
+    "sessions": ["main", "work/standard-bridge", "work/memory-runtime"],
+}
+_DEMO_TRACES = [
+    ("dev", "ACTION", "main"), ("dev", "DECISION", "main"), ("qa", "ACTION", "main"),
+    ("dev", "HANDOFF", "main"), ("mnemo", "REMEMBER", "main"), ("atlas", "CHECKPOINT", "main"),
+    ("pm", "ACTION", "work/standard-bridge"), ("dev", "ACTION", "work/standard-bridge"),
+    ("qa", "WARN", "work/standard-bridge"), ("sentinel", "DECISION", "work/standard-bridge"),
+    ("dev", "ACTION", "work/memory-runtime"), ("mnemo", "REMEMBER", "work/memory-runtime"),
+    ("dev", "HANDOFF", "work/memory-runtime"), ("tech-writer", "ACTION", "work/memory-runtime"),
+    ("qa", "ACTION", "work/memory-runtime"), ("atlas", "CHECKPOINT", "work/memory-runtime"),
+    ("dev", "ERROR", "work/memory-runtime"), ("dev", "DECISION", "work/memory-runtime"),
+]
+
+
+def build_observatory(root: Path) -> dict | None:
+    """Runtime data for observability/game-ui — from `observatory.py export`
+    if the project has runtime data, else a representative demo snapshot."""
+    obs_tool = root / "framework/tools/observatory.py"
+    data = None
+    if obs_tool.is_file():
+        try:
+            r = subprocess.run(
+                [sys.executable, str(obs_tool), "--project-root", str(root), "export"],
+                cwd=root, capture_output=True, text=True, timeout=60,
+            )
+            data = json.loads(r.stdout) if r.stdout.strip().startswith("{") else None
+        except Exception:  # best-effort export; fall back to the demo snapshot
+            data = None
+
+    has_runtime = bool(data and data.get("traces"))
+    if has_runtime:
+        out = data
+        out["is_demo"] = False
+    else:
+        import datetime as _d
+        base = _d.datetime.now(_d.UTC)
+        traces = [
+            {"timestamp": (base - _d.timedelta(minutes=2 * (len(_DEMO_TRACES) - i))).isoformat(timespec="seconds"),
+             "agent": a, "event_type": t, "session": s, "payload": ""}
+            for i, (a, t, s) in enumerate(_DEMO_TRACES)
+        ]
+        out = {
+            "is_demo": True,
+            "traces": traces,
+            "events": [],
+            "agents": _DEMO_OBSERVATORY["agents"],
+            "relationships": _DEMO_OBSERVATORY["relationships"],
+            "shared_state": {},
+            "sessions": _DEMO_OBSERVATORY["sessions"],
+            "agent_ids": [a["id"] for a in _DEMO_OBSERVATORY["agents"]],
+            "event_types": _DEMO_OBSERVATORY["event_types"],
+        }
+    return out
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
@@ -202,6 +278,12 @@ def main(argv: list[str]) -> int:
         (out_dir / "taskboard.json").write_text(json.dumps(board, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tag = "demo" if board["is_demo"] else "live"
         print(f"[OK] web/data/taskboard.json — {tag} · {len(board['states'])} états · {len(board['tasks'])} tâches · {board['source']}")
+
+    obs = build_observatory(root)
+    if obs is not None:
+        (out_dir / "observatory.json").write_text(json.dumps(obs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tag = "demo" if obs.get("is_demo") else "live"
+        print(f"[OK] web/data/observatory.json — {tag} · {len(obs.get('traces', []))} traces · {len(obs.get('agents', []))} agents · {len(obs.get('relationships', []))} relations")
     return 0
 
 

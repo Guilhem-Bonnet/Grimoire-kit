@@ -1,0 +1,285 @@
+{
+  "is_demo": true,
+  "traces": [
+    {
+      "timestamp": "2026-06-26T14:37:16+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:39:16+00:00",
+      "agent": "dev",
+      "event_type": "DECISION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:41:16+00:00",
+      "agent": "qa",
+      "event_type": "ACTION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:43:16+00:00",
+      "agent": "dev",
+      "event_type": "HANDOFF",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:45:16+00:00",
+      "agent": "mnemo",
+      "event_type": "REMEMBER",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:47:16+00:00",
+      "agent": "atlas",
+      "event_type": "CHECKPOINT",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:49:16+00:00",
+      "agent": "pm",
+      "event_type": "ACTION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:51:16+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:53:16+00:00",
+      "agent": "qa",
+      "event_type": "WARN",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:55:16+00:00",
+      "agent": "sentinel",
+      "event_type": "DECISION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:57:16+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T14:59:16+00:00",
+      "agent": "mnemo",
+      "event_type": "REMEMBER",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:01:16+00:00",
+      "agent": "dev",
+      "event_type": "HANDOFF",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:03:16+00:00",
+      "agent": "tech-writer",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:05:16+00:00",
+      "agent": "qa",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:07:16+00:00",
+      "agent": "atlas",
+      "event_type": "CHECKPOINT",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:09:16+00:00",
+      "agent": "dev",
+      "event_type": "ERROR",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-26T15:11:16+00:00",
+      "agent": "dev",
+      "event_type": "DECISION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    }
+  ],
+  "events": [],
+  "agents": [
+    {
+      "id": "atlas",
+      "persona": "Project Navigator",
+      "capabilities": [
+        "navigation",
+        "coordination"
+      ],
+      "metrics": {
+        "traces": 9
+      }
+    },
+    {
+      "id": "mnemo",
+      "persona": "Memory Keeper",
+      "capabilities": [
+        "memory",
+        "contradiction-detection"
+      ],
+      "metrics": {
+        "traces": 6
+      }
+    },
+    {
+      "id": "sentinel",
+      "persona": "Agent Optimizer",
+      "capabilities": [
+        "quality",
+        "self-healing"
+      ],
+      "metrics": {
+        "traces": 4
+      }
+    },
+    {
+      "id": "dev",
+      "persona": "Amelia",
+      "capabilities": [
+        "implement",
+        "refactor",
+        "test"
+      ],
+      "metrics": {
+        "traces": 12
+      }
+    },
+    {
+      "id": "qa",
+      "persona": "Quinn",
+      "capabilities": [
+        "test",
+        "review"
+      ],
+      "metrics": {
+        "traces": 7
+      }
+    },
+    {
+      "id": "pm",
+      "persona": "John",
+      "capabilities": [
+        "spec",
+        "prd"
+      ],
+      "metrics": {
+        "traces": 5
+      }
+    },
+    {
+      "id": "tech-writer",
+      "persona": "Paige",
+      "capabilities": [
+        "docs"
+      ],
+      "metrics": {
+        "traces": 3
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from_agent": "atlas",
+      "to_agent": "dev",
+      "type": "handoff",
+      "strength": 0.9,
+      "interactions": 8,
+      "avg_trust": 0.92
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "qa",
+      "type": "handoff",
+      "strength": 0.85,
+      "interactions": 6,
+      "avg_trust": 0.88
+    },
+    {
+      "from_agent": "pm",
+      "to_agent": "dev",
+      "type": "spec",
+      "strength": 0.7,
+      "interactions": 4,
+      "avg_trust": 0.8
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "mnemo",
+      "type": "memory",
+      "strength": 0.6,
+      "interactions": 5,
+      "avg_trust": 0.9
+    },
+    {
+      "from_agent": "qa",
+      "to_agent": "sentinel",
+      "type": "escalation",
+      "strength": 0.5,
+      "interactions": 2,
+      "avg_trust": 0.75
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "tech-writer",
+      "type": "handoff",
+      "strength": 0.5,
+      "interactions": 3,
+      "avg_trust": 0.82
+    }
+  ],
+  "shared_state": {},
+  "sessions": [
+    "main",
+    "work/standard-bridge",
+    "work/memory-runtime"
+  ],
+  "agent_ids": [
+    "atlas",
+    "mnemo",
+    "sentinel",
+    "dev",
+    "qa",
+    "pm",
+    "tech-writer"
+  ],
+  "event_types": [
+    "ACTION",
+    "DECISION",
+    "HANDOFF",
+    "CHECKPOINT",
+    "REMEMBER",
+    "WARN",
+    "ERROR"
+  ]
+}

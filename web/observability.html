@@ -3,470 +3,183 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Observatory — Grimoire Kit</title>
+  <meta name="description" content="Observabilité du runtime Grimoire Kit : traces, types d'événements, activité par agent, graphe de relations et trace log — depuis observatory.py (réel en local, snapshot sur la vitrine)." />
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
-  <link rel="stylesheet" href="forge-charts.css"/>
   <style>
     body { padding-top: 56px; }
-    .obs-topbar { position: sticky; top: 56px; z-index: 800; height: 48px; display:flex; align-items:center; gap:12px; padding:0 24px; background:var(--elev-1); border-bottom:1px solid var(--line); }
-    .obs-title { font-family:var(--font-mono); font-size:0.68rem; letter-spacing:.14em; color:var(--ink); font-weight:600; }
-    .obs-timestamp { font-family:var(--font-mono); font-size:0.62rem; color:var(--ink-muted); }
-    .obs-spacer { flex:1; }
-    .obs-body { padding:20px 24px 100px; display:flex; flex-direction:column; gap:20px; max-width:1440px; margin:0 auto; }
-    .chart-panel { background:var(--elev-1); border:1px solid var(--line); border-radius:var(--r-sm); padding:18px; position:relative; }
-    .chart-panel.pos-rel { position:relative; overflow:hidden; }
-    .chart-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-    .chart-lbl { font-family:var(--font-mono); font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); }
-    .legend { display:flex; gap:14px; }
-    .legend-i { display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:.6rem; color:var(--ink-muted); cursor:pointer; }
-    .legend-i .lc { width:20px; height:2px; border-radius:1px; }
-    .legend-i.muted { opacity:.3; }
-    /* kpi */
-    .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
-    .kpi-tile { background:var(--elev-2); border:1px solid var(--line); border-radius:var(--r-sm); padding:14px; }
-    .kpi-tile.alert-tile { border-color:rgba(248,113,113,.35); }
-    .kpi-lbl { font-family:var(--font-mono); font-size:.58rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-muted); margin-bottom:6px; }
-    .kpi-val { font-family:var(--font-mono); font-size:1.7rem; font-weight:600; line-height:1; color:var(--ink); margin-bottom:4px; }
-    .kpi-tile.alert-tile .kpi-val { color:var(--data-red); }
-    .kpi-delta { font-family:var(--font-mono); font-size:.6rem; margin-bottom:8px; }
-    .kpi-delta.pos { color:var(--data-green); } .kpi-delta.neg { color:var(--data-red); } .kpi-delta.neu { color:var(--ink-muted); }
-    .spark-svg { width:100%; height:28px; overflow:visible; }
-    .spark-line { fill:none; stroke-width:1.2; }
-    /* chart grid lines */
-    .cg { stroke:rgba(255,255,255,.05); stroke-width:1; }
-    .ax { font-family:'Geist Mono',monospace; font-size:9px; fill:var(--ink-muted); }
-    /* heatmap */
-    .hm-wrap { overflow-x:auto; }
-    .hm-grid { display:grid; grid-template-columns:64px repeat(24,1fr); gap:2px; min-width:600px; }
-    .hm-row-lbl { font-family:var(--font-mono); font-size:.58rem; color:var(--ink-muted); display:flex; align-items:center; }
-    .hm-col-lbl { font-family:var(--font-mono); font-size:.52rem; color:var(--ink-muted); text-align:center; line-height:1; }
-    .hm-cell { height:26px; border-radius:2px; background:var(--accent); cursor:pointer; transition:opacity 600ms; }
-    .hm-cell:hover { outline:1px solid var(--accent); }
-    /* waterfall */
-    .wf-row { display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom:1px solid var(--line); }
-    .wf-row:last-child { border-bottom:none; }
-    .wf-lbl { font-family:var(--font-mono); font-size:.6rem; color:var(--ink-muted); width:130px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .wf-track { flex:1; position:relative; height:18px; }
-    .wf-bar { position:absolute; top:1px; height:16px; border-radius:2px; cursor:pointer; transition:filter 150ms; }
-    .wf-bar:hover { filter:brightness(1.3); }
-    .wf-bar.llm { background:var(--data-cyan); opacity:.8; }
-    .wf-bar.tool { background:var(--data-violet); opacity:.8; }
-    .wf-bar.io { background:var(--data-amber); opacity:.8; }
-    .wf-bar.sog { background:var(--accent); opacity:.85; }
-    .wf-dur { font-family:var(--font-mono); font-size:.58rem; color:var(--ink-muted); width:42px; text-align:right; flex-shrink:0; }
-    /* pheromone */
-    .phe-grid { display:grid; grid-template-columns:repeat(16,1fr); gap:3px; }
-    .phe-cell { aspect-ratio:1; background:var(--accent); border-radius:2px; transition:opacity 800ms; cursor:pointer; }
-    /* ticker */
-    .ticker-wrap { position:fixed; bottom:0; left:0; right:0; z-index:50; background:var(--bg); border-top:1px solid var(--line); padding:7px 0; overflow:hidden; }
-    .ticker-inner { display:flex; white-space:nowrap; animation:tick 35s linear infinite; }
-    .ticker-inner:hover { animation-play-state:paused; }
-    @keyframes tick { from{transform:translateX(0)} to{transform:translateX(-50%)} }
-    .tick-item { display:inline-flex; align-items:center; gap:7px; padding:0 20px; font-family:var(--font-mono); font-size:.62rem; color:var(--ink-muted); }
-    .tick-item .ev { color:var(--accent); }
-    .tick-sep { color:var(--line-strong); margin:0 3px; }
-    /* alerts */
-    .alert-list { display:flex; flex-direction:column; gap:8px; }
-    .alert-i { background:var(--elev-2); border:1px solid var(--line); border-left:2px solid var(--ink-muted); border-radius:var(--r-sm); padding:10px 12px; }
-    .alert-i.w { border-left-color:var(--data-amber); }
-    .alert-i.c { border-left-color:var(--data-red); }
-    .alert-imsg { font-family:var(--font-mono); font-size:.62rem; color:var(--ink-soft); line-height:1.5; }
-    .alert-itime { font-family:var(--font-mono); font-size:.58rem; color:var(--ink-muted); margin-top:3px; }
-    /* tooltip */
-    #chart-tooltip { position:fixed; background:var(--elev-3); border:1px solid var(--line-strong); border-radius:var(--r-sm); padding:8px 12px; font-family:var(--font-mono); font-size:.62rem; color:var(--ink-soft); pointer-events:none; white-space:nowrap; z-index:200; display:none; }
-    @media(max-width:960px){ .kpi-grid{grid-template-columns:repeat(2,1fr);} }
-    @media(max-width:640px){ .kpi-grid{grid-template-columns:1fr 1fr;} }
+    #hero { padding: 72px 0 18px; }
+    #hero .container, #obs .container { max-width: var(--max-w); }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 600px; line-height: var(--lh-body); }
+    .obs-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+    #obs { padding: 8px 0 80px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 14px 0 22px; }
+    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px 18px; }
+    .kpi-lbl { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
+    .kpi-val { font-family: var(--font-mono); font-size: 1.8rem; font-weight: 600; color: var(--ink); line-height: 1; }
+
+    .board-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 860px) { .board-grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: 1fr 1fr; } }
+    .panel { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px; }
+    .panel.full { grid-column: 1 / -1; }
+    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; }
+    .panel-head .sub { color: var(--ink-muted); }
+
+    .bar-row { display: grid; grid-template-columns: 130px 1fr 44px; align-items: center; gap: 10px; margin-bottom: 9px; }
+    .bar-lbl { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { height: 8px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; transition: width 600ms var(--ease-forge); }
+    .bar-val { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted); text-align: right; }
+
+    .edge { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .edge:last-child { border-bottom: none; }
+    .edge-flow { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-soft); }
+    .edge-flow .ar { color: var(--accent); margin: 0 5px; }
+    .edge-flow .ty { color: var(--ink-muted); font-size: 0.58rem; margin-left: 6px; }
+    .edge-meta { display: flex; align-items: center; gap: 8px; }
+    .edge-bar { width: 60px; height: 5px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .edge-bar > i { display: block; height: 100%; background: var(--accent); }
+    .edge-int { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+
+    .tracelog { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.66rem; }
+    .tracelog th { text-align: left; color: var(--ink-muted); font-weight: 500; letter-spacing: 0.06em; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 0.56rem; }
+    .tracelog td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+    .tracelog tr:hover td { background: rgba(255,255,255,0.02); }
+    .ev-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.56rem; letter-spacing: 0.04em; border: 1px solid var(--line); }
+    .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .filt { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--elev-2); color: var(--ink-soft); cursor: pointer; }
+    .filt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    #obs-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
 <body>
 <div id="scroll-progress" aria-hidden="true"></div>
-<nav id="forge-nav"></nav>
-
-<div class="obs-topbar" role="toolbar" aria-label="Contrôles dashboard">
-  <span class="obs-title">OBSERVATORY</span>
-  <div id="live-badge" class="obs-live-badge" role="status"><span class="dot"></span><span>LIVE</span></div>
-  <div style="display:flex;gap:6px;" role="group" aria-label="Plage temporelle">
-    <button class="range-btn active" data-range="15m">15m</button>
-    <button class="range-btn" data-range="1h">1h</button>
-    <button class="range-btn" data-range="6h">6h</button>
-    <button class="range-btn" data-range="24h">24h</button>
-    <button class="range-btn" data-range="7j">7j</button>
-  </div>
-  <span class="obs-spacer"></span>
-  <span class="obs-timestamp" id="obs-ts" aria-live="polite"></span>
-  <button class="refresh-btn" id="refresh-btn" aria-label="Rafraîchir">
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M10 6A4 4 0 1 1 6 2M10 2v4H6"/></svg>
-    REFRESH
-  </button>
-</div>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
 
 <main id="main">
-<div class="obs-body">
-  <!-- KPI Grid -->
-  <div class="kpi-grid" id="kpi-grid" role="list" aria-label="Indicateurs clés"></div>
+  <section id="hero">
+    <div class="container">
+      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-02</span> · OBSERVABILITY</div>
+      <h1 class="grad-text reveal" data-delay="60">Le runtime, observé.</h1>
+      <p class="hero-sub reveal" data-delay="120">
+        Tout ce que font les agents est tracé : chaque action, décision, handoff et checkpoint.
+        Ces vues sont générées par <code>observatory.py</code> à partir de la trace du projet —
+        <strong>réelles en local</strong>, snapshot représentatif sur la vitrine.
+      </p>
+      <span class="obs-badge reveal" data-delay="160" id="obs-badge"><span class="dot"></span>CHARGEMENT…</span>
+    </div>
+  </section>
 
-  <!-- Line chart: latency -->
-  <div class="chart-panel pos-rel">
-    <div class="chart-head">
-      <span class="chart-lbl">LATENCE (ms) — SÉRIE TEMPORELLE</span>
-      <div class="legend" id="legend">
-        <span class="legend-i" data-s="p50"><span class="lc" style="background:var(--data-green)"></span>P50</span>
-        <span class="legend-i" data-s="p95"><span class="lc" style="background:var(--data-amber)"></span>P95</span>
-        <span class="legend-i" data-s="p99"><span class="lc" style="background:var(--data-red)"></span>P99</span>
+  <section id="obs">
+    <div class="container">
+      <div class="kpi-grid" id="kpis"></div>
+      <div class="board-grid">
+        <div class="panel"><div class="panel-head"><span>Répartition par type d'événement</span><span class="sub" id="evt-total"></span></div><div id="evt-bars"></div></div>
+        <div class="panel"><div class="panel-head"><span>Activité par agent</span><span class="sub" id="ag-total"></span></div><div id="ag-bars"></div></div>
+        <div class="panel"><div class="panel-head"><span>Graphe d'agents — relations</span><span class="sub" id="rel-total"></span></div><div id="edges"></div></div>
+        <div class="panel"><div class="panel-head"><span>Sessions</span></div><div id="sessions"></div></div>
+        <div class="panel full"><div class="panel-head"><span>Trace log</span><span class="sub" id="tl-count"></span></div><div class="filters" id="tl-filters"></div><div style="overflow-x:auto"><table class="tracelog"><thead><tr><th>HEURE</th><th>AGENT</th><th>TYPE</th><th>SESSION</th></tr></thead><tbody id="tl-body"></tbody></table></div></div>
       </div>
+      <div id="obs-empty">Données runtime indisponibles (<code>data/observatory.json</code>). Lance <code>grimoire observatory export</code> dans un projet instrumenté.</div>
     </div>
-    <svg id="line-chart" style="width:100%;height:200px;display:block;overflow:visible;" aria-label="Graphe latence"></svg>
-  </div>
-
-  <!-- Heatmap + Alert rail -->
-  <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;" class="chart-row-wrap">
-    <div class="chart-panel">
-      <div class="chart-head"><span class="chart-lbl">REQUÊTES PAR AGENT × HEURE</span></div>
-      <div class="hm-wrap"><div class="hm-grid" id="hm-grid" aria-label="Heatmap agents par heure"></div></div>
-    </div>
-    <div class="chart-panel">
-      <div class="chart-head"><span class="chart-lbl">ALERTES ACTIVES</span></div>
-      <div class="alert-list">
-        <div class="alert-i w"><div class="alert-imsg">Hallucination rate &gt; 0.4%<br><span style="color:var(--ink-muted)">agent/critic · session-4a2f</span></div><div class="alert-itime">09:14:32</div></div>
-        <div class="alert-i"><div class="alert-imsg">P99 latency spike 1.8s<br><span style="color:var(--ink-muted)">agent/tech-writer · pipeline/synthesis</span></div><div class="alert-itime">09:12:01</div></div>
-        <div class="alert-i"><div class="alert-imsg">Sub-agent depth &gt; 4<br><span style="color:var(--ink-muted)">agent/architect · RFC-09</span></div><div class="alert-itime">09:08:44</div></div>
-        <div class="alert-i c"><div class="alert-imsg">Cost rate +32% vs SLA<br><span style="color:var(--ink-muted)">session-7c3d · GPT-4o</span></div><div class="alert-itime">09:02:11</div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Trace Waterfall -->
-  <div class="chart-panel">
-    <div class="chart-head">
-      <span class="chart-lbl">TRACE WATERFALL — session-4a2f · FORGE-0342</span>
-      <div style="display:flex;gap:10px;" role="list" aria-label="Légende types">
-        <span class="legend-i"><span class="lc" style="background:var(--accent)"></span>SOG</span>
-        <span class="legend-i"><span class="lc" style="background:var(--data-cyan)"></span>LLM</span>
-        <span class="legend-i"><span class="lc" style="background:var(--data-violet)"></span>TOOL</span>
-        <span class="legend-i"><span class="lc" style="background:var(--data-amber)"></span>I/O</span>
-      </div>
-    </div>
-    <div id="waterfall" aria-label="Trace waterfall" role="list"></div>
-  </div>
-
-  <!-- Pheromone board -->
-  <div class="chart-panel">
-    <div class="chart-head"><span class="chart-lbl">PHEROMONE BOARD — SIGNAUX STIGMERGIQUES</span><span style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted)">intensité · mise à jour 2s</span></div>
-    <div class="phe-grid" id="phe-grid" aria-label="Carte phéromonale des agents"></div>
-    <div style="display:flex;gap:24px;margin-top:12px;">
-      <span style="font-family:var(--font-mono);font-size:.58rem;color:var(--ink-muted)">AGENTS : pm · dev · qa · architect · writer · analyst · critic</span>
-      <span style="font-family:var(--font-mono);font-size:.58rem;color:var(--ink-muted)">INTENSITÉ : opacité orange</span>
-    </div>
-  </div>
-</div>
+  </section>
 </main>
-<footer id="forge-footer" style="margin-bottom:40px;"></footer>
 
-<!-- Live ticker -->
-<div class="ticker-wrap" aria-live="off" aria-label="Flux d'événements">
-  <div class="ticker-inner" id="ticker"></div>
-</div>
-
-<div id="chart-tooltip" role="tooltip" aria-hidden="true"></div>
+<footer id="forge-footer"></footer>
 
 <script src="forge-nav.js"></script>
+<script src="forge-motion.js"></script>
 <script>
-/* ── Data generation ── */
-const N = 60;
-const AGENTS = ['pm','dev','qa','architect','writer','analyst','critic'];
-const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
+/* ── Observability — piloté par data/observatory.json (observatory.py export) ── */
+(function () {
+  const EVT_COLOR = {
+    ACTION: 'var(--accent)', DECISION: 'var(--data-cyan)', HANDOFF: 'var(--data-violet)',
+    CHECKPOINT: 'var(--data-green)', REMEMBER: 'var(--data-amber)', WARN: 'var(--data-amber)', ERROR: 'var(--data-red)',
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const evColor = (t) => EVT_COLOR[t] || 'var(--ink-soft)';
+  let DATA = null, filter = null;
 
-function rw(base, vol, n=N) {
-  const a=[]; let v=base;
-  for(let i=0;i<n;i++){
-    v = Math.max(base*.4, Math.min(base*1.9, v+(Math.random()-.5)*vol*2));
-    a.push(Math.round(v*100)/100);
+  fetch('data/observatory.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(render)
+    .catch(() => { document.getElementById('obs-empty').style.display = 'block'; const b = document.getElementById('obs-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; });
+
+  function countBy(arr, key) {
+    const m = {}; arr.forEach((x) => { const k = typeof key === 'function' ? key(x) : x[key]; if (k) m[k] = (m[k] || 0) + 1; }); return m;
   }
-  return a;
-}
-
-const data = {
-  p50: rw(320,35), p95: rw(680,80), p99: rw(1100,140),
-  rps: rw(24,4), tokens: rw(8400,1100), cost: rw(0.34,0.04),
-  hallucination: rw(0.018,0.005), depth: rw(2.3,0.25), agents: rw(5.2,0.6)
-};
-
-function last(a){ return a[a.length-1]; }
-function dlta(a){ const p=a[Math.max(0,a.length-10)]; return ((last(a)-p)/p*100).toFixed(1); }
-
-/* ── KPI tiles ── */
-const KPIS = [
-  {key:'rps',   label:'REQUESTS / MIN',   fmt:v=>Math.round(v),     suf:'',      inv:false, series:data.rps,         color:'var(--data-green)'},
-  {key:'p50',   label:'P50 LATENCY',      fmt:v=>Math.round(v),     suf:' ms',   inv:true,  series:data.p50,         color:'var(--data-green)'},
-  {key:'p99',   label:'P99 LATENCY',      fmt:v=>Math.round(v),     suf:' ms',   inv:true,  series:data.p99,         color:'var(--data-red)'},
-  {key:'tokens',label:'TOKENS / MIN',     fmt:v=>Math.round(v/100)/10+'k', suf:'', inv:false, series:data.tokens,    color:'var(--data-cyan)'},
-  {key:'cost',  label:'COST / HOUR',      fmt:v=>'$'+v.toFixed(2),  suf:'',      inv:true,  series:data.cost,        color:'var(--data-amber)'},
-  {key:'hall',  label:'HALLUCINATION RATE',fmt:v=>v.toFixed(3)+'%', suf:'',      inv:true,  series:data.hallucination, color:'var(--data-red)', alert:true},
-  {key:'depth', label:'SUB-AGENT DEPTH',  fmt:v=>v.toFixed(1),      suf:'',      inv:true,  series:data.depth,       color:'var(--data-violet)'},
-  {key:'agents',label:'ACTIVE AGENTS',    fmt:v=>Math.round(v),     suf:'',      inv:false, series:data.agents,      color:'var(--accent)'},
-];
-
-function sparkPath(arr, w=200, h=28){
-  const mn=Math.min(...arr), mx=Math.max(...arr), rng=mx-mn||1;
-  const pts=arr.map((v,i)=>`${i/(arr.length-1)*w},${h-((v-mn)/rng)*(h-2)+1}`);
-  return 'M'+pts.join(' L');
-}
-
-const grid = document.getElementById('kpi-grid');
-KPIS.forEach(k=>{
-  const d_val = dlta(k.series);
-  const isPos = parseFloat(d_val) < 0 && k.inv || parseFloat(d_val) > 0 && !k.inv;
-  const isNeg = !isPos && parseFloat(d_val) !== 0;
-  const cls = parseFloat(d_val)===0 ? 'neu' : (isPos ? 'pos' : 'neg');
-  const arrow = parseFloat(d_val) > 0 ? '↑' : (parseFloat(d_val) < 0 ? '↓' : '–');
-  const el=document.createElement('div');
-  el.className='kpi-tile'+(k.alert?' alert-tile':'');
-  el.setAttribute('role','listitem');
-  el.innerHTML=`
-    <div class="kpi-lbl">${k.label}</div>
-    <div class="kpi-val">${k.fmt(last(k.series))}</div>
-    <div class="kpi-delta ${cls}">${arrow} ${Math.abs(d_val)}% vs 10m</div>
-    <svg class="spark-svg" viewBox="0 0 200 28" aria-hidden="true">
-      <path class="spark-line" d="${sparkPath(k.series)}" stroke="${k.color}" style="stroke-dasharray:2000;stroke-dashoffset:${reduced?0:2000};transition:stroke-dashoffset 1200ms ease-out"/>
-    </svg>`;
-  grid.appendChild(el);
-});
-
-/* ── Animate sparklines ── */
-if(!reduced){
-  const obs = new IntersectionObserver(entries=>{
-    entries.forEach(e=>{if(e.isIntersecting){
-      e.target.querySelectorAll('.spark-line').forEach(p=>p.style.strokeDashoffset='0');
-      obs.unobserve(e.target);
-    }});
-  },{threshold:.3});
-  obs.observe(grid);
-}
-
-/* ── Line chart ── */
-(function(){
-  const svg = document.getElementById('line-chart');
-  const W=1000, H=180, PAD={t:10,r:10,b:30,l:50};
-  const CW=W-PAD.l-PAD.r, CH=H-PAD.t-PAD.b;
-  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
-
-  const series = [{arr:data.p50, color:'var(--data-green)', id:'p50'},{arr:data.p95, color:'var(--data-amber)', id:'p95'},{arr:data.p99, color:'var(--data-red)', id:'p99'}];
-  const allV = series.flatMap(s=>s.arr);
-  const mn=0, mx=Math.ceil(Math.max(...allV)/100)*100;
-  const xS=i=>(i/(N-1))*CW+PAD.l;
-  const yS=v=>CH-((v-mn)/(mx-mn))*CH+PAD.t;
-
-  let ns='http://www.w3.org/2000/svg';
-  function el(tag,attrs,parent){
-    const e=document.createElementNS(ns,tag);
-    Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));
-    (parent||svg).appendChild(e); return e;
+  function bars(map, colorFn) {
+    const max = Math.max(1, ...Object.values(map));
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+      `<div class="bar-row"><span class="bar-lbl">${esc(k)}</span><span class="bar-track"><span class="bar-fill" style="width:${(v / max * 100).toFixed(0)}%;background:${colorFn ? colorFn(k) : 'var(--accent)'}"></span></span><span class="bar-val">${v}</span></div>`
+    ).join('');
   }
 
-  // Grid lines
-  [0,.25,.5,.75,1].forEach(t=>{
-    const y=yS(mn+(mx-mn)*t);
-    el('line',{x1:PAD.l,y1:y,x2:W-PAD.r,y2:y,class:'cg'});
-    el('text',{x:PAD.l-6,y:y+3,'text-anchor':'end',class:'ax'},svg).textContent=Math.round(mn+(mx-mn)*t);
-  });
-  // X labels (every 10)
-  for(let i=0;i<N;i+=10){
-    const mm=Math.round((N-1-i)/1)+'m';
-    el('text',{x:xS(i),y:H-6,'text-anchor':'middle',class:'ax'},svg).textContent='-'+(N-1-i)+'m';
+  function render(d) {
+    DATA = d;
+    const traces = d.traces || [], agents = d.agents || [], rels = d.relationships || [];
+    // badge
+    const badge = document.getElementById('obs-badge');
+    badge.innerHTML = `<span class="dot" style="background:${d.is_demo ? 'var(--accent)' : 'var(--data-green)'}"></span>` + (d.is_demo ? 'SNAPSHOT DÉMO' : 'LIVE · observatory.py') + ` · ${traces.length} traces`;
+
+    // KPIs
+    const kpis = [
+      ['TRACES', traces.length],
+      ['AGENTS', (d.agent_ids || agents.map((a) => a.id)).length],
+      ['SESSIONS', (d.sessions || []).length],
+      ["TYPES D'ÉVÉNEMENTS", (d.event_types || Object.keys(countBy(traces, 'event_type'))).length],
+    ];
+    document.getElementById('kpis').innerHTML = kpis.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
+
+    // Event types
+    const byType = countBy(traces, 'event_type');
+    document.getElementById('evt-bars').innerHTML = bars(byType, evColor) || '<div class="bar-val">—</div>';
+    document.getElementById('evt-total').textContent = Object.keys(byType).length + ' types';
+
+    // Agent activity
+    const byAgent = countBy(traces, 'agent');
+    document.getElementById('ag-bars').innerHTML = bars(byAgent) || '<div class="bar-val">—</div>';
+    document.getElementById('ag-total').textContent = Object.keys(byAgent).length + ' agents';
+
+    // Relationships
+    const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
+    document.getElementById('edges').innerHTML = rels.length ? rels.map((r) =>
+      `<div class="edge"><span class="edge-flow">${esc(r.from_agent)}<span class="ar">→</span>${esc(r.to_agent)}<span class="ty">${esc(r.type || '')}</span></span><span class="edge-meta"><span class="edge-bar"><i style="width:${((r.strength || 0) / maxStr * 100).toFixed(0)}%"></i></span><span class="edge-int">${r.interactions || 0}×</span></span></div>`
+    ).join('') : '<div class="bar-val">— aucune relation</div>';
+    document.getElementById('rel-total').textContent = rels.length + ' relations';
+
+    // Sessions
+    document.getElementById('sessions').innerHTML = (d.sessions || []).map((s) => {
+      const n = traces.filter((t) => t.session === s).length;
+      return `<div class="bar-row"><span class="bar-lbl">${esc(s)}</span><span class="bar-track"><span class="bar-fill" style="width:${(n / Math.max(1, traces.length) * 100).toFixed(0)}%"></span></span><span class="bar-val">${n}</span></div>`;
+    }).join('') || '<div class="bar-val">—</div>';
+
+    // Trace log filters
+    document.getElementById('tl-filters').innerHTML =
+      `<span class="filt active" data-f="">TOUT</span>` +
+      Object.keys(byType).map((t) => `<span class="filt" data-f="${esc(t)}" style="border-color:${evColor(t)}">${esc(t)}</span>`).join('');
+    document.querySelectorAll('#tl-filters .filt').forEach((el) => el.addEventListener('click', () => {
+      filter = el.dataset.f || null;
+      document.querySelectorAll('#tl-filters .filt').forEach((x) => x.classList.toggle('active', x === el));
+      renderLog();
+    }));
+    renderLog();
+
+    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
   }
 
-  // Area fill for p50 (first series)
-  const areaD=`M${xS(0)},${yS(data.p50[0])} `+data.p50.slice(1).map((_,i)=>`L${xS(i+1)},${yS(data.p50[i+1])}`).join(' ')+` L${xS(N-1)},${yS(0)} L${xS(0)},${yS(0)} Z`;
-  const areaEl=el('path',{d:areaD,fill:'url(#area-grad)',opacity:'0'});
-  const defs=el('defs',{});
-  const grad=el('linearGradient',{id:'area-grad',x1:'0',y1:'0',x2:'0',y2:'1'},defs);
-  el('stop',{'offset':'0%','stop-color':'rgba(110,231,255,.15)'},grad);
-  el('stop',{'offset':'100%','stop-color':'rgba(110,231,255,0)'},grad);
-  if(!reduced) setTimeout(()=>{ areaEl.style.opacity='1'; areaEl.style.transition='opacity 800ms'; },400);
-
-  // Series lines
-  const lineEls={};
-  series.forEach(s=>{
-    const d='M'+s.arr.map((_,i)=>`${xS(i)},${yS(s.arr[i])}`).join(' L');
-    const path=el('path',{d,fill:'none',stroke:s.color,'stroke-width':'1.5','stroke-dasharray':'3000','stroke-dashoffset':reduced?'0':'3000',id:'line-'+s.id});
-    if(!reduced) setTimeout(()=>{path.style.transition='stroke-dashoffset 1400ms ease-out'; path.style.strokeDashoffset='0';},200);
-    lineEls[s.id]=path;
-  });
-
-  // Hover line
-  const hline=el('line',{x1:0,y1:PAD.t,x2:0,y2:H-PAD.b,stroke:'rgba(255,255,255,.15)','stroke-width':'1',display:'none'});
-  const tip=document.getElementById('chart-tooltip');
-
-  svg.addEventListener('mousemove',e=>{
-    const rect=svg.getBoundingClientRect();
-    const mx=(e.clientX-rect.left)/rect.width*W;
-    const idx=Math.round((mx-PAD.l)/CW*(N-1));
-    if(idx<0||idx>=N){hline.setAttribute('display','none');tip.style.display='none';return;}
-    hline.setAttribute('display','');
-    hline.setAttribute('x1',xS(idx)); hline.setAttribute('x2',xS(idx));
-    tip.style.display='block';
-    tip.style.left=(e.clientX+12)+'px'; tip.style.top=(e.clientY-12)+'px';
-    tip.innerHTML=`P50 <b>${Math.round(data.p50[idx])}ms</b> &nbsp; P95 <b>${Math.round(data.p95[idx])}ms</b> &nbsp; P99 <b>${Math.round(data.p99[idx])}ms</b>`;
-  });
-  svg.addEventListener('mouseleave',()=>{hline.setAttribute('display','none');tip.style.display='none';});
-
-  // Legend toggle
-  document.querySelectorAll('#legend .legend-i').forEach(li=>{
-    li.addEventListener('click',()=>{
-      const s=li.dataset.s;
-      li.classList.toggle('muted');
-      const lEl=document.getElementById('line-'+s);
-      if(lEl) lEl.style.opacity=li.classList.contains('muted')?'0':'1';
-    });
-  });
-})();
-
-/* ── Heatmap ── */
-(function(){
-  const hg=document.getElementById('hm-grid');
-  // Header row
-  const blank=document.createElement('div'); hg.appendChild(blank);
-  for(let h=0;h<24;h++){
-    const lbl=document.createElement('div'); lbl.className='hm-col-lbl'; lbl.textContent=h+'h'; hg.appendChild(lbl);
-  }
-  const hmData=[];
-  AGENTS.forEach(agent=>{
-    const row=[];
-    const lbl=document.createElement('div'); lbl.className='hm-row-lbl'; lbl.textContent=agent; hg.appendChild(lbl);
-    for(let h=0;h<24;h++){
-      const workWeight = h>=9&&h<=18 ? 1 : (h>=7&&h<=20 ? 0.5 : 0.1);
-      const agentWeight = agent==='dev'||agent==='pm' ? 1.2 : 1;
-      const v = Math.random()*workWeight*agentWeight;
-      row.push(v);
-      const cell=document.createElement('div'); cell.className='hm-cell';
-      cell.style.opacity=String(Math.max(0.04, Math.min(0.95, v)));
-      cell.title=`${agent} · ${h}h · ${(v*100).toFixed(0)} req`;
-      hg.appendChild(cell);
-    }
-    hmData.push(row);
-  });
-})();
-
-/* ── Trace waterfall ── */
-(function(){
-  const wf=document.getElementById('waterfall');
-  const TOTAL=1420;
-  const rows=[
-    {lbl:'user · prompt',        start:0,   end:50,   type:'io'},
-    {lbl:'SOG · dispatch',       start:50,  end:180,  type:'sog'},
-    {lbl:'agent/pm · LLM call',  start:180, end:720,  type:'llm'},
-    {lbl:'agent/analyst · LLM',  start:180, end:540,  type:'llm'},
-    {lbl:'sub-agent/dev · tool', start:320, end:620,  type:'tool'},
-    {lbl:'agent/writer · LLM',   start:540, end:1260, type:'llm'},
-    {lbl:'agent/critic · LLM',   start:720, end:1080, type:'llm'},
-    {lbl:'SOG · aggregation',    start:1260,end:1380, type:'sog'},
-    {lbl:'artefact · emit+seal', start:1380,end:1420, type:'io'},
-  ];
-  const tip=document.getElementById('chart-tooltip');
-  rows.forEach(r=>{
-    const row=document.createElement('div'); row.className='wf-row'; row.setAttribute('role','listitem');
-    const lbl=document.createElement('div'); lbl.className='wf-lbl'; lbl.textContent=r.lbl;
-    const track=document.createElement('div'); track.className='wf-track';
-    const bar=document.createElement('div'); bar.className='wf-bar '+r.type;
-    const dur=r.end-r.start;
-    bar.style.left=((r.start/TOTAL)*100)+'%';
-    bar.style.width=((dur/TOTAL)*100)+'%';
-    bar.setAttribute('aria-label',`${r.lbl} · ${dur}ms`);
-    bar.addEventListener('mouseenter',e=>{
-      tip.style.display='block'; tip.style.left=(e.clientX+12)+'px'; tip.style.top=(e.clientY-12)+'px';
-      tip.textContent=`${r.lbl} · ${dur}ms`;
-    });
-    bar.addEventListener('mouseleave',()=>tip.style.display='none');
-    const durEl=document.createElement('div'); durEl.className='wf-dur'; durEl.textContent=dur+'ms';
-    track.appendChild(bar); row.appendChild(lbl); row.appendChild(track); row.appendChild(durEl);
-    wf.appendChild(row);
-  });
-})();
-
-/* ── Pheromone board ── */
-const pheCells=[];
-(function(){
-  const pg=document.getElementById('phe-grid');
-  for(let r=0;r<8;r++) for(let c=0;c<16;c++){
-    const cell=document.createElement('div'); cell.className='phe-cell';
-    const v=Math.random()*0.8+0.05;
-    cell.style.opacity=String(v);
-    cell.title=`Signal [${c},${r}] · intensité ${(v*100).toFixed(0)}%`;
-    pheCells.push(cell); pg.appendChild(cell);
+  function renderLog() {
+    const traces = (DATA.traces || []).filter((t) => !filter || t.event_type === filter).slice().reverse();
+    document.getElementById('tl-count').textContent = traces.length + ' entrées';
+    document.getElementById('tl-body').innerHTML = traces.map((t) => {
+      const hh = (t.timestamp || '').replace('T', ' ').replace(/(\+\d\d:\d\d|Z)$/, '').slice(5, 16);
+      return `<tr><td>${esc(hh)}</td><td>${esc(t.agent)}</td><td><span class="ev-pill" style="color:${evColor(t.event_type)};border-color:${evColor(t.event_type)}">${esc(t.event_type)}</span></td><td style="color:var(--ink-muted)">${esc(t.session)}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" style="color:var(--ink-muted)">—</td></tr>';
   }
 })();
-
-/* ── Ticker ── */
-(function(){
-  const events=[
-    {type:'FORGE',msg:'artefact FORGE-0342 · prd-app-notes-v1.md scellé'},
-    {type:'SOG',  msg:'dispatch → 3 sub-agents · session-4a2f'},
-    {type:'TRACE',msg:'trace sealed · 874 events · 1.4s'},
-    {type:'AGENT',msg:'agent/pm spawned · contrat RFC-09 · pid:0x3f1'},
-    {type:'AGENT',msg:'agent/critic · CVTL pass · score 0.94'},
-    {type:'FORGE',msg:'artefact FORGE-0341 · brief-v2.json émis'},
-    {type:'ALERT',msg:'hallucination rate 0.41% · agent/critic · seuil 0.5%'},
-    {type:'SOG',  msg:'routing → claude-opus-4 · latence SOG 38ms'},
-    {type:'FORGE',msg:'artefact FORGE-0340 · schema-v3.ts émis'},
-    {type:'AGENT',msg:'agent/architect · sub-agent depth 3 · trust 0.91'},
-    {type:'TRACE',msg:'session-7c3d opened · 2 agents · pipeline/review'},
-    {type:'FORGE',msg:'artefact FORGE-0339 · test-suite-v1.ts · 44 tests'},
-  ];
-  const inner=document.getElementById('ticker');
-  const doubled=[...events,...events];
-  doubled.forEach(ev=>{
-    const item=document.createElement('span'); item.className='tick-item';
-    item.innerHTML=`<span class="ev">${ev.type}</span><span class="tick-sep">·</span>${ev.msg}`;
-    inner.appendChild(item);
-  });
-})();
-
-/* ── Live pheromone update ── */
-if(!reduced){
-  setInterval(()=>{
-    const isLive=document.getElementById('live-badge').classList.contains('paused')===false;
-    if(!isLive) return;
-    pheCells.forEach(c=>{ if(Math.random()<0.3){ const v=Math.max(.05,Math.min(.95,parseFloat(c.style.opacity)+(Math.random()-.5)*.15)); c.style.opacity=String(v); }});
-  },2000);
-}
-
-/* ── Timestamp ── */
-function updateTS(){ document.getElementById('obs-ts').textContent=new Date().toLocaleTimeString('fr-FR',{hour12:false}); }
-updateTS(); setInterval(updateTS,1000);
-
-/* ── Live/Paused toggle ── */
-const liveBadge=document.getElementById('live-badge');
-let isLive=true;
-liveBadge.addEventListener('click',()=>{
-  isLive=!isLive;
-  liveBadge.classList.toggle('paused');
-  liveBadge.querySelector('span:last-child').textContent=isLive?'LIVE':'PAUSED';
-});
-
-/* ── Refresh ── */
-document.getElementById('refresh-btn').addEventListener('click',function(){
-  this.classList.add('spinning');
-  setTimeout(()=>this.classList.remove('spinning'),500);
-});
-
-/* ── Range selector ── */
-document.querySelectorAll('.range-btn').forEach(btn=>{
-  btn.addEventListener('click',function(){
-    document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
-    this.classList.add('active');
-  });
-});
-
-/* ── Keyboard shortcuts ── */
-document.addEventListener('keydown',e=>{
-  if(e.key==='l'||e.key==='L') liveBadge.click();
-  if(e.key==='r'||e.key==='R') document.getElementById('refresh-btn').click();
-  if(e.key==='1') document.querySelector('[data-range="15m"]').click();
-  if(e.key==='2') document.querySelector('[data-range="1h"]').click();
-  if(e.key==='3') document.querySelector('[data-range="6h"]').click();
-  if(e.key==='4') document.querySelector('[data-range="24h"]').click();
-});
 </script>
 </body>
 </html>
