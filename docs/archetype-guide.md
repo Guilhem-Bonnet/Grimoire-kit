@@ -216,7 +216,7 @@ python3 framework/tools/gen-tests.py \
 ```bash
 bash grimoire-init.sh --name "Mon API" --user "Guilhem" --auto
 # → stack détecté : go docker
-# → agents stack : Gopher 🐹 + Container 🐋
+# → agents stack : Gopher (Go) + Container (Docker)
 ```
 
 **Installation manuelle d'un agent stack :**
@@ -286,7 +286,7 @@ id: mon-archetype
 name: "Mon Archétype"
 version: "1.0.0"
 description: "Description courte"
-icon: "🎯"
+icon: "rocket"
 author: "votre-nom"
 tags: [custom]
 inherits: minimal

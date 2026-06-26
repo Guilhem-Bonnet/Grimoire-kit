@@ -894,7 +894,7 @@ def fmt_tokens(n: int) -> str:
 
 
 def status_icon(status: str) -> str:
-    return {"OK": "✅", "WARNING": "⚠️ ", "CRITICAL": "🔴"}.get(status, "❓")
+    return {"OK": "[OK]", "WARNING": "[WARN]", "CRITICAL": "[CRIT]"}.get(status, "[?]")
 
 
 def bar(pct: float, width: int = 20) -> str:
@@ -906,13 +906,13 @@ def bar(pct: float, width: int = 20) -> str:
 
 def role_icon(role: str) -> str:
     return {
-        "agent-definition": "🤖",
-        "base-protocol":    "⚙️ ",
-        "memory":           "🧠",
-        "trace":            "📋",
-        "dna":              "🧬",
-        "project":          "📁",
-    }.get(role, "📄")
+        "agent-definition": "[agent]",
+        "base-protocol":    "[proto]",
+        "memory":           "[mem]",
+        "trace":            "[trace]",
+        "dna":              "[dna]",
+        "project":          "[proj]",
+    }.get(role, "[file]")
 
 
 def print_budget(budget: AgentBudget, detail: bool = False, threshold: int = THRESHOLD_WARN) -> None:

@@ -1,5 +1,5 @@
 """
-Tests for grimoire-setup.py — BMAD user configuration synchronisation tool.
+Tests for grimoire-setup.py — user configuration synchronisation tool.
 """
 
 from __future__ import annotations
@@ -299,42 +299,6 @@ class TestUpdateCopilotInstructions:
         assert result == COPILOT_INSTRUCTIONS
 
 
-# ── Tests: check_config_file ─────────────────────────────────────────────────
-
-
-class TestCheckConfigFile:
-    def test_detects_diffs_bmm(self, project_tree: Path):
-        cfg = UserConfig("my-project", "Alice", "English", "English", "intermediate")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
-        diffs = grimoire_setup.check_config_file(path, cfg, "bmm")
-        keys = {d.key for d in diffs}
-        assert "user_name" in keys
-        assert "communication_language" in keys
-        assert "project_name" in keys
-        assert "user_skill_level" in keys
-
-    def test_detects_diffs_core(self, project_tree: Path):
-        cfg = UserConfig("my-project", "Alice", "English", "English", "intermediate")
-        path = project_tree / "_bmad" / "core" / "config.yaml"
-        diffs = grimoire_setup.check_config_file(path, cfg, "core")
-        keys = {d.key for d in diffs}
-        assert "user_name" in keys
-        assert "communication_language" in keys
-        # core does NOT have project_name or user_skill_level
-        assert "project_name" not in keys
-        assert "user_skill_level" not in keys
-
-    def test_no_diffs_when_synced(self, synced_tree: Path):
-        cfg = UserConfig("synced", "Bob", "Français", "Français", "expert")
-        for module in grimoire_setup.MODULE_CONFIGS:
-            path = synced_tree / "_bmad" / module / "config.yaml"
-            assert grimoire_setup.check_config_file(path, cfg, module) == []
-
-    def test_missing_file_returns_empty(self, tmp_path: Path):
-        cfg = UserConfig("x", "x", "x", "x", "x")
-        assert grimoire_setup.check_config_file(tmp_path / "nope.yaml", cfg, "core") == []
-
-
 # ── Tests: check_copilot_instructions ─────────────────────────────────────────
 
 
@@ -353,47 +317,6 @@ class TestCheckCopilotInstructions:
         cfg = UserConfig("synced", "Bob", "Français", "Français", "expert")
         path = synced_tree / ".github" / "copilot-instructions.md"
         assert grimoire_setup.check_copilot_instructions(path, cfg) == []
-
-
-# ── Tests: apply_config_file ──────────────────────────────────────────────────
-
-
-class TestApplyConfigFile:
-    def test_updates_bmm(self, project_tree: Path):
-        cfg = UserConfig("new-proj", "NewUser", "English", "English", "beginner")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
-        assert grimoire_setup.apply_config_file(path, cfg, "bmm") is True
-        text = path.read_text(encoding="utf-8")
-        assert "user_name: NewUser" in text
-        assert "communication_language: English" in text
-        assert "project_name: new-proj" in text
-        assert "user_skill_level: beginner" in text
-
-    def test_updates_core(self, project_tree: Path):
-        cfg = UserConfig("x", "NewUser", "English", "English", "x")
-        path = project_tree / "_bmad" / "core" / "config.yaml"
-        assert grimoire_setup.apply_config_file(path, cfg, "core") is True
-        text = path.read_text(encoding="utf-8")
-        assert "user_name: NewUser" in text
-        assert "communication_language: English" in text
-
-    def test_preserves_non_user_fields(self, project_tree: Path):
-        cfg = UserConfig("x", "NewUser", "English", "English", "x")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
-        grimoire_setup.apply_config_file(path, cfg, "bmm")
-        text = path.read_text(encoding="utf-8")
-        assert "planning_artifacts:" in text
-        assert "implementation_artifacts:" in text
-        assert "project_knowledge:" in text
-
-    def test_no_change_returns_false(self, project_tree: Path):
-        cfg = UserConfig("old-project", "OldUser", "Français", "Français", "expert")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
-        assert grimoire_setup.apply_config_file(path, cfg, "bmm") is False
-
-    def test_missing_file_returns_false(self, tmp_path: Path):
-        cfg = UserConfig("x", "x", "x", "x", "x")
-        assert grimoire_setup.apply_config_file(tmp_path / "nope.yaml", cfg, "core") is False
 
 
 # ── Tests: apply_copilot_instructions ─────────────────────────────────────────
@@ -477,9 +400,6 @@ class TestRunCheck:
         report = grimoire_setup.run_check(project_tree, cfg)
         assert not report.is_synced
         files_with_diffs = {d.file for d in report.diffs}
-        # Should find diffs in all module configs + copilot-instructions
-        assert any("bmm" in f for f in files_with_diffs)
-        assert any("core" in f for f in files_with_diffs)
         assert any("copilot-instructions" in f for f in files_with_diffs)
 
     def test_all_synced(self, synced_tree: Path):
@@ -502,8 +422,6 @@ class TestRunApply:
         cfg = UserConfig("new-proj", "NewUser", "English", "English", "beginner")
         report = grimoire_setup.run_apply(project_tree, cfg)
         assert "project-context.yaml" in report.updated_files
-        assert "_bmad/bmm/config.yaml" in report.updated_files
-        assert "_bmad/core/config.yaml" in report.updated_files
         assert ".github/copilot-instructions.md" in report.updated_files
 
     def test_missing_module_skipped(self, tmp_path: Path):

@@ -10,8 +10,6 @@ Source de vérité : project-context.yaml
 
 Fichiers mis à jour :
   - project-context.yaml            (si changement — mode interactif/CLI)
-  - _bmad/{bmm,core,cis,tea,bmb}/config.yaml
-  - _bmad/_memory/config.yaml
   - .github/copilot-instructions.md
 
 Usage :
@@ -162,50 +160,6 @@ def _update_copilot_instructions(text: str, config: UserConfig) -> str:
 
 # ── Check / Audit ─────────────────────────────────────────────────────────────
 
-MODULE_CONFIGS = ["bmm", "core", "cis", "tea", "bmb"]
-MEMORY_CONFIG = "_memory"
-
-# Fields present in ALL module configs
-COMMON_FIELDS = {
-    "user_name": "user_name",
-    "communication_language": "communication_language",
-    "document_output_language": "document_output_language",
-}
-
-# Extra fields only in bmm/config.yaml
-BMM_EXTRA_FIELDS = {
-    "project_name": "project_name",
-    "user_skill_level": "user_skill_level",
-}
-
-
-def check_config_file(
-    path: Path, config: UserConfig, module: str,
-) -> list[ConfigDiff]:
-    """Compare a ``config.yaml`` against the expected values."""
-    if not path.exists():
-        return []
-
-    text = path.read_text(encoding="utf-8")
-    diffs: list[ConfigDiff] = []
-    rel = str(path)
-
-    for attr, yaml_key in COMMON_FIELDS.items():
-        current = _read_yaml_key(text, yaml_key)
-        expected = getattr(config, attr)
-        if current is not None and current != expected:
-            diffs.append(ConfigDiff(file=rel, key=yaml_key, current=current, expected=expected))
-
-    if module == "bmm":
-        for attr, yaml_key in BMM_EXTRA_FIELDS.items():
-            current = _read_yaml_key(text, yaml_key)
-            expected = getattr(config, attr)
-            if current is not None and current != expected:
-                diffs.append(ConfigDiff(file=rel, key=yaml_key, current=current, expected=expected))
-
-    return diffs
-
-
 def check_copilot_instructions(
     path: Path, config: UserConfig,
 ) -> list[ConfigDiff]:
@@ -236,33 +190,6 @@ def check_copilot_instructions(
 
 
 # ── Apply (update files) ─────────────────────────────────────────────────────
-
-
-def apply_config_file(path: Path, config: UserConfig, module: str) -> bool:
-    """Update a ``config.yaml`` with the expected values. Returns True if changed."""
-    if not path.exists():
-        return False
-
-    text = path.read_text(encoding="utf-8")
-    original = text
-
-    for attr, yaml_key in COMMON_FIELDS.items():
-        current = _read_yaml_key(text, yaml_key)
-        expected = getattr(config, attr)
-        if current is not None and current != expected:
-            text = _update_yaml_key(text, yaml_key, expected)
-
-    if module == "bmm":
-        for attr, yaml_key in BMM_EXTRA_FIELDS.items():
-            current = _read_yaml_key(text, yaml_key)
-            expected = getattr(config, attr)
-            if current is not None and current != expected:
-                text = _update_yaml_key(text, yaml_key, expected)
-
-    if text != original:
-        path.write_text(text, encoding="utf-8")
-        return True
-    return False
 
 
 def apply_copilot_instructions(path: Path, config: UserConfig) -> bool:
@@ -326,49 +253,21 @@ def apply_project_context(path: Path, config: UserConfig) -> bool:
 
 
 def run_check(project_root: Path, config: UserConfig) -> SetupReport:
-    """Audit all config files against *config* — no changes."""
+    """Audit project config files against *config* — no changes."""
     report = SetupReport()
-    bmad_dir = project_root / "_bmad"
-
-    for module in MODULE_CONFIGS:
-        cfg_path = bmad_dir / module / "config.yaml"
-        report.diffs.extend(check_config_file(cfg_path, config, module))
-
-    mem_cfg = bmad_dir / MEMORY_CONFIG / "config.yaml"
-    report.diffs.extend(check_config_file(mem_cfg, config, MEMORY_CONFIG))
-
     ci_path = project_root / ".github" / "copilot-instructions.md"
     report.diffs.extend(check_copilot_instructions(ci_path, config))
-
     return report
 
 
 def run_apply(project_root: Path, config: UserConfig) -> SetupReport:
     """Apply *config* values to every target file and return a report."""
     report = SetupReport()
-    bmad_dir = project_root / "_bmad"
 
     # project-context.yaml
     pcy = project_root / "project-context.yaml"
     if apply_project_context(pcy, config):
         report.updated_files.append("project-context.yaml")
-
-    # Module configs
-    for module in MODULE_CONFIGS:
-        cfg_path = bmad_dir / module / "config.yaml"
-        if not cfg_path.exists():
-            report.skipped_files.append(f"_bmad/{module}/config.yaml")
-            continue
-        if apply_config_file(cfg_path, config, module):
-            report.updated_files.append(f"_bmad/{module}/config.yaml")
-
-    # Memory config
-    mem_cfg = bmad_dir / MEMORY_CONFIG / "config.yaml"
-    if mem_cfg.exists():
-        if apply_config_file(mem_cfg, config, MEMORY_CONFIG):
-            report.updated_files.append(f"_bmad/{MEMORY_CONFIG}/config.yaml")
-    else:
-        report.skipped_files.append(f"_bmad/{MEMORY_CONFIG}/config.yaml")
 
     # Copilot instructions
     ci_path = project_root / ".github" / "copilot-instructions.md"

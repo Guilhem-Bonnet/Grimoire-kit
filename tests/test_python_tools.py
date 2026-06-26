@@ -83,16 +83,16 @@ class TestStatusIcon(unittest.TestCase):
         self.cg = importlib.import_module("context-guard")
 
     def test_ok(self):
-        self.assertEqual(self.cg.status_icon("OK"), "✅")
+        self.assertEqual(self.cg.status_icon("OK"), "[OK]")
 
     def test_warning(self):
-        self.assertEqual(self.cg.status_icon("WARNING"), "⚠️ ")
+        self.assertEqual(self.cg.status_icon("WARNING"), "[WARN]")
 
     def test_critical(self):
-        self.assertEqual(self.cg.status_icon("CRITICAL"), "🔴")
+        self.assertEqual(self.cg.status_icon("CRITICAL"), "[CRIT]")
 
     def test_unknown(self):
-        self.assertEqual(self.cg.status_icon("FOOBAR"), "❓")
+        self.assertEqual(self.cg.status_icon("FOOBAR"), "[?]")
 
 
 class TestBar(unittest.TestCase):
@@ -124,11 +124,11 @@ class TestRoleIcon(unittest.TestCase):
         self.cg = importlib.import_module("context-guard")
 
     def test_known_roles(self):
-        self.assertEqual(self.cg.role_icon("agent-definition"), "🤖")
-        self.assertEqual(self.cg.role_icon("memory"), "🧠")
+        self.assertEqual(self.cg.role_icon("agent-definition"), "[agent]")
+        self.assertEqual(self.cg.role_icon("memory"), "[mem]")
 
     def test_unknown_role(self):
-        self.assertEqual(self.cg.role_icon("unknown"), "📄")
+        self.assertEqual(self.cg.role_icon("unknown"), "[file]")
 
 
 class TestModelProfile(unittest.TestCase):

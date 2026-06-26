@@ -150,13 +150,13 @@ Vérifier que le endpoint /api/auth/login :
 Ajouter dans `_grimoire/_config/agent-manifest.csv` :
 
 ```csv
-"mon-nouvel-agent","Gardien","Sécurité Applicative","🛡️","security-app","custom","_grimoire/_config/custom/agents/mon-nouvel-agent.md"
+"mon-nouvel-agent","Gardien","Sécurité Applicative","shield-pulse","security-app","custom","_grimoire/_config/custom/agents/mon-nouvel-agent.md"
 ```
 
 Ajouter dans `_grimoire/_memory/shared-context.md` (table équipe) :
 
 ```markdown
-| mon-nouvel-agent | Gardien | 🛡️ | Sécurité applicative |
+| mon-nouvel-agent | Gardien | shield-pulse | Sécurité applicative |
 ```
 
 Créer le fichier learnings :
@@ -215,7 +215,7 @@ Si vous utilisez `mem0-bridge.py dispatch`, ajoutez votre agent dans `project-co
 agents:
   custom_agents:
     - name: "gardien"
-      icon: "🛡️"
+      icon: "shield-pulse"
       domain: "Sécurité applicative"
       keywords: "oauth jwt rbac auth login permission security headers csp cors"
 ```
