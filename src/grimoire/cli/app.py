@@ -2389,7 +2389,7 @@ def setup(
     doc_lang: str | None = _setup_doc_lang_opt,
     skill_level: str | None = _setup_skill_opt,
 ) -> None:
-    """Sync user config (name, language, skill) across all BMAD config files."""
+    """Sync user config (name, language, skill) across project config files."""
     from grimoire.cli.cmd_setup import SetupResult, apply, check, load_user_values
 
     # Respect both --json flag and global -o json

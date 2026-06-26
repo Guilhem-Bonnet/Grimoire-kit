@@ -94,7 +94,7 @@ mon-projet/
 
 ## Configurer votre identité
 
-Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration du projet (configs BMAD, instructions Copilot).
+Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration du projet (instructions Copilot).
 
 ```bash
 # Synchroniser depuis project-context.yaml
@@ -109,7 +109,6 @@ grimoire setup --check
 
 **Source de vérité** : `project-context.yaml` (section `user`). La commande `setup` propage les valeurs vers :
 
-- `_bmad/*/config.yaml` — configuration des modules BMAD
 - `.github/copilot-instructions.md` — instructions injectées dans Copilot Chat
 
 ## Vérifier votre projet

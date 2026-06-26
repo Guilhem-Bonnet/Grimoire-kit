@@ -145,9 +145,6 @@ La commande `grimoire setup` propage ces valeurs dans tous les fichiers de confi
 
 | Fichier cible | Champs synchronisés |
 |---------------|--------------------|
-| `_bmad/bmm/config.yaml` | `project_name`, `user_name`, `communication_language`, `document_output_language`, `user_skill_level` |
-| `_bmad/{core,cis,tea,bmb}/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
-| `_bmad/_memory/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
 | `.github/copilot-instructions.md` | Project, User, Communication Language, Document Output Language, User Skill Level |
 
 ```bash

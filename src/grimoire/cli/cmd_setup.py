@@ -1,10 +1,8 @@
-"""``grimoire setup`` — synchronise user configuration across all config files.
+"""``grimoire setup`` — synchronise user configuration across project config files.
 
 Source of truth: ``project-context.yaml``
 
 Target files (when they exist):
-  - ``_bmad/{bmm,core,cis,tea,bmb}/config.yaml``
-  - ``_bmad/_memory/config.yaml``
   - ``.github/copilot-instructions.md``
 """
 
@@ -97,58 +95,7 @@ def load_user_values(path: Path) -> UserValues:
     return vals
 
 
-# ── Fields map ────────────────────────────────────────────────────────────────
-
-_COMMON = {
-    "user_name": "user_name",
-    "communication_language": "communication_language",
-    "document_output_language": "document_output_language",
-}
-
-_BMM_EXTRA = {
-    "project_name": "project_name",
-    "user_skill_level": "user_skill_level",
-}
-
-_MODULES = ["bmm", "core", "cis", "tea", "bmb"]
-
 # ── Check / Apply helpers ─────────────────────────────────────────────────────
-
-
-def _check_file(path: Path, vals: UserValues, module: str) -> list[ConfigDiff]:
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8")
-    diffs: list[ConfigDiff] = []
-    rel = str(path)
-    fields = dict(_COMMON)
-    if module == "bmm":
-        fields.update(_BMM_EXTRA)
-    for attr, key in fields.items():
-        cur = _read_key(text, key)
-        exp = getattr(vals, attr)
-        if cur is not None and cur != exp:
-            diffs.append(ConfigDiff(file=rel, key=key, current=cur, expected=exp))
-    return diffs
-
-
-def _apply_file(path: Path, vals: UserValues, module: str) -> bool:
-    if not path.exists():
-        return False
-    text = path.read_text(encoding="utf-8")
-    original = text
-    fields = dict(_COMMON)
-    if module == "bmm":
-        fields.update(_BMM_EXTRA)
-    for attr, key in fields.items():
-        cur = _read_key(text, key)
-        exp = getattr(vals, attr)
-        if cur is not None and cur != exp:
-            text = _update_key(text, key, exp)
-    if text != original:
-        path.write_text(text, encoding="utf-8")
-        return True
-    return False
 
 
 def _check_copilot(path: Path, vals: UserValues) -> list[ConfigDiff]:
@@ -197,12 +144,8 @@ def _apply_copilot(path: Path, vals: UserValues) -> bool:
 
 
 def check(project_root: Path, vals: UserValues) -> SetupResult:
-    """Audit all config files against *vals* — pure read, no writes."""
+    """Audit project config files against *vals* — pure read, no writes."""
     result = SetupResult()
-    bmad = project_root / "_bmad"
-    for mod in _MODULES:
-        result.diffs.extend(_check_file(bmad / mod / "config.yaml", vals, mod))
-    result.diffs.extend(_check_file(bmad / "_memory" / "config.yaml", vals, "_memory"))
     result.diffs.extend(_check_copilot(project_root / ".github" / "copilot-instructions.md", vals))
     return result
 
@@ -210,22 +153,6 @@ def check(project_root: Path, vals: UserValues) -> SetupResult:
 def apply(project_root: Path, vals: UserValues) -> SetupResult:
     """Write *vals* into every target file, return a report."""
     result = SetupResult()
-    bmad = project_root / "_bmad"
-
-    for mod in _MODULES:
-        p = bmad / mod / "config.yaml"
-        if not p.exists():
-            result.skipped_files.append(f"_bmad/{mod}/config.yaml")
-            continue
-        if _apply_file(p, vals, mod):
-            result.updated_files.append(f"_bmad/{mod}/config.yaml")
-
-    mem = bmad / "_memory" / "config.yaml"
-    if mem.exists():
-        if _apply_file(mem, vals, "_memory"):
-            result.updated_files.append("_bmad/_memory/config.yaml")
-    else:
-        result.skipped_files.append("_bmad/_memory/config.yaml")
 
     ci = project_root / ".github" / "copilot-instructions.md"
     if ci.exists():

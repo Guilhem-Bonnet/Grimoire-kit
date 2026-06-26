@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-06-25
+
+### Changé
+
+- **BMAD retiré de `grimoire setup` (SDK)** — `grimoire setup` ne synchronise plus les configs de modules `_bmad/{bmm,core,cis,tea,bmb}/config.yaml` (taxonomie legacy que le scaffold actuel ne crée plus) ; il propage l'identité utilisateur (source `project-context.yaml`) vers `.github/copilot-instructions.md` uniquement. Docstrings (`app.py`, `project.py`) et docs (getting-started, grimoire-yaml-reference, onboarding) nettoyés de la marque « BMAD » (« BMad Master » → « Grimoire Master »). Noms de modules internes (bmm/core/cis/tea/bmb) conservés. **Reste à traiter** : l'outil shell legacy `framework/tools/grimoire-setup.py` (+ `grimoire.sh`, test non-CI) — décision standalone vs délégation SDK.
+
 ## [3.12.0] - 2026-06-25
 
 ### Changé

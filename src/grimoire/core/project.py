@@ -208,7 +208,7 @@ class GrimoireProject:
         """Build a context payload for agent consumption."""
         cfg = self.config  # raises if not loaded
 
-        # Count files and directories (shallow, skip hidden/bmad dirs)
+        # Count files and directories (shallow, skip hidden dirs)
         file_count = 0
         dir_count = 0
         for item in self._root.iterdir():

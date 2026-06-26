@@ -35,7 +35,7 @@ bash grimoire-kit/grimoire.sh setup --user "Votre Nom" --lang "Français"
 grimoire setup --user "Votre Nom" --lang "Français"
 ```
 
-Cette commande synchronise `project-context.yaml` vers les configs BMAD et les instructions Copilot.
+Cette commande synchronise `project-context.yaml` vers les instructions Copilot.
 
 ### 3. Vérifier l'installation
 
@@ -54,7 +54,7 @@ Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
 /grimoire-master
 ```
 
-L'agent BMad Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
+L'agent Grimoire Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
 
 ### 5. Structure à connaître
 
@@ -82,7 +82,7 @@ Les agents sont des personas spécialisées. Chacun a un domaine d'expertise :
 
 | Agent | Spécialité | Quand l'utiliser |
 |-------|-----------|-----------------|
-| BMad Master | Orchestration | Commencer ici, il route vers les autres |
+| Grimoire Master | Orchestration | Commencer ici, il route vers les autres |
 | Analyst (Mary) | Business | Étude de marché, exigences métier |
 | PM (John) | Produit | PRD, user stories, priorisation |
 | Architect (Winston) | Technique | Architecture, choix technologiques |
