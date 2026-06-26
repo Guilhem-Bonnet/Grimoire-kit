@@ -267,7 +267,7 @@ class TestIntegration:
 
     def test_main_on_real_project(self):
         """Run validator on actual project skills."""
-        project_root = KIT_DIR.parent  # bmad-custom
+        project_root = KIT_DIR.parent  # grimoire-kit
         if (project_root / ".github" / "skills").is_dir():
             exit_code = sv.main(["--project-root", str(project_root)])
             assert exit_code == 0

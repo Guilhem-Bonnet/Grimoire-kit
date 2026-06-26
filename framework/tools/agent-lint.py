@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-agent-lint.py — Linter structurel pour les agents BMAD.
+agent-lint.py — Linter structurel pour les agents Grimoire.
 =======================================================
 
 Vérifie l'intégrité structurelle de chaque fichier agent .md :
@@ -77,13 +77,13 @@ class LintReport:
 # ── Discovery ────────────────────────────────────────────────────────────────
 
 def discover_agents(project_root: Path) -> list[tuple[str, Path]]:
-    """Découvre tous les fichiers agent .md dans _bmad/*/agents/."""
-    bmad_dir = project_root / "_bmad"
+    """Découvre tous les fichiers agent .md dans _grimoire/*/agents/."""
+    grimoire_dir = project_root / "_grimoire"
     agents = []
-    if not bmad_dir.is_dir():
+    if not grimoire_dir.is_dir():
         return agents
 
-    for module_dir in sorted(bmad_dir.iterdir()):
+    for module_dir in sorted(grimoire_dir.iterdir()):
         if not module_dir.is_dir() or module_dir.name.startswith("_"):
             continue
         agents_dir = module_dir / "agents"
@@ -103,7 +103,7 @@ def discover_agents(project_root: Path) -> list[tuple[str, Path]]:
 
 def load_manifest(project_root: Path) -> dict[str, dict]:
     """Charge le agent-manifest.csv en dict indexé par name."""
-    manifest_path = project_root / "_bmad" / "_config" / "agent-manifest.csv"
+    manifest_path = project_root / "_grimoire" / "_config" / "agent-manifest.csv"
     if not manifest_path.is_file():
         return {}
     result = {}
@@ -245,7 +245,7 @@ def lint_manifest_sync(
             severity=Severity.ERROR,
             rule="manifest-sync",
             message=f"Agent '{slug}' absent du agent-manifest.csv",
-            fix_hint="Ajouter une entrée dans _bmad/_config/agent-manifest.csv"
+            fix_hint="Ajouter une entrée dans _grimoire/_config/agent-manifest.csv"
         ))
         return findings
 
@@ -370,14 +370,14 @@ def lint_config_path(
         ))
 
     # Check module match
-    expected_prefix = f"_bmad/{module}/"
+    expected_prefix = f"_grimoire/{module}/"
     if not config_path.startswith(expected_prefix):
         findings.append(Finding(
             agent=agent_name,
             severity=Severity.WARNING,
             rule="config-path",
             message=f"Config path '{config_path}' ne correspond pas au module '{module}'",
-            fix_hint=f"Utiliser _bmad/{module}/config.yaml"
+            fix_hint=f"Utiliser _grimoire/{module}/config.yaml"
         ))
 
     return findings
@@ -503,12 +503,12 @@ def format_json(report: LintReport) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Lint structurel des agents BMAD",
+        description="Lint structurel des agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--project-root", type=Path, required=True,
-        help="Racine du projet BMAD",
+        help="Racine du projet Grimoire",
     )
     parser.add_argument(
         "--agent", type=str, default=None,
@@ -528,8 +528,8 @@ def main() -> int:
         logging.basicConfig(level=logging.DEBUG)
 
     project_root = args.project_root.resolve()
-    if not (project_root / "_bmad").is_dir():
-        print(f"❌ Pas de répertoire _bmad/ trouvé dans {project_root}", file=sys.stderr)
+    if not (project_root / "_grimoire").is_dir():
+        print(f"[error] Pas de répertoire _grimoire/ trouvé dans {project_root}", file=sys.stderr)
         return 1
 
     report = run_lint(project_root, args.agent)

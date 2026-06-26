@@ -436,15 +436,6 @@ class TestCLINoCommand:
 
 
 class TestFindOutputDir:
-    def test_prefers_dir_with_trace(self, tmp_path):
-        """When both dirs exist, prefer the one with actual trace data."""
-        go = tmp_path / "_grimoire-output"
-        go.mkdir()
-        bo = tmp_path / "_bmad-output"
-        bo.mkdir()
-        (bo / "BMAD_TRACE.md").write_text("# trace\n")
-        assert obs._find_output_dir(tmp_path) == bo
-
     def test_prefers_grimoire_trace_naming(self, tmp_path):
         go = tmp_path / "_grimoire-output"
         go.mkdir()
@@ -467,27 +458,18 @@ class TestFindTrace:
         (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n")
         assert obs._find_trace(tmp_path) == tmp_path / "Grimoire_TRACE.md"
 
-    def test_finds_bmad_trace(self, tmp_path):
-        (tmp_path / "BMAD_TRACE.md").write_text("# trace\n")
-        assert obs._find_trace(tmp_path) == tmp_path / "BMAD_TRACE.md"
-
-    def test_prefers_grimoire_naming(self, tmp_path):
-        (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n")
-        (tmp_path / "BMAD_TRACE.md").write_text("# trace\n")
-        assert obs._find_trace(tmp_path) == tmp_path / "Grimoire_TRACE.md"
-
     def test_fallback_when_neither_exists(self, tmp_path):
         result = obs._find_trace(tmp_path)
         assert result == tmp_path / "Grimoire_TRACE.md"
 
 
-class TestLoadAllBmadLayout:
-    """Test load_all with BMAD-style directory layout."""
+class TestLoadAllGrimoireLayout:
+    """Test load_all with the Grimoire directory layout."""
 
-    def test_loads_from_bmad_output(self, tmp_path):
-        out = tmp_path / "_bmad-output"
+    def test_loads_from_grimoire_output(self, tmp_path):
+        out = tmp_path / "_grimoire-output"
         out.mkdir()
-        (out / "BMAD_TRACE.md").write_text(SAMPLE_TRACE, encoding="utf-8")
+        (out / "Grimoire_TRACE.md").write_text(SAMPLE_TRACE, encoding="utf-8")
         (out / ".event-log.jsonl").write_text(
             "\n".join(json.dumps(e) for e in SAMPLE_EVENTS) + "\n",
             encoding="utf-8",

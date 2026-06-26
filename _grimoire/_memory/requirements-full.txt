@@ -1,4 +1,4 @@
-# BMAD Memory System — Dépendances Python
+# Grimoire Memory System — Dépendances Python
 #
 # Mode minimal (JSON only) : aucune dépendance requise
 # Mode sémantique (recommandé) : décommenter les lignes ci-dessous

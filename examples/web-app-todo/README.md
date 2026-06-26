@@ -38,7 +38,7 @@ Agents déployés automatiquement :
 ```
 todo-app/
 ├── project-context.yaml
-├── _bmad/
+├── _grimoire/
 │   ├── _config/
 │   │   └── custom/
 │   │       ├── agent-base.md
@@ -128,7 +128,7 @@ Loop [REPORTER] → `&#x2713; Fix validé — 2 itérations — pattern sauvegar
 git add .
 git commit -m "feat: filtre par tag"
 
-🔒 BMAD Completion Contract — vérification pre-commit...
+[lock] Grimoire Completion Contract — vérification pre-commit...
    Fichiers stagés détectés : 8 fichier(s) vérifiable(s)
 
 🔍 Détection du stack...
@@ -152,7 +152,7 @@ git commit -m "feat: filtre par tag"
 
 ## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> shared-context.md rempli
 
-Après installation, compléter `_bmad/_memory/shared-context.md` :
+Après installation, compléter `_grimoire/_memory/shared-context.md` :
 
 ```yaml
 # Stack Technique

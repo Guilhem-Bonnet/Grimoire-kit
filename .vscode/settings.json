@@ -92,8 +92,8 @@
 
   // ── Git ──────────────────────────────────────────────────────────────
   "git.enableSmartCommit": false,
-  "git.branchProtection": ["main", "bmad/production"],
-  "git.branchPrefix": "bmad/",
+  "git.branchProtection": ["main", "grimoire/production"],
+  "git.branchPrefix": "grimoire/",
 
   // ── Copilot ──────────────────────────────────────────────────────────
   // Instructions via fichier .github/copilot-instructions.md (chargé automatiquement)

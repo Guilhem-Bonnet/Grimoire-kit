@@ -391,18 +391,17 @@ def parse_shared_state(path: Path) -> dict:
 
 
 def _find_output_dir(project_root: Path) -> Path:
-    """Find the output directory — supports both Grimoire and BMAD layouts.
+    """Find the output directory — Grimoire layout.
 
     Prefers directories that actually contain trace data.
     """
     candidates = [
         project_root / OUTPUT_DIR,          # _grimoire-output/
-        project_root / "_bmad-output",      # BMAD custom layout
     ]
     # First pass: find one with trace data
     for d in candidates:
         if d.is_dir():
-            for name in (TRACE_FILE, "BMAD_TRACE.md"):
+            for name in (TRACE_FILE,):
                 if (d / name).exists():
                     return d
     # Second pass: just find an existing directory
@@ -414,10 +413,9 @@ def _find_output_dir(project_root: Path) -> Path:
 
 
 def _find_trace(out_dir: Path) -> Path:
-    """Find trace file — supports multiple naming conventions."""
+    """Find trace file."""
     candidates = [
         out_dir / TRACE_FILE,               # Grimoire_TRACE.md
-        out_dir / "BMAD_TRACE.md",          # BMAD custom naming
     ]
     for f in candidates:
         if f.exists():
@@ -1587,7 +1585,7 @@ function renderOverview() {
   const cards = [];
 
   // KPI Cards
-  cards.push({icon:'&#128209;',label:'Traces',value:DATA.traces.length,cls:DATA.traces.length>0?'good':'',sub:'BMAD_TRACE.md'});
+  cards.push({icon:'&#128209;',label:'Traces',value:DATA.traces.length,cls:DATA.traces.length>0?'good':'',sub:'Grimoire_TRACE.md'});
   cards.push({icon:'&#9889;',label:'\u00c9v\u00e9nements',value:DATA.events.length,cls:DATA.events.length>0?'good':'',sub:'.event-log.jsonl'});
   cards.push({icon:'&#129302;',label:'Agents',value:DATA.agents.length||DATA.agent_ids.length,cls:DATA.agent_ids.length>3?'good':'warn',sub:DATA.agent_ids.length+' uniques'});
   cards.push({icon:'&#128218;',label:'Sessions',value:DATA.sessions.length,cls:'',sub:'Contextes de travail'});

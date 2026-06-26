@@ -7,7 +7,7 @@
   // ── Archetype DNA ────────────────────────────────────────────────────
   "Grimoire Archetype DNA Template": {
     "scope": "yaml",
-    "prefix": "bmad-dna",
+    "prefix": "grimoire-dna",
     "description": "Template complet d'un fichier .dna.yaml Grimoire",
     "body": [
       "# yaml-language-server: \\$schema=../../framework/archetype-dna.schema.yaml",
@@ -42,7 +42,7 @@
   // ── .agent-rules ─────────────────────────────────────────────────────
   "Grimoire Agent Rules File": {
     "scope": "markdown",
-    "prefix": "bmad-rules",
+    "prefix": "grimoire-rules",
     "description": "Template .agent-rules pour override DNA par dossier",
     "body": [
       "# .agent-rules — ${1:path/to/folder}",
@@ -70,7 +70,7 @@
   // ── Story Grimoire ────────────────────────────────────────────────────────
   "Grimoire Story Template": {
     "scope": "markdown",
-    "prefix": "bmad-story",
+    "prefix": "grimoire-story",
     "description": "Template d'une user story Grimoire complète",
     "body": [
       "# Story ${1:BM-XX}: ${2:Titre de la story}",
@@ -109,7 +109,7 @@
   // ── Checkpoint Grimoire ───────────────────────────────────────────────────
   "Grimoire Checkpoint Call": {
     "scope": "shellscript",
-    "prefix": "bmad-ckpt",
+    "prefix": "grimoire-ckpt",
     "description": "Appel de checkpoint dans un script bash",
     "body": [
       "bash grimoire-init.sh resume --checkpoint-new \"${1:Description du checkpoint}\" \\\\",
@@ -122,7 +122,7 @@
   // ── DNA Acceptance Criteria ───────────────────────────────────────────
   "Grimoire DNA Acceptance Criteria": {
     "scope": "yaml",
-    "prefix": "bmad-ac",
+    "prefix": "grimoire-ac",
     "description": "Critère d'acceptation DNA Grimoire",
     "body": [
       "- id: ${1:ac-00${2:1}}",
@@ -151,7 +151,7 @@
   // ── Workflow Graph Node ───────────────────────────────────────────────
   "Grimoire Workflow DAG Node": {
     "scope": "yaml",
-    "prefix": "bmad-node",
+    "prefix": "grimoire-node",
     "description": "Nœud dans un workflow-graph.tpl.yaml Grimoire",
     "body": [
       "- id: ${1:node-id}",
@@ -171,7 +171,7 @@
   // ── Context Guard TRACE ──────────────────────────────────────────
   "Grimoire Context Guard result trace": {
     "scope": "markdown",
-    "prefix": "bmad-guard",
+    "prefix": "grimoire-guard",
     "description": "Entrée Grimoire_TRACE suite à un résultat context-guard",
     "body": [
       "## ${1:YYYY-MM-DD} | copilot | guard",
@@ -187,7 +187,7 @@
   // ── DNA Evolution Entry ───────────────────────────────────────────
   "Grimoire DNA Evolution decision": {
     "scope": "markdown",
-    "prefix": "bmad-evolve",
+    "prefix": "grimoire-evolve",
     "description": "Entrée Grimoire_TRACE pour une évolution DNA appliquée",
     "body": [
       "## ${1:YYYY-MM-DD} | copilot | dna-evolve",

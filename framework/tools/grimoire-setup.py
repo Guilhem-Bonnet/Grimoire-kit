@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-grimoire-setup.py — Configuration utilisateur BMAD.
+grimoire-setup.py — Configuration utilisateur Grimoire.
 ====================================================
 
 Synchronise les valeurs utilisateur (nom, langue, niveau) dans tous
-les fichiers de configuration du projet BMAD.
+les fichiers de configuration du projet Grimoire.
 
 Source de vérité : project-context.yaml
 
@@ -375,11 +375,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="grimoire setup",
         description=(
-            "Configuration utilisateur BMAD — synchronise les valeurs "
+            "Configuration utilisateur Grimoire — synchronise les valeurs "
             "dans tous les fichiers config."
         ),
     )
-    p.add_argument("--project-root", type=Path, required=True, help="Racine du projet BMAD")
+    p.add_argument("--project-root", type=Path, required=True, help="Racine du projet Grimoire")
     p.add_argument("--check", action="store_true", help="Audit seulement — aucune modification")
     p.add_argument("--sync", action="store_true", help="Sync auto depuis project-context.yaml")
     p.add_argument("--json", action="store_true", help="Sortie JSON")

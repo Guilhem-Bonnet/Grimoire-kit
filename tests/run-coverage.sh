@@ -16,7 +16,7 @@ TEST_FILES=(
   tests/test_rag_indexer.py
   tests/test_rag_retriever.py
   tests/test_memory_sync.py
-  tests/test_bmad_mcp_tools.py
+  tests/test_grimoire_mcp_tools.py
   tests/test_context_summarizer.py
   tests/test_semantic_cache.py
   tests/test_token_budget.py
@@ -61,7 +61,7 @@ fi
 
 # ── Run ──────────────────────────────────────────────────────
 
-COVDIR="_bmad-output/bench-reports"
+COVDIR="_grimoire-output/bench-reports"
 mkdir -p "$COVDIR"
 
 if [[ "${1:-}" == "--quick" ]]; then

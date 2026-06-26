@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-06-26
+
+### Supprimé / Changé
+
+- **Purge BMAD — résidu complet** — Tout le code fonctionnel et l'outillage sont débarrassés de la marque/layout `_bmad` :
+  - `agent-lint.py` retargeté de `_bmad/*/agents/` vers `_grimoire/*/agents/` (variable `grimoire_dir`, manifeste, messages) ;
+  - `observatory.py` ne supporte plus le layout `_bmad-output` / `BMAD_TRACE.md` (Grimoire uniquement) ; tests alignés ;
+  - `github-cc-check.yml.tpl` (framework + copie déployée) rebrandé « Grimoire Completion Contract », chemin `_grimoire/_config/custom/cc-verify.sh`, hint `grimoire init` ;
+  - `bug-finder.py` ignore désormais `.grimoire-rnd` (était `.bmad-rnd`, nom obsolète) ;
+  - docstrings/commentaires/aides nettoyés : `grimoire-setup.py`, `agent-test.py`, `skill-validator.py` ;
+  - `grimoire-completion.zsh` : suppression de l'alias `bmad`/`compdef` et de `bmad-master` ;
+  - `.github/CODEOWNERS`, `.vscode/settings.json` (`git.branchPrefix`), `.vscode/snippets` (préfixes `grimoire-*`), `examples/web-app-todo`, `tests/smoke-test.sh`, `tests/run-coverage.sh`, `_grimoire/_memory/requirements-full.txt` : rebrand `_grimoire`.
+  - **Conservé** : la citation de BMAD-METHOD comme framework de référence dans `docs/agentic-standard-benchmark-corpus-2026Q2.md` (provenance/attribution, pas un usage interne).
+
 ## [3.14.0] - 2026-06-25
 
 ### Changé

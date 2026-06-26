@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# BMAD Custom Kit — Smoke Tests
+# Grimoire Custom Kit — Smoke Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Teste grimoire-init.sh dans un tmpdir vierge pour vérifier que l'installation
@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 KIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BMAD_INIT="$KIT_DIR/grimoire-init.sh"
+Grimoire_INIT="$KIT_DIR/grimoire-init.sh"
 PASSED=0
 FAILED=0
 TOTAL=0
@@ -114,50 +114,50 @@ scenario_minimal() {
     setup_tmpdir "minimal"
 
     # Exécuter l'init
-    bash "$BMAD_INIT" --name "TestSmoke" --user "CI" --archetype minimal --force 2>&1 | tail -5
+    bash "$Grimoire_INIT" --name "TestSmoke" --user "CI" --archetype minimal --force 2>&1 | tail -5
 
     # Structure de base
-    assert_dir_exists  "_bmad/_config/custom/agents"       "Dossier agents custom"
-    assert_dir_exists  "_bmad/_config/custom/workflows"    "Dossier workflows"
-    assert_dir_exists  "_bmad/_memory"                     "Dossier memory"
-    assert_dir_exists  "_bmad/_memory/agent-learnings"     "Dossier agent-learnings"
-    assert_dir_exists  "_bmad-output/.runs/main"           "Session main"
+    assert_dir_exists  "_grimoire/_config/custom/agents"       "Dossier agents custom"
+    assert_dir_exists  "_grimoire/_config/custom/workflows"    "Dossier workflows"
+    assert_dir_exists  "_grimoire/_memory"                     "Dossier memory"
+    assert_dir_exists  "_grimoire/_memory/agent-learnings"     "Dossier agent-learnings"
+    assert_dir_exists  "_grimoire-output/.runs/main"           "Session main"
 
     # Framework files
-    assert_file_exists "_bmad/_config/custom/agent-base.md"    "agent-base.md"
-    assert_file_exists "_bmad/_config/custom/cc-verify.sh"     "cc-verify.sh"
-    assert_file_exists "_bmad/_config/custom/sil-collect.sh"   "sil-collect.sh"
-    assert_file_exists "_bmad/_memory/maintenance.py"          "maintenance.py"
-    assert_file_exists "_bmad/_memory/mem0-bridge.py"          "mem0-bridge.py"
-    assert_file_exists "_bmad/_memory/session-save.py"         "session-save.py"
-    assert_file_exists "_bmad/_memory/backends/__init__.py"    "backends/__init__.py"
+    assert_file_exists "_grimoire/_config/custom/agent-base.md"    "agent-base.md"
+    assert_file_exists "_grimoire/_config/custom/cc-verify.sh"     "cc-verify.sh"
+    assert_file_exists "_grimoire/_config/custom/sil-collect.sh"   "sil-collect.sh"
+    assert_file_exists "_grimoire/_memory/maintenance.py"          "maintenance.py"
+    assert_file_exists "_grimoire/_memory/mem0-bridge.py"          "mem0-bridge.py"
+    assert_file_exists "_grimoire/_memory/session-save.py"         "session-save.py"
+    assert_file_exists "_grimoire/_memory/backends/__init__.py"    "backends/__init__.py"
 
     # Config files
     assert_file_exists "project-context.yaml"                  "project-context.yaml"
-    assert_file_exists "_bmad/_memory/config.yaml"             "memory config.yaml"
-    assert_file_exists "_bmad/_memory/shared-context.md"       "shared-context.md"
-    assert_file_exists "_bmad/_memory/decisions-log.md"        "decisions-log.md"
-    assert_file_exists "_bmad/_memory/failure-museum.md"       "failure-museum.md"
-    assert_file_exists "_bmad/_memory/memories.json"           "memories.json"
-    assert_file_exists "_bmad/_config/agent-manifest.csv"      "agent-manifest.csv"
+    assert_file_exists "_grimoire/_memory/config.yaml"             "memory config.yaml"
+    assert_file_exists "_grimoire/_memory/shared-context.md"       "shared-context.md"
+    assert_file_exists "_grimoire/_memory/decisions-log.md"        "decisions-log.md"
+    assert_file_exists "_grimoire/_memory/failure-museum.md"       "failure-museum.md"
+    assert_file_exists "_grimoire/_memory/memories.json"           "memories.json"
+    assert_file_exists "_grimoire/_config/agent-manifest.csv"      "agent-manifest.csv"
 
     # Meta agents (toujours inclus)
-    assert_file_exists "_bmad/_config/custom/agents/project-navigator.md"  "Atlas (meta)"
-    assert_file_exists "_bmad/_config/custom/agents/agent-optimizer.md"    "Sentinel (meta)"
-    assert_file_exists "_bmad/_config/custom/agents/memory-keeper.md"      "Mnemo (meta)"
+    assert_file_exists "_grimoire/_config/custom/agents/project-navigator.md"  "Atlas (meta)"
+    assert_file_exists "_grimoire/_config/custom/agents/agent-optimizer.md"    "Sentinel (meta)"
+    assert_file_exists "_grimoire/_config/custom/agents/memory-keeper.md"      "Mnemo (meta)"
 
     # Minimal template
-    assert_file_exists "_bmad/_config/custom/agents/custom-agent.tpl.md"   "custom-agent template"
+    assert_file_exists "_grimoire/_config/custom/agents/custom-agent.tpl.md"   "custom-agent template"
 
     # project-context.yaml contenu
     assert_file_contains "project-context.yaml" "TestSmoke"               "project-context contient le nom"
-    assert_file_contains "project-context.yaml" "bmad_kit_version"        "project-context contient la version du kit"
+    assert_file_contains "project-context.yaml" "grimoire_kit_version"        "project-context contient la version du kit"
 
     # Session branching
-    assert_file_exists "_bmad-output/.runs/main/branch.json"  "branch.json main"
+    assert_file_exists "_grimoire-output/.runs/main/branch.json"  "branch.json main"
 
     # Manifest
-    assert_file_contains "_bmad/_config/agent-manifest.csv" "project-navigator"  "manifest contient atlas"
+    assert_file_contains "_grimoire/_config/agent-manifest.csv" "project-navigator"  "manifest contient atlas"
 
     # Copilot instructions
     assert_file_exists ".github/copilot-instructions.md"                       "copilot-instructions.md"
@@ -175,23 +175,23 @@ scenario_infra_ops() {
     echo -e "${CYAN}━━━ Scénario 2 : Installation infra-ops ━━━${NC}"
     setup_tmpdir "infra-ops"
 
-    bash "$BMAD_INIT" --name "InfraTest" --user "CI" --archetype infra-ops --force 2>&1 | tail -3
+    bash "$Grimoire_INIT" --name "InfraTest" --user "CI" --archetype infra-ops --force 2>&1 | tail -3
 
     # Agents infra-ops
-    assert_file_exists "_bmad/_config/custom/agents/ops-engineer.md"          "ops-engineer"
-    assert_file_exists "_bmad/_config/custom/agents/systems-debugger.md"      "systems-debugger"
-    assert_file_exists "_bmad/_config/custom/agents/security-hardener.md"     "security-hardener"
-    assert_file_exists "_bmad/_config/custom/agents/k8s-navigator.md"         "k8s-navigator"
-    assert_file_exists "_bmad/_config/custom/agents/monitoring-specialist.md"  "monitoring-specialist"
-    assert_file_exists "_bmad/_config/custom/agents/pipeline-architect.md"    "pipeline-architect"
-    assert_file_exists "_bmad/_config/custom/agents/backup-dr-specialist.md"  "backup-dr-specialist"
+    assert_file_exists "_grimoire/_config/custom/agents/ops-engineer.md"          "ops-engineer"
+    assert_file_exists "_grimoire/_config/custom/agents/systems-debugger.md"      "systems-debugger"
+    assert_file_exists "_grimoire/_config/custom/agents/security-hardener.md"     "security-hardener"
+    assert_file_exists "_grimoire/_config/custom/agents/k8s-navigator.md"         "k8s-navigator"
+    assert_file_exists "_grimoire/_config/custom/agents/monitoring-specialist.md"  "monitoring-specialist"
+    assert_file_exists "_grimoire/_config/custom/agents/pipeline-architect.md"    "pipeline-architect"
+    assert_file_exists "_grimoire/_config/custom/agents/backup-dr-specialist.md"  "backup-dr-specialist"
 
     # Meta toujours présents
-    assert_file_exists "_bmad/_config/custom/agents/project-navigator.md"    "Atlas (meta) avec infra-ops"
+    assert_file_exists "_grimoire/_config/custom/agents/project-navigator.md"    "Atlas (meta) avec infra-ops"
 
     # Prompt templates
-    assert_dir_exists  "_bmad/_config/custom/prompt-templates"               "prompt-templates copiés"
-    assert_file_exists "_bmad/_config/custom/prompt-templates/troubleshoot.md" "troubleshoot template"
+    assert_dir_exists  "_grimoire/_config/custom/prompt-templates"               "prompt-templates copiés"
+    assert_file_exists "_grimoire/_config/custom/prompt-templates/troubleshoot.md" "troubleshoot template"
 
     cleanup_tmpdir
 }
@@ -205,40 +205,40 @@ scenario_subcommands() {
     setup_tmpdir "subcmd"
 
     # Installer d'abord
-    bash "$BMAD_INIT" --name "CmdTest" --user "CI" --archetype minimal --force >/dev/null 2>&1
+    bash "$Grimoire_INIT" --name "CmdTest" --user "CI" --archetype minimal --force >/dev/null 2>&1
 
     # --version
     local ver
-    ver="$(bash "$BMAD_INIT" --version 2>&1)"
-    if [[ "$ver" =~ ^BMAD\ Custom\ Kit\ v ]]; then
+    ver="$(bash "$Grimoire_INIT" --version 2>&1)"
+    if [[ "$ver" =~ ^Grimoire\ Custom\ Kit\ v ]]; then
         pass "--version retourne une version"
     else
         fail "--version output: '$ver'"
     fi
 
     # doctor (doit exit 0 dans un projet initialisé)
-    assert_exit_code 0 "doctor exit 0" bash "$BMAD_INIT" doctor
+    assert_exit_code 0 "doctor exit 0" bash "$Grimoire_INIT" doctor
 
     # validate —all (doit exit 0 — rien à valider dans minimal mais pas d'erreur)
-    assert_exit_code 0 "validate --all exit 0" bash "$BMAD_INIT" validate --all
+    assert_exit_code 0 "validate --all exit 0" bash "$Grimoire_INIT" validate --all
 
     # guard (doit exit 0 car agents existent)
-    assert_exit_code 0 "guard exit 0" bash "$BMAD_INIT" guard
+    assert_exit_code 0 "guard exit 0" bash "$Grimoire_INIT" guard
 
     # hooks --status (doit exit 0)
-    assert_exit_code 0 "hooks --status exit 0" bash "$BMAD_INIT" hooks --status
+    assert_exit_code 0 "hooks --status exit 0" bash "$Grimoire_INIT" hooks --status
 
     # session-branch --list (doit exit 0)
-    assert_exit_code 0 "session-branch --list exit 0" bash "$BMAD_INIT" session-branch --list
+    assert_exit_code 0 "session-branch --list exit 0" bash "$Grimoire_INIT" session-branch --list
 
     # install --list (doit exit 0)
-    assert_exit_code 0 "install --list exit 0" bash "$BMAD_INIT" install --list
+    assert_exit_code 0 "install --list exit 0" bash "$Grimoire_INIT" install --list
 
     # upgrade (doit exit 0 — même version = OK)
-    assert_exit_code 0 "upgrade exit 0" bash "$BMAD_INIT" upgrade
+    assert_exit_code 0 "upgrade exit 0" bash "$Grimoire_INIT" upgrade
 
     # upgrade --dry-run --force (doit exit 0)
-    assert_exit_code 0 "upgrade --dry-run --force exit 0" bash "$BMAD_INIT" upgrade --dry-run --force
+    assert_exit_code 0 "upgrade --dry-run --force exit 0" bash "$Grimoire_INIT" upgrade --dry-run --force
 
     cleanup_tmpdir
 }
@@ -252,21 +252,21 @@ scenario_incremental_install() {
     setup_tmpdir "incremental"
 
     # D'abord init minimal
-    bash "$BMAD_INIT" --name "IncrTest" --user "CI" --archetype minimal --force >/dev/null 2>&1
+    bash "$Grimoire_INIT" --name "IncrTest" --user "CI" --archetype minimal --force >/dev/null 2>&1
 
     # Puis installer un agent stack
-    bash "$BMAD_INIT" install --archetype stack/go 2>&1 | tail -3
+    bash "$Grimoire_INIT" install --archetype stack/go 2>&1 | tail -3
 
-    assert_file_exists "_bmad/_config/custom/agents/go-expert.md"    "go-expert installé"
+    assert_file_exists "_grimoire/_config/custom/agents/go-expert.md"    "go-expert installé"
 
     # Installer un second
-    bash "$BMAD_INIT" install --archetype stack/docker 2>&1 | tail -3
+    bash "$Grimoire_INIT" install --archetype stack/docker 2>&1 | tail -3
 
-    assert_file_exists "_bmad/_config/custom/agents/docker-expert.md" "docker-expert installé"
+    assert_file_exists "_grimoire/_config/custom/agents/docker-expert.md" "docker-expert installé"
 
     # Verify they coexist
     local count
-    count=$(ls _bmad/_config/custom/agents/*.md 2>/dev/null | wc -l)
+    count=$(ls _grimoire/_config/custom/agents/*.md 2>/dev/null | wc -l)
     if [[ "$count" -ge 6 ]]; then  # 3 meta + 1 minimal + 2 stack
         pass "Au moins 6 agents après install incrémental ($count trouvés)"
     else
@@ -285,14 +285,14 @@ scenario_idempotence() {
     setup_tmpdir "idempotent"
 
     # Première init
-    bash "$BMAD_INIT" --name "IdempTest" --user "CI" --archetype infra-ops --force >/dev/null 2>&1
+    bash "$Grimoire_INIT" --name "IdempTest" --user "CI" --archetype infra-ops --force >/dev/null 2>&1
     local count1
-    count1=$(ls _bmad/_config/custom/agents/*.md 2>/dev/null | wc -l)
+    count1=$(ls _grimoire/_config/custom/agents/*.md 2>/dev/null | wc -l)
 
     # Seconde init identique
-    bash "$BMAD_INIT" --name "IdempTest" --user "CI" --archetype infra-ops --force >/dev/null 2>&1
+    bash "$Grimoire_INIT" --name "IdempTest" --user "CI" --archetype infra-ops --force >/dev/null 2>&1
     local count2
-    count2=$(ls _bmad/_config/custom/agents/*.md 2>/dev/null | wc -l)
+    count2=$(ls _grimoire/_config/custom/agents/*.md 2>/dev/null | wc -l)
 
     if [[ "$count1" -eq "$count2" ]]; then
         pass "Nombre d'agents stable après double init ($count1 = $count2)"
@@ -355,7 +355,7 @@ scenario_python_tools() {
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  BMAD Custom Kit — Smoke Tests v$(cat "$KIT_DIR/version.txt")${NC}"
+echo -e "${CYAN}  Grimoire Custom Kit — Smoke Tests v$(cat "$KIT_DIR/version.txt")${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
 
 if [[ "$SCENARIO_FILTER" == "--scenario" ]]; then

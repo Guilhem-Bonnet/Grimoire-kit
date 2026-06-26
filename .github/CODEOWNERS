@@ -1,4 +1,4 @@
-# BMAD Custom Kit — CODEOWNERS
+# Grimoire Custom Kit — CODEOWNERS
 # Format : <pattern> <owner> [<owner>...]
 # Référence : https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
@@ -6,7 +6,7 @@
 *                               @Guilhem-Bonnet
 
 # ── CLI principal ─────────────────────────────────────────────────────────────
-bmad-init.sh                    @Guilhem-Bonnet
+grimoire-init.sh                    @Guilhem-Bonnet
 
 # ── Archetypes — chaque archétype a son propre owner ──────────────────────────
 archetypes/minimal/             @Guilhem-Bonnet

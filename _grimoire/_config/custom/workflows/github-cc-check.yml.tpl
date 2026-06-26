@@ -1,10 +1,10 @@
-# BMAD Completion Contract — CI Check
-# Template déployé par bmad-init.sh dans .github/workflows/
+# Grimoire Completion Contract — CI Check
+# Template déployé par `grimoire init` dans .github/workflows/
 #
 # Déclenché sur chaque PR modifiant des fichiers vérifiables.
 # Lance cc-verify.sh --changed-only et poste le résultat en annotation.
 
-name: BMAD Completion Contract
+name: Grimoire Completion Contract
 
 on:
   pull_request:
@@ -61,11 +61,11 @@ jobs:
         if: hashFiles('requirements.txt') != ''
         run: pip install -r requirements.txt
 
-      - name: BMAD — Completion Contract
+      - name: Grimoire — Completion Contract
         run: |
-          if [[ -f "_bmad/_config/custom/cc-verify.sh" ]]; then
-            bash _bmad/_config/custom/cc-verify.sh --changed-only
+          if [[ -f "_grimoire/_config/custom/cc-verify.sh" ]]; then
+            bash _grimoire/_config/custom/cc-verify.sh --changed-only
           else
-            echo "⚠️  cc-verify.sh introuvable — BMAD non initialisé dans ce dépôt."
-            echo "    Lancez bmad-init.sh pour installer le Completion Contract."
+            echo "[warn] cc-verify.sh introuvable — Grimoire non initialisé dans ce dépôt."
+            echo "       Lancez 'grimoire init' pour installer le Completion Contract."
           fi
