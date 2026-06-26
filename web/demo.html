@@ -219,9 +219,9 @@
 
       <div class="demo-section" data-section="5">
         <div class="ds-num">06 · LES SURFACES</div>
-        <h2>Six interfaces. Un runtime.</h2>
-        <p>Cockpit pour le pilotage temps réel. Observatory pour l'audit. Kanban pour le flux. War Room pour la crise. Game UI pour la lisibilité. Proofs pour l'audit.</p>
-        <p class="ds-sub">Toutes exposent le même runtime via des contrats différents. Toutes sont remplaçables sans toucher au noyau.</p>
+        <h2>Une surface par usage. Un seul runtime.</h2>
+        <p>CLI et SDK Python pour piloter. Serveur MCP pour brancher Copilot ou Claude Desktop. Observatory pour l'audit, Kanban gouverné pour le flux, Game UI pour la lisibilité.</p>
+        <p class="ds-sub">Toutes lisent le même runtime — la trace, le task-board, le registre d'artefacts. Le Cockpit temps réel, lui, reste une vision assumée.</p>
       </div>
 
       <div class="demo-section" data-section="6">
@@ -315,25 +315,25 @@
 
         <!-- VIZ 5: Surfaces preview -->
         <div class="viz" id="viz-5" aria-label="Aperçu des surfaces">
-          <div class="viz-label">LES SURFACES · CONTROL PLANE</div>
+          <div class="viz-label">LES SURFACES · UN SEUL RUNTIME</div>
           <div class="preview-grid">
-            <div class="preview-tile"><h4>COCKPIT</h4><p>Pilotage temps réel</p><div class="preview-status">LIVE</div></div>
-            <div class="preview-tile"><h4>OBSERVATORY</h4><p>Audit &amp; télémétrie</p><div class="preview-status" style="color:var(--data-amber)">PARTIAL</div></div>
-            <div class="preview-tile"><h4>KANBAN</h4><p>Flux de travail</p><div class="preview-status" style="color:var(--data-amber)">BETA</div></div>
-            <div class="preview-tile"><h4>WAR ROOM</h4><p>Crise &amp; débat</p><div class="preview-status" style="color:var(--ink-muted)">Q3 2026</div></div>
-            <div class="preview-tile"><h4>GAME UI</h4><p>Rendu isométrique</p><div class="preview-status" style="color:var(--data-amber)">BETA</div></div>
-            <div class="preview-tile"><h4>PROOFS</h4><p>Registre audit</p><div class="preview-status" style="color:var(--data-amber)">PARTIAL</div></div>
+            <div class="preview-tile"><h4>CLI · grimoire</h4><p>init · standard · verify · up</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>SDK + MCP</h4><p>Python &amp; Copilot/Claude</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>OBSERVATORY</h4><p>Traces &amp; graphe d'agents</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>KANBAN</h4><p>Flux gouverné, gated</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>GAME UI</h4><p>Scène isométrique</p><div class="preview-status">LIVE</div></div>
+            <div class="preview-tile"><h4>COCKPIT</h4><p>Pilotage temps réel</p><div class="preview-status" style="color:var(--data-amber)">VISION</div></div>
           </div>
         </div>
 
-        <!-- VIZ 6: Observability preview -->
+        <!-- VIZ 6: Observability preview (live observatory.json) -->
         <div class="viz" id="viz-6" aria-label="Aperçu observability">
-          <div class="viz-label">OBSERVABILITY · MÉTRIQUES RUNTIME</div>
+          <div class="viz-label" id="viz6-label">OBSERVABILITY · SNAPSHOT observatory.py</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">P50 LATENCY</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">318ms</div></div>
-            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">HALLUC. RATE</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">0.02%</div></div>
-            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">TOKENS / MIN</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">8.4k</div></div>
-            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">AGENTS ACTIFS</div><div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--accent)">5</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">TRACES</div><div id="viz6-traces" style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">18</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">AGENTS</div><div id="viz6-agents" style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--accent)">7</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">SESSIONS</div><div id="viz6-sessions" style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">3</div></div>
+            <div style="background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;"><div style="font-family:var(--font-mono);font-size:.56rem;color:var(--ink-muted);margin-bottom:4px">TYPES D'ÉVÉNEMENTS</div><div id="viz6-types" style="font-family:var(--font-mono);font-size:1.4rem;font-weight:600;color:var(--ink)">7</div></div>
           </div>
           <div style="margin-top:12px;text-align:center"><a href="observability.html" style="font-family:var(--font-mono);font-size:.65rem;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim)">VOIR L'OBSERVABILITY →</a></div>
         </div>
@@ -549,6 +549,19 @@ const TERMINAL_LINES=[
   {type:'out', text:'  [OK] conformité vérifiée (fail-closed)'},
   {type:'dim', text:'  Premier projet gouverné en quelques minutes.'},
 ];
+
+/* ── VIZ 6: live observatory KPIs (fallback = snapshot) ── */
+(function(){
+  fetch('data/observatory.json',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{
+    const traces=d.traces||[]; const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+    set('viz6-traces', traces.length);
+    set('viz6-agents', (d.agent_ids||(d.agents||[]).map(a=>a.id)).length);
+    set('viz6-sessions', (d.sessions||[]).length);
+    set('viz6-types', (d.event_types||[...new Set(traces.map(t=>t.event_type))]).length);
+    const lbl=document.getElementById('viz6-label');
+    if(lbl) lbl.textContent = 'OBSERVABILITY · ' + (d.is_demo ? 'SNAPSHOT observatory.py' : 'LIVE observatory.py');
+  }).catch(()=>{});
+})();
 
 function startTerminal(){
   termDone=true;

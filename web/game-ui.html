@@ -58,6 +58,10 @@
     }
     .iso-agent:hover { filter: brightness(1.3); }
     .iso-agent:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .iso-agent { transition: filter 200ms, opacity 200ms; }
+    #iso-stage.focus .iso-agent:not(.lit):not(.src) { opacity: 0.28; }
+    #iso-stage.focus .iso-agent.src { filter: brightness(1.45); }
+    svg line.flow { transition: opacity 200ms; }
 
     /* Agent name label */
     .agent-tag {
@@ -166,7 +170,13 @@
       </div>
       <div class="legend-block reveal" data-delay="80">
         <h3>Flux</h3>
-        <p>Les lignes entre agents sont les relations du graphe d'agents : handoff, spec, mémoire, escalade. L'épaisseur reflète la force du lien.</p>
+        <p>Les lignes entre agents sont les relations du graphe d'agents. L'épaisseur reflète la force du lien ; survolez un agent pour isoler ses flux.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted)">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#A78BFA"></span>handoff</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#6EE7FF"></span>spec</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#FCD34D"></span>mémoire</span>
+          <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#F87171"></span>escalade</span>
+        </div>
       </div>
       <div class="legend-block reveal" data-delay="160">
         <h3>Traces</h3>
@@ -235,7 +245,10 @@
   const panel = document.getElementById('agent-panel');
   const panelContent = document.getElementById('panel-content');
   const COLORS = ['#FF6B3D', '#6EE7FF', '#34D399', '#A78BFA', '#F6B83A', '#9BA0A8', '#FCD34D'];
+  const REL_COLOR = { handoff: '#A78BFA', spec: '#6EE7FF', memory: '#FCD34D', escalation: '#F87171' };
+  const relColor = (t) => REL_COLOR[t] || '#FF6B3D';
   const SLOTS = [[2, 2], [4, 2], [6, 2], [2, 4], [6, 4], [3, 6], [5, 6], [4, 4], [7, 3]];
+  const NEIGH = {};
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
   document.getElementById('panel-close').addEventListener('click', () => panel.classList.remove('open'));
 
@@ -297,18 +310,26 @@
       };
     });
 
-    // Relationship flows
+    // Relationship flows (couleur par type, focus au survol)
     const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
     rels.forEach((r) => {
+      (NEIGH[r.from_agent] = NEIGH[r.from_agent] || new Set()).add(r.to_agent);
+      (NEIGH[r.to_agent] = NEIGH[r.to_agent] || new Set()).add(r.from_agent);
       const a = pos[r.from_agent], b = pos[r.to_agent]; if (!a || !b) return;
       const ac = isoPos(a.col, a.row), bc = isoPos(b.col, b.row);
+      const base = (0.2 + (r.strength || 0) / maxStr * 0.45).toFixed(2);
       const line = document.createElementNS(SVGNS, 'line');
+      line.setAttribute('class', 'flow');
+      line.dataset.a = r.from_agent; line.dataset.b = r.to_agent; line.dataset.base = base;
       line.setAttribute('x1', ac.x); line.setAttribute('y1', ac.y + 10);
       line.setAttribute('x2', bc.x); line.setAttribute('y2', bc.y + 10);
-      line.setAttribute('stroke', 'var(--accent)');
+      line.setAttribute('stroke', relColor(r.type));
       line.setAttribute('stroke-width', (0.6 + (r.strength || 0) / maxStr * 1.8).toFixed(2));
       line.setAttribute('stroke-dasharray', '4 4');
-      line.setAttribute('opacity', (0.2 + (r.strength || 0) / maxStr * 0.45).toFixed(2));
+      line.setAttribute('opacity', base);
+      const ttl = document.createElementNS(SVGNS, 'title');
+      ttl.textContent = `${r.from_agent} → ${r.to_agent} · ${r.type || ''} · ${r.interactions || 0}×`;
+      line.appendChild(ttl);
       if (!reduced) line.style.animation = 'ticker 1.5s linear infinite';
       svg.appendChild(line);
     });
@@ -325,9 +346,12 @@
       const tag = document.createElement('div'); tag.className = 'agent-tag' + (ag.working ? ' working' : ''); tag.textContent = ag.id.toUpperCase();
       const badge2 = document.createElement('div'); badge2.className = 'task-badge'; badge2.textContent = ag.traces + ' tr.';
       w.innerHTML = agentSVG(ag.color); w.appendChild(tag); w.appendChild(badge2);
-      w.addEventListener('mouseenter', (e) => { tip.style.display = 'block'; tip.innerHTML = tipHTML(ag); positionTip(e); });
+      w.dataset.id = ag.id;
+      w.addEventListener('mouseenter', (e) => { tip.style.display = 'block'; tip.innerHTML = tipHTML(ag); positionTip(e); focusAgent(ag.id); });
       w.addEventListener('mousemove', positionTip);
-      w.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      w.addEventListener('mouseleave', () => { tip.style.display = 'none'; blurAgent(); });
+      w.addEventListener('focus', () => focusAgent(ag.id));
+      w.addEventListener('blur', blurAgent);
       const open = () => { panelContent.innerHTML = panelHTML(ag); panel.classList.add('open'); };
       w.addEventListener('click', open);
       w.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
@@ -335,6 +359,21 @@
     });
 
     requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
+  }
+
+  function focusAgent(id) {
+    const nb = NEIGH[id] || new Set();
+    stage.classList.add('focus');
+    stage.querySelectorAll('.iso-agent').forEach((el) => { el.classList.toggle('src', el.dataset.id === id); el.classList.toggle('lit', nb.has(el.dataset.id)); });
+    svg.querySelectorAll('line.flow').forEach((l) => {
+      const on = l.dataset.a === id || l.dataset.b === id;
+      l.setAttribute('opacity', on ? '0.9' : '0.05');
+    });
+  }
+  function blurAgent() {
+    stage.classList.remove('focus');
+    stage.querySelectorAll('.iso-agent').forEach((el) => el.classList.remove('src', 'lit'));
+    svg.querySelectorAll('line.flow').forEach((l) => l.setAttribute('opacity', l.dataset.base || '0.3'));
   }
 
   function tipHTML(ag) {

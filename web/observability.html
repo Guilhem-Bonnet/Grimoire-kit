@@ -8,46 +8,65 @@
   <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/observability.html"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Observabilité du runtime Grimoire Kit : traces, types d'événements, activité par agent, graphe de relations et trace log — depuis observatory.py (réel en local, snapshot sur la vitrine)." />
+  <meta name="description" content="Observabilité du runtime Grimoire Kit : constellation d'agents, relations pondérées, types d'événements, sessions et trace log — depuis observatory.py (réel en local, snapshot sur la vitrine)." />
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
   <style>
     body { padding-top: 56px; }
-    #hero { padding: 72px 0 18px; }
+    #hero { padding: 64px 0 14px; }
     #hero .container, #obs .container { max-width: var(--max-w); }
-    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 600px; line-height: var(--lh-body); }
-    .obs-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .hero-sub { color: var(--ink-soft); margin-top: 12px; font-size: 0.98rem; max-width: 620px; line-height: var(--lh-body); }
+    .obs-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
     .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
 
-    #obs { padding: 8px 0 80px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 14px 0 22px; }
-    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px 18px; }
-    .kpi-lbl { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
-    .kpi-val { font-family: var(--font-mono); font-size: 1.8rem; font-weight: 600; color: var(--ink); line-height: 1; }
+    /* blueprint surface */
+    .obs-surface { position: relative; overflow: hidden; border-top: 1px solid var(--line); background: var(--elev-1); padding: 26px 0 80px; }
+    .obs-surface::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
+    #obs .container { position: relative; z-index: 1; }
 
-    .board-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    @media (max-width: 860px) { .board-grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: 1fr 1fr; } }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 0 0 22px; }
+    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: var(--r-md); padding: 16px 18px; }
+    .kpi-lbl { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
+    .kpi-val { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 600; color: var(--ink); line-height: 1; }
+
     .panel { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px; }
-    .panel.full { grid-column: 1 / -1; }
-    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; }
+    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: baseline; }
     .panel-head .sub { color: var(--ink-muted); }
 
-    .bar-row { display: grid; grid-template-columns: 130px 1fr 44px; align-items: center; gap: 10px; margin-bottom: 9px; }
-    .bar-lbl { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* graph + side */
+    .graph-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .graph-panel { padding: 6px 6px 10px; }
+    #graph { width: 100%; display: block; }
+    #graph .edge { fill: none; stroke: var(--ink-soft); opacity: 0.16; transition: opacity 200ms, stroke-width 200ms; }
+    #graph.focus .edge { opacity: 0.05; }
+    #graph.focus .edge.lit { opacity: 0.85; }
+    #graph .gnode circle { transition: opacity 180ms; cursor: pointer; }
+    #graph .gnode text { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-soft); pointer-events: none; }
+    #graph.focus .gnode:not(.lit):not(.src) { opacity: 0.25; }
+    #graph .gnode.src circle { stroke: var(--ink); stroke-width: 2; }
+    .side-col { display: flex; flex-direction: column; gap: 14px; }
+    @media (max-width: 920px) { .graph-grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: 1fr 1fr; } }
+
+    .bar-row { display: grid; grid-template-columns: 96px 1fr 36px; align-items: center; gap: 10px; margin-bottom: 9px; }
+    .bar-lbl { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .bar-track { height: 8px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
     .bar-fill { height: 100%; border-radius: 999px; transition: width 600ms var(--ease-forge); }
-    .bar-val { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted); text-align: right; }
+    .bar-val { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); text-align: right; }
 
-    .edge { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
-    .edge:last-child { border-bottom: none; }
-    .edge-flow { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-soft); }
-    .edge-flow .ar { color: var(--accent); margin: 0 5px; }
-    .edge-flow .ty { color: var(--ink-muted); font-size: 0.58rem; margin-left: 6px; }
-    .edge-meta { display: flex; align-items: center; gap: 8px; }
-    .edge-bar { width: 60px; height: 5px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
-    .edge-bar > i { display: block; height: 100%; background: var(--accent); }
-    .edge-int { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    /* agent roster */
+    .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .ag-card { background: var(--elev-2); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim); border-radius: var(--r-md); padding: 12px 14px; cursor: pointer; transition: border-color 180ms, box-shadow 180ms, opacity 180ms; }
+    .ag-card:hover, .ag-card.lit { border-color: var(--accent); box-shadow: 0 0 24px -10px var(--accent-glow); }
+    .ag-card.src { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 28px -8px var(--accent-glow); }
+    .roster.focus .ag-card:not(.lit):not(.src) { opacity: 0.3; }
+    .ag-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .ag-id { font-size: 0.86rem; font-weight: 700; color: var(--ink); }
+    .ag-tr { font-family: var(--font-mono); font-size: 0.62rem; color: var(--accent); }
+    .ag-persona { font-size: 0.68rem; color: var(--ink-muted); margin: 2px 0 8px; }
+    .ag-caps { display: flex; flex-wrap: wrap; gap: 4px; }
+    .ag-cap { font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.03em; color: var(--ink-soft); background: var(--elev-3); border-radius: 3px; padding: 1px 6px; }
 
     .tracelog { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.66rem; }
     .tracelog th { text-align: left; color: var(--ink-muted); font-weight: 500; letter-spacing: 0.06em; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 0.56rem; }
@@ -67,27 +86,43 @@
 <main id="main">
   <section id="hero">
     <div class="container">
-      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-02</span> · OBSERVABILITY</div>
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-02</span> · OBSERVABILITY</div>
       <h1 class="grad-text reveal" data-delay="60">Le runtime, observé.</h1>
       <p class="hero-sub reveal" data-delay="120">
-        Tout ce que font les agents est tracé : chaque action, décision, handoff et checkpoint.
-        Ces vues sont générées par <code>observatory.py</code> à partir de la trace du projet —
-        <strong>réelles en local</strong>, snapshot représentatif sur la vitrine.
+        Chaque action, décision, handoff et checkpoint est tracé. Cette constellation est générée par
+        <code>observatory.py</code> à partir de la trace du projet — <strong>réelle en local</strong>,
+        snapshot représentatif sur la vitrine. Survolez un agent pour suivre ses relations.
       </p>
       <span class="obs-badge reveal" data-delay="160" id="obs-badge"><span class="dot"></span>CHARGEMENT…</span>
     </div>
   </section>
 
-  <section id="obs">
+  <section class="obs-surface" id="obs">
     <div class="container">
-      <div class="kpi-grid" id="kpis"></div>
-      <div class="board-grid">
-        <div class="panel"><div class="panel-head"><span>Répartition par type d'événement</span><span class="sub" id="evt-total"></span></div><div id="evt-bars"></div></div>
-        <div class="panel"><div class="panel-head"><span>Activité par agent</span><span class="sub" id="ag-total"></span></div><div id="ag-bars"></div></div>
-        <div class="panel"><div class="panel-head"><span>Graphe d'agents — relations</span><span class="sub" id="rel-total"></span></div><div id="edges"></div></div>
-        <div class="panel"><div class="panel-head"><span>Sessions</span></div><div id="sessions"></div></div>
-        <div class="panel full"><div class="panel-head"><span>Trace log</span><span class="sub" id="tl-count"></span></div><div class="filters" id="tl-filters"></div><div style="overflow-x:auto"><table class="tracelog"><thead><tr><th>HEURE</th><th>AGENT</th><th>TYPE</th><th>SESSION</th></tr></thead><tbody id="tl-body"></tbody></table></div></div>
+      <div class="kpi-grid reveal" id="kpis"></div>
+
+      <div class="graph-grid">
+        <div class="panel graph-panel reveal" data-delay="60">
+          <div class="panel-head" style="padding:12px 14px 0"><span>Constellation d'agents</span><span class="sub" id="graph-sub"></span></div>
+          <svg id="graph" viewBox="0 0 640 460" aria-label="Graphe des agents et relations"></svg>
+        </div>
+        <div class="side-col">
+          <div class="panel reveal" data-delay="100"><div class="panel-head"><span>Types d'événement</span><span class="sub" id="evt-total"></span></div><div id="evt-bars"></div></div>
+          <div class="panel reveal" data-delay="140"><div class="panel-head"><span>Sessions</span><span class="sub" id="sess-total"></span></div><div id="sessions"></div></div>
+        </div>
       </div>
+
+      <div class="panel reveal" data-delay="120" style="margin-bottom:14px">
+        <div class="panel-head"><span>Agents</span><span class="sub" id="roster-sub"></span></div>
+        <div class="roster" id="roster"></div>
+      </div>
+
+      <div class="panel reveal" data-delay="160">
+        <div class="panel-head"><span>Trace log</span><span class="sub" id="tl-count"></span></div>
+        <div class="filters" id="tl-filters"></div>
+        <div style="overflow-x:auto"><table class="tracelog"><thead><tr><th>HEURE</th><th>AGENT</th><th>TYPE</th><th>SESSION</th></tr></thead><tbody id="tl-body"></tbody></table></div>
+      </div>
+
       <div id="obs-empty">Données runtime indisponibles (<code>data/observatory.json</code>). Lance <code>grimoire observatory export</code> dans un projet instrumenté.</div>
     </div>
   </section>
@@ -104,18 +139,19 @@
     ACTION: 'var(--accent)', DECISION: 'var(--data-cyan)', HANDOFF: 'var(--data-violet)',
     CHECKPOINT: 'var(--data-green)', REMEMBER: 'var(--data-amber)', WARN: 'var(--data-amber)', ERROR: 'var(--data-red)',
   };
+  const REL_COLOR = { handoff: 'var(--data-violet)', spec: 'var(--data-cyan)', memory: 'var(--data-amber)', escalation: 'var(--data-red)' };
+  const SVGNS = 'http://www.w3.org/2000/svg';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
   const evColor = (t) => EVT_COLOR[t] || 'var(--ink-soft)';
-  let DATA = null, filter = null;
+  const relColor = (t) => REL_COLOR[t] || 'var(--accent)';
+  let DATA = null, filter = null; const NEIGH = {};
 
   fetch('data/observatory.json', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then(render)
     .catch(() => { document.getElementById('obs-empty').style.display = 'block'; const b = document.getElementById('obs-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; });
 
-  function countBy(arr, key) {
-    const m = {}; arr.forEach((x) => { const k = typeof key === 'function' ? key(x) : x[key]; if (k) m[k] = (m[k] || 0) + 1; }); return m;
-  }
+  function countBy(arr, key) { const m = {}; arr.forEach((x) => { const k = typeof key === 'function' ? key(x) : x[key]; if (k) m[k] = (m[k] || 0) + 1; }); return m; }
   function bars(map, colorFn) {
     const max = Math.max(1, ...Object.values(map));
     return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
@@ -126,43 +162,35 @@
   function render(d) {
     DATA = d;
     const traces = d.traces || [], agents = d.agents || [], rels = d.relationships || [];
-    // badge
+    const ids = d.agent_ids || agents.map((a) => a.id);
+    const byAgent = countBy(traces, 'agent');
+
     const badge = document.getElementById('obs-badge');
     badge.innerHTML = `<span class="dot" style="background:${d.is_demo ? 'var(--accent)' : 'var(--data-green)'}"></span>` + (d.is_demo ? 'SNAPSHOT DÉMO' : 'LIVE · observatory.py') + ` · ${traces.length} traces`;
 
-    // KPIs
     const kpis = [
-      ['TRACES', traces.length],
-      ['AGENTS', (d.agent_ids || agents.map((a) => a.id)).length],
+      ['TRACES', traces.length], ['AGENTS', ids.length],
       ['SESSIONS', (d.sessions || []).length],
       ["TYPES D'ÉVÉNEMENTS", (d.event_types || Object.keys(countBy(traces, 'event_type'))).length],
     ];
     document.getElementById('kpis').innerHTML = kpis.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
 
-    // Event types
+    rels.forEach((r) => { (NEIGH[r.from_agent] = NEIGH[r.from_agent] || new Set()).add(r.to_agent); (NEIGH[r.to_agent] = NEIGH[r.to_agent] || new Set()).add(r.from_agent); });
+    drawGraph(agents, ids, rels, byAgent);
+    document.getElementById('graph-sub').textContent = `${ids.length} agents · ${rels.length} relations`;
+
+    drawRoster(agents, ids, byAgent);
+
     const byType = countBy(traces, 'event_type');
     document.getElementById('evt-bars').innerHTML = bars(byType, evColor) || '<div class="bar-val">—</div>';
     document.getElementById('evt-total').textContent = Object.keys(byType).length + ' types';
 
-    // Agent activity
-    const byAgent = countBy(traces, 'agent');
-    document.getElementById('ag-bars').innerHTML = bars(byAgent) || '<div class="bar-val">—</div>';
-    document.getElementById('ag-total').textContent = Object.keys(byAgent).length + ' agents';
-
-    // Relationships
-    const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
-    document.getElementById('edges').innerHTML = rels.length ? rels.map((r) =>
-      `<div class="edge"><span class="edge-flow">${esc(r.from_agent)}<span class="ar">→</span>${esc(r.to_agent)}<span class="ty">${esc(r.type || '')}</span></span><span class="edge-meta"><span class="edge-bar"><i style="width:${((r.strength || 0) / maxStr * 100).toFixed(0)}%"></i></span><span class="edge-int">${r.interactions || 0}×</span></span></div>`
-    ).join('') : '<div class="bar-val">— aucune relation</div>';
-    document.getElementById('rel-total').textContent = rels.length + ' relations';
-
-    // Sessions
     document.getElementById('sessions').innerHTML = (d.sessions || []).map((s) => {
       const n = traces.filter((t) => t.session === s).length;
-      return `<div class="bar-row"><span class="bar-lbl">${esc(s)}</span><span class="bar-track"><span class="bar-fill" style="width:${(n / Math.max(1, traces.length) * 100).toFixed(0)}%"></span></span><span class="bar-val">${n}</span></div>`;
+      return `<div class="bar-row"><span class="bar-lbl" title="${esc(s)}">${esc(s)}</span><span class="bar-track"><span class="bar-fill" style="width:${(n / Math.max(1, traces.length) * 100).toFixed(0)}%"></span></span><span class="bar-val">${n}</span></div>`;
     }).join('') || '<div class="bar-val">—</div>';
+    document.getElementById('sess-total').textContent = (d.sessions || []).length + ' sessions';
 
-    // Trace log filters
     document.getElementById('tl-filters').innerHTML =
       `<span class="filt active" data-f="">TOUT</span>` +
       Object.keys(byType).map((t) => `<span class="filt" data-f="${esc(t)}" style="border-color:${evColor(t)}">${esc(t)}</span>`).join('');
@@ -174,6 +202,79 @@
     renderLog();
 
     requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
+  }
+
+  /* ── Constellation : agents sur ellipse, relations en chordes pondérées ── */
+  function drawGraph(agents, ids, rels, byAgent) {
+    const svg = document.getElementById('graph');
+    const W = 640, H = 460, cx = W / 2, cy = H / 2 + 6, rx = 250, ry = 168;
+    const trOf = (id) => (byAgent[id] || (agents.find((a) => a.id === id) || {}).metrics?.traces || 0);
+    const maxTr = Math.max(1, ...ids.map(trOf));
+    const POS = {};
+    ids.forEach((id, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / ids.length; POS[id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), r: 13 + trOf(id) / maxTr * 15 }; });
+
+    let edges = '', nodes = '';
+    const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
+    rels.forEach((r) => {
+      const a = POS[r.from_agent], b = POS[r.to_agent]; if (!a || !b) return;
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; const qx = mx + (cx - mx) * 0.35, qy = my + (cy - my) * 0.35;
+      const w = 1 + (r.strength || 0) / maxStr * 3.4;
+      edges += `<path class="edge" data-a="${esc(r.from_agent)}" data-b="${esc(r.to_agent)}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}" style="stroke:${relColor(r.type)};stroke-width:${w.toFixed(2)}"><title>${esc(r.from_agent)} → ${esc(r.to_agent)} · ${esc(r.type || '')} · ${r.interactions || 0}× · trust ${(r.avg_trust || 0).toFixed(2)}</title></path>`;
+    });
+    ids.forEach((id) => {
+      const p = POS[id];
+      nodes += `<g class="gnode" data-id="${esc(id)}" tabindex="0" role="button" aria-label="${esc(id)}">
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="var(--accent)"/>
+        <text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 14).toFixed(1)}" text-anchor="middle">${esc(id)}</text>
+      </g>`;
+    });
+    svg.innerHTML = edges + nodes;
+
+    svg.querySelectorAll('.gnode').forEach((g) => {
+      const id = g.dataset.id;
+      g.addEventListener('mouseenter', () => focus(id));
+      g.addEventListener('mouseleave', blur);
+      g.addEventListener('focus', () => focus(id));
+      g.addEventListener('blur', blur);
+    });
+  }
+
+  function focus(id) {
+    const nb = NEIGH[id] || new Set();
+    const g = document.getElementById('graph'); g.classList.add('focus');
+    g.querySelectorAll('.gnode').forEach((el) => { el.classList.toggle('src', el.dataset.id === id); el.classList.toggle('lit', nb.has(el.dataset.id)); });
+    g.querySelectorAll('.edge').forEach((p) => p.classList.toggle('lit', p.dataset.a === id || p.dataset.b === id));
+    const r = document.getElementById('roster'); r.classList.add('focus');
+    r.querySelectorAll('.ag-card').forEach((el) => { el.classList.toggle('src', el.dataset.id === id); el.classList.toggle('lit', nb.has(el.dataset.id)); });
+  }
+  function blur() {
+    const g = document.getElementById('graph'); g.classList.remove('focus');
+    g.querySelectorAll('.gnode').forEach((el) => el.classList.remove('src', 'lit'));
+    g.querySelectorAll('.edge').forEach((p) => p.classList.remove('lit'));
+    const r = document.getElementById('roster'); r.classList.remove('focus');
+    r.querySelectorAll('.ag-card').forEach((el) => el.classList.remove('src', 'lit'));
+  }
+
+  function drawRoster(agents, ids, byAgent) {
+    const roster = document.getElementById('roster');
+    const ordered = ids.slice().sort((a, b) => (byAgent[b] || 0) - (byAgent[a] || 0));
+    roster.innerHTML = ordered.map((id) => {
+      const a = agents.find((x) => x.id === id) || {};
+      const caps = (a.capabilities || []).map((c) => `<span class="ag-cap">${esc(c)}</span>`).join('');
+      const tr = byAgent[id] || (a.metrics && a.metrics.traces) || 0;
+      return `<div class="ag-card" data-id="${esc(id)}" tabindex="0">
+        <div class="ag-top"><span class="ag-id">${esc(id)}</span><span class="ag-tr">${tr} tr</span></div>
+        <div class="ag-persona">${esc(a.persona || '—')}</div>
+        <div class="ag-caps">${caps}</div></div>`;
+    }).join('');
+    document.getElementById('roster-sub').textContent = ids.length + ' agents · taille du nœud ∝ volume de traces';
+    roster.querySelectorAll('.ag-card').forEach((el) => {
+      el.addEventListener('mouseenter', () => focus(el.dataset.id));
+      el.addEventListener('mouseleave', blur);
+      el.addEventListener('focus', () => focus(el.dataset.id));
+      el.addEventListener('blur', blur);
+    });
   }
 
   function renderLog() {

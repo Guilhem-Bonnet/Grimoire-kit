@@ -14,63 +14,56 @@
   <link rel="stylesheet" href="forge-motion.css"/>
   <style>
     body { padding-top: 56px; }
-
-    #hero { padding: 72px 0 28px; }
+    #hero { padding: 64px 0 22px; }
     #hero .container { max-width: var(--max-w); }
-    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 640px; line-height: var(--lh-body); }
-    .board-badge {
-      display: inline-flex; align-items: center; gap: 7px; margin-top: 18px;
-      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em;
-      padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft);
-    }
+    .hero-sub { color: var(--ink-soft); margin-top: 12px; font-size: 0.98rem; max-width: 640px; line-height: var(--lh-body); }
+    .board-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
     .board-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
 
-    /* ── Transitions gated (signature) ── */
-    #gates { padding: 8px 0 28px; }
-    #gates .container { max-width: var(--max-w); }
-    .gates-label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 14px; }
-    .gates-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-    .gate {
-      background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-md);
-      padding: 13px 15px; border-left: 2px solid var(--accent-dim);
-    }
-    .gate-flow { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink); margin-bottom: 8px; }
-    .gate-flow .arrow { color: var(--accent); margin: 0 4px; }
-    .gate-req { display: flex; flex-wrap: wrap; gap: 5px; }
-    .gate-req span {
-      font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em;
-      color: var(--data-green); background: rgba(52,211,153,0.10);
-      border: 1px solid rgba(52,211,153,0.22); border-radius: var(--r-sm); padding: 2px 7px;
-    }
+    /* ── Governed pipeline rail ── */
+    #pipe { position: relative; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--elev-1); padding: 26px 0 28px; }
+    #pipe::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
+    #pipe .container { max-width: none; padding-left: 32px; padding-right: 32px; position: relative; z-index: 1; }
+    .pipe-label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 18px; }
+    .rail { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 8px; }
+    .rail::-webkit-scrollbar { height: 8px; } .rail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+    .station { flex: 0 0 auto; min-width: 116px; background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--st, var(--ink-muted)); border-radius: var(--r-md); padding: 11px 13px; }
+    .station.empty { opacity: 0.5; }
+    .st-top { display: flex; align-items: center; gap: 7px; }
+    .st-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st); flex: 0 0 auto; }
+    .st-name { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.05em; color: var(--ink); text-transform: uppercase; }
+    .st-count { margin-left: auto; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--ink); }
+    .connector { flex: 0 0 auto; width: 118px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 0 4px; }
+    .connector .arrow { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); margin-top: 6px; }
+    .connector .gates { display: flex; flex-direction: column; gap: 3px; margin-top: 7px; width: 100%; }
+    .gchip { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.02em; text-align: center; color: var(--data-green); background: rgba(52,211,153,0.10); border: 1px solid rgba(52,211,153,0.22); border-radius: var(--r-sm); padding: 2px 5px; line-height: 1.25; }
+    .branch { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    .branch .b-from { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); letter-spacing: 0.05em; }
+    .branch .arrow { color: var(--data-red); font-family: var(--font-mono); }
+    .branch .station { border-top-color: var(--data-red); }
+    .branch .gates { flex-direction: row; flex-wrap: wrap; width: auto; }
+    .branch .gchip { color: var(--data-red); background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.24); }
 
     /* ── Board ── */
-    #board { padding: 0 0 80px; }
+    #board { padding: 26px 0 80px; }
     #board .container { max-width: none; padding-left: 32px; padding-right: 32px; }
     .columns { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 18px; scroll-snap-type: x proximity; }
-    .columns::-webkit-scrollbar { height: 9px; }
-    .columns::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+    .columns::-webkit-scrollbar { height: 9px; } .columns::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
     .col { flex: 0 0 268px; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 200px; }
-    .col-head { display: flex; align-items: center; gap: 9px; padding: 0 4px 12px; position: sticky; top: 0; }
+    .col-head { display: flex; align-items: center; gap: 9px; padding: 0 4px 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
     .col-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
     .col-name { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; color: var(--ink); text-transform: uppercase; }
     .col-count { margin-left: auto; font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted); background: var(--elev-2); border-radius: 999px; padding: 1px 9px; }
     .col-cards { display: flex; flex-direction: column; gap: 10px; }
-    .col-empty { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); opacity: 0.6; padding: 14px 4px; }
+    .col-empty { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); opacity: 0.5; padding: 14px 4px; }
 
-    .card {
-      background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md);
-      padding: 13px 14px; position: relative; overflow: hidden;
-      transition: border-color 200ms, transform 200ms;
-    }
+    .card { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 13px 14px; position: relative; overflow: hidden; transition: border-color 200ms, transform 200ms, box-shadow 200ms; }
     .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prio, var(--ink-muted)); }
-    .card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 0 24px -12px var(--accent-glow); }
     .card-title { font-size: 0.86rem; line-height: 1.35; color: var(--ink); font-weight: 500; margin-bottom: 10px; }
     .card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .chip {
-      font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.03em;
-      border-radius: var(--r-sm); padding: 2px 7px; border: 1px solid var(--line);
-      color: var(--ink-soft); background: var(--elev-3);
-    }
+    .chip { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.03em; border-radius: var(--r-sm); padding: 2px 7px; border: 1px solid var(--line); color: var(--ink-soft); background: var(--elev-3); }
     .chip.role { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-soft); }
     .chip.owner { color: var(--ink-soft); }
     .card-blockers { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
@@ -80,7 +73,6 @@
     .ref { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.04em; color: var(--data-cyan); border: 1px solid rgba(110,231,255,0.22); background: rgba(110,231,255,0.08); border-radius: var(--r-sm); padding: 1px 6px; }
 
     #board-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 4px; }
-
     @media (max-width: 640px) { .col { flex-basis: 80vw; } }
   </style>
 </head>
@@ -91,7 +83,7 @@
 <main id="main">
   <section id="hero">
     <div class="container">
-      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-06</span> · KANBAN GOUVERNÉ</div>
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-06</span> · KANBAN GOUVERNÉ</div>
       <h1 class="grad-text reveal" data-delay="60">Le tableau agentique.</h1>
       <p class="hero-sub reveal" data-delay="120">
         Huit états, des transitions <strong>gated par la preuve</strong>. Une carte n'avance pas parce qu'un agent
@@ -102,10 +94,11 @@
     </div>
   </section>
 
-  <section id="gates">
+  <section id="pipe">
     <div class="container">
-      <div class="gates-label reveal">Transitions gouvernées — chaque passage exige son artefact</div>
-      <div class="gates-row reveal" data-delay="60" id="gates-row"></div>
+      <div class="pipe-label reveal">Pipeline gouverné — chaque transition exige sa preuve</div>
+      <div class="rail reveal" data-delay="60" id="rail"></div>
+      <div class="branch reveal" data-delay="100" id="branch"></div>
     </div>
   </section>
 
@@ -135,11 +128,9 @@
     archived:   { label: 'Archivé',  c: 'var(--ink-muted)' },
   };
   const PRIO = { high: 'var(--data-red)', medium: 'var(--data-amber)', low: 'var(--ink-muted)' };
-  const REF_LABEL = {
-    acceptance_criteria: 'critères', context_bundle_ref: 'contexte',
-    evidence_pack_ref: 'evidence', decision_trace_ref: 'décision', remediation_ref: 'remédiation',
-  };
+  const REF_LABEL = { acceptance_criteria: 'critères', context_bundle_ref: 'contexte', evidence_pack_ref: 'evidence', decision_trace_ref: 'décision', remediation_ref: 'remédiation' };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const stMeta = (s) => STATE[s] || { label: s.replace(/_/g, ' '), c: 'var(--ink-muted)' };
 
   fetch('data/taskboard.json', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -151,63 +142,67 @@
     });
 
   function render(board) {
-    // Badge démo / live
     const badge = document.getElementById('board-badge');
     if (badge) {
       const live = !board.is_demo;
-      badge.innerHTML =
-        `<span class="dot" style="background:${live ? 'var(--data-green)' : 'var(--accent)'}"></span>` +
-        (live ? `LIVE · ${esc(board.source || 'task-board.yaml')}` : 'DÉMO · standard task-board') +
-        ` · ${board.tasks.length} TÂCHES`;
+      badge.innerHTML = `<span class="dot" style="background:${live ? 'var(--data-green)' : 'var(--accent)'}"></span>` +
+        (live ? `LIVE · ${esc(board.source || 'task-board.yaml')}` : 'DÉMO · standard task-board') + ` · ${board.tasks.length} TÂCHES`;
     }
 
-    // Transitions gated
-    const gates = document.getElementById('gates-row');
-    if (gates && board.transitions) {
-      gates.innerHTML = Object.entries(board.transitions).map(([key, val]) => {
-        const parts = key.replace(/_to_/, ' → ').split(' → ');
-        const flow = parts.map((p) => (STATE[p] ? STATE[p].label : p.replace(/_/g, ' '))).join('<span class="arrow">→</span>');
-        const reqs = (val && val.requires || []).map((r) => `<span>${esc(r.replace(/_/g, ' '))}</span>`).join('');
-        return `<div class="gate"><div class="gate-flow">${flow}</div><div class="gate-req">${reqs}</div></div>`;
-      }).join('');
+    const counts = {};
+    (board.tasks || []).forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
+    const trans = board.transitions || {};
+
+    // Rail linéaire (états hors "blocked"), gates entre stations consécutives
+    const flow = (board.states || []).filter((s) => s !== 'blocked');
+    let railHtml = '';
+    flow.forEach((s, i) => {
+      const m = stMeta(s), n = counts[s] || 0;
+      railHtml += `<div class="station${n ? '' : ' empty'}" style="--st:${m.c}"><div class="st-top"><span class="st-dot"></span><span class="st-name">${esc(m.label)}</span><span class="st-count">${n}</span></div></div>`;
+      if (i < flow.length - 1) {
+        const t = trans[`${s}_to_${flow[i + 1]}`];
+        const gates = t && t.requires ? t.requires.map((r) => `<span class="gchip">${esc(r.replace(/_/g, ' '))}</span>`).join('') : '';
+        railHtml += `<div class="connector"><span class="arrow">→</span><div class="gates">${gates}</div></div>`;
+      }
+    });
+    document.getElementById('rail').innerHTML = railHtml;
+
+    // Branche "bloqué" (any → blocked)
+    const blk = trans.any_to_blocked;
+    if (blk) {
+      const m = stMeta('blocked');
+      const gates = (blk.requires || []).map((r) => `<span class="gchip">${esc(r.replace(/_/g, ' '))}</span>`).join('');
+      document.getElementById('branch').innerHTML =
+        `<span class="b-from">DEPUIS N'IMPORTE QUEL ÉTAT</span><span class="arrow">→</span>` +
+        `<div class="station" style="--st:${m.c}"><div class="st-top"><span class="st-dot"></span><span class="st-name">${esc(m.label)}</span><span class="st-count">${counts.blocked || 0}</span></div></div>` +
+        `<div class="gates">${gates}</div>`;
     }
 
-    // Colonnes
+    // Board
     const byState = {};
     (board.tasks || []).forEach((t) => { (byState[t.status] = byState[t.status] || []).push(t); });
-    const cols = document.getElementById('columns');
-    cols.innerHTML = (board.states || []).map((st) => {
-      const meta = STATE[st] || { label: st, c: 'var(--ink-muted)' };
-      const tasks = byState[st] || [];
-      const cards = tasks.length
-        ? tasks.map(card).join('')
-        : '<div class="col-empty">—</div>';
+    document.getElementById('columns').innerHTML = (board.states || []).map((st) => {
+      const m = stMeta(st), tasks = byState[st] || [];
+      const cards = tasks.length ? tasks.map(card).join('') : '<div class="col-empty">—</div>';
       return `<div class="col" role="listitem">
-        <div class="col-head">
-          <span class="col-dot" style="background:${meta.c}"></span>
-          <span class="col-name">${esc(meta.label)}</span>
-          <span class="col-count">${tasks.length}</span>
-        </div>
-        <div class="col-cards">${cards}</div>
-      </div>`;
+        <div class="col-head"><span class="col-dot" style="background:${m.c}"></span><span class="col-name">${esc(m.label)}</span><span class="col-count">${tasks.length}</span></div>
+        <div class="col-cards">${cards}</div></div>`;
     }).join('');
+
+    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
   }
 
   function card(t) {
     const prio = PRIO[t.priority] || 'var(--ink-muted)';
     const roles = (t.agent_roles || []).map((r) => `<span class="chip role">${esc(r)}</span>`).join('');
     const owner = t.owner ? `<span class="chip owner">@${esc(t.owner)}</span>` : '';
-    const blockers = (t.blockers || []).length
-      ? `<div class="card-blockers">${t.blockers.map((b) => `<span class="blocker">${esc(b)}</span>`).join('')}</div>` : '';
-    const refs = Object.keys(REF_LABEL)
-      .filter((k) => t[k])
-      .map((k) => `<span class="ref">${REF_LABEL[k]}</span>`).join('');
+    const blockers = (t.blockers || []).length ? `<div class="card-blockers">${t.blockers.map((b) => `<span class="blocker">${esc(b)}</span>`).join('')}</div>` : '';
+    const refs = Object.keys(REF_LABEL).filter((k) => t[k]).map((k) => `<span class="ref">${REF_LABEL[k]}</span>`).join('');
     return `<div class="card" style="--prio:${prio}">
       <div class="card-title">${esc(t.title)}</div>
       <div class="card-meta">${owner}${roles}</div>
       ${blockers}
-      ${refs ? `<div class="card-refs">${refs}</div>` : ''}
-    </div>`;
+      ${refs ? `<div class="card-refs">${refs}</div>` : ''}</div>`;
   }
 })();
 </script>
