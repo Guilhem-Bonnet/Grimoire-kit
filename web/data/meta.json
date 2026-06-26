@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-26T14:12:06+00:00",
+  "version": "3.16.0",
+  "counts": {
+    "tools": 108,
+    "agents": 33,
+    "archetypes": 10,
+    "patterns": 36,
+    "pattern_categories": 11,
+    "profiles": 5,
+    "artifact_types": 41,
+    "tests": 5917
+  },
+  "archetypes": [
+    "agentic-standard",
+    "creative-studio",
+    "features",
+    "fix-loop",
+    "infra-ops",
+    "meta",
+    "minimal",
+    "platform-engineering",
+    "stack",
+    "web-app"
+  ],
+  "profiles": [
+    "starter",
+    "controlled",
+    "orchestrated",
+    "governed",
+    "production"
+  ],
+  "links": {
+    "github": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+    "pypi": "https://pypi.org/project/grimoire-kit/",
+    "docs": "https://guilhem-bonnet.github.io/Grimoire-kit/",
+    "license": "MIT"
+  }
+}
