@@ -7,6 +7,35 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-06-26
+
+### Changé
+
+- **Purge emoji — sortie terminal (étape 3, finale)** — Balayage déterministe de toute la
+  sortie CLI : `framework/tools/*.py`, le SDK `src/grimoire/**` et les tests (126 fichiers,
+  ~1900 occurrences).
+  - Glyphes de statut → marqueurs ASCII maison : `✅✔✓`→`[OK]`, `❌✖✗`→`[x]`, `⚠`→`[!]`,
+    `ℹ`→`[i]`, pastilles de sévérité `🔴`→`[!!]` / `🟡🟠`→`[!]` / `🟢`→`[ok]` / `🔵`→`[i]`,
+    `🚫⛔🛑`→`[STOP]`.
+  - Emojis purement décoratifs (en-têtes de section, icônes de catégorie) supprimés.
+  - Symboles typographiques conservés (flèches `→ ← ↑ ↓`, tirets, points de suite) — ce ne
+    sont pas des emojis.
+  - Ternaires devenus identiques après strip remédiés (markers distincts : `[fix]`, `[sem]`/
+    `[lex]`, `[~]`/`[+]`, `[+]`/`[-]`), échelle de santé `dashboard` re-distinguée
+    (`[ok]`/`[~]`/`[!]`/`[!!]`).
+  - Correctif de parsing : `antifragile-score._count_contradictions` ne dépend plus d'un
+    glyphe `⏳` supprimé (active = non-résolu).
+  - Suite complète verte : 5996 passed, 4 skipped ; ruff clean.
+
+### Corrigé (release/hygiène)
+
+- **Pipeline release robuste** — `release.yml` génère désormais `RELEASE_NOTES.md` en
+  best-effort depuis la trace puis **retombe systématiquement sur `git log`** si le fichier
+  est absent ou vide (corrige l'échec v3.15.0 où `cat RELEASE_NOTES.md` plantait).
+- **Artefacts générés dé-trackés** — `_grimoire-output/Grimoire_TRACE.md` et
+  `_grimoire/_memory/*.sqlite3` retirés du suivi git et ajoutés au `.gitignore` (ils avaient
+  été inclus par erreur via `git add -A` en v3.15.0, ce qui faussait le workflow release).
+
 ## [3.15.0] - 2026-06-26
 
 ### Supprimé / Changé

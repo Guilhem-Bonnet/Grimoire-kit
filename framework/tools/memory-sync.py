@@ -696,7 +696,7 @@ def build_syncer_from_config(project_root: Path) -> MemorySyncer:
 
 def _print_sync_report(report: SyncReport) -> None:
     """Affiche un rapport de sync."""
-    status = "✅" if not report.errors else "⚠️"
+    status = "[OK]" if not report.errors else "[!]"
     print(f"\n  {status} Memory Sync — {report.direction.upper()}")
     print(f"  {'─' * 50}")
     print(f"  Processed : {report.entries_processed}")
@@ -710,7 +710,7 @@ def _print_sync_report(report: SyncReport) -> None:
     print(f"  Duration  : {report.duration_ms}ms")
 
     if report.errors:
-        print("\n  ⚠️  Erreurs:")
+        print("\n  [!]  Erreurs:")
         for err in report.errors:
             print(f"     → {err}")
     print()
@@ -718,18 +718,18 @@ def _print_sync_report(report: SyncReport) -> None:
 
 def _print_diff(diffs: list[DiffEntry]) -> None:
     """Affiche le diff MD vs Qdrant."""
-    print("\n  📋 Memory Diff — MD vs Qdrant")
+    print("\n  Memory Diff — MD vs Qdrant")
     print(f"  {'─' * 60}")
 
     status_icons = {
-        "synced": "✅",
-        "modified": "🟡",
-        "new_in_md": "🆕",
-        "new_in_qdrant": "☁️",
+        "synced": "[OK]",
+        "modified": "[!]",
+        "new_in_md": "",
+        "new_in_qdrant": "",
     }
 
     for d in diffs:
-        icon = status_icons.get(d.status, "❓")
+        icon = status_icons.get(d.status, "")
         extra = ""
         if d.status == "modified":
             extra = f" (MD: {d.md_hash}… Qdrant: {d.qdrant_hash}…)"
@@ -737,7 +737,7 @@ def _print_diff(diffs: list[DiffEntry]) -> None:
 
     synced = sum(1 for d in diffs if d.status == "synced")
     modified = sum(1 for d in diffs if d.status in ("modified", "new_in_md"))
-    print(f"\n  📊 {synced} synced, {modified} à pousser")
+    print(f"\n  {synced} synced, {modified} à pousser")
     print()
 
 
@@ -791,7 +791,7 @@ def main() -> None:
     try:
         syncer = build_syncer_from_config(project_root)
     except Exception as e:
-        print(f"\n  ❌ {e}\n")
+        print(f"\n  [x] {e}\n")
         sys.exit(1)
 
     if args.command == "push":

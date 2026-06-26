@@ -46,12 +46,12 @@ HEALING_LOG = "healing-log.json"
 
 # Stratégies de réparation
 class Strategy:
-    RETRY = "🔄 RETRY"
-    ALTERNATIVE = "🔀 ALTERNATIVE"
-    ROLLBACK = "⏪ ROLLBACK"
-    CREATE = "📝 CREATE"
-    FIX = "🔧 FIX"
-    ESCALATE = "🆘 ESCALATE"
+    RETRY = "RETRY"
+    ALTERNATIVE = "ALTERNATIVE"
+    ROLLBACK = "ROLLBACK"
+    CREATE = "CREATE"
+    FIX = "FIX"
+    ESCALATE = "ESCALATE"
 
 
 # ── Healing Playbook ────────────────────────────────────────────────────────
@@ -392,7 +392,7 @@ def save_to_history(project_root: Path, diagnosis: Diagnosis):
 
 def format_diagnosis(diag: Diagnosis) -> str:
     lines = [
-        "🏥 Diagnostic Self-Healing",
+        "Diagnostic Self-Healing",
         f"   Erreur : {diag.error[:120]}",
         f"   Règle : [{diag.matched_rule}] {diag.rule_name}",
         f"   Stratégie : {diag.strategy}",
@@ -404,17 +404,17 @@ def format_diagnosis(diag: Diagnosis) -> str:
         lines.append(f"      {i}. {action}")
 
     if diag.healed:
-        lines.append(f"\n   ✅ Réparé : {diag.heal_result}")
+        lines.append(f"\n   [OK] Réparé : {diag.heal_result}")
     elif diag.heal_result:
-        lines.append(f"\n   ⚠️ {diag.heal_result}")
+        lines.append(f"\n   [!] {diag.heal_result}")
 
     return "\n".join(lines)
 
 
 def format_playbook() -> str:
-    lines = ["📋 Self-Healing Playbook — Stratégies de réparation", ""]
+    lines = ["Self-Healing Playbook — Stratégies de réparation", ""]
     for rule in PLAYBOOK:
-        auto = "✅ auto" if rule.get("auto_heal") else "👤 manuel"
+        auto = "[OK] auto" if rule.get("auto_heal") else "manuel"
         lines.append(f"   [{rule['id']}] {rule['name']}  {rule['strategy']}  ({auto})")
         lines.append(f"      {rule['description']}")
         for a in rule["actions"][:2]:
@@ -459,11 +459,11 @@ def cmd_history(args: argparse.Namespace) -> int:
         } for r in records], indent=2, ensure_ascii=False))
     else:
         if not records:
-            print("📜 Aucun historique de guérison")
+            print("Aucun historique de guérison")
             return 0
-        print(f"📜 Historique Self-Healing ({len(records)} entrées)\n")
+        print(f"Historique Self-Healing ({len(records)} entrées)\n")
         for r in records[-10:]:
-            status = "✅" if r.success else "❌"
+            status = "[OK]" if r.success else "[x]"
             print(f"   {status} [{r.timestamp[:16]}] {r.rule_id} {r.strategy}")
             print(f"      {r.error[:80]}")
             if r.detail:
@@ -491,7 +491,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     success = sum(1 for r in records if r.success)
     rate = success / total * 100 if total > 0 else 0
 
-    print("🏥 Self-Healing — Statut\n")
+    print("Self-Healing — Statut\n")
     print(f"   Tentatives totales : {total}")
     print(f"   Réussites : {success} ({rate:.0f}%)")
     print(f"   Règles connues : {len(PLAYBOOK)}")

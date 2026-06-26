@@ -136,8 +136,8 @@ def _score_cc_compliance(content: str, _ext: str) -> tuple[int, list[str]]:
     score = 100
 
     # Look for CC markers
-    cc_pass = bool(re.search(r"CC\s+PASS|✅\s*CC", content))
-    cc_fail = bool(re.search(r"CC\s+FAIL|🔴\s*CC", content))
+    cc_pass = bool(re.search(r"CC\s+PASS|[OK]\s*CC", content))
+    cc_fail = bool(re.search(r"CC\s+FAIL|[!!]\s*CC", content))
 
     if cc_fail:
         score -= 50
@@ -243,7 +243,7 @@ def cmd_score(args: argparse.Namespace) -> int:
     if not p.is_absolute():
         p = Path(args.project_root) / p
     if not p.exists():
-        print(f"  ❌ File not found: {args.file}")
+        print(f"  [x] File not found: {args.file}")
         return 1
 
     result = score_artifact(p)
@@ -259,7 +259,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
     if not d.is_absolute():
         d = Path(args.project_root) / d
     if not d.exists():
-        print(f"  ❌ Directory not found: {args.directory}")
+        print(f"  [x] Directory not found: {args.directory}")
         return 1
 
     files = sorted(d.glob("*.*"))
@@ -274,7 +274,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         if not results:
             print("  No scoreable artifacts found.")
             return 0
-        print(f"\n  📊 Quality Scores — {len(results)} artifacts\n")
+        print(f"\n  Quality Scores — {len(results)} artifacts\n")
         for r in sorted(results, key=lambda x: x["score"]):
             bar = _score_bar(r["score"])
             print(f"  {bar} {r['score']:3d}/100  {r['file']}")
@@ -288,7 +288,7 @@ def cmd_threshold(args: argparse.Namespace) -> int:
     if not p.is_absolute():
         p = Path(args.project_root) / p
     if not p.exists():
-        print(f"  ❌ File not found: {args.file}")
+        print(f"  [x] File not found: {args.file}")
         return 1
 
     result = score_artifact(p)
@@ -301,9 +301,9 @@ def cmd_threshold(args: argparse.Namespace) -> int:
     else:
         _display_score(result)
         if passed:
-            print(f"  ✅ Score {result['score']} ≥ threshold {args.min}")
+            print(f"  [OK] Score {result['score']} ≥ threshold {args.min}")
         else:
-            print(f"  ❌ Score {result['score']} < threshold {args.min}")
+            print(f"  [x] Score {result['score']} < threshold {args.min}")
     return 0 if passed else 1
 
 
@@ -312,17 +312,17 @@ def _score_bar(score: int) -> str:
     filled = score // 10
     empty = 10 - filled
     if score >= 80:
-        icon = "🟢"
+        icon = "[ok]"
     elif score >= 60:
-        icon = "🟡"
+        icon = "[!]"
     else:
-        icon = "🔴"
+        icon = "[!!]"
     return f"{icon} {'█' * filled}{'░' * empty}"
 
 
 def _display_score(result: dict[str, Any]) -> None:
     """Display a score result in human-readable format."""
-    print(f"\n  📊 Quality Score: {result['file']}\n")
+    print(f"\n  Quality Score: {result['file']}\n")
     print(f"  Overall: {_score_bar(result['score'])} {result['score']}/100\n")
     for dim, val in result["dimensions"].items():
         weight = DIMENSIONS[dim]

@@ -562,7 +562,7 @@ class LLMRouter:
             model = self.models.get(stat.model)
             if model and model.cost_per_1m_tokens >= 10.0 and stat.request_count > total_requests * 0.3:
                 recs.append(
-                    f"⚠️  {stat.model} (${model.cost_per_1m_tokens}/M) gère {stat.request_count}/{total_requests} "
+                    f"[!]  {stat.model} (${model.cost_per_1m_tokens}/M) gère {stat.request_count}/{total_requests} "
                     f"requêtes ({stat.request_count / total_requests * 100:.0f}%). "
                     f"Envisager de router les tâches simples vers un modèle moins cher."
                 )
@@ -573,15 +573,15 @@ class LLMRouter:
                 stat = next((s for s in stats if s.model == model_id), None)
                 if not stat or stat.request_count < total_requests * 0.1:
                     recs.append(
-                        f"💡 {model_id} est gratuit (local) mais sous-utilisé. "
+                        f"{model_id} est gratuit (local) mais sous-utilisé. "
                         f"Configurer des rules pour les tâches triviales/formatting."
                     )
 
         if total_cost > 0:
-            recs.append(f"📊 Coût estimé total : ${total_cost:.4f} sur {total_requests} requêtes.")
+            recs.append(f"Coût estimé total : ${total_cost:.4f} sur {total_requests} requêtes.")
 
         if not recs:
-            recs.append("✅ Routing semble optimal. Pas de recommandation.")
+            recs.append("[OK] Routing semble optimal. Pas de recommandation.")
 
         return recs
 
@@ -682,40 +682,40 @@ def build_router_from_config(project_root: Path) -> LLMRouter:
 def _print_classification(tc: TaskClassification) -> None:
     """Affiche une classification joliment."""
     complexity_icons = {
-        "trivial": "🟢",
-        "standard": "🔵",
-        "complex": "🟡",
-        "expert": "🔴",
+        "trivial": "[ok]",
+        "standard": "[i]",
+        "complex": "[!]",
+        "expert": "[!!]",
     }
-    icon = complexity_icons.get(tc.complexity, "⚪")
+    icon = complexity_icons.get(tc.complexity, "[-]")
     print(f"\n  {icon} Complexity : {tc.complexity.upper()} (confidence: {tc.confidence})")
-    print(f"  📋 Task type  : {tc.task_type}")
-    print(f"  📏 Prompt len : {tc.prompt_length} chars (~{tc.prompt_length // 4} tokens)")
+    print(f"  Task type  : {tc.task_type}")
+    print(f"  Prompt len : {tc.prompt_length} chars (~{tc.prompt_length // 4} tokens)")
     if tc.indicators_matched:
-        print(f"  🔍 Indicators : {', '.join(tc.indicators_matched[:5])}")
+        print(f"  Indicators : {', '.join(tc.indicators_matched[:5])}")
     if tc.suggested_model:
-        print(f"  🎯 Model      : {tc.suggested_model}")
+        print(f"  Model      : {tc.suggested_model}")
 
 
 def _print_decision(dec: RoutingDecision) -> None:
     """Affiche une décision de routing joliment."""
     print(f"\n{'=' * 60}")
-    print("  🤖 LLM ROUTER — Routing Decision")
+    print("  LLM ROUTER — Routing Decision")
     print(f"{'=' * 60}")
     print(f"  Agent   : {dec.agent}")
     print(f"  Prompt  : {dec.prompt_summary}")
     _print_classification(dec.classification)
-    print(f"\n  ➡️  Selected : {dec.selected_model}")
-    print(f"  🔄 Fallback : {dec.fallback_model}")
-    print(f"  📐 Rule     : {dec.rule_matched}")
+    print(f"\n  ➡  Selected : {dec.selected_model}")
+    print(f"  Fallback : {dec.fallback_model}")
+    print(f"  Rule     : {dec.rule_matched}")
     if dec.estimated_cost > 0:
-        print(f"  💰 Est.cost : ${dec.estimated_cost:.6f}")
+        print(f"  Est.cost : ${dec.estimated_cost:.6f}")
     print(f"{'=' * 60}\n")
 
 
 def _print_models(router: LLMRouter) -> None:
     """Affiche la liste des modèles configurés."""
-    print(f"\n  📦 Modèles configurés ({len(router.models)})")
+    print(f"\n  Modèles configurés ({len(router.models)})")
     print(f"  {'─' * 50}")
     for m in sorted(router.models.values(), key=lambda x: x.cost_per_1m_tokens, reverse=True):
         caps = ", ".join(m.capabilities[:4]) if m.capabilities else "general"
@@ -727,10 +727,10 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
     """Affiche les stats d'utilisation."""
     stats = router.get_stats()
     if not stats:
-        print("\n  📊 Aucune stat de routing encore. Commencez par utiliser 'route'.\n")
+        print("\n  Aucune stat de routing encore. Commencez par utiliser 'route'.\n")
         return
 
-    print("\n  📊 Statistiques d'utilisation LLM Router")
+    print("\n  Statistiques d'utilisation LLM Router")
     print(f"  {'─' * 55}")
     print(f"  {'Modèle':20s} │ {'Requêtes':>10s} │ {'Tokens':>10s} │ {'Coût':>10s}")
     print(f"  {'─' * 55}")
@@ -744,7 +744,7 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
 
     if recommend:
         recs = router.get_recommendations()
-        print("  💡 Recommandations")
+        print("  Recommandations")
         print(f"  {'─' * 55}")
         for r in recs:
             print(f"  {r}")
@@ -809,7 +809,7 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
         else:
-            print("\n  🧠 Task Classification")
+            print("\n  Task Classification")
             _print_classification(result)
             print()
 

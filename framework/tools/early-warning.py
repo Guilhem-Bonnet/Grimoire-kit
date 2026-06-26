@@ -14,9 +14,9 @@ Inspiré de l'effet papillon : petits signaux → grandes conséquences.
   5. Divergence artefacts (drift entre documents)
 
 3 niveaux d'alerte :
-  🟢 NOMINAL — tout va bien
-  🟡 WATCH   — tendance à surveiller
-  🔴 ALERT   — intervention requise
+  [ok] NOMINAL — tout va bien
+  [!] WATCH   — tendance à surveiller
+  [!!] ALERT   — intervention requise
 
 Features :
   - Phase transitions : détecte les changements de régime
@@ -55,9 +55,9 @@ EARLY_WARNING_VERSION = "1.1.0"
 
 # Niveaux d'alerte
 class Level:
-    NOMINAL = "🟢 NOMINAL"
-    WATCH = "🟡 WATCH"
-    ALERT = "🔴 ALERT"
+    NOMINAL = "[ok] NOMINAL"
+    WATCH = "[!] WATCH"
+    ALERT = "[!!] ALERT"
 
 # Seuils
 ENTROPY_WATCH = 0.65
@@ -271,7 +271,7 @@ def measure_entropy(project_root: Path) -> Metric:
                 content = md.read_text(encoding="utf-8")
                 unresolved += content.count("- [ ]")
                 unresolved += content.count("TODO")
-                unresolved += content.count("⚠️")
+                unresolved += content.count("[!]")
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
                 # Silent exception — add logging when investigating issues
@@ -544,17 +544,17 @@ def build_report(project_root: Path, window_days: int = DEFAULT_WINDOW_DAYS) -> 
     # Recommandations
     for m in report.metrics:
         if "ALERT" in m.level:
-            report.recommendations.append(f"🔴 {m.name} : {m.detail}")
+            report.recommendations.append(f"[!!] {m.name} : {m.detail}")
         elif "WATCH" in m.level:
-            report.recommendations.append(f"🟡 {m.name} : {m.detail}")
+            report.recommendations.append(f"[!] {m.name} : {m.detail}")
 
     if report.phase == "crisis":
         report.recommendations.append(
-            "⚡ Phase de crise détectée — prioriser la stabilisation avant de nouvelles features"
+            "Phase de crise détectée — prioriser la stabilisation avant de nouvelles features"
         )
     elif report.phase == "turbulence":
         report.recommendations.append(
-            "🌊 Phase de turbulence — surveiller étroitement les métriques"
+            "Phase de turbulence — surveiller étroitement les métriques"
         )
 
     return report
@@ -564,12 +564,12 @@ def build_report(project_root: Path, window_days: int = DEFAULT_WINDOW_DAYS) -> 
 
 def format_report(report: EarlyWarningReport) -> str:
     lines = [
-        "🦋 Early Warning System — Grimoire",
+        "Early Warning System — Grimoire",
         f"   {report.overall_level}   Phase : {report.phase}",
         f"   Entropie : {report.entropy_score:.2f}/1.0",
         f"   Git : {'oui' if report.git_available else 'non'}",
         "",
-        "   📊 MÉTRIQUES :",
+        "   MÉTRIQUES :",
     ]
 
     for m in report.metrics:
@@ -580,7 +580,7 @@ def format_report(report: EarlyWarningReport) -> str:
     lines.append("")
 
     if report.recommendations:
-        lines.append("   📋 RECOMMANDATIONS :")
+        lines.append("   RECOMMANDATIONS :")
         for r in report.recommendations:
             lines.append(f"      {r}")
         lines.append("")
@@ -606,7 +606,7 @@ def emit_alerts(project_root: Path, report: EarlyWarningReport) -> int:
     """Émet des phéromones ALERT via stigmergy.py."""
     stigmergy_py = project_root / "framework" / "tools" / "stigmergy.py"
     if not stigmergy_py.exists():
-        print("   ⚠️ stigmergy.py non trouvé — émission impossible")
+        print("   [!] stigmergy.py non trouvé — émission impossible")
         return 0
 
     emitted = 0
@@ -640,7 +640,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if args.emit:
         emitted = emit_alerts(project_root, report)
         if emitted:
-            print(f"   📡 {emitted} alerte(s) émise(s) via stigmergy\n")
+            print(f"   {emitted} alerte(s) émise(s) via stigmergy\n")
 
     if args.json:
         print(json.dumps(report_to_dict(report), indent=2, ensure_ascii=False))
@@ -657,7 +657,7 @@ def cmd_entropy(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(metric.to_dict(), indent=2, ensure_ascii=False))
     else:
-        print(f"🧮 Entropie : {metric.value:.2f}/1.0  {metric.level}")
+        print(f"Entropie : {metric.value:.2f}/1.0  {metric.level}")
         print(f"   {metric.detail}")
 
     return 0
@@ -668,7 +668,7 @@ def cmd_trends(args: argparse.Namespace) -> int:
     use_git = _git_available(project_root)
 
     if not use_git:
-        print("⚠️ Git non disponible — tendances limitées")
+        print("[!] Git non disponible — tendances limitées")
         return 1
 
     # Comparer 2 fenêtres
@@ -678,7 +678,7 @@ def cmd_trends(args: argparse.Namespace) -> int:
     # Soustraire les récents des plus anciens
     old_only = commits_older[len(commits_recent):]
 
-    print(f"📈 Tendances (fenêtre : {window} jours)\n")
+    print(f"Tendances (fenêtre : {window} jours)\n")
     print(f"   Commits récents : {len(commits_recent)}")
     print(f"   Commits période précédente : {len(old_only)}")
 
@@ -695,7 +695,7 @@ def cmd_trends(args: argparse.Namespace) -> int:
     errors_old = sum(1 for c in old_only if any(kw in c.get("message", "").lower() for kw in error_kw))
     print(f"\n   Erreurs récentes : {errors_recent} vs précédentes : {errors_old}")
     if errors_recent > errors_old * 1.5:
-        print("   ⚠️ Taux d'erreur en hausse significative")
+        print("   [!] Taux d'erreur en hausse significative")
 
     return 0
 

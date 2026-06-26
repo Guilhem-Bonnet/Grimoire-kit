@@ -105,7 +105,7 @@ class DriftResult:
     missing_in_target: list[str] = field(default_factory=list)
     new_in_target: list[str] = field(default_factory=list)
     drift_score: float = 0.0   # 0.0 = identique, 1.0 = complètement divergé
-    level: str = "🟢 OK"
+    level: str = "[ok] OK"
 
     def compute_drift(self):
         if self.source_concepts == 0:
@@ -113,11 +113,11 @@ class DriftResult:
         else:
             self.drift_score = len(self.missing_in_target) / self.source_concepts
         if self.drift_score >= DRIFT_THRESHOLD_ALERT:
-            self.level = "🔴 ALERT"
+            self.level = "[!!] ALERT"
         elif self.drift_score >= DRIFT_THRESHOLD_WARN:
-            self.level = "🟡 WARNING"
+            self.level = "[!] WARNING"
         else:
-            self.level = "🟢 OK"
+            self.level = "[ok] OK"
 
 
 @dataclass
@@ -335,7 +335,7 @@ def analyze_chain(project_root: Path) -> ChainReport:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_concepts(concepts: list[Concept], source: str = "") -> str:
-    lines = [f"📝 Concepts extraits{f' de {source}' if source else ''}",
+    lines = [f"Concepts extraits{f' de {source}' if source else ''}",
              f"   Total : {len(concepts)}", ""]
     for c in concepts[:30]:
         freq_bar = "█" * min(c.frequency, 20)
@@ -349,20 +349,20 @@ def format_concepts(concepts: list[Concept], source: str = "") -> str:
 
 def format_drift(drift: DriftResult) -> str:
     lines = [
-        f"🔍 Drift : {drift.source} → {drift.target}",
+        f"Drift : {drift.source} → {drift.target}",
         f"   {drift.level}  Score : {drift.drift_score:.0%}",
         f"   Concepts source : {drift.source_concepts}  |  cible : {drift.target_concepts}  |  partagés : {drift.shared}",
     ]
     if drift.missing_in_target:
-        lines.append(f"   ❌ Manquants ({len(drift.missing_in_target)}) : {', '.join(drift.missing_in_target[:10])}")
+        lines.append(f"   [x] Manquants ({len(drift.missing_in_target)}) : {', '.join(drift.missing_in_target[:10])}")
     if drift.new_in_target:
-        lines.append(f"   ✨ Nouveaux ({len(drift.new_in_target)}) : {', '.join(drift.new_in_target[:10])}")
+        lines.append(f"   Nouveaux ({len(drift.new_in_target)}) : {', '.join(drift.new_in_target[:10])}")
     return "\n".join(lines)
 
 
 def format_chain(report: ChainReport) -> str:
     lines = [
-        "🧊 Chaîne du Froid Sémantique — Rapport",
+        "Chaîne du Froid Sémantique — Rapport",
         f"   Intégrité : {report.chain_integrity:.0%}",
         f"   Concepts totaux : {report.total_concepts}",
         f"   Maillons analysés : {len(report.drifts)}",
@@ -380,7 +380,7 @@ def format_chain(report: ChainReport) -> str:
 
 def format_impact(nodes: list[ImpactNode], concept: str) -> str:
     lines = [
-        f"💥 Impact du concept '{concept}'",
+        f"Impact du concept '{concept}'",
         f"   Fichiers affectés : {len(nodes)}",
         "",
     ]
@@ -396,7 +396,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve()
     fpath = project_root / args.file
     if not fpath.exists():
-        print(f"❌ Fichier non trouvé : {args.file}")
+        print(f"[x] Fichier non trouvé : {args.file}")
         return 1
     concepts = extract_concepts_from_file(fpath)
     if args.json:
@@ -412,7 +412,7 @@ def cmd_trace(args: argparse.Namespace) -> int:
     concept = args.concept.lower()
     artifacts = discover_artifacts(project_root)
 
-    print(f"🔎 Traçabilité du concept '{args.concept}'\n")
+    print(f"Traçabilité du concept '{args.concept}'\n")
     found_in = []
     for atype in CHAIN_ORDER:
         if atype not in artifacts:
@@ -436,7 +436,7 @@ def cmd_trace(args: argparse.Namespace) -> int:
             for atype, fname, count in found_in:
                 print(f"   [{atype:12s}] {fname} (×{count})")
         else:
-            print(f"   ⚠️ Concept '{args.concept}' non trouvé dans la chaîne")
+            print(f"   [!] Concept '{args.concept}' non trouvé dans la chaîne")
     return 0
 
 
@@ -446,10 +446,10 @@ def cmd_drift(args: argparse.Namespace) -> int:
     tgt = project_root / args.to
 
     if not src.exists():
-        print(f"❌ Source non trouvée : {getattr(args, 'from')}")
+        print(f"[x] Source non trouvée : {getattr(args, 'from')}")
         return 1
     if not tgt.exists():
-        print(f"❌ Cible non trouvée : {args.to}")
+        print(f"[x] Cible non trouvée : {args.to}")
         return 1
 
     src_concepts = extract_concepts_from_file(src)

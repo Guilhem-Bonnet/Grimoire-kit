@@ -27,7 +27,7 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("⚠️  PyYAML requis : pip install pyyaml")
+    print("[!]  PyYAML requis : pip install pyyaml")
     sys.exit(1)
 
 
@@ -42,7 +42,7 @@ Archétype : {archetype_name} v{archetype_version}
 Trait : {trait_name}
 Généré le : {date}
 
-⚠️  Squelette auto-généré — compléter les assertions et fixtures
+[!]  Squelette auto-généré — compléter les assertions et fixtures
 """
 import pytest
 
@@ -78,7 +78,7 @@ def test_{test_id}():
  * Trait : {trait_name}
  * Généré le : {date}
  *
- * ⚠️  Squelette auto-généré — compléter les expects et mocks
+ * [!]  Squelette auto-généré — compléter les expects et mocks
  */
 
 describe("{archetype_name} — {trait_name}", () => {{
@@ -105,7 +105,7 @@ describe("{archetype_name} — {trait_name}", () => {{
 # Trait : {trait_name}
 # Généré le : {date}
 #
-# ⚠️  Squelette auto-généré — compléter les assertions
+# [!]  Squelette auto-généré — compléter les assertions
 
 ''',
         "test_func": '''@test "{test_id}: {description}" {{
@@ -125,7 +125,7 @@ describe("{archetype_name} — {trait_name}", () => {{
 // Trait : {trait_name}
 // Généré le : {date}
 //
-// ⚠️  Squelette auto-généré — compléter les assertions
+// [!]  Squelette auto-généré — compléter les assertions
 
 package tests
 
@@ -160,14 +160,14 @@ def load_dna(dna_path: str) -> dict:
     """Charge et valide un fichier archetype.dna.yaml."""
     path = Path(dna_path)
     if not path.exists():
-        print(f"❌  Fichier DNA non trouvé : {dna_path}")
+        print(f"[x]  Fichier DNA non trouvé : {dna_path}")
         sys.exit(1)
 
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     if not isinstance(data, dict):
-        print(f"❌  Format DNA invalide dans {dna_path}")
+        print(f"[x]  Format DNA invalide dans {dna_path}")
         sys.exit(1)
 
     return data
@@ -226,14 +226,14 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
 
     tmpl = TEMPLATES.get(framework)
     if not tmpl:
-        print(f"❌  Framework non supporté : {framework}")
+        print(f"[x]  Framework non supporté : {framework}")
         print(f"   Supportés : {', '.join(TEMPLATES.keys())}")
         sys.exit(1)
 
     items = extract_ac_items(dna)
 
     if not items:
-        print(f"⚠️  Aucun acceptance_criteria trouvé dans {dna_path}")
+        print(f"[!]  Aucun acceptance_criteria trouvé dans {dna_path}")
         print("   Ajoutez des sections `acceptance_criteria` dans vos traits ou contraintes.")
         return []
 
@@ -313,7 +313,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
                 f.write(tmpl["footer"])
 
         generated_files.append(filepath)
-        print(f"✅  Généré : {filepath} ({len(trait_items)} tests)")
+        print(f"[OK]  Généré : {filepath} ({len(trait_items)} tests)")
 
     return generated_files
 
@@ -364,32 +364,32 @@ Ajoutez des acceptance_criteria dans votre DNA :
 
     if args.list_ac:
         archetype_name = dna.get("name", dna.get("id", "unknown"))
-        print(f"\n📋  Acceptance Criteria dans {args.dna}")
+        print(f"\n Acceptance Criteria dans {args.dna}")
         print(f"    Archétype : {archetype_name}")
         print(f"    Total AC trouvés : {len(items)}\n")
         for item in items:
-            enforcement_icon = "🔴" if item["enforcement"] == "hard" else "🟡"
+            enforcement_icon = "[!!]" if item["enforcement"] == "hard" else "[!]"
             print(f"  {enforcement_icon} [{item['trait_name']}] {item['id']}")
             print(f"     {item['description']}")
         if not items:
             print("  (aucun — ajoutez des `acceptance_criteria` dans vos traits)")
         return
 
-    print(f"\n🧪  Génération des tests depuis {args.dna}")
+    print(f"\n Génération des tests depuis {args.dna}")
     print(f"    Framework : {args.framework}")
     print(f"    Output    : {args.output}\n")
 
     generated = generate_tests(dna, args.framework, args.output, args.dna)
 
     if generated:
-        print(f"\n✅  {len(generated)} fichier(s) généré(s) dans {args.output}")
+        print(f"\n[OK]  {len(generated)} fichier(s) généré(s) dans {args.output}")
         print("\nProchaines étapes :")
         print("  1. Compléter les assertions dans chaque fonction de test")
         print("  2. Ajouter les fixtures / mocks nécessaires")
         print("  3. Lancer les tests : pytest/jest/bats selon votre framework")
         print("  4. Vérifier qu'ils ÉCHOUENT d'abord (TDD red phase)")
     else:
-        print("⚠️  Aucun fichier généré. Vérifiez que votre DNA contient des `acceptance_criteria`.")
+        print("[!]  Aucun fichier généré. Vérifiez que votre DNA contient des `acceptance_criteria`.")
         print("   Lancez --list-ac pour inspecter le DNA.")
 
 

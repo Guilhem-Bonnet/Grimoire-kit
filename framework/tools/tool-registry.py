@@ -547,7 +547,7 @@ def load_registry_config(project_root: Path) -> dict:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def _print_tool_list(tools: list[GrimoireTool]) -> None:
-    print(f"\n  🔧 Grimoire Tool Registry — {len(tools)} outils")
+    print(f"\n  Grimoire Tool Registry — {len(tools)} outils")
     print(f"  {'─' * 70}")
 
     for tool in tools:
@@ -564,7 +564,7 @@ def _print_tool_list(tools: list[GrimoireTool]) -> None:
 
 
 def _print_tool_detail(tool: GrimoireTool) -> None:
-    print(f"\n  🔧 {tool.name}")
+    print(f"\n  {tool.name}")
     print(f"  {'─' * 60}")
     print(f"  Description : {tool.description}")
     print(f"  Type        : {tool.tool_type}")
@@ -589,23 +589,23 @@ def _print_tool_detail(tool: GrimoireTool) -> None:
 def _print_validation(results: list[ValidationResult]) -> None:
     valid_count = sum(1 for r in results if r.valid)
     total = len(results)
-    icon = "✅" if valid_count == total else "⚠️"
+    icon = "[OK]" if valid_count == total else "[!]"
 
     print(f"\n  {icon} Validation — {valid_count}/{total} outils valides")
     print(f"  {'─' * 60}")
 
     for r in results:
-        status = "✅" if r.valid else "❌"
+        status = "[OK]" if r.valid else "[x]"
         print(f"  {status} {r.tool_name}")
         for err in r.errors:
-            print(f"      ❌ {err}")
+            print(f"      [x] {err}")
         for warn in r.warnings:
-            print(f"      ⚠️ {warn}")
+            print(f"      [!] {warn}")
     print()
 
 
 def _print_stats(stats: RegistryStats) -> None:
-    print("\n  📊 Registry Stats")
+    print("\n  Registry Stats")
     print(f"  {'─' * 40}")
     print(f"  Total outils       : {stats.total_tools}")
     print(f"  Python CLI         : {stats.python_tools}")
@@ -685,7 +685,7 @@ def main() -> None:
     elif args.command == "inspect":
         tool = registry.get(args.tool)
         if not tool:
-            print(f"\n  ❌ Outil '{args.tool}' introuvable\n")
+            print(f"\n  [x] Outil '{args.tool}' introuvable\n")
             sys.exit(1)
         fmt = getattr(args, "format", "")
         if fmt:

@@ -294,7 +294,7 @@ def _check_failure_museum(query: str, project_root: Path) -> list[str]:
             corpus_words = set(corpus.split())
             overlap = len(desc_words & corpus_words)
             if overlap >= 2:
-                warnings.append(f"⚠️ [{entry.failure_id}] {entry.title} — {entry.rule_added}")
+                warnings.append(f"[!] [{entry.failure_id}] {entry.title} — {entry.rule_added}")
         return warnings[:3]
     except Exception as exc:
         _log.debug("failure-museum check failed: %s", exc)
@@ -306,16 +306,16 @@ def _check_failure_museum(query: str, project_root: Path) -> list[str]:
 
 def display_triage(result: TriageResult) -> None:
     """Affiche le résultat du triage."""
-    icons = {"simple": "🟢", "complex": "🟠", "ambiguous": "🔵"}
-    conf_icon = "🟢" if result.confidence >= 0.5 else "🟡" if result.confidence >= 0.3 else "🔴"
+    icons = {"simple": "[ok]", "complex": "[!]", "ambiguous": "[i]"}
+    conf_icon = "[ok]" if result.confidence >= 0.5 else "[!]" if result.confidence >= 0.3 else "[!!]"
 
-    print("\n🎩 Concierge — Triage")
+    print("\nConcierge — Triage")
     print("=" * 50)
     print(f"  Requête    : {result.query}")
-    print(f"  Complexité : {icons.get(result.classification, '⚪')} {result.classification}")
+    print(f"  Complexité : {icons.get(result.classification, '[-]')} {result.classification}")
     print(f"  Confiance  : {conf_icon} {result.confidence:.0%}")
     print()
-    print(f"  ➡️  Agent recommandé : {result.agent_name} ({result.suggested_agent})")
+    print(f"  ➡  Agent recommandé : {result.agent_name} ({result.suggested_agent})")
     print(f"     {result.reasoning}")
 
     if result.alternatives:
@@ -324,17 +324,17 @@ def display_triage(result: TriageResult) -> None:
             print(f"    - {alt['name']} ({alt['agent']}) — score {alt['score']:.0%}")
 
     if result.risk_warnings:
-        print("\n  ⚠️  Risques connus :")
+        print("\n  [!]  Risques connus :")
         for warn in result.risk_warnings:
             print(f"    {warn}")
 
     if result.confidence < 0.3:
-        print("\n  💡 Confiance basse — je recommande de préciser la demande.")
+        print("\n  Confiance basse — je recommande de préciser la demande.")
 
 
 def display_agents() -> None:
     """Affiche la liste des agents disponibles."""
-    print("\n🎩 Agents disponibles")
+    print("\nAgents disponibles")
     print("=" * 60)
     for agent in AGENT_PROFILES:
         print(f"  {agent.tag:25s} {agent.name:10s} — {agent.use_when}")
@@ -426,11 +426,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "check-risk":
         warnings = _check_failure_museum(args.query, root)
         if warnings:
-            print("⚠️  Risques détectés :")
+            print("[!]  Risques détectés :")
             for w in warnings:
                 print(f"  {w}")
             return 1
-        print("✅ Aucun risque historique détecté.")
+        print("[OK] Aucun risque historique détecté.")
         return 0
 
     return 1

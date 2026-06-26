@@ -147,7 +147,7 @@ def analyze_health(project_root: Path) -> HealthReport:
     readme = (project_root / "README.md").exists()
     doc_score = min(100, len(docs) * 12 + (30 if readme else 0))
     report.metrics.append(HealthMetric("Documentation", doc_score,
-                                       f"{len(docs)} docs, README: {'✅' if readme else '❌'}"))
+                                       f"{len(docs)} docs, README: {'[OK]' if readme else '[x]'}"))
 
     # 2. Tests
     tests = list(project_root.rglob("test_*.py")) + list(project_root.rglob("*.test.*"))
@@ -243,15 +243,15 @@ def analyze_pareto(project_root: Path) -> ParetoReport:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_health(report: HealthReport) -> str:
-    # Determine emoji
+    # Determine status marker
     if report.global_score >= 80:
-        emoji = "🟢"
+        emoji = "[ok]"
     elif report.global_score >= 60:
-        emoji = "🟡"
+        emoji = "[~]"
     elif report.global_score >= 40:
-        emoji = "🟠"
+        emoji = "[!]"
     else:
-        emoji = "🔴"
+        emoji = "[!!]"
 
     lines = [f"{emoji} Santé du projet : {report.global_score}/100\n"]
     for m in report.metrics:
@@ -262,7 +262,7 @@ def format_health(report: HealthReport) -> str:
 
 def format_entropy(report: EntropyReport) -> str:
     lines = [
-        f"📊 Entropie du projet ({report.total_files} fichiers)\n",
+        f"Entropie du projet ({report.total_files} fichiers)\n",
         f"   Entropie types fichiers : {report.file_entropy:.2f} bits",
         f"   Entropie répertoires    : {report.dir_entropy:.2f} bits",
         "",
@@ -282,7 +282,7 @@ def format_full_dashboard(project_root: Path) -> str:
     activity = _git_activity(project_root)
 
     lines = [
-        "# 🌟 Dashboard Grimoire — Bioluminescence",
+        "# Dashboard Grimoire — Bioluminescence",
         "",
         f"> Généré le {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
@@ -365,7 +365,7 @@ def cmd_pareto(args: argparse.Namespace) -> int:
         print(json.dumps({"top_20_value_pct": report.top_20_value, "gini": report.gini},
                          indent=2, ensure_ascii=False))
     else:
-        print("📊 Analyse Pareto\n")
+        print("Analyse Pareto\n")
         print(f"   Top 20% = {report.top_20_value:.0%} de la taille")
         print(f"   Gini = {report.gini:.2f}")
     return 0
@@ -376,7 +376,7 @@ def cmd_activity(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(activity, indent=2, ensure_ascii=False))
     else:
-        print(f"📈 Activité récente — {len(activity)} commits (30j)\n")
+        print(f"Activité récente — {len(activity)} commits (30j)\n")
         for c in activity[:15]:
             print(f"   {c['date']} {c['author']:15s} {c['message']}")
     return 0

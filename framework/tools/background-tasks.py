@@ -517,13 +517,13 @@ def mcp_background_task(
 
 def _status_icon(status: str) -> str:
     return {
-        "pending": "⏳",
-        "running": "🔄",
-        "completed": "✅",
-        "failed": "❌",
-        "cancelled": "🚫",
-        "timeout": "⏰",
-    }.get(status, "❓")
+        "pending": "",
+        "running": "",
+        "completed": "[OK]",
+        "failed": "[x]",
+        "cancelled": "[STOP]",
+        "timeout": "",
+    }.get(status, "")
 
 
 def _print_task(task: BackgroundTask, verbose: bool = False) -> None:
@@ -541,7 +541,7 @@ def _print_task(task: BackgroundTask, verbose: bool = False) -> None:
 
 
 def _print_task_list(task_list: TaskList) -> None:
-    print(f"\n  📋 Tâches Background ({task_list.total_count})")
+    print(f"\n  Tâches Background ({task_list.total_count})")
     print(f"  {'─' * 60}")
     print(f"  En cours  : {task_list.running_count}/{task_list.max_concurrent}")
     print()
@@ -619,13 +619,13 @@ def main() -> None:
             if getattr(args, "json", False):
                 print(json.dumps(task.to_dict(), ensure_ascii=False, indent=2))
             else:
-                print(f"\n  🚀 Tâche lancée : {task.task_id}")
+                print(f"\n  Tâche lancée : {task.task_id}")
                 print(f"    Agent : {task.agent}")
                 print(f"    Type  : {task.task_type}")
                 print(f"    Desc  : {task.description}")
                 print(f"    Dir   : {task.result_path}\n")
         except RuntimeError as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "status":
@@ -645,9 +645,9 @@ def main() -> None:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
             if "error" in result:
-                print(f"  ❌ {result['error']}", file=sys.stderr)
+                print(f"  [x] {result['error']}", file=sys.stderr)
                 sys.exit(1)
-            print(f"\n  📊 Check-in : {result['task_id']}")
+            print(f"\n  Check-in : {result['task_id']}")
             print(f"  Status  : {result['status']}")
             print(f"  Elapsed : {result['elapsed_seconds']}s")
             if result.get("result_content"):
@@ -659,9 +659,9 @@ def main() -> None:
     elif args.command == "cancel":
         task = manager.cancel(args.task_id)
         if task:
-            print(f"\n  🚫 Tâche '{args.task_id}' annulée\n")
+            print(f"\n  [STOP] Tâche '{args.task_id}' annulée\n")
         else:
-            print(f"  ❌ Tâche '{args.task_id}' non trouvée", file=sys.stderr)
+            print(f"  [x] Tâche '{args.task_id}' non trouvée", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "list":
@@ -677,7 +677,7 @@ def main() -> None:
 
     elif args.command == "clean":
         cleaned = manager.clean(keep_days=args.keep_days)
-        print(f"\n  🧹 {cleaned} tâches nettoyées\n")
+        print(f"\n  {cleaned} tâches nettoyées\n")
 
 
 if __name__ == "__main__":

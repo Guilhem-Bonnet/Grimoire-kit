@@ -37,15 +37,17 @@ jobs:
       - name: Générer CHANGELOG depuis Grimoire_TRACE
         id: changelog
         run: |
-          # Générer le changelog si Grimoire_TRACE existe
+          # Best-effort : générer depuis la trace Grimoire si présente
           if [[ -f "_grimoire-output/Grimoire_TRACE.md" ]]; then
-            bash grimoire-init.sh changelog --output RELEASE_NOTES.md
+            bash grimoire-init.sh changelog --output RELEASE_NOTES.md || true
             echo "has_trace=true" >> $GITHUB_OUTPUT
           else
-            # Changelog depuis git log
-            git log --oneline --no-merges $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD \
-              > RELEASE_NOTES.md || echo "Première release" > RELEASE_NOTES.md
             echo "has_trace=false" >> $GITHUB_OUTPUT
+          fi
+          # Fallback git log si RELEASE_NOTES.md est absent ou vide
+          if [[ ! -s RELEASE_NOTES.md ]]; then
+            git log --oneline --no-merges "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD" \
+              > RELEASE_NOTES.md || echo "Première release" > RELEASE_NOTES.md
           fi
           cat RELEASE_NOTES.md
 

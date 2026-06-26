@@ -733,10 +733,10 @@ class RAGIndexer:
         """Indexe toutes les collections."""
         reports: list[IndexReport] = []
         for collection in ALL_COLLECTIONS:
-            print(f"  📦 Indexation collection '{collection}'...")
+            print(f"  Indexation collection '{collection}'...")
             report = self.index_collection(collection, full=full)
             reports.append(report)
-            status = "✅" if not report.errors else "⚠️"
+            status = "[OK]" if not report.errors else "[!]"
             print(
                 f"  {status} {collection}: {report.files_processed} fichiers, "
                 f"{report.chunks_upserted} chunks, {report.duration_ms}ms"
@@ -785,7 +785,7 @@ class RAGIndexer:
                             collection=coll,
                         ))
             except Exception as e:
-                print(f"  ⚠️  Erreur recherche {name}: {e}")
+                print(f"  [!]  Erreur recherche {name}: {e}")
 
         # Trier par score global
         results.sort(key=lambda r: r.score, reverse=True)
@@ -834,7 +834,7 @@ class RAGIndexer:
                 limit=10_000,
             )
         except Exception as e:
-            print(f"  ❌ Erreur export {name}: {e}")
+            print(f"  [x] Erreur export {name}: {e}")
             return 0
 
         lines = [
@@ -914,16 +914,16 @@ def build_indexer_from_config(project_root: Path) -> RAGIndexer:
 def _print_status(indexer: RAGIndexer) -> None:
     """Affiche l'état des collections."""
     st = indexer.status()
-    print(f"\n  🗄️  RAG Index Status — {st['project']}")
+    print(f"\n   RAG Index Status — {st['project']}")
     print(f"  Embedding model : {st['embedding_model']} ({st['vector_size']}d)")
     print(f"  {'─' * 50}")
     for coll, info in st["collections"].items():
         if "error" in info:
-            print(f"  ❌ {coll:12s} │ error: {info['error']}")
+            print(f"  [x] {coll:12s} │ error: {info['error']}")
         else:
             count = info.get("points_count", 0)
             status = info.get("status", "unknown")
-            icon = "✅" if count > 0 else "⚪"
+            icon = "[OK]" if count > 0 else "[-]"
             print(f"  {icon} {coll:12s} │ {count:>6d} chunks │ {status}")
     print()
 
@@ -931,14 +931,14 @@ def _print_status(indexer: RAGIndexer) -> None:
 def _print_search_results(results: list[SearchResult]) -> None:
     """Affiche les résultats de recherche."""
     if not results:
-        print("\n  🔍 Aucun résultat trouvé.\n")
+        print("\n  Aucun résultat trouvé.\n")
         return
 
-    print(f"\n  🔍 {len(results)} résultats trouvés")
+    print(f"\n  {len(results)} résultats trouvés")
     print(f"  {'─' * 60}")
     for i, r in enumerate(results, 1):
         score_bar = "█" * int(r.score * 10)
-        print(f"\n  [{i}] 📄 {r.source_file}")
+        print(f"\n  [{i}] {r.source_file}")
         print(f"      Score: {r.score} {score_bar}")
         print(f"      Type: {r.chunk_type} | Collection: {r.collection}")
         if r.heading:
@@ -997,14 +997,14 @@ def main() -> None:
     try:
         indexer = build_indexer_from_config(args.project_root)
     except ImportError as e:
-        print(f"\n  ❌ {e}\n")
+        print(f"\n  [x] {e}\n")
         sys.exit(1)
 
     if args.command == "index":
         full = getattr(args, "full", False)
         collection = getattr(args, "collection", None)
 
-        print(f"\n  🚀 RAG Indexation {'FULL' if full else 'INCREMENTAL'}")
+        print(f"\n  RAG Indexation {'FULL' if full else 'INCREMENTAL'}")
         print(f"  {'─' * 50}")
 
         if collection:
@@ -1020,14 +1020,14 @@ def main() -> None:
         total_time = sum(r.duration_ms for r in reports)
 
         print(f"\n  {'─' * 50}")
-        print(f"  📊 Total : {total_files} fichiers, {total_chunks} chunks, {total_time}ms")
+        print(f"  Total : {total_files} fichiers, {total_chunks} chunks, {total_time}ms")
         if total_errors:
-            print(f"  ⚠️  {total_errors} erreurs")
+            print(f"  [!]  {total_errors} erreurs")
             for r in reports:
                 for err in r.errors:
                     print(f"     → {err}")
         else:
-            print("  ✅ Indexation terminée sans erreur")
+            print("  [OK] Indexation terminée sans erreur")
         print()
 
     elif args.command == "status":
@@ -1047,7 +1047,7 @@ def main() -> None:
 
     elif args.command == "export":
         count = indexer.export_collection(args.collection, args.output)
-        print(f"\n  📄 Exporté {count} entrées → {args.output}\n")
+        print(f"\n  Exporté {count} entrées → {args.output}\n")
 
 
 if __name__ == "__main__":

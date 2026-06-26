@@ -499,7 +499,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
 <agent id="{agent_tag}.agent.yaml" name="{agent_name}" title="{agent_role}" icon="{agent_icon}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {{{{project-root}}}}/_grimoire/_config/custom/agent-base.md with:
+      <step n="2">BASE PROTOCOL — Load and apply {{{{project-root}}}}/_grimoire/_config/custom/agent-base.md with:
           AGENT_TAG={agent_tag} | AGENT_NAME={agent_name} | LEARNINGS_FILE={agent_tag} | DOMAIN_WORD={domain_word}
       </step>
       <step n="3">Remember: user\'s name is {{{{user_name}}}}</step>
@@ -608,7 +608,7 @@ def render_agent(proposal: AgentProposal, archetype: str = "custom") -> str:
     overlap_rules = ""
     if proposal.existing_overlap:
         overlap_str = ", ".join(proposal.existing_overlap)
-        overlap_rules = f'\n      <r>⚠️ SCOPE WARNING : chevauchement potentiel avec {overlap_str} — clarifier la frontière de responsabilité</r>'
+        overlap_rules = f'\n      <r>[!] SCOPE WARNING : chevauchement potentiel avec {overlap_str} — clarifier la frontière de responsabilité</r>'
 
     # Règle inter-agent si la forge vient d\'un gap
     inter_agent_rule = ""
@@ -725,12 +725,12 @@ def install_proposal(
     if not candidates:
         candidates = list(proposals_dir.glob("*.proposed.md"))
         if not candidates:
-            print(f"❌ Aucun proposal trouvé pour : {proposal_name}", file=sys.stderr)
+            print(f"[x] Aucun proposal trouvé pour : {proposal_name}", file=sys.stderr)
             sys.exit(1)
         # Sélectionner le plus proche
         candidates = [c for c in candidates if proposal_name.lower() in c.stem.lower()]
         if not candidates:
-            print(f"❌ Proposal introuvable : {proposal_name}", file=sys.stderr)
+            print(f"[x] Proposal introuvable : {proposal_name}", file=sys.stderr)
             print(f"   Proposals disponibles : {[f.name for f in proposals_dir.glob('*.proposed.md')]}")
             sys.exit(1)
 
@@ -742,11 +742,11 @@ def install_proposal(
     dest = agents_dir / f"{agent_tag}.md"
 
     if dest.exists():
-        print(f"⚠️  {dest.name} existe déjà — sauvegarder en .bak", file=sys.stderr)
+        print(f"[!]  {dest.name} existe déjà — sauvegarder en .bak", file=sys.stderr)
         dest.rename(dest.with_suffix(".md.bak"))
 
     proposal_file.rename(dest)
-    print(f"✅ Agent installé : {dest}")
+    print(f"[OK] Agent installé : {dest}")
     print(f"   Tag    : {agent_tag}")
     print(f"   Fichier: {dest}")
     print()
@@ -761,9 +761,9 @@ def install_proposal(
         try:
             with manifest_path.open("a", encoding="utf-8") as f:
                 f.write(f"\n{agent_tag},custom,{agent_tag}.md,[TODO description]")
-            print("   ✅ agent-manifest.csv mis à jour")
+            print("   [OK] agent-manifest.csv mis à jour")
         except OSError as e:
-            print(f"   ⚠️  Impossible de mettre à jour le manifest : {e}")
+            print(f"   [!]  Impossible de mettre à jour le manifest : {e}")
 
 
 def list_proposals(proposals_dir: Path) -> None:
@@ -784,7 +784,7 @@ def list_proposals(proposals_dir: Path) -> None:
             desc = source_m.group(2)[:60] if source_m else ""
         except OSError:
             source, desc = "?", ""
-        print(f"  📄 {p.name}")
+        print(f"  {p.name}")
         print(f"     Source : {source} — {desc}")
         print()
     print("  → Installer : bash grimoire-init.sh forge --install <nom-agent>")
@@ -873,21 +873,21 @@ Exemples :
     elif args.from_gap:
         gaps = scan_gaps_from_shared_context(Path(args.shared_context))
         if not gaps:
-            print("ℹ️  Aucune requête inter-agent non résolue trouvée dans shared-context.md")
+            print("[i]  Aucune requête inter-agent non résolue trouvée dans shared-context.md")
             print(f"   Cherché dans : {args.shared_context}")
             print("   Format attendu : - [ ] [agent→?] description")
             return
         proposals = build_proposals_from_gaps(gaps, project_context, existing_agents)
-        print(f"🔍 {len(gaps)} gap(s) inter-agent trouvé(s)")
+        print(f"{len(gaps)} gap(s) inter-agent trouvé(s)")
 
     # ── --from-trace ───────────────────────────────────────────────────────
     elif args.from_trace:
         trace_gaps = scan_gaps_from_trace(Path(args.trace), existing_agents)
         if not trace_gaps:
-            print("ℹ️  Aucun pattern de failure récurrent sans agent propriétaire détecté")
+            print("[i]  Aucun pattern de failure récurrent sans agent propriétaire détecté")
             return
         proposals = build_proposals_from_trace_gaps(trace_gaps, project_context, existing_agents)
-        print(f"🔍 {len(trace_gaps)} gap(s) détecté(s) dans Grimoire_TRACE")
+        print(f"{len(trace_gaps)} gap(s) détecté(s) dans Grimoire_TRACE")
 
     # ── Sauvegarder les proposals ──────────────────────────────────────────
     if not proposals:
@@ -901,12 +901,12 @@ Exemples :
         saved_paths.append(out_path)
 
         # Résumé du proposal
-        print(f"✅ Proposal généré : {out_path.name}")
+        print(f"[OK] Proposal généré : {out_path.name}")
         print(f"   Domaine  : {proposal.domain_key} ({proposal.agent_icon})")
         print(f"   Nom      : {proposal.agent_name} [{proposal.agent_tag}]")
         print(f"   Rôle     : {proposal.agent_role}")
         if proposal.existing_overlap:
-            print(f"   ⚠️  Overlap : {', '.join(proposal.existing_overlap)}")
+            print(f"   [!]  Overlap : {', '.join(proposal.existing_overlap)}")
         if proposal.inter_agent_source:
             print(f"   Gap from : {proposal.inter_agent_source}")
         print()
@@ -918,7 +918,7 @@ Exemples :
     print("  1. Réviser les [TODO] dans chaque fichier .proposed.md")
     print("  2. Remplir les prompts avec la logique métier réelle")
     if proposal.existing_overlap:
-        print("  3. ⚠️  Résoudre les overlaps détectés avant installation")
+        print("  3. [!]  Résoudre les overlaps détectés avant installation")
     print(f"  {3 if proposal.existing_overlap else '3'}. bash grimoire-init.sh forge --install <nom-agent>")
     print("  4. Sentinel [AA] pour l'audit qualité")
 

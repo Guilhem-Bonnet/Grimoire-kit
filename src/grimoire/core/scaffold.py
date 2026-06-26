@@ -627,7 +627,7 @@ class ProjectScaffolder:
             name = fc.dst.stem
             category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
             desc = self._extract_agent_description(fc.src).replace(",", ";")
-            manifest_lines.append(f"{name},{name}.md,{category},{desc},🤖\n")
+            manifest_lines.append(f"{name},{name}.md,{category},{desc},\n")
         p.templates.append(TemplateRender(
             dst=self._target / "_grimoire" / "_config" / "agent-manifest.csv",
             content="".join(manifest_lines),

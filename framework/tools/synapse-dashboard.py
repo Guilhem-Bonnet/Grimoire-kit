@@ -131,7 +131,7 @@ def _collect_router(project_root: Path) -> SectionResult:
         stats = router.get_stats()
         stats_dicts = [asdict(s) for s in stats] if stats else []
 
-        lines = ["## 🔀 LLM Router\n"]
+        lines = ["## LLM Router\n"]
         if not stats_dicts:
             lines.append("_Aucune statistique disponible — pas encore de requêtes routées._\n")
         else:
@@ -176,7 +176,7 @@ def _collect_cache(project_root: Path) -> SectionResult:
         cache = cache_cls(project_root)
         stats = cache.get_stats() if hasattr(cache, "get_stats") else None
 
-        lines = ["## 💾 Semantic Cache\n"]
+        lines = ["## Semantic Cache\n"]
         if stats:
             s = asdict(stats) if hasattr(stats, "__dataclass_fields__") else stats
             hits = s.get("hits", 0)
@@ -213,7 +213,7 @@ def _collect_budget(project_root: Path) -> SectionResult:
             return SectionResult(name="budget", status="error", error="mcp_context_budget not found")
 
         result = mcp_fn(str(project_root))
-        lines = ["## 📊 Token Budget\n"]
+        lines = ["## Token Budget\n"]
 
         if isinstance(result, dict):
             model = result.get("model", "?")
@@ -221,8 +221,8 @@ def _collect_budget(project_root: Path) -> SectionResult:
             window = result.get("window_tokens", 0)
             pct = result.get("usage_pct", 0)
             level = result.get("level", "?")
-            level_icons = {"ok": "✅", "warning": "⚠️", "critical": "🔶", "emergency": "🔴"}
-            icon = level_icons.get(level, "❓")
+            level_icons = {"ok": "[OK]", "warning": "[!]", "critical": "", "emergency": "[!!]"}
+            icon = level_icons.get(level, "")
 
             lines.append(f"- **Modèle** : {model}")
             lines.append(f"- **Utilisation** : {used:,} / {window:,} tokens ({pct:.1%}) {icon}")
@@ -296,7 +296,7 @@ def _collect_orchestrator(project_root: Path) -> SectionResult:
         stats = orch.get_stats()
         history = orch.get_history(last_n=5)
 
-        lines = ["## 🎯 Orchestrator\n"]
+        lines = ["## Orchestrator\n"]
 
         s = asdict(stats)
         lines.append(f"- **Exécutions totales** : {s.get('total_executions', 0)}")
@@ -343,7 +343,7 @@ def _collect_bus(project_root: Path) -> SectionResult:
             return SectionResult(name="bus", status="error", error="mcp_message_bus_status not found")
 
         result = mcp_fn()
-        lines = ["## 📡 Message Bus\n"]
+        lines = ["## Message Bus\n"]
         if isinstance(result, dict):
             backend = result.get("backend", "in-process")
             pending = result.get("pending", 0)
@@ -381,7 +381,7 @@ def _collect_traces(project_root: Path) -> SectionResult:
             return SectionResult(name="traces", status="error", error="mcp_synapse_trace not found")
 
         result = mcp_fn(str(project_root), action="status")
-        lines = ["## 🔍 Synapse Traces\n"]
+        lines = ["## Synapse Traces\n"]
         if isinstance(result, dict):
             total = result.get("total_traces", result.get("count", 0))
             lines.append(f"- **Total traces** : {total}")
@@ -420,7 +420,7 @@ def _collect_workers(project_root: Path) -> SectionResult:
             return SectionResult(name="workers", status="error", error="mcp_agent_worker not found")
 
         result = mcp_fn(str(project_root), action="list")
-        lines = ["## 👷 Agent Workers\n"]
+        lines = ["## Agent Workers\n"]
         if isinstance(result, dict):
             workers = result.get("workers", result.get("agents", []))
             if isinstance(workers, list):
@@ -463,7 +463,7 @@ def _collect_registry(project_root: Path) -> SectionResult:
         registry = registry_cls(project_root)
         entries = registry.list_tools() if hasattr(registry, "list_tools") else []
 
-        lines = ["## 🧰 Tool Registry\n"]
+        lines = ["## Tool Registry\n"]
         if entries:
             lines.append(f"- **Outils enregistrés** : {len(entries)}")
             lines.append("")
@@ -502,7 +502,7 @@ def _collect_mcp(project_root: Path) -> SectionResult:
         discover_fn = getattr(mod, "discover_synapse_tools", None)
         get_all_fn = getattr(mod, "get_all_tool_names", None)
 
-        lines = ["## 🔌 MCP Server\n"]
+        lines = ["## MCP Server\n"]
 
         if get_all_fn:
             all_tools = get_all_fn()
@@ -595,7 +595,7 @@ def build_dashboard(
 def render_markdown(report: DashboardReport) -> str:
     """Rendu Markdown du rapport."""
     lines = [
-        "# 🧠 Synapse Intelligence Dashboard",
+        "# Synapse Intelligence Dashboard",
         "",
         f"_Généré le {report.generated_at} — v{report.dashboard_version}_  ",
         f"_Projet : `{report.project_root}`_  ",
@@ -609,17 +609,17 @@ def render_markdown(report: DashboardReport) -> str:
     err_count = sum(1 for s in report.sections if s.status == "error")
     na_count = sum(1 for s in report.sections if s.status == "unavailable")
 
-    lines.append(f"**Résumé** : {ok_count} ✅ | {err_count} ❌ | {na_count} ⚠️ indisponibles")
+    lines.append(f"**Résumé** : {ok_count} [OK] | {err_count} [x] | {na_count} [!] indisponibles")
     lines.append("")
 
     for section in report.sections:
         if section.status == "ok" and section.markdown:
             lines.append(section.markdown)
         elif section.status == "unavailable":
-            lines.append(f"## ⚠️ {section.name.title()}\n")
+            lines.append(f"## [!] {section.name.title()}\n")
             lines.append(f"_Section indisponible : {section.error}_\n")
         elif section.status == "error":
-            lines.append(f"## ❌ {section.name.title()}\n")
+            lines.append(f"## [x] {section.name.title()}\n")
             lines.append(f"_Erreur : {section.error}_\n")
 
     lines.append("---")
@@ -700,7 +700,7 @@ def main():
         out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(output, encoding="utf-8")
-        print(f"✅ Dashboard sauvegardé dans {out_path}")
+        print(f"[OK] Dashboard sauvegardé dans {out_path}")
     else:
         print(output)
 

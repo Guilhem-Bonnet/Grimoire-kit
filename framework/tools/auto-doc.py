@@ -491,7 +491,7 @@ def render_report(report: DocReport, changes: int = 0) -> str:
     lines = [
         "",
         "╔══════════════════════════════════════════════════════════════╗",
-        "║        📝 Auto-Doc Sync — README Drift Check               ║",
+        "║        Auto-Doc Sync — README Drift Check               ║",
         "╚══════════════════════════════════════════════════════════════╝",
         "",
         f"  README    : {report.readme_path}",
@@ -505,12 +505,12 @@ def render_report(report: DocReport, changes: int = 0) -> str:
     lines.append("")
 
     if not report.drifts:
-        lines.append("  ✅ Documentation synchronisée — aucun drift détecté.")
+        lines.append("  [OK] Documentation synchronisée — aucun drift détecté.")
         lines.append("")
         return "\n".join(lines)
 
     for drift in report.drifts:
-        fixable = "🔧" if drift.auto_fixable else "📝"
+        fixable = "[fix]" if drift.auto_fixable else ""
         loc = f" (L{drift.line})" if drift.line > 0 else ""
         lines.append(f"  {fixable} {drift.section}{loc}")
         lines.append(f"     Actuel  : {drift.current}")

@@ -195,7 +195,7 @@ def cmd_checkpoint(root: Path, label: str, notes: str, tags: list[str],
     }
 
     if not as_json:
-        print(f"💾 Checkpoint créé : {cp_id}")
+        print(f"Checkpoint créé : {cp_id}")
         if label:
             print(f"   Label : {label}")
         print(f"   Fichiers : {copied}")
@@ -221,11 +221,11 @@ def cmd_history(root: Path, as_json: bool) -> dict[str, Any]:
 
     if not as_json:
         if not checkpoints:
-            print("📭 Aucun checkpoint trouvé.")
+            print("Aucun checkpoint trouvé.")
             print("   Créez-en un avec : time-travel checkpoint --label 'mon-label'")
             return result
 
-        print(f"📜 Historique ({len(checkpoints)} checkpoints) :")
+        print(f"Historique ({len(checkpoints)} checkpoints) :")
         print()
         for cp_data in checkpoints:
             ts = cp_data.get("timestamp", "")[:19]
@@ -239,7 +239,7 @@ def cmd_history(root: Path, as_json: bool) -> dict[str, Any]:
             print(f"  ● {cp_data['checkpoint_id']} — {label}{tag_str}")
             print(f"    {ts} | {files} fichiers | {size_kb:.1f} KB")
             if notes:
-                print(f"    📝 {notes}")
+                print(f"    {notes}")
             print()
 
     return result
@@ -285,19 +285,19 @@ def cmd_replay(root: Path, from_ref: str, to_ref: str, as_json: bool) -> dict[st
     result["total_changes"] = total_changes
 
     if not as_json:
-        print(f"🔄 Replay : {from_ref} → {to_ref}")
+        print(f"Replay : {from_ref} → {to_ref}")
         print(f"   {step.summary}")
         print()
         if step.added:
-            print(f"  ➕ Ajoutés ({len(step.added)}) :")
+            print(f"  Ajoutés ({len(step.added)}) :")
             for fpath in step.added[:10]:
                 print(f"     {fpath}")
         if step.removed:
-            print(f"  ➖ Supprimés ({len(step.removed)}) :")
+            print(f"  Supprimés ({len(step.removed)}) :")
             for fpath in step.removed[:10]:
                 print(f"     {fpath}")
         if step.modified:
-            print(f"  ✏️ Modifiés ({len(step.modified)}) :")
+            print(f"  Modifiés ({len(step.modified)}) :")
             for fpath in step.modified[:10]:
                 print(f"     {fpath}")
 
@@ -342,15 +342,15 @@ def cmd_restore(root: Path, ref: str, dry_run: bool, as_json: bool) -> dict[str,
 
     if not as_json:
         mode = "RESTORE" if not dry_run else "DRY RUN"
-        print(f"⏪ {mode} vers {ref}")
+        print(f"{mode} vers {ref}")
         print(f"   Fichiers affectés : {len(operations)}")
         for op in operations[:15]:
-            icon = "📝" if op["action"] == "update" else "✨"
+            icon = "[~]" if op["action"] == "update" else "[+]"
             print(f"     {icon} {op['file']}")
         if len(operations) > 15:
             print(f"     ... et {len(operations) - 15} autres")
         if dry_run:
-            print("\n   ℹ️ Mode dry-run. Relancez sans --dry-run pour appliquer.")
+            print("\n   [i] Mode dry-run. Relancez sans --dry-run pour appliquer.")
 
     return result
 
@@ -441,14 +441,14 @@ def cmd_bisect(root: Path, good_ref: str, bad_ref: str, test_cmd: str,
     }
 
     if not as_json:
-        print(f"🔬 Bisect : {good_ref} → {bad_ref}")
+        print(f"Bisect : {good_ref} → {bad_ref}")
         print(f"   Checkpoints testés : {len(steps)}")
         print()
         for step_data in steps:
-            icon = {"good": "✅", "bad": "❌", "error": "⚠️"}.get(step_data["test_result"], "❓")
+            icon = {"good": "[OK]", "bad": "[x]", "error": "[!]"}.get(step_data["test_result"], "")
             print(f"  {icon} {step_data['checkpoint']} ({step_data['label']}) — {step_data['test_result']}")
         print()
-        print(f"  🎯 Coupable probable : {culprit_cp}")
+        print(f"  Coupable probable : {culprit_cp}")
         if culprit_meta:
             print(f"     Label : {culprit_meta.label}")
             print(f"     Date : {culprit_meta.timestamp[:19]}")

@@ -42,13 +42,13 @@ from pathlib import Path
 VERSION = "1.0.0"
 
 NODE_TYPES = {
-    "agent": "🤖",
-    "tool": "🔧",
-    "workflow": "🔄",
-    "doc": "📄",
-    "config": "⚙️",
-    "test": "🧪",
-    "archetype": "🧬",
+    "agent": "",
+    "tool": "",
+    "workflow": "",
+    "doc": "",
+    "config": "",
+    "test": "",
+    "archetype": "",
 }
 
 
@@ -264,7 +264,7 @@ def format_graph(graph: Graph) -> str:
         type_counts[n.node_type] += 1
 
     lines = [
-        f"🕸️ Project Graph — {len(graph.nodes)} nœuds, {len(graph.edges)} connexions\n",
+        f"Project Graph — {len(graph.nodes)} nœuds, {len(graph.edges)} connexions\n",
         "   Types de nœuds :",
     ]
     for ntype, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
@@ -277,7 +277,7 @@ def format_graph(graph: Graph) -> str:
 
 
 def format_centrality(results: list[CentralityResult]) -> str:
-    lines = ["📊 Centralité de degré (top 15)\n"]
+    lines = ["Centralité de degré (top 15)\n"]
     for r in results[:15]:
         bar = "█" * r.degree
         lines.append(f"   {bar:20s} {r.node_name:25s} deg={r.degree} ({r.degree_centrality:.2f})")
@@ -341,7 +341,7 @@ def cmd_clusters(args: argparse.Namespace) -> int:
         print(json.dumps([{"id": c.id, "size": len(c.nodes), "nodes": c.nodes}
                           for c in clusters], indent=2, ensure_ascii=False))
     else:
-        print(f"🔍 Clusters : {len(clusters)} composantes connexes\n")
+        print(f"Clusters : {len(clusters)} composantes connexes\n")
         for c in clusters[:10]:
             print(f"   Cluster #{c.id} ({len(c.nodes)} nœuds)")
             for n in c.nodes[:5]:
@@ -358,7 +358,7 @@ def cmd_orphans(args: argparse.Namespace) -> int:
         print(json.dumps([{"id": o.id, "name": o.name, "type": o.node_type}
                           for o in orphans], indent=2, ensure_ascii=False))
     else:
-        print(f"👻 Nœuds orphelins : {len(orphans)}\n")
+        print(f"Nœuds orphelins : {len(orphans)}\n")
         for o in orphans:
             emoji = NODE_TYPES.get(o.node_type, "?")
             print(f"   {emoji} {o.name} ({o.node_type})")

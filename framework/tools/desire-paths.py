@@ -55,12 +55,12 @@ UNDERUSED_THRESHOLD = 0.1  # < 10% d'activité = underused
 
 # Labels
 class Usage:
-    OVERUSED = "🔥 Sur-utilisé"
-    NORMAL = "✅ Nominal"
-    UNDERUSED = "💤 Sous-utilisé"
-    DORMANT = "⚫ Dormant"
-    GHOST = "👻 Fantôme"     # Référencé mais n'existe pas
-    DESIRE = "🛤️ Desire Path"  # Utilisé sans être conçu
+    OVERUSED = "Sur-utilisé"
+    NORMAL = "[OK] Nominal"
+    UNDERUSED = "Sous-utilisé"
+    DORMANT = "[-] Dormant"
+    GHOST = "Fantôme"     # Référencé mais n'existe pas
+    DESIRE = "Desire Path"  # Utilisé sans être conçu
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -319,7 +319,7 @@ def generate_recommendations(report: DesireReport) -> list[str]:
 
     if desire_paths:
         recs.append(
-            f"🛤️ {len(desire_paths)} desire path(s) détecté(s) — "
+            f"{len(desire_paths)} desire path(s) détecté(s) — "
             f"les utilisateurs contournent le design. "
             f"Envisager de formaliser : {', '.join(e.name for e in desire_paths[:3])}"
         )
@@ -331,18 +331,18 @@ def generate_recommendations(report: DesireReport) -> list[str]:
         for cat, names in by_cat.items():
             if len(names) > 3:
                 recs.append(
-                    f"💤 {len(names)} {cat}(s) dormant(s) — "
+                    f"{len(names)} {cat}(s) dormant(s) — "
                     f"évaluer : supprimer, fusionner, ou documenter. "
                     f"Exemples : {', '.join(names[:3])}"
                 )
             else:
                 recs.append(
-                    f"💤 {cat}(s) dormant(s) : {', '.join(names)}"
+                    f"{cat}(s) dormant(s) : {', '.join(names)}"
                 )
 
     if overused:
         recs.append(
-            f"🔥 {len(overused)} élément(s) sur-utilisé(s) — "
+            f"{len(overused)} élément(s) sur-utilisé(s) — "
             f"risque de bottleneck. "
             f"Envisager de décomposer : {', '.join(e.name for e in overused[:3])}"
         )
@@ -354,12 +354,12 @@ def generate_recommendations(report: DesireReport) -> list[str]:
         ratio = active / total
         if ratio < 0.5:
             recs.append(
-                f"⚠️ Seulement {ratio:.0%} des éléments sont activement utilisés. "
+                f"[!] Seulement {ratio:.0%} des éléments sont activement utilisés. "
                 f"Le framework est peut-être sur-conçu."
             )
         elif ratio > 0.9:
             recs.append(
-                f"✅ {ratio:.0%} des éléments sont actifs — bonne adéquation design/usage."
+                f"[OK] {ratio:.0%} des éléments sont actifs — bonne adéquation design/usage."
             )
 
     return recs
@@ -370,7 +370,7 @@ def generate_recommendations(report: DesireReport) -> list[str]:
 def format_report(report: DesireReport, category: str = "") -> str:
     """Formatage texte humain."""
     lines = [
-        "🛤️  Desire Paths — Analyse d'adéquation Design vs Usage",
+        " Desire Paths — Analyse d'adéquation Design vs Usage",
         f"   Éléments analysés : {len(report.entries)}",
         f"   Git disponible : {'oui' if report.git_available else 'non'}",
         "",
@@ -383,13 +383,13 @@ def format_report(report: DesireReport, category: str = "") -> str:
             continue
         by_cat[e.category].append(e)
 
-    cat_emojis = {"agent": "🤖", "workflow": "🔄", "tool": "🔧", "memory": "📝"}
+    cat_emojis = {"agent": "", "workflow": "", "tool": "", "memory": ""}
 
     for cat in ["agent", "workflow", "tool", "memory"]:
         if cat not in by_cat:
             continue
         entries = by_cat[cat]
-        lines.append(f"   {cat_emojis.get(cat, '📦')} {cat.upper()}S ({len(entries)})")
+        lines.append(f"   {cat_emojis.get(cat, '')} {cat.upper()}S ({len(entries)})")
 
         # Par label
         by_label: dict[str, list[DesireEntry]] = defaultdict(list)
@@ -409,7 +409,7 @@ def format_report(report: DesireReport, category: str = "") -> str:
 
     # Recommandations
     if report.recommendations:
-        lines.append("   📋 RECOMMANDATIONS :")
+        lines.append("   RECOMMANDATIONS :")
         for r in report.recommendations:
             lines.append(f"      {r}")
         lines.append("")
@@ -502,11 +502,11 @@ def cmd_recommend(args: argparse.Namespace) -> int:
         print(json.dumps({"recommendations": report.recommendations}, indent=2, ensure_ascii=False))
     else:
         if report.recommendations:
-            print("📋 RECOMMANDATIONS Desire Paths :\n")
+            print("RECOMMANDATIONS Desire Paths :\n")
             for r in report.recommendations:
                 print(f"   {r}")
         else:
-            print("✅ Aucune recommandation — adéquation design/usage nominale.")
+            print("[OK] Aucune recommandation — adéquation design/usage nominale.")
     return 0
 
 

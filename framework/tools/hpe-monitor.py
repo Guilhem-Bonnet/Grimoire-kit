@@ -270,9 +270,9 @@ def format_status_text(data: MonitorData) -> str:
     for plan in data.plans:
         s = plan_summary(plan)
         state_icon = {
-            "pending": "⏳", "running": "🔄", "completed": "✅",
-            "failed": "❌", "paused": "⏸️",
-        }.get(s["state"], "❔")
+            "pending": "", "running": "", "completed": "[OK]",
+            "failed": "[x]", "paused": "",
+        }.get(s["state"], "")
 
         lines.append(f"{state_icon} Plan: {s['plan_id']}")
         if s["description"]:
@@ -293,9 +293,9 @@ def format_status_text(data: MonitorData) -> str:
                     if task:
                         st = task.get("status", "?")
                         agent = task.get("agent", "?")
-                        icon = {"done": "✅", "failed": "❌", "running": "🔄",
-                                "pending": "⏳", "ready": "🔵", "skipped": "⏭️",
-                                "cancelled": "🚫"}.get(st, "❔")
+                        icon = {"done": "[OK]", "failed": "[x]", "running": "",
+                                "pending": "", "ready": "[i]", "skipped": "",
+                                "cancelled": "[STOP]"}.get(st, "")
                         task_details.append(f"    {icon} {tid} ({agent}) [{st}]")
                 lines.append(f"    Wave {i}: [{', '.join(layer)}]")
                 lines.extend(task_details)
@@ -304,14 +304,14 @@ def format_status_text(data: MonitorData) -> str:
 
     # Traces summary
     if data.traces:
-        lines.append(f"📊 Traces: {len(data.traces)} exécutions")
+        lines.append(f"Traces: {len(data.traces)} exécutions")
         for backend, count in sorted(data.backends.items()):
             lines.append(f"  {backend}: {count}")
         lines.append("")
 
     # Checkpoints
     if data.checkpoints:
-        lines.append(f"💾 Checkpoints: {len(data.checkpoints)}")
+        lines.append(f"Checkpoints: {len(data.checkpoints)}")
         for cp in data.checkpoints[-3:]:
             lines.append(f"  {cp.get('checkpoint_id', '?')} "
                           f"(plan: {cp.get('plan_id', '?')}, "
@@ -494,7 +494,7 @@ a{color:var(--accent);text-decoration:none}
 <body>
 
 <div class="hdr">
-  <h1>⚡ HPE Monitor</h1>
+  <h1>HPE Monitor</h1>
   <span style="color:var(--fg2)">Hybrid Parallelism Engine</span>
   <span class="gen" id="gen-time"></span>
 </div>
@@ -667,7 +667,7 @@ function renderDAG() {
                 background:${stateColors[st] || '#8b949e'}"></span>
               <span class="tid">${esc(tid)}</span>
             </div>
-            <div class="agent">🤖 ${esc(agent)}</div>
+            <div class="agent">${esc(agent)}</div>
             ${desc ? `<div class="desc">${esc(desc)}</div>` : ''}
           </div>`;
         }
@@ -680,7 +680,7 @@ function renderDAG() {
       if (edges.length) {
         html += `<details style="margin-top:12px">
           <summary style="color:var(--fg2);cursor:pointer;font-size:.85rem">
-            📐 Dépendances (${edges.length})</summary>
+            Dépendances (${edges.length})</summary>
           <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px">
             ${edges.map(e =>
               `<span style="font-size:.8rem;font-family:var(--mono);
@@ -758,7 +758,7 @@ function renderTimeline() {
     return;
   }
 
-  let html = '<div class="card"><h3>📅 Historique des événements</h3><div class="timeline">';
+  let html = '<div class="card"><h3>Historique des événements</h3><div class="timeline">';
   for (const ev of D.history) {
     const type = ev.event || 'unknown';
     const planId = ev.plan_id || '';
@@ -788,7 +788,7 @@ function renderTraces() {
     return;
   }
 
-  let html = `<div class="card"><h3>📋 Traces d'exécution (${D.traces.length})</h3>
+  let html = `<div class="card"><h3>Traces d'exécution (${D.traces.length})</h3>
     <div style="overflow-x:auto"><table class="tbl"><thead><tr>
       <th>Trace ID</th><th>Task</th><th>Agent</th><th>Backend</th>
       <th>Status</th><th>Durée</th><th>Tokens</th><th>Timestamp</th>
@@ -842,7 +842,7 @@ function renderBackends() {
   html += '</div>';
 
   // Backend distribution bar
-  html += '<div class="card"><h3>🔧 Distribution des backends</h3>';
+  html += '<div class="card"><h3>Distribution des backends</h3>';
   html += '<div style="display:flex;height:32px;border-radius:6px;overflow:hidden;margin-top:12px">';
   for (const [name, count] of entries) {
     const color = backendColors[name] || 'var(--fg2)';
@@ -862,7 +862,7 @@ function renderBackends() {
     if (t.duration_ms) durations[b].push(t.duration_ms);
   }
   if (Object.keys(durations).length) {
-    html += '<div class="card"><h3>⏱️ Durées par backend</h3><table class="tbl"><thead><tr>';
+    html += '<div class="card"><h3>Durées par backend</h3><table class="tbl"><thead><tr>';
     html += '<th>Backend</th><th>Min</th><th>Moy</th><th>Max</th><th>Exécutions</th>';
     html += '</tr></thead><tbody>';
     for (const [b, durs] of Object.entries(durations)) {

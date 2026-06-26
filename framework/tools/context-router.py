@@ -128,10 +128,10 @@ class LoadPlan:
     def status(self) -> str:
         pct = self.usage_pct
         if pct >= CRITICAL_THRESHOLD * 100:
-            return "🔴 CRITICAL"
+            return "[!!] CRITICAL"
         elif pct >= WARNING_THRESHOLD * 100:
-            return "🟡 WARNING"
-        return "🟢 OK"
+            return "[!] WARNING"
+        return "[ok] OK"
 
 
 @dataclass
@@ -331,21 +331,21 @@ def calculate_plan(
     # Recommandations
     if plan.usage_pct >= CRITICAL_THRESHOLD * 100:
         plan.recommendations.append(
-            "🔴 Budget critique — Résumer les fichiers > 30 jours via [THINK]"
+            "[!!] Budget critique — Résumer les fichiers > 30 jours via [THINK]"
         )
         plan.recommendations.append(
-            "💡 Passer les P1-SESSION en LAZY si non pertinents pour la tâche actuelle"
+            "Passer les P1-SESSION en LAZY si non pertinents pour la tâche actuelle"
         )
     elif plan.usage_pct >= WARNING_THRESHOLD * 100:
         plan.recommendations.append(
-            "🟡 Budget élevé — Ne charger les P2/P3 que sur demande explicite"
+            "[!] Budget élevé — Ne charger les P2/P3 que sur demande explicite"
         )
 
     # Charge cognitive audit (#98)
     loaded_count = sum(1 for e in entries if e.loaded)
     if loaded_count > 7:
         plan.recommendations.append(
-            f"📦 {loaded_count} fichiers chargés — la loi de Miller (7±2) suggère "
+            f"{loaded_count} fichiers chargés — la loi de Miller (7±2) suggère "
             f"de consolider les plus petits en un seul digest"
         )
 
@@ -357,7 +357,7 @@ def calculate_plan(
 def format_plan(plan: LoadPlan, detail: bool = False) -> str:
     """Formate un plan de chargement pour affichage."""
     lines = [
-        f"📡 Context Router — Plan pour [{plan.agent}]",
+        f"Context Router — Plan pour [{plan.agent}]",
         f"   Modèle : {plan.model} ({plan.model_window:,} tokens)",
         f"   Budget utilisé : {plan.loaded_tokens:,} / {plan.model_window:,} "
         f"({plan.usage_pct:.1f}%) {plan.status}",
@@ -369,7 +369,7 @@ def format_plan(plan: LoadPlan, detail: bool = False) -> str:
         for e in plan.entries:
             if e.loaded:
                 lines.append(
-                    f"   {'✅' if e.loaded else '⏸️'} [{e.priority_label}] "
+                    f"   {'[OK]' if e.loaded else ''} [{e.priority_label}] "
                     f"{e.path} ({e.estimated_tokens:,} tok) — {e.reason}"
                 )
         lines.append("")
@@ -378,7 +378,7 @@ def format_plan(plan: LoadPlan, detail: bool = False) -> str:
             lines.append("   Fichiers différés :")
             for e in skipped:
                 lines.append(
-                    f"   ⏸️ [{e.priority_label}] "
+                    f"   [{e.priority_label}] "
                     f"{e.path} ({e.estimated_tokens:,} tok) — {e.reason}"
                 )
             lines.append("")
@@ -395,7 +395,7 @@ def format_plan(plan: LoadPlan, detail: bool = False) -> str:
 def format_budget_report(report: BudgetReport) -> str:
     """Formate un rapport de budget pour tous les agents."""
     lines = [
-        "📊 Context Budget Report",
+        "Context Budget Report",
         f"   Agents analysés : {len(report.plans)}",
         f"   Agents en surbudget : {report.overbudget_count}",
         "",
@@ -416,7 +416,7 @@ def format_budget_report(report: BudgetReport) -> str:
 def cmd_plan(args: argparse.Namespace, project_root: Path) -> int:
     """Calcule et affiche le plan de chargement pour un agent."""
     if not args.agent:
-        print("❌ --agent requis pour la commande plan", file=sys.stderr)
+        print("[x] --agent requis pour la commande plan", file=sys.stderr)
         return 1
 
     plan = calculate_plan(
@@ -458,7 +458,7 @@ def cmd_budget(args: argparse.Namespace, project_root: Path) -> int:
     """Rapport de budget pour tous les agents."""
     agent_files = find_agent_files(project_root)
     if not agent_files:
-        print("⚠️ Aucun agent trouvé dans le projet.", file=sys.stderr)
+        print("[!] Aucun agent trouvé dans le projet.", file=sys.stderr)
         return 1
 
     report = BudgetReport()
@@ -481,19 +481,19 @@ def cmd_budget(args: argparse.Namespace, project_root: Path) -> int:
 def cmd_suggest(args: argparse.Namespace, project_root: Path) -> int:
     """Suggestions d'optimisation pour un agent."""
     if not args.agent:
-        print("❌ --agent requis pour la commande suggest", file=sys.stderr)
+        print("[x] --agent requis pour la commande suggest", file=sys.stderr)
         return 1
 
     plan = calculate_plan(project_root, args.agent, model=args.model)
 
-    print(f"💡 Optimisations pour [{args.agent}] ({plan.status})\n")
+    print(f"Optimisations pour [{args.agent}] ({plan.status})\n")
 
     suggestions = []
 
     # Fichiers volumineux
     big_files = [e for e in plan.entries if e.estimated_tokens > 3000 and e.loaded]
     if big_files:
-        suggestions.append("📏 Fichiers volumineux (>3000 tokens) chargés automatiquement :")
+        suggestions.append("Fichiers volumineux (>3000 tokens) chargés automatiquement :")
         for bf in sorted(big_files, key=lambda f: -f.estimated_tokens):
             suggestions.append(
                 f"   - {bf.path} ({bf.estimated_tokens:,} tok) → "
@@ -504,7 +504,7 @@ def cmd_suggest(args: argparse.Namespace, project_root: Path) -> int:
     loaded = [e for e in plan.entries if e.loaded]
     if len(loaded) > 5:
         suggestions.append(
-            f"\n📦 {len(loaded)} fichiers chargés — consolider les petits fichiers "
+            f"\n{len(loaded)} fichiers chargés — consolider les petits fichiers "
             f"(<500 tok) en un seul digest"
         )
 
@@ -512,11 +512,11 @@ def cmd_suggest(args: argparse.Namespace, project_root: Path) -> int:
     for e in plan.entries:
         if e.priority == Priority.P1_SESSION and e.estimated_tokens < 100:
             suggestions.append(
-                f"\n🔍 {e.path} fait < 100 tokens — fusionner avec shared-context"
+                f"\n{e.path} fait < 100 tokens — fusionner avec shared-context"
             )
 
     if not suggestions:
-        suggestions.append("✅ Configuration optimale — pas de suggestion.")
+        suggestions.append("[OK] Configuration optimale — pas de suggestion.")
 
     print("\n".join(suggestions))
     return 0
@@ -525,14 +525,14 @@ def cmd_suggest(args: argparse.Namespace, project_root: Path) -> int:
 def cmd_relevance(args: argparse.Namespace, project_root: Path) -> int:
     """Score de pertinence pour une requête donnée."""
     if not args.agent or not args.query:
-        print("❌ --agent et --query requis pour relevance", file=sys.stderr)
+        print("[x] --agent et --query requis pour relevance", file=sys.stderr)
         return 1
 
     entries = discover_context_files(project_root, args.agent)
     entries = compute_relevance(entries, args.query)
     entries.sort(key=lambda e: -e.relevance_score)
 
-    print(f"🎯 Pertinence pour [{args.agent}] — requête : \"{args.query}\"\n")
+    print(f"Pertinence pour [{args.agent}] — requête : \"{args.query}\"\n")
     for e in entries:
         bar = "█" * int(e.relevance_score * 10) + "░" * (10 - int(e.relevance_score * 10))
         print(f"   {bar} {e.relevance_score:.2f} [{e.priority_label}] {e.path}")
@@ -592,7 +592,7 @@ def main() -> int:
 
     project_root = Path(args.project_root).resolve()
     if not (project_root / "_grimoire").exists():
-        print(f"❌ Pas de dossier _grimoire dans {project_root}", file=sys.stderr)
+        print(f"[x] Pas de dossier _grimoire dans {project_root}", file=sys.stderr)
         return 1
 
     commands = {

@@ -498,14 +498,14 @@ def format_list(idx: DocIndex, as_json: bool = False) -> str:
         )
 
     if not idx.sources:
-        return "\n  📚 Aucune source de documentation indexée.\n"
+        return "\n  Aucune source de documentation indexée.\n"
 
     lines: list[str] = []
-    lines.append("\n  📚 Sources de documentation indexées")
+    lines.append("\n  Sources de documentation indexées")
     lines.append(f"  {'─' * 50}")
 
     for name, source in sorted(idx.sources.items()):
-        lines.append(f"\n  📖 {name}")
+        lines.append(f"\n  {name}")
         lines.append(f"     URL   : {source.base_url}")
         lines.append(f"     Pages : {len(source.pages)}")
         lines.append(f"     Chunks: {source.total_chunks}")
@@ -521,14 +521,14 @@ def format_search_results(results: list[dict], as_json: bool = False) -> str:
         return json.dumps(results, indent=2, ensure_ascii=False)
 
     if not results:
-        return "\n  🔍 Aucun résultat trouvé.\n"
+        return "\n  Aucun résultat trouvé.\n"
 
     lines: list[str] = []
-    lines.append(f"\n  🔍 {len(results)} résultat(s)")
+    lines.append(f"\n  {len(results)} résultat(s)")
     lines.append(f"  {'─' * 55}")
 
     for i, r in enumerate(results, 1):
-        lines.append(f"\n  [{i}] 📄 {r['title']}")
+        lines.append(f"\n  [{i}] {r['title']}")
         lines.append(f"      Source: {r['source']} — {r['url']}")
         lines.append(f"      Score : {r['score']}")
         lines.append(f"      {r['snippet'][:200]}")
@@ -645,11 +645,11 @@ def main() -> None:
         if as_json:
             print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
         else:
-            print(f"\n  📖 {args.name} — {report.pages_fetched} page(s) indexée(s), "
+            print(f"\n  {args.name} — {report.pages_fetched} page(s) indexée(s), "
                   f"{report.chunks_created} chunks en {report.duration_ms}ms")
             if report.errors:
                 for e in report.errors:
-                    print(f"     ⚠️  {e}")
+                    print(f"     [!]  {e}")
             print()
 
     elif args.command == "list":
@@ -666,7 +666,7 @@ def main() -> None:
         idx = load_doc_index(project_root)
         name = args.name
         if name not in idx.sources:
-            print(f"\n  ❌ Source '{name}' non trouvée.\n")
+            print(f"\n  [x] Source '{name}' non trouvée.\n")
             sys.exit(1)
 
         del idx.sources[name]
@@ -675,20 +675,20 @@ def main() -> None:
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
         save_doc_index(project_root, idx)
-        print(f"\n  ✅ Source '{name}' supprimée.\n")
+        print(f"\n  [OK] Source '{name}' supprimée.\n")
 
     elif args.command == "refresh":
         idx = load_doc_index(project_root)
         if not idx.sources:
-            print("\n  📚 Aucune source à rafraîchir.\n")
+            print("\n  Aucune source à rafraîchir.\n")
             return
 
         for name, source in idx.sources.items():
-            print(f"  🔄 Rafraîchissement {name}...")
+            print(f"  Rafraîchissement {name}...")
             new_source, report = fetch_source(
                 project_root, name, source.base_url, source.paths)
             idx.sources[name] = new_source
-            print(f"     ✅ {report.pages_fetched} pages, {report.chunks_created} chunks")
+            print(f"     [OK] {report.pages_fetched} pages, {report.chunks_created} chunks")
 
         save_doc_index(project_root, idx)
         print()

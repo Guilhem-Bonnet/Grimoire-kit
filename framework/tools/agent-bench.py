@@ -326,7 +326,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
 
     sorted_agents = sorted(session.agents.values(), key=lambda a: a.activity_score, reverse=True)
     for ag in sorted_agents:
-        score_icon = "🟢" if ag.activity_score >= 70 else ("🟡" if ag.activity_score >= 40 else "🔴")
+        score_icon = "[ok]" if ag.activity_score >= 70 else ("[!]" if ag.activity_score >= 40 else "[!!]")
         ac_str = f"{ag.ac_pass_rate:.0f}%" if (ag.ac_pass_count + ag.ac_fail_count) > 0 else "n/a"
         lines.append(
             f"| `{ag.agent_id}` | {score_icon} {ag.activity_score}/100 | "
@@ -345,7 +345,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
         ]
         sorted_failures = sorted(session.failure_patterns.items(), key=lambda x: x[1], reverse=True)
         for pat, count in sorted_failures:
-            priority = "🔴 HAUTE" if count >= 5 else ("🟠 MOYENNE" if count >= 2 else "🟢 BASSE")
+            priority = "[!!] HAUTE" if count >= 5 else ("[!] MOYENNE" if count >= 2 else "[ok] BASSE")
             lines.append(f"| `{pat}` | {count} | {priority} |")
 
     # Cycle times stories
@@ -358,7 +358,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
             "|-------|--------------|------------|",
         ]
         for story, days in sorted(session.story_cycle_times.items(), key=lambda x: x[1], reverse=True)[:10]:
-            eval_str = "🔴 Long" if days > 7 else ("🟡 Normal" if days > 2 else "🟢 Rapide")
+            eval_str = "[!!] Long" if days > 7 else ("[!] Normal" if days > 2 else "[ok] Rapide")
             lines.append(f"| `{story}` | {days} | {eval_str} |")
 
     # Mémoire
@@ -395,7 +395,7 @@ def report_text(session: SessionMetrics, memory_stats: dict, out: Path) -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"✅ Rapport écrit : {out}")
+    print(f"[OK] Rapport écrit : {out}")
 
 
 def generate_bench_context(session: SessionMetrics, out: Path) -> None:
@@ -466,7 +466,7 @@ def generate_bench_context(session: SessionMetrics, out: Path) -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"✅ Bench context écrit : {out}")
+    print(f"[OK] Bench context écrit : {out}")
     print("   → Ouvrez ce fichier et passez-le à Sentinel avec la commande : bench-review")
 
 
@@ -481,25 +481,25 @@ def _auto_recommendations(session: SessionMetrics) -> list[str]:
     ]
     if silent:
         names = ", ".join(f"`{a.agent_id}`" for a in silent[:3])
-        recs.append(f"🟡 Agents peu actifs (0 décision, 0 commit) : {names} — vérifier leurs protocoles d'activation")
+        recs.append(f"[!] Agents peu actifs (0 décision, 0 commit) : {names} — vérifier leurs protocoles d'activation")
 
     # Failures récurrentes
     for pat, count in session.failure_patterns.items():
         if count >= 5:
-            recs.append(f"🔴 Pattern `{pat}` récurrent ({count}x) — ajouter une règle préventive dans les agents concernés")
+            recs.append(f"[!!] Pattern `{pat}` récurrent ({count}x) — ajouter une règle préventive dans les agents concernés")
 
     # Pas de learnings = aucune capitalisation
     no_learn = [ag for ag in session.agents.values() if ag.learnings_count == 0 and ag.stories_touched]
     if len(no_learn) > len(session.agents) * 0.5:
-        recs.append("🟠 Moins de 50% des agents capitalisent des learnings — vérifier l'intégration Mnemo")
+        recs.append("[!] Moins de 50% des agents capitalisent des learnings — vérifier l'intégration Mnemo")
 
     # Cycle times longs
     long_stories = {k: v for k, v in session.story_cycle_times.items() if v > 14}
     if long_stories:
-        recs.append(f"🟠 {len(long_stories)} story(ies) dépassent 14 jours — envisager checkpoints plus fréquents")
+        recs.append(f"[!] {len(long_stories)} story(ies) dépassent 14 jours — envisager checkpoints plus fréquents")
 
     if not recs:
-        recs.append("🟢 Aucune anomalie majeure détectée automatiquement.")
+        recs.append("[ok] Aucune anomalie majeure détectée automatiquement.")
 
     return recs
 
@@ -558,7 +558,7 @@ def main() -> None:
         print(f"[WARN] Grimoire_TRACE introuvable : {trace_path}", file=sys.stderr)
         print("[INFO] Lancement avec données vides — exécutez des sessions Grimoire pour alimenter le bench")
 
-    print(f"📊 Parsing Grimoire_TRACE : {trace_path}")
+    print(f"Parsing Grimoire_TRACE : {trace_path}")
     session = parse_trace(trace_path, since=args.since, agent_filter=args.agent)
     memory_stats = read_memory_stats(grimoire_dir)
 

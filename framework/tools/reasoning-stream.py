@@ -368,18 +368,18 @@ def compact_stream(project_root: Path,
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
 TYPE_ICONS = {
-    "HYPOTHESIS": "🔬",
-    "DOUBT": "❓",
-    "REASONING": "🧠",
-    "ASSUMPTION": "📌",
-    "ALTERNATIVE": "🔀",
+    "HYPOTHESIS": "",
+    "DOUBT": "",
+    "REASONING": "",
+    "ASSUMPTION": "",
+    "ALTERNATIVE": "",
 }
 
 STATUS_ICONS = {
-    "open": "⏳",
-    "validated": "✅",
-    "invalidated": "❌",
-    "abandoned": "🚫",
+    "open": "",
+    "validated": "[OK]",
+    "invalidated": "[x]",
+    "abandoned": "[STOP]",
 }
 
 
@@ -390,7 +390,7 @@ def render_entries(entries: list[ReasoningEntry]) -> str:
 
     lines = []
     for e in entries:
-        t_icon = TYPE_ICONS.get(e.entry_type, "📝")
+        t_icon = TYPE_ICONS.get(e.entry_type, "")
         s_icon = STATUS_ICONS.get(e.status, "?")
         conf_bar = "█" * int(e.confidence * 5) + "░" * (5 - int(e.confidence * 5))
         lines.append(
@@ -399,9 +399,9 @@ def render_entries(entries: list[ReasoningEntry]) -> str:
         )
         lines.append(f"   {e.text}")
         if e.context:
-            lines.append(f"   📎 {e.context}")
+            lines.append(f"   {e.context}")
         if e.tags:
-            lines.append(f"   🏷️ {', '.join(e.tags)}")
+            lines.append(f"   {', '.join(e.tags)}")
         lines.append("")
     return "\n".join(lines)
 
@@ -409,29 +409,29 @@ def render_entries(entries: list[ReasoningEntry]) -> str:
 def render_analysis(analysis: StreamAnalysis) -> str:
     """Génère le rapport d'analyse du stream."""
     lines = [
-        "# 🧠 Analyse du Reasoning Stream",
+        "# Analyse du Reasoning Stream",
         "",
         f"> **Entrées totales** : {analysis.total_entries}",
         f"> **Confiance moyenne** : {analysis.avg_confidence:.0%}",
     ]
     if analysis.needs_compaction:
-        lines.append("> ⚠️ **Compaction recommandée**")
+        lines.append("> [!] **Compaction recommandée**")
     lines.extend(["", "---", ""])
 
     # Par type
-    lines.append("## 📊 Par Type")
+    lines.append("## Par Type")
     lines.append("")
     lines.append("| Type | Count | % |")
     lines.append("|------|-------|---|")
     for etype, count in sorted(analysis.by_type.items(),
                                 key=lambda x: x[1], reverse=True):
-        icon = TYPE_ICONS.get(etype, "📝")
+        icon = TYPE_ICONS.get(etype, "")
         pct = count / analysis.total_entries * 100 if analysis.total_entries else 0
         lines.append(f"| {icon} {etype} | {count} | {pct:.0f}% |")
     lines.extend(["", "---", ""])
 
     # Par agent
-    lines.append("## 👤 Par Agent")
+    lines.append("## Par Agent")
     lines.append("")
     for agent, count in sorted(analysis.by_agent.items(),
                                 key=lambda x: x[1], reverse=True):
@@ -440,7 +440,7 @@ def render_analysis(analysis: StreamAnalysis) -> str:
     lines.extend(["", "---", ""])
 
     # Par statut
-    lines.append("## 📋 Par Statut")
+    lines.append("## Par Statut")
     lines.append("")
     for status, count in sorted(analysis.by_status.items()):
         icon = STATUS_ICONS.get(status, "?")
@@ -449,40 +449,40 @@ def render_analysis(analysis: StreamAnalysis) -> str:
 
     # Éléments actionnables
     if analysis.open_hypotheses:
-        lines.append(f"## 🔬 Hypothèses ouvertes ({len(analysis.open_hypotheses)})")
+        lines.append(f"## Hypothèses ouvertes ({len(analysis.open_hypotheses)})")
         lines.append("")
         for h in analysis.open_hypotheses[:10]:
             lines.append(f"- [{h.agent}] {h.text[:100]}")
         lines.extend(["", "---", ""])
 
     if analysis.unresolved_doubts:
-        lines.append(f"## ❓ Doutes non résolus ({len(analysis.unresolved_doubts)})")
+        lines.append(f"## Doutes non résolus ({len(analysis.unresolved_doubts)})")
         lines.append("")
         for d in analysis.unresolved_doubts[:10]:
             lines.append(f"- [{d.agent}] {d.text[:100]}")
         lines.extend(["", "---", ""])
 
     if analysis.unvalidated_assumptions:
-        lines.append(f"## 📌 Assumptions non validées ({len(analysis.unvalidated_assumptions)})")
+        lines.append(f"## Assumptions non validées ({len(analysis.unvalidated_assumptions)})")
         lines.append("")
         for a in analysis.unvalidated_assumptions[:10]:
             lines.append(f"- [{a.agent}] {a.text[:100]}")
         lines.extend(["", "---", ""])
 
     if analysis.reasoning_chains:
-        lines.append(f"## 🔗 Chaînes de raisonnement ({len(analysis.reasoning_chains)})")
+        lines.append(f"## Chaînes de raisonnement ({len(analysis.reasoning_chains)})")
         lines.append("")
         for chain in analysis.reasoning_chains[:5]:
             lines.append(f"**Chaîne ({len(chain)} étapes)** :")
             for step in chain:
-                icon = TYPE_ICONS.get(step.entry_type, "📝")
+                icon = TYPE_ICONS.get(step.entry_type, "")
                 lines.append(f"  {icon} {step.text[:80]}")
             lines.append("")
         lines.extend(["---", ""])
 
     # Recommandations
     if analysis.recommendations:
-        lines.append("## 🎯 Recommandations")
+        lines.append("## Recommandations")
         lines.append("")
         for i, rec in enumerate(analysis.recommendations, 1):
             lines.append(f"{i}. {rec}")
@@ -509,7 +509,7 @@ def render_stats(entries: list[ReasoningEntry]) -> str:
 
     avg_conf = total_conf / len(entries)
     lines = [
-        "## 📊 Reasoning Stream Stats",
+        "## Reasoning Stream Stats",
         "",
         f"- **Total** : {len(entries)} entrées",
         f"- **Confiance moy.** : {avg_conf:.0%}",
@@ -518,7 +518,7 @@ def render_stats(entries: list[ReasoningEntry]) -> str:
         "**Par type** :",
     ]
     for t, c in sorted(by_type.items(), key=lambda x: x[1], reverse=True):
-        icon = TYPE_ICONS.get(t, "📝")
+        icon = TYPE_ICONS.get(t, "")
         lines.append(f"  {icon} {t}: {c}")
 
     lines.append("")
@@ -614,7 +614,7 @@ def main():
             tags=tags,
         )
         path = log_entry(entry, project_root)
-        icon = TYPE_ICONS.get(args.type, "📝")
+        icon = TYPE_ICONS.get(args.type, "")
         print(f"{icon} Entrée '{args.type}' ajoutée au reasoning stream")
         print(f"   → {path}")
 
@@ -651,13 +651,13 @@ def main():
         result = compact_stream(project_root, before=args.before,
                                 dry_run=args.dry_run)
         if args.dry_run:
-            print("🔍 Preview compaction :")
+            print("Preview compaction :")
             print(f"   Entrées à compacter : {result['compacted']}")
             print(f"   Entrées conservées : {result['kept']}")
             print()
             print(result.get("summary", ""))
         else:
-            print(f"✅ {result['summary']}")
+            print(f"[OK] {result['summary']}")
             print(f"   Conservées : {result['kept']}")
 
     elif args.command == "stats":
@@ -671,7 +671,7 @@ def main():
             icon = STATUS_ICONS.get(args.status, "?")
             print(f"{icon} Entrée mise à jour → {args.status}")
         else:
-            print("❌ Entrée non trouvée", file=sys.stderr)
+            print("[x] Entrée non trouvée", file=sys.stderr)
             sys.exit(1)
 
 

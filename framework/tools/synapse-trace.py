@@ -476,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "status":
         stats = tracer.get_stats()
-        print(f"📊 Synapse Trace — {stats.total_entries} entrées")
+        print(f"Synapse Trace — {stats.total_entries} entrées")
         if stats.total_entries > 0:
             print(f"  Période : {stats.oldest_entry} → {stats.newest_entry}")
             print(f"  Durée totale : {stats.total_duration_ms:,.0f}ms")
@@ -505,9 +505,9 @@ def main(argv: list[str] | None = None) -> int:
                 "matches": [m.to_dict() for m in results.matches],
             }, indent=2, ensure_ascii=False))
         else:
-            print(f"🔍 {results.total_matches} résultat(s) pour '{results.query}'")
+            print(f"{results.total_matches} résultat(s) pour '{results.query}'")
             for m in results.matches:
-                status_icon = "✅" if m.status == "ok" else "❌"
+                status_icon = "[OK]" if m.status == "ok" else "[x]"
                 print(f"  {status_icon} [{m.timestamp}] {m.tool}.{m.operation} "
                       f"({m.duration_ms:.0f}ms, ~{m.tokens_estimated}tok)")
         return 0
@@ -524,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "clear":
         count = tracer.clear_synapse_entries()
-        print(f"🧹 {count} entrée(s) Synapse supprimée(s)")
+        print(f"{count} entrée(s) Synapse supprimée(s)")
         return 0
 
     parser.print_help()

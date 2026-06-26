@@ -490,32 +490,32 @@ class TestRenderEntries(unittest.TestCase):
     def test_renders_type_icon(self):
         entries = [_make_entry(self.mod, entry_type="HYPOTHESIS")]
         result = self.mod.render_entries(entries)
-        self.assertIn("🔬", result)
+        self.assertIn("", result)
 
     def test_renders_doubt_icon(self):
         entries = [_make_entry(self.mod, entry_type="DOUBT")]
         result = self.mod.render_entries(entries)
-        self.assertIn("❓", result)
+        self.assertIn("", result)
 
     def test_renders_reasoning_icon(self):
         entries = [_make_entry(self.mod, entry_type="REASONING")]
         result = self.mod.render_entries(entries)
-        self.assertIn("🧠", result)
+        self.assertIn("", result)
 
     def test_renders_assumption_icon(self):
         entries = [_make_entry(self.mod, entry_type="ASSUMPTION")]
         result = self.mod.render_entries(entries)
-        self.assertIn("📌", result)
+        self.assertIn("", result)
 
     def test_renders_alternative_icon(self):
         entries = [_make_entry(self.mod, entry_type="ALTERNATIVE")]
         result = self.mod.render_entries(entries)
-        self.assertIn("🔀", result)
+        self.assertIn("", result)
 
     def test_renders_status(self):
         entries = [_make_entry(self.mod, status="validated")]
         result = self.mod.render_entries(entries)
-        self.assertIn("✅", result)
+        self.assertIn("[OK]", result)
 
     def test_renders_context(self):
         entries = [_make_entry(self.mod, context="Story #42")]

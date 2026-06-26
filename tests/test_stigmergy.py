@@ -676,7 +676,7 @@ class TestRender(unittest.TestCase):
         self.assertIn("NEED", out)
         self.assertIn("src/auth", out)
         self.assertIn("review", out)
-        self.assertIn("🔵", out)
+        self.assertIn("[i]", out)
 
     def test_render_landscape(self):
         board = self.st.PheromoneBoard()

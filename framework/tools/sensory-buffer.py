@@ -173,7 +173,7 @@ def cmd_capture(root: Path, agent: str, data: dict[str, Any],
     }
 
     if not as_json:
-        print(f"📥 Capturé : {item_id}")
+        print(f"Capturé : {item_id}")
         print(f"   Agent : {agent}")
         print(f"   Catégorie : {category}")
         print(f"   Importance : {new_item.importance:.0%}")
@@ -212,19 +212,19 @@ def cmd_recall(root: Path, agent: str, category: str | None,
 
     if not as_json:
         if not recalled:
-            print(f"📭 Aucun item actif pour {agent} (seuil: {min_strength:.0%})")
+            print(f"Aucun item actif pour {agent} (seuil: {min_strength:.0%})")
             return result
 
-        print(f"🧠 Mémoire sensorielle de {agent} ({len(recalled)} actifs)")
+        print(f"Mémoire sensorielle de {agent} ({len(recalled)} actifs)")
         print()
         for entry in recalled[:20]:
             strength = entry["current_strength"]
             bar_len = int(strength * 15)
             bar = "█" * bar_len + "░" * (15 - bar_len)
             cat_icon = {
-                "context": "🌍", "decision": "⚖️", "observation": "👁️",
-                "interaction": "💬", "error": "⚠️",
-            }.get(entry.get("category", ""), "📎")
+                "context": "", "decision": "", "observation": "",
+                "interaction": "", "error": "[!]",
+            }.get(entry.get("category", ""), "")
 
             print(f"  {cat_icon} [{entry['item_id']}] Force: [{bar}] {strength:.0%}")
 
@@ -237,7 +237,7 @@ def cmd_recall(root: Path, agent: str, category: str | None,
                 print(f"     {str(data)[:80]}")
 
             if entry.get("tags"):
-                print(f"     🏷️ {', '.join(entry['tags'])}")
+                print(f"     {', '.join(entry['tags'])}")
             print()
 
     return result
@@ -295,7 +295,7 @@ def cmd_decay(root: Path, agent: str, as_json: bool) -> dict[str, Any]:
     }
 
     if not as_json:
-        print(f"⏳ Décroissance — {agent}")
+        print(f"Décroissance — {agent}")
         print(f"   Total : {len(items)} | Actifs : {active_count} | Oubliés : {forgotten_count}")
         print(f"   Demi-vie base : {DECAY_HALF_LIFE_HOURS}h | Seuil : {DECAY_THRESHOLD:.0%}")
         print()
@@ -303,7 +303,7 @@ def cmd_decay(root: Path, agent: str, as_json: bool) -> dict[str, Any]:
             strength = entry["current_strength"]
             bar_len = int(strength * 20)
             bar = "█" * bar_len + "░" * (20 - bar_len)
-            status_icon = "🟢" if entry["status"] == "active" else "💀"
+            status_icon = "[ok]" if entry["status"] == "active" else ""
             print(f"  {status_icon} [{entry['item_id']}] [{bar}] {strength:.0%} "
                   f"(âge: {entry['age_hours']}h, TTL: {entry['ttl_hours']}h)")
 
@@ -351,7 +351,7 @@ def cmd_prioritize(root: Path, agent: str, top_n: int,
     }
 
     if not as_json:
-        print(f"🎯 Top {top_n} items prioritaires — {agent}")
+        print(f"Top {top_n} items prioritaires — {agent}")
         print()
         for i, entry in enumerate(top_items, 1):
             score = entry["combined_score"]
@@ -424,7 +424,7 @@ def cmd_flush(root: Path, agent: str, older_than: str | None,
     }
 
     if not as_json:
-        print(f"🧹 Flush — {agent}")
+        print(f"Flush — {agent}")
         print(f"   Purgés : {flushed}")
         print(f"   Restants : {len(kept)}")
 

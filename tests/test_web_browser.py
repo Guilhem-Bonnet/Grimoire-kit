@@ -564,8 +564,8 @@ class TestRenderers(unittest.TestCase):
             ],
         )
         out = wb._render_interact(ir)
-        self.assertIn("✓ Step 0", out)
-        self.assertIn("✓ Step 1", out)
+        self.assertIn("[OK] Step 0", out)
+        self.assertIn("[OK] Step 1", out)
         self.assertIn("extrait:", out)
 
     def test_render_interact_error(self):
@@ -576,7 +576,7 @@ class TestRenderers(unittest.TestCase):
         )
         out = wb._render_interact(ir)
         self.assertIn("Navigation failed", out)
-        self.assertIn("✗ Step 0", out)
+        self.assertIn("[x] Step 0", out)
         self.assertIn("Not found", out)
 
     def test_render_interact_evaluate_result(self):
@@ -593,8 +593,8 @@ class TestRenderers(unittest.TestCase):
             playwright_message="OK", browser_message="Chromium OK",
         )
         out = wb._render_status(bs)
-        self.assertIn("✓ Playwright", out)
-        self.assertIn("✓ Navigateur", out)
+        self.assertIn("[OK] Playwright", out)
+        self.assertIn("[OK] Navigateur", out)
 
     def test_render_status_not_installed(self):
         bs = wb.BrowserStatus(
@@ -602,7 +602,7 @@ class TestRenderers(unittest.TestCase):
             playwright_message="not found", browser_message="N/A",
         )
         out = wb._render_status(bs)
-        self.assertIn("✗ Playwright", out)
+        self.assertIn("[x] Playwright", out)
         self.assertIn("pip install playwright", out)
 
 

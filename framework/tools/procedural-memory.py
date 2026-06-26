@@ -194,9 +194,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         if result["status"] == "created":
-            print(f"  ✅ Pattern #{result['id']} created for task '{args.task}'")
+            print(f"  [OK] Pattern #{result['id']} created for task '{args.task}'")
         else:
-            print(f"  ✅ Pattern incremented (count: {result['success_count']})")
+            print(f"  [OK] Pattern incremented (count: {result['success_count']})")
     return 0
 
 
@@ -208,7 +208,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"results": results}, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔍 Patterns for '{args.task}' ({len(results)} found)\n")
+        print(f"\n  Patterns for '{args.task}' ({len(results)} found)\n")
         if not results:
             print("  No patterns found.")
         for p in results:
@@ -226,7 +226,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"patterns": patterns}, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📚 Procedural Memory — {len(patterns)} pattern(s)\n")
+        print(f"\n  Procedural Memory — {len(patterns)} pattern(s)\n")
         for p in patterns:
             tags_str = f" [{', '.join(p['tags'])}]" if p.get("tags") else ""
             print(f"  #{p['id']} {p['task_type']}{tags_str} (×{p['success_count']})")
@@ -240,7 +240,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(stats, indent=2, ensure_ascii=False))
     else:
-        print("\n  📊 Procedural Memory Stats\n")
+        print("\n  Procedural Memory Stats\n")
         print(f"  Total patterns: {stats['total']}")
         print(f"  Total uses:     {stats.get('total_uses', 0)}")
         if stats["task_types"]:

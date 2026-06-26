@@ -656,8 +656,8 @@ def build_retriever_from_config(project_root: Path) -> RAGRetriever:
 
 def _print_retrieval(result: RetrievalResult) -> None:
     """Affiche un résultat de retrieval."""
-    status = "✅" if result.qdrant_available else "⚠️ FALLBACK"
-    print(f"\n  🔍 RAG Retrieval — {status}")
+    status = "[OK]" if result.qdrant_available else "[!] FALLBACK"
+    print(f"\n  RAG Retrieval — {status}")
     print(f"  Agent: {result.agent} | Query: {result.query[:80]}")
     print(f"  Chunks: {len(result.chunks)} | Tokens: {result.total_tokens} | {result.retrieval_time_ms}ms")
 
@@ -668,7 +668,7 @@ def _print_retrieval(result: RetrievalResult) -> None:
     print(f"  {'─' * 60}")
     for i, chunk in enumerate(result.chunks, 1):
         score_bar = "█" * int(chunk.final_score * 10)
-        print(f"\n  [{i}] 📄 {chunk.source_file}")
+        print(f"\n  [{i}] {chunk.source_file}")
         print(f"      Score: {chunk.final_score} {score_bar}")
         if chunk.rerank_score != 0:
             print(f"      Rerank: {chunk.score} → {chunk.final_score} ({chunk.rerank_score:+.4f})")
@@ -684,21 +684,21 @@ def _print_retrieval(result: RetrievalResult) -> None:
 
 def _print_preflight(report: PreflightReport) -> None:
     """Affiche le rapport preflight."""
-    status = "✅ HEALTHY" if report.healthy else "❌ ISSUES"
-    print(f"\n  🏥 RAG Preflight — {status}")
+    status = "[OK] HEALTHY" if report.healthy else "[x] ISSUES"
+    print(f"\n  RAG Preflight — {status}")
     print(f"  {'─' * 50}")
-    print(f"  Qdrant    : {'✅' if report.qdrant_reachable else '❌'}")
-    print(f"  Embedding : {'✅' if report.embedding_available else '❌'}")
+    print(f"  Qdrant    : {'[OK]' if report.qdrant_reachable else '[x]'}")
+    print(f"  Embedding : {'[OK]' if report.embedding_available else '[x]'}")
     print(f"  Chunks    : {report.total_indexed_chunks}")
 
     if report.collections_status:
         print(f"  {'─' * 50}")
         for coll, info in report.collections_status.items():
-            icon = "✅" if info.get("exists") and info.get("points", 0) > 0 else "⚪"
+            icon = "[OK]" if info.get("exists") and info.get("points", 0) > 0 else "[-]"
             print(f"  {icon} {coll:12s} │ {info.get('points', 0):>6d} chunks │ {info.get('status', '?')}")
 
     if report.errors:
-        print("\n  ⚠️  Problèmes détectés:")
+        print("\n  [!]  Problèmes détectés:")
         for err in report.errors:
             print(f"     → {err}")
     print()
@@ -706,7 +706,7 @@ def _print_preflight(report: PreflightReport) -> None:
 
 def _print_augmented(aug: AugmentedPrompt) -> None:
     """Affiche le prompt augmenté."""
-    print("\n  🧩 Prompt Augmenté")
+    print("\n  Prompt Augmenté")
     print(f"  {'─' * 60}")
     print(f"  Original  : {aug.original_prompt[:80]}...")
     print(f"  Chunks RAG: {len(aug.retrieval.chunks)}")
@@ -845,13 +845,13 @@ def main() -> None:
 
     elif args.command == "benchmark":
         queries = [q.strip() for q in args.queries.split(",") if q.strip()]
-        print(f"\n  ⏱️  RAG Benchmark — {len(queries)} queries")
+        print(f"\n   RAG Benchmark — {len(queries)} queries")
         print(f"  {'─' * 60}")
 
         try:
             retriever = build_retriever_from_config(project_root)
         except (ImportError, Exception) as e:
-            print(f"  ❌ {e}")
+            print(f"  [x] {e}")
             sys.exit(1)
 
         total_time = 0
@@ -860,11 +860,11 @@ def main() -> None:
             result = retriever.retrieve(query=q, agent_id=args.agent)
             total_time += result.retrieval_time_ms
             total_chunks += len(result.chunks)
-            status = "✅" if result.chunks else "⚪"
+            status = "[OK]" if result.chunks else "[-]"
             print(f"  {status} \"{q}\" → {len(result.chunks)} chunks, {result.retrieval_time_ms}ms")
 
         avg_time = total_time / len(queries) if queries else 0
-        print(f"\n  📊 Moyenne: {avg_time:.0f}ms/query, {total_chunks / len(queries):.1f} chunks/query")
+        print(f"\n  Moyenne: {avg_time:.0f}ms/query, {total_chunks / len(queries):.1f} chunks/query")
         print()
 
 

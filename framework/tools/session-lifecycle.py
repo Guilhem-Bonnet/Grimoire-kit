@@ -473,18 +473,18 @@ def _save_state(project_root: Path, result: LifecycleResult) -> None:
 
 def _print_result(result: LifecycleResult) -> None:
     """Affiche le résultat d'un cycle."""
-    phase_icons = {"pre": "🌅", "post": "🌙"}
-    icon = phase_icons.get(result.phase, "⚙️")
+    phase_icons = {"pre": "", "post": ""}
+    icon = phase_icons.get(result.phase, "")
     print(f"\n  {icon} Session Lifecycle — {result.phase.upper()}")
     print(f"  {'─' * 50}")
 
     for hook in result.hooks:
         status_icon = {
-            "completed": "✅",
-            "skipped": "⏭️",
-            "failed": "❌",
-            "pending": "⏳",
-        }.get(hook.status, "❓")
+            "completed": "[OK]",
+            "skipped": "",
+            "failed": "[x]",
+            "pending": "",
+        }.get(hook.status, "")
         print(f"  {status_icon} {hook.name:25s} [{hook.duration_seconds:.3f}s] {hook.message}")
 
     print(f"\n  Status: {result.status} — {result.total_duration_seconds:.3f}s total")
@@ -544,7 +544,7 @@ def main() -> None:
             print(json.dumps(state, indent=2, ensure_ascii=False))
         else:
             if state.get("status") == "no-session":
-                print("  ℹ️ Aucune session enregistrée")
+                print("  [i] Aucune session enregistrée")
             else:
                 print(json.dumps(state, indent=2, ensure_ascii=False))
 

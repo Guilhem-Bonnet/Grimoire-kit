@@ -110,7 +110,7 @@ class TestHandleTool(unittest.TestCase):
         })
         # Should be JSON (either valid routing or error message)
         self.assertIsInstance(result, str)
-        if "❌" not in result:
+        if "[x]" not in result:
             data = json.loads(result)
             self.assertIn("selected_model", data)
 
@@ -119,14 +119,14 @@ class TestHandleTool(unittest.TestCase):
             "prompt": "refactor the authentication module",
         })
         self.assertIsInstance(result, str)
-        if "❌" not in result:
+        if "[x]" not in result:
             data = json.loads(result)
             self.assertIn("complexity", data)
 
     def test_router_stats(self):
         result = self.mod._handle_tool("grimoire_router_stats", {})
         self.assertIsInstance(result, str)
-        if "❌" not in result:
+        if "[x]" not in result:
             data = json.loads(result)
             self.assertIn("stats", data)
 
@@ -140,7 +140,7 @@ class TestHandleTool(unittest.TestCase):
         })
         self.assertIsInstance(result, str)
         # Either JSON result or error
-        if "❌" not in result:
+        if "[x]" not in result:
             data = json.loads(result)
             self.assertIn("query", data)
 

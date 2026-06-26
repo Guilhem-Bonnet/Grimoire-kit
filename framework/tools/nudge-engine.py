@@ -51,11 +51,11 @@ SHARED_GLOB = "**/shared-context*.md"
 
 # Nudge types
 class NudgeType:
-    REMINDER = "💡 REMINDER"      # Rappel d'une leçon apprise
-    WARNING = "⚠️ WARNING"        # Risque basé sur un échec passé
-    OPPORTUNITY = "🌟 OPPORTUNITY" # Connexion cross-module détectée
-    PATTERN = "🔄 PATTERN"        # Pattern récurrent identifié
-    SERENDIP = "✨ SERENDIPITY"   # Connexion surprenante
+    REMINDER = "REMINDER"      # Rappel d'une leçon apprise
+    WARNING = "[!] WARNING"        # Risque basé sur un échec passé
+    OPPORTUNITY = "OPPORTUNITY" # Connexion cross-module détectée
+    PATTERN = "PATTERN"        # Pattern récurrent identifié
+    SERENDIP = "SERENDIPITY"   # Connexion surprenante
 
 # Scoring
 MAX_NUDGES = 10
@@ -393,7 +393,7 @@ def generate_recalls(
 def format_report(report: NudgeReport) -> str:
     """Formatage texte du rapport."""
     lines = [
-        f"💡 Nudge Engine — {report.mode.upper()}",
+        f"Nudge Engine — {report.mode.upper()}",
     ]
     if report.agent:
         lines.append(f"   Agent : {report.agent}")
@@ -405,7 +405,7 @@ def format_report(report: NudgeReport) -> str:
 
     if not report.nudges:
         lines.append("   Aucune suggestion pertinente trouvée.")
-        lines.append("   💡 Astuce : enrichir failure-museum et learnings pour de meilleurs nudges.")
+        lines.append("   Astuce : enrichir failure-museum et learnings pour de meilleurs nudges.")
         return "\n".join(lines)
 
     for i, nudge in enumerate(report.nudges, 1):

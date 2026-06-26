@@ -675,31 +675,31 @@ def emit_to_stigmergy(report: LintReport, project_root: Path) -> int:
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
 SEVERITY_ICONS = {
-    SEVERITY_ERROR: "🔴",
-    SEVERITY_WARNING: "🟡",
-    SEVERITY_INFO: "🔵",
+    SEVERITY_ERROR: "[!!]",
+    SEVERITY_WARNING: "[!]",
+    SEVERITY_INFO: "[i]",
 }
 
 CATEGORY_ICONS = {
-    "contradiction": "⚡",
-    "duplicate": "📋",
-    "orphan": "👻",
-    "broken-ref": "🔗",
-    "chrono": "📅",
+    "contradiction": "",
+    "duplicate": "",
+    "orphan": "",
+    "broken-ref": "",
+    "chrono": "",
 }
 
 
 def render_report(report: LintReport, show_fix: bool = False) -> str:
     """Rend le rapport en texte formaté."""
     lines = [
-        "🔍 Grimoire Memory Lint Report",
+        "Grimoire Memory Lint Report",
         f"   Fichiers scannés : {report.files_scanned}",
         f"   Entrées analysées : {report.entries_scanned}",
         "",
     ]
 
     if not report.issues:
-        lines.append("✅ Aucun problème détecté — mémoire cohérente.")
+        lines.append("[OK] Aucun problème détecté — mémoire cohérente.")
         return "\n".join(lines)
 
     lines.append(
@@ -709,7 +709,7 @@ def render_report(report: LintReport, show_fix: bool = False) -> str:
     lines.extend(["", "---", ""])
 
     for issue in report.issues:
-        sev_icon = SEVERITY_ICONS.get(issue.severity, "❓")
+        sev_icon = SEVERITY_ICONS.get(issue.severity, "")
         cat_icon = CATEGORY_ICONS.get(issue.category, "")
         lines.append(
             f"{sev_icon} {cat_icon} [{issue.issue_id}] {issue.title}"
@@ -719,7 +719,7 @@ def render_report(report: LintReport, show_fix: bool = False) -> str:
             for entry in issue.entries[:2]:
                 lines.append(f"     → {entry}")
         if show_fix and issue.fix_suggestion:
-            lines.append(f"   💡 Fix : {issue.fix_suggestion}")
+            lines.append(f"   Fix : {issue.fix_suggestion}")
         lines.append("")
 
     return "\n".join(lines)
@@ -783,7 +783,7 @@ def main():
     if args.emit and report.error_count > 0:
         count = emit_to_stigmergy(report, project_root)
         if count > 0:
-            print(f"🐜 {count} erreur(s) émise(s) comme phéromones stigmergy")
+            print(f"{count} erreur(s) émise(s) comme phéromones stigmergy")
 
     # Exit code : 1 si erreurs, 0 sinon
     sys.exit(1 if report.error_count > 0 else 0)

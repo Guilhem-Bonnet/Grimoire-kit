@@ -341,7 +341,7 @@ class TestRendering(unittest.TestCase):
     def test_render_clean(self):
         report = self.mod.ValidationReport(files_checked=5)
         text = self.mod.render_report(report)
-        self.assertIn("✅", text)
+        self.assertIn("[OK]", text)
         self.assertIn("5", text)
 
     def test_render_with_issues(self):
@@ -353,7 +353,7 @@ class TestRendering(unittest.TestCase):
             )],
         )
         text = self.mod.render_report(report)
-        self.assertIn("❌", text)
+        self.assertIn("[x]", text)
         self.assertIn("Missing field", text)
 
     def test_report_to_dict(self):

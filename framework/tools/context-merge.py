@@ -564,10 +564,10 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(diff_result.to_dict(), ensure_ascii=False, indent=2))
         else:
-            print(f"\n  📊 Diff : {diff_result.branch_a} ↔ {diff_result.branch_b}")
+            print(f"\n  Diff : {diff_result.branch_a} ↔ {diff_result.branch_b}")
             print(f"  {'─' * 55}")
             print(f"  Différences totales : {diff_result.total_differences}")
-            print(f"  Conflits            : {'⚠️ Oui' if diff_result.has_conflicts else '✅ Non'}")
+            print(f"  Conflits            : {'[!] Oui' if diff_result.has_conflicts else '[OK] Non'}")
             print()
 
             if diff_result.artifacts_only_a:
@@ -583,7 +583,7 @@ def main() -> None:
                 for a in diff_result.artifacts_modified:
                     print(f"    ~ {a.path}")
             if diff_result.decisions_conflicts:
-                print("\n  ⚠️  Conflits de décision :")
+                print("\n  [!]  Conflits de décision :")
                 for c in diff_result.decisions_conflicts:
                     print(f"    {c.decision}")
                     print(f"      A: {c.branch_a_value[:80]}")
@@ -595,7 +595,7 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         else:
-            icon = {"completed": "✅", "partial": "⚠️", "conflict": "⚡", "failed": "❌"}.get(result.status, "❓")
+            icon = {"completed": "[OK]", "partial": "[!]", "conflict": "", "failed": "[x]"}.get(result.status, "")
             print(f"\n  {icon} Merge {result.merge_id}")
             print(f"    {result.source_branch} → {result.target_branch}")
             print(f"    Status    : {result.status}")
@@ -603,7 +603,7 @@ def main() -> None:
             print(f"    Conflicts : {result.conflicts_found}")
             if result.errors:
                 for err in result.errors:
-                    print(f"    ❌ {err}")
+                    print(f"    [x] {err}")
             print()
 
     elif args.command == "preview":
@@ -611,12 +611,12 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps([asdict(a) for a in actions], ensure_ascii=False, indent=2))
         else:
-            print(f"\n  🔍 Preview merge : {args.source} → {args.target}")
+            print(f"\n  Preview merge : {args.source} → {args.target}")
             print(f"  {'─' * 50}")
             if not actions:
                 print("  (aucune action à effectuer)")
             for a in actions:
-                icon = {"copy": "📋", "conflict": "⚡", "overwrite": "✏️"}.get(a.action_type, "•")
+                icon = {"copy": "", "conflict": "", "overwrite": ""}.get(a.action_type, "•")
                 print(f"    {icon} [{a.action_type}] {a.detail}")
             print()
 

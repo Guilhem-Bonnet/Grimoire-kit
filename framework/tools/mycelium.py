@@ -280,7 +280,7 @@ def format_scan(patterns: list[Pattern]) -> str:
     type_counts = Counter(p.pattern_type for p in patterns)
     total_size = sum(p.size_bytes for p in patterns)
     lines = [
-        f"🍄 Mycelium — {len(patterns)} patterns détectés ({total_size / 1024:.1f} KB)\n",
+        f"Mycelium — {len(patterns)} patterns détectés ({total_size / 1024:.1f} KB)\n",
         "   Par type :",
     ]
     for ptype, count in type_counts.most_common():
@@ -315,9 +315,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"exported": exported, "output": str(output)}, indent=2))
     else:
-        print(f"🍄 {exported} patterns exportés vers {output}")
+        print(f"{exported} patterns exportés vers {output}")
         if args.anonymize:
-            print("   🔒 Contenu anonymisé")
+            print("   Contenu anonymisé")
     return 0
 
 
@@ -328,7 +328,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"imported": imported}, indent=2))
     else:
-        print(f"🍄 {imported} patterns importés depuis {source}")
+        print(f"{imported} patterns importés depuis {source}")
     return 0
 
 
@@ -341,7 +341,7 @@ def cmd_match(args: argparse.Namespace) -> int:
                            "remote": m.remote_file, "similarity": m.similarity}
                           for m in matches], indent=2, ensure_ascii=False))
     else:
-        print(f"🔗 {len(matches)} patterns communs trouvés\n")
+        print(f"{len(matches)} patterns communs trouvés\n")
         for m in matches[:15]:
             bar = "█" * int(m.similarity * 10)
             print(f"   {bar} {m.pattern_type}: {m.local_file}")
@@ -357,7 +357,7 @@ def cmd_catalog(args: argparse.Namespace) -> int:
         print(json.dumps(json.loads(catalog.read_text(encoding="utf-8")), indent=2, ensure_ascii=False))
     else:
         print(format_scan(patterns))
-        print(f"\n   📁 Catalogue sauvé : {catalog}")
+        print(f"\n   Catalogue sauvé : {catalog}")
     return 0
 
 

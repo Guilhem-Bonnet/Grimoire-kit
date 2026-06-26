@@ -593,13 +593,13 @@ def main(argv: list[str] | None = None) -> int:
         warnings = [i for i in issues if i.level == "warning"]
 
         if not issues:
-            print("✅ Configuration valide — aucune issue.")
+            print("[OK] Configuration valide — aucune issue.")
             return 0
 
         for i in errors:
-            print(f"❌ [{i.section}] {i.field}: {i.message}")
+            print(f"[x] [{i.section}] {i.field}: {i.message}")
         for i in warnings:
-            print(f"⚠️  [{i.section}] {i.field}: {i.message}")
+            print(f"[!]  [{i.section}] {i.field}: {i.message}")
         print(f"\n{len(errors)} erreur(s), {len(warnings)} avertissement(s)")
         return 1 if errors else 0
 
@@ -608,7 +608,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(template, encoding="utf-8")
-            print(f"✅ Template écrit dans {args.output}")
+            print(f"[OK] Template écrit dans {args.output}")
         else:
             print(template)
         return 0

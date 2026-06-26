@@ -222,7 +222,7 @@ class AgentForge(GrimoireTool):
             domain_key=domain_key,
             agent_name=name,
             agent_tag=tag,
-            agent_icon=profile.get("icon", "🤖"),
+            agent_icon=profile.get("icon", ""),
             agent_role=profile.get("role", "Custom Specialist"),
             overlap=overlap,
         )

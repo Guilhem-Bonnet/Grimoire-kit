@@ -337,7 +337,7 @@ def run_maintenance_cycle(root: Path, cycle_num: int = 1,
 def daemon_loop(root: Path, interval: int = DEFAULT_INTERVAL) -> None:
     """Boucle principale du daemon."""
     if _is_running(root):
-        print(f"⚠️  Daemon déjà en cours (PID {_read_pid(root)})")
+        print(f"[!]  Daemon déjà en cours (PID {_read_pid(root)})")
         return
 
     _write_pid(root)
@@ -367,7 +367,7 @@ def daemon_loop(root: Path, interval: int = DEFAULT_INTERVAL) -> None:
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    print(f"🔄 Grimoire Daemon démarré (PID {os.getpid()}, interval {interval}s)")
+    print(f"Grimoire Daemon démarré (PID {os.getpid()}, interval {interval}s)")
     _log.info("Daemon started (PID=%d, interval=%ds)", os.getpid(), interval)
 
     cycle_num = 0
@@ -379,7 +379,7 @@ def daemon_loop(root: Path, interval: int = DEFAULT_INTERVAL) -> None:
             result = run_maintenance_cycle(root, cycle_num)
 
             for t in result.tasks:
-                icon = "✅" if t.status == "success" else "❌" if t.status == "failed" else "⏭️"
+                icon = "[OK]" if t.status == "success" else "[x]" if t.status == "failed" else ""
                 _log.info("  %s %s (%s, %.1fs)", icon, t.name, t.status, t.duration_s)
 
             state.total_cycles = cycle_num
@@ -396,7 +396,7 @@ def daemon_loop(root: Path, interval: int = DEFAULT_INTERVAL) -> None:
         _write_state(root, state)
         _clear_pid(root)
         _log.info("Daemon stopped after %d cycles", cycle_num)
-        print(f"\n🛑 Daemon arrêté après {cycle_num} cycle(s)")
+        print(f"\n[STOP] Daemon arrêté après {cycle_num} cycle(s)")
 
 
 # ── Display ──────────────────────────────────────────────────────────────────
@@ -407,7 +407,7 @@ def display_status(root: Path) -> None:
     state = _read_state(root)
     running = _is_running(root)
 
-    icon = "🟢" if running else "🔴"
+    icon = "[ok]" if running else "[!!]"
     print(f"\n{icon} Grimoire Daemon")
     print("=" * 40)
     print(f"  Status   : {'running' if running else 'stopped'}")
@@ -424,10 +424,10 @@ def display_status(root: Path) -> None:
 
 def display_cycle(result: CycleResult) -> None:
     """Affiche le résultat d'un cycle."""
-    print(f"\n🔄 Cycle #{result.cycle} — {result.timestamp}")
+    print(f"\nCycle #{result.cycle} — {result.timestamp}")
     print("-" * 50)
     for t in result.tasks:
-        icon = "✅" if t.status == "success" else "❌" if t.status == "failed" else "⏭️"
+        icon = "[OK]" if t.status == "success" else "[x]" if t.status == "failed" else ""
         print(f"  {icon} {t.name:20s} {t.status:8s} ({t.duration_s:.1f}s)")
         if t.message:
             print(f"     {t.message[:80]}")
@@ -514,9 +514,9 @@ def main(argv: list[str] | None = None) -> int:
         pid = _read_pid(root)
         if pid and _is_running(root):
             os.kill(pid, signal.SIGTERM)
-            print(f"🛑 Signal SIGTERM envoyé au PID {pid}")
+            print(f"[STOP] Signal SIGTERM envoyé au PID {pid}")
             return 0
-        print("⚠️  Daemon non actif.")
+        print("[!]  Daemon non actif.")
         return 1
 
     return 1

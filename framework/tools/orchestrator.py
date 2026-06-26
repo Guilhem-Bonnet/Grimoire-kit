@@ -587,15 +587,15 @@ def mcp_orchestrate(
 
 
 def _print_plan(plan: ExecutionPlan) -> None:
-    mode_icons = {"simulated": "🎭", "sequential": "🔗", "concurrent-cpu": "⚡"}
-    icon = mode_icons.get(plan.mode, "❓")
+    mode_icons = {"simulated": "", "sequential": "", "concurrent-cpu": ""}
+    icon = mode_icons.get(plan.mode, "")
     print(f"\n  {icon} Execution Plan — {plan.workflow}")
     print(f"  {'─' * 55}")
     print(f"  Mode          : {plan.mode}")
     print(f"  Reason        : {plan.mode_reason}")
     print(f"  Cost mult     : {plan.estimated_cost_multiplier}x")
     print(f"  Est. tokens   : {plan.estimated_total_tokens:,}")
-    print(f"  Budget OK     : {'✅' if plan.budget_ok else '❌'}")
+    print(f"  Budget OK     : {'[OK]' if plan.budget_ok else '[x]'}")
     if plan.fallback_mode:
         print(f"  Fallback      : {plan.fallback_mode}")
     print(f"  Agents        : {', '.join(plan.agents_involved)}")
@@ -608,7 +608,7 @@ def _print_plan(plan: ExecutionPlan) -> None:
 
 
 def _print_result(result: ExecutionResult) -> None:
-    status_icon = {"completed": "✅", "partial": "⚠️", "failed": "❌"}.get(result.status, "❓")
+    status_icon = {"completed": "[OK]", "partial": "[!]", "failed": "[x]"}.get(result.status, "")
     print(f"\n  {status_icon} Execution Result — {result.workflow}")
     print(f"  {'─' * 55}")
     print(f"  Mode      : {result.mode}")
@@ -616,19 +616,19 @@ def _print_result(result: ExecutionResult) -> None:
     print(f"  Duration  : {result.total_duration_seconds:.2f}s")
     print(f"  Tokens    : {result.total_tokens_used:,}")
     if result.fallback_triggered:
-        print("  ⚠️  Fallback triggered")
+        print("  [!]  Fallback triggered")
     print()
 
     if result.steps:
         print("  Steps :")
         for step in result.steps:
-            icon = {"completed": "✅", "failed": "❌", "skipped": "⏭️"}.get(step.status, "⏳")
+            icon = {"completed": "[OK]", "failed": "[x]", "skipped": ""}.get(step.status, "")
             print(f"    {icon} {step.step_number}. {step.agent:>12s} │ "
                   f"{step.duration_seconds:.2f}s │ {step.output_summary[:40]}")
     if result.errors:
         print("\n  Erreurs :")
         for err in result.errors:
-            print(f"    ❌ {err}")
+            print(f"    [x] {err}")
     print()
 
 
@@ -709,7 +709,7 @@ def main() -> None:
 
     elif args.command == "status":
         stats = orchestrator.get_stats()
-        print("\n  📊 Orchestrator Stats")
+        print("\n  Orchestrator Stats")
         print(f"  {'─' * 40}")
         print(f"  Executions     : {stats.total_executions}")
         print(f"  Success rate   : {stats.success_rate:.0%}")
@@ -731,10 +731,10 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps([r.to_dict() for r in history], ensure_ascii=False, indent=2))
         else:
-            print(f"\n  📜 Historique ({len(history)} dernières)")
+            print(f"\n  Historique ({len(history)} dernières)")
             print(f"  {'─' * 60}")
             for r in history:
-                icon = {"completed": "✅", "partial": "⚠️", "failed": "❌"}.get(r.status, "❓")
+                icon = {"completed": "[OK]", "partial": "[!]", "failed": "[x]"}.get(r.status, "")
                 print(f"    {icon} {r.execution_id} │ {r.workflow:>15s} │ "
                       f"{r.mode:>12s} │ {r.total_duration_seconds:.1f}s")
             print()

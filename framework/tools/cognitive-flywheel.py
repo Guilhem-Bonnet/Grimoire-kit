@@ -473,13 +473,13 @@ def apply_gates(corrections: list[Correction], max_corrections: int) -> list[Cor
 
 def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
     """Render a markdown scoreboard."""
-    trend_icon = {"improving": "📈", "stable": "➡️", "degrading": "📉"}.get(score.trend, "❓")
+    trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(score.trend, "")
     lines = [
         "# Grimoire Cognitive Flywheel — Scoreboard",
         "",
         f"> Cycle: {score.cycle_id} | {score.timestamp[:10]}",
         "",
-        "## 📊 Health Score",
+        "## Health Score",
         "",
         "| Métrique | Valeur |",
         "|---|---|",
@@ -492,7 +492,7 @@ def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
         f"| Corrections appliquées | {score.corrections_applied} |",
         f"| Tendance | {trend_icon} {score.trend} |",
         "",
-        "## 🔍 Patterns Détectés",
+        "## Patterns Détectés",
         "",
     ]
 
@@ -502,7 +502,7 @@ def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
     if confirmed:
         lines.append("### Confirmés (≥3 occurrences)")
         for p in confirmed:
-            sev_icon = {"low": "🟡", "medium": "🟠", "high": "🔴"}.get(p.severity, "⚪")
+            sev_icon = {"low": "[!]", "medium": "[!]", "high": "[!!]"}.get(p.severity, "[-]")
             lines.append(f"- {sev_icon} **{p.pattern_id}** [{p.severity}] "
                          f"({p.occurrences}x) — {p.description}")
         lines.append("")
@@ -510,7 +510,7 @@ def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
     if watching:
         lines.append("### En surveillance (2 occurrences)")
         for p in watching:
-            lines.append(f"- 👁️ **{p.pattern_id}** ({p.occurrences}x) — {p.description}")
+            lines.append(f"- **{p.pattern_id}** ({p.occurrences}x) — {p.description}")
         lines.append("")
 
     if not confirmed and not watching:
@@ -529,7 +529,7 @@ def cmd_analyze(root: Path, args: argparse.Namespace) -> int:
     entries = parse_trace(root, since=since)
 
     if not entries:
-        print("⚠️  Aucune entrée Grimoire_TRACE trouvée — rien à analyser.")
+        print("[!]  Aucune entrée Grimoire_TRACE trouvée — rien à analyser.")
         return 0
 
     patterns = extract_patterns(entries)
@@ -567,7 +567,7 @@ def cmd_analyze(root: Path, args: argparse.Namespace) -> int:
     scoreboard = render_scoreboard(score, patterns)
     _scoreboard_path(root).write_text(scoreboard, encoding="utf-8")
 
-    print(f"🔄 Flywheel cycle {score.cycle_id} terminé")
+    print(f"Flywheel cycle {score.cycle_id} terminé")
     print(f"   Entries: {score.total_entries}")
     print(f"   Grade: {score.health_grade} ({score.trend})")
     print(f"   Patterns: {score.patterns_confirmed} confirmés, {score.patterns_watch} watch")
@@ -576,7 +576,7 @@ def cmd_analyze(root: Path, args: argparse.Namespace) -> int:
         print(f"   Corrections éligibles: {len(confirmed_corrections)}")
     high = [c for c in corrections if c.status == "high-escalated"]
     if high:
-        print(f"   ⚠️  High severity (révision manuelle): {len(high)}")
+        print(f"   [!]  High severity (révision manuelle): {len(high)}")
 
     return 0
 
@@ -591,10 +591,10 @@ def cmd_report(root: Path, _args: argparse.Namespace) -> int:
     print(render_scoreboard(report.score, report.patterns))
 
     if report.corrections:
-        print("\n## 🔧 Corrections")
+        print("\n## Corrections")
         for c in report.corrections:
-            icon = {"pending": "⏳", "applied": "✅", "deferred": "⏸️", "high-escalated": "🔴"}.get(
-                c.status, "❓"
+            icon = {"pending": "", "applied": "[OK]", "deferred": "", "high-escalated": "[!!]"}.get(
+                c.status, ""
             )
             print(f"  {icon} {c.correction_id} [{c.severity}] {c.description} → {c.status}")
     return 0
@@ -613,7 +613,7 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> int:
     eligible = [c for c in report.corrections if c.status == "pending"][:max_corr]
 
     if not eligible:
-        print("✅ Aucune correction éligible — tout est sain.")
+        print("[OK] Aucune correction éligible — tout est sain.")
         return 0
 
     applied_count = 0
@@ -624,7 +624,7 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> int:
             c.status = "applied"
             c.applied_at = datetime.now(UTC).isoformat()
             applied_count += 1
-            print(f"  ✅ {c.correction_id}: {c.description}")
+            print(f"  [OK] {c.correction_id}: {c.description}")
 
     if not dry_run:
         # Save updated report
@@ -648,9 +648,9 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> int:
 
     high = [c for c in report.corrections if c.status == "high-escalated"]
     if high:
-        print(f"\n⚠️  {len(high)} correction(s) high-severity nécessitent une révision manuelle:")
+        print(f"\n[!]  {len(high)} correction(s) high-severity nécessitent une révision manuelle:")
         for c in high:
-            print(f"  🔴 {c.correction_id}: {c.description}")
+            print(f"  [!!] {c.correction_id}: {c.description}")
 
     return 0
 
@@ -662,12 +662,12 @@ def cmd_history(root: Path, _args: argparse.Namespace) -> int:
         print("Aucun historique flywheel.")
         return 0
 
-    print("📜 Flywheel History")
+    print("Flywheel History")
     print("=" * 60)
     for e in entries:
         grade = e.get("health_grade", "?")
-        trend_icon = {"improving": "📈", "stable": "➡️", "degrading": "📉"}.get(
-            e.get("trend", ""), "❓"
+        trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(
+            e.get("trend", ""), ""
         )
         print(
             f"  [{e.get('cycle_id', '?')}] {e.get('timestamp', '?')[:10]} "
@@ -686,7 +686,7 @@ def cmd_score(root: Path, _args: argparse.Namespace) -> int:
         return 1
 
     s = report.score
-    trend_icon = {"improving": "📈", "stable": "➡️", "degrading": "📉"}.get(s.trend, "?")
+    trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(s.trend, "?")
     print(
         f"Grade: {s.health_grade} {trend_icon} | "
         f"Fail rate: {s.failure_rate:.1%} | "

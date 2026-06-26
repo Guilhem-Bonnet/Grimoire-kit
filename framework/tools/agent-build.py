@@ -334,17 +334,17 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(result), indent=2, ensure_ascii=False))
     else:
-        icon = "✅" if result.valid else "❌"
+        icon = "[OK]" if result.valid else "[x]"
         print(f"\n  {icon} Agent Validation: {result.agent_name}")
         for c in result.checks:
-            ci = "✅" if c["passed"] else "❌"
+            ci = "[OK]" if c["passed"] else "[x]"
             print(f"    {ci} {c.get('description', c['check'])}")
         if result.errors:
-            print("\n  ❌ Errors:")
+            print("\n  [x] Errors:")
             for e in result.errors:
                 print(f"    - {e}")
         if result.warnings:
-            print("\n  ⚠️  Warnings:")
+            print("\n  [!]  Warnings:")
             for w in result.warnings:
                 print(f"    - {w}")
     return 0 if result.valid else 1
@@ -358,9 +358,9 @@ def cmd_deps(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([asdict(d) for d in deps], indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📦 Dependencies for {args.agent}\n")
+        print(f"\n  Dependencies for {args.agent}\n")
         for d in deps:
-            icon = "✅" if d.resolved else ("❌" if d.required else "⚠️")
+            icon = "[OK]" if d.resolved else ("[x]" if d.required else "[!]")
             req = "required" if d.required else "optional"
             print(f"    {icon} [{d.dep_type}] {d.name} ({req})")
             print(f"       {d.message}")
@@ -375,14 +375,14 @@ def cmd_build(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(result), indent=2, ensure_ascii=False))
     else:
-        icons = {"success": "✅", "warning": "⚠️", "failed": "❌", "pending": "⏳"}
-        icon = icons.get(result.build_status, "❓")
+        icons = {"success": "[OK]", "warning": "[!]", "failed": "[x]", "pending": ""}
+        icon = icons.get(result.build_status, "")
         print(f"\n  {icon} Build: {result.agent_name} [{result.build_status}]")
         print(f"  Build ID: {result.build_id}")
 
         # Validation summary
         v = result.validation
-        vi = "✅" if v.get("valid") else "❌"
+        vi = "[OK]" if v.get("valid") else "[x]"
         print(f"  Validation: {vi} ({len(v.get('errors', []))} errors, {len(v.get('warnings', []))} warnings)")
 
         # Deps summary
@@ -391,7 +391,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         print(f"  Dependencies: {resolved}/{len(deps)} resolved")
 
         if not result.all_deps_resolved:
-            print("\n  ❌ Unresolved required dependencies:")
+            print("\n  [x] Unresolved required dependencies:")
             for d in deps:
                 if not d["resolved"] and d["required"]:
                     print(f"    - [{d['dep_type']}] {d['name']}: {d['message']}")
@@ -417,12 +417,12 @@ def cmd_list(args: argparse.Namespace) -> int:
                 continue
         print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🏗️  Agent Builds ({len(builds)} total)\n")
+        print(f"\n   Agent Builds ({len(builds)} total)\n")
         for b in builds[:20]:
             try:
                 d = json.loads(b.read_text(encoding="utf-8"))
-                icons = {"success": "✅", "warning": "⚠️", "failed": "❌"}
-                icon = icons.get(d.get("build_status", ""), "❓")
+                icons = {"success": "[OK]", "warning": "[!]", "failed": "[x]"}
+                icon = icons.get(d.get("build_status", ""), "")
                 print(f"  {icon} {d.get('agent_name', '?'):25s} {d.get('build_id', '')}  {d.get('timestamp', '')[:19]}")
             except json.JSONDecodeError:
                 continue

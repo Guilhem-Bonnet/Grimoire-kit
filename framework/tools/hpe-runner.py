@@ -897,16 +897,16 @@ def mcp_hpe_status(
 
 def _status_icon(s: str) -> str:
     return {
-        "pending": "⏳", "ready": "🟢", "running": "🔄",
-        "done": "✅", "failed": "❌", "cancelled": "⛔",
-        "skipped": "⏭️", "paused": "⏸️", "completed": "🏁",
-    }.get(s, "❓")
+        "pending": "", "ready": "[ok]", "running": "",
+        "done": "[OK]", "failed": "[x]", "cancelled": "[STOP]",
+        "skipped": "", "paused": "", "completed": "",
+    }.get(s, "")
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
     fpath = Path(args.file)
     if not fpath.exists():
-        print(f"  ❌ File not found: {fpath}", file=sys.stderr)
+        print(f"  [x] File not found: {fpath}", file=sys.stderr)
         return 1
 
     content = fpath.read_text(encoding="utf-8")
@@ -918,10 +918,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
             import yaml
             definition = yaml.safe_load(content)
         except ImportError:
-            print("  ❌ File is not valid JSON and PyYAML not available", file=sys.stderr)
+            print("  [x] File is not valid JSON and PyYAML not available", file=sys.stderr)
             return 1
         except Exception:
-            print("  ❌ Cannot parse file as JSON or YAML", file=sys.stderr)
+            print("  [x] Cannot parse file as JSON or YAML", file=sys.stderr)
             return 1
 
     root = Path(args.project_root).resolve()
@@ -929,7 +929,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     errors = validate_plan(plan)
 
     if errors:
-        print("  ❌ Validation errors:")
+        print("  [x] Validation errors:")
         for e in errors:
             print(f"    → {e}")
         return 1
@@ -941,14 +941,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
     else:
         layers = topological_layers(plan)
         cp = critical_path(plan)
-        print(f"\n  📐 HPE Plan créé : {plan.plan_id}")
-        print(f"  📝 {plan.description}")
-        print(f"  📊 {len(plan.tasks)} tasks, {len(layers)} waves")
+        print(f"\n  HPE Plan créé : {plan.plan_id}")
+        print(f"  {plan.description}")
+        print(f"  {len(plan.tasks)} tasks, {len(layers)} waves")
         print("\n  Waves :")
         for i, layer in enumerate(layers):
             print(f"    Wave {i}: {', '.join(layer)}")
         if cp:
-            print(f"\n  🔥 Critical path : {' → '.join(cp)}")
+            print(f"\n  Critical path : {' → '.join(cp)}")
 
     return 0
 
@@ -957,7 +957,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     plan = load_plan(root, args.plan_id)
     if not plan:
-        print(f"  ❌ Plan {args.plan_id} not found", file=sys.stderr)
+        print(f"  [x] Plan {args.plan_id} not found", file=sys.stderr)
         return 1
 
     plan, results = run_plan(plan, root)
@@ -966,14 +966,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(json.dumps(get_plan_status(plan), indent=2, ensure_ascii=False))
     else:
         status = get_plan_status(plan)
-        print(f"\n  🏗️  HPE Run — {plan.plan_id}")
+        print(f"\n   HPE Run — {plan.plan_id}")
         print(f"  État : {_status_icon(status['state'])} {status['state']}")
         print(f"  Progression : {status['progress_pct']}%")
         print(f"  Vagues : {len(results)}")
         for wr in results:
             s_count = len(wr.succeeded)
             f_count = len(wr.failed)
-            print(f"    Wave {wr.wave_number}: ✅ {s_count} / ❌ {f_count}")
+            print(f"    Wave {wr.wave_number}: [OK] {s_count} / [x] {f_count}")
         if status["outputs_available"]:
             print(f"  Outputs : {', '.join(status['outputs_available'])}")
 
@@ -984,7 +984,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     plan = load_plan(root, args.plan_id)
     if not plan:
-        print(f"  ❌ Plan {args.plan_id} not found", file=sys.stderr)
+        print(f"  [x] Plan {args.plan_id} not found", file=sys.stderr)
         return 1
 
     status = get_plan_status(plan)
@@ -992,14 +992,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(status, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📊 HPE Status — {plan.plan_id}")
+        print(f"\n  HPE Status — {plan.plan_id}")
         print(f"  État : {_status_icon(status['state'])} {status['state']}")
         print(f"  Progression : {status['progress_pct']}%")
         print(f"  Tâches : {status['total_tasks']} total")
         for st, count in sorted(status["by_status"].items()):
             print(f"    {_status_icon(st)} {st}: {count}")
         if status["critical_path"]:
-            print(f"\n  🔥 Critical path : {' → '.join(status['critical_path'])}")
+            print(f"\n  Critical path : {' → '.join(status['critical_path'])}")
 
     return 0
 
@@ -1008,7 +1008,7 @@ def cmd_critical(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     plan = load_plan(root, args.plan_id)
     if not plan:
-        print(f"  ❌ Plan {args.plan_id} not found", file=sys.stderr)
+        print(f"  [x] Plan {args.plan_id} not found", file=sys.stderr)
         return 1
 
     cp = critical_path(plan)
@@ -1017,7 +1017,7 @@ def cmd_critical(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"critical_path": cp, "layers": layers}, indent=2))
     else:
-        print(f"\n  🔥 Critical Path — {plan.plan_id}")
+        print(f"\n  Critical Path — {plan.plan_id}")
         if cp:
             for i, tid in enumerate(cp):
                 task = _find_task(plan, tid)
@@ -1033,12 +1033,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     checkpoint = load_checkpoint(root, args.checkpoint)
     if not checkpoint:
-        print(f"  ❌ Checkpoint {args.checkpoint} not found", file=sys.stderr)
+        print(f"  [x] Checkpoint {args.checkpoint} not found", file=sys.stderr)
         return 1
 
     plan = load_plan(root, checkpoint.plan_id)
     if not plan:
-        print(f"  ❌ Plan {checkpoint.plan_id} not found", file=sys.stderr)
+        print(f"  [x] Plan {checkpoint.plan_id} not found", file=sys.stderr)
         return 1
 
     plan = restore_from_checkpoint(plan, checkpoint)
@@ -1047,7 +1047,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(get_plan_status(plan), indent=2, ensure_ascii=False))
     else:
-        print(f"  🔄 Reprise depuis {args.checkpoint}")
+        print(f"  Reprise depuis {args.checkpoint}")
         print(f"  État : {_status_icon(plan.state)} {plan.state}")
         print(f"  Vagues supplémentaires : {len(results)}")
 

@@ -55,7 +55,7 @@ VOTER_PERSPECTIVES = [
     VoterPerspective(
         id="technical",
         name="Analyste Technique",
-        icon="🔧",
+        icon="",
         focus="Faisabilité technique et qualité d'implémentation",
         criteria=[
             "Complexité d'implémentation (lignes de code, deps)",
@@ -68,7 +68,7 @@ VOTER_PERSPECTIVES = [
     VoterPerspective(
         id="business",
         name="Analyste Business",
-        icon="📊",
+        icon="",
         focus="Valeur business et alignement stratégique",
         criteria=[
             "Valeur ajoutée pour l'utilisateur final",
@@ -81,7 +81,7 @@ VOTER_PERSPECTIVES = [
     VoterPerspective(
         id="risk",
         name="Analyste Risques",
-        icon="⚠️",
+        icon="[!]",
         focus="Risques, edge cases et failure modes",
         criteria=[
             "Modes de défaillance identifiés",
@@ -96,7 +96,7 @@ VOTER_PERSPECTIVES = [
 DEVIL_ADVOCATE = VoterPerspective(
     id="devil",
     name="Avocat du Diable",
-    icon="😈",
+    icon="",
     focus="Destruction systématique de la proposition",
     criteria=[
         "Quel est le PIRE scénario réaliste ?",
@@ -494,14 +494,14 @@ def load_history(project_root: Path) -> list[dict]:
 
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
-VERDICT_ICONS = {"approved": "✅", "rejected": "❌", "inconclusive": "🟡"}
-SEVERITY_ICONS = {"critical": "🔴", "major": "🟠", "minor": "🟡"}
-VOTE_ICONS = {"approve": "✅", "reject": "❌", "abstain": "🟡"}
+VERDICT_ICONS = {"approved": "[OK]", "rejected": "[x]", "inconclusive": "[!]"}
+SEVERITY_ICONS = {"critical": "[!!]", "major": "[!]", "minor": "[!]"}
+VOTE_ICONS = {"approve": "[OK]", "reject": "[x]", "abstain": "[!]"}
 
 
 def render_report(result: ConsensusResult) -> str:
     """Génère le rapport de consensus en Markdown."""
-    icon = VERDICT_ICONS.get(result.final_verdict, "❓")
+    icon = VERDICT_ICONS.get(result.final_verdict, "")
     lines = [
         f"# {icon} Rapport de Consensus — {result.decision_hash}",
         "",
@@ -511,35 +511,35 @@ def render_report(result: ConsensusResult) -> str:
         "",
         "---",
         "",
-        "## 🗳️ Votes",
+        "## Votes",
         "",
         "| Votant | Verdict | Confiance | Rationale |",
         "|--------|---------|-----------|-----------|",
     ]
 
     for v in result.votes:
-        v_icon = VOTE_ICONS.get(v.verdict, "❓")
+        v_icon = VOTE_ICONS.get(v.verdict, "")
         lines.append(
             f"| {v.voter_name} | {v_icon} {v.verdict} | {v.confidence:.0%} | {v.rationale} |"
         )
     lines.extend(["", "---", ""])
 
     # Détail des scores par critère
-    lines.append("## 📊 Scores détaillés")
+    lines.append("## Scores détaillés")
     lines.append("")
     for v in result.votes:
         lines.append(f"### {v.voter_name}")
         lines.append("")
         for criterion, score in v.criteria_scores.items():
             bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
-            flag = " ⚠️" if score < 0.5 else ""
+            flag = " [!]" if score < 0.5 else ""
             lines.append(f"- `{bar}` {score:.0%} — {criterion}{flag}")
         lines.append("")
 
     # Devil's Advocate
-    lines.extend(["---", "", "## 😈 Challenges de l'Avocat du Diable", ""])
+    lines.extend(["---", "", "## Challenges de l'Avocat du Diable", ""])
     for c in result.devil_challenges:
-        sev_icon = SEVERITY_ICONS.get(c.severity, "❓")
+        sev_icon = SEVERITY_ICONS.get(c.severity, "")
         lines.append(f"### {sev_icon} [{c.severity.upper()}] {c.attack_vector}")
         lines.append("")
         lines.append(c.description)
@@ -550,13 +550,13 @@ def render_report(result: ConsensusResult) -> str:
 
     # Surviving concerns
     if result.surviving_concerns:
-        lines.extend(["---", "", "## ⚠️ Concerns non résolus", ""])
+        lines.extend(["---", "", "## [!] Concerns non résolus", ""])
         for concern in result.surviving_concerns:
             lines.append(f"- {concern}")
         lines.append("")
 
     # Conclusion
-    lines.extend(["---", "", "## 🏛️ Conclusion", ""])
+    lines.extend(["---", "", "## Conclusion", ""])
     if result.consensus_reached:
         lines.append(
             f"Le consensus est **atteint** ({result.consensus_score:.0%} ≥ seuil). "
@@ -583,7 +583,7 @@ def render_history_table(history: list[dict]) -> str:
     ]
     for i, entry in enumerate(reversed(history), 1):
         ts = entry.get("timestamp", "?")[:10]
-        icon = VERDICT_ICONS.get(entry.get("verdict", ""), "❓")
+        icon = VERDICT_ICONS.get(entry.get("verdict", ""), "")
         lines.append(
             f"| {i} | {ts} | `{entry.get('hash', '?')}` | "
             f"{icon} {entry.get('verdict', '?')} | {entry.get('score', 0):.0%} | "
@@ -604,7 +604,7 @@ def render_stats(history: list[dict]) -> str:
     avg_score = sum(h.get("score", 0) for h in history) / total
 
     lines = [
-        "## 📊 Statistiques du Consensus",
+        "## Statistiques du Consensus",
         "",
         f"- **Total décisions** : {total}",
         f"- **Approuvées** : {approved} ({approved/total:.0%})",
@@ -653,19 +653,19 @@ def main():
     if args.proposal_file:
         pf = Path(args.proposal_file)
         if not pf.exists():
-            print(f"❌ Fichier non trouvé : {args.proposal_file}", file=sys.stderr)
+            print(f"[x] Fichier non trouvé : {args.proposal_file}", file=sys.stderr)
             sys.exit(1)
         proposal = pf.read_text(encoding="utf-8").strip()
 
     if not proposal:
-        print("❌ Proposition requise (--proposal ou --proposal-file)", file=sys.stderr)
+        print("[x] Proposition requise (--proposal ou --proposal-file)", file=sys.stderr)
         parser.print_help()
         sys.exit(1)
 
     # Exécuter le consensus
-    print("🏛️  Adversarial Consensus Protocol")
-    print(f"📝 Proposition : {proposal[:100]}{'...' if len(proposal) > 100 else ''}")
-    print(f"🎯 Seuil : {args.threshold:.0%}")
+    print(" Adversarial Consensus Protocol")
+    print(f"Proposition : {proposal[:100]}{'...' if len(proposal) > 100 else ''}")
+    print(f"Seuil : {args.threshold:.0%}")
     print()
 
     result = run_consensus(proposal, project_root, args.threshold)
@@ -688,7 +688,7 @@ def main():
     # Sauvegarder
     if not args.dry_run:
         save_result(result, project_root)
-        icon = VERDICT_ICONS.get(result.final_verdict, "❓")
+        icon = VERDICT_ICONS.get(result.final_verdict, "")
         print(f"\n{icon} Décision {result.decision_hash} enregistrée dans consensus-history.json")
 
 

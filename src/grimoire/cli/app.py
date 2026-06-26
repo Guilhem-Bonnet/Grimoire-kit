@@ -531,7 +531,7 @@ def status(
     # Structure health
     console.print("\n[bold]Structure[/bold]")
     for d, ok in dir_status.items():
-        icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
+        icon = "[green][OK][/green]" if ok else "[red][x][/red]"
         console.print(f"  {icon} {d}/")
 
     console.print()
@@ -783,12 +783,12 @@ def lint(
         raise typer.Exit(0 if not errors else 1)
 
     if not errors:
-        console.print(f"[green]✓[/green] {config_path.name} — no issues found.")
+        console.print(f"[green][OK][/green] {config_path.name} — no issues found.")
         raise typer.Exit(0)
 
     console.print(f"[bold]{config_path.name}[/bold] — [red]{len(errors)} issue(s)[/red]\n")
     for err in errors:
-        line = f"  [red]✗[/red] [bold]{err.path}[/bold]: {err.message}"
+        line = f"  [red][x][/red] [bold]{err.path}[/bold]: {err.message}"
         if err.suggestion:
             line += f"\n    [dim]→ {err.suggestion}[/dim]"
         console.print(line)
@@ -1617,7 +1617,7 @@ def check(
             if fmt == "json":
                 typer.echo(json.dumps({"all_ok": False, "phases": phases}, indent=2))
             else:
-                console.print("  [red]✗[/red] project-context.yaml not found")
+                console.print("  [red][x][/red] project-context.yaml not found")
             raise typer.Exit(1)
 
         data = load_yaml(config_path)
@@ -1629,9 +1629,9 @@ def check(
         if fmt != "json":
             if errors:
                 for err in errors:
-                    console.print(f"  [red]✗[/red] {err}")
+                    console.print(f"  [red][x][/red] {err}")
             else:
-                console.print("  [green]✓[/green] No lint issues")
+                console.print("  [green][OK][/green] No lint issues")
 
     # ── Phase 2: validate ─────
     _phase_header("2/3 Validate")
@@ -1652,7 +1652,7 @@ def check(
             for w in validate_errors:
                 console.print(f"  [yellow]![/yellow] {w}")
         else:
-            console.print("  [green]✓[/green] Config valid")
+            console.print("  [green][OK][/green] Config valid")
 
     # ── Phase 3: structure ────
     _phase_header("3/3 Structure")
@@ -1666,7 +1666,7 @@ def check(
             for d in missing:
                 console.print(f"  [yellow]![/yellow] Missing directory: {d}")
         else:
-            console.print("  [green]✓[/green] All directories present")
+            console.print("  [green][OK][/green] All directories present")
 
     if fmt == "json":
         typer.echo(json.dumps({"all_ok": all_ok, "phases": phases}, indent=2))
@@ -1899,9 +1899,9 @@ def config_validate(ctx: typer.Context) -> None:
     if warnings:
         console.print("[yellow]Config valid with warnings:[/yellow]")
         for w in warnings:
-            console.print(f"  [yellow]⚠[/yellow] {w}")
+            console.print(f"  [yellow][!][/yellow] {w}")
     else:
-        console.print("[green]✓[/green] Config valid — no issues found.")
+        console.print("[green][OK][/green] Config valid — no issues found.")
 
 
 # ── grimoire completion ───────────────────────────────────────────────────────────
@@ -1950,7 +1950,7 @@ def completion_install(
     if shell == "fish":
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(script + "\n", encoding="utf-8")
-        console.print(f"[green]✓[/green] Completion installed to {target}")
+        console.print(f"[green][OK][/green] Completion installed to {target}")
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         marker = "# grimoire shell completion"
@@ -1960,7 +1960,7 @@ def completion_install(
             return
         with target.open("a", encoding="utf-8") as fh:
             fh.write(f"\n{marker}\n{script}\n")
-        console.print(f"[green]✓[/green] Completion appended to {target}")
+        console.print(f"[green][OK][/green] Completion appended to {target}")
         console.print(f"[dim]Reload with: source {target}[/dim]")
 
     _log_operation("completion_install", {"shell": shell})
@@ -2094,7 +2094,7 @@ def self_update() -> None:
         console.print(f"  [dim]{hint}[/dim]")
         raise typer.Exit(1)
 
-    console.print(f"\n[green]✓ Updated to {latest}[/green]", highlight=False)
+    console.print(f"\n[green][OK] Updated to {latest}[/green]", highlight=False)
     console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
 
 
@@ -2156,8 +2156,8 @@ def self_diagnose(ctx: typer.Context) -> None:
 
     console.print("[bold]grimoire self diagnose[/bold]\n")
     for c in checks:
-        icon = "[green]✓[/green]" if c["status"] == "ok" else (
-            "[yellow]![/yellow]" if c["status"] == "warn" else "[red]✗[/red]"
+        icon = "[green][OK][/green]" if c["status"] == "ok" else (
+            "[yellow]![/yellow]" if c["status"] == "warn" else "[red][x][/red]"
         )
         ver = f" {c['version']}" if c.get("version") else ""
         opt = " [dim](optional)[/dim]" if not c["required"] else ""
@@ -2278,7 +2278,7 @@ def upgrade(
 
     if plan.warnings:
         for w in plan.warnings:
-            console.print(f"  [yellow]⚠ {w}[/yellow]")
+            console.print(f"  [yellow][!] {w}[/yellow]")
 
     for desc in completed:
         icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
@@ -2346,7 +2346,7 @@ def merge(
 
     if plan.warnings:
         for w in plan.warnings:
-            console.print(f"  [yellow]⚠ {w}[/yellow]")
+            console.print(f"  [yellow][!] {w}[/yellow]")
 
     for f in result.files_created:
         icon = "[cyan]plan[/cyan]" if dry_run else "[green]created[/green]"
@@ -2523,15 +2523,15 @@ def env_cmd(ctx: typer.Context) -> None:
     console.print(f"  Python       {sys.version.split()[0]} ({platform.python_implementation()})")
     console.print(f"  Platform     {platform.platform()}")
     console.print(f"  Arch         {platform.machine()}")
-    online_icon = "[green]✓[/green]" if online else "[yellow]✗[/yellow]"
+    online_icon = "[green][OK][/green]" if online else "[yellow][x][/yellow]"
     console.print(f"  Online       {online_icon}")
 
     console.print("\n[bold]Dependencies[/bold]")
     for dep, ver in deps.items():
         if ver:
-            console.print(f"  [green]✓[/green] {dep} {ver}")
+            console.print(f"  [green][OK][/green] {dep} {ver}")
         else:
-            console.print(f"  [dim]✗ {dep} (not installed)[/dim]")
+            console.print(f"  [dim][x] {dep} (not installed)[/dim]")
 
     console.print("\n[bold]Environment[/bold]")
     for var, val in env_vars.items():
@@ -2540,7 +2540,7 @@ def env_cmd(ctx: typer.Context) -> None:
     if conflicts:
         console.print("\n[bold yellow]Conflicts[/bold yellow]")
         for c in conflicts:
-            console.print(f"  [yellow]⚠[/yellow] {c}")
+            console.print(f"  [yellow][!][/yellow] {c}")
 
     if project_info and project_info["name"] != "(unreadable)":
         console.print("\n[bold]Project[/bold]")
@@ -2639,7 +2639,7 @@ def history_cmd(
         if fmt == "json":
             typer.echo(json.dumps({"cleared": True}))
         else:
-            console.print("[green]✓[/green] Audit log cleared.")
+            console.print("[green][OK][/green] Audit log cleared.")
         return
 
     if not log_file.is_file():
@@ -2679,7 +2679,7 @@ def history_cmd(
         return
 
     if skipped > 0:
-        console.print(f"[yellow]⚠ {skipped} corrupted entries skipped[/yellow]")
+        console.print(f"[yellow][!] {skipped} corrupted entries skipped[/yellow]")
 
     tbl = Table(title=f"Audit History (last {limit})")
     tbl.add_column("Timestamp", style="dim")
@@ -2691,7 +2691,7 @@ def history_cmd(
         ts = e.get("ts", "?")[:19].replace("T", " ")
         ver = e.get("v", "—")
         cmd = e.get("cmd", "?")
-        status_icon = "[green]✓[/green]" if e.get("ok") else "[red]✗[/red]"
+        status_icon = "[green][OK][/green]" if e.get("ok") else "[red][x][/red]"
         args_str = ", ".join(f"{k}={v}" for k, v in (e.get("args") or {}).items())
         tbl.add_row(ts, ver, cmd, status_icon, args_str)
     console.print(tbl)
@@ -2801,7 +2801,7 @@ def _warn_deprecated() -> None:
     for old_flag, (new_flag, version) in _DEPRECATED_FLAGS.items():
         if old_flag in sys.argv:
             console.print(
-                f"[yellow]⚠ '{old_flag}' is deprecated and will be removed in v{version}. "
+                f"[yellow][!] '{old_flag}' is deprecated and will be removed in v{version}. "
                 f"Use '{new_flag}' instead.[/yellow]"
             )
 
@@ -2851,7 +2851,7 @@ def is_online() -> bool:
 def _handle_signal(signum: int, _frame: Any) -> None:
     """Handle SIGINT/SIGTERM — print message and exit cleanly."""
     sig_name = signal.Signals(signum).name
-    console.print(f"\n[yellow]⚠ Interrupted ({sig_name})[/yellow]")
+    console.print(f"\n[yellow][!] Interrupted ({sig_name})[/yellow]")
     raise SystemExit(128 + signum)
 
 
@@ -2944,7 +2944,7 @@ def cli() -> None:
         if _show_profile and _phase_timings:
             _display_profile(total)
         elif _show_time:
-            console.print(f"\n[dim]⏱  {total * 1000:.0f}ms[/dim]")
+            console.print(f"\n[dim] {total * 1000:.0f}ms[/dim]")
 
 
 if __name__ == "__main__":

@@ -47,12 +47,12 @@ MAX_INTENSITY = 1.0
 DEFAULT_INTENSITY = 0.7
 
 TYPE_ICONS = {
-    "NEED":        "🔵",
-    "ALERT":       "🔴",
-    "OPPORTUNITY": "🟢",
-    "PROGRESS":    "🟡",
-    "COMPLETE":    "✅",
-    "BLOCK":       "🚧",
+    "NEED":        "[i]",
+    "ALERT":       "[!!]",
+    "OPPORTUNITY": "[ok]",
+    "PROGRESS":    "[!]",
+    "COMPLETE":    "[OK]",
+    "BLOCK":       "",
 }
 
 # Per-type half-life (hours) — overrides board.half_life_hours

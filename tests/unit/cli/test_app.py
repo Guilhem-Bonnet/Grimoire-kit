@@ -657,7 +657,7 @@ class TestLint:
         runner.invoke(app, ["init", str(tmp_path), "--name", "lint-ok"])
         result = runner.invoke(app, ["lint", str(tmp_path)])
         assert result.exit_code == 0
-        assert "no issues" in result.output.lower() or "✓" in result.output
+        assert "no issues" in result.output.lower() or "[OK]" in result.output
 
     def test_lint_json_output_valid(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "lint-json"])
@@ -763,7 +763,7 @@ class TestCheck:
         runner.invoke(app, ["init", str(tmp_path), "--name", "check-ok"])
         result = runner.invoke(app, ["check", str(tmp_path)])
         assert result.exit_code == 0
-        assert "passed" in result.output.lower() or "✓" in result.output
+        assert "passed" in result.output.lower() or "[OK]" in result.output
 
     def test_check_invalid_config(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
@@ -923,7 +923,7 @@ class TestDoctorFixture:
     def test_check_ok_with_fixture(self, init_project: Path) -> None:
         result = runner.invoke(app, ["check", str(init_project)])
         assert result.exit_code == 0
-        assert "passed" in result.output.lower() or "✓" in result.output
+        assert "passed" in result.output.lower() or "[OK]" in result.output
 
     def test_validate_ok_with_fixture(self, init_project: Path) -> None:
         result = runner.invoke(app, ["validate", str(init_project)])
@@ -1059,7 +1059,7 @@ class TestSelfDiagnose:
     def test_self_diagnose_text(self) -> None:
         result = runner.invoke(app, ["self", "diagnose"])
         assert result.exit_code == 0
-        assert "diagnose" in result.output.lower() or "✓" in result.output
+        assert "diagnose" in result.output.lower() or "[OK]" in result.output
 
     def test_self_diagnose_json(self) -> None:
         result = runner.invoke(app, ["-o", "json", "self", "diagnose"])
@@ -3388,7 +3388,7 @@ class TestR35HistoryClear:
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-y", "history", "--clear"])
         assert result.exit_code == 0
-        assert "cleared" in result.output.lower() or "✓" in result.output
+        assert "cleared" in result.output.lower() or "[OK]" in result.output
 
     def test_clear_json(self, cli_project: Path) -> None:
         from grimoire.cli.app import _AUDIT_FILENAME
@@ -3724,4 +3724,4 @@ class TestR37EnvConflicts:
         )
         assert result.exit_code == 0
         # Conflict warning should appear in text output
-        assert "conflict" in result.output.lower() or "⚠" in result.output
+        assert "conflict" in result.output.lower() or "[!]" in result.output

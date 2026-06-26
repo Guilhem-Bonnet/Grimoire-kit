@@ -346,10 +346,10 @@ def _cli() -> int:
         if result.dissonances:
             print(f"Dissonances: {len(result.dissonances)}")
             for d in result.dissonances:
-                icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🔵"}.get(d.severity, "•")
+                icon = {"HIGH": "[!!]", "MEDIUM": "[!]", "LOW": "[i]"}.get(d.severity, "•")
                 print(f"  {icon} [{d.category}] {d.file}: {d.message}")
         else:
-            print("✅ No dissonances — architecture is harmonious!")
+            print("[OK] No dissonances — architecture is harmonious!")
     return 0
 
 

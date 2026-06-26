@@ -44,11 +44,11 @@ from pathlib import Path
 VERSION = "1.0.0"
 
 LEVELS = {
-    "L0": {"name": "Découverte", "range": (0, 20), "emoji": "🌱"},
-    "L1": {"name": "Apprenti", "range": (20, 40), "emoji": "🌿"},
-    "L2": {"name": "Praticien", "range": (40, 60), "emoji": "🌳"},
-    "L3": {"name": "Expert", "range": (60, 80), "emoji": "🏔️"},
-    "L4": {"name": "Maître", "range": (80, 100), "emoji": "🏆"},
+    "L0": {"name": "Découverte", "range": (0, 20), "emoji": ""},
+    "L1": {"name": "Apprenti", "range": (20, 40), "emoji": ""},
+    "L2": {"name": "Praticien", "range": (40, 60), "emoji": ""},
+    "L3": {"name": "Expert", "range": (60, 80), "emoji": ""},
+    "L4": {"name": "Maître", "range": (80, 100), "emoji": ""},
 }
 
 
@@ -255,14 +255,14 @@ def format_assessment(result: AssessmentResult) -> str:
     for mid in result.achieved_milestones:
         m = milestone_map.get(mid)
         if m:
-            lines.append(f"      ✅ [{mid}] {m.name}")
+            lines.append(f"      [OK] [{mid}] {m.name}")
 
     if result.next_milestones:
         lines.append("\n   Prochains jalons :")
         for mid in result.next_milestones:
             m = milestone_map.get(mid)
             if m:
-                lines.append(f"      ⬜ [{mid}] {m.name} — {m.description}")
+                lines.append(f"      [{mid}] {m.name} — {m.description}")
 
     # Progress bar
     bar = "█" * (result.score // 10) + "░" * (10 - result.score // 10)
@@ -273,7 +273,7 @@ def format_assessment(result: AssessmentResult) -> str:
 
 def format_guidance(level: str, items: list[GuidanceItem]) -> str:
     info = LEVELS.get(level, LEVELS["L0"])
-    lines = [f"📚 Guide pour {info['emoji']} {info['name']} (niveau {level})\n"]
+    lines = [f"Guide pour {info['emoji']} {info['name']} (niveau {level})\n"]
     for i, item in enumerate(items, 1):
         lines.append(f"   {i}. {item.title}")
         lines.append(f"      Action : {item.action}")
@@ -285,7 +285,7 @@ def format_guidance(level: str, items: list[GuidanceItem]) -> str:
 
 
 def format_milestones() -> str:
-    lines = ["🏁 Jalons de progression Grimoire\n"]
+    lines = ["Jalons de progression Grimoire\n"]
     for level, info in LEVELS.items():
         lines.append(f"  {info['emoji']} {level} — {info['name']}")
         for m in MILESTONES:

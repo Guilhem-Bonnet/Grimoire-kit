@@ -356,7 +356,7 @@ def transform_document(content: str, template_id: str) -> str:
     """Transforme un document selon un template."""
     template = TEMPLATES.get(template_id)
     if not template:
-        return f"❌ Template inconnu : {template_id}"
+        return f"[x] Template inconnu : {template_id}"
 
     analysis = analyze_document(content)
     lines = [f"# {template['name']}\n"]
@@ -381,14 +381,14 @@ def transform_document(content: str, template_id: str) -> str:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_modes() -> str:
-    lines = ["📐 Modes de verbosité Grimoire\n"]
+    lines = ["Modes de verbosité Grimoire\n"]
     for mode, config in VERBOSITY_MODES.items():
         lines.append(f"   [{mode}] {config['description']}")
         lines.append(f"      Max sentences: {config['max_sentences']}")
-        lines.append(f"      Exemples: {'✅' if config['include_examples'] else '❌'}")
-        lines.append(f"      Raisonnement: {'✅' if config['include_rationale'] else '❌'}")
+        lines.append(f"      Exemples: {'[OK]' if config['include_examples'] else '[x]'}")
+        lines.append(f"      Raisonnement: {'[OK]' if config['include_rationale'] else '[x]'}")
         lines.append("")
-    lines.append("📋 Templates disponibles :")
+    lines.append("Templates disponibles :")
     for tid, tmpl in TEMPLATES.items():
         lines.append(f"   [{tid}] {tmpl['name']} — sections: {', '.join(tmpl['sections'])}")
     return "\n".join(lines)
@@ -400,7 +400,7 @@ def cmd_condense(args: argparse.Namespace) -> int:
     try:
         content = Path(args.input).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        print(f"❌ Impossible de lire {args.input} : {e}")
+        print(f"[x] Impossible de lire {args.input} : {e}")
         return 1
 
     result = condense(content, args.mode)
@@ -411,7 +411,7 @@ def cmd_condense(args: argparse.Namespace) -> int:
             "ratio": result.ratio, "content": result.content,
         }, indent=2, ensure_ascii=False))
     else:
-        print(f"📐 Condensation {result.mode} ({result.original_words} → {result.condensed_words} mots, "
+        print(f"Condensation {result.mode} ({result.original_words} → {result.condensed_words} mots, "
               f"{result.ratio:.0%})\n")
         print(result.content)
     return 0
@@ -432,7 +432,7 @@ def cmd_transform(args: argparse.Namespace) -> int:
     try:
         content = Path(args.input).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        print(f"❌ Impossible de lire {args.input} : {e}")
+        print(f"[x] Impossible de lire {args.input} : {e}")
         return 1
 
     result = transform_document(content, args.template)
@@ -447,7 +447,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     try:
         content = Path(args.input).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        print(f"❌ Impossible de lire {args.input} : {e}")
+        print(f"[x] Impossible de lire {args.input} : {e}")
         return 1
 
     if args.json:
@@ -457,7 +457,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
             results[mode] = {"words": r.condensed_words, "ratio": r.ratio}
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
-        print("📊 Comparaison des modes de condensation\n")
+        print("Comparaison des modes de condensation\n")
         for mode in VERBOSITY_MODES:
             r = condense(content, mode)
             bar = "█" * int(r.ratio * 20)

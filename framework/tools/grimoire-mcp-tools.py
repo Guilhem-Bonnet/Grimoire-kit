@@ -144,12 +144,12 @@ def _sanitize_mcp_input(args: dict) -> dict:
             for pattern in _INJECTION_PATTERNS:
                 if pattern.search(value):
                     raise ValueError(
-                        f"⛔ Entrée rejetée — pattern d'injection détecté dans '{key}'"
+                        f"[STOP] Entrée rejetée — pattern d'injection détecté dans '{key}'"
                     )
             # Check for aggressive path traversal
             if _PATH_TRAVERSAL_PATTERN.search(value):
                 raise ValueError(
-                    f"⛔ Entrée rejetée — traversée de chemin détectée dans '{key}'"
+                    f"[STOP] Entrée rejetée — traversée de chemin détectée dans '{key}'"
                 )
             # Limit input length (generous but bounded)
             sanitized[key] = value[:10_000]
@@ -180,7 +180,7 @@ def _rate_limit_check(tool_name: str) -> str | None:
 
     if len(_call_timestamps[tool_name]) >= _RATE_LIMIT_MAX_CALLS:
         return (
-            f"⚠️ Rate limit atteint pour {tool_name}: "
+            f"[!] Rate limit atteint pour {tool_name}: "
             f"{_RATE_LIMIT_MAX_CALLS} appels/{_RATE_LIMIT_WINDOW}s. "
             f"Réessayez dans quelques secondes."
         )
@@ -372,7 +372,7 @@ def _call_discovered_tool(tool_name: str, args: dict) -> str:
 
     tools = discover_synapse_tools()
     if tool_name not in tools:
-        return f"❌ Unknown discovered tool: {tool_name}"
+        return f"[x] Unknown discovered tool: {tool_name}"
 
     entry = tools[tool_name]
     func = entry["func"]
@@ -431,7 +431,7 @@ def create_server():
         from mcp.types import TextContent, Tool
     except ImportError:
         print(
-            "❌ MCP SDK non installé.\n"
+            "[x] MCP SDK non installé.\n"
             "   pip install mcp\n"
             "   ou: pip install 'mcp[cli]'",
             file=sys.stderr,
@@ -632,7 +632,7 @@ def create_server():
             return [TextContent(type="text", text=result)]
         except Exception as e:
             _audit_log(name, arguments, "", "error", 0.0)
-            return [TextContent(type="text", text=f"❌ Error: {e}")]
+            return [TextContent(type="text", text=f"[x] Error: {e}")]
 
     return server, stdio_server
 
@@ -657,14 +657,14 @@ def _handle_tool(name: str, args: dict) -> str:
     if name == "grimoire_route_request":
         router = _get_router()
         if not router:
-            return "❌ LLM Router non disponible (llm-router.py introuvable)"
+            return "[x] LLM Router non disponible (llm-router.py introuvable)"
         decision = router.route(args["prompt"], args.get("agent", ""))
         result = json.dumps(asdict(decision), ensure_ascii=False, indent=2)
 
     elif name == "grimoire_classify_task":
         mod = _import_tool("llm-router.py", "llm_router_mcp")
         if not mod:
-            return "❌ LLM Router non disponible"
+            return "[x] LLM Router non disponible"
         classifier = mod.TaskClassifier()
         _res = classifier.classify(args["prompt"], args.get("agent", ""))
         result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
@@ -672,7 +672,7 @@ def _handle_tool(name: str, args: dict) -> str:
     elif name == "grimoire_router_stats":
         router = _get_router()
         if not router:
-            return "❌ LLM Router non disponible"
+            return "[x] LLM Router non disponible"
         stats = router.get_stats()
         output = {"stats": [asdict(s) for s in stats]}
         if args.get("recommend"):
@@ -691,7 +691,7 @@ def _handle_tool(name: str, args: dict) -> str:
                 )
                 result = json.dumps(asdict(_res), ensure_ascii=False, indent=2)
             else:
-                result = "❌ RAG Retriever non disponible"
+                result = "[x] RAG Retriever non disponible"
         else:
             collections = [args["collection"]] if args.get("collection") else None
             _res = retriever.retrieve(
@@ -744,7 +744,7 @@ def _handle_tool(name: str, args: dict) -> str:
     elif name == "grimoire_memory_push":
         syncer = _get_syncer()
         if not syncer:
-            result = "❌ Memory Sync non disponible"
+            result = "[x] Memory Sync non disponible"
         else:
             report = syncer.push(
                 specific_file=args.get("file"),
@@ -755,7 +755,7 @@ def _handle_tool(name: str, args: dict) -> str:
     elif name == "grimoire_memory_diff":
         syncer = _get_syncer()
         if not syncer:
-            result = "❌ Memory Sync non disponible"
+            result = "[x] Memory Sync non disponible"
         else:
             diffs = syncer.diff()
             result = json.dumps([asdict(d) for d in diffs], ensure_ascii=False, indent=2)
@@ -763,9 +763,9 @@ def _handle_tool(name: str, args: dict) -> str:
     else:
         # Try auto-discovered Synapse tools
         result = _call_discovered_tool(name, args)
-        if result.startswith("❌ Unknown discovered tool:"):
+        if result.startswith("[x] Unknown discovered tool:"):
             _audit_log(name, args, "", "unknown_tool", 0.0)
-            return f"❌ Unknown tool: {name}"
+            return f"[x] Unknown tool: {name}"
 
     # ── Audit trail for ALL successful calls ─────────────────────────
     _duration = (_time_mod.monotonic() - _start) * 1000
@@ -840,14 +840,14 @@ Configuration MCP (VS Code mcp.json) :
         ]
         print("Legacy Tools:")
         for t in legacy_list:
-            print(f"  ✅ {t}")
+            print(f"  [OK] {t}")
 
         discovered = discover_synapse_tools()
         if discovered:
             print(f"\nAuto-Discovered Synapse Tools ({len(discovered)}):")
             for t_name in sorted(discovered):
                 src = discovered[t_name]["source_file"]
-                print(f"  🔍 {t_name}  [{src}]")
+                print(f"  {t_name}  [{src}]")
 
         total = len(legacy_list) + len(discovered)
         print(f"\n  {total} tools registered — Project: {PROJECT_ROOT}")

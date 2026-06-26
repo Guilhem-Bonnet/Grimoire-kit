@@ -109,7 +109,7 @@ CONTEXT_RULES: list[dict] = [
 # Séquences de workflow recommandées
 WORKFLOWS: list[dict] = [
     {
-        "name": "🔍 Diagnostic complet",
+        "name": "Diagnostic complet",
         "description": "Audit global du projet",
         "steps": [
             "synapse-dashboard.py",
@@ -120,7 +120,7 @@ WORKFLOWS: list[dict] = [
         ],
     },
     {
-        "name": "🚀 Pre-release",
+        "name": "Pre-release",
         "description": "Validation avant push",
         "steps": [
             "cc-verify.sh",
@@ -130,7 +130,7 @@ WORKFLOWS: list[dict] = [
         ],
     },
     {
-        "name": "🧠 Maintenance mémoire",
+        "name": "Maintenance mémoire",
         "description": "Nettoyage et consolidation de la mémoire",
         "steps": [
             "dream.py --quick",
@@ -140,7 +140,7 @@ WORKFLOWS: list[dict] = [
         ],
     },
     {
-        "name": "📊 Bilan de santé",
+        "name": "Bilan de santé",
         "description": "Score de fitness + tendance",
         "steps": [
             "fitness-tracker.py check",
@@ -149,7 +149,7 @@ WORKFLOWS: list[dict] = [
         ],
     },
     {
-        "name": "🔧 Auto-réparation",
+        "name": "Auto-réparation",
         "description": "Détecter et réparer les problèmes",
         "steps": [
             "agent-debugger.py report",
@@ -159,7 +159,7 @@ WORKFLOWS: list[dict] = [
         ],
     },
     {
-        "name": "🧪 Reality Check",
+        "name": "Reality Check",
         "description": "Mesurer l'écart entre promesse agentique et preuves runtime",
         "steps": [
             "agent-debugger.py status",
@@ -407,24 +407,24 @@ def mcp_tool_advisor(
 def render_suggestions(report: AdvisorReport) -> str:
     """Rendu texte des suggestions."""
     lines = [
-        "\n💡 Tool Advisor — Suggestions",
+        "\nTool Advisor — Suggestions",
         "=" * 50,
         "",
     ]
 
     if report.suggestions:
-        lines.append("📋 Outils recommandés :")
+        lines.append("Outils recommandés :")
         for s in report.suggestions:
-            icon = "🔴" if s.priority == "high" else "🟡" if s.priority == "medium" else "🟢"
+            icon = "[!!]" if s.priority == "high" else "[!]" if s.priority == "medium" else "[ok]"
             lines.append(f"   {icon} {s.tool}")
             lines.append(f"      {s.reason}")
             lines.append("")
     else:
-        lines.append("   ✅ Aucune suggestion spécifique")
+        lines.append("   [OK] Aucune suggestion spécifique")
         lines.append("")
 
     if report.unused_tools:
-        lines.append(f"🔇 Outils non utilisés ({len(report.unused_tools)}) :")
+        lines.append(f"Outils non utilisés ({len(report.unused_tools)}) :")
         for tool in report.unused_tools[:10]:
             lines.append(f"   • {tool}")
         if len(report.unused_tools) > 10:
@@ -437,7 +437,7 @@ def render_suggestions(report: AdvisorReport) -> str:
 def render_workflows() -> str:
     """Rendu texte des workflows recommandés."""
     lines = [
-        "\n🔄 Workflows Grimoire recommandés",
+        "\nWorkflows Grimoire recommandés",
         "=" * 50,
         "",
     ]
@@ -495,11 +495,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"unused_tools": unused}, indent=2, ensure_ascii=False))
         else:
             if unused:
-                print(f"\n🔇 Outils non utilisés ({len(unused)}) :")
+                print(f"\nOutils non utilisés ({len(unused)}) :")
                 for t in unused:
                     print(f"   • {t}")
             else:
-                print("\n✅ Tous les outils ont été utilisés au moins une fois.")
+                print("\n[OK] Tous les outils ont été utilisés au moins une fois.")
         return 0
 
     if command == "workflows":

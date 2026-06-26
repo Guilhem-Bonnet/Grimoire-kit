@@ -515,7 +515,7 @@ def mcp_agent_worker(
 
 
 def _print_workers(wl: WorkerList) -> None:
-    print(f"\n  👷 Agent Workers ({wl.total_count})")
+    print(f"\n  Agent Workers ({wl.total_count})")
     print(f"  {'─' * 60}")
     print(f"  Actifs : {wl.running_count}/{wl.max_parallel}")
     print()
@@ -525,7 +525,7 @@ def _print_workers(wl: WorkerList) -> None:
         return
 
     for w in wl.workers:
-        icon = {"running": "🟢", "stopped": "🔴", "error": "❌"}.get(w.status, "❓")
+        icon = {"running": "[ok]", "stopped": "[!!]", "error": "[x]"}.get(w.status, "")
         tasks = f" [{w.tasks_completed} done]" if w.tasks_completed else ""
         print(f"    {icon} {w.worker_id} │ {w.agent_id:>10s} │ "
               f"{w.status:>8s} │ {w.model or '-':>20s}{tasks}")
@@ -581,19 +581,19 @@ def main() -> None:
             if getattr(args, "json", False):
                 print(json.dumps(status.to_dict(), ensure_ascii=False, indent=2))
             else:
-                print(f"\n  🚀 Worker '{status.worker_id}' démarré pour {args.agent}")
+                print(f"\n  Worker '{status.worker_id}' démarré pour {args.agent}")
                 print(f"    Provider : {status.provider}")
                 print(f"    Model    : {status.model}\n")
         except (ValueError, RuntimeError) as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "stop":
         worker = manager.stop_worker(args.agent)
         if worker:
-            print(f"\n  🔴 Worker pour '{args.agent}' arrêté\n")
+            print(f"\n  [!!] Worker pour '{args.agent}' arrêté\n")
         else:
-            print(f"  ❌ Aucun worker actif pour '{args.agent}'", file=sys.stderr)
+            print(f"  [x] Aucun worker actif pour '{args.agent}'", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "status":
@@ -602,10 +602,10 @@ def main() -> None:
 
     elif args.command == "list":
         agents = manager.list_available_agents()
-        print(f"\n  🤖 Agents disponibles ({len(agents)})")
+        print(f"\n  Agents disponibles ({len(agents)})")
         print(f"  {'─' * 60}")
         for a in agents:
-            status_icon = "🟢" if a["worker_status"] == "running" else "⚪"
+            status_icon = "[ok]" if a["worker_status"] == "running" else "[-]"
             caps = ", ".join(a["capabilities"][:3])
             print(f"    {status_icon} {a['agent_id']:>12s} │ {a['title']:>20s} │ {caps}")
         print()

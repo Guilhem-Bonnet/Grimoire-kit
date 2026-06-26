@@ -727,7 +727,7 @@ main{flex:1;overflow-y:auto}
 <body>
 
 <header>
-  <h1>🔭 Grimoire Observatory</h1>
+  <h1>Grimoire Observatory</h1>
   <div class="global-search">
     <span class="search-icon">&#128269;</span>
     <input id="global-q" type="text" placeholder="Recherche globale…" autocomplete="off">
@@ -957,7 +957,7 @@ function renderTimeline() {
   if (q) items = items.filter(i => `${i.agent} ${i.type} ${i.payload}`.toLowerCase().includes(q));
 
   const ct = $('#timeline-ct');
-  if (!items.length) { ct.innerHTML = `<div class="empty-state"><div class="icon">📭</div><h2>Aucune trace</h2><p>Lancez un workflow pour voir l'activité.</p></div>`; return; }
+  if (!items.length) { ct.innerHTML = `<div class="empty-state"><div class="icon"></div><h2>Aucune trace</h2><p>Lancez un workflow pour voir l'activité.</p></div>`; return; }
   const shown = items.slice(0, 500);
   ct.innerHTML = shown.map(i => {
     const time = i.ts.replace(/.*T/,'').replace('Z','');
@@ -977,7 +977,7 @@ function renderSwimlane() {
   const sessionF = $('#f-sl-session').value;
   const items = getAllItems(sessionF);
 
-  if (!items.length) { ct.innerHTML = `<div class="empty-state"><div class="icon">🏊</div><h2>Aucune donnée pour le swimlane</h2><p>Les traces apparaîtront ici comme un diagramme de séquence.</p></div>`; return; }
+  if (!items.length) { ct.innerHTML = `<div class="empty-state"><div class="icon"></div><h2>Aucune donnée pour le swimlane</h2><p>Les traces apparaîtront ici comme un diagramme de séquence.</p></div>`; return; }
 
   // Determine agent columns — orchestrator/HPE first, then by frequency
   const agentFreq = {};
@@ -1029,7 +1029,7 @@ function renderSwimlane() {
   parallelGroups.forEach(group => {
     const y1 = PAD_T + group[0] * ROW_H;
     const y2 = PAD_T + (group[group.length-1]+1) * ROW_H;
-    bodyHtml += `<div class="sl-parallel-band" style="top:${y1}px;height:${y2-y1}px"><span class="sl-parallel-label" style="top:2px">⚡ parallel</span></div>`;
+    bodyHtml += `<div class="sl-parallel-band" style="top:${y1}px;height:${y2-y1}px"><span class="sl-parallel-label" style="top:2px">parallel</span></div>`;
   });
 
   // Lane backgrounds
@@ -1185,7 +1185,7 @@ function renderDAG() {
     }
   });
 
-  if (!tasks.size) { ct.innerHTML = `<div class="empty-state"><div class="icon">🔀</div><h2>Aucun DAG détecté</h2><p>Le moteur HPE n'a pas encore planifié de tâches.<br>Événements attendus : <code>task_started</code> / <code>task_completed</code></p></div>`; return; }
+  if (!tasks.size) { ct.innerHTML = `<div class="empty-state"><div class="icon"></div><h2>Aucun DAG détecté</h2><p>Le moteur HPE n'a pas encore planifié de tâches.<br>Événements attendus : <code>task_started</code> / <code>task_completed</code></p></div>`; return; }
 
   // Sort by start time, then topologically
   const taskList = [...tasks.values()].sort((a,b) => (a.start||'').localeCompare(b.start||''));
@@ -1195,7 +1195,7 @@ function renderDAG() {
   const minT = Math.min(...allTimes), maxT = Math.max(...allTimes);
   const range = maxT - minT || 1;
 
-  let html = `<div class="gantt-header"><h3>📊 Task DAG — ${taskList.length} tâches</h3><div class="gantt-legend"><span class="gl-item"><span class="gl-dot" style="background:var(--green)"></span>Done</span><span class="gl-item"><span class="gl-dot" style="background:var(--yellow)"></span>Running</span><span class="gl-item"><span class="gl-dot" style="background:var(--border)"></span>Waiting</span><span class="gl-item"><span class="gl-dot" style="background:var(--red)"></span>Failed</span></div></div>`;
+  let html = `<div class="gantt-header"><h3>Task DAG — ${taskList.length} tâches</h3><div class="gantt-legend"><span class="gl-item"><span class="gl-dot" style="background:var(--green)"></span>Done</span><span class="gl-item"><span class="gl-dot" style="background:var(--yellow)"></span>Running</span><span class="gl-item"><span class="gl-dot" style="background:var(--border)"></span>Waiting</span><span class="gl-item"><span class="gl-dot" style="background:var(--red)"></span>Failed</span></div></div>`;
   html += `<div class="gantt-chart" style="position:relative">`;
 
   // SVG for dependency lines — use percentage-based viewBox for alignment with flex tracks
@@ -1223,7 +1223,7 @@ function renderDAG() {
     const startPct = t.start ? ((new Date(t.start).getTime() - minT) / range) * 100 : 0;
     const endPct = t.end ? ((new Date(t.end).getTime() - minT) / range) * 100 : startPct + 5;
     const widthPct = Math.max(endPct - startPct, 3);
-    const trustBadge = t.trust ? ` 🛡️${t.trust}` : '';
+    const trustBadge = t.trust ? ` ${t.trust}` : '';
     const color = agentColor(t.agent);
     html += `<div class="gantt-row"><div class="gantt-label" style="color:${color}">${esc(t.id)}<div class="gl-agent">${esc(t.agent)}</div></div><div class="gantt-track"><div class="gantt-bar ${t.status}" style="left:${startPct}%;width:${widthPct}%" data-item-idx="${storeItem({ts:t.start,agent:t.agent,type:"task:"+t.id,payload:"Status: "+t.status+(t.trust?" | Trust: "+t.trust:""),session:""})}">${esc(t.desc.substring(0,20))}${trustBadge}</div></div></div>`;
   });
@@ -1459,15 +1459,15 @@ function renderGraph() {
     let capsHtml = (a.capabilities||[]).map(c => `<span class="ac-cap">${esc(c)}</span>`).join('');
     // Emergent capabilities
     (a.emergent_capabilities||[]).forEach(ec => {
-      if (ec.skill) capsHtml += `<span class="ac-cap" style="border:1px solid ${color};color:${color}">✨ ${esc(ec.skill)}</span>`;
+      if (ec.skill) capsHtml += `<span class="ac-cap" style="border:1px solid ${color};color:${color}">${esc(ec.skill)}</span>`;
     });
     return `<div class="agent-card">
       <div class="ac-header"><div class="ac-avatar" style="border-color:${color};color:${color}">${initials}</div><div><div class="ac-name" style="color:${color}">${esc(a.id)}</div><div class="ac-persona">${esc(a.persona||'')}</div></div></div>
       <div class="ac-stats">
         ${m.tasks_completed?`<div class="ac-stat"><span class="label">Tasks</span><span>${m.tasks_completed}</span></div>`:''}
         ${m.avg_trust_score?`<div class="ac-stat"><span class="label">Trust</span><span style="color:${m.avg_trust_score>=90?'var(--green)':m.avg_trust_score>=70?'var(--yellow)':'var(--red)'}">${m.avg_trust_score}</span></div>`:''}
-        ${m.cross_validations_passed?`<div class="ac-stat"><span class="label">CVTL ✓</span><span>${m.cross_validations_passed}</span></div>`:''}
-        ${m.hup_red_count!==undefined?`<div class="ac-stat"><span class="label">HUP 🔴</span><span>${m.hup_red_count}</span></div>`:''}
+        ${m.cross_validations_passed?`<div class="ac-stat"><span class="label">CVTL [OK]</span><span>${m.cross_validations_passed}</span></div>`:''}
+        ${m.hup_red_count!==undefined?`<div class="ac-stat"><span class="label">HUP [!!]</span><span>${m.hup_red_count}</span></div>`:''}
       </div>
       ${capsHtml?`<div class="ac-caps">${capsHtml}</div>`:''}
     </div>`;
@@ -1556,7 +1556,7 @@ function renderMetrics() {
   const sortedTypes = Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]);
   const maxCount = sortedTypes[0]?sortedTypes[0][1]:1;
 
-  chartsHtml += `<h3>📊 Distribution des types d'événements</h3><div class="bar-chart">`;
+  chartsHtml += `<h3>Distribution des types d'événements</h3><div class="bar-chart">`;
   sortedTypes.slice(0,15).forEach(([type,count]) => {
     const pct = (count/maxCount)*100;
     const color = type.startsWith('HPE:') ? 'var(--accent)' : type.startsWith('HUP:') ? 'var(--yellow)' : type.startsWith('CVTL:') ? 'var(--purple)' : type.includes('ACTION') ? 'var(--green)' : type === 'DECISION' ? 'var(--orange)' : type === 'ACTIVATED' ? 'var(--cyan)' : 'var(--fg2)';
@@ -1567,7 +1567,7 @@ function renderMetrics() {
   // Agent activity bar chart
   const sortedAgents = Object.entries(agentActivity).sort((a,b)=>b[1]-a[1]);
   const maxAg = sortedAgents[0]?sortedAgents[0][1]:1;
-  chartsHtml += `<h3 style="margin-top:24px">👥 Activité par agent</h3><div class="bar-chart">`;
+  chartsHtml += `<h3 style="margin-top:24px">Activité par agent</h3><div class="bar-chart">`;
   sortedAgents.forEach(([agent,count]) => {
     const pct = (count/maxAg)*100;
     chartsHtml += `<div class="bar-row"><span class="bar-label" style="color:${agentColor(agent)}">${esc(agent)}</span><span class="bar-track"><span class="bar-fill" style="width:${pct}%;background:${agentColor(agent)}">${count}</span></span></div>`;
@@ -1826,9 +1826,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / OBSERVATORY_HTML
     out_path.write_text(html, encoding="utf-8")
-    print(f"✅ Observatory generated: {out_path}")
-    print(f"   📊 {len(data.traces)} traces | {len(data.events)} events | {len(data.agents)} agents")
-    print(f"   🌐 Open in browser: file://{out_path}")
+    print(f"[OK] Observatory generated: {out_path}")
+    print(f"   {len(data.traces)} traces | {len(data.events)} events | {len(data.agents)} agents")
+    print(f"   Open in browser: file://{out_path}")
     return 0
 
 
@@ -1870,9 +1870,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     new_data = load_all(root, out_dir)
                     new_html = generate_html(new_data, auto_refresh=True)
                     out_path.write_text(new_html, encoding="utf-8")
-                    print(f"🔄 Regenerated ({len(new_data.traces)} traces, {len(new_data.events)} events)")
+                    print(f"Regenerated ({len(new_data.traces)} traces, {len(new_data.events)} events)")
                 except Exception as e:
-                    print(f"⚠️ Regen error: {e}")
+                    print(f"[!] Regen error: {e}")
 
     t = threading.Thread(target=watcher, daemon=True)
     t.start()
@@ -1885,13 +1885,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             pass  # silent
 
     server = http.server.HTTPServer(("", port), QuietHandler)
-    print(f"🔭 Grimoire Observatory serving at http://localhost:{port}/{OBSERVATORY_HTML}")
+    print(f"Grimoire Observatory serving at http://localhost:{port}/{OBSERVATORY_HTML}")
     print(f"   Auto-reload: watching {len(watch_files)} files every 2s")
     print("   Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n🛑 Observatory stopped.")
+        print("\n[STOP] Observatory stopped.")
     return 0
 
 

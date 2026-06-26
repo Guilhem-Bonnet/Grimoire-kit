@@ -46,9 +46,9 @@ PREFLIGHT_VERSION = "1.0.0"
 
 # Sévérité
 class Severity:
-    BLOCKER = "🔴 BLOCKER"
-    WARNING = "🟡 WARNING"
-    INFO = "🟢 INFO"
+    BLOCKER = "[!!] BLOCKER"
+    WARNING = "[!] WARNING"
+    INFO = "[ok] INFO"
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -91,10 +91,10 @@ class PreflightReport:
     @property
     def go_nogo(self) -> str:
         if self.blockers:
-            return "🔴 NO-GO"
+            return "[!!] NO-GO"
         if self.warnings:
-            return "🟡 GO (avec réserves)"
-        return "🟢 GO"
+            return "[!] GO (avec réserves)"
+        return "[ok] GO"
 
 
 # ── Checks ───────────────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ def check_memory_state(project_root: Path) -> list[Check]:
     if contradiction_log.exists():
         try:
             content = contradiction_log.read_text(encoding="utf-8")
-            unresolved = content.count("- [ ]") or content.count("⚠️")
+            unresolved = content.count("- [ ]") or content.count("[!]")
             if unresolved > 0:
                 checks.append(Check(
                     name="contradictions",
@@ -621,7 +621,7 @@ def run_all_checks(
 def format_report(report: PreflightReport) -> str:
     """Formate le rapport pour affichage terminal."""
     lines = [
-        "✈️  Pre-flight Check — Grimoire",
+        " Pre-flight Check — Grimoire",
         f"   {report.go_nogo}",
     ]
     if report.agent:
@@ -635,23 +635,23 @@ def format_report(report: PreflightReport) -> str:
     lines.append("")
 
     if report.blockers:
-        lines.append("   🔴 BLOCKERS :")
+        lines.append("   [!!] BLOCKERS :")
         for c in report.blockers:
             lines.append(f"      {c.message}")
             if c.fix_hint:
-                lines.append(f"         💡 {c.fix_hint}")
+                lines.append(f"         {c.fix_hint}")
         lines.append("")
 
     if report.warnings:
-        lines.append("   🟡 WARNINGS :")
+        lines.append("   [!] WARNINGS :")
         for c in report.warnings:
             lines.append(f"      {c.message}")
             if c.fix_hint:
-                lines.append(f"         💡 {c.fix_hint}")
+                lines.append(f"         {c.fix_hint}")
         lines.append("")
 
     if report.infos:
-        lines.append("   🟢 INFO :")
+        lines.append("   [ok] INFO :")
         for c in report.infos:
             lines.append(f"      {c.message}")
         lines.append("")
@@ -740,7 +740,7 @@ def main() -> int:
     elif args.quiet:
         if report.blockers:
             for c in report.blockers:
-                print(f"🔴 {c.message}")
+                print(f"[!!] {c.message}")
             return 1
     else:
         print(format_report(report))

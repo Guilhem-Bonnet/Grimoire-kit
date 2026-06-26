@@ -211,13 +211,13 @@ def cmd_observe(root: Path, agent_name: str | None, as_json: bool) -> dict[str, 
     }
 
     if not as_json:
-        print(f"👁️ Observation — {len(profiles)} agent(s)")
+        print(f"Observation — {len(profiles)} agent(s)")
         print()
         for name, data in ranked:
             comp = data["metrics"]["completeness"]
             bar_len = int(comp * 20)
             bar = "█" * bar_len + "░" * (20 - bar_len)
-            print(f"  🤖 {name}")
+            print(f"  {name}")
             print(f"     Complétude : [{bar}] {comp:.0%}")
             print(f"     Sections : {data['metrics']['section_count']} | "
                   f"Menu : {data['metrics']['menu_items']} | "
@@ -226,7 +226,7 @@ def cmd_observe(root: Path, agent_name: str | None, as_json: bool) -> dict[str, 
             # Patterns manquants
             missing = [k for k, v in data.get("patterns", {}).items() if not v]
             if missing:
-                print(f"     ⚠️ Manquant : {', '.join(missing[:5])}")
+                print(f"     [!] Manquant : {', '.join(missing[:5])}")
             print()
 
     return result
@@ -288,11 +288,11 @@ def cmd_learn(root: Path, source: str, pattern_type: str | None,
     }
 
     if not as_json:
-        print(f"🧠 Apprentissage depuis {source}")
+        print(f"Apprentissage depuis {source}")
         print(f"   Nouveaux patterns : {len(new_patterns)}")
         print(f"   Total catalogue : {len(all_patterns)}")
         for pat in new_patterns:
-            print(f"   📎 {pat.pattern_id} [{pat.pattern_type}] — {pat.description}")
+            print(f"   {pat.pattern_id} [{pat.pattern_type}] — {pat.description}")
 
     return result
 
@@ -348,14 +348,14 @@ def cmd_mirror(root: Path, from_agent: str, to_agent: str,
     }
 
     if not as_json:
-        print(f"🪞 Mirroring : {from_agent} → {to_agent}")
+        print(f"Mirroring : {from_agent} → {to_agent}")
         print(f"   Complétude source : {prof_from.metrics.get('completeness', 0):.0%}")
         print(f"   Complétude cible : {prof_to.metrics.get('completeness', 0):.0%}")
         print(f"   Suggestions : {len(suggestions)}")
         print()
         for sug in suggestions:
-            impact_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(sug["expected_impact"], "⚪")
-            diff_icon = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}.get(sug["difficulty"], "⚪")
+            impact_icon = {"high": "[!!]", "medium": "[!]", "low": "[ok]"}.get(sug["expected_impact"], "[-]")
+            diff_icon = {"easy": "[ok]", "medium": "[!]", "hard": "[!!]"}.get(sug["difficulty"], "[-]")
             print(f"  {impact_icon} {sug['pattern']}")
             print(f"     {sug['description']}")
             print(f"     Difficulté : {diff_icon} {sug['difficulty']} | Impact : {sug['expected_impact']}")
@@ -381,14 +381,14 @@ def cmd_catalog(root: Path, as_json: bool) -> dict[str, Any]:
 
     if not as_json:
         if not patterns:
-            print("📭 Aucun pattern appris.")
+            print("Aucun pattern appris.")
             print("   Utilisez 'mirror-agent learn --source <agent>' pour apprendre.")
             return result
 
-        print(f"📚 Catalogue de patterns ({len(patterns)})")
+        print(f"Catalogue de patterns ({len(patterns)})")
         print()
         for ptype, pats in sorted(by_type.items()):
-            print(f"  📂 {ptype} ({len(pats)})")
+            print(f"  {ptype} ({len(pats)})")
             for pat in pats:
                 eff_bar = "█" * int(pat.effectiveness * 10) + "░" * (10 - int(pat.effectiveness * 10))
                 print(f"     [{pat.pattern_id}] de {pat.source_agent}")
@@ -438,7 +438,7 @@ def cmd_diff(root: Path, agent_names: list[str], as_json: bool) -> dict[str, Any
     }
 
     if not as_json:
-        print(f"📊 Comparaison : {' vs '.join(agent_names)}")
+        print(f"Comparaison : {' vs '.join(agent_names)}")
         print()
 
         # Table de patterns
@@ -450,14 +450,14 @@ def cmd_diff(root: Path, agent_names: list[str], as_json: bool) -> dict[str, Any
             row = f"  {pat:<25s}"
             for name in agent_names:
                 has = comparison[pat].get(name, False)
-                row += f" {'✅':^12s}" if has else f" {'❌':^12s}"
+                row += f" {'[OK]':^12s}" if has else f" {'[x]':^12s}"
             print(row)
 
         print()
         if universal:
-            print(f"  🌐 Patterns universels : {', '.join(universal)}")
+            print(f"  Patterns universels : {', '.join(universal)}")
         for name, pats in unique.items():
-            print(f"  ⭐ Unique à {name} : {', '.join(pats)}")
+            print(f"  Unique à {name} : {', '.join(pats)}")
 
     return result
 

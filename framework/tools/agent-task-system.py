@@ -701,15 +701,15 @@ def mcp_ats_graph(project_root: str = ".") -> dict[str, Any]:
 
 
 def _priority_icon(p: str) -> str:
-    return {"critical": "🔴", "high": "🟠", "normal": "🔵", "low": "⚪"}.get(p, "⚪")
+    return {"critical": "[!!]", "high": "[!]", "normal": "[i]", "low": "[-]"}.get(p, "[-]")
 
 
 def _status_icon(s: str) -> str:
     return {
-        "pending": "⏳", "scheduled": "📋", "running": "🔄",
-        "blocked": "🚫", "review": "👁️", "done": "✅",
-        "failed": "❌", "cancelled": "⛔",
-    }.get(s, "❓")
+        "pending": "", "scheduled": "", "running": "",
+        "blocked": "[STOP]", "review": "", "done": "[OK]",
+        "failed": "[x]", "cancelled": "[STOP]",
+    }.get(s, "")
 
 
 def cmd_create(args: argparse.Namespace) -> int:
@@ -727,7 +727,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print("\n  ✅ TaskAtom créé")
+        print("\n  [OK] TaskAtom créé")
         print(f"  ID: {result['task_id']}")
         print(f"  Titre: {result['title']}")
         print(f"  Type: {result['task_type']}")
@@ -745,13 +745,13 @@ def cmd_graph(args: argparse.Namespace) -> int:
 
     tasks = graph.tasks
     if not tasks:
-        print("\n  📊 Graphe de tâches : vide")
+        print("\n  Graphe de tâches : vide")
         return 0
 
-    print(f"\n  📊 Task Graph — {graph.graph_id}")
+    print(f"\n  Task Graph — {graph.graph_id}")
     if graph.goal:
-        print(f"  🎯 Goal: {graph.goal}")
-    print(f"  📈 {len(tasks)} tasks\n")
+        print(f"  Goal: {graph.goal}")
+    print(f"  {len(tasks)} tasks\n")
 
     # Afficher par couche topologique
     topo = topological_sort(graph)
@@ -768,11 +768,11 @@ def cmd_graph(args: argparse.Namespace) -> int:
     # Chemin critique
     cp = critical_path(graph)
     if cp:
-        print(f"\n  🔥 Chemin critique : {' → '.join(cp)}")
+        print(f"\n  Chemin critique : {' → '.join(cp)}")
 
     # Stats
     stats = compute_stats(graph)
-    print(f"  📈 Progression : {stats.get('progress_pct', 0)}%")
+    print(f"  Progression : {stats.get('progress_pct', 0)}%")
 
     return 0
 
@@ -792,9 +792,9 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         reason = result.get("reason", "")
 
         if not task_ids:
-            print(f"\n  ⚠️  Aucune tâche à scheduler : {reason}")
+            print(f"\n  [!]  Aucune tâche à scheduler : {reason}")
         else:
-            print(f"\n  📋 Batch {batch_id}")
+            print(f"\n  Batch {batch_id}")
             print(f"  Tâches : {len(task_ids)}")
             for tid in task_ids:
                 print(f"    → {tid}")
@@ -811,7 +811,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         stats = result.get("stats", {})
         ready = result.get("ready_tasks", [])
-        print("\n  📊 Agent Task System Status")
+        print("\n  Agent Task System Status")
         print(f"  Graph: {result.get('graph_id', 'N/A')}")
         if result.get("goal"):
             print(f"  Goal: {result['goal']}")
@@ -819,15 +819,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         if stats.get("by_status"):
             for st, count in sorted(stats["by_status"].items()):
                 print(f"    {_status_icon(st)} {st}: {count}")
-        print(f"\n  📈 Progress: {stats.get('progress_pct', 0)}%")
+        print(f"\n  Progress: {stats.get('progress_pct', 0)}%")
         if ready:
-            print(f"\n  🟢 Ready to execute ({len(ready)}):")
+            print(f"\n  [ok] Ready to execute ({len(ready)}):")
             for t in ready:
                 print(f"    → {t['task_id']}  {t['title']}")
         if result.get("has_cycles"):
-            print(f"\n  ⚠️  CYCLES DETECTED: {result['cycles']}")
+            print(f"\n  [!]  CYCLES DETECTED: {result['cycles']}")
         if result.get("critical_path"):
-            print(f"\n  🔥 Critical path: {' → '.join(result['critical_path'])}")
+            print(f"\n  Critical path: {' → '.join(result['critical_path'])}")
     return 0
 
 
@@ -837,13 +837,13 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     task = find_task(graph, args.id)
 
     if not task:
-        print(f"  ❌ Task {args.id} not found", file=sys.stderr)
+        print(f"  [x] Task {args.id} not found", file=sys.stderr)
         return 1
 
     if args.json:
         print(json.dumps(task, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📋 TaskAtom: {task['task_id']}")
+        print(f"\n  TaskAtom: {task['task_id']}")
         print(f"  Titre: {task['title']}")
         print(f"  Type: {task['task_type']}")
         print(f"  Status: {_status_icon(task['status'])} {task['status']}")
@@ -869,7 +869,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
     task = find_task(graph, args.id)
 
     if not task:
-        print(f"  ❌ Task {args.id} not found", file=sys.stderr)
+        print(f"  [x] Task {args.id} not found", file=sys.stderr)
         return 1
 
     task["status"] = "pending"
@@ -879,7 +879,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
     save_graph(root, graph)
     append_history(root, {"event": "task_reset", "task_id": args.id})
 
-    print(f"  🔄 Task {args.id} reset to pending")
+    print(f"  Task {args.id} reset to pending")
     return 0
 
 

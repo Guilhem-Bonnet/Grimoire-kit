@@ -235,7 +235,7 @@ class TestRenderMarkdown(unittest.TestCase):
         md = dash.render_markdown(report)
         self.assertIn("## Test", md)
         self.assertIn("Hello", md)
-        self.assertIn("1 ✅", md)
+        self.assertIn("1 [OK]", md)
 
     def test_render_with_error_section(self):
         report = dash.DashboardReport(generated_at="now")
@@ -244,7 +244,7 @@ class TestRenderMarkdown(unittest.TestCase):
         )
         md = dash.render_markdown(report)
         self.assertIn("Something failed", md)
-        self.assertIn("1 ❌", md)
+        self.assertIn("1 [x]", md)
 
     def test_render_with_unavailable_section(self):
         report = dash.DashboardReport(generated_at="now")
@@ -253,7 +253,7 @@ class TestRenderMarkdown(unittest.TestCase):
         )
         md = dash.render_markdown(report)
         self.assertIn("indisponible", md)
-        self.assertIn("1 ⚠️", md)
+        self.assertIn("1 [!]", md)
 
     def test_render_footer(self):
         report = dash.DashboardReport(generated_at="now")

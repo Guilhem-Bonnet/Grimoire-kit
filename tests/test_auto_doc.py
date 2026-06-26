@@ -209,7 +209,7 @@ class TestRendering(unittest.TestCase):
     def test_render_clean(self):
         report = self.mod.DocReport(readme_path="README.md")
         text = self.mod.render_report(report)
-        self.assertIn("✅", text)
+        self.assertIn("[OK]", text)
 
     def test_render_with_drifts(self):
         report = self.mod.DocReport(

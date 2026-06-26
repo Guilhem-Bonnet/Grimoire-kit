@@ -440,11 +440,11 @@ def run_test_suite(
     for cat, scores in category_scores.items():
         cat_avg = sum(scores) / len(scores)
         if cat_avg < 0.5:
-            recs.append(f"⚠️ Catégorie '{cat}' faible ({cat_avg:.2f}) — renforcer dans l'agent")
+            recs.append(f"[!] Catégorie '{cat}' faible ({cat_avg:.2f}) — renforcer dans l'agent")
 
     failed_critical = [r for r in results if not r.passed and r.category in ("persona", "tools")]
     for r in failed_critical:
-        recs.append(f"❌ Test critique échoué: {r.name} — {r.feedback}")
+        recs.append(f"[x] Test critique échoué: {r.name} — {r.feedback}")
 
     suite_result = TestSuiteResult(
         suite_id=f"suite-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
@@ -620,8 +620,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(result), indent=2, ensure_ascii=False))
     else:
-        grade_colors = {"A": "🟢", "B": "🔵", "C": "🟡", "D": "🟠", "F": "🔴"}
-        gc = grade_colors.get(result.grade, "⚪")
+        grade_colors = {"A": "[ok]", "B": "[i]", "C": "[!]", "D": "[!]", "F": "[!!]"}
+        gc = grade_colors.get(result.grade, "[-]")
         print(f"\n  {gc} Agent Test: {result.agent_name} — Grade {result.grade} ({result.score:.2f})")
         print(f"  Suite: {result.suite_type} | {result.passed}/{result.total_tests} passed\n")
 
@@ -633,16 +633,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         for cat, rs in cat_results.items():
             cat_passed = sum(1 for r in rs if r["passed"])
-            cat_icon = "✅" if cat_passed == len(rs) else ("⚠️" if cat_passed > 0 else "❌")
+            cat_icon = "[OK]" if cat_passed == len(rs) else ("[!]" if cat_passed > 0 else "[x]")
             print(f"  {cat_icon} {cat.upper()} ({cat_passed}/{len(rs)})")
             for r in rs:
-                icon = "✅" if r["passed"] else "❌"
+                icon = "[OK]" if r["passed"] else "[x]"
                 print(f"    {icon} {r['name']} — {r['score']:.2f}")
                 if r.get("feedback"):
-                    print(f"       💬 {r['feedback']}")
+                    print(f"       {r['feedback']}")
 
         if result.recommendations:
-            print("\n  📋 Recommandations:")
+            print("\n  Recommandations:")
             for rec in result.recommendations:
                 print(f"    {rec}")
 
@@ -665,7 +665,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
             _log.warning("Agent file not found: %s", name)
 
     if len(agent_paths) < 2:
-        print("❌ Need at least 2 agent files for benchmark")
+        print("[x] Need at least 2 agent files for benchmark")
         return 1
 
     result = run_benchmark(agent_paths, args.suite, root)
@@ -673,11 +673,11 @@ def cmd_bench(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(result), indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🏆 Benchmark: {result.bench_id}")
+        print(f"\n  Benchmark: {result.bench_id}")
         print(f"  {result.analysis}\n")
         for agent_name in result.agents:
             score = result.scores.get(agent_name, 0)
-            winner_marker = " 👑" if agent_name == result.winner else ""
+            winner_marker = " " if agent_name == result.winner else ""
             print(f"  {agent_name}: {score:.2f}{winner_marker}")
             cats = result.category_scores.get(agent_name, {})
             for cat, cat_score in cats.items():
@@ -697,9 +697,9 @@ def cmd_report(args: argparse.Namespace) -> int:
         if not entries:
             print("  Aucun résultat de test enregistré.")
             return 0
-        print(f"\n  📊 Derniers {len(entries)} résultats:\n")
+        print(f"\n  Derniers {len(entries)} résultats:\n")
         for e in reversed(entries):
-            gc = {"A": "🟢", "B": "🔵", "C": "🟡", "D": "🟠", "F": "🔴"}.get(e.get("grade", "?"), "⚪")
+            gc = {"A": "[ok]", "B": "[i]", "C": "[!]", "D": "[!]", "F": "[!!]"}.get(e.get("grade", "?"), "[-]")
             print(f"  {gc} {e.get('agent', '?')}: {e.get('grade', '?')} ({e.get('score', 0):.2f}) "
                   f"— {e.get('passed', 0)}/{e.get('passed', 0) + e.get('failed', 0)} "
                   f"[{e.get('timestamp', '')[:16]}]")
@@ -718,7 +718,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(categories, indent=2, ensure_ascii=False))
     else:
-        print("\n  📋 Catégories de tests comportementaux:\n")
+        print("\n  Catégories de tests comportementaux:\n")
         for cat, desc in categories.items():
             print(f"    {cat:12s} — {desc}")
         print("\n  Suites disponibles: full, quick")

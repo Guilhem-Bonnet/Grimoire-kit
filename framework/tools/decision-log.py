@@ -151,7 +151,7 @@ def cmd_log(root: Path, title: str, context: str, decision: str,
     }
 
     if not as_json:
-        print(f"📋 Décision enregistrée : {dec_id}")
+        print(f"Décision enregistrée : {dec_id}")
         print(f"   Titre : {title}")
         print(f"   Scope : {scope}")
         print(f"   Hash : {new_decision.self_hash}")
@@ -194,20 +194,20 @@ def cmd_chain(root: Path, limit: int, as_json: bool) -> dict[str, Any]:
 
     if not as_json:
         if not chain:
-            print("📭 Aucune décision enregistrée.")
+            print("Aucune décision enregistrée.")
             print("   Utilisez 'decision-log log' pour enregistrer la première.")
             return result
 
-        print(f"⛓️ Chaîne de décisions ({len(chain)} total)")
+        print(f"Chaîne de décisions ({len(chain)} total)")
         if limit > 0 and len(chain) > limit:
             print(f"   (affichage des {limit} dernières)")
         print()
 
         for dec in displayed:
             status_icon = {
-                "accepted": "✅", "superseded": "🔄",
-                "deprecated": "⚠️", "proposed": "💭",
-            }.get(dec.status, "⚪")
+                "accepted": "[OK]", "superseded": "",
+                "deprecated": "[!]", "proposed": "",
+            }.get(dec.status, "[-]")
 
             print(f"  {status_icon} [{dec.decision_id}] {dec.title}")
             print(f"     {dec.timestamp[:19]} | Scope: {dec.scope} | Status: {dec.status}")
@@ -229,7 +229,7 @@ def cmd_verify(root: Path, as_json: bool) -> dict[str, Any]:
     if not chain:
         result = {"valid": True, "message": "Chaîne vide", "length": 0}
         if not as_json:
-            print("📭 Chaîne vide — rien à vérifier.")
+            print("Chaîne vide — rien à vérifier.")
         return result
 
     issues: list[dict[str, str]] = []
@@ -282,13 +282,13 @@ def cmd_verify(root: Path, as_json: bool) -> dict[str, Any]:
 
     if not as_json:
         if is_valid:
-            print(f"✅ Chaîne valide — {len(chain)} décisions, intégrité vérifiée")
+            print(f"[OK] Chaîne valide — {len(chain)} décisions, intégrité vérifiée")
             print(f"   Genesis : {chain[0].self_hash}")
             print(f"   Dernier : {chain[-1].self_hash}")
         else:
-            print(f"❌ Chaîne corrompue — {len(issues)} problème(s) détecté(s)")
+            print(f"[x] Chaîne corrompue — {len(issues)} problème(s) détecté(s)")
             for issue in issues:
-                print(f"   🔴 [{issue['decision']}] {issue['type']}: {issue['message']}")
+                print(f"   [!!] [{issue['decision']}] {issue['type']}: {issue['message']}")
 
     return result
 
@@ -314,14 +314,14 @@ def cmd_audit(root: Path, scope: str | None, status: str | None,
     # Détection d'anomalies
     anomalies: list[str] = []
     if status_counts.get("superseded", 0) > len(chain) * 0.5:
-        anomalies.append("⚠️ Plus de 50% des décisions sont superseded — instabilité décisionnelle")
+        anomalies.append("[!] Plus de 50% des décisions sont superseded — instabilité décisionnelle")
     if len(scope_counts) == 1 and len(chain) > 10:
-        anomalies.append("⚠️ Toutes les décisions dans le même scope — diversifier la couverture")
+        anomalies.append("[!] Toutes les décisions dans le même scope — diversifier la couverture")
 
     # Décisions sans rationale
     no_rationale = [dec for dec in chain if not dec.rationale]
     if no_rationale:
-        anomalies.append(f"ℹ️ {len(no_rationale)} décision(s) sans rationale documenté")
+        anomalies.append(f"[i] {len(no_rationale)} décision(s) sans rationale documenté")
 
     result = {
         "total": len(chain),
@@ -339,27 +339,27 @@ def cmd_audit(root: Path, scope: str | None, status: str | None,
             title += f" [scope: {scope}]"
         if status:
             title += f" [status: {status}]"
-        print(f"🔍 {title}")
+        print(f"{title}")
         print(f"   Total : {len(chain)} | Filtrées : {len(filtered)}")
         print()
 
-        print("  📊 Répartition par scope :")
+        print("  Répartition par scope :")
         for scp, cnt in sorted(scope_counts.items()):
             bar = "█" * min(cnt, 30)
             print(f"     {scp:15s} {bar} {cnt}")
 
-        print("\n  📊 Répartition par statut :")
+        print("\n  Répartition par statut :")
         for sts, cnt in sorted(status_counts.items()):
             bar = "█" * min(cnt, 30)
             print(f"     {sts:15s} {bar} {cnt}")
 
         if anomalies:
-            print("\n  🚨 Anomalies :")
+            print("\n  Anomalies :")
             for anomaly in anomalies:
                 print(f"     {anomaly}")
 
         if filtered:
-            print(f"\n  📋 Décisions ({len(filtered)}) :")
+            print(f"\n  Décisions ({len(filtered)}) :")
             for dec in filtered:
                 print(f"     [{dec.decision_id}] {dec.title} ({dec.scope}/{dec.status})")
 
@@ -379,8 +379,8 @@ def cmd_export(root: Path, fmt: str, output: str | None,
 
         for dec in chain:
             status_badge = {
-                "accepted": "✅ Acceptée", "superseded": "🔄 Remplacée",
-                "deprecated": "⚠️ Dépréciée", "proposed": "💭 Proposée",
+                "accepted": "[OK] Acceptée", "superseded": "Remplacée",
+                "deprecated": "[!] Dépréciée", "proposed": "Proposée",
             }.get(dec.status, dec.status)
 
             lines.append(f"## {dec.decision_id} — {dec.title}\n")
@@ -441,7 +441,7 @@ def cmd_export(root: Path, fmt: str, output: str | None,
     }
 
     if not as_json and saved:
-        print(f"📤 Exporté : {saved} ({result['size_bytes']} bytes)")
+        print(f"Exporté : {saved} ({result['size_bytes']} bytes)")
 
     return result
 

@@ -252,14 +252,14 @@ def cmd_scan(root: Path, workflow_name: str | None, as_json: bool) -> dict[str, 
 
     if not as_json:
         for wname, wdata in results.items():
-            print(f"🔬 Workflow : {wname}")
+            print(f"Workflow : {wname}")
             print(f"   Fichier : {wdata['path']}")
             print(f"   Segments : {wdata['total_segments']} | Lignes : {wdata['total_lines']}")
             print()
             for seg in wdata["segments"]:
                 type_icon = {
-                    "step": "📌", "section": "📂", "h1": "📗", "h2": "📕",
-                    "h3": "📙", "gate": "🚧", "item": "•", "block": "▪",
+                    "step": "", "section": "", "h1": "", "h2": "",
+                    "h3": "", "gate": "", "item": "•", "block": "▪",
                 }.get(seg["segment_type"], "▫")
                 indent = "  " * seg.get("indent_level", 0)
                 lines_range = f"L{seg['line_start']}-L{seg['line_end']}"
@@ -337,12 +337,12 @@ def cmd_splice(root: Path, workflow_name: str, at_ref: str,
 
     if not as_json:
         mode = "SPLICE" if not dry_run else "DRY RUN — splice"
-        print(f"✂️ {mode} sur {workflow_name}")
+        print(f"{mode} sur {workflow_name}")
         print(f"   Cible : {at_ref} ({position})")
         print(f"   Lignes insérées : {len(insert_lines)}")
         print(f"   Hash : {edit.before_hash} → {edit.after_hash}")
         if dry_run:
-            print("\n   ℹ️ Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
+            print("\n   [i] Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
 
     return result
 
@@ -400,12 +400,12 @@ def cmd_excise(root: Path, workflow_name: str, segment_ref: str,
 
     if not as_json:
         mode = "EXCISION" if not dry_run else "DRY RUN — excision"
-        print(f"🗑️ {mode} sur {workflow_name}")
+        print(f"{mode} sur {workflow_name}")
         print(f"   Segment : {segment_ref} ({target_seg.name})")
         print(f"   Lignes supprimées : {len(excised)}")
         print(f"   Hash : {edit.before_hash} → {edit.after_hash}")
         if dry_run:
-            print("\n   ℹ️ Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
+            print("\n   [i] Mode dry-run. Relancez avec --no-dry-run pour appliquer.")
 
     return result
 
@@ -486,7 +486,7 @@ def cmd_transplant(root: Path, source_ref: str, dest_ref: str,
     }
 
     if not as_json:
-        print("🧬 Transplant effectué")
+        print("Transplant effectué")
         print(f"   Source : {src_wf}:{source_segment.name}")
         print(f"   Destination : {dst_wf}:{dest_segment.name}")
         print(f"   Lignes transplantées : {len(transplant_lines)}")
@@ -567,21 +567,21 @@ def cmd_validate(root: Path, workflow_name: str, as_json: bool) -> dict[str, Any
     }
 
     if not as_json:
-        icon = "✅" if is_valid else "❌"
+        icon = "[OK]" if is_valid else "[x]"
         print(f"{icon} Validation : {workflow_name}")
         print(f"   Santé : {health.upper()}")
         print(f"   Segments : {len(segments)} | Lignes : {total_lines}")
         print(f"   Éditions précédentes : {edit_count}")
         if issues:
-            print(f"\n   🔴 Problèmes ({len(issues)}) :")
+            print(f"\n   [!!] Problèmes ({len(issues)}) :")
             for issue in issues:
                 print(f"     {issue['message']}")
         if warnings:
-            print(f"\n   🟡 Avertissements ({len(warnings)}) :")
+            print(f"\n   [!] Avertissements ({len(warnings)}) :")
             for warn in warnings:
                 print(f"     {warn['message']}")
         if is_valid and not warnings:
-            print("\n   ✨ Workflow en parfait état")
+            print("\n   Workflow en parfait état")
 
     return result
 

@@ -159,12 +159,12 @@ def cmd_search(args: argparse.Namespace) -> int:
             "count": len(results),
         }, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔍 Résultats pour: {query}\n")
+        print(f"\n  Résultats pour: {query}\n")
         if not results:
             print("  Aucun résultat.")
         for i, r in enumerate(results, 1):
             if r.get("error"):
-                print(f"  ❌ Erreur: {r['error']}")
+                print(f"  [x] Erreur: {r['error']}")
                 continue
             print(f"  {i}. {r['title']}")
             print(f"     {r['url']}")
@@ -183,10 +183,10 @@ def cmd_test(args: argparse.Namespace) -> int:
                           indent=2, ensure_ascii=False))
     else:
         if results and not results[0].get("error"):
-            print("  ✅ Web search operational")
+            print("  [OK] Web search operational")
         else:
             error = results[0].get("error", "unknown") if results else "no response"
-            print(f"  ❌ Web search failed: {error}")
+            print(f"  [x] Web search failed: {error}")
     return 0
 
 

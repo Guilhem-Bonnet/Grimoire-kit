@@ -298,7 +298,7 @@ def compute_drift(baseline: AgentFingerprint, current: AgentFingerprint) -> Drif
     ))
 
     if removed_caps:
-        report.alerts.append(f"⚠️ Capabilities supprimées: {', '.join(removed_caps)}")
+        report.alerts.append(f"[!] Capabilities supprimées: {', '.join(removed_caps)}")
 
     # 4. MCP servers drift
     base_mcp = set(baseline.mcp_servers)
@@ -316,7 +316,7 @@ def compute_drift(baseline: AgentFingerprint, current: AgentFingerprint) -> Drif
     ))
 
     if removed_mcp:
-        report.alerts.append(f"🔴 Serveurs MCP retirés: {', '.join(removed_mcp)}")
+        report.alerts.append(f"[!!] Serveurs MCP retirés: {', '.join(removed_mcp)}")
 
     # 5. Persona drift
     persona_changed = baseline.persona_hash != current.persona_hash and baseline.persona_hash
@@ -331,7 +331,7 @@ def compute_drift(baseline: AgentFingerprint, current: AgentFingerprint) -> Drif
     ))
 
     if persona_changed:
-        report.alerts.append("🔴 Persona modifiée — vérifier la cohérence d'identité")
+        report.alerts.append("[!!] Persona modifiée — vérifier la cohérence d'identité")
 
     # 6. Rules drift
     rules_changed = baseline.rules_hash != current.rules_hash and baseline.rules_hash
@@ -362,7 +362,7 @@ def compute_drift(baseline: AgentFingerprint, current: AgentFingerprint) -> Drif
     ))
 
     if size_score > DRIFT_THRESHOLD_HIGH:
-        report.alerts.append(f"⚠️ Changement de taille important: {size_score:.0%}")
+        report.alerts.append(f"[!] Changement de taille important: {size_score:.0%}")
 
     # 8. Handlers drift
     base_handlers = set(baseline.handlers)
@@ -412,7 +412,7 @@ def compute_drift(baseline: AgentFingerprint, current: AgentFingerprint) -> Drif
         report.recommendation = ("Dérive significative — review humain recommandé. "
                                  "Envisager un re-baseline ou un rollback.")
     else:
-        report.recommendation = ("⚠️ Dérive critique — agent potentiellement cassé. "
+        report.recommendation = ("[!] Dérive critique — agent potentiellement cassé. "
                                  "Rollback vers le baseline recommandé.")
 
     return report
@@ -527,7 +527,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(fp), indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📸 Baseline captured: {fp.agent_name}")
+        print(f"\n  Baseline captured: {fp.agent_name}")
         print(f"  File: {fp.agent_file}")
         print(f"  Hash: {fp.file_hash}")
         print(f"  Structure: persona={fp.has_persona}, menu={fp.has_menu}, "
@@ -546,7 +546,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     baseline = load_baseline(agent_name, root)
     if baseline is None:
-        print(f"  ❌ No baseline for '{agent_name}'. Run: agent-watch snapshot --agent {args.agent}")
+        print(f"  [x] No baseline for '{agent_name}'. Run: agent-watch snapshot --agent {args.agent}")
         return 1
 
     current = fingerprint_agent(agent_path)
@@ -564,23 +564,23 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
     else:
-        sev_icons = {"stable": "🟢", "none": "🟢", "low": "🔵", "medium": "🟡", "high": "🟠", "critical": "🔴"}
-        icon = sev_icons.get(report.severity, "⚪")
+        sev_icons = {"stable": "[ok]", "none": "[ok]", "low": "[i]", "medium": "[!]", "high": "[!]", "critical": "[!!]"}
+        icon = sev_icons.get(report.severity, "[-]")
         print(f"\n  {icon} Drift Check: {report.agent_name} — {report.severity.upper()} ({report.overall_drift:.1%})")
         print(f"  Baseline: {report.baseline_timestamp[:16]} → Now: {report.timestamp[:16]}\n")
 
         for v in report.vectors:
             if v["dimension"] == "file_hash":
                 continue
-            vi = sev_icons.get(v["severity"], "⚪")
+            vi = sev_icons.get(v["severity"], "[-]")
             print(f"  {vi} {v['dimension']:15s} {v['drift_score']:.0%} — {v['detail']}")
 
         if report.alerts:
-            print("\n  🚨 Alertes:")
+            print("\n  Alertes:")
             for a in report.alerts:
                 print(f"    {a}")
 
-        print(f"\n  💡 {report.recommendation}")
+        print(f"\n  {report.recommendation}")
     return 0
 
 
@@ -599,11 +599,11 @@ def cmd_history(args: argparse.Namespace) -> int:
         if not entries:
             print("  Aucun historique de monitoring.")
             return 0
-        print(f"\n  📊 Derniers {len(entries)} checks:\n")
+        print(f"\n  Derniers {len(entries)} checks:\n")
         for e in reversed(entries):
             sev = e.get("severity", "?")
-            icon = {"stable": "🟢", "none": "🟢", "low": "🔵", "medium": "🟡",
-                    "high": "🟠", "critical": "🔴"}.get(sev, "⚪")
+            icon = {"stable": "[ok]", "none": "[ok]", "low": "[i]", "medium": "[!]",
+                    "high": "[!]", "critical": "[!!]"}.get(sev, "[-]")
             alerts = f" ({e.get('alerts', 0)} alertes)" if e.get("alerts", 0) > 0 else ""
             print(f"  {icon} {e.get('agent', '?'):20s} {sev:10s} "
                   f"drift={e.get('drift', 0):.1%}{alerts} [{e.get('timestamp', '')[:16]}]")

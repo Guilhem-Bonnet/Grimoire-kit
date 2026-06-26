@@ -55,12 +55,12 @@ VERSION = "1.0.0"
 INCUBATOR_FILE = "incubator.json"
 
 LIFECYCLE = {
-    "SEED": {"emoji": "🌰", "description": "Idée brute"},
-    "INCUBATING": {"emoji": "🥚", "description": "En évaluation"},
-    "VIABLE": {"emoji": "🐣", "description": "Prête pour implémentation"},
-    "DORMANT": {"emoji": "💤", "description": "En sommeil"},
-    "DEAD": {"emoji": "💀", "description": "Abandonnée"},
-    "HATCHED": {"emoji": "🐥", "description": "Implémentée"},
+    "SEED": {"emoji": "", "description": "Idée brute"},
+    "INCUBATING": {"emoji": "", "description": "En évaluation"},
+    "VIABLE": {"emoji": "", "description": "Prête pour implémentation"},
+    "DORMANT": {"emoji": "", "description": "En sommeil"},
+    "DEAD": {"emoji": "", "description": "Abandonnée"},
+    "HATCHED": {"emoji": "", "description": "Implémentée"},
 }
 
 VIABILITY_CHECKS = [
@@ -203,13 +203,13 @@ def format_idea(idea: Idea) -> str:
     if idea.tags:
         lines.append(f"      Tags : {', '.join(idea.tags)}")
     if idea.viability:
-        checks = " ".join(f"{'✅' if v else '❌'}{k}" for k, v in idea.viability.items())
+        checks = " ".join(f"{'[OK]' if v else '[x]'}{k}" for k, v in idea.viability.items())
         lines.append(f"      Viabilité : {checks}")
     return "\n".join(lines)
 
 
 def format_status(ideas: list[Idea]) -> str:
-    lines = [f"🥚 Incubateur Grimoire — {len(ideas)} idées\n"]
+    lines = [f"Incubateur Grimoire — {len(ideas)} idées\n"]
 
     status_counts = {}
     for idea in ideas:
@@ -258,7 +258,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(idea.to_dict(), indent=2, ensure_ascii=False))
     else:
-        print(f"🌰 Idée soumise : {idea.id}")
+        print(f"Idée soumise : {idea.id}")
         print(format_idea(idea))
     return 0
 
@@ -272,7 +272,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         if ideas:
             print(format_status(ideas))
         else:
-            print("🥚 Incubateur vide — soumettez une idée avec 'submit'")
+            print("Incubateur vide — soumettez une idée avec 'submit'")
     return 0
 
 
@@ -285,7 +285,7 @@ def cmd_viable(args: argparse.Namespace) -> int:
             target = idea
             break
     if not target:
-        print(f"❌ Idée {args.id} non trouvée")
+        print(f"[x] Idée {args.id} non trouvée")
         return 1
 
     viability = check_viability(target, project_root)
@@ -323,13 +323,13 @@ def cmd_wake(args: argparse.Namespace) -> int:
                 if args.json:
                     print(json.dumps(idea.to_dict(), indent=2, ensure_ascii=False))
                 else:
-                    print(f"☀️ Idée {idea.id} réveillée")
+                    print(f"Idée {idea.id} réveillée")
                     print(format_idea(idea))
                 return 0
             else:
-                print(f"⚠️ {idea.id} n'est pas dormante (status: {idea.status})")
+                print(f"[!] {idea.id} n'est pas dormante (status: {idea.status})")
                 return 1
-    print(f"❌ Idée {args.id} non trouvée")
+    print(f"[x] Idée {args.id} non trouvée")
     return 1
 
 
@@ -342,11 +342,11 @@ def cmd_prune(args: argparse.Namespace) -> int:
         print(json.dumps({"pruned": [p.id for p in pruned]}, indent=2))
     else:
         if pruned:
-            print(f"✂️ {len(pruned)} idées éliminées :")
+            print(f"{len(pruned)} idées éliminées :")
             for p in pruned:
-                print(f"   💀 [{p.id}] {p.title}")
+                print(f"   [{p.id}] {p.title}")
         else:
-            print("✅ Aucune idée à éliminer")
+            print("[OK] Aucune idée à éliminer")
     return 0
 
 

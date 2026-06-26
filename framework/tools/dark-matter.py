@@ -53,12 +53,12 @@ DARK_MATTER_VERSION = "1.0.0"
 
 # Types de matière noire
 class DarkType:
-    CONVENTION = "📐 Convention non-écrite"
-    ASSUMPTION = "💭 Hypothèse implicite"
-    SILO = "🏝️ Silo de connaissance"
-    DEPENDENCY = "🔗 Dépendance tacite"
-    MAGIC = "✨ Valeur magique"
-    RITUAL = "🕯️ Rituel non documenté"
+    CONVENTION = "Convention non-écrite"
+    ASSUMPTION = "Hypothèse implicite"
+    SILO = "Silo de connaissance"
+    DEPENDENCY = "Dépendance tacite"
+    MAGIC = "Valeur magique"
+    RITUAL = "Rituel non documenté"
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -402,7 +402,7 @@ def build_full_report(project_root: Path) -> DarkMatterReport:
 
 def format_report(report: DarkMatterReport) -> str:
     lines = [
-        "🌑 Dark Matter Detector — Matière noire du projet",
+        "Dark Matter Detector — Matière noire du projet",
         f"   Éléments détectés : {len(report.items)}",
         f"   Bus factor : {report.bus_factor}",
         "",
@@ -414,10 +414,10 @@ def format_report(report: DarkMatterReport) -> str:
         for item in items[:5]:
             lines.append(f"      [{item.confidence:.0%}] {item.title}")
             if item.location:
-                lines.append(f"           📍 {item.location}")
+                lines.append(f"           {item.location}")
             lines.append(f"           {item.description[:80]}")
             if item.recommendation:
-                lines.append(f"           💡 {item.recommendation}")
+                lines.append(f"           {item.recommendation}")
         if len(items) > 5:
             lines.append(f"      ... et {len(items) - 5} de plus")
         lines.append("")
@@ -428,7 +428,7 @@ def format_report(report: DarkMatterReport) -> str:
 def generate_documentation(report: DarkMatterReport) -> str:
     """Génère un document Markdown de la matière noire."""
     lines = [
-        "# 🌑 Matière Noire — Documentation du savoir tribal",
+        "# Matière Noire — Documentation du savoir tribal",
         f"\n> Généré le {report.timestamp[:10]}",
         f"> {len(report.items)} éléments détectés | Bus factor : {report.bus_factor}\n",
     ]
@@ -470,9 +470,9 @@ def cmd_patterns(args: argparse.Namespace) -> int:
     for item in items:
         print(f"   {item.dark_type}: {item.title}")
         if item.location:
-            print(f"      📍 {item.location}")
+            print(f"      {item.location}")
     if not items:
-        print("✅ Aucune convention non-écrite détectée")
+        print("[OK] Aucune convention non-écrite détectée")
     return 0
 
 
@@ -486,7 +486,7 @@ def cmd_silos(args: argparse.Namespace) -> int:
             print(f"   {item.title}")
             print(f"      {item.description}")
         if not items:
-            print("✅ Aucun silo de connaissance détecté (ou git non disponible)")
+            print("[OK] Aucun silo de connaissance détecté (ou git non disponible)")
     return 0
 
 
@@ -497,12 +497,12 @@ def cmd_implicit(args: argparse.Namespace) -> int:
         print(json.dumps([i.to_dict() for i in items], indent=2, ensure_ascii=False))
     else:
         for item in items:
-            print(f"   💭 {item.title}")
+            print(f"   {item.title}")
             print(f"      {item.description[:100]}")
-            print(f"      📍 {item.location}")
+            print(f"      {item.location}")
             print()
         if not items:
-            print("✅ Aucune hypothèse implicite détectée")
+            print("[OK] Aucune hypothèse implicite détectée")
     return 0
 
 
@@ -513,7 +513,7 @@ def cmd_document(args: argparse.Namespace) -> int:
     output = project_root / "_grimoire-output" / "dark-matter-report.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(md, encoding="utf-8")
-    print(f"📄 Rapport généré → {output}")
+    print(f"Rapport généré → {output}")
     return 0
 
 

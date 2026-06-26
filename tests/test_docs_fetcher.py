@@ -548,7 +548,7 @@ class TestRenderers:
             error="timeout",
         )
         text = df.render_text_fetch(r)
-        assert "❌" in text
+        assert "[x]" in text
         assert "timeout" in text
 
     def test_render_search_empty(self):

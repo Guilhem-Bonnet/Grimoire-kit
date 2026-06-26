@@ -1029,34 +1029,34 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(asdict(plan), indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔍 Résolution : \"{plan.intent}\"\n")
+        print(f"\n  Résolution : \"{plan.intent}\"\n")
 
         if plan.matched_capabilities:
-            print(f"  📋 Capabilities identifiées : {', '.join(plan.matched_capabilities)}\n")
+            print(f"  Capabilities identifiées : {', '.join(plan.matched_capabilities)}\n")
         else:
-            print("  ⚠️  Aucune capability identifiée pour cette intention.\n")
+            print("  [!]  Aucune capability identifiée pour cette intention.\n")
 
         if plan.ready_to_use:
-            print(f"  ✅ Outils PRÊTS ({len(plan.ready_to_use)}) :")
+            print(f"  [OK] Outils PRÊTS ({len(plan.ready_to_use)}) :")
             for c in plan.ready_to_use:
-                print(f"    🟢 {c['name']} [{c['provider_type']}]")
+                print(f"    [ok] {c['name']} [{c['provider_type']}]")
                 print(f"       Tools: {', '.join(c['tools_offered'])}")
                 if c.get("note"):
-                    print(f"       💡 {c['note']}")
+                    print(f"       {c['note']}")
 
         if plan.provision_needed:
-            print(f"\n  📦 Provision nécessaire ({len(plan.provision_needed)}) :")
+            print(f"\n  Provision nécessaire ({len(plan.provision_needed)}) :")
             for a in plan.provision_needed:
-                confirm = " ⚠️ confirmation requise" if a.get("requires_confirmation") else ""
-                print(f"    🔧 [{a['method']}] {a['command']}{confirm}")
+                confirm = " [!] confirmation requise" if a.get("requires_confirmation") else ""
+                print(f"    [{a['method']}] {a['command']}{confirm}")
 
         if plan.recommended and not plan.ready_to_use:
-            print("\n  💡 Recommandé (après provision) :")
+            print("\n  Recommandé (après provision) :")
             for c in plan.recommended[:3]:
-                print(f"    ➡️  {c['name']} [{c['provision_method']}]")
+                print(f"    ➡  {c['name']} [{c['provision_method']}]")
 
         if plan.fallback_plan:
-            print(f"\n  🔄 Fallback : {plan.fallback_plan}")
+            print(f"\n  Fallback : {plan.fallback_plan}")
 
     return 0
 
@@ -1069,20 +1069,20 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(json.dumps([asdict(c) for c in candidates], indent=2, ensure_ascii=False))
     else:
         if not candidates:
-            print(f"  ❌ Aucun provider pour capability '{args.capability}'")
+            print(f"  [x] Aucun provider pour capability '{args.capability}'")
             print(f"  Capabilities connues : {', '.join(sorted(CAPABILITY_CATALOG.keys()))}")
             return 1
 
         cap_desc = CAPABILITY_CATALOG.get(args.capability, {}).get("description", "")
-        print(f"\n  🔎 Providers pour '{args.capability}' — {cap_desc}\n")
+        print(f"\n  Providers pour '{args.capability}' — {cap_desc}\n")
         for c in candidates:
-            icon = "🟢" if c.available else "🔴"
+            icon = "[ok]" if c.available else "[!!]"
             print(f"  {icon} {c.name} [{c.provider_type}] (priority: {c.priority})")
             print(f"     Tools: {', '.join(c.tools_offered)}")
             if not c.available and c.provision_method != "none":
-                print(f"     📦 Provision: {c.provision_method}")
+                print(f"     Provision: {c.provision_method}")
             if c.note:
-                print(f"     💡 {c.note}")
+                print(f"     {c.note}")
     return 0
 
 
@@ -1093,13 +1093,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        icon = "🟢" if result.get("available") else "🔴"
+        icon = "[ok]" if result.get("available") else "[!!]"
         print(f"\n  {icon} {result.get('name', args.tool)} — "
               f"{'disponible' if result.get('available') else 'non disponible'}")
         if not result.get("available") and "provision" in result:
             prov = result["provision"]
             if prov.get("method") != "none":
-                print(f"  📦 Pour installer : {prov.get('method')} {prov.get('package', '')}")
+                print(f"  Pour installer : {prov.get('method')} {prov.get('package', '')}")
     return 0
 
 
@@ -1112,12 +1112,12 @@ def cmd_provision(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         if "error" in result:
-            print(f"  ❌ {result['error']}")
+            print(f"  [x] {result['error']}")
             return 1
         mode = "EXÉCUTION" if not dry_run else "DRY RUN"
-        print(f"\n  📦 Provision [{mode}] : {args.tool}\n")
+        print(f"\n  Provision [{mode}] : {args.tool}\n")
         for a in result.get("actions", []):
-            icon = "✅" if a.get("success") else "❌"
+            icon = "[OK]" if a.get("success") else "[x]"
             print(f"  {icon} [{a['method']}] {a['command']}")
             if a.get("output"):
                 print(f"     → {a['output'][:200]}")
@@ -1131,13 +1131,13 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📚 Tool Catalog — {result['total_capabilities']} capabilities\n")
+        print(f"\n  Tool Catalog — {result['total_capabilities']} capabilities\n")
         for cap in result["capabilities"]:
             avail = cap["available_count"]
-            icon = "🟢" if avail > 0 else "🔴"
+            icon = "[ok]" if avail > 0 else "[!!]"
             print(f"  {icon} {cap['id']:25s} {cap['description']}")
             for p in cap["providers"]:
-                pi = "✅" if p["available"] else "⬜"
+                pi = "[OK]" if p["available"] else ""
                 print(f"     {pi} {p['name']} [{p['type']}]")
     return 0
 
@@ -1146,12 +1146,12 @@ def cmd_cache(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     if args.clear:
         cleared = clear_cache(root)
-        print("  ✅ Cache vidé" if cleared else "  ⚪ Pas de cache à vider")
+        print("  [OK] Cache vidé" if cleared else "  [-] Pas de cache à vider")
         return 0
 
     cache_path = root / CACHE_DIR / CACHE_FILE
     if not cache_path.exists():
-        print("  ⚪ Pas de cache")
+        print("  [-] Pas de cache")
         return 0
 
     cache = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -1160,7 +1160,7 @@ def cmd_cache(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(cache, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  📦 Cache de résolution — {len(resolutions)} entrées\n")
+        print(f"\n  Cache de résolution — {len(resolutions)} entrées\n")
         for key, entry in list(resolutions.items())[-10:]:
             cached_at = entry.get("cached_at", "?")[:16]
             plan = entry.get("plan", {})

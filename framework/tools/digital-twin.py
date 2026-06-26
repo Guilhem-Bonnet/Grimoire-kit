@@ -235,7 +235,7 @@ def cmd_snapshot(root: Path, output_dir: Path | None, as_json: bool) -> dict[str
     }
 
     if not as_json:
-        print(f"📸 Snapshot capturé : {snap_id}")
+        print(f"Snapshot capturé : {snap_id}")
         print(f"   Fichier : {snap_file}")
         print(f"   Entités : {len(entities)}")
         print(f"   Connexions : {len(edges)}")
@@ -357,15 +357,15 @@ def _analyze_impact(change: SimulationChange, entities: list[ProjectEntity],
     # Recommandations
     recommendations: list[str] = []
     if risk >= 50:
-        recommendations.append("⚠️ Risque élevé — tester dans un environnement isolé d'abord")
+        recommendations.append("[!] Risque élevé — tester dans un environnement isolé d'abord")
     if len(direct) > 5:
-        recommendations.append("📊 Beaucoup de dépendants — prévoir une migration progressive")
+        recommendations.append("Beaucoup de dépendants — prévoir une migration progressive")
     if change.action == "remove":
-        recommendations.append("🗑️ Vérifier qu'aucune référence résiduelle ne subsiste après suppression")
+        recommendations.append("Vérifier qu'aucune référence résiduelle ne subsiste après suppression")
     if change.action == "rename":
-        recommendations.append("🔄 Utiliser un refactoring global (search & replace) pour les références")
+        recommendations.append("Utiliser un refactoring global (search & replace) pour les références")
     if not recommendations:
-        recommendations.append("✅ Changement à faible risque — procéder normalement")
+        recommendations.append("[OK] Changement à faible risque — procéder normalement")
 
     return ImpactResult(
         change=asdict(change),
@@ -401,7 +401,7 @@ def cmd_simulate(root: Path, changes: list[str], as_json: bool) -> dict[str, Any
     }
 
     if not as_json:
-        print(f"🧪 Simulation — {len(changes)} changement(s)")
+        print(f"Simulation — {len(changes)} changement(s)")
         print(f"   Risque cumulé : {total_risk:.1f}/100 [{total_level.upper()}]")
         print()
         for i, res in enumerate(results, 1):
@@ -410,7 +410,7 @@ def cmd_simulate(root: Path, changes: list[str], as_json: bool) -> dict[str, Any
             print(f"      Risque : {res['risk_score']}/100 [{res['risk_level']}]")
             print(f"      Impacts directs : {len(res['direct_impacts'])}")
             for imp in res["direct_impacts"][:5]:
-                sev_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(imp["severity"], "⚪")
+                sev_icon = {"high": "[!!]", "medium": "[!]", "low": "[ok]"}.get(imp["severity"], "[-]")
                 print(f"        {sev_icon} {imp['entity']} — {imp['description']}")
             if len(res["direct_impacts"]) > 5:
                 print(f"        ... et {len(res['direct_impacts']) - 5} autres")
@@ -436,7 +436,7 @@ def cmd_diff(root: Path, snapshot_path: str, as_json: bool) -> dict[str, Any]:
         if candidates:
             snap_file = candidates[0]
         else:
-            print(f"❌ Snapshot introuvable : {snapshot_path}", file=sys.stderr)
+            print(f"[x] Snapshot introuvable : {snapshot_path}", file=sys.stderr)
             return {"error": f"Snapshot not found: {snapshot_path}"}
 
     snap_data = json.loads(snap_file.read_text(encoding="utf-8"))
@@ -490,20 +490,20 @@ def cmd_diff(root: Path, snapshot_path: str, as_json: bool) -> dict[str, Any]:
     }
 
     if not as_json:
-        print(f"📊 Diff vs snapshot {result['snapshot']}")
+        print(f"Diff vs snapshot {result['snapshot']}")
         print(f"   Date snapshot : {result['snapshot_date'][:19]}")
         print(f"   Total changements : {result['total_changes']}")
         print()
         if added:
-            print(f"  ➕ Ajoutés ({len(added)}) :")
+            print(f"  Ajoutés ({len(added)}) :")
             for item in added:
                 print(f"     {item}")
         if removed:
-            print(f"  ➖ Supprimés ({len(removed)}) :")
+            print(f"  Supprimés ({len(removed)}) :")
             for item in removed:
                 print(f"     {item}")
         if modified:
-            print(f"  ✏️ Modifiés ({len(modified)}) :")
+            print(f"  Modifiés ({len(modified)}) :")
             for mod in modified:
                 delta = mod["new_size"] - mod["old_size"]
                 sign = "+" if delta >= 0 else ""
@@ -529,7 +529,7 @@ def cmd_impact(root: Path, target: str, as_json: bool) -> dict[str, Any]:
     if not target_entity:
         msg = f"Entité introuvable : {target}"
         if not as_json:
-            print(f"❌ {msg}", file=sys.stderr)
+            print(f"[x] {msg}", file=sys.stderr)
         return {"error": msg}
 
     target_key = f"{target_entity.kind}:{target_entity.name}"
@@ -572,21 +572,21 @@ def cmd_impact(root: Path, target: str, as_json: bool) -> dict[str, Any]:
     }
 
     if not as_json:
-        print(f"🎯 Analyse d'impact : {target_key}")
+        print(f"Analyse d'impact : {target_key}")
         print(f"   Fichier : {target_entity.path}")
         print(f"   Criticité : {criticality}/100 [{crit_level.upper()}]")
         print(f"   Portée d'impact : {total_reach} entités, profondeur max {max_depth}")
         print()
         if target_entity.dependencies:
-            print(f"  📥 Dépendances ({len(target_entity.dependencies)}) :")
+            print(f"  Dépendances ({len(target_entity.dependencies)}) :")
             for dep in target_entity.dependencies[:10]:
                 print(f"     → {dep}")
         if target_entity.dependents:
-            print(f"  📤 Dépendants ({len(target_entity.dependents)}) :")
+            print(f"  Dépendants ({len(target_entity.dependents)}) :")
             for dep in target_entity.dependents[:10]:
                 print(f"     ← {dep}")
         if impact_depth:
-            print("\n  🌊 Carte de propagation :")
+            print("\n  Carte de propagation :")
             for entity, depth in sorted(impact_depth.items(), key=lambda x: x[1]):
                 if entity == target_key:
                     continue
@@ -652,7 +652,7 @@ def cmd_scenario(root: Path, scenario_file: str | None, scenario_name: str,
     summary_parts.append(f"risque cumulé {total_risk:.0f}/100")
     summary_parts.append(f"{total_direct} impacts directs, {total_indirect} indirects")
     if high_risk_changes:
-        summary_parts.append(f"⚠️ {len(high_risk_changes)} changement(s) à haut risque")
+        summary_parts.append(f"[!] {len(high_risk_changes)} changement(s) à haut risque")
 
     result = ScenarioResult(
         scenario_name=scenario_name or "unnamed",
@@ -666,7 +666,7 @@ def cmd_scenario(root: Path, scenario_file: str | None, scenario_name: str,
     output = asdict(result)
 
     if not as_json:
-        print(f"🎬 Scénario : {result.scenario_name}")
+        print(f"Scénario : {result.scenario_name}")
         print(f"   Changements : {len(scenario_changes)}")
         print(f"   Risque total : {total_risk:.1f}/100")
         print(f"   Faisabilité : {feasibility.upper()}")
@@ -674,14 +674,14 @@ def cmd_scenario(root: Path, scenario_file: str | None, scenario_name: str,
         print()
         for i, imp in enumerate(impacts, 1):
             chg = imp["change"]
-            risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "⛔"}.get(imp["risk_level"], "⚪")
+            risk_icon = {"low": "[ok]", "medium": "[!]", "high": "[!!]", "critical": "[STOP]"}.get(imp["risk_level"], "[-]")
             print(f"  [{i}] {risk_icon} {chg['action']} {chg['target_kind']}:{chg['target_name']} "
                   f"— risque {imp['risk_score']}")
             for rec in imp["recommendations"]:
                 print(f"      {rec}")
         print()
         if feasibility in ("low", "very_low"):
-            print("  ⚠️ ATTENTION : Ce scénario présente des risques élevés.")
+            print("  [!] ATTENTION : Ce scénario présente des risques élevés.")
             print("  Recommandation : diviser en étapes plus petites et tester incrémentalement.")
 
     return output
@@ -746,7 +746,7 @@ def main() -> None:
 
     root = args.project_root.resolve()
     if not root.exists():
-        print(f"❌ Répertoire introuvable : {root}", file=sys.stderr)
+        print(f"[x] Répertoire introuvable : {root}", file=sys.stderr)
         sys.exit(1)
 
     result: dict[str, Any] = {}

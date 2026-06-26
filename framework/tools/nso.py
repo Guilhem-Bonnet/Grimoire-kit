@@ -390,7 +390,7 @@ def run_nso(project_root: Path | str, since: str | None = None,
 
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
-STATUS_ICONS = {"ok": "✅", "skip": "⏭️", "error": "❌"}
+STATUS_ICONS = {"ok": "[OK]", "skip": "", "error": "[x]"}
 
 
 def render_report(report: NSOReport) -> str:
@@ -398,7 +398,7 @@ def render_report(report: NSOReport) -> str:
     lines = [
         "",
         "╔══════════════════════════════════════════════════════════════╗",
-        "║        🧠 Nervous System Orchestrator — Report             ║",
+        "║        Nervous System Orchestrator — Report             ║",
         "╚══════════════════════════════════════════════════════════════╝",
         "",
         f"  Timestamp : {report.timestamp}",
@@ -411,7 +411,7 @@ def render_report(report: NSOReport) -> str:
     ]
 
     for phase in report.phases:
-        icon = STATUS_ICONS.get(phase.status, "❓")
+        icon = STATUS_ICONS.get(phase.status, "")
         name = phase.name[:12].ljust(12)
         dur = f"{phase.duration_ms}ms".rjust(8)
         summary = (phase.summary or phase.error)[:33].ljust(33)
@@ -425,9 +425,9 @@ def render_report(report: NSOReport) -> str:
     # Détails des erreurs
     errors = [p for p in report.phases if p.status == "error"]
     if errors:
-        lines.append("⚠️  Erreurs détaillées :")
+        lines.append("[!]  Erreurs détaillées :")
         for p in errors:
-            lines.append(f"  ❌ {p.name}: {p.error}")
+            lines.append(f"  [x] {p.name}: {p.error}")
         lines.append("")
 
     return "\n".join(lines)
@@ -673,7 +673,7 @@ def render_retro(report: RetroReport) -> str:
     lines = [
         "",
         "╔══════════════════════════════════════════════════════════════╗",
-        "║        🔄 Rétrospective — Nervous System                   ║",
+        "║        Rétrospective — Nervous System                   ║",
         "╚══════════════════════════════════════════════════════════════╝",
         "",
         f"  Timestamp : {report.timestamp}",
@@ -682,7 +682,7 @@ def render_retro(report: RetroReport) -> str:
     ]
 
     # Went well
-    lines.append("  ✅ CE QUI A BIEN MARCHÉ")
+    lines.append("  [OK] CE QUI A BIEN MARCHÉ")
     lines.append("  " + "─" * 55)
     if report.went_well:
         for item in report.went_well:
@@ -692,18 +692,18 @@ def render_retro(report: RetroReport) -> str:
     lines.append("")
 
     # Problems
-    lines.append("  ❌ PROBLÈMES DÉTECTÉS")
+    lines.append("  [x] PROBLÈMES DÉTECTÉS")
     lines.append("  " + "─" * 55)
     if report.problems:
         for item in report.problems:
-            flag = "🔴" if item.priority > 0 else "🟡"
+            flag = "[!!]" if item.priority > 0 else "[!]"
             lines.append(f"    {flag} [{item.source}] {item.text}")
     else:
         lines.append("    (aucun problème)")
     lines.append("")
 
     # Actions
-    lines.append("  🎯 ACTIONS RECOMMANDÉES")
+    lines.append("  ACTIONS RECOMMANDÉES")
     lines.append("  " + "─" * 55)
     if report.actions:
         for i, item in enumerate(report.actions, 1):

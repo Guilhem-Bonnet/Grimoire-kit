@@ -293,9 +293,9 @@ def cmd_list(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"servers": servers}, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔌 MCP Proxy Servers — {len(servers)} configured\n")
+        print(f"\n  MCP Proxy Servers — {len(servers)} configured\n")
         for s in servers:
-            enabled = "✅" if s.get("enabled") else "⬜"
+            enabled = "[OK]" if s.get("enabled") else ""
             desc = s.get("description", "")
             print(f"  {enabled} {s['name']:20s}  {desc}")
             print(f"     cmd: {s.get('command', 'N/A')}")
@@ -311,9 +311,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps({"statuses": statuses, "available": available},
                           indent=2, ensure_ascii=False))
     else:
-        print("\n  🔌 MCP Proxy Status\n")
+        print("\n  MCP Proxy Status\n")
         for s in statuses:
-            icon = "🟢" if s["available"] else ("⬜" if s["status"] == "disabled" else "🔴")
+            icon = "[ok]" if s["available"] else ("" if s["status"] == "disabled" else "[!!]")
             print(f"  {icon} {s['name']:20s}  {s['status']}")
     return 0
 
@@ -324,13 +324,13 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     if args.init:
         _save_config(project_root, _DEFAULT_CONFIG)
-        print(f"  ✅ Config initialized at {_config_path(project_root)}")
+        print(f"  [OK] Config initialized at {_config_path(project_root)}")
         return 0
 
     if args.json:
         print(json.dumps(config, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  ⚙️ MCP Proxy Config: {_config_path(project_root)}\n")
+        print(f"\n  MCP Proxy Config: {_config_path(project_root)}\n")
         print(json.dumps(config, indent=2, ensure_ascii=False))
     return 0
 

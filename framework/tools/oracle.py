@@ -49,12 +49,12 @@ ORACLE_VERSION = "1.0.0"
 
 # Maturity levels
 MATURITY_LEVELS = [
-    (90, "🏆 Exemplaire"),
-    (75, "🟢 Mature"),
-    (60, "🟡 En progression"),
-    (40, "🟠 Émergent"),
-    (20, "🔴 Initial"),
-    (0, "⚫ Inexistant"),
+    (90, "Exemplaire"),
+    (75, "[ok] Mature"),
+    (60, "[!] En progression"),
+    (40, "[!] Émergent"),
+    (20, "[!!] Initial"),
+    (0, "[-] Inexistant"),
 ]
 
 
@@ -345,7 +345,7 @@ def analyze_maturity(project_root: Path) -> list[MaturityDimension]:
     contributing = (project_root / "CONTRIBUTING.md").exists()
     doc_score = min(100, len(docs) * 10 + (30 if readme else 0) + (20 if contributing else 0))
     dimensions.append(MaturityDimension("Documentation", doc_score,
-                                        f"{len(docs)} docs, README: {'✅' if readme else '❌'}"))
+                                        f"{len(docs)} docs, README: {'[OK]' if readme else '[x]'}"))
 
     # 2. Tests
     test_files = list(project_root.rglob("test_*.py")) + list(project_root.rglob("*.test.*"))
@@ -388,23 +388,23 @@ def generate_recommendations(report: OracleReport) -> list[str]:
     # Basé sur les faiblesses
     for w in report.swot.weaknesses:
         if w.score >= 0.7:
-            recs.append(f"🔴 Corriger : {w.text}")
+            recs.append(f"[!!] Corriger : {w.text}")
         elif w.score >= 0.4:
-            recs.append(f"🟡 Améliorer : {w.text}")
+            recs.append(f"[!] Améliorer : {w.text}")
 
     # Basé sur les opportunités
     for o in report.swot.opportunities[:3]:
-        recs.append(f"🟢 Exploiter : {o.text}")
+        recs.append(f"[ok] Exploiter : {o.text}")
 
     # Basé sur la maturité
     for dim in report.maturity_dimensions:
         if dim.score < 40:
-            recs.append(f"📈 Développer {dim.name} (actuellement {dim.score}/100)")
+            recs.append(f"Développer {dim.name} (actuellement {dim.score}/100)")
 
     # Basé sur les attracteurs
     for att in report.attractors:
         if att.strength > 0.5:
-            recs.append(f"🎯 Levier : {att.name} — {att.description[:80]}")
+            recs.append(f"Levier : {att.name} — {att.description[:80]}")
 
     return recs[:10]
 
@@ -433,12 +433,12 @@ def build_report(project_root: Path) -> OracleReport:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_swot(swot: SWOT) -> str:
-    lines = ["🔮 SWOT — Analyse stratégique\n"]
+    lines = ["SWOT — Analyse stratégique\n"]
     sections = [
-        ("💪 FORCES", swot.strengths),
-        ("⚠️ FAIBLESSES", swot.weaknesses),
-        ("🌟 OPPORTUNITÉS", swot.opportunities),
-        ("🔥 MENACES", swot.threats),
+        ("FORCES", swot.strengths),
+        ("[!] FAIBLESSES", swot.weaknesses),
+        ("OPPORTUNITÉS", swot.opportunities),
+        ("MENACES", swot.threats),
     ]
     for title, items in sections:
         lines.append(f"   {title}")
@@ -456,7 +456,7 @@ def format_swot(swot: SWOT) -> str:
 
 def format_maturity(dimensions: list[MaturityDimension], score: int, level: str) -> str:
     lines = [
-        f"📊 Maturité : {score}/100  {level}\n",
+        f"Maturité : {score}/100  {level}\n",
     ]
     for dim in dimensions:
         bar = "█" * (dim.score // 10) + "░" * (10 - dim.score // 10)
@@ -466,14 +466,14 @@ def format_maturity(dimensions: list[MaturityDimension], score: int, level: str)
 
 def format_full_report(report: OracleReport) -> str:
     lines = [
-        "🔮 Oracle Introspectif — Rapport Complet Grimoire",
+        "Oracle Introspectif — Rapport Complet Grimoire",
         f"   Maturité globale : {report.maturity_score}/100  {report.maturity_level}",
         "",
         format_swot(report.swot),
     ]
 
     if report.attractors:
-        lines.append("🧲 ATTRACTEURS NATURELS :")
+        lines.append("ATTRACTEURS NATURELS :")
         for att in report.attractors:
             bar = "█" * int(att.strength * 10)
             lines.append(f"   {bar} {att.name}")
@@ -484,7 +484,7 @@ def format_full_report(report: OracleReport) -> str:
     lines.append("")
 
     if report.recommendations:
-        lines.append("📋 RECOMMANDATIONS STRATÉGIQUES :")
+        lines.append("RECOMMANDATIONS STRATÉGIQUES :")
         for r in report.recommendations:
             lines.append(f"   {r}")
 
@@ -532,7 +532,7 @@ def cmd_attract(args: argparse.Namespace) -> int:
                           for a in attractors], indent=2, ensure_ascii=False))
     else:
         for att in attractors:
-            print(f"🧲 {att.name} (force: {att.strength:.0%})")
+            print(f"{att.name} (force: {att.strength:.0%})")
             print(f"   {att.description}")
             for ev in att.evidence[:3]:
                 print(f"   → {ev}")
@@ -564,7 +564,7 @@ def cmd_advise(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"recommendations": report.recommendations}, indent=2, ensure_ascii=False))
     else:
-        print("📋 Recommandations de l'Oracle :\n")
+        print("Recommandations de l'Oracle :\n")
         for r in report.recommendations:
             print(f"   {r}")
     return 0

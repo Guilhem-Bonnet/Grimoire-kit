@@ -181,7 +181,7 @@ def main() -> None:
         if args.as_json:
             print(json.dumps(result, indent=2))
         else:
-            print(f"  ✅ Snapshot créé — {result['files']} fichiers")
+            print(f"  [OK] Snapshot créé — {result['files']} fichiers")
 
     elif args.command in ("verify", "diff"):
         report = verify(root)
@@ -189,17 +189,17 @@ def main() -> None:
             print(json.dumps(report.to_dict(), indent=2))
         else:
             if report.status == "no-snapshot":
-                print("  ℹ️ Aucun snapshot. Lancez d'abord: agent-integrity snapshot")
+                print("  [i] Aucun snapshot. Lancez d'abord: agent-integrity snapshot")
             elif report.status == "clean":
-                print(f"  ✅ Intégrité OK — {report.total_files} fichiers vérifiés")
+                print(f"  [OK] Intégrité OK — {report.total_files} fichiers vérifiés")
             else:
-                print("  ⚠️ Modifications détectées :")
+                print("  [!] Modifications détectées :")
                 for f in report.modified:
-                    print(f"    🔄 Modifié : {f}")
+                    print(f"    Modifié : {f}")
                 for f in report.added:
-                    print(f"    ➕ Ajouté  : {f}")
+                    print(f"    Ajouté  : {f}")
                 for f in report.removed:
-                    print(f"    ➖ Supprimé: {f}")
+                    print(f"    Supprimé: {f}")
 
 
 if __name__ == "__main__":

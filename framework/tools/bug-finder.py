@@ -591,7 +591,7 @@ def scan_git_diff(project_root: Path, against: str = "HEAD") -> ScanReport:
 
 def watch_directory(root: Path, target: Path, interval: float = WATCH_INTERVAL) -> None:
     """Surveiller un dossier et scanner les fichiers modifiés (polling)."""
-    print(f"\n  👁️  Bug Finder Watch Mode — {target}")
+    print(f"\n   Bug Finder Watch Mode — {target}")
     print(f"  Polling toutes les {interval}s — Ctrl+C pour arrêter\n")
 
     mtimes: dict[Path, float] = {}
@@ -615,15 +615,15 @@ def watch_directory(root: Path, target: Path, interval: float = WATCH_INTERVAL) 
                 for fpath in changed:
                     bugs = scan_file(fpath)
                     if bugs:
-                        print(f"  🐛 {fpath.relative_to(root)} — {len(bugs)} bug(s)")
+                        print(f"  {fpath.relative_to(root)} — {len(bugs)} bug(s)")
                         for b in bugs:
-                            icon = "🔴" if b.severity in (Severity.CRITICAL, Severity.HIGH) else "🟡"
+                            icon = "[!!]" if b.severity in (Severity.CRITICAL, Severity.HIGH) else "[!]"
                             print(f"     {icon} L{b.line}: [{b.rule_id}] {b.message}")
                     else:
-                        print(f"  ✅ {fpath.relative_to(root)} — clean")
+                        print(f"  [OK] {fpath.relative_to(root)} — clean")
 
     except KeyboardInterrupt:
-        print("\n  👋 Watch arrêté.\n")
+        print("\n  Watch arrêté.\n")
 
 
 # ── Display ───────────────────────────────────────────────────────────────────
@@ -634,7 +634,7 @@ def format_report(report: ScanReport, as_json: bool = False) -> str:
         return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
 
     lines: list[str] = []
-    lines.append("\n  🐛 Bug Finder Report")
+    lines.append("\n  Bug Finder Report")
     lines.append(f"  {'─' * 55}")
     lines.append(f"  Fichiers scannés : {report.files_scanned} ({report.files_skipped} ignorés)")
     lines.append(f"  Bugs trouvés     : {report.total}")
@@ -653,21 +653,21 @@ def format_report(report: ScanReport, as_json: bool = False) -> str:
             by_file.setdefault(b.file, []).append(b)
 
         for filepath, bugs in sorted(by_file.items()):
-            lines.append(f"\n  📄 {filepath}")
+            lines.append(f"\n  {filepath}")
             for b in sorted(bugs, key=lambda x: x.line):
                 severity_icons = {
-                    Severity.CRITICAL: "🔴",
-                    Severity.HIGH: "🔴",
-                    Severity.MEDIUM: "🟡",
-                    Severity.LOW: "🟢",
+                    Severity.CRITICAL: "[!!]",
+                    Severity.HIGH: "[!!]",
+                    Severity.MEDIUM: "[!]",
+                    Severity.LOW: "[ok]",
                 }
-                icon = severity_icons.get(b.severity, "⚪")
+                icon = severity_icons.get(b.severity, "[-]")
                 lines.append(f"     {icon} L{b.line}:{b.col} [{b.rule_id}][{b.severity}] {b.message}")
                 if b.suggestion:
-                    lines.append(f"        💡 {b.suggestion}")
+                    lines.append(f"        {b.suggestion}")
 
     elif report.files_scanned > 0:
-        lines.append("\n  ✅ Aucun bug détecté !")
+        lines.append("\n  [OK] Aucun bug détecté !")
 
     lines.append("")
     return "\n".join(lines)

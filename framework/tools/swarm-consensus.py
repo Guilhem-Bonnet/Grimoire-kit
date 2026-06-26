@@ -218,15 +218,15 @@ def save_entry(project_root: Path, entry: dict) -> None:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_vote(result: VoteResult) -> str:
-    icon = "✅" if result.consensus else "❌"
+    icon = "[OK]" if result.consensus else "[x]"
     lines = [
-        f"🗳️ Vote : {result.topic}",
+        f"Vote : {result.topic}",
         f"   Mode : {result.mode} — {CONSENSUS_MODES.get(result.mode, {}).get('description', '')}",
         f"   Résultat : {icon} {result.detail}",
         "",
     ]
     for v in result.votes:
-        vote_icon = "👍" if v.value else "👎"
+        vote_icon = "[+]" if v.value else "[-]"
         weight_info = f" (poids: {v.weight:.1f})" if result.mode == "SWARM" else ""
         lines.append(f"   {vote_icon} {v.agent}{weight_info}")
     return "\n".join(lines)
@@ -234,7 +234,7 @@ def format_vote(result: VoteResult) -> str:
 
 def format_estimate(result: EstimateResult) -> str:
     lines = [
-        f"📊 Estimation : {result.task}",
+        f"Estimation : {result.task}",
         f"   Moyenne : {result.mean:.1f}",
         f"   Médiane : {result.median:.1f}",
         f"   Écart-type : {result.std_dev:.1f}",
@@ -244,7 +244,7 @@ def format_estimate(result: EstimateResult) -> str:
         "",
     ]
     if result.outliers:
-        lines.append(f"   ⚠️ Outliers : {', '.join(result.outliers)}")
+        lines.append(f"   [!] Outliers : {', '.join(result.outliers)}")
         lines.append("")
     for e in result.estimates:
         bar = "█" * e.value
@@ -258,7 +258,7 @@ def cmd_vote(args: argparse.Namespace) -> int:
     try:
         votes_dict = json.loads(args.votes)
     except json.JSONDecodeError:
-        print("❌ Format JSON invalide pour --votes")
+        print("[x] Format JSON invalide pour --votes")
         return 1
 
     result = process_votes(args.topic, votes_dict, args.mode, args.domain)
@@ -280,7 +280,7 @@ def cmd_estimate(args: argparse.Namespace) -> int:
     try:
         estimates_dict = json.loads(args.estimates)
     except json.JSONDecodeError:
-        print("❌ Format JSON invalide pour --estimates")
+        print("[x] Format JSON invalide pour --estimates")
         return 1
 
     result = process_estimates(args.task, estimates_dict, args.domain)
@@ -303,14 +303,14 @@ def cmd_consensus(args: argparse.Namespace) -> int:
     history = load_history(Path(args.project_root).resolve())
     topic_entries = [e for e in history if e.get("topic") == args.topic]
     if not topic_entries:
-        print(f"📜 Aucun vote trouvé pour « {args.topic} »")
+        print(f"Aucun vote trouvé pour « {args.topic} »")
         return 0
     latest = topic_entries[-1]
     if args.json:
         print(json.dumps(latest, indent=2, ensure_ascii=False))
     else:
-        icon = "✅" if latest.get("consensus") else "❌"
-        print(f"🗳️ Dernier consensus pour « {args.topic} » : {icon} ({latest.get('ratio', 0):.0%})")
+        icon = "[OK]" if latest.get("consensus") else "[x]"
+        print(f"Dernier consensus pour « {args.topic} » : {icon} ({latest.get('ratio', 0):.0%})")
     return 0
 
 
@@ -319,12 +319,12 @@ def cmd_history(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(history[-20:], indent=2, ensure_ascii=False))
     else:
-        print(f"📜 Historique consensus ({len(history)} entrées)\n")
+        print(f"Historique consensus ({len(history)} entrées)\n")
         for entry in history[-10:]:
             ts = entry.get("timestamp", "?")[:19]
             typ = entry.get("type", "?")
             if typ == "vote":
-                icon = "✅" if entry.get("consensus") else "❌"
+                icon = "[OK]" if entry.get("consensus") else "[x]"
                 print(f"   {ts} [vote] {entry.get('topic', '?')} → {icon}")
             elif typ == "estimate":
                 print(f"   {ts} [estimate] {entry.get('task', '?')} → Fib {entry.get('fibonacci', '?')}")
@@ -340,7 +340,7 @@ def cmd_report(args: argparse.Namespace) -> int:
                           "votes": len(votes), "estimates": len(estimates)},
                          indent=2, ensure_ascii=False))
     else:
-        print("📊 Rapport consensus")
+        print("Rapport consensus")
         print(f"   Décisions : {len(history)}")
         print(f"   Votes : {len(votes)}")
         print(f"   Estimations : {len(estimates)}")

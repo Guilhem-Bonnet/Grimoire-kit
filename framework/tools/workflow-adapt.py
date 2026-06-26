@@ -354,7 +354,7 @@ def save_history(project_root: Path, report: AdaptReport) -> Path:
 
 def format_analysis(report: AdaptReport) -> str:
     lines = [
-        "🧠 Plasticité synaptique — Analyse adaptative",
+        "Plasticité synaptique — Analyse adaptative",
         f"   Workflows analysés : {report.workflows_analyzed}",
         f"   Traces chargées : {report.total_traces}",
         f"   Adaptations détectées : {len(report.adaptations)}",
@@ -436,7 +436,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
         print(json.dumps([{"workflow": a.workflow, "step": a.step, "reason": a.reason}
                           for a in prune], indent=2, ensure_ascii=False))
     else:
-        print(f"✂️ Candidats à l'élagage : {len(prune)}\n")
+        print(f"Candidats à l'élagage : {len(prune)}\n")
         for a in prune:
             print(f"   {a.workflow} → {a.step}")
             print(f"   ↳ {a.reason}")
@@ -450,7 +450,7 @@ def cmd_jit(args: argparse.Namespace) -> int:
         print(json.dumps([{"workflow": a.workflow, "step": a.step, "reason": a.reason}
                           for a in jit], indent=2, ensure_ascii=False))
     else:
-        print(f"⏱️ Candidats JIT (différer) : {len(jit)}\n")
+        print(f"Candidats JIT (différer) : {len(jit)}\n")
         for a in jit:
             print(f"   {a.workflow} → {a.step}")
             print(f"   ↳ {a.reason}")
@@ -466,7 +466,7 @@ def cmd_history(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
         data = json.loads(out.read_text(encoding="utf-8"))
-        print(f"📜 Historique d'adaptations ({len(data)} entrées)\n")
+        print(f"Historique d'adaptations ({len(data)} entrées)\n")
         for entry in data[-10:]:
             print(f"   {entry['timestamp'][:19]} — {entry['adaptations']} adaptations, {entry['traces']} traces")
     return 0

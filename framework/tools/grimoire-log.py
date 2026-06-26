@@ -208,7 +208,7 @@ def cmd_stats(root: Path, _args: argparse.Namespace) -> int:
         if "exc_type" in entry:
             exc_types[entry["exc_type"]] += 1
 
-    print(f"📊 Grimoire Log Stats — {total} entrées")
+    print(f"Grimoire Log Stats — {total} entrées")
     print("=" * 50)
     print("\nPar level:")
     for lvl, cnt in levels.most_common():
@@ -252,7 +252,7 @@ def cmd_clear(root: Path, _args: argparse.Namespace) -> int:
         if path.is_file():
             path.unlink()
             cleared += 1
-    print(f"🗑️  {cleared} fichier(s) supprimé(s).")
+    print(f" {cleared} fichier(s) supprimé(s).")
     return 0
 
 

@@ -139,11 +139,11 @@ def _count_failure_sections(path: Path, since: str | None = None) -> dict:
 
     for line in content.splitlines():
         # Détecter la section sévérité
-        if "Top Erreurs Critiques" in line or "🔴" in line:
+        if "Top Erreurs Critiques" in line or "[!!]" in line:
             current_severity = "critical"
-        elif "Erreurs Importantes" in line or "🟡" in line:
+        elif "Erreurs Importantes" in line or "[!]" in line:
             current_severity = "important"
-        elif "Micro-Erreurs" in line or "🟢" in line:
+        elif "Micro-Erreurs" in line or "[ok]" in line:
             current_severity = "micro"
 
         # Détecter une entrée
@@ -204,10 +204,10 @@ def _count_contradictions(path: Path) -> dict:
     for line in content.splitlines():
         if "|" in line and not line.startswith("|--"):
             result["total"] += 1
-            if "⏳" in line or "⚠️" in line:
-                result["active"] += 1
-            elif "✅" in line or "resolved" in line.lower():
+            if "[OK]" in line or "resolved" in line.lower():
                 result["resolved"] += 1
+            else:
+                result["active"] += 1
     return result
 
 
@@ -619,13 +619,13 @@ def load_history(project_root: Path) -> list[dict]:
 
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
-LEVEL_ICONS = {"FRAGILE": "🔴", "ROBUST": "🟡", "ANTIFRAGILE": "🟢"}
+LEVEL_ICONS = {"FRAGILE": "[!!]", "ROBUST": "[!]", "ANTIFRAGILE": "[ok]"}
 LEVEL_BARS = {"FRAGILE": "█", "ROBUST": "▓", "ANTIFRAGILE": "░"}
 
 
 def render_report(result: AntifragileResult) -> str:
     """Génère le rapport d'anti-fragilité en Markdown."""
-    icon = LEVEL_ICONS.get(result.level, "❓")
+    icon = LEVEL_ICONS.get(result.level, "")
     lines = [
         f"# {icon} Score Anti-Fragilité — {result.global_score}/100 ({result.level})",
         "",
@@ -641,11 +641,11 @@ def render_report(result: AntifragileResult) -> str:
     filled = int(result.global_score / 5)
     empty = 20 - filled
     bar = "█" * filled + "░" * empty
-    lines.append(f"## 📊 Score Global : `{bar}` {result.global_score}/100")
+    lines.append(f"## Score Global : `{bar}` {result.global_score}/100")
     lines.extend(["", "---", ""])
 
     # Détail des dimensions
-    lines.append("## 🔍 Dimensions")
+    lines.append("## Dimensions")
     lines.append("")
     lines.append("| Dimension | Score | Poids | Pondéré | Signaux |")
     lines.append("|-----------|-------|-------|---------|---------|")
@@ -658,10 +658,10 @@ def render_report(result: AntifragileResult) -> str:
     lines.extend(["", "---", ""])
 
     # Détails par dimension
-    lines.append("## 📋 Détails par dimension")
+    lines.append("## Détails par dimension")
     lines.append("")
     for d in result.dimensions:
-        status = "🟢" if d.score >= 0.6 else "🟡" if d.score >= 0.3 else "🔴"
+        status = "[ok]" if d.score >= 0.6 else "[!]" if d.score >= 0.3 else "[!!]"
         lines.append(f"### {status} {d.name}")
         lines.append(f"**Score** : {d.score:.0%} — {d.details}")
         if d.recommendations:
@@ -677,7 +677,7 @@ def render_report(result: AntifragileResult) -> str:
         all_recs.extend(d.recommendations)
 
     if all_recs:
-        lines.extend(["---", "", "## 🎯 Plan d'action", ""])
+        lines.extend(["---", "", "## Plan d'action", ""])
         for i, rec in enumerate(all_recs, 1):
             lines.append(f"{i}. {rec}")
         lines.append("")
@@ -691,7 +691,7 @@ def render_trend(history: list[dict]) -> str:
         return "Aucun historique disponible. Lancez `grimoire-init.sh antifragile` pour commencer."
 
     lines = [
-        "## 📈 Tendance Anti-Fragilité",
+        "## Tendance Anti-Fragilité",
         "",
         "| # | Date | Score | Niveau | Signaux |",
         "|---|------|-------|--------|---------|",
@@ -700,7 +700,7 @@ def render_trend(history: list[dict]) -> str:
         ts = entry.get("timestamp", "?")[:10]
         score = entry.get("score", 0)
         level = entry.get("level", "?")
-        icon = LEVEL_ICONS.get(level, "❓")
+        icon = LEVEL_ICONS.get(level, "")
         evidence = entry.get("evidence", 0)
         lines.append(f"| {i} | {ts} | {score}/100 | {icon} {level} | {evidence} |")
 
@@ -710,7 +710,7 @@ def render_trend(history: list[dict]) -> str:
         last = scores[-1]
         prev = scores[-2]
         delta = last - prev
-        trend = "📈 +" if delta > 0 else "📉 " if delta < 0 else "➡️ "
+        trend = "+" if delta > 0 else "" if delta < 0 else "➡ "
         lines.extend(["", f"**Tendance** : {trend}{delta:+.1f} points depuis le dernier run"])
 
     if len(history) >= 3:
@@ -751,13 +751,13 @@ def main():
         results: list[tuple[str, AntifragileResult]] = []
         for proj in projects:
             if not (proj / "_grimoire" / "_memory").exists():
-                print(f"⚠️  {proj.name}: pas de mémoire Grimoire — ignoré")
+                print(f"[!]  {proj.name}: pas de mémoire Grimoire — ignoré")
                 continue
             result = compute_antifragile_score(proj, args.since)
             results.append((proj.name, result))
 
         if not results:
-            print("❌ Aucun projet valide trouvé.")
+            print("[x] Aucun projet valide trouvé.")
             return
 
         if args.json:
@@ -775,11 +775,11 @@ def main():
             }
             print(json.dumps(data, indent=2, ensure_ascii=False))
         else:
-            print("# 🔀 Comparaison Multi-Projet — Anti-Fragilité\n")
+            print("# Comparaison Multi-Projet — Anti-Fragilité\n")
             print("| Projet | Score | Niveau | Signaux | Meilleure dim. | Plus faible dim. |")
             print("|--------|-------|--------|---------|----------------|-----------------|")
             for name, r in sorted(results, key=lambda x: x[1].global_score, reverse=True):
-                icon = LEVEL_ICONS.get(r.level, "❓")
+                icon = LEVEL_ICONS.get(r.level, "")
                 best = max(r.dimensions, key=lambda d: d.score)
                 worst = min(r.dimensions, key=lambda d: d.score)
                 print(
@@ -790,7 +790,7 @@ def main():
 
             # Recommandations croisées
             if len(results) >= 2:
-                print("\n## 💡 Insights croisés\n")
+                print("\n## Insights croisés\n")
                 all_results = [(n, r) for n, r in results]
                 best_proj = max(all_results, key=lambda x: x[1].global_score)
                 worst_proj = min(all_results, key=lambda x: x[1].global_score)
@@ -839,27 +839,27 @@ def main():
         print(render_report(result))
     else:
         # Sortie compacte
-        icon = LEVEL_ICONS.get(result.level, "❓")
+        icon = LEVEL_ICONS.get(result.level, "")
         filled = int(result.global_score / 5)
         bar = "█" * filled + "░" * (20 - filled)
         print(f"{icon} Anti-Fragile Score : {bar} {result.global_score}/100 ({result.level})")
         print(f"   {result.summary}")
         print()
         for d in sorted(result.dimensions, key=lambda x: x.score):
-            d_icon = "🟢" if d.score >= 0.6 else "🟡" if d.score >= 0.3 else "🔴"
+            d_icon = "[ok]" if d.score >= 0.6 else "[!]" if d.score >= 0.3 else "[!!]"
             print(f"   {d_icon} {d.name}: {d.score:.0%} ({d.evidence_count} signaux)")
         # Recommandations top 3
         all_recs = [r for d in result.dimensions for r in d.recommendations]
         if all_recs:
             print()
-            print("   🎯 Actions prioritaires :")
+            print("   Actions prioritaires :")
             for rec in all_recs[:3]:
                 print(f"      → {rec}")
 
     # Sauvegarder
     if not args.dry_run:
         save_score(result, project_root)
-        icon = LEVEL_ICONS.get(result.level, "❓")
+        icon = LEVEL_ICONS.get(result.level, "")
         print(f"\n{icon} Score enregistré dans {HISTORY_FILE}")
 
 

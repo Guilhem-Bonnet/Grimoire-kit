@@ -397,7 +397,7 @@ class TokenBudgetEnforcer:
             recommendations.append("Lancez: token-budget.py enforce")
         elif level == "emergency":
             recommendations.append(
-                f"⚠️ Budget à {usage_pct:.0%} — drop P3/P4 nécessaire"
+                f"[!] Budget à {usage_pct:.0%} — drop P3/P4 nécessaire"
             )
             recommendations.append("Lancez: token-budget.py enforce --force")
 
@@ -492,7 +492,7 @@ class TokenBudgetEnforcer:
                 action_type="alert",
                 target="user",
                 detail=(
-                    f"⚠️ Budget critique ({status.usage_pct:.0%}) — "
+                    f"[!] Budget critique ({status.usage_pct:.0%}) — "
                     f"P3/P4 exclus du contexte"
                 ),
             ))
@@ -661,8 +661,8 @@ def load_budget_config(project_root: Path) -> dict:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def _level_icon(level: str) -> str:
-    icons = {"ok": "✅", "warning": "⚠️", "critical": "🔶", "emergency": "🔴"}
-    return icons.get(level, "❓")
+    icons = {"ok": "[OK]", "warning": "[!]", "critical": "", "emergency": "[!!]"}
+    return icons.get(level, "")
 
 
 def _print_status(status: BudgetStatus) -> None:
@@ -687,9 +687,9 @@ def _print_status(status: BudgetStatus) -> None:
     c_pos = int(CRITICAL_THRESHOLD * bar_width)
     e_pos = int(EMERGENCY_THRESHOLD * bar_width)
     markers = [" "] * (bar_width + 2)
-    markers[w_pos] = "⚠"
-    markers[c_pos] = "🔶"
-    markers[e_pos] = "🔴"
+    markers[w_pos] = "[!]"
+    markers[c_pos] = ""
+    markers[e_pos] = "[!!]"
     print(f"  {''.join(markers)}")
     print()
 
@@ -718,12 +718,12 @@ def _print_enforcement(report: EnforcementReport) -> None:
     if report.actions:
         print(f"\n  Actions appliquées ({len(report.actions)}) :")
         for action in report.actions:
-            icons = {"warning": "⚠️", "summarize": "📦", "drop": "🗑️", "alert": "🔔"}
+            icons = {"warning": "[!]", "summarize": "", "drop": "", "alert": ""}
             icon = icons.get(action.action_type, "•")
             freed = f" [{action.tokens_freed:,} tok libérés]" if action.tokens_freed else ""
             print(f"    {icon} [{action.action_type}] {action.target}: {action.detail}{freed}")
     else:
-        print("\n  ✅ Aucune action nécessaire")
+        print("\n  [OK] Aucune action nécessaire")
 
     if report.total_tokens_freed > 0:
         print(f"\n  Total libéré : {report.total_tokens_freed:,} tokens")
@@ -736,7 +736,7 @@ def _print_enforcement(report: EnforcementReport) -> None:
     if report.errors:
         print("\n  Erreurs :")
         for err in report.errors:
-            print(f"    ❌ {err}")
+            print(f"    [x] {err}")
 
     print()
 
@@ -805,7 +805,7 @@ def main() -> None:
             print(json.dumps(out, ensure_ascii=False, indent=2))
         else:
             if getattr(args, "dry_run", False):
-                print("  ℹ️  Mode dry-run — aucune écriture")
+                print("  [i]  Mode dry-run — aucune écriture")
             _print_enforcement(report)
 
     elif args.command == "report":

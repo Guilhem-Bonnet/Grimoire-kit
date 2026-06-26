@@ -313,10 +313,10 @@ def display_history(records: list[CCRecord], last: int = 20) -> None:
         print("Aucun enregistrement CC.")
         return
 
-    print("\n📋 Historique CC")
+    print("\nHistorique CC")
     print("=" * 70)
     for r in shown:
-        icon = "✅" if r.result == "pass" else "🔴"
+        icon = "[OK]" if r.result == "pass" else "[!!]"
         museum = f" → {r.museum_entry}" if r.museum_entry else ""
         print(f"  {r.record_id}  {icon} {r.result:4s}  [{r.stack:12s}]  {r.timestamp[:16]}  {r.details[:40]}{museum}")
     print()
@@ -324,7 +324,7 @@ def display_history(records: list[CCRecord], last: int = 20) -> None:
 
 def display_stats(stats: dict) -> None:
     """Affiche les statistiques CC."""
-    print("\n📊 Statistiques CC")
+    print("\nStatistiques CC")
     print("=" * 50)
     print(f"  Total : {stats['total']}")
     print(f"  Pass  : {stats['pass']}  ({stats['pass_rate']:.0%})")
@@ -339,8 +339,8 @@ def display_stats(stats: dict) -> None:
 
 def display_trend(trend: dict) -> None:
     """Affiche la tendance CC."""
-    icons = {"improving": "📈", "degrading": "📉", "stable": "➡️", "neutral": "⚪"}
-    print(f"\n{icons.get(trend['trend'], '⚪')} Tendance ({trend['window']} dernières) : {trend['trend']} — {trend['pass_rate']:.0%} pass rate\n")
+    icons = {"improving": "", "degrading": "", "stable": "➡", "neutral": "[-]"}
+    print(f"\n{icons.get(trend['trend'], '[-]')} Tendance ({trend['window']} dernières) : {trend['trend']} — {trend['pass_rate']:.0%} pass rate\n")
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -391,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "json", False):
             print(json.dumps(asdict(rec), indent=2, ensure_ascii=False))
         else:
-            icon = "✅" if rec.result == "pass" else "🔴"
+            icon = "[OK]" if rec.result == "pass" else "[!!]"
             print(f"{icon} {rec.record_id} enregistré — {rec.result} [{rec.stack}]")
             if rec.museum_entry:
                 print(f"   → Ajouté au Failure Museum : {rec.museum_entry}")

@@ -300,7 +300,7 @@ def trace_etymology(project_root: Path, term: str) -> EtymologyRecord:
 
 def format_glossary(glossary: Glossary) -> str:
     lines = [
-        "📖 Rosetta Stone — Glossaire Cross-Domain",
+        "Rosetta Stone — Glossaire Cross-Domain",
         f"   Entrées : {len(glossary.entries)}",
         f"   Ambiguïtés : {len(glossary.ambiguities)}",
         "",
@@ -309,18 +309,18 @@ def format_glossary(glossary: Glossary) -> str:
     # Top cross-domain terms
     cross = [e for e in glossary.entries.values() if e.domain_count >= 2]
     if cross:
-        lines.append(f"   🔄 Termes cross-domain ({len(cross)}) :")
+        lines.append(f"   Termes cross-domain ({len(cross)}) :")
         for entry in cross[:15]:
             domains_str = " | ".join(
                 f"{d}(×{entry.frequency.get(d, 0)})" for d in DOMAINS if d in entry.frequency
             )
-            amb = " ⚠️" if entry.is_ambiguous else ""
+            amb = " [!]" if entry.is_ambiguous else ""
             lines.append(f"      {entry.term:25s} {domains_str}{amb}")
         lines.append("")
 
     # Ambiguities
     if glossary.ambiguities:
-        lines.append(f"   ⚠️ Termes ambigus ({len(glossary.ambiguities)}) :")
+        lines.append(f"   [!] Termes ambigus ({len(glossary.ambiguities)}) :")
         for term in glossary.ambiguities[:10]:
             entry = glossary.entries[term]
             lines.append(f"      {term}:")
@@ -333,21 +333,21 @@ def format_glossary(glossary: Glossary) -> str:
 
 def format_lookup(entry: GlossaryEntry | None, term: str) -> str:
     if not entry:
-        return f"❌ Terme '{term}' non trouvé dans le glossaire"
+        return f"[x] Terme '{term}' non trouvé dans le glossaire"
 
-    lines = [f"📖 {entry.term}", ""]
+    lines = [f"{entry.term}", ""]
     for domain in DOMAINS:
         if domain in entry.domains:
             lines.append(f"   [{domain:8s}] (×{entry.frequency.get(domain, 0)}) {entry.domains[domain]}")
     if entry.is_ambiguous:
-        lines.append("\n   ⚠️ ATTENTION : terme ambigu — sens différent selon le domaine")
+        lines.append("\n   [!] ATTENTION : terme ambigu — sens différent selon le domaine")
     if entry.sources:
         lines.append(f"\n   Sources : {', '.join(entry.sources[:3])}")
     return "\n".join(lines)
 
 
 def format_etymology(record: EtymologyRecord) -> str:
-    lines = [f"📜 Étymologie : {record.term}", ""]
+    lines = [f"Étymologie : {record.term}", ""]
     if record.first_seen:
         lines.append(f"   Première apparition : {record.first_seen} dans {record.first_source}")
     if record.rationale:
@@ -362,7 +362,7 @@ def format_etymology(record: EtymologyRecord) -> str:
 def export_markdown(glossary: Glossary) -> str:
     """Exporte en Markdown structuré."""
     lines = [
-        "# 📖 Glossaire Rosetta Stone",
+        "# Glossaire Rosetta Stone",
         f"\n> Généré le {glossary.timestamp[:10]}",
         f"> {len(glossary.entries)} entrées | {len(glossary.ambiguities)} ambiguïtés\n",
         "| Terme | Business | Tech | UX | Ambigu |",
@@ -372,7 +372,7 @@ def export_markdown(glossary: Glossary) -> str:
         biz = f"×{entry.frequency.get('business', 0)}" if "business" in entry.frequency else "—"
         tech = f"×{entry.frequency.get('tech', 0)}" if "tech" in entry.frequency else "—"
         ux = f"×{entry.frequency.get('ux', 0)}" if "ux" in entry.frequency else "—"
-        amb = "⚠️" if entry.is_ambiguous else ""
+        amb = "[!]" if entry.is_ambiguous else ""
         lines.append(f"| {entry.term} | {biz} | {tech} | {ux} | {amb} |")
 
     return "\n".join(lines)
@@ -424,14 +424,14 @@ def cmd_ambiguity(args: argparse.Namespace) -> int:
                          indent=2, ensure_ascii=False))
     else:
         if ambiguous:
-            print(f"⚠️ {len(ambiguous)} termes ambigus détectés :\n")
+            print(f"[!] {len(ambiguous)} termes ambigus détectés :\n")
             for entry in ambiguous:
                 print(f"   {entry.term}:")
                 for d, ctx in entry.domains.items():
                     print(f"      [{d}] {ctx[:80]}")
                 print()
         else:
-            print("✅ Aucune ambiguïté détectée")
+            print("[OK] Aucune ambiguïté détectée")
     return 0
 
 
@@ -456,7 +456,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     output = project_root / "_grimoire-output" / "glossary-rosetta.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(md, encoding="utf-8")
-    print(f"📖 Glossaire exporté → {output}")
+    print(f"Glossaire exporté → {output}")
     return 0
 
 

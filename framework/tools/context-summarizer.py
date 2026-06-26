@@ -514,7 +514,7 @@ class ContextSummarizer:
                     original_content = filepath.read_text(encoding="utf-8")
                     # Ajouter la référence au digest en haut
                     ref_line = (
-                        f"\n> 📦 Sections anciennes ({len(to_summarize)}) "
+                        f"\n> Sections anciennes ({len(to_summarize)}) "
                         f"résumées dans [{digest_filename}]"
                         f"({ARCHIVES_DIR}/{digest_filename})\n"
                     )
@@ -731,7 +731,7 @@ def mcp_context_auto_prune(
 
 def _print_report(report: SummaryReport) -> None:
     """Affiche le rapport de résumé."""
-    status = "✅" if not report.errors else "⚠️"
+    status = "[OK]" if not report.errors else "[!]"
     print(f"\n  {status} Context Summarizer — Rapport")
     print(f"  {'─' * 55}")
     print(f"  Sections traitées  : {report.sections_processed}")
@@ -745,13 +745,13 @@ def _print_report(report: SummaryReport) -> None:
     if report.digests:
         print("\n  Digests :")
         for d in report.digests:
-            print(f"    📦 {d.digest_file}")
+            print(f"    {d.digest_file}")
             print(f"       {d.sections_summarized} sections | "
                   f"{d.original_tokens:,} → {d.digest_tokens:,} tok "
                   f"({d.compression_ratio:.0%} compression)")
 
     if report.errors:
-        print("\n  ⚠️  Erreurs :")
+        print("\n  [!]  Erreurs :")
         for err in report.errors:
             print(f"     → {err}")
     print()
@@ -759,7 +759,7 @@ def _print_report(report: SummaryReport) -> None:
 
 def _print_status(digests: list[DigestStatus]) -> None:
     """Affiche l'état des digests existants."""
-    print(f"\n  📦 Digests existants — {len(digests)} trouvés")
+    print(f"\n  Digests existants — {len(digests)} trouvés")
     print(f"  {'─' * 60}")
 
     if not digests:
@@ -769,7 +769,7 @@ def _print_status(digests: list[DigestStatus]) -> None:
     total_tokens = 0
     for d in digests:
         total_tokens += d.tokens
-        print(f"  📄 {d.filename}")
+        print(f"  {d.filename}")
         print(f"     Source: {d.source_file} | {d.sections_count} sections | "
               f"{d.tokens:,} tok | {d.created_at}")
 
@@ -778,7 +778,7 @@ def _print_status(digests: list[DigestStatus]) -> None:
 
 def _print_preview(sections: list[Section]) -> None:
     """Affiche la prévisualisation des sections à résumer."""
-    print(f"\n  🔍 Preview — {len(sections)} sections à résumer")
+    print(f"\n  Preview — {len(sections)} sections à résumer")
     print(f"  {'─' * 60}")
 
     if not sections:
@@ -788,8 +788,8 @@ def _print_preview(sections: list[Section]) -> None:
     total_tokens = 0
     for s in sections:
         total_tokens += s.estimated_tokens
-        preserved = " 🛡️ PRESERVED" if s.preserved else ""
-        print(f"  📝 [{s.source_file}] {s.heading}")
+        preserved = " PRESERVED" if s.preserved else ""
+        print(f"  [{s.source_file}] {s.heading}")
         print(f"     Date: {s.date or '?'} | Âge: {s.age_days}j | "
               f"{s.estimated_tokens:,} tok{preserved}")
         preview = s.content[:100].replace("\n", " ").strip()
@@ -798,7 +798,7 @@ def _print_preview(sections: list[Section]) -> None:
         print(f"     {preview}")
         print()
 
-    print(f"  📊 Total: {total_tokens:,} tokens récupérables\n")
+    print(f"  Total: {total_tokens:,} tokens récupérables\n")
 
 
 def main() -> None:
@@ -853,7 +853,7 @@ def main() -> None:
             print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
         else:
             if args.dry_run:
-                print("  ℹ️  Mode dry-run — aucune écriture")
+                print("  [i]  Mode dry-run — aucune écriture")
             _print_report(report)
 
     elif args.command == "status":
@@ -870,9 +870,9 @@ def main() -> None:
         summarizer = build_summarizer_from_config(project_root)
         success = summarizer.restore(args.digest)
         if success:
-            print(f"\n  ✅ Restauré avec succès depuis {args.digest}\n")
+            print(f"\n  [OK] Restauré avec succès depuis {args.digest}\n")
         else:
-            print(f"\n  ❌ Impossible de restaurer {args.digest} — archive original introuvable\n")
+            print(f"\n  [x] Impossible de restaurer {args.digest} — archive original introuvable\n")
             sys.exit(1)
 
 

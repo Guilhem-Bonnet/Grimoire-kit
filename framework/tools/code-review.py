@@ -496,7 +496,7 @@ def format_review(report: ReviewReport, as_json: bool = False) -> str:
         return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
 
     lines: list[str] = []
-    lines.append("\n  🔍 Code Review Report")
+    lines.append("\n  Code Review Report")
     lines.append(f"  {'─' * 55}")
     lines.append(f"  Fichiers modifiés : {len(report.diff_files)}")
     lines.append(f"  Lignes ajoutées   : +{report.total_added}")
@@ -510,16 +510,16 @@ def format_review(report: ReviewReport, as_json: bool = False) -> str:
 
     # Fichiers modifiés
     if report.diff_files:
-        lines.append("\n  📁 Fichiers")
+        lines.append("\n  Fichiers")
         lines.append(f"  {'─' * 55}")
         for df in sorted(report.diff_files, key=lambda x: x.path):
-            status_icon = {"A": "🆕", "M": "✏️", "D": "🗑️"}.get(df.status, "❓")
-            test_icon = " 🧪" if df.is_test else ""
+            status_icon = {"A": "", "M": "", "D": ""}.get(df.status, "")
+            test_icon = " " if df.is_test else ""
             lines.append(f"  {status_icon} {df.path}{test_icon}  (+{df.added_lines}/-{df.removed_lines})")
 
     # Findings
     if report.findings:
-        lines.append("\n  ⚠️  Findings")
+        lines.append("\n  [!]  Findings")
         lines.append(f"  {'─' * 55}")
 
         severity_order = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2,
@@ -528,20 +528,20 @@ def format_review(report: ReviewReport, as_json: bool = False) -> str:
                                  key=lambda f: severity_order.get(f.severity, 5))
 
         icons = {
-            Severity.CRITICAL: "🔴", Severity.HIGH: "🔴",
-            Severity.MEDIUM: "🟡", Severity.LOW: "🟢", Severity.INFO: "ℹ️",
+            Severity.CRITICAL: "[!!]", Severity.HIGH: "[!!]",
+            Severity.MEDIUM: "[!]", Severity.LOW: "[ok]", Severity.INFO: "[i]",
         }
 
         for f in sorted_findings:
-            icon = icons.get(f.severity, "⚪")
+            icon = icons.get(f.severity, "[-]")
             loc = f"{f.file}:{f.line}" if f.line else f.file
             lines.append(f"  {icon} [{f.rule_id}][{f.severity}] {f.message}")
             if loc:
-                lines.append(f"      📍 {loc}")
+                lines.append(f"      {loc}")
             if f.suggestion:
-                lines.append(f"      💡 {f.suggestion}")
+                lines.append(f"      {f.suggestion}")
     else:
-        lines.append("\n  ✅ Aucun finding — code propre !")
+        lines.append("\n  [OK] Aucun finding — code propre !")
 
     lines.append("")
     return "\n".join(lines)
@@ -607,7 +607,7 @@ def main() -> None:
 
     elif args.command == "summary":
         report = run_review(project_root)
-        print(f"\n  📊 Résumé: {len(report.diff_files)} fichiers, "
+        print(f"\n  Résumé: {len(report.diff_files)} fichiers, "
               f"+{report.total_added}/-{report.total_removed}, "
               f"{report.total_findings} findings\n")
 

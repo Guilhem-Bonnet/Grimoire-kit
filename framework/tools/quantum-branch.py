@@ -138,7 +138,7 @@ def cmd_fork(root: Path, name: str, description: str, as_json: bool) -> dict[str
     if branch_dir.exists():
         msg = f"La branche '{name}' existe déjà"
         if not as_json:
-            print(f"❌ {msg}", file=sys.stderr)
+            print(f"[x] {msg}", file=sys.stderr)
         return {"error": msg}
 
     # Copier les fichiers du projet
@@ -176,7 +176,7 @@ def cmd_fork(root: Path, name: str, description: str, as_json: bool) -> dict[str
     }
 
     if not as_json:
-        print(f"🔀 Branche '{name}' créée")
+        print(f"Branche '{name}' créée")
         print(f"   Fichiers copiés : {copied}")
         print(f"   Checksum : {overall_hash}")
         print(f"   Description : {description or '(aucune)'}")
@@ -213,10 +213,10 @@ def cmd_list(root: Path, as_json: bool) -> dict[str, Any]:
     result = {"branches": branches, "total": len(branches)}
 
     if not as_json:
-        print(f"🌿 Branches ({len(branches)}) :")
+        print(f"Branches ({len(branches)}) :")
         print()
         for branch in branches:
-            status_icon = {"active": "🟢", "merged": "✅", "pruned": "🗑️"}.get(branch.get("status", ""), "⚪")
+            status_icon = {"active": "[ok]", "merged": "[OK]", "pruned": ""}.get(branch.get("status", ""), "[-]")
             print(f"  {status_icon} {branch['name']}")
             if branch.get("description"):
                 print(f"     {branch['description']}")
@@ -284,20 +284,20 @@ def cmd_compare(root: Path, branch_names: list[str], as_json: bool) -> dict[str,
     )
 
     if not as_json:
-        print(f"🔍 Comparaison : {name_a} ↔ {name_b}")
+        print(f"Comparaison : {name_a} ↔ {name_b}")
         print(f"   Divergence : {result['divergence_ratio']}%")
         print(f"   Total différences : {result['total_differences']}")
         print()
         if diff.added:
-            print(f"  ➕ Uniquement dans {name_b} ({len(diff.added)}) :")
+            print(f"  Uniquement dans {name_b} ({len(diff.added)}) :")
             for fpath in diff.added[:10]:
                 print(f"     {fpath}")
         if diff.removed:
-            print(f"  ➖ Uniquement dans {name_a} ({len(diff.removed)}) :")
+            print(f"  Uniquement dans {name_a} ({len(diff.removed)}) :")
             for fpath in diff.removed[:10]:
                 print(f"     {fpath}")
         if diff.modified:
-            print(f"  ✏️ Modifiés ({len(diff.modified)}) :")
+            print(f"  Modifiés ({len(diff.modified)}) :")
             for mod in diff.modified[:10]:
                 print(f"     {mod['file']}")
         print(f"  ═ Identiques : {diff.unchanged}")
@@ -354,15 +354,15 @@ def cmd_merge(root: Path, source: str, dry_run: bool, as_json: bool) -> dict[str
 
     if not as_json:
         mode = "DRY RUN" if dry_run else "MERGE"
-        print(f"🔀 {mode} : {source} → main")
+        print(f"{mode} : {source} → main")
         print(f"   Fichiers affectés : {len(operations)}")
         for op in operations[:15]:
-            icon = "📝" if op["action"] == "update" else "✨"
+            icon = "[~]" if op["action"] == "update" else "[+]"
             print(f"     {icon} {op['file']} [{op['action']}]")
         if len(operations) > 15:
             print(f"     ... et {len(operations) - 15} autres")
         if dry_run:
-            print("\n   ℹ️ Mode dry-run — aucun fichier modifié. Relancez sans --dry-run pour appliquer.")
+            print("\n   [i] Mode dry-run — aucun fichier modifié. Relancez sans --dry-run pour appliquer.")
 
     return result
 
@@ -378,7 +378,7 @@ def cmd_prune(root: Path, branch_name: str, force: bool, as_json: bool) -> dict[
         msg = (f"Branche '{branch_name}' est active. "
                f"Utilisez --force pour supprimer une branche active.")
         if not as_json:
-            print(f"⚠️ {msg}", file=sys.stderr)
+            print(f"[!] {msg}", file=sys.stderr)
         return {"error": msg}
 
     # Compter les fichiers avant suppression
@@ -393,7 +393,7 @@ def cmd_prune(root: Path, branch_name: str, force: bool, as_json: bool) -> dict[
     }
 
     if not as_json:
-        print(f"🗑️ Branche '{branch_name}' supprimée")
+        print(f"Branche '{branch_name}' supprimée")
         print(f"   Fichiers supprimés : {file_count}")
 
     return result

@@ -488,19 +488,19 @@ class TestRender:
         s = ta.ToolSuggestion(tool="x.py", reason="r", priority="high")
         report = ta.AdvisorReport(timestamp="now", suggestions=[s])
         text = ta.render_suggestions(report)
-        assert "🔴" in text
+        assert "[!!]" in text
 
     def test_render_medium_priority_icon(self):
         s = ta.ToolSuggestion(tool="x.py", reason="r", priority="medium")
         report = ta.AdvisorReport(timestamp="now", suggestions=[s])
         text = ta.render_suggestions(report)
-        assert "🟡" in text
+        assert "[!]" in text
 
     def test_render_low_priority_icon(self):
         s = ta.ToolSuggestion(tool="x.py", reason="r", priority="low")
         report = ta.AdvisorReport(timestamp="now", suggestions=[s])
         text = ta.render_suggestions(report)
-        assert "🟢" in text
+        assert "[ok]" in text
 
     def test_render_unused_tools_section(self, tmp_project):
         report = ta.build_advice(tmp_project)

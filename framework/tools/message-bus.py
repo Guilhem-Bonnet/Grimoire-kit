@@ -639,7 +639,7 @@ def main() -> None:
         try:
             payload = json.loads(args.payload)
         except json.JSONDecodeError:
-            print(f"  ❌ Payload JSON invalide: {args.payload}", file=sys.stderr)
+            print(f"  [x] Payload JSON invalide: {args.payload}", file=sys.stderr)
             sys.exit(1)
 
         msg = AgentMessage(
@@ -654,7 +654,7 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
         else:
-            icon = "✅" if result.success else "❌"
+            icon = "[OK]" if result.success else "[x]"
             print(f"\n  {icon} Message {result.message_id}")
             print(f"    {args.sender} → {args.recipient} [{args.msg_type}]")
             print(f"    Pattern : {args.pattern}")
@@ -669,7 +669,7 @@ def main() -> None:
 
     elif args.command == "clear":
         count = bus.clear()
-        print(f"\n  🗑️  {count} messages supprimés\n")
+        print(f"\n   {count} messages supprimés\n")
 
     bus.close()
 

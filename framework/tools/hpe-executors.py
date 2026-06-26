@@ -670,11 +670,11 @@ def cmd_detect(args: argparse.Namespace) -> int:
             "recommended": best,
         }, indent=2, ensure_ascii=False))
     else:
-        print("\n  🔍 Backends d'exécution HPE détectés\n")
+        print("\n  Backends d'exécution HPE détectés\n")
         for b in backends:
-            icon = "✅" if b.available else "❌"
+            icon = "[OK]" if b.available else "[x]"
             print(f"  {icon} [{b.priority}] {b.name} — {b.reason}")
-        print(f"\n  ➡️  Recommandé : {best}")
+        print(f"\n  ➡  Recommandé : {best}")
 
     return 0
 
@@ -705,7 +705,7 @@ def cmd_test(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"success": success, "result": result}, indent=2, ensure_ascii=False))
     else:
-        icon = "✅" if success else "❌"
+        icon = "[OK]" if success else "[x]"
         print(f"\n  {icon} Test backend={backend} agent={args.agent}")
         if success:
             for k, v in result.items():

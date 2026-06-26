@@ -243,7 +243,7 @@ def cmd_inject(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🧠 RAG Auto-Inject ({result['backend']} backend)\n")
+        print(f"\n  RAG Auto-Inject ({result['backend']} backend)\n")
         print(f"  Keywords: {', '.join(result['keywords'])}")
         print(f"  Chunks:   {result['count']}\n")
         if result["context"]:
@@ -260,7 +260,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  👁️  RAG Preview ({result['backend']})\n")
+        print(f"\n   RAG Preview ({result['backend']})\n")
         for i, c in enumerate(result["chunks"], 1):
             print(f"  [{i}] {c['source']} (score={c['score']:.2f})")
             print(f"      {c['text'][:100]}...")
@@ -282,7 +282,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(config, indent=2, ensure_ascii=False))
     else:
-        print("\n  ⚙️ RAG Auto-Inject Config\n")
+        print("\n  RAG Auto-Inject Config\n")
         print(f"  Knowledge dirs:  {', '.join(_KNOWLEDGE_DIRS)}")
         print(f"  Extensions:      {', '.join(sorted(_KNOWLEDGE_EXTENSIONS))}")
         print(f"  Files found:     {len(files)}")

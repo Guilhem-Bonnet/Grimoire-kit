@@ -186,7 +186,7 @@ def cmd_add(root: Path, args: argparse.Namespace) -> int:
     )
     save_failure(root, failure)
     sync_markdown(root)
-    print(f"✅ {fid} — {args.title} (severity={args.severity})")
+    print(f"[OK] {fid} — {args.title} (severity={args.severity})")
     return 0
 
 
@@ -203,7 +203,7 @@ def cmd_list(root: Path, args: argparse.Namespace) -> int:
         entries = [e for e in entries if e.status == args.status]
 
     for e in entries:
-        sev_icon = {"low": "🟡", "medium": "🟠", "high": "🔴"}.get(e.severity, "⚪")
+        sev_icon = {"low": "[!]", "medium": "[!]", "high": "[!!]"}.get(e.severity, "[-]")
         print(f"  {sev_icon} {e.failure_id} — {e.title} [{e.severity}] ({e.status})")
     print(f"\nTotal: {len(entries)} entrée(s)")
     return 0
@@ -245,7 +245,7 @@ def cmd_stats(root: Path, _args: argparse.Namespace) -> int:
         by_sev[e.severity] = by_sev.get(e.severity, 0) + 1
         by_status[e.status] = by_status.get(e.status, 0) + 1
 
-    print("📊 Failure Museum — Stats")
+    print("Failure Museum — Stats")
     print(f"  Total: {len(entries)} entrée(s)")
     print(f"  Par sévérité: {dict(sorted(by_sev.items()))}")
     print(f"  Par statut:   {dict(sorted(by_status.items()))}")
@@ -285,7 +285,7 @@ def cmd_lessons(root: Path, _args: argparse.Namespace) -> int:
         print("Aucune règle extraite du museum.")
         return 0
 
-    print("📚 Leçons extraites du Failure Museum")
+    print("Leçons extraites du Failure Museum")
     print("=" * 50)
     for fid, rule in rules:
         print(f"  [{fid}] {rule}")
@@ -318,10 +318,10 @@ def cmd_check(root: Path, args: argparse.Namespace) -> int:
     warnings.sort(key=lambda x: -x[1])
 
     if not warnings:
-        print("✅ Aucun risque historique détecté.")
+        print("[OK] Aucun risque historique détecté.")
         return 0
 
-    print("⚠️  Risques historiques potentiels :")
+    print("[!]  Risques historiques potentiels :")
     for e, score in warnings[:5]:
         pct = int(score * 100)
         print(f"  [{pct}%] {e.failure_id} — {e.title}")

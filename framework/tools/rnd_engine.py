@@ -106,7 +106,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
         # Check 1: Duplication avec l'historique
         past_titles = {m.get("title", "").lower() for m in memory}
         if idea.title.lower() in past_titles:
-            notes.append("⚠️ Idée déjà explorée dans un cycle précédent")
+            notes.append("[!] Idée déjà explorée dans un cycle précédent")
             go_score -= 0.15
 
         # Check 2: Domaine surinvesti
@@ -114,7 +114,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
                            if m.get("domain") == idea.domain and m.get("merged"))
         if domain_count > 3:
             penalty = min(0.25, domain_count * 0.03)
-            notes.append(f"⚠️ Domaine '{idea.domain}' saturé ({domain_count} innovations, -{penalty:.2f})")
+            notes.append(f"[!] Domaine '{idea.domain}' saturé ({domain_count} innovations, -{penalty:.2f})")
             go_score -= penalty
 
         # Check 3: Pattern d'échec récurrent
@@ -122,26 +122,26 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
                                if m.get("domain") == idea.domain
                                and not m.get("merged") and m.get("reward", 0) < 0)
         if failed_in_domain > 2:
-            notes.append(f"🔴 Pattern d'échec dans '{idea.domain}' ({failed_in_domain} échecs)")
+            notes.append(f"[!!] Pattern d'échec dans '{idea.domain}' ({failed_in_domain} échecs)")
             go_score -= 0.20
 
         # Check 4: Complexité vs faisabilité
         if idea.action in ("split", "merge") and idea.scores.get("feasibility", 1) < 0.6:
-            notes.append("⚠️ Action complexe avec faible faisabilité")
+            notes.append("[!] Action complexe avec faible faisabilité")
             go_score -= 0.10
 
         # Check 5: Pre-mortem
         if idea.scores.get("risk_inverse", 1) < 0.4:
-            notes.append("🔴 Pre-mortem: risque élevé de régression")
+            notes.append("[!!] Pre-mortem: risque élevé de régression")
             go_score -= 0.05
         if idea.scores.get("uniqueness", 1) < 0.3:
-            notes.append("⚠️ Pre-mortem: trop proche d'un outil existant")
+            notes.append("[!] Pre-mortem: trop proche d'un outil existant")
             go_score -= 0.05
 
         # Check 6: Sous la médiane
         if idea.total_score < median_score * 0.85:
             gap = median_score - idea.total_score
-            notes.append(f"🔴 Score ({idea.total_score:.3f}) < 85% médiane ({median_score:.3f})")
+            notes.append(f"[!!] Score ({idea.total_score:.3f}) < 85% médiane ({median_score:.3f})")
             go_score -= gap * 0.5
 
         # Check 7: Taux de succès historique de la source
@@ -149,14 +149,14 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
         if len(source_ideas) >= 3:
             source_success = sum(1 for m in source_ideas if m.get("merged")) / len(source_ideas)
             if source_success < 0.2:
-                notes.append(f"⚠️ Source '{idea.source}' historiquement faible ({source_success:.0%})")
+                notes.append(f"[!] Source '{idea.source}' historiquement faible ({source_success:.0%})")
                 go_score -= 0.10
 
         # Check 8: Pénalité chaîne de mutations
         if idea.mutation_depth > 1:
             chain_penalty = min(0.30, (idea.mutation_depth - 1) * 0.12)
             notes.append(
-                f"⚠️ Chaîne de mutations profondeur {idea.mutation_depth} "
+                f"[!] Chaîne de mutations profondeur {idea.mutation_depth} "
                 f"(-{chain_penalty:.2f})"
             )
             go_score -= chain_penalty
@@ -167,7 +167,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
         if idea.source == "mutation":
             nesting = sum(1 for p in _mut_prefixes if p in title_lower)
             if nesting > 1:
-                notes.append("🔴 Titre non actionnable — mutation imbriquée")
+                notes.append("[!!] Titre non actionnable — mutation imbriquée")
                 go_score -= 0.20
             elif nesting == 1 and idea.mutation_depth > 0:
                 for p in _mut_prefixes:
@@ -175,7 +175,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
                     if idx >= 0:
                         rest = title_lower[idx + len(p):]
                         if any(p2 in rest for p2 in _mut_prefixes):
-                            notes.append("⚠️ Mutation de mutation détectée dans le titre")
+                            notes.append("[!] Mutation de mutation détectée dans le titre")
                             go_score -= 0.15
                         break
 
@@ -201,7 +201,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
             if nogo_count >= min_rejects:
                 break
             idea.challenge_result = "NO-GO"
-            idea.challenge_notes.append("⚫ Rejeté par quota minimum de filtre (20%)")
+            idea.challenge_notes.append("[-] Rejeté par quota minimum de filtre (20%)")
             nogo_count += 1
 
         if nogo_count < min_rejects:
@@ -213,7 +213,7 @@ def challenge(ideas: list[Idea], project_root: Path) -> list[Idea]:
                 if nogo_count >= min_rejects:
                     break
                 idea.challenge_result = "NO-GO"
-                idea.challenge_notes.append("⚫ Rejeté par quota (GO le plus faible)")
+                idea.challenge_notes.append("[-] Rejeté par quota (GO le plus faible)")
                 nogo_count += 1
 
     return ideas
@@ -645,7 +645,7 @@ def train(project_root: Path, epochs: int = DEFAULT_EPOCHS,
 
         if auto_stop and report.verdict in ("STOP", "CONSOLIDATE"):
             if verbose:
-                print(f"\n🛑 Auto-stop: {report.verdict} à l'epoch {epoch}")
+                print(f"\n[STOP] Auto-stop: {report.verdict} à l'epoch {epoch}")
             train_report.convergence_reached = True
             train_report.convergence_epoch = epoch
             break
@@ -679,7 +679,7 @@ def _print_cycle_summary(report: CycleReport, epoch: int, total: int) -> None:
     bar_fill = int(report.best_reward * bar_len)
     bar = "█" * bar_fill + "░" * (bar_len - bar_fill)
 
-    print(f"\n  📊 Cycle {report.cycle_id} (epoch {epoch}/{total})")
+    print(f"\n  Cycle {report.cycle_id} (epoch {epoch}/{total})")
     print(f"  ├── Idées: {report.ideas_harvested} récoltées"
           f" → {report.ideas_go} GO / {report.ideas_rejected} rejetées"
           f" → {report.ideas_merged} merged")
@@ -693,7 +693,7 @@ def _print_cycle_summary(report: CycleReport, epoch: int, total: int) -> None:
 
     winners = [i for i in report.ideas if i.get("merged")]
     if winners:
-        print("\n  🏆 Innovation(s) sélectionnée(s):")
+        print("\n  Innovation(s) sélectionnée(s):")
         for w in winners[:3]:
             print(f"     • [{w.get('domain', '?')}] {w.get('title', '?')[:60]}"
                   f" (reward: {w.get('reward', 0):.3f})")
@@ -702,7 +702,7 @@ def _print_cycle_summary(report: CycleReport, epoch: int, total: int) -> None:
 def _print_train_summary(report: TrainReport) -> None:
     """Affiche le résumé d'entraînement final."""
     print(f"\n{'═' * 60}")
-    print("  🎓 ENTRAÎNEMENT TERMINÉ")
+    print("  ENTRAÎNEMENT TERMINÉ")
     print(f"{'═' * 60}")
     print(f"  Epochs: {report.epochs_completed}/{report.epochs_requested}")
     print(f"  Idées totales: {report.total_ideas}")
@@ -713,7 +713,7 @@ def _print_train_summary(report: TrainReport) -> None:
     print(f"  Durée totale: {report.duration_ms}ms")
 
     if report.reward_curve:
-        print("\n  📈 Courbe de reward:")
+        print("\n  Courbe de reward:")
         max_r = max(report.reward_curve) if report.reward_curve else 1
         for i, r in enumerate(report.reward_curve):
             bar_len = 30
@@ -723,7 +723,7 @@ def _print_train_summary(report: TrainReport) -> None:
             print(f"    E{i + 1:02d} [{bar}] {r:.4f}{marker}")
 
     if report.best_idea:
-        print("\n  🏆 Meilleure innovation globale:")
+        print("\n  Meilleure innovation globale:")
         print(f"     {report.best_idea.get('title', '?')}")
         print(f"     Domaine: {report.best_idea.get('domain', '?')}"
               f" | Reward: {report.best_idea.get('reward', 0):.4f}")
@@ -732,12 +732,12 @@ def _print_train_summary(report: TrainReport) -> None:
     if fp.get("source_weights"):
         top_sources = sorted(fp["source_weights"].items(),
                              key=lambda x: x[1], reverse=True)[:3]
-        print("\n  🧠 Policy apprise (top sources):")
+        print("\n  Policy apprise (top sources):")
         for s, w in top_sources:
             print(f"     • {s}: {w:.4f}")
     if fp.get("domain_weights"):
         top_domains = sorted(fp["domain_weights"].items(),
                              key=lambda x: x[1], reverse=True)[:3]
-        print("  🧠 Policy apprise (top domaines):")
+        print("  Policy apprise (top domaines):")
         for d, w in top_domains:
             print(f"     • {d}: {w:.4f}")

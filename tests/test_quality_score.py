@@ -67,12 +67,12 @@ class TestScoreStructure(unittest.TestCase):
 
 class TestScoreCCCompliance(unittest.TestCase):
     def test_cc_pass_marker(self):
-        content = "# Report\n\n✅ CC PASS — py — 2024-01-01\n"
+        content = "# Report\n\n[OK] CC PASS — py — 2024-01-01\n"
         score, _details = qs._score_cc_compliance(content, ".md")
         self.assertGreaterEqual(score, 90)
 
     def test_cc_fail_marker(self):
-        content = "# Report\n\n🔴 CC FAIL\n"
+        content = "# Report\n\n[!!] CC FAIL\n"
         score, _ = qs._score_cc_compliance(content, ".md")
         self.assertLess(score, 60)
 
@@ -99,7 +99,7 @@ class TestScoreArtifact(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             f.write("# Good Report\n\n## Overview\n\nDetailed content here.\n\n")
             f.write("## Analysis\n\nMore detailed analysis.\n\n")
-            f.write("## Conclusion\n\n✅ CC PASS — py — 2024-01-01\n")
+            f.write("## Conclusion\n\n[OK] CC PASS — py — 2024-01-01\n")
             f.flush()
             result = qs.score_artifact(Path(f.name))
 
@@ -128,13 +128,13 @@ class TestMcpInterface(unittest.TestCase):
 class TestDisplayHelpers(unittest.TestCase):
     def test_score_bar(self):
         bar = qs._score_bar(85)
-        self.assertIn("🟢", bar)
+        self.assertIn("[ok]", bar)
 
         bar = qs._score_bar(65)
-        self.assertIn("🟡", bar)
+        self.assertIn("[!]", bar)
 
         bar = qs._score_bar(40)
-        self.assertIn("🔴", bar)
+        self.assertIn("[!!]", bar)
 
 
 if __name__ == "__main__":

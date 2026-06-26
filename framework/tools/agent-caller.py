@@ -534,7 +534,7 @@ def load_caller_config(project_root: Path) -> dict:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def _print_agent_list(agents: list[AgentToolSpec]) -> None:
-    print(f"\n  🤖 Agents appelables — {len(agents)}")
+    print(f"\n  Agents appelables — {len(agents)}")
     print(f"  {'─' * 65}")
 
     for a in agents:
@@ -545,7 +545,7 @@ def _print_agent_list(agents: list[AgentToolSpec]) -> None:
 
 
 def _print_history(entries: list[dict]) -> None:
-    print(f"\n  📜 Historique des appels — {len(entries)} derniers")
+    print(f"\n  Historique des appels — {len(entries)} derniers")
     print(f"  {'─' * 70}")
 
     if not entries:
@@ -553,7 +553,7 @@ def _print_history(entries: list[dict]) -> None:
         return
 
     for e in entries:
-        status_icon = {"success": "✅", "error": "❌", "timeout": "⏰"}.get(e.get("status", ""), "❓")
+        status_icon = {"success": "[OK]", "error": "[x]", "timeout": ""}.get(e.get("status", ""), "")
         dur = e.get("duration_ms", 0)
         tokens = e.get("tokens_used", 0)
         print(f"  {status_icon} [{e.get('call_id', '?')[:8]}] "
@@ -566,7 +566,7 @@ def _print_history(entries: list[dict]) -> None:
 
 
 def _print_schema(spec: AgentToolSpec) -> None:
-    print(f"\n  🔧 Agent Schema — {spec.agent_id}")
+    print(f"\n  Agent Schema — {spec.agent_id}")
     print(f"  {'─' * 55}")
     print(f"  Title        : {spec.title}")
     print(f"  Description  : {spec.description}")
@@ -637,7 +637,7 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(asdict(response), ensure_ascii=False, indent=2))
         else:
-            icon = {"success": "✅", "error": "❌", "timeout": "⏰"}.get(response.status, "❓")
+            icon = {"success": "[OK]", "error": "[x]", "timeout": ""}.get(response.status, "")
             print(f"\n  {icon} Agent Call — {response.status}")
             print(f"  {'─' * 55}")
             print(f"  From     : {response.from_agent}")
@@ -646,7 +646,7 @@ def main() -> None:
             print(f"  Tokens   : {response.tokens_used:,}")
             print(f"  Duration : {response.duration_ms}ms")
             if response.validation_errors:
-                print(f"  Validation: ❌ {', '.join(response.validation_errors)}")
+                print(f"  Validation: [x] {', '.join(response.validation_errors)}")
             print(f"\n{response.response}\n")
 
     elif args.command == "list":
@@ -656,7 +656,7 @@ def main() -> None:
     elif args.command == "history":
         if getattr(args, "stats", False):
             stats = caller.get_stats()
-            print("\n  📊 Statistiques d'appels inter-agents")
+            print("\n  Statistiques d'appels inter-agents")
             print(f"  {'─' * 50}")
             print(f"  Total appels  : {stats.get('total_calls', 0)}")
             print(f"  Succès        : {stats.get('success', 0)}")
@@ -676,7 +676,7 @@ def main() -> None:
     elif args.command == "schema":
         spec = caller.get_agent_schema(args.agent)
         if not spec:
-            print(f"\n  ❌ Agent '{args.agent}' introuvable\n")
+            print(f"\n  [x] Agent '{args.agent}' introuvable\n")
             sys.exit(1)
         _print_schema(spec)
 

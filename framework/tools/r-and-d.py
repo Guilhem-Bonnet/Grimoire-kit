@@ -200,7 +200,7 @@ def cmd_harvest(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([i.to_dict() for i in ideas], indent=2, ensure_ascii=False))
     else:
-        print(f"\n🌾 Récolte : {len(ideas)} idée(s)\n")
+        print(f"\nRécolte : {len(ideas)} idée(s)\n")
         for idea in ideas:
             print(f"  [{idea.domain}] {idea.title}")
             print(f"    Source: {idea.source} | Action: {idea.action}")
@@ -220,7 +220,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([i.to_dict() for i in ideas], indent=2, ensure_ascii=False))
     else:
-        print(f"\n📊 Évaluation : {len(ideas)} idée(s)\n")
+        print(f"\nÉvaluation : {len(ideas)} idée(s)\n")
         for idea in ideas:
             bar_len = 20
             bar_fill = int(idea.total_score * bar_len)
@@ -261,7 +261,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(status, indent=2, ensure_ascii=False))
     else:
-        print(f"\n🔬 R&D Engine v{VERSION}")
+        print(f"\nR&D Engine v{VERSION}")
         print(f"  Cycles: {len(reports)}")
         print(f"  Idées explorées: {policy.total_ideas}")
         print(f"  Innovations mergées: {policy.total_merged}")
@@ -279,11 +279,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         if policy.source_weights:
             top = sorted(policy.source_weights.items(),
                          key=lambda x: x[1], reverse=True)[:3]
-            print(f"\n  🧠 Top sources: {', '.join(f'{s}({w:.3f})' for s, w in top)}")
+            print(f"\n  Top sources: {', '.join(f'{s}({w:.3f})' for s, w in top)}")
         if policy.domain_weights:
             top = sorted(policy.domain_weights.items(),
                          key=lambda x: x[1], reverse=True)[:3]
-            print(f"  🧠 Top domaines: {', '.join(f'{d}({w:.3f})' for d, w in top)}")
+            print(f"  Top domaines: {', '.join(f'{d}({w:.3f})' for d, w in top)}")
     return 0
 
 
@@ -296,10 +296,10 @@ def cmd_history(args: argparse.Namespace) -> int:
         print(json.dumps([r.to_dict() for r in reports], indent=2, ensure_ascii=False))
     else:
         if not reports:
-            print("\n📜 Aucun cycle dans l'historique.")
+            print("\nAucun cycle dans l'historique.")
             return 0
 
-        print(f"\n📜 Historique : {len(reports)} cycle(s)\n")
+        print(f"\nHistorique : {len(reports)} cycle(s)\n")
         for r in reports:
             bar_len = 15
             bar_fill = int(r.best_reward * bar_len) if r.best_reward > 0 else 0
@@ -318,7 +318,7 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     memory = load_memory(project_root)
 
     lines = [
-        "# 🔬 R&D Innovation Engine — Dashboard",
+        "# R&D Innovation Engine — Dashboard",
         "",
         f"*Généré le {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
         "",
@@ -408,7 +408,7 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         _ensure_dirs(project_root)
         dash_path.write_text(output, encoding="utf-8")
         print(output)
-        print(f"\n💾 Dashboard sauvé dans {dash_path}")
+        print(f"\nDashboard sauvé dans {dash_path}")
     return 0
 
 
@@ -431,7 +431,7 @@ def cmd_tune(args: argparse.Namespace) -> int:
 
     if changed:
         save_policy(project_root, policy)
-        print("  ✅ Policy mise à jour")
+        print("  [OK] Policy mise à jour")
     else:
         print(f"  Epsilon: {policy.epsilon:.3f}")
         print(f"  Learning rate: {policy.learning_rate:.3f}")
@@ -446,8 +446,8 @@ def cmd_reset(args: argparse.Namespace) -> int:
     policy = Policy.default()
     save_policy(project_root, policy)
 
-    print("  🔄 Policy remise à zéro (poids uniformes)")
-    print("  📜 L'historique et la mémoire sont préservés")
+    print("  Policy remise à zéro (poids uniformes)")
+    print("  L'historique et la mémoire sont préservés")
     return 0
 
 
@@ -484,7 +484,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
             _log.debug("Exception suppressed: %s", _exc)
             # Silent exception — add logging when investigating issues
         if not args.json:
-            print(f"  🌱 Incubateur: {seeded} idées ensemencées")
+            print(f"  Incubateur: {seeded} idées ensemencées")
 
     # 2. Seed stigmergy avec des phéromones OPPORTUNITY
     mod_stigmergy = _load_tool("stigmergy")
@@ -522,7 +522,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
                 _log.debug("Exception suppressed: %s", _exc)
                 # Silent exception — add logging when investigating issues
         if not args.json:
-            print(f"  🐜 Stigmergy: {stig_count} phéromones déposées")
+            print(f"  Stigmergy: {stig_count} phéromones déposées")
 
     # 3. Seed la mémoire R&D avec des learnings de baseline
     memory = load_memory(project_root)
@@ -550,7 +550,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
     if seed_mem > 0:
         save_memory(project_root, memory)
     if not args.json:
-        print(f"  🧠 Mémoire: {seed_mem} entrée(s) baseline")
+        print(f"  Mémoire: {seed_mem} entrée(s) baseline")
 
     total = seeded + stig_count + seed_mem
     if args.json:
@@ -562,7 +562,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
             "health": health,
         }, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  ✅ Total ensemencé: {total} entrées")
+        print(f"\n  [OK] Total ensemencé: {total} entrées")
         print("  Relancer 'cycle' ou 'train' pour utiliser les nouvelles graines.")
     return 0
 
@@ -642,7 +642,7 @@ def main() -> int:
     if args.json:
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
-        print(f"\\n🔬 Prototype: {title_clean}")
+        print(f"\\nPrototype: {title_clean}")
         for k, v in results.items():
             print(f"  {{k}}: {{v}}")
     return 0
@@ -698,7 +698,7 @@ def cmd_prototype(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"prototypes": generated}, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🏗️  {len(generated)} prototype(s) générés:")
+        print(f"\n   {len(generated)} prototype(s) générés:")
         for g in generated:
             print(f"    • {g['idea_id']}: {g['prototype']}")
         if generated:
@@ -714,7 +714,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(health, indent=2, ensure_ascii=False))
     else:
-        print("\n  🏥 Santé du projet")
+        print("\n  Santé du projet")
         print(f"  ├── Outils: {health['tool_count']}")
         print(f"  ├── Tests: {health['test_count']} "
               f"(ratio: {health['test_ratio']:.0%})")

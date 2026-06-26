@@ -498,9 +498,9 @@ def validate_all(project_root: Path | str,
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
 SEVERITY_ICONS = {
-    SEVERITY_ERROR: "❌",
-    SEVERITY_WARNING: "⚠️",
-    SEVERITY_INFO: "ℹ️",
+    SEVERITY_ERROR: "[x]",
+    SEVERITY_WARNING: "[!]",
+    SEVERITY_INFO: "[i]",
 }
 
 
@@ -509,7 +509,7 @@ def render_report(report: ValidationReport) -> str:
     lines = [
         "",
         "╔══════════════════════════════════════════════════════════════╗",
-        "║        🏗️ Schema Validator — Grimoire Configs                   ║",
+        "║        Schema Validator — Grimoire Configs                   ║",
         "╚══════════════════════════════════════════════════════════════╝",
         "",
         f"  Fichiers vérifiés : {report.files_checked}",
@@ -518,14 +518,14 @@ def render_report(report: ValidationReport) -> str:
     ]
 
     if report.is_valid and report.warning_count == 0 and report.info_count == 0:
-        lines.append("  ✅ Tous les fichiers sont valides.")
+        lines.append("  [OK] Tous les fichiers sont valides.")
         lines.append("")
         return "\n".join(lines)
 
     if report.is_valid:
-        lines.append("  ✅ Aucune erreur bloquante.")
+        lines.append("  [OK] Aucune erreur bloquante.")
     else:
-        lines.append("  ❌ Erreurs détectées — corrections requises.")
+        lines.append("  [x] Erreurs détectées — corrections requises.")
     lines.append("")
 
     # Group by file
@@ -535,13 +535,13 @@ def render_report(report: ValidationReport) -> str:
         by_file.setdefault(f, []).append(issue)
 
     for fname, issues in by_file.items():
-        lines.append(f"  📄 {fname}")
+        lines.append(f"  {fname}")
         for issue in issues:
             icon = SEVERITY_ICONS.get(issue.severity, "?")
             field_str = f" ({issue.field})" if issue.field else ""
             lines.append(f"    {icon} [{issue.issue_id}]{field_str}: {issue.message}")
             if issue.suggestion:
-                lines.append(f"       💡 {issue.suggestion}")
+                lines.append(f"       {issue.suggestion}")
         lines.append("")
 
     return "\n".join(lines)

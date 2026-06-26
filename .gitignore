@@ -74,6 +74,8 @@ _grimoire-output/.tool-resolver/
 _grimoire-output/agent-debugger.html
 _grimoire-output/hpe-dashboard.html
 _grimoire-output/pheromone-board.json
+_grimoire-output/Grimoire_TRACE.md
+_grimoire/_memory/*.sqlite3
 .grimoire-memory/
 .grimoire-twin/
 framework/memory/session-state.md

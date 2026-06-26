@@ -532,9 +532,9 @@ def build_cache_from_config(project_root: Path) -> SemanticCache:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def _print_stats(stats: CacheStats) -> None:
-    print("\n  📊 Semantic Cache — Stats")
+    print("\n  Semantic Cache — Stats")
     print(f"  {'─' * 50}")
-    print(f"  Qdrant        : {'✅' if stats.qdrant_available else '❌'}")
+    print(f"  Qdrant        : {'[OK]' if stats.qdrant_available else '[x]'}")
     print(f"  Entrées       : {stats.total_entries}")
     print(f"  Hits / Misses : {stats.total_hits} / {stats.total_misses}")
     print(f"  Hit Rate      : {stats.hit_rate:.1%}")
@@ -603,17 +603,17 @@ def main() -> None:
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
         else:
             if result.hit:
-                print(f"\n  ✅ CACHE HIT — similarity={result.similarity} "
+                print(f"\n  [OK] CACHE HIT — similarity={result.similarity} "
                       f"({result.age_hours}h ago)")
                 print(f"  Tokens sauvés: {result.tokens_saved:,}")
                 print(f"\n{result.response}\n")
             else:
-                print("\n  ⚪ CACHE MISS\n")
+                print("\n  [-] CACHE MISS\n")
 
     elif args.command == "store":
         cache = build_cache_from_config(project_root)
         ok = cache.store(args.prompt, args.response, args.type, args.agent, args.files)
-        print(f"\n  {'✅ Stocké' if ok else '❌ Échec'}\n")
+        print(f"\n  {'[OK] Stocké' if ok else '[x] Échec'}\n")
 
     elif args.command == "stats":
         cache = build_cache_from_config(project_root)
@@ -624,14 +624,14 @@ def main() -> None:
         cache = build_cache_from_config(project_root)
         count = cache.clear(args.type)
         if count == -1:
-            print("\n  🗑️  Cache vidé intégralement\n")
+            print("\n   Cache vidé intégralement\n")
         else:
-            print(f"\n  🗑️  {count} entrées supprimées\n")
+            print(f"\n   {count} entrées supprimées\n")
 
     elif args.command == "invalidate":
         cache = build_cache_from_config(project_root)
         count = cache.invalidate(args.files)
-        print(f"\n  🔄 {count} entrées invalidées\n")
+        print(f"\n  {count} entrées invalidées\n")
 
 
 if __name__ == "__main__":

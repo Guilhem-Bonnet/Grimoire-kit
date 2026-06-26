@@ -529,8 +529,8 @@ def find_tensions(sources: list[DreamSource]) -> list[DreamInsight]:
                     title=f"Tension détectée entre {pos_src} et {neg_src}",
                     description=(
                         f"Possible contradiction sur le même sujet :\n"
-                        f"  ✅ [{pos_src}] {pos_entry[:120]}...\n"
-                        f"  ❌ [{neg_src}] {neg_entry[:120]}..."
+                        f"  [OK] [{pos_src}] {pos_entry[:120]}...\n"
+                        f"  [x] [{neg_src}] {neg_entry[:120]}..."
                     ),
                     sources=[pos_src, neg_src],
                     category="tension",
@@ -827,10 +827,10 @@ def emit_to_incubator(insights: list[DreamInsight],
 # ── Rendu ─────────────────────────────────────────────────────────────────────
 
 CATEGORY_ICONS = {
-    "connection": "🔗",
-    "pattern": "🔄",
-    "tension": "⚡",
-    "opportunity": "💡",
+    "connection": "",
+    "pattern": "",
+    "tension": "",
+    "opportunity": "",
 }
 
 # ── Timestamp incrémental ─────────────────────────────────────────────────────
@@ -1015,7 +1015,7 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
     total_entries = sum(len(s.entries) for s in sources)
 
     lines = [
-        f"# 🌙 Grimoire Dream Journal — {now}",
+        f"# Grimoire Dream Journal — {now}",
         "",
         f"> Consolidation hors-session — {len(sources)} sources, {total_entries} entrées analysées",
     ]
@@ -1029,20 +1029,20 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
         persist_count = len(dream_diff.get("persistent", []))
         resolved_count = len(dream_diff.get("resolved", []))
         if new_count or persist_count or resolved_count:
-            lines.append("## 🔀 Dream Diff")
+            lines.append("## Dream Diff")
             lines.append("")
             if persist_count:
-                lines.append(f"**🔁 Persistants** ({persist_count}) — insights confirmés sur plusieurs sessions :")
+                lines.append(f"**Persistants** ({persist_count}) — insights confirmés sur plusieurs sessions :")
                 for ins in dream_diff["persistent"]:
-                    lines.append(f"- ⬆️ {ins.title} ({ins.confidence:.0%})")
+                    lines.append(f"- ⬆ {ins.title} ({ins.confidence:.0%})")
                 lines.append("")
             if new_count:
-                lines.append(f"**🆕 Nouveaux** ({new_count}) :")
+                lines.append(f"**Nouveaux** ({new_count}) :")
                 for ins in dream_diff["new"]:
                     lines.append(f"- {ins.title}")
                 lines.append("")
             if resolved_count:
-                lines.append(f"**✅ Résolus** ({resolved_count}) — n'apparaissent plus :")
+                lines.append(f"**[OK] Résolus** ({resolved_count}) — n'apparaissent plus :")
                 for sig in dream_diff["resolved"]:
                     lines.append(f"- ~{sig}~")
                 lines.append("")
@@ -1053,21 +1053,21 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
     for ins in insights:
         by_cat.setdefault(ins.category, []).append(ins)
 
-    lines.append("## 📊 Résumé")
+    lines.append("## Résumé")
     lines.append("")
     lines.append("| Catégorie | Count | Confiance moy. |")
     lines.append("|-----------|-------|----------------|")
     for cat, cat_insights in sorted(by_cat.items()):
-        icon = CATEGORY_ICONS.get(cat, "❓")
+        icon = CATEGORY_ICONS.get(cat, "")
         avg_conf = sum(i.confidence for i in cat_insights) / len(cat_insights)
         lines.append(f"| {icon} {cat} | {len(cat_insights)} | {avg_conf:.0%} |")
     lines.extend(["", "---", ""])
 
     # Détail des insights
-    lines.append("## 🧠 Insights")
+    lines.append("## Insights")
     lines.append("")
     for idx, ins in enumerate(insights, 1):
-        icon = CATEGORY_ICONS.get(ins.category, "❓")
+        icon = CATEGORY_ICONS.get(ins.category, "")
         conf_bar = "█" * int(ins.confidence * 10) + "░" * (10 - int(ins.confidence * 10))
         lines.append(f"### {icon} {idx}. {ins.title}")
         lines.append("")
@@ -1076,13 +1076,13 @@ def render_journal(insights: list[DreamInsight], sources: list[DreamSource],
         if ins.agents_relevant:
             lines.append(f"**Agents** : {', '.join(ins.agents_relevant)}")
         if ins.actionable:
-            lines.append("**🎯 Actionable**")
+            lines.append("**Actionable**")
         lines.append("")
         lines.append(ins.description)
         lines.append("")
 
     # Sources analysées
-    lines.extend(["---", "", "## 📚 Sources analysées", ""])
+    lines.extend(["---", "", "## Sources analysées", ""])
     for src in sources:
         lines.append(f"- **{src.name}** ({src.kind}) — {len(src.entries)} entrées")
     lines.append("")
@@ -1153,7 +1153,7 @@ def main():
 
         for proj in projects:
             if not (proj / "_grimoire" / "_memory").exists():
-                print(f"⚠️  {proj.name}: pas de mémoire Grimoire — ignoré")
+                print(f"[!]  {proj.name}: pas de mémoire Grimoire — ignoré")
                 continue
             sources = collect_sources(proj, since, args.agent)
             if not sources:
@@ -1168,11 +1168,11 @@ def main():
             all_project_insights[proj.name] = insights
 
         if not all_project_insights:
-            print("💤 Aucun projet avec des insights — rien à croiser.")
+            print("Aucun projet avec des insights — rien à croiser.")
             sys.exit(0)
 
         # Croiser : trouver les patterns communs et divergents
-        print("# 🔀 Dream Multi-Projet — Insights Croisés\n")
+        print("# Dream Multi-Projet — Insights Croisés\n")
         total_insights = sum(len(v) for v in all_project_insights.values())
         print(f"  {len(all_project_insights)} projets, "
               f"{total_insights} insights totaux\n")
@@ -1190,7 +1190,7 @@ def main():
 
         # Thèmes communs (titres similaires entre projets)
         if len(all_project_insights) >= 2:
-            print("\n## 🔗 Thèmes communs\n")
+            print("\n## Thèmes communs\n")
             proj_names = list(all_project_insights.keys())
             found_common = False
             for i, p1 in enumerate(proj_names):
@@ -1212,13 +1212,13 @@ def main():
                 print("  Aucun thème commun détecté — les projets divergent.\n")
 
             # Insights uniques à chaque projet
-            print("## 🌟 Insights uniques\n")
+            print("## Insights uniques\n")
             for proj_name, insights in all_project_insights.items():
                 unique = [i for i in insights if i.confidence >= 0.6]
                 if unique:
                     print(f"### {proj_name}")
                     for ins in unique[:3]:
-                        icon = CATEGORY_ICONS.get(ins.category, "❓")
+                        icon = CATEGORY_ICONS.get(ins.category, "")
                         print(f"  {icon} {ins.title} ({ins.confidence:.0%})")
                     print()
 
@@ -1246,12 +1246,12 @@ def main():
     # Collecte unique (partagée entre affichage et dream)
     sources = collect_sources(project_root, since, args.agent)
     if not sources:
-        print("💤 Aucune source de mémoire trouvée — rien à rêver.")
+        print("Aucune source de mémoire trouvée — rien à rêver.")
         sys.exit(0)
 
     total_entries = sum(len(s.entries) for s in sources)
     mode_label = "Quick" if args.quick else "Dream"
-    print(f"🌙 {mode_label} Mode — {len(sources)} sources, {total_entries} entrées")
+    print(f"{mode_label} Mode — {len(sources)} sources, {total_entries} entrées")
     if since:
         print(f"   Depuis : {since}")
     print()
@@ -1265,7 +1265,7 @@ def main():
                          _sources=sources)
 
     if not insights:
-        print("😴 Aucun insight émergent détecté. Le système est cohérent.")
+        print("Aucun insight émergent détecté. Le système est cohérent.")
         sys.exit(0)
 
     # Dream Memory — tracking persistence cross-session
@@ -1279,11 +1279,11 @@ def main():
         persist_count = len(dream_diff.get("persistent", []))
         resolved_count = len(dream_diff.get("resolved", []))
         if persist_count:
-            print(f"🔁 {persist_count} insight(s) persistant(s) (confiance boostée)")
+            print(f"{persist_count} insight(s) persistant(s) (confiance boostée)")
         if new_count:
-            print(f"🆕 {new_count} nouvel(s) insight(s)")
+            print(f"{new_count} nouvel(s) insight(s)")
         if resolved_count:
-            print(f"✅ {resolved_count} insight(s) résolu(s) (disparus)")
+            print(f"[OK] {resolved_count} insight(s) résolu(s) (disparus)")
         if persist_count or new_count or resolved_count:
             print()
 
@@ -1291,14 +1291,14 @@ def main():
     if args.emit:
         count = emit_to_stigmergy(insights, project_root)
         if count > 0:
-            print(f"🐜 {count} insight(s) émis comme phéromones stigmergy")
+            print(f"{count} insight(s) émis comme phéromones stigmergy")
             print()
 
     # Emit → incubator (Dream-Driven Development)
     if args.incubate:
         count = emit_to_incubator(insights, project_root)
         if count > 0:
-            print(f"🌰 {count} insight(s) soumis à l'incubateur")
+            print(f"{count} insight(s) soumis à l'incubateur")
             print()
 
     # Sortie JSON (enrichie avec dream diff et agents)
@@ -1332,13 +1332,13 @@ def main():
     output_path = write_journal(journal, project_root, args.dry_run)
 
     if not args.dry_run:
-        print(f"✅ {len(insights)} insights écrits dans {output_path}")
+        print(f"[OK] {len(insights)} insights écrits dans {output_path}")
         # Sauver le timestamp pour le mode incrémental
         save_last_dream_timestamp(project_root)
         print()
         # Preview compact
         for idx, ins in enumerate(insights[:5], 1):
-            icon = CATEGORY_ICONS.get(ins.category, "❓")
+            icon = CATEGORY_ICONS.get(ins.category, "")
             print(f"  {icon} {idx}. {ins.title} ({ins.confidence:.0%})")
         if len(insights) > 5:
             print(f"  ... et {len(insights) - 5} de plus dans le journal")

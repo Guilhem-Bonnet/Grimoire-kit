@@ -188,11 +188,11 @@ def plan_import(scan: ProjectScan) -> ImportPlan:
 
     # Recommendations
     if scan.categories.get("memory", 0) > 0:
-        plan.recommendations.append("💾 Mémoire collective détectée — import recommandé pour ne pas perdre les apprentissages")
+        plan.recommendations.append("Mémoire collective détectée — import recommandé pour ne pas perdre les apprentissages")
     if scan.categories.get("tools", 0) > 3:
-        plan.recommendations.append("🔧 Outils custom détectés — vérifier la compatibilité avec le nouveau projet")
+        plan.recommendations.append("Outils custom détectés — vérifier la compatibilité avec le nouveau projet")
     if scan.categories.get("agents", 0) > 5:
-        plan.recommendations.append("🤖 Nombreux agents — évaluer quels agents sont pertinents pour le nouveau contexte")
+        plan.recommendations.append("Nombreux agents — évaluer quels agents sont pertinents pour le nouveau contexte")
 
     return plan
 
@@ -225,7 +225,7 @@ def export_assets(source: Path, plan: ImportPlan, output: Path) -> int:
 
 def format_scan(scan: ProjectScan) -> str:
     lines = [
-        "🎮 New Game+ — Scan du projet source",
+        "New Game+ — Scan du projet source",
         f"   Fichiers total : {scan.total_files}",
         f"   Stack détectée : {', '.join(scan.tech_stack) if scan.tech_stack else 'N/A'}",
         "",
@@ -240,8 +240,8 @@ def format_scan(scan: ProjectScan) -> str:
 
 def format_similarity(results: list[SimilarityResult]) -> str:
     if not results:
-        return "🎯 Aucun archétype trouvé"
-    lines = ["🎯 Similarité avec les archétypes :\n"]
+        return "Aucun archétype trouvé"
+    lines = ["Similarité avec les archétypes :\n"]
     for r in results[:5]:
         bar = "█" * int(r.score * 10)
         lines.append(f"   {bar} {r.archetype} ({r.score:.0%})")
@@ -252,7 +252,7 @@ def format_similarity(results: list[SimilarityResult]) -> str:
 
 def format_plan(plan: ImportPlan) -> str:
     lines = [
-        "📋 Plan d'import New Game+",
+        "Plan d'import New Game+",
         f"   À importer : {len(plan.assets_to_import)} assets ({plan.estimated_size / 1024:.1f} KB)",
         f"   À ignorer : {len(plan.assets_to_skip)} assets",
         "",
@@ -314,7 +314,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"exported": exported, "output": str(output)}, indent=2))
     else:
-        print(f"✅ {exported} assets exportés vers {output}")
+        print(f"[OK] {exported} assets exportés vers {output}")
     return 0
 
 
@@ -332,7 +332,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
             "stack": scan.tech_stack,
         }, indent=2, ensure_ascii=False))
     else:
-        print("💡 Recommandations New Game+\n")
+        print("Recommandations New Game+\n")
         print(f"   Stack : {', '.join(scan.tech_stack)}")
         if similarities:
             print(f"   Archétype recommandé : {similarities[0].archetype} ({similarities[0].score:.0%})")

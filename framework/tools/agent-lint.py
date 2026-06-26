@@ -37,9 +37,9 @@ AGENT_LINT_VERSION = "1.0.0"
 # ── Sévérités ────────────────────────────────────────────────────────────────
 
 class Severity:
-    ERROR = "🔴 ERROR"
-    WARNING = "🟡 WARNING"
-    INFO = "🟢 INFO"
+    ERROR = "[!!] ERROR"
+    WARNING = "[!] WARNING"
+    INFO = "[ok] INFO"
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -457,7 +457,7 @@ def format_text(report: LintReport) -> str:
     ]
 
     if not report.findings:
-        lines.append("\n  ✅ Tous les agents sont conformes !")
+        lines.append("\n  [OK] Tous les agents sont conformes !")
         return "\n".join(lines)
 
     # Group by agent
@@ -468,12 +468,12 @@ def format_text(report: LintReport) -> str:
     for agent, findings in sorted(by_agent.items()):
         error_count = sum(1 for f in findings if f.is_error)
         warn_count = len(findings) - error_count
-        status = "❌" if error_count else "⚠️"
+        status = "[x]" if error_count else "[!]"
         lines.append(f"\n{status} {agent} ({error_count} errors, {warn_count} warnings)")
         for f in findings:
             lines.append(f"  {f.severity} [{f.rule}] {f.message}")
             if f.fix_hint:
-                lines.append(f"    💡 {f.fix_hint}")
+                lines.append(f"    {f.fix_hint}")
 
     return "\n".join(lines)
 

@@ -15,10 +15,10 @@ Dimensions de fitness (pondérées, total 100) :
   - influence    (0.10) : checkpoints créés, contributions aux décisions collectives
 
 Niveaux d'évolution :
-  - ELITE    (≥75) 🟢 — patterns à répliquer
-  - VIABLE   (40-74) 🟡 — maintien, amélioration suggérée
-  - FRAGILE  (20-39) 🟠 — amélioration requise
-  - OBSOLETE (<20) 🔴 — deprecation recommandée
+  - ELITE    (≥75) [ok] — patterns à répliquer
+  - VIABLE   (40-74) [!] — maintien, amélioration suggérée
+  - FRAGILE  (20-39) [!] — amélioration requise
+  - OBSOLETE (<20) [!!] — deprecation recommandée
 
 Usage :
   python3 agent-darwinism.py --project-root . evaluate
@@ -72,10 +72,10 @@ LEVEL_THRESHOLDS = {
 }
 
 LEVEL_ICONS = {
-    LEVEL_ELITE:    "🟢",
-    LEVEL_VIABLE:   "🟡",
-    LEVEL_FRAGILE:  "🟠",
-    LEVEL_OBSOLETE: "🔴",
+    LEVEL_ELITE:    "[ok]",
+    LEVEL_VIABLE:   "[!]",
+    LEVEL_FRAGILE:  "[!]",
+    LEVEL_OBSOLETE: "[!!]",
 }
 
 ACTION_PROMOTE    = "PROMOTE"
@@ -85,11 +85,11 @@ ACTION_DEPRECATE  = "DEPRECATE"
 ACTION_OBSERVE    = "OBSERVE"
 
 ACTION_ICONS = {
-    ACTION_PROMOTE:   "⬆️",
-    ACTION_IMPROVE:   "🔧",
-    ACTION_HYBRIDIZE: "🧬",
-    ACTION_DEPRECATE: "⬇️",
-    ACTION_OBSERVE:   "👁️",
+    ACTION_PROMOTE:   "⬆",
+    ACTION_IMPROVE:   "",
+    ACTION_HYBRIDIZE: "",
+    ACTION_DEPRECATE: "⬇",
+    ACTION_OBSERVE:   "",
 }
 
 
@@ -717,7 +717,7 @@ def render_leaderboard(scores: list[FitnessScore]) -> str:
     """Affiche le classement des agents."""
     sorted_scores = sorted(scores, key=lambda s: s.composite, reverse=True)
     lines = [
-        "# 🏆 Leaderboard Darwiniste",
+        "# Leaderboard Darwiniste",
         "",
         "| Rang | Agent | Fitness | Niveau | Fiabilité | Productivité | Apprentissage | Adaptabilité | Résilience | Influence |",
         "|------|-------|---------|--------|-----------|--------------|---------------|--------------|------------|-----------|",
@@ -743,7 +743,7 @@ def render_evaluate(scores: list[FitnessScore],
                     generation: int) -> str:
     """Affiche le rapport d'évaluation."""
     lines = [
-        f"# 🧬 Évaluation Darwiniste — Génération {generation}",
+        f"# Évaluation Darwiniste — Génération {generation}",
         "",
         f"> {len(scores)} agent(s) évalué(s)",
         "",
@@ -773,9 +773,9 @@ def render_evaluate(scores: list[FitnessScore],
 def render_evolve(actions: list[EvolutionAction],
                   dry_run: bool = False) -> str:
     """Affiche les actions évolutives."""
-    prefix = "🔍 DRY RUN — " if dry_run else ""
+    prefix = "DRY RUN — " if dry_run else ""
     lines = [
-        f"# {prefix}🧬 Actions Évolutives",
+        f"# {prefix}Actions Évolutives",
         "",
     ]
 
@@ -806,7 +806,7 @@ def render_history(history: list[GenerationRecord]) -> str:
         return "Aucun historique darwiniste disponible."
 
     lines = [
-        "# 📜 Historique Darwiniste",
+        "# Historique Darwiniste",
         "",
         "| Gén. | Date | Agents | Fitness moy. | Elite | Viable | Fragile | Obsolète |",
         "|------|------|--------|-------------|-------|--------|---------|----------|",
@@ -829,7 +829,7 @@ def render_lineage(agent_id: str,
                    history: list[GenerationRecord]) -> str:
     """Affiche l'évolution d'un agent à travers les générations."""
     lines = [
-        f"# 📈 Lignée de '{agent_id}'",
+        f"# Lignée de '{agent_id}'",
         "",
     ]
 

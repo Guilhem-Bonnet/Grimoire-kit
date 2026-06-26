@@ -257,7 +257,7 @@ class TestIntegration:
     def test_format_human_clean(self):
         report = sv.SkillReport(skill_dir="test-skill")
         output = sv.format_human([report])
-        assert "✅" in output
+        assert "[OK]" in output
 
     def test_format_json_structure(self):
         report = sv.SkillReport(skill_dir="test-skill")

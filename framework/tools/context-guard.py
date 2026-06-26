@@ -481,7 +481,7 @@ def do_optimize(
     if agent_id:
         agents = [a for a in agents if agent_id.lower() in a.stem.lower()]
         if not agents:
-            print(f"❌ Agent '{agent_id}' introuvable.", file=sys.stderr)
+            print(f"[x] Agent '{agent_id}' introuvable.", file=sys.stderr)
             sys.exit(1)
 
     # Collecter les fichiers uniques toutes charges confondues
@@ -523,7 +523,7 @@ def do_optimize(
     print()
 
     if not all_hints:
-        print("  ✅ Aucune optimisation évidente détectée — le framework est déjà compact.")
+        print("  [OK] Aucune optimisation évidente détectée — le framework est déjà compact.")
         return
 
     # Trier par savings estimé décroissant (informatifs en dernier)
@@ -538,7 +538,7 @@ def do_optimize(
         gain_str = f"-{fmt_tokens(hint.estimated_savings)}" if hint.estimated_savings > 0 else "info"
         pct_str = f"-{hint.pct_savings:.0f}%" if hint.estimated_savings > 0 else ""
         print(f"  {short_name:<40} {hint.category:<14} {fmt_tokens(hint.current_tokens):>8} {gain_str:>8} {pct_str:>6}")
-        print(f"    💡 {hint.description}")
+        print(f"    {hint.description}")
         total_savings += hint.estimated_savings
 
     print()
@@ -550,7 +550,7 @@ def do_optimize(
         print(f"  Gain total (× {agent_count} agents) : ~{fmt_tokens(total_fleet)} tokens")
         print(f"  Équivalent fenêtre     : {per_agent / window * 100:.1f}% du budget {model}")
         print()
-    print("  💡 Pour appliquer : optimiser manuellement les fichiers listés ci-dessus.")
+    print("  Pour appliquer : optimiser manuellement les fichiers listés ci-dessus.")
     print("      Stratégies : compresser les commentaires, extraire les sections on-demand,")
     print("      renvoyer vers docs/ pour les détails verbeux.")
     print()
@@ -719,7 +719,7 @@ def do_recommend_models(
     if agent_id:
         agents = [a for a in agents if agent_id.lower() in a.stem.lower()]
         if not agents:
-            print(f"❌ Agent '{agent_id}' introuvable.", file=sys.stderr)
+            print(f"[x] Agent '{agent_id}' introuvable.", file=sys.stderr)
             sys.exit(1)
 
     # Charger la config des modèles disponibles (optionnel)
@@ -804,7 +804,7 @@ def do_recommend_models(
     print()
 
     if not recs:
-        print("  ℹ️  Aucun agent avec model_affinity trouvé.")
+        print("  [i]  Aucun agent avec model_affinity trouvé.")
         print("      Ajoutez model_affinity dans le frontmatter YAML de vos agents.")
         print("      Voir docs/creating-agents.md pour le format.")
         return
@@ -818,8 +818,8 @@ def do_recommend_models(
     tier_savings = {"economy": 0, "standard": 0, "premium": 0}
     for rec in recs:
         best_profile = MODEL_PROFILES.get(rec.best_model)
-        tier_icon = {"economy": "💚", "standard": "💛", "premium": "❤️ "}.get(
-            best_profile.tier if best_profile else "standard", "💛")
+        tier_icon = {"economy": "", "standard": "", "premium": ""}.get(
+            best_profile.tier if best_profile else "standard", "")
         print(f"  {rec.agent_id:<28} {tier_icon} {rec.best_model:<17} {rec.best_score:>5.0f}/100"
               f"   {rec.alt_model:<20} {rec.alt_score:>5.0f}/100  {rec.reason}")
         if best_profile:
@@ -829,7 +829,7 @@ def do_recommend_models(
     print()
     print("  ─────────────────────────────────────────────")
     total = len(recs)
-    for tier_name, icon in [("economy", "💚"), ("standard", "💛"), ("premium", "❤️ ")]:
+    for tier_name, icon in [("economy", ""), ("standard", ""), ("premium", "")]:
         count = tier_savings.get(tier_name, 0)
         if count:
             pct = count / total * 100
@@ -837,7 +837,7 @@ def do_recommend_models(
     print()
     economy_pct = tier_savings.get("economy", 0) / total * 100 if total else 0
     if economy_pct >= 30:
-        print(f"  💡 {economy_pct:.0f}% des agents peuvent tourner sur des modèles economy")
+        print(f"  {economy_pct:.0f}% des agents peuvent tourner sur des modèles economy")
         print("      → réduction significative des rate limits et coûts API")
     print()
 
@@ -848,7 +848,7 @@ def generate_recommendations(budgets: list[AgentBudget]) -> list[str]:
     # Recommandations globales
     worst = sorted(budgets, key=lambda b: b.pct, reverse=True)
     if worst and worst[0].pct >= THRESHOLD_CRIT:
-        recs.append(f"🚨 URGENT : {worst[0].agent_id} consomme {worst[0].pct:.0f}% du contexte au démarrage")
+        recs.append(f"URGENT : {worst[0].agent_id} consomme {worst[0].pct:.0f}% du contexte au démarrage")
 
     # Fichiers communs les plus gros
     all_loads: dict[str, list[int]] = {}
@@ -869,7 +869,7 @@ def generate_recommendations(budgets: list[AgentBudget]) -> list[str]:
         if tokens > 5000:
             short = Path(biggest_shared).name
             recs.append(
-                f"📦 {short} ({tokens:,} tokens) × {agents_count} agents = "
+                f"{short} ({tokens:,} tokens) × {agents_count} agents = "
                 f"{tokens * agents_count:,} tokens totaux — priorité de réduction"
             )
 
@@ -880,7 +880,7 @@ def generate_recommendations(budgets: list[AgentBudget]) -> list[str]:
             if fl.role in CONSOLIDATION_RULES and fl.role not in seen_rules:
                 seen_rules.add(fl.role)
                 reason, action = CONSOLIDATION_RULES[fl.role]
-                recs.append(f"💡 {reason} → {action}")
+                recs.append(f"{reason} → {action}")
 
     return recs[:6]
 
@@ -947,9 +947,9 @@ def print_summary_table(budgets: list[AgentBudget]) -> None:
     print()
     print("  ─────────────────────────────────────────────")
     print(f"  Agents analysés : {len(budgets)}")
-    print(f"    ✅ OK       : {ok}")
-    print(f"    ⚠️  WARNING  : {warn}  (> {THRESHOLD_WARN}% du contexte au démarrage)")
-    print(f"    🔴 CRITICAL : {crit}  (> {THRESHOLD_CRIT}% du contexte au démarrage)")
+    print(f"    [OK] OK       : {ok}")
+    print(f"    [!]  WARNING  : {warn}  (> {THRESHOLD_WARN}% du contexte au démarrage)")
+    print(f"    [!!] CRITICAL : {crit}  (> {THRESHOLD_CRIT}% du contexte au démarrage)")
     print(f"  Tokens totaux (sum) : {fmt_tokens(total_agent_tokens)}")
     print()
 
@@ -1025,14 +1025,14 @@ Exemples :
             if direct.exists():
                 filtered = [direct]
             else:
-                print(f"❌ Agent '{args.agent}' introuvable.", file=sys.stderr)
+                print(f"[x] Agent '{args.agent}' introuvable.", file=sys.stderr)
                 print(f"   Agents disponibles : {[a.stem for a in agents]}")
                 sys.exit(1)
         agent_paths = filtered
     else:
         agent_paths = find_agents(project_root)
         if not agent_paths:
-            print("ℹ️  Aucun agent Grimoire trouvé dans ce projet.")
+            print("[i]  Aucun agent Grimoire trouvé dans ce projet.")
             print(f"   Projet root : {project_root}")
             print("   Initialisez avec : bash grimoire-init.sh --name ...")
             return

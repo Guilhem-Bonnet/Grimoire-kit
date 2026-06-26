@@ -408,7 +408,7 @@ def full_analysis(project_root: Path) -> tuple[ArchScan, dict]:
 
 def format_scan(scan: ArchScan) -> str:
     lines = [
-        "🏛️ Scan architectural",
+        "Scan architectural",
         f"   Agents     : {len(scan.agents)}",
         f"   Workflows  : {len(scan.workflows)}",
         f"   Tools      : {len(scan.tools)}",
@@ -423,14 +423,14 @@ def format_scan(scan: ArchScan) -> str:
 
 def format_dissonances(dissonances: list[Dissonance]) -> str:
     if not dissonances:
-        return "✅ Aucune dissonance détectée — Architecture harmonieuse !"
+        return "[OK] Aucune dissonance détectée — Architecture harmonieuse !"
 
     by_sev = {SEVERITY_HIGH: [], SEVERITY_MEDIUM: [], SEVERITY_LOW: []}
     for d in dissonances:
         by_sev[d.severity].append(d)
 
-    icons = {SEVERITY_HIGH: "🔴", SEVERITY_MEDIUM: "🟡", SEVERITY_LOW: "🔵"}
-    lines = [f"🎵 Dissonances détectées : {len(dissonances)}\n"]
+    icons = {SEVERITY_HIGH: "[!!]", SEVERITY_MEDIUM: "[!]", SEVERITY_LOW: "[i]"}
+    lines = [f"Dissonances détectées : {len(dissonances)}\n"]
 
     for sev in [SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW]:
         items = by_sev[sev]
@@ -448,7 +448,7 @@ def format_dissonances(dissonances: list[Dissonance]) -> str:
 
 def format_score(score_data: dict) -> str:
     lines = [
-        f"🎼 Score d'harmonie : {score_data['score']}/100 ({score_data['grade']})",
+        f"Score d'harmonie : {score_data['score']}/100 ({score_data['grade']})",
     ]
     if score_data["detail"]:
         lines.append("   Détail par catégorie :")
@@ -503,7 +503,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             high = sum(1 for d in scan.dissonances if d.severity == SEVERITY_HIGH)
             med = sum(1 for d in scan.dissonances if d.severity == SEVERITY_MEDIUM)
             low = sum(1 for d in scan.dissonances if d.severity == SEVERITY_LOW)
-            print(f"   🔴 {high} critiques | 🟡 {med} moyennes | 🔵 {low} mineures")
+            print(f"   [!!] {high} critiques | [!] {med} moyennes | [i] {low} mineures")
     return 0
 
 

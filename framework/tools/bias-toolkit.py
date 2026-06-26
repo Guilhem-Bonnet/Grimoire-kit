@@ -44,9 +44,9 @@ from pathlib import Path
 VERSION = "1.0.0"
 
 ETHICAL_LEVELS = {
-    "green": "✅ Usage éthique — nudge positif, transparent",
-    "yellow": "⚠️ Usage prudent — risque de manipulation douce",
-    "red": "🔴 Usage dangereux — manipulation non consentie",
+    "green": "[OK] Usage éthique — nudge positif, transparent",
+    "yellow": "[!] Usage prudent — risque de manipulation douce",
+    "red": "[!!] Usage dangereux — manipulation non consentie",
 }
 
 
@@ -83,7 +83,7 @@ BIAS_CATALOG: list[Bias] = [
         ethical_use="Présenter les choix de manière positive et constructive",
         dangerous_use="Formuler les options pour pousser vers un choix prédéterminé",
         agent_integration="Formuler les résumés d'étape en termes de progression, pas d'échec",
-        detection_patterns=[r"attention|warning|danger", r"✅|❌|⚠️"],
+        detection_patterns=[r"attention|warning|danger", r"[OK]|[x]|[!]"],
         keywords=["cadrage", "framing", "formulation"],
     ),
     Bias(
@@ -308,30 +308,30 @@ def check_ethics(bias_id: str, usage: str) -> dict:
 # ── Formatters ───────────────────────────────────────────────────────────────
 
 def format_catalog(biases: list[Bias]) -> str:
-    lines = [f"🧠 Catalogue de biais cognitifs — {len(biases)} biais\n"]
+    lines = [f"Catalogue de biais cognitifs — {len(biases)} biais\n"]
     cats = {}
     for b in biases:
         cats.setdefault(b.category, []).append(b)
     for cat, items in sorted(cats.items()):
-        lines.append(f"  📁 {cat.upper()}")
+        lines.append(f"  {cat.upper()}")
         for b in items:
             lines.append(f"    [{b.id}] {b.name}")
             lines.append(f"         Mécanisme : {b.mechanism[:80]}")
-            lines.append(f"         ✅ Éthique : {b.ethical_use[:80]}")
-            lines.append(f"         🔴 Danger  : {b.dangerous_use[:80]}")
+            lines.append(f"         [OK] Éthique : {b.ethical_use[:80]}")
+            lines.append(f"         [!!] Danger  : {b.dangerous_use[:80]}")
             lines.append("")
     return "\n".join(lines)
 
 
 def format_audit(detections: list[BiasDetection]) -> str:
-    lines = [f"🔍 Audit biais — {len(detections)} patterns détectés\n"]
+    lines = [f"Audit biais — {len(detections)} patterns détectés\n"]
     by_bias = {}
     for d in detections:
         by_bias.setdefault(d.bias_name, []).append(d)
     for name, dets in sorted(by_bias.items()):
         lines.append(f"  {name} ({len(dets)} occurrences)")
         for d in dets[:3]:
-            lines.append(f"    📄 {d.file}:{d.line}")
+            lines.append(f"    {d.file}:{d.line}")
             lines.append(f"       {d.context}")
         if len(dets) > 3:
             lines.append(f"    ... et {len(dets) - 3} autres")
@@ -371,7 +371,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         print(json.dumps([{"id": b.id, "name": b.name, "integration": b.agent_integration}
                           for b in biases], indent=2, ensure_ascii=False))
     else:
-        print(f"💡 Biais suggérés pour « {args.goal} » :\n")
+        print(f"Biais suggérés pour « {args.goal} » :\n")
         for b in biases:
             print(f"  [{b.id}] {b.name}")
             print(f"    → {b.agent_integration}")
@@ -387,9 +387,9 @@ def cmd_ethics(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         if "error" in result:
-            print(f"❌ {result['error']}")
+            print(f"[x] {result['error']}")
             return 1
-        print(f"⚖️ Vérification éthique : {result['bias']}")
+        print(f"Vérification éthique : {result['bias']}")
         print(f"   Usage proposé : {result['usage']}")
         print(f"   Verdict : {result['verdict']}")
         print(f"   Alternative éthique : {result['ethical_alternative']}")

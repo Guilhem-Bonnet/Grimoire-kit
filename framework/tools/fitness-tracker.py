@@ -306,7 +306,7 @@ def compute_fitness(project_root: Path) -> FitnessSnapshot:
     recommendations = []
     for d in dimensions:
         if d.score < 0.5:
-            recommendations.append(f"⚠️ {d.name}: {d.detail}")
+            recommendations.append(f"[!] {d.name}: {d.detail}")
 
     return FitnessSnapshot(
         timestamp=timestamp,
@@ -444,7 +444,7 @@ def mcp_fitness_trend(project_root: str, last_n: int = 10) -> dict:
 
 def render_report(snapshot: FitnessSnapshot) -> str:
     """Rendu texte du rapport de fitness."""
-    icon = "🟢" if snapshot.level == "HEALTHY" else "🟡" if snapshot.level == "WARNING" else "🔴"
+    icon = "[ok]" if snapshot.level == "HEALTHY" else "[!]" if snapshot.level == "WARNING" else "[!!]"
 
     lines = [
         f"\n{icon} Fitness Tracker — Score: {snapshot.fitness_score}/100 ({snapshot.level})",
@@ -460,7 +460,7 @@ def render_report(snapshot: FitnessSnapshot) -> str:
         lines.append("")
 
     if snapshot.recommendations:
-        lines.append("📋 Recommandations :")
+        lines.append("Recommandations :")
         for r in snapshot.recommendations:
             lines.append(f"   {r}")
         lines.append("")
@@ -472,9 +472,9 @@ def render_trend(project_root: Path) -> str:
     """Rendu texte de la tendance."""
     trend = compute_trend(project_root)
     if trend["trend"] == "insufficient_data":
-        return "📊 Pas assez de données pour la tendance (min 2 snapshots)."
+        return "Pas assez de données pour la tendance (min 2 snapshots)."
 
-    arrows = {"improving": "📈", "declining": "📉", "stable": "➡️"}
+    arrows = {"improving": "", "declining": "", "stable": "➡"}
     arrow = arrows.get(trend["trend"], "")
 
     lines = [

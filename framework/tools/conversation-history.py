@@ -549,7 +549,7 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(entry.to_dict(), ensure_ascii=False, indent=2))
         else:
-            print(f"\n  ✅ Conversation indexée : {entry.conversation_id}")
+            print(f"\n  [OK] Conversation indexée : {entry.conversation_id}")
             print(f"    Summary : {entry.summary[:80]}")
             print(f"    Agents  : {', '.join(entry.agents) or '-'}")
             print(f"    Topics  : {', '.join(entry.topics) or '-'}\n")
@@ -561,12 +561,12 @@ def main() -> None:
                    for r in results]
             print(json.dumps(out, ensure_ascii=False, indent=2))
         else:
-            print(f"\n  🔍 Résultats pour : \"{args.query}\" ({len(results)})")
+            print(f"\n  Résultats pour : \"{args.query}\" ({len(results)})")
             print(f"  {'─' * 55}")
             if not results:
                 print("  (aucun résultat)")
             for r in results:
-                method_icon = "🧠" if r.match_method == "semantic" else "🔤"
+                method_icon = "[sem]" if r.match_method == "semantic" else "[lex]"
                 print(f"    {method_icon} [{r.score:.2f}] {r.conversation.summary[:60]}")
                 if r.conversation.agents:
                     print(f"           Agents: {', '.join(r.conversation.agents)}")
@@ -574,15 +574,15 @@ def main() -> None:
 
     elif args.command == "forget":
         count = manager.forget(args.topic)
-        print(f"\n  🗑️  {count} conversations oubliées pour le topic \"{args.topic}\"\n")
+        print(f"\n   {count} conversations oubliées pour le topic \"{args.topic}\"\n")
 
     elif args.command == "stats":
         s = manager.stats()
-        print("\n  📊 Conversation History Stats")
+        print("\n  Conversation History Stats")
         print(f"  {'─' * 40}")
         print(f"  Total conversations : {s.total_conversations}")
         print(f"  Total tokens        : {s.total_tokens:,}")
-        print(f"  Qdrant disponible   : {'✅' if s.qdrant_available else '❌'}")
+        print(f"  Qdrant disponible   : {'[OK]' if s.qdrant_available else '[x]'}")
         print(f"  Agents actifs       : {', '.join(s.agents_active) or '-'}")
         if s.oldest_conversation:
             print(f"  Plus ancienne       : {s.oldest_conversation}")
@@ -599,7 +599,7 @@ def main() -> None:
         output = json.dumps(data, ensure_ascii=False, indent=2)
         if args.output:
             args.output.write_text(output + "\n", encoding="utf-8")
-            print(f"\n  ✅ Exporté : {args.output} ({len(data)} conversations)\n")
+            print(f"\n  [OK] Exporté : {args.output} ({len(data)} conversations)\n")
         else:
             print(output)
 

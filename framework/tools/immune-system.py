@@ -48,11 +48,11 @@ ANTIBODY_FILE = "immune-memory.json"  # Mémoire adaptative
 
 # Sévérité
 class Severity:
-    CRITICAL = "🔴 CRITICAL"
-    HIGH = "🟠 HIGH"
-    MEDIUM = "🟡 MEDIUM"
-    LOW = "🟢 LOW"
-    INFO = "ℹ️ INFO"
+    CRITICAL = "[!!] CRITICAL"
+    HIGH = "[!] HIGH"
+    MEDIUM = "[!] MEDIUM"
+    LOW = "[ok] LOW"
+    INFO = "[i] INFO"
 
 
 # ── Innate Rules (OWASP-inspired + conventions) ─────────────────────────────
@@ -379,7 +379,7 @@ def scan_adaptive(project_root: Path, target: str = "") -> tuple[list[Finding], 
 
 def format_report(report: ImmuneReport) -> str:
     lines = [
-        "🛡️ Système Immunitaire Grimoire — Rapport",
+        "Système Immunitaire Grimoire — Rapport",
         f"   Score de santé : {report.health_score}/100",
         f"   Fichiers scannés : {report.files_scanned}",
         f"   Règles innées : {report.innate_checks} | Anticorps : {report.adaptive_checks}",
@@ -389,7 +389,7 @@ def format_report(report: ImmuneReport) -> str:
     ]
 
     if not report.findings:
-        lines.append("   ✅ Aucune vulnérabilité détectée — système sain")
+        lines.append("   [OK] Aucune vulnérabilité détectée — système sain")
         return "\n".join(lines)
 
     # Grouper par sévérité
@@ -408,7 +408,7 @@ def format_report(report: ImmuneReport) -> str:
             if finding.match:
                 lines.append(f"         → {finding.match[:80]}")
             if finding.fix:
-                lines.append(f"         💡 {finding.fix}")
+                lines.append(f"         {finding.fix}")
         if len(items) > 10:
             lines.append(f"      ... et {len(items) - 10} de plus")
         lines.append("")
@@ -490,7 +490,7 @@ def cmd_learn(args: argparse.Namespace) -> int:
     antibodies.append(ab)
     save_antibodies(project_root, antibodies)
 
-    print(f"🧬 Anticorps {next_id} enregistré : {args.desc}")
+    print(f"Anticorps {next_id} enregistré : {args.desc}")
     print(f"   Type : {args.type}")
     if args.pattern:
         print(f"   Pattern : {args.pattern}")
@@ -501,7 +501,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve()
     antibodies = load_antibodies(project_root)
 
-    print("🛡️ État du Système Immunitaire\n")
+    print("État du Système Immunitaire\n")
     print(f"   Règles innées : {len(INNATE_RULES)}")
     print(f"   Anticorps adaptatifs : {len(antibodies)}")
 

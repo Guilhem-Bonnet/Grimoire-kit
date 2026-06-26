@@ -425,7 +425,7 @@ class TestRenderRetro(unittest.TestCase):
         self.assertIn("Bonne chose", text)
         self.assertIn("Bug grave", text)
         self.assertIn("Corriger X", text)
-        self.assertIn("🔴", text)  # priority=1
+        self.assertIn("[!!]", text)  # priority=1
 
     def test_render_shows_item_count(self):
         report = self.mod.RetroReport(

@@ -440,9 +440,9 @@ def format_human(reports: list[SkillReport]) -> str:
 
     for report in reports:
         if not report.findings:
-            lines.append(f"  ✅ {report.skill_dir}")
+            lines.append(f"  [OK] {report.skill_dir}")
         else:
-            icon = '❌' if report.has_critical else '⚠️'
+            icon = '[x]' if report.has_critical else '[!]'
             count = len(report.findings)
             lines.append(f"  {icon} {report.skill_dir} ({count} findings)")
             for f in sorted(report.findings, key=lambda x: SEVERITY_ORDER.get(x.severity, 99)):
@@ -452,7 +452,7 @@ def format_human(reports: list[SkillReport]) -> str:
 
     lines.append("")
     if total_findings == 0:
-        lines.append("✅ Tous les skills sont conformes.")
+        lines.append("[OK] Tous les skills sont conformes.")
     else:
         by_severity: dict[str, int] = {}
         for r in reports:
@@ -463,7 +463,7 @@ def format_human(reports: list[SkillReport]) -> str:
             key=lambda x: SEVERITY_ORDER.get(x[0], 99),
         )
         summary = ", ".join(f"{count} {sev}" for sev, count in sorted_sev)
-        lines.append(f"⚠️  {summary}")
+        lines.append(f"[!]  {summary}")
 
     return "\n".join(lines)
 
@@ -529,7 +529,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.skill:
         skill_dir = project_root / ".github" / "skills" / args.skill
         if not skill_dir.is_dir():
-            print(f"❌ Skill non trouvé: {skill_dir}", file=sys.stderr)
+            print(f"[x] Skill non trouvé: {skill_dir}", file=sys.stderr)
             return 1
         skill_dirs = [skill_dir]
     else:

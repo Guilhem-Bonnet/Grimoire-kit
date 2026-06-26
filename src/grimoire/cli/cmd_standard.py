@@ -683,7 +683,7 @@ def init_profile(
     action = "Would write" if dry_run else "Written"
     console.print(f"[green]{action}[/green] profile [bold]{result.profile}[/bold] in {result.project_root}")
     for path in result.written:
-        console.print(f"  [green]✓[/green] {path}")
+        console.print(f"  [green][OK][/green] {path}")
     for path in result.skipped:
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
     if provider_ids:
@@ -693,9 +693,9 @@ def init_profile(
         _print_plan(plan)
         if plan.tech_extras:
             if installed_extras_ok is True:
-                console.print("  [green]✓[/green] technology extras installed")
+                console.print("  [green][OK][/green] technology extras installed")
             elif installed_extras_ok is False:
-                console.print("  [red]✗[/red] extra install failed; run the command above manually")
+                console.print("  [red][x][/red] extra install failed; run the command above manually")
             else:
                 console.print(f"  [cyan]next[/cyan] install technology extras: [green]{plan.pip_command}[/green]")
 
@@ -745,11 +745,11 @@ def verify_profile(
         f"([red]{result.error_count} error(s)[/red], [yellow]{result.warning_count} warning(s)[/yellow])"
     )
     for path in result.present:
-        console.print(f"  [green]✓[/green] {path}")
+        console.print(f"  [green][OK][/green] {path}")
     for path in result.missing:
-        console.print(f"  [red]✗[/red] missing {path}")
+        console.print(f"  [red][x][/red] missing {path}")
     for path in result.invalid_yaml:
-        console.print(f"  [red]✗[/red] invalid YAML {path}")
+        console.print(f"  [red][x][/red] invalid YAML {path}")
     for check in result.checks:
         color = "red" if check.severity == "error" else "yellow"
         path_text = f" ({check.path})" if check.path else ""
@@ -828,7 +828,7 @@ def context_build(
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
         return
-    console.print(f"[green]✓[/green] context bundle written to {artifact.path}")
+    console.print(f"[green][OK][/green] context bundle written to {artifact.path}")
 
 
 @context_app.command("verify")
@@ -855,7 +855,7 @@ def decision_trace(
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
         return
-    console.print(f"[green]✓[/green] decision trace written to {artifact.path}")
+    console.print(f"[green][OK][/green] decision trace written to {artifact.path}")
 
 
 @decision_app.command("explain")
@@ -871,7 +871,7 @@ def decision_explain(
         typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
         return
     records = artifact.data.get("records", [])
-    console.print(f"[green]✓[/green] {len(records) if isinstance(records, list) else 0} decision record(s) explained in {artifact.path}")
+    console.print(f"[green][OK][/green] {len(records) if isinstance(records, list) else 0} decision record(s) explained in {artifact.path}")
 
 
 @rules_app.command("verify")
@@ -911,7 +911,7 @@ def hooks_simulate(
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
         return
-    console.print(f"[green]✓[/green] hook simulation written to {artifact.path}")
+    console.print(f"[green][OK][/green] hook simulation written to {artifact.path}")
 
 
 @gate_app.command("check")
@@ -950,7 +950,7 @@ def gate_check(
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} evidence gates for task {result.task_id}")
     for missing in result.missing:
-        console.print(f"  [red]✗[/red] missing {missing}")
+        console.print(f"  [red][x][/red] missing {missing}")
     raise typer.Exit(exit_code)
 
 
@@ -1021,7 +1021,7 @@ def knowledge_index(
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(_artifact_json(artifact), indent=2, ensure_ascii=False))
         return
-    console.print(f"[green]✓[/green] knowledge index written to {artifact.path}")
+    console.print(f"[green][OK][/green] knowledge index written to {artifact.path}")
 
 
 @knowledge_app.command("graph")
@@ -1039,7 +1039,7 @@ def knowledge_graph(
         return
     nodes = artifact.data.get("nodes", [])
     node_count = len(nodes) if isinstance(nodes, list) else 0
-    console.print(f"[green]✓[/green] knowledge graph with {node_count} node(s) written to {artifact.path}")
+    console.print(f"[green][OK][/green] knowledge graph with {node_count} node(s) written to {artifact.path}")
 
 
 @knowledge_app.command("verify")
@@ -1116,7 +1116,7 @@ def fix(
     console.print(f"[cyan]{action_label}[/cyan] {len(actions)} remediation action(s)")
     if apply_result is not None:
         for path in apply_result.written:
-            console.print(f"  [green]✓[/green] wrote {path}")
+            console.print(f"  [green][OK][/green] wrote {path}")
         for skipped in apply_result.skipped:
             console.print(f"  [yellow]↷[/yellow] skipped {skipped}")
     for action in actions:

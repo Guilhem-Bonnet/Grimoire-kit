@@ -443,7 +443,7 @@ def mcp_conversation_branch(
 
 def _print_tree(tree: BranchTree) -> None:
     """Affiche l'arbre des branches."""
-    print(f"\n  🌿 Branches de conversation ({tree.total_branches})")
+    print(f"\n  Branches de conversation ({tree.total_branches})")
     print(f"  {'─' * 60}")
     print(f"  Active : {tree.active_branch}")
     print(f"  ({tree.active_count} actives, {tree.archived_count} archivées)")
@@ -457,11 +457,11 @@ def _print_tree(tree: BranchTree) -> None:
         prefix = "  " + "│   " * indent
         is_active = "◉" if info.name == tree.active_branch else "○"
         status_icon = {
-            "active": "🟢",
-            "archived": "📦",
-            "merged": "🔀",
-            "deleted": "🗑️",
-        }.get(info.status, "❓")
+            "active": "[ok]",
+            "archived": "",
+            "merged": "",
+            "deleted": "",
+        }.get(info.status, "")
         artifacts = f" [{info.artifacts_count} artifacts]" if info.artifacts_count else ""
         purpose = f" — {info.purpose}" if info.purpose else ""
         print(f"{prefix}{is_active} {status_icon} {info.name}{artifacts}{purpose}")
@@ -479,7 +479,7 @@ def _print_tree(tree: BranchTree) -> None:
 
 def _print_info(info: BranchInfo) -> None:
     """Affiche les détails d'une branche."""
-    status_icon = {"active": "🟢", "archived": "📦", "merged": "🔀"}.get(info.status, "❓")
+    status_icon = {"active": "[ok]", "archived": "", "merged": ""}.get(info.status, "")
     print(f"\n  {status_icon} Branche : {info.name}")
     print(f"  {'─' * 50}")
     print(f"  Parent      : {info.parent}")
@@ -572,9 +572,9 @@ def main() -> None:
             if getattr(args, "json", False):
                 print(json.dumps(info.to_dict(), ensure_ascii=False, indent=2))
             else:
-                print(f"\n  ✅ Branche '{info.name}' créée (parent: {info.parent})\n")
+                print(f"\n  [OK] Branche '{info.name}' créée (parent: {info.parent})\n")
         except ValueError as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "list":
@@ -591,15 +591,15 @@ def main() -> None:
     elif args.command == "switch":
         try:
             info = manager.switch(args.name)
-            print(f"\n  🔀 Basculé sur '{info.name}'\n")
+            print(f"\n  Basculé sur '{info.name}'\n")
         except ValueError as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "info":
         info = manager.get_info(args.name)
         if not info:
-            print(f"  ❌ Branche '{args.name}' non trouvée", file=sys.stderr)
+            print(f"  [x] Branche '{args.name}' non trouvée", file=sys.stderr)
             sys.exit(1)
         if getattr(args, "json", False):
             print(json.dumps(info.to_dict(), ensure_ascii=False, indent=2))
@@ -609,17 +609,17 @@ def main() -> None:
     elif args.command == "archive":
         try:
             info = manager.archive(args.name)
-            print(f"\n  📦 Branche '{info.name}' archivée\n")
+            print(f"\n  Branche '{info.name}' archivée\n")
         except ValueError as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "delete":
         try:
             manager.delete(args.name)
-            print(f"\n  🗑️  Branche '{args.name}' supprimée\n")
+            print(f"\n   Branche '{args.name}' supprimée\n")
         except ValueError as e:
-            print(f"  ❌ {e}", file=sys.stderr)
+            print(f"  [x] {e}", file=sys.stderr)
             sys.exit(1)
 
 

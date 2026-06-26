@@ -950,7 +950,7 @@ def memory_status(ctx: typer.Context) -> None:
         }, indent=2, default=str))
         return
 
-    status_icon = "[green]✓[/green]" if health.healthy else "[red]✗[/red]"
+    status_icon = "[green][OK][/green]" if health.healthy else "[red][x][/red]"
     console.print(f"{status_icon} Backend: [bold]{health.backend}[/bold]")
     console.print(f"  Entries : {total}")
     if health.detail:

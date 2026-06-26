@@ -564,7 +564,7 @@ def render_report_md(
     if adds:
         lines += ["## Ajouts proposés", ""]
         for m in adds:
-            conf_icon = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(m.confidence, "⚪")
+            conf_icon = {"high": "[ok]", "medium": "[!]", "low": "[!!]"}.get(m.confidence, "[-]")
             lines.append(f"### {conf_icon} `{m.item_id}` → `{m.target_section}`")
             lines.append(f"\n**{m.description}**\n")
             lines.append(f"> {m.rationale}\n")
@@ -575,7 +575,7 @@ def render_report_md(
     if deps:
         lines += ["## Dépréciations proposées", ""]
         for m in deps:
-            lines.append(f"### ⚠️ `{m.item_id}` — à déprécier")
+            lines.append(f"### [!] `{m.item_id}` — à déprécier")
             lines.append(f"\n> {m.rationale}\n")
             lines.append("")
 
@@ -585,14 +585,14 @@ def render_report_md(
         lines.append("|-------|------------|--------|----------------------|")
         for tool in sorted(observed_tools.values(), key=lambda t: t.count, reverse=True)[:15]:
             agents = ", ".join(sorted(tool.agents)[:3])
-            in_dna = "✅" if tool.name in [t.lower() for t in dna.tools] else "➕"
+            in_dna = "[OK]" if tool.name in [t.lower() for t in dna.tools] else ""
             lines.append(f"| {in_dna} `{tool.name}` | {tool.count} | {agents} | {tool.last_seen or '-'} |")
         lines.append("")
 
     if patterns:
         lines += ["## Patterns comportementaux détectés", ""]
         for p in patterns:
-            source_icon = {"trace": "📋", "decisions": "📝", "learnings": "🧠"}.get(p.source, "📄")
+            source_icon = {"trace": "", "decisions": "", "learnings": ""}.get(p.source, "")
             lines.append(f"- {source_icon} **{p.pattern_id}** ({p.occurrences}x) — {p.description}")
         lines.append("")
 
@@ -620,7 +620,7 @@ def apply_patch(patch_path: Path, dna: DNASnapshot) -> None:
     Stratégie : append les nouvelles sections en YAML commenté à approuver manuellement.
     """
     if not patch_path.exists():
-        print(f"❌ Patch introuvable : {patch_path}", file=sys.stderr)
+        print(f"[x] Patch introuvable : {patch_path}", file=sys.stderr)
         sys.exit(1)
 
     patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
@@ -629,16 +629,16 @@ def apply_patch(patch_path: Path, dna: DNASnapshot) -> None:
     add_tools = re.findall(r"^  - id: ([\w-]+)$.*?check_command:", patch_content, re.MULTILINE | re.DOTALL)
 
     if not add_tools:
-        print("ℹ️  Aucun outil ADD non-commenté trouvé dans le patch.")
+        print("[i]  Aucun outil ADD non-commenté trouvé dans le patch.")
         print("   Éditer le patch et retirer les '#' des items à appliquer.")
         return
 
-    print(f"✅ {len(add_tools)} outil(s) à ajouter à {dna.source_path}")
+    print(f"[OK] {len(add_tools)} outil(s) à ajouter à {dna.source_path}")
     for t in add_tools:
         if t in dna.tools:
-            print(f"   ⚠️  {t} déjà dans la DNA — ignoré")
+            print(f"   [!]  {t} déjà dans la DNA — ignoré")
         else:
-            print(f"   ➕ {t}")
+            print(f"   {t}")
 
     # Backup
     backup = dna.source_path.with_suffix(".dna.yaml.bak")
@@ -700,12 +700,12 @@ Exemples :
             dna_path = (main_candidates or candidates)[0]
 
     if not dna_path or not dna_path.exists():
-        print("❌ Aucun fichier archetype.dna.yaml trouvé.", file=sys.stderr)
+        print("[x] Aucun fichier archetype.dna.yaml trouvé.", file=sys.stderr)
         print("   Spécifier avec --dna ou initialiser un archétype d'abord.")
         sys.exit(1)
 
     dna = parse_dna(dna_path)
-    print(f"\n  📐 DNA source : {dna_path.relative_to(project_root) if dna_path.is_relative_to(project_root) else dna_path}")
+    print(f"\n  DNA source : {dna_path.relative_to(project_root) if dna_path.is_relative_to(project_root) else dna_path}")
     print(f"     Archétype  : {dna.archetype_id} v{dna.version}")
     print(f"     Outils DNA : {len(dna.tools)}  |  Traits: {len(dna.traits)}  |  Contraintes: {len(dna.constraints)}")
 
@@ -714,7 +714,7 @@ Exemples :
         out_dir = project_root / args.out_dir
         patches = sorted(out_dir.glob("archetype.dna.patch*.yaml")) if out_dir.exists() else []
         if not patches:
-            print("❌ Aucun patch trouvé dans", out_dir)
+            print("[x] Aucun patch trouvé dans", out_dir)
             sys.exit(1)
         apply_patch(patches[-1], dna)
         return
@@ -744,7 +744,7 @@ Exemples :
 
     if not mutations:
         print()
-        print("  ✅ Aucune mutation nécessaire — la DNA reflète bien l'usage actuel.")
+        print("  [OK] Aucune mutation nécessaire — la DNA reflète bien l'usage actuel.")
         print()
         return
 
@@ -758,26 +758,26 @@ Exemples :
         patch_content = render_patch_yaml(dna, mutations)
         patch_path = out_dir / f"archetype.dna.patch.{date_str}.yaml"
         patch_path.write_text(patch_content, encoding="utf-8")
-        print(f"\n  📋 Patch : {patch_path.relative_to(project_root)}")
+        print(f"\n  Patch : {patch_path.relative_to(project_root)}")
 
     report_content = render_report_md(dna, mutations, observed_tools, all_patterns)
     report_path = out_dir / f"dna-evolution-report.{date_str}.md"
     report_path.write_text(report_content, encoding="utf-8")
-    print(f"  📄 Rapport : {report_path.relative_to(project_root)}")
+    print(f"  Rapport : {report_path.relative_to(project_root)}")
 
     # ── Résumé ────────────────────────────────────────────────────────────
     print()
     print("  ──────────────────────────────────────────────────")
     high = [m for m in adds if m.confidence == "high"]
     if high:
-        print(f"  🟢 HIGH confidence ({len(high)}) — fortement recommandés :")
+        print(f"  [ok] HIGH confidence ({len(high)}) — fortement recommandés :")
         for m in high[:4]:
             print(f"     + {m.item_id} → {m.target_section}  ({m.evidence_count}x dans TRACE)")
     med = [m for m in adds if m.confidence == "medium"]
     if med:
-        print(f"  🟡 MEDIUM confidence ({len(med)}) — à évaluer")
+        print(f"  [!] MEDIUM confidence ({len(med)}) — à évaluer")
     if deps:
-        print(f"  ⚠️  {len(deps)} outil(s) à déprécier (absents du TRACE)")
+        print(f"  [!]  {len(deps)} outil(s) à déprécier (absents du TRACE)")
     print()
     print("  Étapes suivantes :")
     if not args.report:

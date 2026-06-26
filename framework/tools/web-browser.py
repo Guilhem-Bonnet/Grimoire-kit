@@ -865,7 +865,7 @@ def _render_interact(result: InteractResult) -> str:
     if result.error:
         lines.append(f"Erreur: {result.error}")
     for step in result.steps:
-        status_str = "✓" if step.get("ok") else "✗"
+        status_str = "[OK]" if step.get("ok") else "[x]"
         action_str = json.dumps(step.get("action", {}), ensure_ascii=False)
         lines.append(f"  {status_str} Step {step['step']}: {action_str}")
         if "markdown" in step:
@@ -879,8 +879,8 @@ def _render_interact(result: InteractResult) -> str:
 
 def _render_status(result: BrowserStatus) -> str:
     """Rendu texte pour status."""
-    pw_icon = "✓" if result.playwright_installed else "✗"
-    br_icon = "✓" if result.browser_installed else "✗"
+    pw_icon = "[OK]" if result.playwright_installed else "[x]"
+    br_icon = "[OK]" if result.browser_installed else "[x]"
     lines = [
         f"web-browser v{result.version}",
         f"  {pw_icon} Playwright: {result.playwright_message}",

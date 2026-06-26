@@ -603,7 +603,7 @@ def render_inspect(bundle: MigrationBundle) -> str:
     """Affiche le contenu d'un bundle."""
     m = bundle.manifest
     lines = [
-        "# 📦 Grimoire Migration Bundle",
+        "# Grimoire Migration Bundle",
         "",
         f"> **Source** : {m.source_project}",
         f"> **Date export** : {m.export_date[:10]}",
@@ -616,7 +616,7 @@ def render_inspect(bundle: MigrationBundle) -> str:
     lines.extend(["", "---", ""])
 
     if bundle.learnings:
-        lines.append(f"## 📚 Learnings ({len(bundle.learnings)})")
+        lines.append(f"## Learnings ({len(bundle.learnings)})")
         lines.append("")
         by_agent: dict[str, int] = {}
         for entry in bundle.learnings:
@@ -627,7 +627,7 @@ def render_inspect(bundle: MigrationBundle) -> str:
         lines.extend(["", "---", ""])
 
     if bundle.rules:
-        lines.append(f"## 📏 Règles ({len(bundle.rules)})")
+        lines.append(f"## Règles ({len(bundle.rules)})")
         lines.append("")
         by_cat: dict[str, int] = {}
         for r in bundle.rules:
@@ -637,25 +637,25 @@ def render_inspect(bundle: MigrationBundle) -> str:
         lines.extend(["", "---", ""])
 
     if bundle.dna_patches:
-        lines.append(f"## 🧬 DNA Patches ({len(bundle.dna_patches)})")
+        lines.append(f"## DNA Patches ({len(bundle.dna_patches)})")
         lines.append("")
         for p in bundle.dna_patches:
             lines.append(f"- {p.get('filename', '?')}")
         lines.extend(["", "---", ""])
 
     if bundle.agents:
-        lines.append(f"## 🤖 Agents ({len(bundle.agents)})")
+        lines.append(f"## Agents ({len(bundle.agents)})")
         lines.append("")
         for a in bundle.agents:
             lines.append(f"- {a.get('filename', '?')}")
         lines.extend(["", "---", ""])
 
     if bundle.consensus:
-        lines.append(f"## 🏛️ Consensus ({len(bundle.consensus)})")
+        lines.append(f"## Consensus ({len(bundle.consensus)})")
         lines.append("")
 
     if bundle.antifragile:
-        lines.append(f"## 🛡️ Anti-Fragile ({len(bundle.antifragile)})")
+        lines.append(f"## Anti-Fragile ({len(bundle.antifragile)})")
         lines.append("")
 
     return "\n".join(lines)
@@ -663,7 +663,7 @@ def render_inspect(bundle: MigrationBundle) -> str:
 
 def render_import_result(result: ImportResult, dry_run: bool = False) -> str:
     """Affiche le résultat d'un import."""
-    prefix = "🔍 DRY RUN" if dry_run else "✅ Import terminé"
+    prefix = "DRY RUN" if dry_run else "[OK] Import terminé"
     lines = [
         f"# {prefix}",
         "",
@@ -678,7 +678,7 @@ def render_import_result(result: ImportResult, dry_run: bool = False) -> str:
     ]
 
     if result.conflicts:
-        lines.extend(["", "⚠️ Conflits :"])
+        lines.extend(["", "[!] Conflits :"])
         for c in result.conflicts:
             lines.append(f"  - {c}")
 
@@ -688,7 +688,7 @@ def render_import_result(result: ImportResult, dry_run: bool = False) -> str:
 def render_diff(bundle: MigrationBundle, project_root: Path) -> str:
     """Compare un bundle avec l'état actuel du projet."""
     lines = [
-        "# 🔀 Diff : Bundle vs Projet",
+        "# Diff : Bundle vs Projet",
         "",
     ]
 
@@ -770,7 +770,7 @@ def main():
             only = {t.strip() for t in args.only.split(",")}
             invalid = only - ARTIFACT_TYPES
             if invalid:
-                print(f"❌ Types inconnus : {invalid}", file=sys.stderr)
+                print(f"[x] Types inconnus : {invalid}", file=sys.stderr)
                 print(f"   Valides : {', '.join(sorted(ARTIFACT_TYPES))}",
                       file=sys.stderr)
                 sys.exit(1)
@@ -781,7 +781,7 @@ def main():
             output_path = project_root / output_path
 
         save_bundle(bundle, output_path)
-        print(f"📦 Bundle exporté : {output_path}")
+        print(f"Bundle exporté : {output_path}")
         print(f"   Source : {bundle.manifest.source_project}")
         print(f"   Types : {', '.join(bundle.manifest.artifact_types) or 'aucun'}")
         print(f"   Items : {bundle.manifest.total_items}")
@@ -789,7 +789,7 @@ def main():
     elif args.command == "import":
         bundle_path = Path(args.bundle)
         if not bundle_path.exists():
-            print(f"❌ Bundle introuvable : {bundle_path}", file=sys.stderr)
+            print(f"[x] Bundle introuvable : {bundle_path}", file=sys.stderr)
             sys.exit(1)
 
         bundle = load_bundle(bundle_path)
@@ -799,7 +799,7 @@ def main():
     elif args.command == "inspect":
         bundle_path = Path(args.bundle)
         if not bundle_path.exists():
-            print(f"❌ Bundle introuvable : {bundle_path}", file=sys.stderr)
+            print(f"[x] Bundle introuvable : {bundle_path}", file=sys.stderr)
             sys.exit(1)
 
         bundle = load_bundle(bundle_path)
@@ -808,7 +808,7 @@ def main():
     elif args.command == "diff":
         bundle_path = Path(args.bundle)
         if not bundle_path.exists():
-            print(f"❌ Bundle introuvable : {bundle_path}", file=sys.stderr)
+            print(f"[x] Bundle introuvable : {bundle_path}", file=sys.stderr)
             sys.exit(1)
 
         bundle = load_bundle(bundle_path)

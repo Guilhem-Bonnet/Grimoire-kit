@@ -306,7 +306,7 @@ def prompt_user(current: UserConfig) -> UserConfig:
             if not val:
                 return default
             if valid and val not in valid:
-                print(f"    ⚠ Choix valides : {', '.join(valid)}")
+                print(f"    [!] Choix valides : {', '.join(valid)}")
                 continue
             return val
 
@@ -344,26 +344,26 @@ def print_report(report: SetupReport, *, json_mode: bool = False) -> None:
         return
 
     if report.updated_files:
-        print("\n  ✅ Fichiers mis à jour :")
+        print("\n  [OK] Fichiers mis à jour :")
         for f in report.updated_files:
             print(f"     • {f}")
 
     if report.skipped_files:
-        print("\n  ⏭  Fichiers absents (ignorés) :")
+        print("\n   Fichiers absents (ignorés) :")
         for f in report.skipped_files:
             print(f"     • {f}")
 
     if report.errors:
-        print("\n  ❌ Erreurs :")
+        print("\n  [x] Erreurs :")
         for e in report.errors:
             print(f"     • {e}")
 
     if report.diffs:
-        print("\n  🔶 Différences restantes :")
+        print("\n  Différences restantes :")
         for d in report.diffs:
             print(f"     • {d.file} → {d.key}: '{d.current}' ≠ '{d.expected}'")
     elif not report.errors:
-        print("\n  ✅ Tous les fichiers sont synchronisés.")
+        print("\n  [OK] Tous les fichiers sont synchronisés.")
 
     print()
 
@@ -407,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     pcy_path = root / "project-context.yaml"
 
     if not pcy_path.exists():
-        msg = f"❌ project-context.yaml introuvable dans {root}"
+        msg = f"[x] project-context.yaml introuvable dans {root}"
         if args.json:
             print(json.dumps({"error": msg}, ensure_ascii=False))
         else:
@@ -449,10 +449,10 @@ def main(argv: list[str] | None = None) -> int:
     # Show preview
     pre_report = run_check(root, target)
     if pre_report.is_synced:
-        print("\n  ✅ Rien à changer — config déjà synchronisée.\n")
+        print("\n  [OK] Rien à changer — config déjà synchronisée.\n")
         return 0
 
-    print(f"\n  📝 {len(pre_report.diffs)} modification(s) à appliquer :")
+    print(f"\n  {len(pre_report.diffs)} modification(s) à appliquer :")
     for d in pre_report.diffs:
         print(f"     • {d.key}: '{d.current}' → '{d.expected}'")
 

@@ -537,12 +537,12 @@ def mcp_vision_list_rubrics() -> dict[str, Any]:
 def cmd_evaluate(args: argparse.Namespace) -> int:
     image = Path(args.image)
     if not image.exists():
-        print(f"  ❌ Image not found: {image}", file=sys.stderr)
+        print(f"  [x] Image not found: {image}", file=sys.stderr)
         return 1
 
     rubric_id = args.rubric
     if rubric_id not in RUBRICS:
-        print(f"  ❌ Unknown rubric: {rubric_id}", file=sys.stderr)
+        print(f"  [x] Unknown rubric: {rubric_id}", file=sys.stderr)
         print(f"     Available: {', '.join(RUBRICS.keys())}", file=sys.stderr)
         return 1
 
@@ -550,11 +550,11 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if image.suffix.lower() == ".svg":
         check = validate_svg_offline(image)
         if check["warnings"]:
-            print("\n  ⚠️  SVG Warnings:")
+            print("\n  [!]  SVG Warnings:")
             for w in check["warnings"]:
                 print(f"     - {w}")
         if check["stats"]:
-            print(f"  📊 SVG Stats: {json.dumps(check['stats'], indent=2)}")
+            print(f"  SVG Stats: {json.dumps(check['stats'], indent=2)}")
 
     prompt = build_evaluation_prompt(
         rubric_id,
@@ -574,16 +574,16 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         rubric = RUBRICS[rubric_id]
-        print(f"\n  👁️  Vision Judge — {rubric['name']}")
-        print(f"  📄 Image: {image}")
-        print(f"  📏 Threshold: {rubric['acceptance_threshold']}")
-        print(f"  📊 Criteria: {len(rubric['criteria'])}")
-        print("\n  📝 Evaluation Prompt:")
+        print(f"\n   Vision Judge — {rubric['name']}")
+        print(f"  Image: {image}")
+        print(f"  Threshold: {rubric['acceptance_threshold']}")
+        print(f"  Criteria: {len(rubric['criteria'])}")
+        print("\n  Evaluation Prompt:")
         print(f"  {'─' * 60}")
         for line in prompt.split("\n"):
             print(f"  {line}")
         print(f"  {'─' * 60}")
-        print("\n  💡 Send this prompt + image to a multimodal LLM to get the evaluation.")
+        print("\n  Send this prompt + image to a multimodal LLM to get the evaluation.")
 
     return 0
 
@@ -593,7 +593,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     after = Path(args.after)
 
     if not before.exists() or not after.exists():
-        print("  ❌ Both images required", file=sys.stderr)
+        print("  [x] Both images required", file=sys.stderr)
         return 1
 
     result = {
@@ -607,7 +607,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print("\n  👁️  Vision Judge — Compare")
+        print("\n   Vision Judge — Compare")
         print(f"  Before: {before}")
         print(f"  After: {after}")
         print(f"  Rubric: {args.rubric}")
@@ -619,9 +619,9 @@ def cmd_rubric(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(mcp_vision_list_rubrics(), indent=2, ensure_ascii=False))
     else:
-        print("\n  👁️  Vision Judge — Available Rubrics\n")
+        print("\n   Vision Judge — Available Rubrics\n")
         for rid, rubric in RUBRICS.items():
-            print(f"  📋 {rid}")
+            print(f"  {rid}")
             print(f"     {rubric['name']} — {rubric['description']}")
             print(f"     Threshold: {rubric['acceptance_threshold']}")
             print(f"     Criteria: {', '.join(c['name'] for c in rubric['criteria'])}")
@@ -632,17 +632,17 @@ def cmd_rubric(args: argparse.Namespace) -> int:
 def cmd_batch(args: argparse.Namespace) -> int:
     directory = Path(args.dir)
     if not directory.is_dir():
-        print(f"  ❌ Not a directory: {directory}", file=sys.stderr)
+        print(f"  [x] Not a directory: {directory}", file=sys.stderr)
         return 1
 
     image_exts = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
     images = sorted(f for f in directory.iterdir() if f.suffix.lower() in image_exts)
 
     if not images:
-        print(f"  ⚠️  No images found in {directory}")
+        print(f"  [!]  No images found in {directory}")
         return 0
 
-    print(f"\n  👁️  Vision Judge — Batch ({len(images)} images)")
+    print(f"\n   Vision Judge — Batch ({len(images)} images)")
     print(f"  Rubric: {args.rubric}\n")
 
     results = []
@@ -651,7 +651,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         if img.suffix.lower() == ".svg":
             r["svg_validation"] = validate_svg_offline(img)
         results.append(r)
-        print(f"  📄 {img.name} — prepared")
+        print(f"  {img.name} — prepared")
 
     if args.json:
         print(json.dumps({"batch": results}, indent=2, ensure_ascii=False))

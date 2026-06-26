@@ -232,7 +232,7 @@ def refine_prompt(
 
 def display_prompt(result: ImagePrompt) -> None:
     """Affiche le prompt généré."""
-    print("\n🎨 Image Prompt Generator")
+    print("\nImage Prompt Generator")
     print("=" * 60)
     print(f"  Style   : {result.style}")
     if result.art_style:
@@ -244,12 +244,12 @@ def display_prompt(result: ImagePrompt) -> None:
     if result.aspect_ratio:
         print(f"  Ratio   : {result.aspect_ratio}")
     print()
-    print("  📋 Prompt :")
+    print("  Prompt :")
     print(f"  {result.final_prompt}")
     if result.negative:
-        print(f"\n  🚫 Négatif : {result.negative}")
+        print(f"\n  [STOP] Négatif : {result.negative}")
     if result.tips:
-        print("\n  💡 Conseils :")
+        print("\n  Conseils :")
         for tip in result.tips:
             print(f"    - {tip}")
     print()
@@ -257,7 +257,7 @@ def display_prompt(result: ImagePrompt) -> None:
 
 def display_options() -> None:
     """Affiche les options disponibles."""
-    print("\n🎨 Options disponibles")
+    print("\nOptions disponibles")
     print("=" * 60)
     print("\n  Styles :", ", ".join(STYLE_PRESETS.keys()))
     print("\n  Art styles :")

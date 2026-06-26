@@ -698,7 +698,7 @@ def main() -> None:
         try:
             payload = json.loads(args.payload)
         except json.JSONDecodeError:
-            print("  ❌ Payload JSON invalide", file=sys.stderr)
+            print("  [x] Payload JSON invalide", file=sys.stderr)
             sys.exit(1)
 
         if args.direction == "input":
@@ -712,7 +712,7 @@ def main() -> None:
                 "errors": [asdict(e) for e in result.errors],
             }, ensure_ascii=False, indent=2))
         else:
-            icon = "✅" if result.valid else "❌"
+            icon = "[OK]" if result.valid else "[x]"
             print(f"\n  {icon} Contrat '{args.contract}' — {args.direction}")
             if result.errors:
                 print(f"  Erreurs ({len(result.errors)}) :")
@@ -747,20 +747,20 @@ def main() -> None:
             args.output.mkdir(parents=True, exist_ok=True)
             outpath = args.output / f"{args.name}.json"
             outpath.write_text(output + "\n", encoding="utf-8")
-            print(f"\n  ✅ Template généré : {outpath}\n")
+            print(f"\n  [OK] Template généré : {outpath}\n")
         else:
             print(output)
 
     elif args.command == "inspect":
         contract = registry.get(args.contract)
         if not contract:
-            print(f"  ❌ Contrat '{args.contract}' non trouvé", file=sys.stderr)
+            print(f"  [x] Contrat '{args.contract}' non trouvé", file=sys.stderr)
             sys.exit(1)
         data = contract.to_dict()
         if getattr(args, "json", False):
             print(json.dumps(data, ensure_ascii=False, indent=2))
         else:
-            print(f"\n  📋 Contrat : {contract.name}")
+            print(f"\n  Contrat : {contract.name}")
             print(f"  {'─' * 50}")
             print(f"  Description : {contract.description}")
             print(f"  Version     : {contract.version}")
@@ -772,21 +772,21 @@ def main() -> None:
             input_s = contract.input_schema.to_json_schema()
             print("\n  Input Schema :")
             for prop_name in input_s.get("properties", {}):
-                req = "✓" if prop_name in input_s.get("required", []) else " "
+                req = "[OK]" if prop_name in input_s.get("required", []) else " "
                 ptype = input_s["properties"][prop_name].get("type", "?")
                 print(f"    [{req}] {prop_name:25s} : {ptype}")
 
             output_s = contract.output_schema.to_json_schema()
             print("\n  Output Schema :")
             for prop_name in output_s.get("properties", {}):
-                req = "✓" if prop_name in output_s.get("required", []) else " "
+                req = "[OK]" if prop_name in output_s.get("required", []) else " "
                 ptype = output_s["properties"][prop_name].get("type", "?")
                 print(f"    [{req}] {prop_name:25s} : {ptype}")
             print()
 
     elif args.command == "stats":
         s = registry.stats()
-        print("\n  📊 Registry Stats")
+        print("\n  Registry Stats")
         print(f"  {'─' * 40}")
         print(f"  Total contrats : {s['total_contracts']}")
         print(f"  Built-in       : {s['builtin']}")

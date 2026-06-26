@@ -8,12 +8,12 @@ dans l'environnement, d'autres agents les captent et adaptent leur
 comportement. Pas de communication directe — l'environnement est le médium.
 
 Phéromones :
-  - NEED       🔵 — besoin (review, expertise, clarification)
-  - ALERT      🔴 — danger (breaking change, dette technique, sécurité)
-  - OPPORTUNITY 🟢 — amélioration potentielle
-  - PROGRESS   🟡 — travail en cours
-  - COMPLETE   ✅ — travail terminé, prêt pour la suite
-  - BLOCK      🚧 — bloqué, en attente de résolution
+  - NEED       [i] — besoin (review, expertise, clarification)
+  - ALERT      [!!] — danger (breaking change, dette technique, sécurité)
+  - OPPORTUNITY [ok] — amélioration potentielle
+  - PROGRESS   [!] — travail en cours
+  - COMPLETE   [OK] — travail terminé, prêt pour la suite
+  - BLOCK      — bloqué, en attente de résolution
 
 Propriétés des phéromones :
   - intensity (0.0-1.0) — décroît avec le temps (demi-vie configurable)
@@ -61,12 +61,12 @@ PHEROMONE_FILE = "pheromone-board.json"
 VALID_TYPES = {"NEED", "ALERT", "OPPORTUNITY", "PROGRESS", "COMPLETE", "BLOCK"}
 
 TYPE_ICONS = {
-    "NEED":        "🔵",
-    "ALERT":       "🔴",
-    "OPPORTUNITY": "🟢",
-    "PROGRESS":    "🟡",
-    "COMPLETE":    "✅",
-    "BLOCK":       "🚧",
+    "NEED":        "[i]",
+    "ALERT":       "[!!]",
+    "OPPORTUNITY": "[ok]",
+    "PROGRESS":    "[!]",
+    "COMPLETE":    "[OK]",
+    "BLOCK":       "",
 }
 
 # Évaporation
@@ -653,17 +653,17 @@ def analyze_trails(board: PheromoneBoard,
 def render_sense(items: list[tuple[Pheromone, float]]) -> str:
     """Affiche les phéromones détectées."""
     if not items:
-        return "🌿 Aucune phéromone active détectée."
+        return "Aucune phéromone active détectée."
 
     lines = [
-        "# 🐜 Phéromones Actives",
+        "# Phéromones Actives",
         "",
         f"> {len(items)} signal(aux) détecté(s)",
         "",
     ]
 
     for p, intensity in items:
-        icon = TYPE_ICONS.get(p.pheromone_type, "❓")
+        icon = TYPE_ICONS.get(p.pheromone_type, "")
         bar = _intensity_bar(intensity)
         lines.extend([
             f"## {icon} {p.pheromone_type} — `{p.pheromone_id}`",
@@ -692,7 +692,7 @@ def render_landscape(board: PheromoneBoard,
     resolved = [p for p in board.pheromones if p.resolved]
 
     lines = [
-        "# 🗺️ Paysage Phéromonique",
+        "# Paysage Phéromonique",
         "",
         f"- Signaux actifs : **{len(active)}**",
         f"- Résolus : **{len(resolved)}**",
@@ -756,18 +756,18 @@ def render_landscape(board: PheromoneBoard,
 def render_trails(patterns: list[TrailPattern]) -> str:
     """Affiche les patterns de coordination détectés."""
     if not patterns:
-        return "🌿 Aucun pattern de coordination émergent détecté."
+        return "Aucun pattern de coordination émergent détecté."
 
     pattern_icons = {
-        "hot-zone":     "🔥",
-        "cold-zone":    "❄️",
-        "convergence":  "🎯",
-        "bottleneck":   "🚧",
-        "relay":        "🔄",
+        "hot-zone":     "",
+        "cold-zone":    "",
+        "convergence":  "",
+        "bottleneck":   "",
+        "relay":        "",
     }
 
     lines = [
-        "# 🐜 Trails — Patterns de coordination",
+        "# Trails — Patterns de coordination",
         "",
         f"> {len(patterns)} pattern(s) détecté(s)",
         "",
@@ -775,7 +775,7 @@ def render_trails(patterns: list[TrailPattern]) -> str:
 
     for pat in sorted(patterns,
                       key=lambda p: p.pheromone_count, reverse=True):
-        icon = pattern_icons.get(pat.pattern_type, "❓")
+        icon = pattern_icons.get(pat.pattern_type, "")
         lines.extend([
             f"## {icon} {pat.pattern_type.upper()} — {pat.location}",
             "",
@@ -795,9 +795,9 @@ def render_trails(patterns: list[TrailPattern]) -> str:
 def render_evaporate(evaporated: int, remaining: int,
                      dry_run: bool = False) -> str:
     """Affiche le résultat de l'évaporation."""
-    prefix = "🔍 DRY RUN — " if dry_run else ""
+    prefix = "DRY RUN — " if dry_run else ""
     return (
-        f"{prefix}🌬️ Évaporation terminée\n\n"
+        f"{prefix}Évaporation terminée\n\n"
         f"- Phéromones évaporées : **{evaporated}**\n"
         f"- Phéromones restantes : **{remaining}**\n"
     )
@@ -908,20 +908,20 @@ def main():
         p = amplify_pheromone(board, args.id, args.agent)
         if p:
             save_board(project_root, board)
-            print(f"⬆️ Phéromone {args.id} renforcée par {args.agent}")
+            print(f"⬆ Phéromone {args.id} renforcée par {args.agent}")
             print(f"   Nouvelle intensité : {p.intensity:.0%}")
             print(f"   Renforcements : {p.reinforcements}")
         else:
-            print(f"❌ Phéromone {args.id} introuvable", file=sys.stderr)
+            print(f"[x] Phéromone {args.id} introuvable", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "resolve":
         p = resolve_pheromone(board, args.id, args.agent)
         if p:
             save_board(project_root, board)
-            print(f"✅ Phéromone {args.id} résolue par {args.agent}")
+            print(f"[OK] Phéromone {args.id} résolue par {args.agent}")
         else:
-            print(f"❌ Phéromone {args.id} introuvable", file=sys.stderr)
+            print(f"[x] Phéromone {args.id} introuvable", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "landscape":
@@ -948,7 +948,7 @@ def main():
         resolved = sum(1 for p in board.pheromones if p.resolved)
         max_reinforced = max(
             (p.reinforcements for p in board.pheromones), default=0)
-        print("# 📊 Statistiques Stigmergy")
+        print("# Statistiques Stigmergy")
         print()
         print(f"- Signaux actifs : **{len(active)}**")
         print(f"- Résolus : **{resolved}**")
@@ -968,9 +968,9 @@ def main():
             key=lambda x: x[1], reverse=True,
         )
         if not scored:
-            print("🌿 Aucun signal urgent détecté.")
+            print("Aucun signal urgent détecté.")
         else:
-            print("# 🚨 Signaux par score d'urgence")
+            print("# Signaux par score d'urgence")
             print()
             for p, score in scored[:10]:
                 icon = TYPE_ICONS.get(p.pheromone_type, "")

@@ -39,12 +39,12 @@ KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "w
 
 # Archetype human descriptions for the wizard (order = display order)
 _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
-    "web-app": ("🌐 Web App", "2 agents", "TDD, type-safety, API-first"),
-    "infra-ops": ("⚙️  Infra & DevOps", "7 agents", "IaC, security-first, observability"),
-    "platform-engineering": ("🏗️  Platform Eng.", "4 agents", "architecture-first, contract-driven"),
-    "agentic-standard": ("⚖️  Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
-    "creative-studio": ("🎨 Creative Studio", "5 agents", "visual-consistency, brand-voice"),
-    "fix-loop": ("🔁 Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
+    "web-app": ("Web App", "2 agents", "TDD, type-safety, API-first"),
+    "infra-ops": (" Infra & DevOps", "7 agents", "IaC, security-first, observability"),
+    "platform-engineering": (" Platform Eng.", "4 agents", "architecture-first, contract-driven"),
+    "agentic-standard": (" Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
+    "creative-studio": ("Creative Studio", "5 agents", "visual-consistency, brand-voice"),
+    "fix-loop": ("Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
 }
 # Minimal is always base — not shown in multi-select
 _ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())
@@ -174,7 +174,7 @@ def _run_wizard(
         for det in scan.stacks:
             conf_pct = f"{det.confidence:.0%}"
             evidence = ", ".join(det.evidence[:3])
-            console.print(f"    [green]✓[/green] {det.name} ({conf_pct}) — {evidence}")
+            console.print(f"    [green][OK][/green] {det.name} ({conf_pct}) — {evidence}")
         console.print()
 
     default_name = target.name
@@ -240,7 +240,7 @@ def _run_wizard(
             auto_indices.append(str(idx))
 
     console.print()
-    console.print("    [bold]0[/bold]) 🤷 Not sure — help me choose")
+    console.print("    [bold]0[/bold]) Not sure — help me choose")
     console.print()
 
     default_input = ",".join(auto_indices) if auto_indices else ""
@@ -336,7 +336,7 @@ def _parse_archetype_selection(
 def _guided_discovery(scan: ScanResult | None) -> list[str]:
     """3-question guided flow for users who don't know which archetypes to pick."""
     console.print()
-    console.print("  [bold]── 🤷 Guided Discovery ──[/bold]\n")
+    console.print("  [bold]── Guided Discovery ──[/bold]\n")
 
     # Detect defaults from scan
     detected = {d.name for d in scan.stacks} if scan and scan.stacks else set()
@@ -381,7 +381,7 @@ def _display_composition_preview(archetypes: list[str]) -> None:
     """Show what the selected composition includes."""
     console.print()
     console.print("  [bold]── Composition ──[/bold]")
-    console.print("  📦 Base : [bold]minimal[/bold] (3 meta-agents)")
+    console.print("  Base : [bold]minimal[/bold] (3 meta-agents)")
     total_agents = 3  # meta-agents
     for key in archetypes:
         if key == "minimal":
@@ -418,7 +418,7 @@ def _display_report(
         stacks_str = " · ".join(
             f"[bold]{d.name}[/bold]" for d in scan.stacks
         )
-        console.print(f"  [cyan]📦 Stack:[/cyan] {stacks_str}")
+        console.print(f"  [cyan]Stack:[/cyan] {stacks_str}")
 
     # Archetypes
     if resolved.is_composite:
@@ -426,11 +426,11 @@ def _display_report(
         for a in resolved.archetypes:
             ai = _ARCHETYPE_INFO.get(a)
             names.append(ai[0] if ai else a)
-        console.print(f"  [cyan]🧬 Archetypes:[/cyan] {' + '.join(names)}")
+        console.print(f"  [cyan]Archetypes:[/cyan] {' + '.join(names)}")
     else:
         info = _ARCHETYPE_INFO.get(resolved.archetype, (resolved.archetype, "", ""))
-        console.print(f"  [cyan]🧬 Archetype:[/cyan] {info[0]} ({resolved.reason})")
-    console.print(f"  [cyan]🧠 Memory:[/cyan] {backend}")
+        console.print(f"  [cyan]Archetype:[/cyan] {info[0]} ({resolved.reason})")
+    console.print(f"  [cyan]Memory:[/cyan] {backend}")
     _backend_tips = {
         "local": "Mémoire fichier locale — aucune dépendance requise",
         "qdrant-local": "Qdrant détecté sur localhost:6333 — recherche sémantique activée",
@@ -452,11 +452,11 @@ def _display_report(
         if "/" in label:
             cat, name = label.split("/", 1)
             agents_by_cat.setdefault(cat, []).append(name)
-    _cat_icons = {"meta": "🧠", "stack": "📦", "feature": "✨"}
+    _cat_icons = {"meta": "", "stack": "", "feature": ""}
     if agents_by_cat:
-        console.print("  [cyan]🤖 Agents deployed:[/cyan]")
+        console.print("  [cyan]Agents deployed:[/cyan]")
         for cat, agents in agents_by_cat.items():
-            icon = _cat_icons.get(cat, "🤖")
+            icon = _cat_icons.get(cat, "")
             agent_names = ", ".join(f"[bold]{a}[/bold]" for a in agents)
             console.print(f"    {icon} [dim]{cat}:[/dim] {agent_names}")
         console.print()
@@ -503,9 +503,9 @@ def _display_dry_run(
             agents_by_cat.setdefault(cat, []).append(name)
     if agents_by_cat:
         console.print("[bold]Agents to deploy:[/bold]")
-        _cat_icons = {"meta": "🧠", "stack": "📦", "feature": "✨"}
+        _cat_icons = {"meta": "", "stack": "", "feature": ""}
         for cat, agents in agents_by_cat.items():
-            icon = _cat_icons.get(cat, "🤖")
+            icon = _cat_icons.get(cat, "")
             console.print(f"  {icon} [cyan]{cat}[/cyan]: {', '.join(agents)}")
         console.print()
 
@@ -526,7 +526,7 @@ def _display_dry_run(
                         if in_section:
                             if line.startswith(("  - ", "  - ")):
                                 val = line.strip().lstrip("- ").split(":")[0]
-                                console.print(f"    [green]✓[/green] {val}")
+                                console.print(f"    [green][OK][/green] {val}")
                             elif not line.startswith(" "):
                                 break
         except OSError:

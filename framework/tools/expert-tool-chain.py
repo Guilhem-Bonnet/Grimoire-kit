@@ -351,7 +351,7 @@ def get_expertise_context(profile_id: str) -> str:
     lines.append("")
     lines.append("## Common Errors to Avoid")
     for key, value in profile.get("common_errors", {}).items():
-        lines.append(f"- ⚠️ **{key}**: {value}")
+        lines.append(f"- [!] **{key}**: {value}")
 
     return "\n".join(lines)
 
@@ -581,26 +581,26 @@ def cmd_execute(args: argparse.Namespace) -> int:
     plan = plan_execution(args.profile, args.brief)
 
     if "error" in plan:
-        print(f"  ❌ {plan['error']}", file=sys.stderr)
+        print(f"  [x] {plan['error']}", file=sys.stderr)
         return 1
 
     if args.json:
         print(json.dumps(plan, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔧 Expert Tool Chain — {plan['name']}")
-        print(f"  📝 Brief: {args.brief}")
-        print(f"  🎯 Domain: {plan['domain']}")
+        print(f"\n  Expert Tool Chain — {plan['name']}")
+        print(f"  Brief: {args.brief}")
+        print(f"  Domain: {plan['domain']}")
         if plan.get("mcp_server"):
-            print(f"  🔌 MCP Server: {plan['mcp_server']}")
+            print(f"  MCP Server: {plan['mcp_server']}")
         else:
-            print("  💻 Mode: Code-only (no MCP server)")
-        print(f"  👁️ Vision Rubric: {plan['vision_rubric']}")
-        print(f"  🔄 Max Iterations: {plan['max_iterations']}")
-        print(f"  📏 Threshold: {plan['acceptance_threshold']}")
-        print("\n  📋 Workflow Steps:")
+            print("  Mode: Code-only (no MCP server)")
+        print(f"  Vision Rubric: {plan['vision_rubric']}")
+        print(f"  Max Iterations: {plan['max_iterations']}")
+        print(f"  Threshold: {plan['acceptance_threshold']}")
+        print("\n  Workflow Steps:")
         for i, step in enumerate(plan["workflow_steps"], 1):
             print(f"    {i}. {step}")
-        print(f"\n  📝 Creation Prompt (first {60} chars):")
+        print(f"\n  Creation Prompt (first {60} chars):")
         prompt = plan.get("creation_prompt", "")
         for line in prompt.split("\n")[:15]:
             print(f"    {line}")
@@ -616,12 +616,12 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(catalog, indent=2, ensure_ascii=False))
     else:
-        print(f"\n  🔧 Expert Tool Chain — Profiles ({catalog['count']})\n")
+        print(f"\n  Expert Tool Chain — Profiles ({catalog['count']})\n")
         for p in catalog["profiles"]:
-            mcp = f"🔌 {p['mcp_server']}" if p["requires_mcp"] else "💻 Code-only"
-            print(f"  📋 {p['id']}")
+            mcp = f"{p['mcp_server']}" if p["requires_mcp"] else "Code-only"
+            print(f"  {p['id']}")
             print(f"     {p['name']} — {p['description']}")
-            print(f"     {mcp} | 👁️ {p['vision_rubric']} | 🔄 max {p['max_iterations']} iter | 📏 {p['acceptance_threshold']}")
+            print(f"     {mcp} | {p['vision_rubric']} | max {p['max_iterations']} iter | {p['acceptance_threshold']}")
             print()
 
     return 0
@@ -635,7 +635,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"server": server_name, "used_by_profiles": using}, indent=2))
     else:
-        print(f"\n  🔌 MCP Server: {server_name}")
+        print(f"\n  MCP Server: {server_name}")
         if using:
             print(f"  Used by profiles: {', '.join(using)}")
             for pid in using:
@@ -643,7 +643,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 tools = [s.get("mcp_tool") for s in profile.get("workflow_steps", []) if s.get("mcp_tool")]
                 print(f"    {pid}: tools = {', '.join(filter(None, tools))}")
         else:
-            print("  ⚠️  Not used by any expertise profile")
+            print("  [!]  Not used by any expertise profile")
 
     return 0
 
@@ -656,12 +656,12 @@ def cmd_history(args: argparse.Namespace) -> int:
         print(json.dumps(entries, indent=2, ensure_ascii=False))
     else:
         if not entries:
-            print("\n  📜 Aucun historique ETC")
+            print("\n  Aucun historique ETC")
             return 0
-        print(f"\n  📜 ETC History ({len(entries)} entries)\n")
+        print(f"\n  ETC History ({len(entries)} entries)\n")
         for e in entries:
-            status_icon = {"completed": "✅", "failed": "❌", "escalated": "⚠️", "running": "🔄"}.get(
-                e.get("status", ""), "❓"
+            status_icon = {"completed": "[OK]", "failed": "[x]", "escalated": "[!]", "running": ""}.get(
+                e.get("status", ""), ""
             )
             print(f"  {status_icon} {e.get('execution_id', '?')} — {e.get('profile', '?')}")
             print(f"     Brief: {e.get('brief', 'N/A')}")

@@ -415,7 +415,7 @@ def uninstall_hook(project_root: Path) -> tuple[bool, str]:
 
 def watch_directory(project_root: Path, interval: float = WATCH_INTERVAL) -> None:
     """Surveille les changements et déclenche l'auto-indexation."""
-    print("\n  👁️  Auto-Index Watch Mode")
+    print("\n   Auto-Index Watch Mode")
     print(f"  Polling toutes les {interval}s — Ctrl+C pour arrêter\n")
 
     state = load_index(project_root)
@@ -428,9 +428,9 @@ def watch_directory(project_root: Path, interval: float = WATCH_INTERVAL) -> Non
 
             if new_or_mod or deleted:
                 count = len(new_or_mod) + len(deleted)
-                print(f"  🔄 {count} changement(s) détecté(s) — indexation...")
+                print(f"  {count} changement(s) détecté(s) — indexation...")
                 report = run_indexation(project_root, files, state, quiet=True)
-                print(f"     ✅ {report.files_indexed} fichier(s) indexé(s) en {report.duration_ms}ms")
+                print(f"     [OK] {report.files_indexed} fichier(s) indexé(s) en {report.duration_ms}ms")
 
                 # Nettoyer les supprimés
                 for d in deleted:
@@ -438,7 +438,7 @@ def watch_directory(project_root: Path, interval: float = WATCH_INTERVAL) -> Non
                 save_index(project_root, state)
 
     except KeyboardInterrupt:
-        print("\n  👋 Watch arrêté.\n")
+        print("\n  Watch arrêté.\n")
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -463,7 +463,7 @@ def show_status(project_root: Path, as_json: bool = False) -> str:
         return json.dumps(status, indent=2, ensure_ascii=False)
 
     lines: list[str] = []
-    lines.append("\n  📊 Auto-Index Status")
+    lines.append("\n  Auto-Index Status")
     lines.append(f"  {'─' * 45}")
     lines.append(f"  Dernière exécution  : {status['last_run']}")
     lines.append(f"  Total indexé        : {status['total_indexed']}")
@@ -473,7 +473,7 @@ def show_status(project_root: Path, as_json: bool = False) -> str:
     lines.append(f"  Supprimés           : {status['files_deleted']}")
 
     if new_or_mod:
-        lines.append("\n  📝 Fichiers stale :")
+        lines.append("\n  Fichiers stale :")
         for fpath in new_or_mod[:15]:
             lines.append(f"     • {fpath.relative_to(project_root)}")
         if len(new_or_mod) > 15:
@@ -533,11 +533,11 @@ def main() -> None:
 
     if args.command == "hook":
         ok, msg = install_hook(project_root)
-        print(f"\n  {'✅' if ok else '❌'} {msg}\n")
+        print(f"\n  {'[OK]' if ok else '[x]'} {msg}\n")
 
     elif args.command == "unhook":
         ok, msg = uninstall_hook(project_root)
-        print(f"\n  {'✅' if ok else '❌'} {msg}\n")
+        print(f"\n  {'[OK]' if ok else '[x]'} {msg}\n")
 
     elif args.command == "run":
         state = load_index(project_root)
@@ -552,7 +552,7 @@ def main() -> None:
             if as_json:
                 print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
             else:
-                print(f"\n  ✅ Auto-index terminé : {report.files_indexed} fichier(s) indexé(s) "
+                print(f"\n  [OK] Auto-index terminé : {report.files_indexed} fichier(s) indexé(s) "
                       f"({report.files_new} nouveaux, {report.files_modified} modifiés) "
                       f"en {report.duration_ms}ms\n")
 

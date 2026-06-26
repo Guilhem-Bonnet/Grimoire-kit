@@ -572,7 +572,7 @@ def load_manifest(manifest_path: Path) -> list[dict[str, str]]:
 def render_text_status(report: DocsReport) -> str:
     lines = [
         "╔══════════════════════════════════════════════╗",
-        "║     📚 DOCS FETCHER — Status                 ║",
+        "║     DOCS FETCHER — Status                 ║",
         "╚══════════════════════════════════════════════╝",
         "",
         f"Sources indexées : {len(report.sources)}",
@@ -584,7 +584,7 @@ def render_text_status(report: DocsReport) -> str:
         lines.append("  (aucune source indexée)")
     else:
         for src in report.sources:
-            lines.append(f"  📖 {src.name} [{src.slug}]")
+            lines.append(f"  {src.name} [{src.slug}]")
             lines.append(f"     URL     : {src.url}")
             lines.append(f"     Chunks  : {src.chunks_count}")
             lines.append(f"     Fetched : {src.fetched_at}")
@@ -594,8 +594,8 @@ def render_text_status(report: DocsReport) -> str:
 
 def render_text_fetch(result: FetchResult) -> str:
     if result.error:
-        return f"❌ Erreur pour '{result.source.name}': {result.error}"
-    status = "📦 (cache)" if result.cached else "✅ (frais)"
+        return f"[x] Erreur pour '{result.source.name}': {result.error}"
+    status = "(cache)" if result.cached else "[OK] (frais)"
     return (
         f"{status} {result.source.name} — "
         f"{result.source.chunks_count} chunks, "
@@ -604,7 +604,7 @@ def render_text_fetch(result: FetchResult) -> str:
 
 
 def render_text_search(chunks: list[DocChunk], query: str) -> str:
-    lines = [f"🔍 Résultats pour '{query}' : {len(chunks)} chunk(s)", ""]
+    lines = [f"Résultats pour '{query}' : {len(chunks)} chunk(s)", ""]
     for i, chunk in enumerate(chunks[:20]):  # Max 20 résultats
         preview = chunk.text[:150].replace("\n", " ")
         lines.append(f"  [{i + 1}] {chunk.source_name} > {chunk.heading}")
@@ -664,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest_path = root / manifest_path
         sources = load_manifest(manifest_path)
         if not sources:
-            print("⚠️  Manifest vide ou introuvable")
+            print("[!]  Manifest vide ou introuvable")
             return 1
         results = []
         for src in sources:
@@ -705,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.as_json:
             print(json.dumps({"removed": ok, "slug": args.slug}))
         else:
-            print(f"✅ Supprimé: {args.slug}" if ok else f"❌ Non trouvé: {args.slug}")
+            print(f"[OK] Supprimé: {args.slug}" if ok else f"[x] Non trouvé: {args.slug}")
         return 0 if ok else 1
 
     elif args.command == "status":
