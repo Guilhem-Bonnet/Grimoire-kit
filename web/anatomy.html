@@ -8,51 +8,65 @@
   <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/anatomy.html"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="L'architecture réelle de Grimoire Kit, couche par couche : interfaces, orchestration & agents, standard gouverné, mémoire, preuve & trace, artefacts. Survolez un composant pour voir ses liens ; chacun pointe vers son code." />
+  <meta name="description" content="Le schéma d'architecture réel de Grimoire Kit : interfaces, orchestration & agents, standard gouverné, mémoire, preuve & trace, artefacts — relations et code à l'appui." />
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
   <style>
     body { padding-top: 56px; }
-
-    #hero { padding: 72px 0 20px; }
-    #hero .container, #anatomy .container { max-width: var(--max-w); }
-    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 640px; line-height: var(--lh-body); }
-    .legend { display: flex; gap: 18px; margin-top: 20px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em; color: var(--ink-muted); flex-wrap: wrap; }
+    #hero { padding: 64px 0 8px; }
+    #hero .container { max-width: var(--max-w); }
+    .hero-sub { color: var(--ink-soft); margin-top: 12px; font-size: 0.98rem; max-width: 640px; line-height: var(--lh-body); }
+    .legend { display: flex; gap: 18px; margin-top: 18px; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.06em; color: var(--ink-muted); flex-wrap: wrap; }
     .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
     .legend .d { width: 8px; height: 8px; border-radius: 50%; }
 
-    #anatomy { padding: 8px 0 90px; }
-    /* diagram canvas — relative, holds the SVG link overlay */
-    .diagram { position: relative; }
-    #arch-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; overflow: visible; }
-    #arch-links line { stroke: var(--accent); stroke-width: 1.4; opacity: 0; transition: opacity 200ms; }
-    .diagram.hot #arch-links line.on { opacity: 0.55; }
-
-    .layer { position: relative; z-index: 1; margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--elev-1); overflow: visible; transition: opacity 200ms; }
-    .layer-head { display: flex; align-items: baseline; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.015); }
-    .layer-idx { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); letter-spacing: 0.1em; }
-    .layer-name { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em; }
-    .layer-desc { color: var(--ink-muted); font-size: 0.78rem; margin-left: auto; }
-    .layer-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 16px 20px; }
-
-    .node {
-      display: flex; flex-direction: column; gap: 6px; cursor: pointer;
-      background: var(--elev-2); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim);
-      border-radius: var(--r-md); padding: 12px 14px; transition: border-color 180ms, transform 180ms, opacity 180ms, box-shadow 180ms;
+    /* ── Blueprint schematic ── */
+    #schema-section { padding: 24px 0 90px; }
+    .schema-wrap {
+      position: relative; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      background: var(--elev-1);
     }
-    .node:hover, .node.hl { border-color: var(--accent); box-shadow: 0 0 24px -10px var(--accent-glow); transform: translateY(-1px); }
-    .node.vision { border-left-color: var(--data-amber); }
-    .diagram.hot .node:not(.hl):not(.src) { opacity: 0.28; }
-    .node.src { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-    .node-top { display: flex; align-items: center; gap: 9px; }
-    .node-name { font-size: 0.88rem; font-weight: 600; color: var(--ink); }
-    .node-status { margin-left: auto; font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.08em; padding: 2px 7px; border-radius: 999px; border: 1px solid; }
-    .node-status.real { color: var(--data-green); border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
-    .node-status.vision { color: var(--data-amber); border-color: rgba(252,211,77,0.3); background: rgba(252,211,77,0.08); }
-    .node-desc { color: var(--ink-soft); font-size: 0.73rem; line-height: 1.45; }
-    .node-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-    .node-links { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); }
+    .schema-wrap::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E");
+    }
+    #schema {
+      position: relative; margin: 0 auto; width: 1160px; height: 760px;
+      transform-origin: top center;
+    }
+    .lane-label {
+      position: absolute; left: 16px; font-family: var(--font-mono); font-size: 0.62rem;
+      letter-spacing: 0.14em; color: var(--ink-muted); text-transform: uppercase; transform: translateY(-50%);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .lane-label b { color: var(--accent); font-weight: 600; }
+    .lane-rule { position: absolute; left: 150px; right: 24px; border-top: 1px dashed var(--line); transform: translateY(-50%); }
+
+    #edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+    #edges path { fill: none; stroke: var(--accent); stroke-width: 1.2; opacity: 0.12; transition: opacity 200ms, stroke-width 200ms; }
+    #schema.focus #edges path { opacity: 0.04; }
+    #schema.focus #edges path.lit { opacity: 0.7; stroke-width: 1.8; }
+
+    .gnode {
+      position: absolute; transform: translate(-50%, -50%); z-index: 2;
+      width: 188px; padding: 10px 13px; cursor: pointer;
+      background: var(--elev-2); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim);
+      border-radius: var(--r-md); transition: border-color 180ms, box-shadow 180ms, opacity 180ms, transform 180ms;
+    }
+    .gnode:hover, .gnode.lit { border-color: var(--accent); box-shadow: 0 0 26px -8px var(--accent-glow); }
+    .gnode.src { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 30px -6px var(--accent-glow); }
+    .gnode.vision { border-left-color: var(--data-amber); }
+    #schema.focus .gnode:not(.lit):not(.src) { opacity: 0.22; }
+    .gnode-top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+    .gnode-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+    .gnode-dot.real { background: var(--data-green); } .gnode-dot.vision { background: var(--data-amber); }
+    .gnode-name { font-size: 0.8rem; font-weight: 600; color: var(--ink); line-height: 1.2; }
+    .gnode-meta { font-family: var(--font-mono); font-size: 0.54rem; color: var(--ink-muted); letter-spacing: 0.04em; }
+
+    @media (max-width: 1220px) { #schema { transform: scale(0.82); } .schema-wrap { padding: 0; } #schema-section .container { max-width: 1000px; } }
+    @media (max-width: 980px)  { #schema { transform: scale(0.62); transform-origin: top left; margin-left: 8px; } }
+    @media (max-width: 680px)  { #schema { transform: scale(0.42); } }
 
     /* ── Detail panel ── */
     #arch-panel { position: fixed; right: 0; top: 56px; bottom: 0; width: 320px; background: var(--elev-1); border-left: 1px solid var(--line); transform: translateX(100%); transition: transform 300ms var(--ease-forge); z-index: 500; overflow-y: auto; padding: 22px; }
@@ -71,7 +85,6 @@
     .ap-conn { display: flex; flex-wrap: wrap; gap: 6px; }
     .ap-conn button { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-soft); background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 3px 9px; cursor: pointer; }
     .ap-conn button:hover { border-color: var(--accent); color: var(--accent); }
-
     #anat-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
@@ -82,29 +95,28 @@
 <main id="main">
   <section id="hero">
     <div class="container">
-      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-04</span> · ANATOMIE</div>
-      <h1 class="grad-text reveal" data-delay="60">Le runtime, couche par couche.</h1>
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-04</span> · ANATOMIE</div>
+      <h1 class="grad-text reveal" data-delay="60">Le schéma du runtime.</h1>
       <p class="hero-sub reveal" data-delay="120">
-        L'architecture réelle de Grimoire Kit — pas un schéma marketing. <strong>Survolez</strong> un composant
-        pour révéler ses liens, <strong>cliquez</strong> pour le détail et son code. <strong>Réel</strong> = livré
-        et vérifiable ; <strong>vision</strong> = concept non encore livré.
+        L'architecture réelle de Grimoire Kit, de l'interface à l'artefact. <strong>Survolez</strong> un bloc pour
+        éclairer ses liens, <strong>cliquez</strong> pour le détail et son code. <strong>Réel</strong> = livré ;
+        <strong>vision</strong> = à venir.
       </p>
       <div class="legend reveal" data-delay="160">
-        <span class="lg"><span class="d" style="background:var(--data-green)"></span>réel · livré</span>
-        <span class="lg"><span class="d" style="background:var(--data-amber)"></span>vision · roadmap</span>
-        <span class="lg"><span class="d" style="background:var(--accent)"></span>survol → liens</span>
+        <span class="lg"><span class="d" style="background:var(--data-green)"></span>réel</span>
+        <span class="lg"><span class="d" style="background:var(--data-amber)"></span>vision</span>
+        <span class="lg"><span class="d" style="background:var(--accent)"></span>liaison (survol)</span>
       </div>
     </div>
   </section>
 
-  <section id="anatomy">
-    <div class="container">
-      <div class="diagram" id="diagram">
-        <svg id="arch-links" aria-hidden="true"></svg>
-        <div id="layers"></div>
+  <section id="schema-section">
+    <div class="schema-wrap">
+      <div id="schema">
+        <svg id="edges" aria-hidden="true"></svg>
       </div>
-      <div id="anat-empty">Carte d'architecture indisponible (<code>data/architecture.json</code>).</div>
     </div>
+    <div class="container"><div id="anat-empty">Schéma indisponible (<code>data/architecture.json</code>).</div></div>
   </section>
 </main>
 
@@ -118,15 +130,16 @@
 <script src="forge-nav.js"></script>
 <script src="forge-motion.js"></script>
 <script>
-/* ── Anatomie — diagramme interactif piloté par data/architecture.json ── */
+/* ── Anatomie — schéma blueprint piloté par data/architecture.json ── */
 (function () {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
-  const diagram = document.getElementById('diagram');
-  const svg = document.getElementById('arch-links');
+  const W = 1160, H = 760, TOP = 70, ROW = 120, LANE_X = 150, RIGHT = 60;
+  const schema = document.getElementById('schema');
+  const edgesSvg = document.getElementById('edges');
   const panel = document.getElementById('arch-panel');
   const apContent = document.getElementById('ap-content');
   document.getElementById('ap-close').addEventListener('click', () => panel.classList.remove('open'));
-  let ARCH = null, BYID = {}, EDGES = {}; // EDGES[id] = Set of neighbour ids (undirected)
+  let ARCH = null; const BYID = {}, POS = {}, NEIGH = {};
 
   fetch('data/architecture.json', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
@@ -135,75 +148,78 @@
 
   function render(arch) {
     ARCH = arch;
-    const repo = arch.repo || 'https://github.com/Guilhem-Bonnet/Grimoire-kit';
     arch.nodes.forEach((n) => { BYID[n.id] = n; });
-    // undirected adjacency
     arch.nodes.forEach((n) => {
-      EDGES[n.id] = EDGES[n.id] || new Set();
-      (n.connects || []).forEach((m) => {
-        EDGES[n.id].add(m);
-        (EDGES[m] = EDGES[m] || new Set()).add(n.id);
+      NEIGH[n.id] = NEIGH[n.id] || new Set();
+      (n.connects || []).forEach((m) => { NEIGH[n.id].add(m); (NEIGH[m] = NEIGH[m] || new Set()).add(n.id); });
+    });
+
+    // Layout : une ligne par couche, nœuds répartis horizontalement
+    arch.layers.forEach((layer, li) => {
+      const y = TOP + li * ROW;
+      // lane label + rule
+      const lab = document.createElement('div');
+      lab.className = 'lane-label'; lab.style.top = y + 'px';
+      lab.innerHTML = `<b>${String(li + 1).padStart(2, '0')}</b> ${esc(layer.name)}`;
+      schema.appendChild(lab);
+      const rule = document.createElement('div');
+      rule.className = 'lane-rule'; rule.style.top = (y - 44) + 'px';
+      schema.appendChild(rule);
+
+      const nodes = arch.nodes.filter((n) => n.layer === layer.id);
+      const span = W - LANE_X - RIGHT;
+      nodes.forEach((n, j) => {
+        const x = LANE_X + span * (j + 1) / (nodes.length + 1) + 30;
+        POS[n.id] = { x, y };
+        const el = document.createElement('div');
+        el.className = 'gnode' + (n.status === 'vision' ? ' vision' : '');
+        el.dataset.id = n.id; el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-label', n.name);
+        el.style.left = x + 'px'; el.style.top = y + 'px';
+        el.innerHTML = `<div class="gnode-top"><span class="gnode-dot ${n.status === 'vision' ? 'vision' : 'real'}"></span><span class="gnode-name">${esc(n.name)}</span></div>
+          <div class="gnode-meta">${(n.connects || []).length} liens · ${n.status === 'vision' ? 'vision' : 'réel'}</div>`;
+        el.addEventListener('mouseenter', () => focus(n.id));
+        el.addEventListener('mouseleave', blur);
+        el.addEventListener('focus', () => focus(n.id));
+        el.addEventListener('blur', blur);
+        el.addEventListener('click', () => openPanel(n.id));
+        el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(n.id); } });
+        schema.appendChild(el);
       });
     });
 
-    const byLayer = {};
-    arch.nodes.forEach((n) => { (byLayer[n.layer] = byLayer[n.layer] || []).push(n); });
-    document.getElementById('layers').innerHTML = arch.layers.map((layer, i) => {
-      const cards = (byLayer[layer.id] || []).map((n) => `
-        <div class="node ${n.status === 'vision' ? 'vision' : ''}" data-id="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(n.name)}">
-          <div class="node-top"><span class="node-name">${esc(n.name)}</span><span class="node-status ${n.status === 'vision' ? 'vision' : 'real'}">${n.status === 'vision' ? 'VISION' : 'RÉEL'}</span></div>
-          <div class="node-desc">${esc(n.desc)}</div>
-          <div class="node-foot"><span class="node-links">${(n.connects || []).length} lien${(n.connects || []).length > 1 ? 's' : ''}</span></div>
-        </div>`).join('');
-      return `<div class="layer reveal" data-delay="${i * 30}">
-        <div class="layer-head"><span class="layer-idx">${String(i + 1).padStart(2, '0')}</span><span class="layer-name">${esc(layer.name)}</span><span class="layer-desc">${esc(layer.desc || '')}</span></div>
-        <div class="layer-nodes">${cards}</div></div>`;
-    }).join('');
+    // Edges (toujours visibles, subtiles) — bezier vertical
+    const seen = new Set(); let paths = '';
+    arch.nodes.forEach((n) => (n.connects || []).forEach((m) => {
+      const key = [n.id, m].sort().join('|'); if (seen.has(key) || !POS[n.id] || !POS[m]) return; seen.add(key);
+      const a = POS[n.id], b = POS[m]; const my = (a.y + b.y) / 2;
+      paths += `<path data-a="${esc(n.id)}" data-b="${esc(m)}" d="M${a.x},${a.y} C${a.x},${my} ${b.x},${my} ${b.x},${b.y}"/>`;
+    }));
+    edgesSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    edgesSvg.innerHTML = paths;
 
-    requestAnimationFrame(() => document.querySelectorAll('#layers .reveal').forEach((el) => el.classList.add('visible')));
-
-    diagram.querySelectorAll('.node').forEach((el) => {
-      const id = el.dataset.id;
-      el.addEventListener('mouseenter', () => highlight(id));
-      el.addEventListener('mouseleave', clearHL);
-      el.addEventListener('focus', () => highlight(id));
-      el.addEventListener('blur', clearHL);
-      el.addEventListener('click', () => openPanel(id, repo));
-      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(id, repo); } });
-    });
+    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
   }
 
-  function centerOf(id) {
-    const el = diagram.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    if (!el) return null;
-    const d = diagram.getBoundingClientRect(), r = el.getBoundingClientRect();
-    return { x: r.left - d.left + r.width / 2, y: r.top - d.top + r.height / 2 };
-  }
-
-  function highlight(id) {
-    const neigh = EDGES[id] || new Set();
-    diagram.classList.add('hot');
-    diagram.querySelectorAll('.node').forEach((el) => {
+  function focus(id) {
+    const nb = NEIGH[id] || new Set();
+    schema.classList.add('focus');
+    schema.querySelectorAll('.gnode').forEach((el) => {
       el.classList.toggle('src', el.dataset.id === id);
-      el.classList.toggle('hl', neigh.has(el.dataset.id));
+      el.classList.toggle('lit', nb.has(el.dataset.id));
     });
-    // draw lines
-    const a = centerOf(id); if (!a) return;
-    let lines = '';
-    neigh.forEach((m) => {
-      const b = centerOf(m); if (!b) return;
-      lines += `<line class="on" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
+    edgesSvg.querySelectorAll('path').forEach((p) => {
+      p.classList.toggle('lit', p.dataset.a === id || p.dataset.b === id);
     });
-    svg.innerHTML = lines;
   }
-  function clearHL() {
-    diagram.classList.remove('hot');
-    diagram.querySelectorAll('.node').forEach((el) => el.classList.remove('hl', 'src'));
-    svg.innerHTML = '';
+  function blur() {
+    schema.classList.remove('focus');
+    schema.querySelectorAll('.gnode').forEach((el) => el.classList.remove('lit', 'src'));
+    edgesSvg.querySelectorAll('path').forEach((p) => p.classList.remove('lit'));
   }
 
-  function openPanel(id, repo) {
+  function openPanel(id) {
     const n = BYID[id]; if (!n) return;
+    const repo = ARCH.repo || 'https://github.com/Guilhem-Bonnet/Grimoire-kit';
     const layer = (ARCH.layers.find((l) => l.id === n.layer) || {}).name || n.layer;
     const ref = n.ref
       ? `<a class="ap-ref" href="${esc(n.ref.startsWith('http') ? n.ref : repo + '/blob/main/' + n.ref)}" target="_blank" rel="noopener">${esc(n.ref)} ↗</a>`
@@ -216,9 +232,9 @@
       <div class="ap-desc">${esc(n.desc)}</div>
       ${ref}
       ${conns ? `<div class="ap-conn-h">CONNECTÉ À</div><div class="ap-conn">${conns}</div>` : ''}`;
-    apContent.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { openPanel(b.dataset.goto, repo); highlight(b.dataset.goto); }));
+    apContent.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { openPanel(b.dataset.goto); focus(b.dataset.goto); }));
     panel.classList.add('open');
-    highlight(id);
+    focus(id);
   }
 })();
 </script>
