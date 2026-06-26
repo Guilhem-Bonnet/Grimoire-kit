@@ -8,20 +8,12 @@ edit_uri: edit/main/docs/
 theme:
   name: material
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: deep purple
-      accent: purple
-      toggle:
-        icon: material/brightness-7
-        name: Mode sombre
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: deep purple
-      accent: purple
-      toggle:
-        icon: material/brightness-4
-        name: Mode clair
+    scheme: slate
+    primary: custom
+    accent: custom
+  font:
+    text: Geist
+    code: Geist Mono
   features:
     - navigation.instant
     - navigation.tabs
@@ -67,6 +59,7 @@ markdown_extensions:
   - md_in_html
 
 extra_css:
+  - stylesheets/forge-theme.css
   - stylesheets/presentation-onepager.css
 
 extra_javascript:

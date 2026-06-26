@@ -1,0 +1,257 @@
+/* ═══════════════════════════════════════════════════════════════════
+   GRIMOIRE KIT — Forge theme for MkDocs Material
+   Dark-first design system: ink on near-black, single orange accent,
+   Geist typography. Maps the Forge design tokens onto Material's
+   CSS custom properties so every page inherits the look.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ── Forge tokens (source of truth) ── */
+  --fg-bg:          #0B0C0E;
+  --fg-elev-1:      #121418;
+  --fg-elev-2:      #1A1D22;
+  --fg-elev-3:      #22262C;
+  --fg-ink:         #F6F7F8;
+  --fg-ink-soft:    #9BA0A8;
+  --fg-ink-muted:   #5B6068;
+  --fg-line:        rgba(255, 255, 255, 0.08);
+  --fg-line-strong: rgba(255, 255, 255, 0.14);
+  --fg-accent:      #FF6B3D;
+  --fg-accent-hot:  #FF2A00;
+  --fg-accent-soft: rgba(255, 107, 61, 0.12);
+  --fg-accent-glow: rgba(255, 107, 61, 0.40);
+  --fg-accent-dim:  rgba(255, 107, 61, 0.20);
+  --fg-r-sm: 4px;
+  --fg-r-md: 8px;
+  --fg-r-lg: 16px;
+  --fg-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --md-text-font: "Geist";
+  --md-code-font: "Geist Mono";
+}
+
+/* ═══ Map Forge tokens onto Material variables (dark scheme) ═══ */
+[data-md-color-scheme="slate"] {
+  --md-hue: 225;
+
+  --md-default-bg-color:            var(--fg-bg);
+  --md-default-bg-color--light:     rgba(246, 247, 248, 0.06);
+  --md-default-bg-color--lighter:   rgba(246, 247, 248, 0.03);
+  --md-default-bg-color--lightest:  rgba(246, 247, 248, 0.02);
+
+  --md-default-fg-color:            var(--fg-ink);
+  --md-default-fg-color--light:     var(--fg-ink-soft);
+  --md-default-fg-color--lighter:   var(--fg-ink-muted);
+  --md-default-fg-color--lightest:  rgba(255, 255, 255, 0.07);
+
+  --md-primary-fg-color:            var(--fg-accent);
+  --md-primary-fg-color--light:     var(--fg-accent-hot);
+  --md-primary-fg-color--dark:      var(--fg-accent-hot);
+  --md-primary-bg-color:            var(--fg-bg);
+  --md-primary-bg-color--light:     rgba(11, 12, 14, 0.7);
+
+  --md-accent-fg-color:             var(--fg-accent);
+  --md-accent-fg-color--transparent: var(--fg-accent-soft);
+  --md-accent-bg-color:             var(--fg-bg);
+
+  --md-typeset-color:               var(--fg-ink);
+  --md-typeset-a-color:             var(--fg-accent);
+  --md-typeset-mark-color:          var(--fg-accent-dim);
+
+  --md-code-fg-color:               #c9d1d9;
+  --md-code-bg-color:               var(--fg-elev-1);
+  --md-code-hl-color:               var(--fg-accent-dim);
+
+  --md-footer-bg-color:             var(--fg-elev-1);
+  --md-footer-bg-color--dark:       var(--fg-bg);
+  --md-footer-fg-color:             var(--fg-ink-soft);
+
+  color-scheme: dark;
+}
+
+/* ═══ Base typography & surface ═══ */
+.md-typeset {
+  font-feature-settings: "kern", "liga", "calt";
+  line-height: 1.6;
+}
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--fg-ink);
+}
+.md-typeset h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+  margin-bottom: 0.6em;
+}
+.md-typeset h2 {
+  font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+  margin-top: 2.2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--fg-line);
+}
+.md-typeset h3 { font-size: 1.3rem; margin-top: 1.6em; }
+.md-typeset a {
+  color: var(--fg-accent);
+  text-decoration: none;
+  transition: color var(--fg-ease) 160ms;
+}
+.md-typeset a:hover { color: var(--fg-accent-hot); text-decoration: underline; }
+
+/* ═══ Header ═══ */
+.md-header {
+  background: rgba(11, 12, 14, 0.82);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  color: var(--fg-ink);
+  border-bottom: 1px solid var(--fg-line);
+  box-shadow: none;
+}
+.md-header__title { font-weight: 600; letter-spacing: -0.01em; }
+.md-header[data-md-state="shadow"] { box-shadow: 0 0 24px rgba(0, 0, 0, 0.6); }
+
+/* ═══ Tabs (top nav) ═══ */
+.md-tabs {
+  background: transparent;
+  border-bottom: 1px solid var(--fg-line);
+  color: var(--fg-ink-soft);
+}
+.md-tabs__link { opacity: 1; color: var(--fg-ink-soft); font-weight: 500; transition: color 160ms; }
+.md-tabs__link:hover,
+.md-tabs__link--active { color: var(--fg-ink); }
+.md-tabs__item--active .md-tabs__link {
+  color: var(--fg-accent);
+}
+
+/* ═══ Search ═══ */
+.md-search__form {
+  background: var(--fg-elev-2);
+  border: 1px solid var(--fg-line);
+  border-radius: var(--fg-r-md);
+  box-shadow: none;
+}
+.md-search__form:hover { background: var(--fg-elev-3); }
+[data-md-toggle="search"]:checked ~ .md-header .md-search__form {
+  background: var(--fg-elev-2);
+}
+.md-search__input::placeholder { color: var(--fg-ink-muted); }
+.md-search-result__meta { color: var(--fg-ink-soft); }
+
+/* ═══ Sidebar / nav ═══ */
+.md-nav { font-size: 0.74rem; }
+.md-nav__title { color: var(--fg-ink-soft); font-weight: 600; }
+.md-nav__link { color: var(--fg-ink-soft); transition: color 140ms; }
+.md-nav__link:hover { color: var(--fg-ink); }
+.md-nav__link--active,
+.md-nav__item--active > .md-nav__link {
+  color: var(--fg-accent);
+  font-weight: 600;
+}
+.md-sidebar__scrollwrap::-webkit-scrollbar-thumb { background: var(--fg-line-strong); }
+
+/* ═══ Content body ═══ */
+.md-content__inner { padding-top: 1.2rem; }
+
+/* ═══ Code ═══ */
+.md-typeset code {
+  background: var(--fg-elev-1);
+  border: 1px solid var(--fg-line);
+  border-radius: var(--fg-r-sm);
+  padding: 0.1em 0.4em;
+  font-size: 0.82em;
+}
+.md-typeset pre > code {
+  border: none;
+  padding: 1em 1.1em;
+}
+.md-typeset .highlight,
+.md-typeset pre {
+  border-radius: var(--fg-r-md);
+  border: 1px solid var(--fg-line);
+}
+.md-clipboard { color: var(--fg-ink-muted); }
+.md-clipboard:hover { color: var(--fg-accent); }
+
+/* ═══ Tables ═══ */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--fg-line);
+  border-radius: var(--fg-r-md);
+  overflow: hidden;
+  font-size: 0.78rem;
+}
+.md-typeset table:not([class]) th {
+  background: var(--fg-elev-2);
+  color: var(--fg-ink);
+  font-weight: 600;
+  border: none;
+}
+.md-typeset table:not([class]) td { border-top: 1px solid var(--fg-line); }
+.md-typeset table:not([class]) tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+/* ═══ Buttons (.md-button) — Forge style ═══ */
+.md-typeset .md-button {
+  font-family: var(--md-code-font), monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  border-radius: var(--fg-r-sm);
+  padding: 0.65em 1.4em;
+  border: 1px solid var(--fg-line-strong);
+  color: var(--fg-ink-soft);
+  background: transparent;
+  transition: all 200ms var(--fg-ease);
+}
+.md-typeset .md-button:hover {
+  border-color: var(--fg-ink-soft);
+  color: var(--fg-ink);
+  background: rgba(255, 255, 255, 0.03);
+}
+.md-typeset .md-button--primary {
+  background: var(--fg-accent);
+  color: var(--fg-bg);
+  border-color: var(--fg-accent);
+  box-shadow: 0 0 32px -8px var(--fg-accent-glow);
+}
+.md-typeset .md-button--primary:hover {
+  background: var(--fg-accent-hot);
+  border-color: var(--fg-accent-hot);
+  color: var(--fg-bg);
+  filter: brightness(1.05);
+}
+
+/* ═══ Admonitions ═══ */
+.md-typeset .admonition,
+.md-typeset details {
+  border: 1px solid var(--fg-line);
+  border-left-width: 3px;
+  border-radius: var(--fg-r-md);
+  background: var(--fg-elev-1);
+  box-shadow: none;
+  font-size: 0.76rem;
+}
+.md-typeset .admonition-title,
+.md-typeset summary { background: rgba(255, 255, 255, 0.02); }
+.md-typeset .admonition.note,
+.md-typeset .admonition.info { border-left-color: var(--fg-accent); }
+.md-typeset .note > .admonition-title,
+.md-typeset .info > .admonition-title { background: var(--fg-accent-soft); }
+
+/* ═══ Misc ═══ */
+.md-typeset hr { border-bottom: 1px solid var(--fg-line); }
+.md-typeset blockquote {
+  border-left: 3px solid var(--fg-accent-dim);
+  color: var(--fg-ink-soft);
+}
+.md-footer-meta { background: var(--fg-bg); }
+::selection { background: var(--fg-accent-dim); color: var(--fg-ink); }
+
+/* Scrollbars */
+* { scrollbar-color: var(--fg-line-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--fg-line-strong); border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
