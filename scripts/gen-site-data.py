@@ -262,11 +262,12 @@ def build_observatory(root: Path) -> dict | None:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
+    ap.add_argument("--out-dir", type=Path, default=None, help="where to write the JSON (default: <root>/web/data)")
     ap.add_argument("--with-tests", action="store_true", help="run pytest --collect-only for the exact test count")
     args = ap.parse_args(argv)
     root = args.root.resolve()
 
-    out_dir = root / "web" / "data"
+    out_dir = (args.out_dir.resolve() if args.out_dir else root / "web" / "data")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     meta = build_meta(root, args.with_tests)
