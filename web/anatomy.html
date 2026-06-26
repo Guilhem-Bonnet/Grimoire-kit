@@ -3,458 +3,137 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Anatomie — Grimoire Kit</title>
+  <meta name="description" content="L'architecture réelle de Grimoire Kit, couche par couche : interfaces, orchestration & agents, standard gouverné, mémoire, preuve & trace, artefacts. Chaque composant est lié à son code." />
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
   <style>
     body { padding-top: 56px; }
-    #anat-hero { padding: 80px 0 60px; }
 
-    /* ── Diagram layout ── */
-    #diagram-section { padding: 0 0 80px; }
-    .diagram-wrap {
-      max-width: 1240px; margin: 0 auto; padding: 0 24px;
-      display: grid; grid-template-columns: 1fr 320px;
-      gap: 32px; align-items: start;
-    }
-    @media(max-width:900px){ .diagram-wrap { grid-template-columns: 1fr; } }
+    #hero { padding: 72px 0 24px; }
+    #hero .container { max-width: var(--max-w); }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 1rem; max-width: 620px; line-height: var(--lh-body); }
+    .legend { display: flex; gap: 18px; margin-top: 20px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em; color: var(--ink-muted); }
+    .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+    .legend .d { width: 8px; height: 8px; border-radius: 50%; }
 
-    /* SVG container */
-    .svg-container {
-      background: var(--elev-1); border: 1px solid var(--line);
-      border-radius: var(--r-md); overflow: hidden;
-      padding: 32px; position: relative;
-    }
-    .svg-container::before {
-      content: ''; position: absolute; inset: 0;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cpath d='M32,0 L0,0 0,32' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.07'/%3E%3C/svg%3E");
-      pointer-events: none;
-    }
-    #anatomy-svg { width: 100%; height: auto; display: block; position: relative; z-index: 1; }
+    #anatomy { padding: 8px 0 80px; }
+    #anatomy .container { max-width: var(--max-w); }
 
-    /* SVG elements */
-    .anat-node {
-      cursor: pointer;
-      transition: filter 150ms;
-    }
-    .anat-node:hover .node-rect { stroke: var(--accent) !important; stroke-width: 1.5 !important; }
-    .anat-node.active .node-rect { stroke: var(--accent) !important; stroke-width: 1.5 !important; }
-    .anat-node.dim { opacity: 0.2; transition: opacity 200ms; }
-    .anat-node.highlight { opacity: 1; }
-    .anat-conn { transition: opacity 200ms, stroke 200ms; }
-    .anat-conn.dim { opacity: 0.05; }
-    .anat-conn.highlight { opacity: 1; stroke: var(--accent) !important; stroke-width: 1.2 !important; }
+    .layer { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--elev-1); overflow: hidden; }
+    .layer-head { display: flex; align-items: baseline; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.015); }
+    .layer-idx { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); letter-spacing: 0.1em; }
+    .layer-name { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+    .layer-desc { color: var(--ink-muted); font-size: 0.8rem; margin-left: auto; }
+    .layer-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; padding: 16px 20px; }
 
-    /* Side panel */
-    .info-panel {
-      background: var(--elev-1); border: 1px solid var(--line);
-      border-radius: var(--r-md); padding: 24px;
-      position: sticky; top: 80px;
-      min-height: 400px;
+    .node {
+      display: flex; flex-direction: column; gap: 7px;
+      background: var(--elev-2); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim);
+      border-radius: var(--r-md); padding: 13px 15px; transition: border-color 200ms, transform 200ms;
     }
-    .info-empty {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      height: 300px; color: var(--ink-muted); font-family: var(--font-mono);
-      font-size: .68rem; letter-spacing: .08em; text-align: center; gap: 12px;
+    .node:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .node.vision { border-left-color: var(--data-amber); opacity: 0.92; }
+    .node-top { display: flex; align-items: center; gap: 9px; }
+    .node-name { font-size: 0.9rem; font-weight: 600; color: var(--ink); }
+    .node-status {
+      margin-left: auto; font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.08em;
+      padding: 2px 7px; border-radius: 999px; border: 1px solid;
     }
-    .info-empty svg { opacity: .3; }
-    .info-layer { font-family: var(--font-mono); font-size: .6rem; letter-spacing: .12em; color: var(--accent); margin-bottom: 8px; }
-    .info-name { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; letter-spacing: -.01em; }
-    .info-desc { font-size: .82rem; color: var(--ink-soft); line-height: 1.7; margin-bottom: 20px; }
-    .info-props { display: flex; flex-direction: column; gap: 0; }
-    .info-prop { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: .65rem; }
-    .info-prop:last-child { border-bottom: none; }
-    .info-prop .k { color: var(--ink-muted); }
-    .info-prop .v { color: var(--ink); }
-    .info-connects { margin-top: 16px; }
-    .info-connects h4 { font-family: var(--font-mono); font-size: .62rem; letter-spacing: .1em; color: var(--ink-muted); margin-bottom: 10px; }
-    .info-conn-tag { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: .6rem; color: var(--ink-muted); background: var(--elev-2); border: 1px solid var(--line); border-radius: 2px; padding: 2px 8px; margin: 0 4px 4px 0; }
-    .info-conn-tag .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
+    .node-status.real   { color: var(--data-green); border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+    .node-status.vision { color: var(--data-amber); border-color: rgba(252,211,77,0.3);  background: rgba(252,211,77,0.08); }
+    .node-desc { color: var(--ink-soft); font-size: 0.76rem; line-height: 1.5; }
+    .node-ref {
+      align-self: flex-start; font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em;
+      color: var(--accent); text-decoration: none; border: 1px solid var(--accent-dim);
+      border-radius: var(--r-sm); padding: 2px 8px; transition: background 160ms;
+    }
+    .node-ref:hover { background: var(--accent-soft); }
+    .node-ref.none { color: var(--ink-muted); border-color: var(--line); cursor: default; }
 
-    /* Layer legend */
-    .layer-legend { display: flex; gap: 24px; flex-wrap: wrap; margin: 32px 24px 0; }
-    .ll-item { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: .65rem; color: var(--ink-muted); }
-    .ll-swatch { width: 16px; height: 2px; border-radius: 1px; }
-
-    /* Lower content */
-    .anat-bottom { max-width: var(--max-w); margin: 60px auto 0; padding: 0 var(--gap); }
-    .module-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--gap); margin-top: 40px; }
-    @media(max-width:960px){ .module-grid{grid-template-columns:repeat(2,1fr);} }
-    @media(max-width:640px){ .module-grid{grid-template-columns:1fr;} }
-    .module-card { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 20px; }
-    .mc-badge { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .1em; color: var(--accent); margin-bottom: 10px; }
-    .module-card h3 { font-size: .88rem; margin-bottom: 6px; }
-    .module-card p { font-size: .75rem; color: var(--ink-soft); line-height: 1.6; }
+    #anat-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
 <body>
 <div id="scroll-progress" aria-hidden="true"></div>
-<nav id="forge-nav"></nav>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
 <main id="main">
-
-<!-- Hero -->
-<section id="anat-hero">
-  <div class="container">
-    <div class="eyebrow reveal" style="margin-bottom:20px"><span class="num">ANATOMIE</span> · ARCHITECTURE DU NOYAU</div>
-    <h1 class="grad-text reveal" data-delay="60" style="max-width:640px">Quatre couches. Un contrat par interface.</h1>
-    <p class="reveal" data-delay="120" style="color:var(--ink-soft);margin-top:14px;font-size:1rem;max-width:540px">Survole un nœud pour explorer ses connexions et lire sa description. Cliquez pour figer le panneau.</p>
-  </div>
-</section>
-
-<!-- Interactive diagram -->
-<section id="diagram-section">
-  <div class="diagram-wrap">
-    <!-- SVG Diagram -->
-    <div class="svg-container reveal" data-delay="80">
-      <svg id="anatomy-svg" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg"
-           role="img" aria-label="Diagramme anatomique du noyau Grimoire Kit — 4 couches : Agents, Runtime, Surfaces, Artefacts">
-
-        <defs>
-          <marker id="arr-acc" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,1 L5,3 L0,5" fill="none" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          </marker>
-          <marker id="arr-dim" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,1 L5,3 L0,5" fill="none" stroke="rgba(91,96,104,0.4)" stroke-width="1"/>
-          </marker>
-        </defs>
-
-        <!-- ── Layer labels (top) ── -->
-        <text x="112" y="18" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" letter-spacing="3" text-anchor="middle">AGENTS</text>
-        <text x="340" y="18" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" letter-spacing="3" text-anchor="middle">RUNTIME</text>
-        <text x="612" y="18" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" letter-spacing="3" text-anchor="middle">SURFACES</text>
-        <text x="820" y="18" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" letter-spacing="3" text-anchor="middle">ARTEFACTS</text>
-
-        <!-- Column separators -->
-        <line x1="222" y1="28" x2="222" y2="540" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
-        <line x1="458" y1="28" x2="458" y2="540" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
-        <line x1="722" y1="28" x2="722" y2="540" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
-
-        <!-- ════════════════════════════
-             AGENTS LAYER
-             ════════════════════════════ -->
-        <!-- BMM -->
-        <g class="anat-node" data-id="bmm" data-layer="AGENTS" tabindex="0" role="button" aria-label="Module BMM — Builder Mind Map">
-          <rect class="node-rect" x="28" y="38" width="166" height="54" rx="3" fill="#121418" stroke="rgba(255,107,61,0.4)" stroke-width="1"/>
-          <text x="111" y="60" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">BMM</text>
-          <text x="111" y="76" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Builder Mind Map</text>
-        </g>
-
-        <!-- BMB -->
-        <g class="anat-node" data-id="bmb" data-layer="AGENTS" tabindex="0" role="button" aria-label="Module BMB — Builder Memory Bank">
-          <rect class="node-rect" x="28" y="112" width="166" height="54" rx="3" fill="#121418" stroke="rgba(255,107,61,0.4)" stroke-width="1"/>
-          <text x="111" y="134" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">BMB</text>
-          <text x="111" y="150" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Builder Memory Bank</text>
-        </g>
-
-        <!-- CIS -->
-        <g class="anat-node" data-id="cis" data-layer="AGENTS" tabindex="0" role="button" aria-label="Module CIS — Contextual Intent System">
-          <rect class="node-rect" x="28" y="186" width="166" height="54" rx="3" fill="#121418" stroke="rgba(255,107,61,0.4)" stroke-width="1"/>
-          <text x="111" y="208" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">CIS</text>
-          <text x="111" y="224" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Contextual Intent Sys.</text>
-        </g>
-
-        <!-- TEA -->
-        <g class="anat-node" data-id="tea" data-layer="AGENTS" tabindex="0" role="button" aria-label="Module TEA — Trace Emit Agent">
-          <rect class="node-rect" x="28" y="260" width="166" height="54" rx="3" fill="#121418" stroke="rgba(255,107,61,0.4)" stroke-width="1"/>
-          <text x="111" y="282" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">TEA</text>
-          <text x="111" y="298" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Trace Emit Agent</text>
-        </g>
-
-        <!-- Sub-agents (dashed) -->
-        <g class="anat-node" data-id="subagents" data-layer="AGENTS" tabindex="0" role="button" aria-label="Sub-agents spécialisés">
-          <rect class="node-rect" x="28" y="334" width="166" height="54" rx="3" fill="#0B0C0E" stroke="#5B6068" stroke-width="1" stroke-dasharray="5,3"/>
-          <text x="111" y="354" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" text-anchor="middle">SUB-AGENTS</text>
-          <text x="111" y="370" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#9BA0A8" text-anchor="middle">pm · dev · qa · architect…</text>
-        </g>
-
-        <!-- ════════════════════════════
-             RUNTIME LAYER
-             ════════════════════════════ -->
-        <!-- SOG -->
-        <g class="anat-node" data-id="sog" data-layer="RUNTIME" tabindex="0" role="button" aria-label="SOG — Smart Orchestrator Gateway">
-          <rect class="node-rect" x="242" y="38" width="192" height="54" rx="3" fill="#1A1D22" stroke="rgba(255,107,61,0.7)" stroke-width="1.5"/>
-          <text x="338" y="60" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">SOG</text>
-          <text x="338" y="76" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Smart Orchestrator Gateway</text>
-        </g>
-
-        <!-- UDF -->
-        <g class="anat-node" data-id="udf" data-layer="RUNTIME" tabindex="0" role="button" aria-label="UDF — Unified Dynamic Factory">
-          <rect class="node-rect" x="242" y="112" width="192" height="54" rx="3" fill="#1A1D22" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="338" y="134" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">UDF</text>
-          <text x="338" y="150" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Unified Dynamic Factory</text>
-        </g>
-
-        <!-- Trace Ledger -->
-        <g class="anat-node" data-id="trace" data-layer="RUNTIME" tabindex="0" role="button" aria-label="Trace Ledger — Journal immutable">
-          <rect class="node-rect" x="242" y="186" width="192" height="54" rx="3" fill="#1A1D22" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="338" y="208" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">TRACE LEDGER</text>
-          <text x="338" y="224" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Journal immutable</text>
-        </g>
-
-        <!-- Memory Bus -->
-        <g class="anat-node" data-id="memory" data-layer="RUNTIME" tabindex="0" role="button" aria-label="Memory Bus — Mémoire partagée">
-          <rect class="node-rect" x="242" y="260" width="192" height="54" rx="3" fill="#1A1D22" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="338" y="282" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">MEMORY BUS</text>
-          <text x="338" y="298" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Contexte partagé · tiered</text>
-        </g>
-
-        <!-- Contract Engine -->
-        <g class="anat-node" data-id="contract" data-layer="RUNTIME" tabindex="0" role="button" aria-label="Contract Engine — Validation des contrats">
-          <rect class="node-rect" x="242" y="334" width="192" height="54" rx="3" fill="#1A1D22" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="338" y="354" font-family="Geist Mono,monospace" font-size="9" fill="#FF6B3D" text-anchor="middle" letter-spacing="1">CONTRACT ENGINE</text>
-          <text x="338" y="370" font-family="Geist Sans,sans-serif" font-size="9.5" fill="#F6F7F8" text-anchor="middle" font-weight="600">Validation · signature</text>
-        </g>
-
-        <!-- ════════════════════════════
-             SURFACES LAYER
-             ════════════════════════════ -->
-        <g class="anat-node" data-id="cockpit" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface Cockpit">
-          <rect class="node-rect" x="476" y="38" width="226" height="40" rx="3" fill="#121418" stroke="rgba(52,211,153,0.5)" stroke-width="1"/>
-          <text x="589" y="55" font-family="Geist Mono,monospace" font-size="9" fill="#34D399" text-anchor="middle">COCKPIT</text>
-          <text x="589" y="69" font-family="Geist Sans,sans-serif" font-size="9" fill="#9BA0A8" text-anchor="middle">Pilotage temps réel · LIVE</text>
-        </g>
-
-        <g class="anat-node" data-id="observatory" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface Observatory">
-          <rect class="node-rect" x="476" y="98" width="226" height="40" rx="3" fill="#121418" stroke="rgba(252,211,77,0.4)" stroke-width="1"/>
-          <text x="589" y="115" font-family="Geist Mono,monospace" font-size="9" fill="#FCD34D" text-anchor="middle">OBSERVATORY</text>
-          <text x="589" y="129" font-family="Geist Sans,sans-serif" font-size="9" fill="#9BA0A8" text-anchor="middle">Audit · télémétrie · PARTIAL</text>
-        </g>
-
-        <g class="anat-node" data-id="kanban" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface Kanban">
-          <rect class="node-rect" x="476" y="158" width="226" height="40" rx="3" fill="#121418" stroke="rgba(252,211,77,0.4)" stroke-width="1"/>
-          <text x="589" y="175" font-family="Geist Mono,monospace" font-size="9" fill="#FCD34D" text-anchor="middle">KANBAN</text>
-          <text x="589" y="189" font-family="Geist Sans,sans-serif" font-size="9" fill="#9BA0A8" text-anchor="middle">Flux de travail · BETA</text>
-        </g>
-
-        <g class="anat-node" data-id="warroom" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface War Room">
-          <rect class="node-rect" x="476" y="218" width="226" height="40" rx="3" fill="#0B0C0E" stroke="#5B6068" stroke-width="1" stroke-dasharray="5,3"/>
-          <text x="589" y="235" font-family="Geist Mono,monospace" font-size="9" fill="#5B6068" text-anchor="middle">WAR ROOM</text>
-          <text x="589" y="249" font-family="Geist Sans,sans-serif" font-size="9" fill="#5B6068" text-anchor="middle">PCE · multi-session · Q3 2026</text>
-        </g>
-
-        <g class="anat-node" data-id="gameui" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface Game UI">
-          <rect class="node-rect" x="476" y="278" width="226" height="40" rx="3" fill="#121418" stroke="rgba(252,211,77,0.4)" stroke-width="1"/>
-          <text x="589" y="295" font-family="Geist Mono,monospace" font-size="9" fill="#FCD34D" text-anchor="middle">GAME UI</text>
-          <text x="589" y="309" font-family="Geist Sans,sans-serif" font-size="9" fill="#9BA0A8" text-anchor="middle">Rendu isométrique · BETA</text>
-        </g>
-
-        <g class="anat-node" data-id="proofs" data-layer="SURFACES" tabindex="0" role="button" aria-label="Surface Proofs">
-          <rect class="node-rect" x="476" y="338" width="226" height="40" rx="3" fill="#121418" stroke="rgba(52,211,153,0.4)" stroke-width="1"/>
-          <text x="589" y="355" font-family="Geist Mono,monospace" font-size="9" fill="#34D399" text-anchor="middle">PROOFS</text>
-          <text x="589" y="369" font-family="Geist Sans,sans-serif" font-size="9" fill="#9BA0A8" text-anchor="middle">Registre audit · hash · sig</text>
-        </g>
-
-        <!-- ════════════════════════════
-             ARTEFACTS LAYER
-             ════════════════════════════ -->
-        <g class="anat-node" data-id="art-spec" data-layer="ARTEFACTS" tabindex="0" role="button" aria-label="Artefact — Specs">
-          <rect class="node-rect" x="736" y="38" width="140" height="36" rx="3" fill="#0B0C0E" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="806" y="56" font-family="Geist Mono,monospace" font-size="8.5" fill="#FF6B3D" text-anchor="middle">SPEC · PRD · RFC</text>
-          <text x="806" y="67" font-family="Geist Sans,sans-serif" font-size="8" fill="#5B6068" text-anchor="middle">Documents structurés</text>
-        </g>
-
-        <g class="anat-node" data-id="art-code" data-layer="ARTEFACTS" tabindex="0" role="button" aria-label="Artefact — Code">
-          <rect class="node-rect" x="736" y="94" width="140" height="36" rx="3" fill="#0B0C0E" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="806" y="112" font-family="Geist Mono,monospace" font-size="8.5" fill="#FF6B3D" text-anchor="middle">CODE · TESTS · SCHEMA</text>
-          <text x="806" y="123" font-family="Geist Sans,sans-serif" font-size="8" fill="#5B6068" text-anchor="middle">Fichiers versionés</text>
-        </g>
-
-        <g class="anat-node" data-id="art-doc" data-layer="ARTEFACTS" tabindex="0" role="button" aria-label="Artefact — Documentation">
-          <rect class="node-rect" x="736" y="150" width="140" height="36" rx="3" fill="#0B0C0E" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="806" y="168" font-family="Geist Mono,monospace" font-size="8.5" fill="#FF6B3D" text-anchor="middle">DOC · BRIEF · RAPPORT</text>
-          <text x="806" y="179" font-family="Geist Sans,sans-serif" font-size="8" fill="#5B6068" text-anchor="middle">Contenu tracé</text>
-        </g>
-
-        <g class="anat-node" data-id="art-trace" data-layer="ARTEFACTS" tabindex="0" role="button" aria-label="Artefact — Traces JSONL">
-          <rect class="node-rect" x="736" y="206" width="140" height="36" rx="3" fill="#0B0C0E" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="806" y="224" font-family="Geist Mono,monospace" font-size="8.5" fill="#FF6B3D" text-anchor="middle">TRACE · JSONL · LOG</text>
-          <text x="806" y="235" font-family="Geist Sans,sans-serif" font-size="8" fill="#5B6068" text-anchor="middle">Preuve immutable</text>
-        </g>
-
-        <g class="anat-node" data-id="art-sig" data-layer="ARTEFACTS" tabindex="0" role="button" aria-label="Artefact — Signatures">
-          <rect class="node-rect" x="736" y="262" width="140" height="36" rx="3" fill="#0B0C0E" stroke="rgba(255,107,61,0.5)" stroke-width="1"/>
-          <text x="806" y="280" font-family="Geist Mono,monospace" font-size="8.5" fill="#FF6B3D" text-anchor="middle">SIG · HASH · CONTRAT</text>
-          <text x="806" y="291" font-family="Geist Sans,sans-serif" font-size="8" fill="#5B6068" text-anchor="middle">Sceau cryptographique</text>
-        </g>
-
-        <!-- ════════════════════════════
-             CONNECTIONS
-             ════════════════════════════ -->
-        <!-- Agents → SOG -->
-        <path class="anat-conn" data-from="bmm"      data-to="sog"       d="M194,65  C218,65  218,65  242,65"  fill="none" stroke="rgba(255,107,61,0.35)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="bmb"      data-to="sog"       d="M194,139 C218,139 218,80  242,80"  fill="none" stroke="rgba(255,107,61,0.25)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="cis"      data-to="sog"       d="M194,213 C218,213 218,90  242,90"  fill="none" stroke="rgba(255,107,61,0.25)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="tea"      data-to="trace"     d="M194,287 C218,287 218,213 242,213" fill="none" stroke="rgba(255,107,61,0.3)"  stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="subagents" data-to="memory"   d="M194,361 C218,361 218,287 242,287" fill="none" stroke="#5B6068" stroke-width="1" marker-end="url(#arr-dim)"/>
-        <!-- Agents → Contract -->
-        <path class="anat-conn" data-from="bmm"      data-to="contract"  d="M111,92  L111,400 C111,400 180,361 242,361" fill="none" stroke="rgba(255,107,61,0.12)" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr-acc)"/>
-
-        <!-- SOG → Surfaces -->
-        <path class="anat-conn" data-from="sog" data-to="cockpit"     d="M434,65  C455,65  455,58  476,58"   fill="none" stroke="rgba(255,107,61,0.45)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="sog" data-to="observatory" d="M434,72  C455,72  455,118 476,118"  fill="none" stroke="rgba(255,107,61,0.3)"  stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="sog" data-to="kanban"      d="M434,78  C455,78  455,178 476,178"  fill="none" stroke="rgba(255,107,61,0.25)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="sog" data-to="warroom"     d="M434,82  C455,82  455,238 476,238"  fill="none" stroke="#5B6068" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr-dim)"/>
-        <path class="anat-conn" data-from="sog" data-to="gameui"      d="M338,92  L338,420 C338,460 476,298 476,298" fill="none" stroke="rgba(255,107,61,0.2)" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="trace" data-to="proofs"    d="M434,213 C455,213 455,358 476,358"  fill="none" stroke="rgba(255,107,61,0.35)" stroke-width="1" marker-end="url(#arr-acc)"/>
-
-        <!-- UDF → Surfaces (dynamic factory) -->
-        <path class="anat-conn" data-from="udf" data-to="cockpit"     d="M338,139 L338,58  C400,58  450,58  476,58"  fill="none" stroke="rgba(255,107,61,0.15)" stroke-width="1" stroke-dasharray="3,4" marker-end="url(#arr-acc)"/>
-
-        <!-- Surfaces → Artefacts -->
-        <path class="anat-conn" data-from="cockpit"     data-to="art-spec"  d="M702,58  C720,58  720,56  736,56"  fill="none" stroke="rgba(255,107,61,0.4)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="observatory" data-to="art-trace" d="M702,118 C720,118 720,224 736,224" fill="none" stroke="rgba(255,107,61,0.3)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="kanban"      data-to="art-doc"   d="M702,178 C720,178 720,168 736,168" fill="none" stroke="rgba(255,107,61,0.3)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="proofs"      data-to="art-sig"   d="M702,358 C720,358 720,280 736,280" fill="none" stroke="rgba(255,107,61,0.4)" stroke-width="1" marker-end="url(#arr-acc)"/>
-        <path class="anat-conn" data-from="sog"         data-to="art-code"  d="M434,65  C600,65  680,112 736,112" fill="none" stroke="rgba(255,107,61,0.18)" stroke-width="1" stroke-dasharray="3,4" marker-end="url(#arr-acc)"/>
-
-      </svg>
-    </div>
-
-    <!-- Info panel -->
-    <div class="info-panel reveal" data-delay="160" id="info-panel">
-      <div class="info-empty" id="info-empty">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="16" cy="16" r="12"/><path d="M16 11v5l3 2"/></svg>
-        <span>SURVOLE UN NŒUD<br>POUR EN SAVOIR PLUS</span>
-      </div>
-      <div id="info-content" style="display:none"></div>
-    </div>
-  </div>
-
-  <!-- Legend -->
-  <div class="layer-legend">
-    <div class="ll-item"><span class="ll-swatch" style="background:rgba(255,107,61,0.6)"></span>Agents · Runtime</div>
-    <div class="ll-item"><span class="ll-swatch" style="background:rgba(52,211,153,0.6)"></span>Surface LIVE</div>
-    <div class="ll-item"><span class="ll-swatch" style="background:rgba(252,211,77,0.6)"></span>Surface BETA/PARTIAL</div>
-    <div class="ll-item"><span class="ll-swatch" style="background:#5B6068"></span>Roadmap</div>
-    <div class="ll-item"><span class="ll-swatch" style="background:rgba(255,107,61,0.4);background-image:repeating-linear-gradient(90deg,rgba(255,107,61,.4) 0,rgba(255,107,61,.4) 3px,transparent 3px,transparent 7px)"></span>Lien dynamique</div>
-  </div>
-
-  <!-- Module details -->
-  <div class="anat-bottom">
-    <div class="divider" aria-hidden="true" style="margin-bottom:40px"></div>
-    <div class="eyebrow reveal"><span class="num">MODULES</span> · DÉTAIL DES COMPOSANTS AGENTS</div>
-    <div class="module-grid">
-      <div class="module-card reveal" data-delay="0">
-        <div class="mc-badge">BMM</div>
-        <h3>Builder Mind Map</h3>
-        <p>Cartographie cognitive de la session. Maintient le graphe de connaissances de l'agent, les dépendances entre tâches et les hypothèses actives.</p>
-      </div>
-      <div class="module-card reveal" data-delay="60">
-        <div class="mc-badge">BMB</div>
-        <h3>Builder Memory Bank</h3>
-        <p>Banque mémoire à trois niveaux : working (volatile), episodic (session), semantic (permanent). Isolation par namespace, TTL configurable.</p>
-      </div>
-      <div class="module-card reveal" data-delay="120">
-        <div class="mc-badge">CIS</div>
-        <h3>Contextual Intent System</h3>
-        <p>Système d'interprétation des intentions. Traduit les directives de haut niveau en contrats d'exécution précis pour le SOG.</p>
-      </div>
-      <div class="module-card reveal" data-delay="180">
-        <div class="mc-badge">TEA</div>
-        <h3>Trace Emit Agent</h3>
-        <p>Agent responsable de l'émission des traces. Intercepte chaque action, l'horodate, la signe et l'envoie au Trace Ledger immutable.</p>
+  <section id="hero">
+    <div class="container">
+      <div class="eyebrow reveal" style="margin-bottom:18px"><span class="num">FORGE-04</span> · ANATOMIE</div>
+      <h1 class="grad-text reveal" data-delay="60">Le runtime, couche par couche.</h1>
+      <p class="hero-sub reveal" data-delay="120">
+        L'architecture réelle de Grimoire Kit — pas un schéma marketing. Chaque composant est ancré dans le
+        dépôt et cliquable vers son code ou sa doc. <strong>Réel</strong> = livré et vérifiable ;
+        <strong>vision</strong> = concept non encore livré.
+      </p>
+      <div class="legend reveal" data-delay="160">
+        <span class="lg"><span class="d" style="background:var(--data-green)"></span>réel · livré</span>
+        <span class="lg"><span class="d" style="background:var(--data-amber)"></span>vision · roadmap</span>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="cta-final">
-  <div class="container" style="position:relative;z-index:1;text-align:center">
-    <h2 class="reveal grad-text" style="margin-bottom:12px">Prêt à forger le premier contrat ?</h2>
-    <div class="reveal" data-delay="80" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:28px;">
-      <a href="index.html#cta-final" class="btn btn-primary">OUVRIR LE COCKPIT</a>
-      <a href="demo.html" class="btn btn-ghost">VOIR LA DÉMO</a>
+  <section id="anatomy">
+    <div class="container">
+      <div id="layers"></div>
+      <div id="anat-empty">Carte d'architecture indisponible (<code>data/architecture.json</code>).</div>
     </div>
-  </div>
-</section>
+  </section>
 </main>
+
 <footer id="forge-footer"></footer>
+
 <script src="forge-nav.js"></script>
+<script src="forge-motion.js"></script>
 <script>
-/* ── Node data ── */
-const NODE_DATA = {
-  bmm:        { layer:'AGENTS', name:'Builder Mind Map', desc:'Cartographie cognitive de la session. Maintient le graphe de connaissances, les dépendances entre tâches et les hypothèses actives de chaque agent.', props:[{k:'TYPE',v:'Agent Module'},{k:'SCOPE',v:'Session locale'},{k:'DÉPENDANCE',v:'BMB, SOG'},{k:'CONTRAT',v:'AgentContract v2'}], connects:['sog','bmb','contract'] },
-  bmb:        { layer:'AGENTS', name:'Builder Memory Bank', desc:'Banque mémoire à trois niveaux : working (volatile, TTL court), episodic (durée session), semantic (permanent inter-sessions). Isolation stricte par namespace.', props:[{k:'TYPE',v:'Agent Module'},{k:'TIERS',v:'working · episodic · semantic'},{k:'TTL',v:'configurable par tier'}], connects:['sog','memory'] },
-  cis:        { layer:'AGENTS', name:'Contextual Intent System', desc:"Système d'interprétation des intentions. Traduit les directives opérateur de haut niveau en contrats d'exécution précis — rôle, outils, mémoire, critères.", props:[{k:'TYPE',v:'Agent Module'},{k:'OUTPUT',v:'AgentContract signé'},{k:'VALIDATION',v:'Contract Engine'}], connects:['sog','contract'] },
-  tea:        { layer:'AGENTS', name:'Trace Emit Agent', desc:"Agent dédié à l'émission des traces. Intercepte chaque action de la session, l'horodate, la signe et l'envoie au Trace Ledger en append-only.", props:[{k:'TYPE',v:'Agent Module'},{k:'FORMAT',v:'JSONL append-only'},{k:'LATENCE',v:'< 2ms par event'}], connects:['trace','art-trace'] },
-  subagents:  { layer:'AGENTS', name:'Sub-agents spécialisés', desc:'Agents métier instanciés par le SOG selon le contrat : pm, dev, qa, architect, tech-writer, analyst, critic. Chacun opère dans un contexte mémoire délimité.', props:[{k:'INSTANCIATION',v:'dynamique via SOG'},{k:'ROSTER',v:'pm · dev · qa · arch…'},{k:'ISOLATION',v:'namespace BMB dédié'}], connects:['sog','memory','contract'] },
-  sog:        { layer:'RUNTIME', name:'Smart Orchestrator Gateway', desc:'Point central de dispatch. Reçoit les requêtes opérateur, valide le contrat, sélectionne et spawne les agents spécialisés, agrège les résultats, scelle l\'artefact.', props:[{k:'PROTOCOLE',v:'ws:// + REST'},{k:'LATENCE MÉD.',v:'3.4s end-to-end'},{k:'CONCURRENCE',v:'multi-session RBAC'}], connects:['cockpit','observatory','kanban','gameui','proofs','trace','contract','udf'] },
-  udf:        { layer:'RUNTIME', name:'Unified Dynamic Factory', desc:'Fabrique d\'artefacts dynamiques. Crée et gère les agents, workflows, skills, instructions à la volée selon les spécifications du contrat. Gère le triage éphémère/permanent.', props:[{k:'SCOPE',v:'agents · skills · workflows'},{k:'TRIAGE',v:'éphémère / permanent'},{k:'CONTRAT',v:'UDFContract v1'}], connects:['sog','art-code','art-spec'] },
-  trace:      { layer:'RUNTIME', name:'Trace Ledger', desc:'Journal immutable de toutes les actions du runtime. Chaque event est horodaté, signé, indexé par session et agent. Rejoutable à l\'identique pour la reproductibilité.', props:[{k:'FORMAT',v:'JSONL append-only'},{k:'RÉTENTION',v:'configurable'},{k:'EXPORT',v:'API REST + stream'}], connects:['proofs','art-trace','observatory'] },
-  memory:     { layer:'RUNTIME', name:'Memory Bus', desc:'Espace mémoire partagé entre agents d\'une session. Structure à trois niveaux, isolation par namespace, TTL par tier. Accès concurrentiel avec verrous optimistes.', props:[{k:'TIERS',v:'working · episodic · semantic'},{k:'ISOLATION',v:'namespace strict'},{k:'ACCÈS',v:'lecture/écriture agents'}], connects:['sog','bmb','subagents'] },
-  contract:   { layer:'RUNTIME', name:'Contract Engine', desc:'Moteur de validation des contrats. Vérifie la signature, les autorisations d\'outils, les critères de sortie avant chaque exécution d\'agent. Aucun agent ne bypass les hooks.', props:[{k:'VALIDATION',v:'pré-exécution'},{k:'SIGNATURE',v:'cryptographique'},{k:'HOOKS',v:'pre / post agent'}], connects:['sog','bmm','cis','subagents'] },
-  cockpit:    { layer:'SURFACES', name:'Cockpit', desc:'Surface de pilotage temps réel. Affiche l\'état des agents, des pipelines, des files de tâches. Permet l\'émission de directives et l\'inspection des artefacts en cours.', props:[{k:'PROTOCOLE',v:'WebSocket bidir.'},{k:'LATENCE',v:'< 40ms'},{k:'ÉTAT',v:'LIVE'}], connects:['sog','art-spec','art-code'] },
-  observatory:{ layer:'SURFACES', name:'Observatory', desc:'Vue longitudinale des traces et artefacts. Inspection diff versions, audit contrats, métriques de session, export JSONL. Interface lecture seule.', props:[{k:'PROTOCOLE',v:'REST + SSE'},{k:'ACCÈS',v:'lecture seule'},{k:'ÉTAT',v:'PARTIAL'}], connects:['trace','art-trace'] },
-  kanban:     { layer:'SURFACES', name:'Kanban', desc:'Gestion des tâches agentiques par état de contrat. Colonnes DRAFT → IN PROGRESS → DONE, drag-to-assign, SLA par lane, assignation manuelle possible.', props:[{k:'PROTOCOLE',v:'WS bidir.'},{k:'ACCÈS',v:'lecture + écriture'},{k:'ÉTAT',v:'BETA'}], connects:['sog','art-doc'] },
-  warroom:    { layer:'SURFACES', name:'War Room', desc:'Surface de coordination multi-sessions pour les situations de crise ou de débat inter-équipes. Inclut le PCE (Productive Conflict Engine) pour les débats agentiques.', props:[{k:'MODÈLE',v:'multi-tenant'},{k:'SÉCURITÉ',v:'RBAC strict'},{k:'ÉTAT',v:'ROADMAP Q3 2026'}], connects:['sog'] },
-  gameui:     { layer:'SURFACES', name:'Game UI', desc:'Surface d\'observation du runtime en rendu pixel art isométrique. Chaque agent est un personnage, chaque tâche une animation. Surface d\'observation intuitive, pas un gadget.', props:[{k:'RENDU',v:'CSS + SVG · 60fps'},{k:'DONNÉES',v:'fixtures → runtime live'},{k:'ÉTAT',v:'BETA'}], connects:['sog'] },
-  proofs:     { layer:'SURFACES', name:'Proofs', desc:'Registre des preuves. Hash SHA-256 de chaque artefact, signatures de contrats, replay de sessions. Export audit complet. Interface immuable par design.', props:[{k:'HASH',v:'SHA-256'},{k:'ACCÈS',v:'lecture + export'},{k:'ÉTAT',v:'PARTIAL'}], connects:['trace','art-sig'] },
-  'art-spec': { layer:'ARTEFACTS', name:'Spec · PRD · RFC', desc:'Artefacts de spécification : PRD, RFC, ADR, brief. Versioned, adressables par hash, liés à la trace de production. Exportables en Markdown ou JSON.', props:[{k:'FORMAT',v:'Markdown · JSON'},{k:'VERSIONING',v:'hash SHA-256'},{k:'LIEN',v:'trace parent'}], connects:['cockpit','udf'] },
-  'art-code': { layer:'ARTEFACTS', name:'Code · Tests · Schema', desc:'Artefacts de code source : fichiers TypeScript, suites de tests, schémas Zod/JSON Schema. Générés et validés par les agents dev et qa.', props:[{k:'FORMAT',v:'.ts · .test.ts · .json'},{k:'VALIDATION',v:'CVTL par agent/qa'},{k:'LIEN',v:'contrat + trace'}], connects:['sog','udf'] },
-  'art-doc':  { layer:'ARTEFACTS', name:'Doc · Brief · Rapport', desc:'Artefacts documentaires : documentation API, briefs créatifs, rapports d\'analyse. Produits par les agents tech-writer et analyst.', props:[{k:'FORMAT',v:'Markdown · PDF'},{k:'AGENTS',v:'tech-writer · analyst'},{k:'LIEN',v:'trace + sig'}], connects:['kanban'] },
-  'art-trace':{ layer:'ARTEFACTS', name:'Trace · JSONL · Log', desc:'Journal de trace complet en JSONL. Chaque ligne = un event signé. Rejoutable à l\'identique pour la reproductibilité totale d\'une session.', props:[{k:'FORMAT',v:'JSONL append-only'},{k:'RÉTENTION',v:'configurable'},{k:'REPLAY',v:'100% fidèle'}], connects:['trace','observatory','tea'] },
-  'art-sig':  { layer:'ARTEFACTS', name:'Sig · Hash · Contrat', desc:'Sceau cryptographique de chaque artefact. Inclut le hash de contenu, la signature du contrat parent et l\'horodatage de scellement. Preuve légale potentielle.', props:[{k:'ALGO',v:'SHA-256 + ECDSA'},{k:'LIEN',v:'contrat parent'},{k:'VÉRIF.',v:'hors-ligne possible'}], connects:['proofs'] },
-};
+/* ── Anatomie pilotée par data/architecture.json (source de vérité ancrée code/doc) ── */
+(function () {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
-/* ── Interactivity ── */
-const nodes = document.querySelectorAll('.anat-node');
-const conns = document.querySelectorAll('.anat-conn');
-const infoEmpty = document.getElementById('info-empty');
-const infoContent = document.getElementById('info-content');
-let pinned = null;
+  fetch('data/architecture.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(render)
+    .catch(() => { document.getElementById('anat-empty').style.display = 'block'; });
 
-function showInfo(id) {
-  const d = NODE_DATA[id]; if(!d) return;
-  infoEmpty.style.display='none'; infoContent.style.display='block';
-  infoContent.innerHTML = `
-    <div class="info-layer">${d.layer}</div>
-    <div class="info-name">${d.name}</div>
-    <div class="info-desc">${d.desc}</div>
-    <div class="info-props">${d.props.map(p=>`<div class="info-prop"><span class="k">${p.k}</span><span class="v">${p.v}</span></div>`).join('')}</div>
-    ${d.connects?.length ? `<div class="info-connects"><h4>CONNECTÉ À</h4>${d.connects.map(c=>`<span class="info-conn-tag"><span class="dot"></span>${(NODE_DATA[c]?.name||c).toUpperCase()}</span>`).join('')}</div>` : ''}`;
-}
+  function refLink(repo, ref) {
+    if (!ref) return '<span class="node-ref none">vision</span>';
+    const url = ref.startsWith('http') ? ref : `${repo}/blob/main/${ref}`;
+    const label = ref.replace(/\/$/, '').split('/').pop() || ref;
+    return `<a class="node-ref" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`;
+  }
 
-function clearInfo() {
-  infoEmpty.style.display='flex'; infoContent.style.display='none';
-}
+  function render(arch) {
+    const repo = arch.repo || 'https://github.com/Guilhem-Bonnet/Grimoire-kit';
+    const byLayer = {};
+    (arch.nodes || []).forEach((n) => { (byLayer[n.layer] = byLayer[n.layer] || []).push(n); });
 
-function highlight(id) {
-  const connected = new Set([id, ...(NODE_DATA[id]?.connects||[])]);
-  nodes.forEach(n=>{
-    const nid = n.dataset.id;
-    n.classList.toggle('dim', !connected.has(nid));
-    n.classList.toggle('highlight', connected.has(nid));
-    n.classList.toggle('active', nid===id);
-  });
-  conns.forEach(c=>{
-    const from=c.dataset.from, to=c.dataset.to;
-    const rel = (from===id&&connected.has(to)) || (to===id&&connected.has(from));
-    c.classList.toggle('dim', !rel);
-    c.classList.toggle('highlight', rel);
-  });
-}
+    document.getElementById('layers').innerHTML = (arch.layers || []).map((layer, i) => {
+      const nodes = byLayer[layer.id] || [];
+      const cards = nodes.map((n) => `
+        <div class="node ${n.status === 'vision' ? 'vision' : ''}">
+          <div class="node-top">
+            <span class="node-name">${esc(n.name)}</span>
+            <span class="node-status ${n.status === 'vision' ? 'vision' : 'real'}">${n.status === 'vision' ? 'VISION' : 'RÉEL'}</span>
+          </div>
+          <div class="node-desc">${esc(n.desc)}</div>
+          ${refLink(repo, n.ref)}
+        </div>`).join('');
+      return `<div class="layer reveal" data-delay="${i * 40}">
+        <div class="layer-head">
+          <span class="layer-idx">${String(i + 1).padStart(2, '0')}</span>
+          <span class="layer-name">${esc(layer.name)}</span>
+          <span class="layer-desc">${esc(layer.desc || '')}</span>
+        </div>
+        <div class="layer-nodes">${cards}</div>
+      </div>`;
+    }).join('');
 
-function clearHighlight() {
-  nodes.forEach(n=>{ n.classList.remove('dim','highlight','active'); });
-  conns.forEach(c=>{ c.classList.remove('dim','highlight'); });
-}
-
-nodes.forEach(n=>{
-  const id=n.dataset.id;
-  n.addEventListener('mouseenter',()=>{ if(pinned) return; highlight(id); showInfo(id); });
-  n.addEventListener('mouseleave',()=>{ if(pinned) return; clearHighlight(); clearInfo(); });
-  n.addEventListener('click',()=>{
-    if(pinned===id){ pinned=null; clearHighlight(); clearInfo(); }
-    else { pinned=id; highlight(id); showInfo(id); }
-  });
-  n.addEventListener('keydown',e=>{
-    if(e.key==='Enter'||e.key===' '){ e.preventDefault();
-      if(pinned===id){ pinned=null; clearHighlight(); clearInfo(); }
-      else { pinned=id; highlight(id); showInfo(id); }
-    }
-    if(e.key==='Escape'&&pinned){ pinned=null; clearHighlight(); clearInfo(); }
-  });
-});
+    // Reveal the freshly-injected layers (IntersectionObserver already ran at load → add the class directly)
+    requestAnimationFrame(() => document.querySelectorAll('#layers .reveal').forEach((el) => el.classList.add('visible')));
+  }
+})();
 </script>
 </body>
 </html>

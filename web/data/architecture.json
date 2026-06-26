@@ -1,0 +1,60 @@
+{
+  "_note": "Carte d'architecture réconciliée — chaque nœud est ancré dans le vrai code/doc du dépôt. status: real = livré et vérifiable ; vision = concept/roadmap non livré tel quel.",
+  "generated_by": "scripts/gen-site-data.py (curated) — édité comme source de vérité",
+  "repo": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+  "layers": [
+    { "id": "interfaces", "name": "Interfaces", "desc": "Les surfaces par lesquelles on pilote le runtime." },
+    { "id": "orchestration", "name": "Orchestration & Agents", "desc": "Le dispatch d'intention et les agents spécialisés." },
+    { "id": "standard", "name": "Standard agentique gouverné", "desc": "Profils, patterns vérifiables, gates fail-closed." },
+    { "id": "memory", "name": "Mémoire (Memory OS)", "desc": "État partagé persistant entre sessions." },
+    { "id": "proof", "name": "Preuve & Trace", "desc": "Tout est tracé, hashé, rejouable." },
+    { "id": "artefacts", "name": "Artefacts", "desc": "Les sorties gouvernées du travail agentique." }
+  ],
+  "nodes": [
+    { "id": "cli", "layer": "interfaces", "name": "CLI `grimoire`", "status": "real",
+      "desc": "init · doctor · status · standard · check · up · merge · registry…", "ref": "src/grimoire/cli/app.py" },
+    { "id": "sdk", "layer": "interfaces", "name": "SDK Python", "status": "real",
+      "desc": "GrimoireConfig / GrimoireProject — piloter projets, agents et outils en code.", "ref": "src/grimoire/core/" },
+    { "id": "mcp", "layer": "interfaces", "name": "Serveur MCP `grimoire-mcp`", "status": "real",
+      "desc": "Expose le projet à Copilot / Claude Desktop via Model Context Protocol.", "ref": "src/grimoire/mcp/server.py" },
+    { "id": "observatory", "layer": "interfaces", "name": "Observatory", "status": "real",
+      "desc": "Dashboard HTML autoporté : traces, event-log, graphe d'agents, état partagé.", "ref": "framework/tools/observatory.py" },
+    { "id": "kanban", "layer": "interfaces", "name": "Kanban gouverné", "status": "real",
+      "desc": "Tableau agentique : 8 états, transitions gated par la preuve.", "ref": "framework/agentic-standard/templates/task-board.yaml" },
+    { "id": "docs", "layer": "interfaces", "name": "Documentation", "status": "real",
+      "desc": "Docs du dépôt rendues en direct (marked + highlight + mermaid).", "ref": "docs/" },
+    { "id": "cockpit", "layer": "interfaces", "name": "Cockpit", "status": "vision",
+      "desc": "Surface de pilotage temps réel — concept / vision.", "ref": null },
+
+    { "id": "sog", "layer": "orchestration", "name": "Smart Orchestrator Gateway (SOG)", "status": "real",
+      "desc": "Point d'entrée unique : détecte l'intention, dispatche vers les sub-agents, agrège.", "ref": "framework/orchestrator-gateway.md" },
+    { "id": "agents", "layer": "orchestration", "name": "Agents & rôles", "status": "real",
+      "desc": "Atlas · Sentinel · Mnemo + rôles d'archétype (pm, dev, qa, architect, tech-writer, analyst). 33 agents, 10 archétypes.", "ref": "archetypes/" },
+    { "id": "agent_base", "layer": "orchestration", "name": "Protocole agent-base", "status": "real",
+      "desc": "Socle commun : Completion Contract, Plan/Act, Extended Thinking, mémoire partagée.", "ref": "docs/concepts.md" },
+
+    { "id": "capability_map", "layer": "standard", "name": "Capability map — 36 patterns", "status": "real",
+      "desc": "36 patterns gouvernés sur 11 catégories, chacun mappé à ses artefacts/checks.", "ref": "framework/agentic-standard/capability-map.yaml" },
+    { "id": "profile_map", "layer": "standard", "name": "Profils — starter → production", "status": "real",
+      "desc": "5 profils par besoin ; 41 types d'artefacts.", "ref": "framework/agentic-standard/profile-map.yaml" },
+    { "id": "verify_gate", "layer": "standard", "name": "verify · audit · score · gate", "status": "real",
+      "desc": "Vérification fail-closed de la conformité (CI-friendly).", "ref": "docs/governed-controls.md" },
+
+    { "id": "memory_os", "layer": "memory", "name": "Memory OS", "status": "real",
+      "desc": "shared-context · decisions-log · learnings, persistants entre sessions.", "ref": "docs/memory-system.md" },
+    { "id": "memory_backends", "layer": "memory", "name": "Backends mémoire", "status": "real",
+      "desc": "sqlite (défaut, zéro-config) · redis · weaviate · neo4j, dégradation gracieuse.", "ref": "docs/memory-system.md" },
+
+    { "id": "trace", "layer": "proof", "name": "Trace JSONL", "status": "real",
+      "desc": "Grimoire_TRACE.md + .event-log.jsonl : chaque action horodatée, rejouable.", "ref": "framework/grimoire-trace.md" },
+    { "id": "decision_log", "layer": "proof", "name": "Decision log (hash chain)", "status": "real",
+      "desc": "Journal de décisions chaîné en sha256 — intégrité vérifiable.", "ref": "framework/tools/decision-log.py" },
+    { "id": "completion_contract", "layer": "proof", "name": "Completion Contract", "status": "real",
+      "desc": "Pas de « fini » sans checks, preuves et clôture vérifiable. cc-verify en pre-commit / CI.", "ref": "framework/cc-verify.sh" },
+
+    { "id": "artifact_types", "layer": "artefacts", "name": "Types d'artefacts (41)", "status": "real",
+      "desc": "mission brief · task envelope · evidence pack · decision trace · compliance declaration · task board…", "ref": "framework/agentic-standard/profile-map.yaml" },
+    { "id": "project_context", "layer": "artefacts", "name": "project-context.yaml", "status": "real",
+      "desc": "Source de vérité du projet, générée par `grimoire init`.", "ref": "src/grimoire/core/scaffold.py" }
+  ]
+}
