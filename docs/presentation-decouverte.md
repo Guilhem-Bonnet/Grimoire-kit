@@ -40,6 +40,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 
 [Orchestration et intent routing](concepts.md)
 [Evidence-first et Completion Contract](workflow-design-patterns.md)
+[Standard agentique gouverné](governed-controls.md)
 [Mémoire projet et session](memory-system.md)
 [Workflows et artefacts](workflow-taxonomy.md)
 {: .gp-hero-signals }
@@ -212,6 +213,8 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
             <p>Quand la root cause bouge ou que les itérations s'emballent, le workflow s'arrête et requalifie.</p>
         </article>
     </div>
+
+    <p class="gp-flow-caption">Et pour le prouver à l'échelle : un <strong>standard agentique gouverné</strong> — un besoin mappe sur un profil (<code>starter → controlled → orchestrated → governed → production</code>) qui active des patterns vérifiables <em>fail-closed</em> (<code>verify · audit · score · gate</code>).</p>
 
 !!! onepager "Mouvement VI — Ce qui survit"
     **Une bonne session laisse une mémoire, pas une impression.**
