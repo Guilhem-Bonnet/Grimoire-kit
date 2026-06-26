@@ -155,6 +155,29 @@ Code de sortie `1` si un problème est détecté.
 
 ---
 
+## Standard agentique gouverné
+
+Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](governed-controls.md).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire standard profiles` | Lister les profils (`starter → production`) |
+| `grimoire standard needs` | Lister les besoins projet (groupés par tier) |
+| `grimoire standard plan --needs <id>` | Prévisualiser le plan (profil + patterns + extras) sans rien écrire |
+| `grimoire standard init [.] --needs <id>` | Générer les artefacts standard du projet |
+| `grimoire standard verify` | Vérifier les artefacts (fail-closed) |
+| `grimoire standard audit` | Rapport de conformité + gaps restants |
+| `grimoire standard score` | Calculer et persister un score de conformité |
+| `grimoire standard gate check` | Gate CI : échoue si une preuve obligatoire manque |
+| `grimoire standard fix [--apply]` | Planifier / appliquer des correctifs sûrs |
+| `grimoire standard doctor` | Vérifier la disponibilité des extras technologiques |
+| `grimoire standard pattern` | Lister / inspecter les patterns |
+| `grimoire standard detect-providers` | Détecter les providers LLM disponibles |
+
+Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, `rules`, `hooks`, `gate`, `events`, `pattern`, `knowledge`.
+
+---
+
 ## Sous-commandes
 
 ### `grimoire config show`

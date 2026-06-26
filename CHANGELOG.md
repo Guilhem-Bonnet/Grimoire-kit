@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.11.5] - 2026-06-25
+
+### Corrigé
+
+- **Review documentation web — couverture du standard agentique** — `index.md`, `concepts.md` et `cli-reference.md` couvrent désormais le standard agentique gouverné (fonctionnalité clé, concept dédié, groupe de commandes `grimoire standard …`), jusqu'ici absent de toute la doc cœur malgré v3.5–v3.11. Arbre d'architecture corrigé (mémoire : Weaviate/Neo4j/Qdrant). Emojis de diagramme (✅/🔴) remplacés par marques typographiques (✓/✗). Build `mkdocs --strict` propre ; nav 36/36 sans orphelin ni lien cassé.
+
 ## [3.11.4] - 2026-06-25
 
 ### Corrigé

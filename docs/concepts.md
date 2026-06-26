@@ -94,8 +94,8 @@ Un agent ne peut JAMAIS dire "fait" sans avoir lancé les vérifications automat
 
 ```
 Agent dit "terminé" → cc-verify.sh détecte Python → lance pytest + ruff
-   → ✅ CC PASS → OK, c'est vraiment fini
-   → 🔴 CC FAIL → corrige, relance, boucle jusqu'à PASS
+   → ✓ CC PASS → OK, c'est vraiment fini
+   → ✗ CC FAIL → corrige, relance, boucle jusqu'à PASS
 ```
 
 ### Plan/Act Mode
@@ -137,6 +137,15 @@ SM → "QA, teste ce code" → QA teste → résultat revient au SM
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
+
+### Standard agentique gouverné
+
+Au-delà des protocoles d'agents, Grimoire applique un **standard agentique** : un besoin projet
+(`grimoire standard needs`) mappe sur un **profil** (`starter → controlled → orchestrated → governed
+→ production`) qui active des **patterns gouvernés vérifiables** (36 au catalogue — sécurité,
+gouvernance, contexte, mémoire, observabilité…). Chaque pattern pose un artefact déclaratif
+(`_grimoire/standard/*.yaml`) et un contrôle *fail-closed* vérifié par `grimoire standard verify`
+/ `audit` / `score` / `gate`. Référence : [Contrôles gouvernés](governed-controls.md).
 
 ## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
 
@@ -325,9 +334,9 @@ votre-projet/
    ├── [ACT par défaut] L'agent exécute directement
    ├── Modifie les fichiers
    ├── Lance cc-verify.sh → tests + lint
-   ├── ✅ CC PASS → "Fait"
+   ├── ✓ CC PASS → "Fait"
    │   ou
-   ├── 🔴 CC FAIL → corrige → relance → boucle
+   ├── ✗ CC FAIL → corrige → relance → boucle
    │
 4. Fin de session
    │
