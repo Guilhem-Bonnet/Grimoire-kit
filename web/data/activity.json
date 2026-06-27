@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-06-27T19:46:05+00:00",
+  "generated_at": "2026-06-27T20:30:23+00:00",
   "git": {
-    "commits_total": 338,
+    "commits_total": 340,
     "per_day": [
       {
         "date": "2026-05-29",
@@ -121,17 +121,17 @@
       },
       {
         "date": "2026-06-27",
-        "count": 1
+        "count": 3
       }
     ],
-    "commits_30d": 95,
-    "commits_7d": 54,
-    "avg_per_day_30d": 3.17,
+    "commits_30d": 97,
+    "commits_7d": 56,
+    "avg_per_day_30d": 3.23,
     "contributor_count": 5,
     "contributors": [
       {
         "name": "guilhem-bonnet",
-        "commits": 274
+        "commits": 276
       },
       {
         "name": "Guilhèm",
@@ -151,9 +151,9 @@
       }
     ],
     "last_commit": {
-      "sha": "d7738322",
-      "message": "feat(web): inventaire agents (par archétype) + consommation tokens/jour",
-      "date": "2026-06-27T00:04:10-04:00",
+      "sha": "a9e9395d",
+      "message": "feat(web): surfacer le multi-LLM dans le data layer (coût/% par modèle)",
+      "date": "2026-06-27T15:49:01-04:00",
       "author": "guilhem-bonnet"
     }
   },
@@ -297,5 +297,24 @@
         "samples": 32
       }
     ]
+  },
+  "economy": {
+    "rtk": {
+      "total_commands": 454,
+      "input_tokens": 3754076,
+      "output_tokens": 145574,
+      "saved_tokens": 3608801,
+      "savings_pct": 96.1,
+      "total_time_ms": 588435,
+      "monthly": [
+        {
+          "month": "2026-06",
+          "commands": 454,
+          "saved_tokens": 3608801,
+          "savings_pct": 96.1
+        }
+      ]
+    },
+    "ccusage": {}
   }
 }

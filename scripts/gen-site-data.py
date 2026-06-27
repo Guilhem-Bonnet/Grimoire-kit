@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -574,6 +575,81 @@ def _context_pressure(root: Path) -> dict:
     }
 
 
+def _rtk_economy(root: Path) -> dict:
+    """Économie de tokens via `rtk gain --format json` (réel, best-effort)."""
+    raw = _run(["rtk", "gain", "--format", "json", "--all"], root, timeout=30)
+    try:
+        d = json.loads(raw) if raw.strip().startswith("{") else {}
+    except json.JSONDecodeError:
+        return {}
+    s = d.get("summary") or {}
+    if not s:
+        return {}
+    return {
+        "total_commands": s.get("total_commands", 0),
+        "input_tokens": s.get("total_input", 0),
+        "output_tokens": s.get("total_output", 0),
+        "saved_tokens": s.get("total_saved", 0),
+        "savings_pct": round(s.get("avg_savings_pct", 0), 1),
+        "total_time_ms": s.get("total_time_ms", 0),
+        "monthly": [{
+            "month": m.get("month"),
+            "commands": m.get("commands", 0),
+            "saved_tokens": m.get("saved_tokens", 0),
+            "savings_pct": round(m.get("savings_pct", 0), 1),
+        } for m in (d.get("monthly") or [])],
+    }
+
+
+def _ccusage(root: Path) -> dict:
+    """Coût/usage Claude réel via `ccusage` — OPT-IN (données personnelles globales).
+
+    Désactivé par défaut : ccusage agrège la dépense IA de TOUS les projets de
+    l'utilisateur ; on ne la publie pas sur la vitrine publique sans opt-in explicite
+    (GRIMOIRE_SITE_INCLUDE_CCUSAGE=1, typiquement pour le mode vue local).
+    """
+    if os.environ.get("GRIMOIRE_SITE_INCLUDE_CCUSAGE") != "1":
+        return {}
+    raw = _run(["ccusage", "daily", "--json"], root, timeout=60)
+    try:
+        d = json.loads(raw) if raw.strip().startswith("{") else {}
+    except json.JSONDecodeError:
+        return {}
+    days = d.get("daily") or []
+    if not days:
+        return {}
+    by_model: dict[str, dict] = {}
+    total_cost = 0.0
+    series = []
+    for day in days:
+        total_cost += day.get("totalCost", 0)
+        series.append({
+            "date": day.get("period"),
+            "cost": round(day.get("totalCost", 0), 4),
+            "input": day.get("inputTokens", 0),
+            "output": day.get("outputTokens", 0),
+            "total": day.get("totalTokens", 0),
+        })
+        for mb in day.get("modelBreakdowns") or []:
+            e = by_model.setdefault(mb.get("modelName", "?"), {"cost": 0.0, "input": 0, "output": 0})
+            e["cost"] += mb.get("cost", 0)
+            e["input"] += mb.get("inputTokens", 0)
+            e["output"] += mb.get("outputTokens", 0)
+    for e in by_model.values():
+        e["cost"] = round(e["cost"], 4)
+    return {
+        "total_cost": round(total_cost, 2),
+        "by_model": by_model,
+        "models_used": sorted(by_model),
+        "days": series[-60:],
+    }
+
+
+def build_economy(root: Path) -> dict:
+    """Économie & coût réels : RTK (publiable) + ccusage (opt-in, personnel)."""
+    return {"rtk": _rtk_economy(root), "ccusage": _ccusage(root)}
+
+
 def build_activity(root: Path) -> dict:
     """Signaux projet 100% réels (git + GitHub + usage tokens) pour la page observability."""
     gh = _github(root)
@@ -585,6 +661,7 @@ def build_activity(root: Path) -> dict:
         "repo": gh["repo"],
         "releases": _git_releases(root),
         "context_pressure": _context_pressure(root),
+        "economy": build_economy(root),
     }
 
 
