@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -23,6 +24,15 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+
+def _num(s: object) -> float | int:
+    """Extrait le premier nombre d'une chaîne (entier ou flottant)."""
+    m = re.search(r"-?\d+(?:\.\d+)?", str(s))
+    if not m:
+        return 0
+    g = m.group()
+    return float(g) if "." in g else int(g)
 
 try:
     import yaml
@@ -489,10 +499,12 @@ def build_observatory(root: Path) -> dict | None:
 
 # ── Project activity (git + GitHub, best-effort, données 100% réelles) ───────
 
-def _run(args: list[str], root: Path, timeout: int = 25) -> str:
+def _run(args: list[str], root: Path, timeout: int = 25, *, check: bool = True) -> str:
+    """Exécute une commande (best-effort). check=False : renvoie stdout même si exit≠0
+    (certains outils sortent non-zéro sur un seuil tout en émettant un JSON valide)."""
     try:
         r = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=timeout)
-        return r.stdout if r.returncode == 0 else ""
+        return r.stdout if (not check or r.returncode == 0) else ""
     except Exception:
         return ""
 
@@ -780,6 +792,177 @@ def build_activity(root: Path) -> dict:
     }
 
 
+# ── Insights : gouvernance, bench agents, routing, mémoire, code (réels) ─────
+
+def _routing(root: Path) -> dict:
+    """Décisions de routing réelles depuis _grimoire-output/.router-stats.jsonl."""
+    path = root / "_grimoire-output/.router-stats.jsonl"
+    if not path.is_file():
+        return {}
+    by_model: dict[str, int] = {}
+    by_task: dict[str, int] = {}
+    by_complexity: dict[str, int] = {}
+    est_cost = 0.0
+    n = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        n += 1
+        for key, bucket in (("model", by_model), ("task_type", by_task), ("complexity", by_complexity)):
+            v = r.get(key)
+            if v:
+                bucket[v] = bucket.get(v, 0) + 1
+        est_cost += r.get("estimated_cost", 0) or 0
+    return {"samples": n, "by_model": by_model, "by_task_type": by_task,
+            "by_complexity": by_complexity, "est_cost_total": round(est_cost, 6)}
+
+
+def _bench(root: Path) -> dict:
+    """Scores de bench par agent (latest.md) + historique des rapports datés."""
+    bdir = root / "_grimoire-output/bench-reports"
+    if not bdir.is_dir():
+        return {}
+    reports = sorted(p.stem for p in bdir.glob("20*.md"))
+
+    def _parse(path: Path) -> list[dict]:
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("|") or "Agent" in line or "---" in line or ":--" in line:
+                continue
+            cells = [c.strip().strip("`*") for c in line.strip().strip("|").split("|")]
+            # ligne d'agent : 1ʳᵉ cellule non numérique, 2ᵉ cellule = score numérique
+            if len(cells) >= 6 and cells[0] and re.search(r"\d", cells[1]):
+                rows.append({
+                    "agent": cells[0],
+                    "score": _num(cells[1]),
+                    "failures": _num(cells[4]),
+                    "ac_pass": cells[5],
+                })
+        return rows
+
+    # latest.md d'abord ; sinon le rapport daté le plus récent qui a des agents
+    agents, as_of = [], ""
+    candidates = ([bdir / "latest.md"] if (bdir / "latest.md").exists() else []) + \
+                 [bdir / f"{d}.md" for d in reversed(reports)]
+    for f in candidates:
+        if not f.exists():
+            continue
+        agents = _parse(f)
+        if agents:
+            as_of = "latest" if f.name == "latest.md" else f.stem
+            break
+    return {"report_count": len(reports), "reports": reports[-8:], "latest": agents, "as_of": as_of}
+
+
+def _memory_health(root: Path) -> dict:
+    """Santé Memory OS : contradictions, failures, learnings, backends."""
+    mdir = root / "_grimoire/_memory"
+    if not mdir.is_dir():
+        return {}
+
+    def _entries(name: str) -> int:
+        p = mdir / name
+        if not p.is_file():
+            return 0
+        return len(re.findall(r"^(?:##\s|-\s)", p.read_text(encoding="utf-8"), re.MULTILINE))
+
+    learn_dir = mdir / "agent-learnings"
+    backends_dir = mdir / "backends"
+    return {
+        "contradictions": _entries("contradiction-log.md"),
+        "failures": _entries("failure-museum.md"),
+        "decisions": _entries("decisions-log.md"),
+        "learnings_files": len(list(learn_dir.glob("*"))) if learn_dir.is_dir() else 0,
+        "backends": sorted(p.name for p in backends_dir.iterdir() if p.is_dir()) if backends_dir.is_dir() else [],
+    }
+
+
+def _code_health(root: Path) -> dict:
+    """Volume de code, ratio tests, cadence de releases, churn, issues."""
+    def _loc(paths: list[str]) -> tuple[int, int]:
+        loc = files = 0
+        for base in paths:
+            for p in (root / base).rglob("*.py"):
+                if ".venv" in p.parts or "__pycache__" in p.parts:
+                    continue
+                files += 1
+                with contextlib.suppress(OSError):
+                    loc += sum(1 for _ in p.open(encoding="utf-8", errors="ignore"))
+        return loc, files
+
+    src_loc, src_files = _loc(["framework", "src"])
+    test_loc, test_files = _loc(["tests"])
+    # releases : total + sur 30 jours (la cadence par diff est trompeuse, releases en rafales)
+    all_dates = []
+    for d in _run(["git", "for-each-ref", "--format=%(creatordate:short)", "refs/tags"], root).splitlines():
+        with contextlib.suppress(ValueError):
+            all_dates.append(_dt.date.fromisoformat(d.strip()))
+    today = _dt.date.today()
+    releases_30d = sum(1 for d in all_dates if (today - d).days <= 30)
+    tags_total = len(all_dates)
+    # churn 60j
+    churn_raw = _run(["git", "log", "--since=60 days ago", "--name-only", "--pretty=format:"], root)
+    churn: dict[str, int] = {}
+    for f in churn_raw.splitlines():
+        f = f.strip()
+        if f:
+            churn[f] = churn.get(f, 0) + 1
+    top_churn = [{"file": f, "changes": c} for f, c in sorted(churn.items(), key=lambda x: -x[1])[:8]]
+    # issues
+    open_i = _gh_json(["issue", "list", "-s", "open", "--limit", "200", "--json", "number"], root)
+    closed_i = _gh_json(["issue", "list", "-s", "closed", "--limit", "200", "--json", "number"], root)
+    return {
+        "loc": src_loc, "py_files": src_files,
+        "test_loc": test_loc, "test_files": test_files,
+        "tests_code_ratio": round(test_loc / src_loc, 3) if src_loc else 0.0,
+        "tags_total": tags_total, "releases_30d": releases_30d,
+        "churn_top": top_churn,
+        "issues_open": len(open_i) if isinstance(open_i, list) else 0,
+        "issues_closed": len(closed_i) if isinstance(closed_i, list) else 0,
+    }
+
+
+def _governance(root: Path) -> dict:
+    """Score d'antifragilité (run best-effort) + décisions loggées."""
+    out: dict = {}
+    # --dry-run : ne pas écrire antifragile-history.json (effet de bord) ;
+    # l'outil émet le JSON suivi d'une ligne de log → on extrait le bloc {...}.
+    raw = _run([sys.executable, str(root / "framework/tools/antifragile-score.py"),
+                "--project-root", str(root), "--json", "--dry-run"], root, timeout=60, check=False)
+    mjson = re.search(r"\{.*\}", raw, re.DOTALL)
+    if mjson:
+        try:
+            d = json.loads(mjson.group())
+        except json.JSONDecodeError:
+            d = {}
+        if d:
+            out["antifragile"] = {
+                "score": d.get("score"),
+                "level": d.get("level"),
+                "evidence": d.get("evidence"),
+                "summary": d.get("summary", ""),
+                "dimensions": {k: v.get("score") for k, v in (d.get("dimensions") or {}).items()},
+            }
+    return out
+
+
+def build_insights(root: Path) -> dict:
+    """Métriques avancées réelles : gouvernance, bench, routing, mémoire, code."""
+    return {
+        "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "governance": _governance(root),
+        "bench": _bench(root),
+        "routing": _routing(root),
+        "memory": _memory_health(root),
+        "code": _code_health(root),
+    }
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
@@ -811,6 +994,11 @@ def main(argv: list[str]) -> int:
     (out_dir / "activity.json").write_text(json.dumps(act, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     g = act.get("git", {})
     print(f"[OK] web/data/activity.json — {g.get('commits_total', 0)} commits · {g.get('commits_7d', 0)} cette semaine · {len(act.get('pulls', []))} PRs · {g.get('contributor_count', 0)} contributeurs")
+
+    ins = build_insights(root)
+    (out_dir / "insights.json").write_text(json.dumps(ins, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    code = ins.get("code", {})
+    print(f"[OK] web/data/insights.json — {len(ins.get('bench', {}).get('latest', []))} agents bench · {ins.get('routing', {}).get('samples', 0)} routings · {code.get('loc', 0)} LOC · {code.get('tags_total', 0)} tags")
     return 0
 
 
