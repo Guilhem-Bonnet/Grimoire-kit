@@ -31,18 +31,20 @@ Références :
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
 import json
 import re
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
-SYNAPSE_TRACE_VERSION = "1.0.0"
+SYNAPSE_TRACE_VERSION = "1.1.0"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,16 @@ TRACE_DIR = "_grimoire-output"
 TRACE_FILE = "Grimoire_TRACE.md"
 SYNAPSE_TAG = "[SYNAPSE]"
 MAX_TRACE_ENTRIES = 10000
+
+# Estimation de coût par défaut (USD / 1k tokens). Surchargeable par tracer ou
+# via la variable d'environnement Grimoire_COST_PER_1K. Ordre de grandeur d'un
+# modèle de classe « sonnet » ; ce n'est qu'une estimation indicative.
+DEFAULT_COST_PER_1K_TOKENS = 0.003
+
+
+def estimate_cost(tokens: int, per_1k: float = DEFAULT_COST_PER_1K_TOKENS) -> float:
+    """Estime un coût USD à partir d'un volume de tokens (estimation indicative)."""
+    return round(max(0, int(tokens or 0)) / 1000.0 * per_1k, 6)
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -67,6 +79,12 @@ class TraceEntry:
     tokens_estimated: int = 0
     status: str = "ok"  # ok | error | timeout
     details: dict = field(default_factory=dict)
+    # Causalité / coût (BM-46 v1.1) — capturés via tracer.span()
+    span_id: str = ""          # identifiant unique de ce span
+    parent_span_id: str = ""   # span déclencheur (arbre parent→enfant)
+    trace_id: str = ""         # racine corrélant tout l'arbre d'opérations
+    cost_usd: float = 0.0      # coût estimé (depuis tokens)
+    retries: int = 0           # tentatives avant l'issue finale
 
     def __post_init__(self):
         if not self.timestamp:
@@ -89,6 +107,16 @@ class TraceEntry:
             f"- **Tokens** : ~{self.tokens_estimated}",
             f"- **Statut** : {self.status}",
         ]
+        if self.retries:
+            lines.append(f"- **Retries** : {self.retries}")
+        if self.cost_usd:
+            lines.append(f"- **Coût** : ${self.cost_usd:.6f}")
+        if self.span_id:
+            lines.append(f"- **Span** : {self.span_id}")
+        if self.parent_span_id:
+            lines.append(f"- **Parent** : {self.parent_span_id}")
+        if self.trace_id and self.trace_id != self.span_id:
+            lines.append(f"- **Trace** : {self.trace_id}")
         if self.details:
             for k, v in self.details.items():
                 lines.append(f"- **{k}** : {v}")
@@ -105,6 +133,8 @@ class TraceStats:
     by_status: dict[str, int] = field(default_factory=dict)
     total_duration_ms: float = 0.0
     total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    total_retries: int = 0
     oldest_entry: str = ""
     newest_entry: str = ""
     errors_count: int = 0
@@ -136,6 +166,7 @@ class SynapseTracer:
         *,
         enabled: bool = True,
         dry_run: bool = False,
+        cost_per_1k: float = DEFAULT_COST_PER_1K_TOKENS,
     ):
         self._root = Path(project_root).resolve()
         self._enabled = enabled
@@ -143,6 +174,33 @@ class SynapseTracer:
         self._entries: list[TraceEntry] = []
         self._trace_path = self._root / TRACE_DIR / TRACE_FILE
         self._loaded = False
+        self.cost_per_1k = cost_per_1k
+        # Pile de spans actifs — donne la causalité parent→enfant automatique.
+        self._span_stack: list[_Span] = []
+
+    def span(
+        self,
+        tool: str,
+        operation: str,
+        *,
+        agent: str = "",
+        retries: int = 0,
+    ) -> _Span:
+        """
+        Ouvre un span tracé en context manager.
+
+        Capture automatiquement, à la sortie du bloc ``with`` : la durée, l'issue
+        (ok/error sur exception), le coût (depuis ``tokens_estimated``), le nombre
+        de retries, et le lien causal parent→enfant (via la pile de spans).
+
+        Usage::
+
+            with tracer.span("orchestrator", "execute", agent="dev") as s:
+                s.tokens_estimated = 1200
+                with tracer.span("router", "classify") as child:
+                    ...           # child.parent_span_id == s.span_id
+        """
+        return _Span(self, tool, operation, agent=agent, retries=retries)
 
     @property
     def trace_path(self) -> Path:
@@ -194,9 +252,12 @@ class SynapseTracer:
             tool = match.group(2)
             operation = match.group(3)
 
-            # Parse metadata lines after the header
-            block_start = match.end()
-            block_text = text[match.start():min(block_start + 500, len(text))]
+            # Parse metadata lines — bornées au bloc courant (jusqu'au prochain
+            # en-tête ###), sinon les champs conditionnels (retries, parent…)
+            # d'un bloc suivant débordent sur le bloc courant.
+            next_hdr = text.find("\n###", match.end())
+            block_end = next_hdr if next_hdr != -1 else len(text)
+            block_text = text[match.start():block_end]
 
             agent = ""
             duration = 0.0
@@ -216,6 +277,25 @@ class SynapseTracer:
             if stat_m:
                 status = stat_m.group(1).strip()
 
+            retries = 0
+            cost = 0.0
+            span_id = parent_span_id = trace_id = ""
+            ret_m = re.search(r"\*\*Retries\*\*\s*:\s*(\d+)", block_text)
+            if ret_m:
+                retries = int(ret_m.group(1))
+            cost_m = re.search(r"\*\*Coût\*\*\s*:\s*\$?([\d.]+)", block_text)
+            if cost_m:
+                cost = float(cost_m.group(1))
+            span_m = re.search(r"\*\*Span\*\*\s*:\s*(\S+)", block_text)
+            if span_m:
+                span_id = span_m.group(1).strip()
+            par_m = re.search(r"\*\*Parent\*\*\s*:\s*(\S+)", block_text)
+            if par_m:
+                parent_span_id = par_m.group(1).strip()
+            tr_m = re.search(r"\*\*Trace\*\*\s*:\s*(\S+)", block_text)
+            if tr_m:
+                trace_id = tr_m.group(1).strip()
+
             entry = TraceEntry(
                 timestamp=ts,
                 tool=tool,
@@ -224,6 +304,11 @@ class SynapseTracer:
                 duration_ms=duration,
                 tokens_estimated=tokens,
                 status=status,
+                span_id=span_id,
+                parent_span_id=parent_span_id,
+                trace_id=trace_id or span_id,
+                cost_usd=cost,
+                retries=retries,
             )
             self._entries.append(entry)
 
@@ -245,6 +330,8 @@ class SynapseTracer:
             stats.by_status[entry.status] = stats.by_status.get(entry.status, 0) + 1
             stats.total_duration_ms += entry.duration_ms
             stats.total_tokens += entry.tokens_estimated
+            stats.total_cost_usd += entry.cost_usd
+            stats.total_retries += entry.retries
             if entry.status == "error":
                 stats.errors_count += 1
 
@@ -347,6 +434,72 @@ def reset_global_tracer() -> None:
     _GLOBAL_TRACER = None
 
 
+# ── Span (causalité parent→enfant) ───────────────────────────────────────────
+
+
+class _Span:
+    """
+    Span tracé ouvert par ``SynapseTracer.span()``.
+
+    À l'entrée, s'empile sur la pile de spans du traceur et hérite du parent
+    courant (lien causal). À la sortie du bloc ``with``, finalise durée, issue,
+    coût et enregistre une ``TraceEntry`` complète.
+
+    Attributs réglables dans le bloc : ``tokens_estimated``, ``cost_usd``,
+    ``retries``, ``status``, ``details``.
+    """
+
+    def __init__(self, tracer: SynapseTracer, tool: str, operation: str, *, agent: str = "", retries: int = 0):
+        self._tracer = tracer
+        self.tool = tool
+        self.operation = operation
+        self.agent = agent
+        self.span_id = uuid.uuid4().hex[:12]
+        self.parent_span_id = ""
+        self.trace_id = self.span_id
+        self.tokens_estimated = 0
+        self.cost_usd = 0.0
+        self.retries = retries
+        self.status = "ok"
+        self.details: dict = {}
+        self._start = 0.0
+
+    def __enter__(self) -> _Span:
+        stack = self._tracer._span_stack
+        if stack:
+            self.parent_span_id = stack[-1].span_id
+            self.trace_id = stack[-1].trace_id
+        stack.append(self)
+        self._start = time.monotonic()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        elapsed_ms = (time.monotonic() - self._start) * 1000
+        if exc_type is not None and self.status == "ok":
+            self.status = "error"
+            self.details.setdefault("error", str(exc)[:200])
+        if not self.cost_usd and self.tokens_estimated:
+            self.cost_usd = estimate_cost(self.tokens_estimated, self._tracer.cost_per_1k)
+        self._tracer.record(TraceEntry(
+            tool=self.tool,
+            operation=self.operation,
+            agent=self.agent,
+            duration_ms=round(elapsed_ms, 1),
+            tokens_estimated=self.tokens_estimated,
+            status=self.status,
+            details=dict(self.details),
+            span_id=self.span_id,
+            parent_span_id=self.parent_span_id,
+            trace_id=self.trace_id,
+            cost_usd=round(self.cost_usd, 6),
+            retries=self.retries,
+        ))
+        stack = self._tracer._span_stack
+        if stack and stack[-1] is self:
+            stack.pop()
+        return False  # ne jamais avaler l'exception
+
+
 # ── Decorator ────────────────────────────────────────────────────────────────
 
 
@@ -363,28 +516,18 @@ def synapse_traced(tool_name: str, operation: str, agent: str = ""):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             tracer = get_global_tracer()
-            start = time.monotonic()
-            entry_status = "ok"
-            entry_details: dict = {}
-            try:
+            eff_agent = agent or kwargs.get("agent", kwargs.get("agent_id", ""))
+            with tracer.span(tool_name, operation, agent=eff_agent) as span:
                 result = func(*args, **kwargs)
                 if isinstance(result, dict):
-                    entry_details["result_status"] = result.get("status", "")
+                    span.details["result_status"] = result.get("status", "")
+                    with contextlib.suppress(TypeError, ValueError):
+                        if result.get("tokens") is not None:
+                            span.tokens_estimated = int(result["tokens"])
+                    with contextlib.suppress(TypeError, ValueError):
+                        if result.get("retries") is not None:
+                            span.retries = int(result["retries"])
                 return result
-            except Exception as exc:
-                entry_status = "error"
-                entry_details["error"] = str(exc)[:200]
-                raise
-            finally:
-                elapsed_ms = (time.monotonic() - start) * 1000
-                tracer.record(TraceEntry(
-                    tool=tool_name,
-                    operation=operation,
-                    agent=agent or kwargs.get("agent", kwargs.get("agent_id", "")),
-                    duration_ms=round(elapsed_ms, 1),
-                    status=entry_status,
-                    details=entry_details or {},
-                ))
         return wrapper
     return decorator
 
@@ -481,6 +624,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  Période : {stats.oldest_entry} → {stats.newest_entry}")
             print(f"  Durée totale : {stats.total_duration_ms:,.0f}ms")
             print(f"  Tokens totaux : ~{stats.total_tokens:,}")
+            if stats.total_cost_usd:
+                print(f"  Coût estimé : ${stats.total_cost_usd:,.4f}")
+            if stats.total_retries:
+                print(f"  Retries : {stats.total_retries}")
             print(f"  Erreurs : {stats.errors_count}")
             print("\n  Par outil :")
             for t, c in sorted(stats.by_tool.items(), key=lambda x: -x[1]):

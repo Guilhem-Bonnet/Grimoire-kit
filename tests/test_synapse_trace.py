@@ -570,5 +570,249 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(r, 0)
 
 
+# ── Cost estimation tests ────────────────────────────────────────────────────
+
+
+class TestEstimateCost(unittest.TestCase):
+    """Test estimate_cost helper."""
+
+    def test_zero_tokens(self):
+        self.assertEqual(mod.estimate_cost(0), 0.0)
+
+    def test_basic(self):
+        # 1000 tokens @ 0.003/1k = 0.003
+        self.assertAlmostEqual(mod.estimate_cost(1000, 0.003), 0.003)
+
+    def test_custom_rate(self):
+        self.assertAlmostEqual(mod.estimate_cost(2000, 0.01), 0.02)
+
+    def test_negative_clamped(self):
+        self.assertEqual(mod.estimate_cost(-5), 0.0)
+
+
+# ── Enriched TraceEntry tests ────────────────────────────────────────────────
+
+
+class TestTraceEntryEnriched(unittest.TestCase):
+    """Test span/cost/retries fields on TraceEntry."""
+
+    def test_new_fields_default(self):
+        e = mod.TraceEntry(tool="t", operation="o")
+        self.assertEqual(e.span_id, "")
+        self.assertEqual(e.parent_span_id, "")
+        self.assertEqual(e.cost_usd, 0.0)
+        self.assertEqual(e.retries, 0)
+
+    def test_markdown_omits_when_unset(self):
+        # Backward-compat: a plain entry must not emit the new lines
+        md = mod.TraceEntry(tool="t", operation="o").to_markdown()
+        self.assertNotIn("Span", md)
+        self.assertNotIn("Coût", md)
+        self.assertNotIn("Retries", md)
+
+    def test_markdown_includes_when_set(self):
+        e = mod.TraceEntry(
+            tool="t", operation="o", span_id="abc123", parent_span_id="par999",
+            trace_id="root000", cost_usd=0.0042, retries=2,
+        )
+        md = e.to_markdown()
+        self.assertIn("abc123", md)
+        self.assertIn("par999", md)
+        self.assertIn("root000", md)
+        self.assertIn("Retries", md)
+        self.assertIn("Coût", md)
+
+    def test_roundtrip_preserves_new_fields(self):
+        original = mod.TraceEntry(tool="t", operation="o", span_id="s1", cost_usd=0.01, retries=3)
+        restored = mod.TraceEntry.from_dict(original.to_dict())
+        self.assertEqual(restored.span_id, "s1")
+        self.assertEqual(restored.cost_usd, 0.01)
+        self.assertEqual(restored.retries, 3)
+
+    def test_load_no_field_bleed_between_blocks(self):
+        # Un champ conditionnel (retries) présent sur UN seul bloc ne doit pas
+        # déborder sur les blocs voisins au rechargement.
+        tmp = tempfile.mkdtemp()
+        try:
+            root = Path(tmp)
+            t1 = mod.SynapseTracer(root)
+            t1.record(mod.TraceEntry(tool="a", operation="o", span_id="s1"))
+            t1.record(mod.TraceEntry(tool="b", operation="o", span_id="s2", retries=2))
+            t1.record(mod.TraceEntry(tool="c", operation="o", span_id="s3"))
+            t2 = mod.SynapseTracer(root)
+            t2.load_from_file()
+            self.assertEqual(t2.get_stats().total_retries, 2)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+            mod.reset_global_tracer()
+
+    def test_record_then_load_preserves_span(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            root = Path(tmp)
+            t1 = mod.SynapseTracer(root)
+            t1.record(mod.TraceEntry(
+                tool="orchestrator", operation="plan", agent="dev",
+                span_id="span01", parent_span_id="span00", trace_id="trace00",
+                cost_usd=0.0123, retries=1,
+            ))
+            t2 = mod.SynapseTracer(root)
+            t2.load_from_file()
+            self.assertTrue(t2.entries)
+            e = t2.entries[0]
+            self.assertEqual(e.span_id, "span01")
+            self.assertEqual(e.parent_span_id, "span00")
+            self.assertEqual(e.retries, 1)
+            self.assertAlmostEqual(e.cost_usd, 0.0123)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+            mod.reset_global_tracer()
+
+
+# ── Span (causality) tests ───────────────────────────────────────────────────
+
+
+class TestSpans(unittest.TestCase):
+    """Test tracer.span() context manager and parent→child causality."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.tracer = mod.SynapseTracer(Path(self._tmpdir), dry_run=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+        mod.reset_global_tracer()
+
+    def test_span_records_on_exit(self):
+        with self.tracer.span("router", "classify", agent="dev"):
+            pass
+        self.assertEqual(len(self.tracer.entries), 1)
+        e = self.tracer.entries[0]
+        self.assertEqual(e.tool, "router")
+        self.assertEqual(e.status, "ok")
+        self.assertTrue(e.span_id)
+        self.assertEqual(e.trace_id, e.span_id)  # root span
+
+    def test_span_measures_duration(self):
+        with self.tracer.span("slow", "op"):
+            time.sleep(0.01)
+        self.assertGreater(self.tracer.entries[0].duration_ms, 0)
+
+    def test_nested_span_parent_and_trace(self):
+        with self.tracer.span("orchestrator", "execute") as parent, \
+                self.tracer.span("router", "classify") as child:
+            self.assertEqual(child.parent_span_id, parent.span_id)
+            self.assertEqual(child.trace_id, parent.trace_id)
+        # child records first (inner exits first), then parent
+        self.assertEqual(len(self.tracer.entries), 2)
+        child_e, parent_e = self.tracer.entries[0], self.tracer.entries[1]
+        self.assertEqual(child_e.parent_span_id, parent_e.span_id)
+        self.assertEqual(child_e.trace_id, parent_e.trace_id)
+
+    def test_span_stack_emptied_after_exit(self):
+        with self.tracer.span("a", "b"):
+            self.assertEqual(len(self.tracer._span_stack), 1)
+        self.assertEqual(len(self.tracer._span_stack), 0)
+
+    def test_span_captures_error(self):
+        with self.assertRaises(ValueError), self.tracer.span("fail", "op"):
+            raise ValueError("boom")
+        e = self.tracer.entries[0]
+        self.assertEqual(e.status, "error")
+        self.assertIn("boom", e.details.get("error", ""))
+        # stack must still unwind on exception
+        self.assertEqual(len(self.tracer._span_stack), 0)
+
+    def test_span_cost_from_tokens(self):
+        with self.tracer.span("llm", "call") as s:
+            s.tokens_estimated = 1000
+        e = self.tracer.entries[0]
+        self.assertEqual(e.tokens_estimated, 1000)
+        self.assertGreater(e.cost_usd, 0)
+
+    def test_span_explicit_retries(self):
+        with self.tracer.span("flaky", "op", retries=3):
+            pass
+        self.assertEqual(self.tracer.entries[0].retries, 3)
+
+
+# ── Enriched stats tests ─────────────────────────────────────────────────────
+
+
+class TestStatsEnriched(unittest.TestCase):
+    """Test cost/retries aggregation in stats."""
+
+    def test_total_cost_and_retries(self):
+        tracer = mod.SynapseTracer(Path(tempfile.mkdtemp()), dry_run=True)
+        tracer.record(mod.TraceEntry(tool="a", operation="o", cost_usd=0.01, retries=1))
+        tracer.record(mod.TraceEntry(tool="b", operation="o", cost_usd=0.02, retries=2))
+        stats = tracer.get_stats()
+        self.assertAlmostEqual(stats.total_cost_usd, 0.03)
+        self.assertEqual(stats.total_retries, 3)
+
+
+# ── Decorator capture of tokens/retries ──────────────────────────────────────
+
+
+class TestDecoratorEnriched(unittest.TestCase):
+    """Test that @synapse_traced captures spans + tokens/retries from result."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.tracer = mod.SynapseTracer(Path(self._tmpdir), dry_run=True)
+        mod.set_global_tracer(self.tracer)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+        mod.reset_global_tracer()
+
+    def test_decorator_sets_span_id(self):
+        @mod.synapse_traced("tool", "op")
+        def fn():
+            return {"status": "ok"}
+
+        fn()
+        self.assertTrue(self.tracer.entries[0].span_id)
+
+    def test_decorator_captures_tokens_and_cost(self):
+        @mod.synapse_traced("llm", "call")
+        def fn():
+            return {"status": "ok", "tokens": 2000}
+
+        fn()
+        e = self.tracer.entries[0]
+        self.assertEqual(e.tokens_estimated, 2000)
+        self.assertGreater(e.cost_usd, 0)
+
+    def test_decorator_captures_retries(self):
+        @mod.synapse_traced("flaky", "op")
+        def fn():
+            return {"status": "ok", "retries": 2}
+
+        fn()
+        self.assertEqual(self.tracer.entries[0].retries, 2)
+
+    def test_nested_decorated_calls_link(self):
+        @mod.synapse_traced("child", "op")
+        def child():
+            return {}
+
+        @mod.synapse_traced("parent", "op")
+        def parent():
+            child()
+            return {}
+
+        parent()
+        self.assertEqual(len(self.tracer.entries), 2)
+        child_e = next(e for e in self.tracer.entries if e.tool == "child")
+        parent_e = next(e for e in self.tracer.entries if e.tool == "parent")
+        self.assertEqual(child_e.parent_span_id, parent_e.span_id)
+        self.assertEqual(child_e.trace_id, parent_e.trace_id)
+
+
 if __name__ == "__main__":
     unittest.main()

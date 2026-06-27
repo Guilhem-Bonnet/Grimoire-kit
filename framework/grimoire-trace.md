@@ -193,6 +193,45 @@ grimoire_trace("mem0-bridge", "RECALL", f"type: {memory_type} | query: \"{query[
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
+## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Spans, coût & causalité (Synapse BM-46)
+
+Au-delà de la ligne `[ts] [agent] [type] payload`, le middleware `synapse-trace.py`
+capture des **spans** structurés enrichissant chaque opération outillée. Une entrée
+Synapse porte, en plus de la durée et des tokens :
+
+| Champ | Sens |
+|------|------|
+| `span_id` | Identifiant unique de l'opération |
+| `parent_span_id` | Span déclencheur — reconstitue l'arbre parent→enfant |
+| `trace_id` | Racine corrélant tout l'arbre d'une requête |
+| `cost_usd` | Coût estimé (dérivé des tokens × taux configurable) |
+| `retries` | Tentatives avant l'issue finale |
+| `status` | Issue : `ok` \| `error` \| `timeout` |
+
+La causalité est capturée **automatiquement** via un context manager qui empile les
+spans actifs : un span ouvert à l'intérieur d'un autre hérite de son `parent_span_id`
+et de son `trace_id`.
+
+```python
+# framework/tools/synapse-trace.py
+tracer = SynapseTracer(project_root)  # taux: cost_per_1k=0.003 par défaut
+
+with tracer.span("orchestrator", "execute", agent="dev") as root:
+    root.tokens_estimated = 1800
+    with tracer.span("router", "classify") as child:      # parent = root, même trace_id
+        child.tokens_estimated = 300
+    with tracer.span("llm", "call", retries=2) as call:    # outcome + retries capturés
+        call.tokens_estimated = 4200
+# À la sortie de chaque bloc : durée, status (error sur exception), coût et lien
+# causal sont enregistrés. Le décorateur @synapse_traced passe par ce même mécanisme.
+```
+
+Le coût est estimé via `estimate_cost(tokens, per_1k)` (estimation indicative,
+surchargeable par tracer). Les agrégats `total_cost_usd` / `total_retries` sont
+exposés par `tracer.get_stats()` et l'action MCP `grimoire_synapse_trace status`.
+
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Utilisation enterprise
 
 Le `Grimoire_TRACE.md` est un artefact exploitable pour :
