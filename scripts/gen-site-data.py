@@ -236,26 +236,47 @@ _DEMO_SPANS = [
     {"span_id": "a1", "parent_span_id": "", "trace_id": "a1", "tool": "orchestrator", "operation": "execute", "agent": "dev", "duration_ms": 4200, "tokens": 1800, "retries": 0, "status": "ok"},
     {"span_id": "a2", "parent_span_id": "a1", "trace_id": "a1", "tool": "router", "operation": "classify", "agent": "dev", "duration_ms": 180, "tokens": 240, "retries": 0, "status": "ok"},
     {"span_id": "a3", "parent_span_id": "a1", "trace_id": "a1", "tool": "memory", "operation": "recall", "agent": "mnemo", "duration_ms": 320, "tokens": 90, "retries": 0, "status": "ok"},
-    {"span_id": "a4", "parent_span_id": "a1", "trace_id": "a1", "tool": "llm", "operation": "generate", "agent": "dev", "duration_ms": 3100, "tokens": 4200, "retries": 0, "status": "ok"},
+    {"span_id": "a4", "parent_span_id": "a1", "trace_id": "a1", "tool": "llm", "operation": "generate", "agent": "dev", "duration_ms": 3100, "input_tokens": 1400, "output_tokens": 2800, "model": "claude-opus-4-8", "provider": "anthropic", "retries": 0, "status": "ok"},
     {"span_id": "a5", "parent_span_id": "a1", "trace_id": "a1", "tool": "verify", "operation": "check", "agent": "qa", "duration_ms": 260, "tokens": 180, "retries": 0, "status": "ok"},
     # trace « standard-bridge » — gate de vérification
     {"span_id": "b1", "parent_span_id": "", "trace_id": "b1", "tool": "verify", "operation": "gate", "agent": "qa", "duration_ms": 1500, "tokens": 600, "retries": 0, "status": "ok"},
     {"span_id": "b2", "parent_span_id": "b1", "trace_id": "b1", "tool": "capability", "operation": "scan", "agent": "qa", "duration_ms": 240, "tokens": 150, "retries": 0, "status": "ok"},
-    {"span_id": "b3", "parent_span_id": "b1", "trace_id": "b1", "tool": "llm", "operation": "review", "agent": "qa", "duration_ms": 1100, "tokens": 2800, "retries": 1, "status": "ok"},
+    {"span_id": "b3", "parent_span_id": "b1", "trace_id": "b1", "tool": "llm", "operation": "review", "agent": "qa", "duration_ms": 1100, "input_tokens": 2000, "output_tokens": 800, "model": "gpt-5.3-codex", "provider": "openai", "retries": 1, "status": "ok"},
     # trace « memory-runtime » — migration mémoire (avec un échec gated)
     {"span_id": "c1", "parent_span_id": "", "trace_id": "c1", "tool": "migrate", "operation": "run", "agent": "dev", "duration_ms": 5200, "tokens": 900, "retries": 0, "status": "ok"},
     {"span_id": "c2", "parent_span_id": "c1", "trace_id": "c1", "tool": "weaviate", "operation": "write", "agent": "dev", "duration_ms": 1800, "tokens": 300, "retries": 0, "status": "ok"},
-    {"span_id": "c3", "parent_span_id": "c1", "trace_id": "c1", "tool": "llm", "operation": "embed", "agent": "mnemo", "duration_ms": 2600, "tokens": 5200, "retries": 0, "status": "ok"},
+    {"span_id": "c3", "parent_span_id": "c1", "trace_id": "c1", "tool": "llm", "operation": "embed", "agent": "mnemo", "duration_ms": 2600, "input_tokens": 5200, "output_tokens": 0, "model": "gemini-3-pro", "provider": "google", "retries": 0, "status": "ok"},
     {"span_id": "c4", "parent_span_id": "c1", "trace_id": "c1", "tool": "verify", "operation": "failclosed", "agent": "qa", "duration_ms": 140, "tokens": 120, "retries": 0, "status": "error"},
 ]
+
+
+# Prix indicatif par modèle (USD/1k) : (input, output) — miroir de synapse-trace.py.
+_MODEL_PRICING = {
+    "claude-opus": (0.015, 0.075), "claude-sonnet": (0.003, 0.015), "claude-haiku": (0.0008, 0.004),
+    "gpt-5": (0.005, 0.015), "gpt-": (0.005, 0.015), "o3": (0.01, 0.04),
+    "gemini": (0.00125, 0.005), "qwen": (0.0, 0.0),
+}
 
 
 def _est_cost(tokens: int) -> float:
     return round(max(0, int(tokens or 0)) / 1000.0 * _COST_PER_1K, 6)
 
 
+def _cost_io(input_tokens: int, output_tokens: int, model: str) -> float:
+    """Coût par modèle (in/out) si connu, sinon taux plat sur le total."""
+    m = (model or "").lower()
+    best = max((p for p in _MODEL_PRICING if m.startswith(p)), key=len, default="")
+    if best:
+        in_r, out_r = _MODEL_PRICING[best]
+        return round(int(input_tokens or 0) / 1000.0 * in_r + int(output_tokens or 0) / 1000.0 * out_r, 6)
+    return _est_cost(int(input_tokens or 0) + int(output_tokens or 0))
+
+
 def _norm_span(e: dict) -> dict:
     """Normalise une entrée (synapse export ou démo) au schéma de la page."""
+    in_tok = e.get("input_tokens", 0) or 0
+    out_tok = e.get("output_tokens", 0) or 0
+    tokens = e.get("tokens", e.get("tokens_estimated", 0)) or (in_tok + out_tok)
     return {
         "span_id": e.get("span_id", ""),
         "parent_span_id": e.get("parent_span_id", ""),
@@ -264,7 +285,11 @@ def _norm_span(e: dict) -> dict:
         "operation": e.get("operation", ""),
         "agent": e.get("agent", ""),
         "duration_ms": e.get("duration_ms", 0) or 0,
-        "tokens": e.get("tokens", e.get("tokens_estimated", 0)) or 0,
+        "tokens": tokens,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "model": e.get("model", ""),
+        "provider": e.get("provider", ""),
         "cost_usd": e.get("cost_usd", 0) or 0,
         "retries": e.get("retries", 0) or 0,
         "status": e.get("status", "ok") or "ok",
@@ -303,6 +328,19 @@ def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) ->
     n_spans = len(spans)
     n_traces = len(roots)
     retries = sum(sp.get("retries", 0) for sp in spans)
+    in_tok = sum(sp.get("input_tokens", 0) for sp in spans)
+    out_tok = sum(sp.get("output_tokens", 0) for sp in spans)
+    by_model: dict[str, int] = {}
+    by_provider: dict[str, int] = {}
+    cost_by_model: dict[str, float] = {}
+    for sp in spans:
+        mdl = sp.get("model")
+        if mdl:
+            by_model[mdl] = by_model.get(mdl, 0) + 1
+            cost_by_model[mdl] = round(cost_by_model.get(mdl, 0.0) + sp.get("cost_usd", 0), 6)
+        prov = sp.get("provider")
+        if prov:
+            by_provider[prov] = by_provider.get(prov, 0) + 1
     return {
         "total_tokens": tokens,
         "total_cost_usd": cost,
@@ -320,6 +358,12 @@ def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) ->
         "avg_duration_ms": round(sum(durs) / n_spans, 1) if n_spans else 0.0,
         "avg_spans_per_trace": round(n_spans / n_traces, 1) if n_traces else 0.0,
         "retry_rate": round(retries / n_spans, 3) if n_spans else 0.0,
+        # multi-LLM
+        "total_input_tokens": in_tok,
+        "total_output_tokens": out_tok,
+        "by_model": by_model,
+        "by_provider": by_provider,
+        "cost_by_model": cost_by_model,
     }
 
 
@@ -372,7 +416,8 @@ def build_observatory(root: Path) -> dict | None:
         spans = []
         for sp in _DEMO_SPANS:
             sp = _norm_span(sp)
-            sp["cost_usd"] = _est_cost(sp["tokens"])
+            sp["cost_usd"] = (_cost_io(sp["input_tokens"], sp["output_tokens"], sp["model"])
+                              if sp["model"] else _est_cost(sp["tokens"]))
             mins = _trace_age.get(sp["trace_id"][:1], 1)
             sp["timestamp"] = (base - _d.timedelta(minutes=mins)).isoformat(timespec="seconds")
             spans.append(sp)

@@ -2,126 +2,126 @@
   "is_demo": true,
   "traces": [
     {
-      "timestamp": "2026-06-27T02:09:45+00:00",
+      "timestamp": "2026-06-27T19:12:41+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:11:45+00:00",
+      "timestamp": "2026-06-27T19:14:41+00:00",
       "agent": "dev",
       "event_type": "DECISION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:13:45+00:00",
+      "timestamp": "2026-06-27T19:16:41+00:00",
       "agent": "qa",
       "event_type": "ACTION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:15:45+00:00",
+      "timestamp": "2026-06-27T19:18:41+00:00",
       "agent": "dev",
       "event_type": "HANDOFF",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:17:45+00:00",
+      "timestamp": "2026-06-27T19:20:41+00:00",
       "agent": "mnemo",
       "event_type": "REMEMBER",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:19:45+00:00",
+      "timestamp": "2026-06-27T19:22:41+00:00",
       "agent": "atlas",
       "event_type": "CHECKPOINT",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:21:45+00:00",
+      "timestamp": "2026-06-27T19:24:41+00:00",
       "agent": "pm",
       "event_type": "ACTION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:23:45+00:00",
+      "timestamp": "2026-06-27T19:26:41+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:25:45+00:00",
+      "timestamp": "2026-06-27T19:28:41+00:00",
       "agent": "qa",
       "event_type": "WARN",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:27:45+00:00",
+      "timestamp": "2026-06-27T19:30:41+00:00",
       "agent": "sentinel",
       "event_type": "DECISION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:29:45+00:00",
+      "timestamp": "2026-06-27T19:32:41+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:31:45+00:00",
+      "timestamp": "2026-06-27T19:34:41+00:00",
       "agent": "mnemo",
       "event_type": "REMEMBER",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:33:45+00:00",
+      "timestamp": "2026-06-27T19:36:41+00:00",
       "agent": "dev",
       "event_type": "HANDOFF",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:35:45+00:00",
+      "timestamp": "2026-06-27T19:38:41+00:00",
       "agent": "tech-writer",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:37:45+00:00",
+      "timestamp": "2026-06-27T19:40:41+00:00",
       "agent": "qa",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:39:45+00:00",
+      "timestamp": "2026-06-27T19:42:41+00:00",
       "agent": "atlas",
       "event_type": "CHECKPOINT",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:41:45+00:00",
+      "timestamp": "2026-06-27T19:44:41+00:00",
       "agent": "dev",
       "event_type": "ERROR",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-27T02:43:45+00:00",
+      "timestamp": "2026-06-27T19:46:41+00:00",
       "agent": "dev",
       "event_type": "DECISION",
       "session": "work/memory-runtime",
@@ -292,10 +292,14 @@
       "agent": "dev",
       "duration_ms": 4200,
       "tokens": 1800,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.0054,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:39:45+00:00"
+      "timestamp": "2026-06-27T19:42:41+00:00"
     },
     {
       "span_id": "a2",
@@ -306,10 +310,14 @@
       "agent": "dev",
       "duration_ms": 180,
       "tokens": 240,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.00072,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:39:45+00:00"
+      "timestamp": "2026-06-27T19:42:41+00:00"
     },
     {
       "span_id": "a3",
@@ -320,10 +328,14 @@
       "agent": "mnemo",
       "duration_ms": 320,
       "tokens": 90,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.00027,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:39:45+00:00"
+      "timestamp": "2026-06-27T19:42:41+00:00"
     },
     {
       "span_id": "a4",
@@ -334,10 +346,14 @@
       "agent": "dev",
       "duration_ms": 3100,
       "tokens": 4200,
-      "cost_usd": 0.0126,
+      "input_tokens": 1400,
+      "output_tokens": 2800,
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "cost_usd": 0.231,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:39:45+00:00"
+      "timestamp": "2026-06-27T19:42:41+00:00"
     },
     {
       "span_id": "a5",
@@ -348,10 +364,14 @@
       "agent": "qa",
       "duration_ms": 260,
       "tokens": 180,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.00054,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:39:45+00:00"
+      "timestamp": "2026-06-27T19:42:41+00:00"
     },
     {
       "span_id": "b1",
@@ -362,10 +382,14 @@
       "agent": "qa",
       "duration_ms": 1500,
       "tokens": 600,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.0018,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:41:45+00:00"
+      "timestamp": "2026-06-27T19:44:41+00:00"
     },
     {
       "span_id": "b2",
@@ -376,10 +400,14 @@
       "agent": "qa",
       "duration_ms": 240,
       "tokens": 150,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.00045,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:41:45+00:00"
+      "timestamp": "2026-06-27T19:44:41+00:00"
     },
     {
       "span_id": "b3",
@@ -390,10 +418,14 @@
       "agent": "qa",
       "duration_ms": 1100,
       "tokens": 2800,
-      "cost_usd": 0.0084,
+      "input_tokens": 2000,
+      "output_tokens": 800,
+      "model": "gpt-5.3-codex",
+      "provider": "openai",
+      "cost_usd": 0.022,
       "retries": 1,
       "status": "ok",
-      "timestamp": "2026-06-27T02:41:45+00:00"
+      "timestamp": "2026-06-27T19:44:41+00:00"
     },
     {
       "span_id": "c1",
@@ -404,10 +436,14 @@
       "agent": "dev",
       "duration_ms": 5200,
       "tokens": 900,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.0027,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:43:45+00:00"
+      "timestamp": "2026-06-27T19:46:41+00:00"
     },
     {
       "span_id": "c2",
@@ -418,10 +454,14 @@
       "agent": "dev",
       "duration_ms": 1800,
       "tokens": 300,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.0009,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:43:45+00:00"
+      "timestamp": "2026-06-27T19:46:41+00:00"
     },
     {
       "span_id": "c3",
@@ -432,10 +472,14 @@
       "agent": "mnemo",
       "duration_ms": 2600,
       "tokens": 5200,
-      "cost_usd": 0.0156,
+      "input_tokens": 5200,
+      "output_tokens": 0,
+      "model": "gemini-3-pro",
+      "provider": "google",
+      "cost_usd": 0.0065,
       "retries": 0,
       "status": "ok",
-      "timestamp": "2026-06-27T02:43:45+00:00"
+      "timestamp": "2026-06-27T19:46:41+00:00"
     },
     {
       "span_id": "c4",
@@ -446,15 +490,19 @@
       "agent": "qa",
       "duration_ms": 140,
       "tokens": 120,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
       "cost_usd": 0.00036,
       "retries": 0,
       "status": "error",
-      "timestamp": "2026-06-27T02:43:45+00:00"
+      "timestamp": "2026-06-27T19:46:41+00:00"
     }
   ],
   "metrics": {
     "total_tokens": 16580,
-    "total_cost_usd": 0.04974,
+    "total_cost_usd": 0.27264,
     "total_duration_ms": 20640,
     "span_count": 12,
     "trace_count": 3,
@@ -463,10 +511,27 @@
     "throughput_per_min": 0.53,
     "error_rate": 0.083,
     "avg_trust": 0.845,
-    "avg_cost_per_trace": 0.01658,
+    "avg_cost_per_trace": 0.09088,
     "avg_tokens_per_span": 1382,
     "avg_duration_ms": 1720.0,
     "avg_spans_per_trace": 4.0,
-    "retry_rate": 0.083
+    "retry_rate": 0.083,
+    "total_input_tokens": 8600,
+    "total_output_tokens": 3600,
+    "by_model": {
+      "claude-opus-4-8": 1,
+      "gpt-5.3-codex": 1,
+      "gemini-3-pro": 1
+    },
+    "by_provider": {
+      "anthropic": 1,
+      "openai": 1,
+      "google": 1
+    },
+    "cost_by_model": {
+      "claude-opus-4-8": 0.231,
+      "gpt-5.3-codex": 0.022,
+      "gemini-3-pro": 0.0065
+    }
   }
 }
