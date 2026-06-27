@@ -1,0 +1,259 @@
+{
+  "generated_at": "2026-06-27T02:45:46+00:00",
+  "git": {
+    "commits_total": 336,
+    "per_day": [
+      {
+        "date": "2026-05-28",
+        "count": 14
+      },
+      {
+        "date": "2026-05-29",
+        "count": 25
+      },
+      {
+        "date": "2026-05-30",
+        "count": 0
+      },
+      {
+        "date": "2026-05-31",
+        "count": 0
+      },
+      {
+        "date": "2026-06-01",
+        "count": 1
+      },
+      {
+        "date": "2026-06-02",
+        "count": 0
+      },
+      {
+        "date": "2026-06-03",
+        "count": 0
+      },
+      {
+        "date": "2026-06-04",
+        "count": 0
+      },
+      {
+        "date": "2026-06-05",
+        "count": 0
+      },
+      {
+        "date": "2026-06-06",
+        "count": 0
+      },
+      {
+        "date": "2026-06-07",
+        "count": 0
+      },
+      {
+        "date": "2026-06-08",
+        "count": 3
+      },
+      {
+        "date": "2026-06-09",
+        "count": 6
+      },
+      {
+        "date": "2026-06-10",
+        "count": 2
+      },
+      {
+        "date": "2026-06-11",
+        "count": 0
+      },
+      {
+        "date": "2026-06-12",
+        "count": 0
+      },
+      {
+        "date": "2026-06-13",
+        "count": 0
+      },
+      {
+        "date": "2026-06-14",
+        "count": 0
+      },
+      {
+        "date": "2026-06-15",
+        "count": 4
+      },
+      {
+        "date": "2026-06-16",
+        "count": 0
+      },
+      {
+        "date": "2026-06-17",
+        "count": 0
+      },
+      {
+        "date": "2026-06-18",
+        "count": 0
+      },
+      {
+        "date": "2026-06-19",
+        "count": 0
+      },
+      {
+        "date": "2026-06-20",
+        "count": 0
+      },
+      {
+        "date": "2026-06-21",
+        "count": 0
+      },
+      {
+        "date": "2026-06-22",
+        "count": 2
+      },
+      {
+        "date": "2026-06-23",
+        "count": 0
+      },
+      {
+        "date": "2026-06-24",
+        "count": 0
+      },
+      {
+        "date": "2026-06-25",
+        "count": 26
+      },
+      {
+        "date": "2026-06-26",
+        "count": 24
+      }
+    ],
+    "commits_30d": 107,
+    "commits_7d": 52,
+    "avg_per_day_30d": 3.57,
+    "contributor_count": 5,
+    "contributors": [
+      {
+        "name": "guilhem-bonnet",
+        "commits": 272
+      },
+      {
+        "name": "Guilhèm",
+        "commits": 28
+      },
+      {
+        "name": "dependabot[bot]",
+        "commits": 19
+      },
+      {
+        "name": "Grimoire Bench Bot",
+        "commits": 16
+      },
+      {
+        "name": "BMAD Bench Bot",
+        "commits": 1
+      }
+    ],
+    "last_commit": {
+      "sha": "c6531742",
+      "message": "feat(web): surfacing télémétrie — spans/coût/causalité sur la page observability (B+A)",
+      "date": "2026-06-26T22:14:37-04:00",
+      "author": "guilhem-bonnet"
+    }
+  },
+  "pulls": [
+    {
+      "number": 29,
+      "title": "feat(memory): exposer l'option vector_database a l'init + docs/CHANGELOG",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/29",
+      "state": "merged",
+      "author": "Guilhem-Bonnet",
+      "created_at": "2026-06-26T05:40:12Z"
+    },
+    {
+      "number": 28,
+      "title": "feat(memory): backend lexical sans DB vectorielle + toggle setup + seed",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/28",
+      "state": "merged",
+      "author": "Guilhem-Bonnet",
+      "created_at": "2026-06-26T05:26:49Z"
+    },
+    {
+      "number": 27,
+      "title": "chore(ci): bump actions/checkout from 4 to 7",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/27",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-22T04:34:15Z"
+    },
+    {
+      "number": 26,
+      "title": "chore(ci): bump actions/checkout from 4 to 6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/26",
+      "state": "closed",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:25Z"
+    },
+    {
+      "number": 25,
+      "title": "chore(ci): bump codecov/codecov-action from 6 to 7",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/25",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:19Z"
+    },
+    {
+      "number": 24,
+      "title": "chore(ci): bump actions/upload-pages-artifact from 4 to 5",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/24",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:15Z"
+    },
+    {
+      "number": 23,
+      "title": "chore(ci): bump actions/setup-python from 5 to 6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/23",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:13Z"
+    },
+    {
+      "number": 22,
+      "title": "chore(deps): update chromadb requirement from <0.7,>=0.6 to >=0.6,<1.6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/22",
+      "state": "open",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:34:48Z"
+    }
+  ],
+  "pulls_open": 2,
+  "repo": {
+    "stars": 4,
+    "forks": 1,
+    "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+    "name": "Guilhem-Bonnet/Grimoire-kit"
+  },
+  "releases": [
+    {
+      "tag": "v3.16.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.14.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.13.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.12.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.11.5",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.11.4",
+      "date": "2026-06-25"
+    }
+  ]
+}

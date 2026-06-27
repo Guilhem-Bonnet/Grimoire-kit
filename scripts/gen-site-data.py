@@ -289,17 +289,26 @@ def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) ->
         except ValueError:
             tput = 0.0
     trusts = [r.get("avg_trust", 0) for r in rels if r.get("avg_trust")]
+    n_spans = len(spans)
+    n_traces = len(roots)
+    retries = sum(sp.get("retries", 0) for sp in spans)
     return {
         "total_tokens": tokens,
         "total_cost_usd": cost,
         "total_duration_ms": round(sum(durs), 1),
-        "span_count": len(spans),
-        "trace_count": len(roots),
+        "span_count": n_spans,
+        "trace_count": n_traces,
         "p50_latency_ms": _percentile(durs, 50),
         "p95_latency_ms": _percentile(durs, 95),
         "throughput_per_min": tput,
-        "error_rate": round(errors / len(spans), 3) if spans else 0.0,
+        "error_rate": round(errors / n_spans, 3) if n_spans else 0.0,
         "avg_trust": round(sum(trusts) / len(trusts), 3) if trusts else 0.0,
+        # moyennes
+        "avg_cost_per_trace": round(cost / n_traces, 6) if n_traces else 0.0,
+        "avg_tokens_per_span": round(tokens / n_spans) if n_spans else 0,
+        "avg_duration_ms": round(sum(durs) / n_spans, 1) if n_spans else 0.0,
+        "avg_spans_per_trace": round(n_spans / n_traces, 1) if n_traces else 0.0,
+        "retry_rate": round(retries / n_spans, 3) if n_spans else 0.0,
     }
 
 
@@ -372,6 +381,109 @@ def build_observatory(root: Path) -> dict | None:
     return out
 
 
+# ── Project activity (git + GitHub, best-effort, données 100% réelles) ───────
+
+def _run(args: list[str], root: Path, timeout: int = 25) -> str:
+    try:
+        r = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=timeout)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _git_activity(root: Path) -> dict:
+    out: dict = {}
+    total = _run(["git", "rev-list", "--count", "HEAD"], root).strip()
+    out["commits_total"] = int(total) if total.isdigit() else 0
+
+    raw = _run(["git", "log", "--since=30 days ago", "--date=short", "--pretty=%ad"], root)
+    counts: dict[str, int] = {}
+    for line in raw.splitlines():
+        d = line.strip()
+        if d:
+            counts[d] = counts.get(d, 0) + 1
+    today = _dt.date.today()
+    per_day = [{"date": (today - _dt.timedelta(days=i)).isoformat(),
+                "count": counts.get((today - _dt.timedelta(days=i)).isoformat(), 0)}
+               for i in range(29, -1, -1)]
+    out["per_day"] = per_day
+    out["commits_30d"] = sum(c["count"] for c in per_day)
+    out["commits_7d"] = sum(c["count"] for c in per_day[-7:])
+    out["avg_per_day_30d"] = round(out["commits_30d"] / 30.0, 2)
+
+    contributors = []
+    for line in _run(["git", "shortlog", "-sne", "HEAD"], root).splitlines():
+        m = re.match(r"\s*(\d+)\s+(.+?)\s+<", line)
+        if m:
+            contributors.append({"name": m.group(2), "commits": int(m.group(1))})
+    out["contributor_count"] = len(contributors)
+    out["contributors"] = contributors[:6]
+
+    last = _run(["git", "log", "-1", "--pretty=%h|%s|%aI|%an"], root).strip()
+    if "|" in last:
+        parts = [*last.split("|", 3), "", "", ""][:4]
+        out["last_commit"] = {"sha": parts[0], "message": parts[1], "date": parts[2], "author": parts[3]}
+    return out
+
+
+def _gh_json(args: list[str], root: Path):
+    raw = _run(["gh", *args], root, timeout=25)
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _github(root: Path) -> dict:
+    out: dict = {"pulls": [], "repo": {}, "pulls_open": 0}
+    prs = _gh_json(["pr", "list", "--state", "all", "--limit", "8",
+                    "--json", "number,title,url,state,author,createdAt"], root)
+    if isinstance(prs, list):
+        out["pulls"] = [{
+            "number": p.get("number"),
+            "title": p.get("title", ""),
+            "url": p.get("url", ""),
+            "state": (p.get("state") or "").lower(),
+            "author": (p.get("author") or {}).get("login", ""),
+            "created_at": p.get("createdAt", ""),
+        } for p in prs]
+    open_prs = _gh_json(["pr", "list", "--state", "open", "--json", "number"], root)
+    out["pulls_open"] = len(open_prs) if isinstance(open_prs, list) else 0
+    repo = _gh_json(["repo", "view", "--json", "stargazerCount,forkCount,url,nameWithOwner"], root)
+    if isinstance(repo, dict):
+        out["repo"] = {
+            "stars": repo.get("stargazerCount", 0),
+            "forks": repo.get("forkCount", 0),
+            "url": repo.get("url", ""),
+            "name": repo.get("nameWithOwner", ""),
+        }
+    return out
+
+
+def _git_releases(root: Path) -> list[dict]:
+    raw = _run(["git", "for-each-ref", "--sort=-creatordate", "--count=6",
+                "--format=%(refname:short)|%(creatordate:short)", "refs/tags"], root)
+    rels = []
+    for line in raw.splitlines():
+        if "|" in line:
+            tag, date = line.split("|", 1)
+            rels.append({"tag": tag.strip(), "date": date.strip()})
+    return rels
+
+
+def build_activity(root: Path) -> dict:
+    """Signaux projet 100% réels (git + GitHub) pour la page observability."""
+    gh = _github(root)
+    return {
+        "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "git": _git_activity(root),
+        "pulls": gh["pulls"],
+        "pulls_open": gh.get("pulls_open", 0),
+        "repo": gh["repo"],
+        "releases": _git_releases(root),
+    }
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
@@ -398,6 +510,11 @@ def main(argv: list[str]) -> int:
         (out_dir / "observatory.json").write_text(json.dumps(obs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tag = "demo" if obs.get("is_demo") else "live"
         print(f"[OK] web/data/observatory.json — {tag} · {len(obs.get('traces', []))} traces · {len(obs.get('agents', []))} agents · {len(obs.get('relationships', []))} relations")
+
+    act = build_activity(root)
+    (out_dir / "activity.json").write_text(json.dumps(act, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    g = act.get("git", {})
+    print(f"[OK] web/data/activity.json — {g.get('commits_total', 0)} commits · {g.get('commits_7d', 0)} cette semaine · {len(act.get('pulls', []))} PRs · {g.get('contributor_count', 0)} contributeurs")
     return 0
 
 
