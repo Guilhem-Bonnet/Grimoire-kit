@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-06-27T04:03:41+00:00",
+  "generated_at": "2026-06-27T19:46:05+00:00",
   "git": {
-    "commits_total": 337,
+    "commits_total": 338,
     "per_day": [
       {
         "date": "2026-05-29",
@@ -121,17 +121,17 @@
       },
       {
         "date": "2026-06-27",
-        "count": 0
+        "count": 1
       }
     ],
-    "commits_30d": 94,
-    "commits_7d": 53,
-    "avg_per_day_30d": 3.13,
+    "commits_30d": 95,
+    "commits_7d": 54,
+    "avg_per_day_30d": 3.17,
     "contributor_count": 5,
     "contributors": [
       {
         "name": "guilhem-bonnet",
-        "commits": 273
+        "commits": 274
       },
       {
         "name": "Guilhèm",
@@ -151,9 +151,9 @@
       }
     ],
     "last_commit": {
-      "sha": "3144b72a",
-      "message": "feat(web): data layer métriques étendues — activité git/GitHub réelle + moyennes",
-      "date": "2026-06-26T22:46:39-04:00",
+      "sha": "d7738322",
+      "message": "feat(web): inventaire agents (par archétype) + consommation tokens/jour",
+      "date": "2026-06-27T00:04:10-04:00",
       "author": "guilhem-bonnet"
     }
   },
@@ -256,33 +256,45 @@
       "date": "2026-06-25"
     }
   ],
-  "usage": {
-    "total_tokens": 2206848,
-    "samples": 192,
+  "context_pressure": {
+    "samples": 200,
     "active_days": 5,
+    "window": 200000,
+    "peak_pct": 0.0575,
+    "avg_pct": 0.0575,
     "models": {
-      "claude-sonnet-4": 192
+      "claude-sonnet-4": 200
     },
     "by_day": [
       {
         "date": "2026-05-29",
-        "tokens": 1103424
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 96
       },
       {
         "date": "2026-06-08",
-        "tokens": 275856
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 24
       },
       {
         "date": "2026-06-10",
-        "tokens": 91952
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 8
       },
       {
         "date": "2026-06-26",
-        "tokens": 459760
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 40
       },
       {
         "date": "2026-06-27",
-        "tokens": 275856
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 32
       }
     ]
   }

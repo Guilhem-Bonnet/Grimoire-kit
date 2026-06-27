@@ -64,6 +64,45 @@ def estimate_cost(tokens: int, per_1k: float = DEFAULT_COST_PER_1K_TOKENS) -> fl
     return round(max(0, int(tokens or 0)) / 1000.0 * per_1k, 6)
 
 
+# Table de prix indicative par modèle (USD / 1k tokens) : (input, output, provider).
+# Ordres de grandeur, surchargeables ; correspondance par préfixe le plus long.
+MODEL_PRICING: dict[str, tuple[float, float, str]] = {
+    "claude-opus": (0.015, 0.075, "anthropic"),
+    "claude-sonnet": (0.003, 0.015, "anthropic"),
+    "claude-haiku": (0.0008, 0.004, "anthropic"),
+    "gpt-5": (0.005, 0.015, "openai"),
+    "gpt-": (0.005, 0.015, "openai"),
+    "o3": (0.01, 0.04, "openai"),
+    "gemini": (0.00125, 0.005, "google"),
+    "qwen": (0.0, 0.0, "local"),
+}
+
+
+def model_pricing(model: str) -> tuple[float, float, str]:
+    """(input_per_1k, output_per_1k, provider) pour un modèle, par préfixe le plus long."""
+    m = (model or "").lower()
+    best = ""
+    for prefix in MODEL_PRICING:
+        if m.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    return MODEL_PRICING[best] if best else (0.0, 0.0, "")
+
+
+def infer_provider(model: str) -> str:
+    """Provider déduit du nom de modèle (vide si inconnu)."""
+    return model_pricing(model)[2]
+
+
+def estimate_cost_io(input_tokens: int, output_tokens: int, model: str,
+                     fallback_per_1k: float = DEFAULT_COST_PER_1K_TOKENS) -> float:
+    """Coût USD depuis tokens in/out et le prix du modèle ; repli sur taux plat."""
+    in_r, out_r, _ = model_pricing(model)
+    if in_r or out_r:
+        return round(int(input_tokens or 0) / 1000.0 * in_r
+                     + int(output_tokens or 0) / 1000.0 * out_r, 6)
+    return estimate_cost(int(input_tokens or 0) + int(output_tokens or 0), fallback_per_1k)
+
+
 # ── Data Classes ─────────────────────────────────────────────────────────────
 
 
@@ -85,6 +124,12 @@ class TraceEntry:
     trace_id: str = ""         # racine corrélant tout l'arbre d'opérations
     cost_usd: float = 0.0      # coût estimé (depuis tokens)
     retries: int = 0           # tentatives avant l'issue finale
+    # Modèle / coût détaillé (BM-46 v1.2)
+    model: str = ""            # ex: claude-opus-4-8, gpt-5.3-codex, gemini-3-pro
+    provider: str = ""         # anthropic | openai | google | local
+    input_tokens: int = 0
+    output_tokens: int = 0
+    pattern: str = ""          # pattern gouverné mobilisé (optionnel)
 
     def __post_init__(self):
         if not self.timestamp:
@@ -117,6 +162,14 @@ class TraceEntry:
             lines.append(f"- **Parent** : {self.parent_span_id}")
         if self.trace_id and self.trace_id != self.span_id:
             lines.append(f"- **Trace** : {self.trace_id}")
+        if self.model:
+            lines.append(f"- **Modèle** : {self.model}")
+        if self.provider:
+            lines.append(f"- **Provider** : {self.provider}")
+        if self.input_tokens or self.output_tokens:
+            lines.append(f"- **Tokens IO** : {self.input_tokens}/{self.output_tokens}")
+        if self.pattern:
+            lines.append(f"- **Pattern** : {self.pattern}")
         if self.details:
             for k, v in self.details.items():
                 lines.append(f"- **{k}** : {v}")
@@ -133,8 +186,13 @@ class TraceStats:
     by_status: dict[str, int] = field(default_factory=dict)
     total_duration_ms: float = 0.0
     total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
     total_cost_usd: float = 0.0
     total_retries: int = 0
+    by_model: dict[str, int] = field(default_factory=dict)
+    by_provider: dict[str, int] = field(default_factory=dict)
+    cost_by_model: dict[str, float] = field(default_factory=dict)
     oldest_entry: str = ""
     newest_entry: str = ""
     errors_count: int = 0
@@ -184,23 +242,28 @@ class SynapseTracer:
         operation: str,
         *,
         agent: str = "",
+        model: str = "",
+        provider: str = "",
+        pattern: str = "",
         retries: int = 0,
     ) -> _Span:
         """
         Ouvre un span tracé en context manager.
 
         Capture automatiquement, à la sortie du bloc ``with`` : la durée, l'issue
-        (ok/error sur exception), le coût (depuis ``tokens_estimated``), le nombre
-        de retries, et le lien causal parent→enfant (via la pile de spans).
+        (ok/error sur exception), le coût, le nombre de retries, le lien causal
+        parent→enfant (pile de spans), et — si renseignés — le modèle/provider et
+        les tokens in/out (coût alors calculé via la table de prix du modèle).
 
         Usage::
 
-            with tracer.span("orchestrator", "execute", agent="dev") as s:
-                s.tokens_estimated = 1200
+            with tracer.span("llm", "generate", agent="dev", model="claude-opus-4-8") as s:
+                s.input_tokens, s.output_tokens = 1200, 800
                 with tracer.span("router", "classify") as child:
                     ...           # child.parent_span_id == s.span_id
         """
-        return _Span(self, tool, operation, agent=agent, retries=retries)
+        return _Span(self, tool, operation, agent=agent, model=model,
+                     provider=provider, pattern=pattern, retries=retries)
 
     @property
     def trace_path(self) -> Path:
@@ -296,6 +359,21 @@ class SynapseTracer:
             if tr_m:
                 trace_id = tr_m.group(1).strip()
 
+            model = provider = pattern = ""
+            in_tok = out_tok = 0
+            mdl_m = re.search(r"\*\*Modèle\*\*\s*:\s*(\S+)", block_text)
+            if mdl_m:
+                model = mdl_m.group(1).strip()
+            prov_m = re.search(r"\*\*Provider\*\*\s*:\s*(\S+)", block_text)
+            if prov_m:
+                provider = prov_m.group(1).strip()
+            io_m = re.search(r"\*\*Tokens IO\*\*\s*:\s*(\d+)/(\d+)", block_text)
+            if io_m:
+                in_tok, out_tok = int(io_m.group(1)), int(io_m.group(2))
+            pat_m = re.search(r"\*\*Pattern\*\*\s*:\s*(\S+)", block_text)
+            if pat_m:
+                pattern = pat_m.group(1).strip()
+
             entry = TraceEntry(
                 timestamp=ts,
                 tool=tool,
@@ -309,6 +387,11 @@ class SynapseTracer:
                 trace_id=trace_id or span_id,
                 cost_usd=cost,
                 retries=retries,
+                model=model,
+                provider=provider,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                pattern=pattern,
             )
             self._entries.append(entry)
 
@@ -330,8 +413,15 @@ class SynapseTracer:
             stats.by_status[entry.status] = stats.by_status.get(entry.status, 0) + 1
             stats.total_duration_ms += entry.duration_ms
             stats.total_tokens += entry.tokens_estimated
+            stats.total_input_tokens += entry.input_tokens
+            stats.total_output_tokens += entry.output_tokens
             stats.total_cost_usd += entry.cost_usd
             stats.total_retries += entry.retries
+            if entry.model:
+                stats.by_model[entry.model] = stats.by_model.get(entry.model, 0) + 1
+                stats.cost_by_model[entry.model] = round(stats.cost_by_model.get(entry.model, 0.0) + entry.cost_usd, 6)
+            if entry.provider:
+                stats.by_provider[entry.provider] = stats.by_provider.get(entry.provider, 0) + 1
             if entry.status == "error":
                 stats.errors_count += 1
 
@@ -449,7 +539,8 @@ class _Span:
     ``retries``, ``status``, ``details``.
     """
 
-    def __init__(self, tracer: SynapseTracer, tool: str, operation: str, *, agent: str = "", retries: int = 0):
+    def __init__(self, tracer: SynapseTracer, tool: str, operation: str, *, agent: str = "",
+                 model: str = "", provider: str = "", pattern: str = "", retries: int = 0):
         self._tracer = tracer
         self.tool = tool
         self.operation = operation
@@ -462,6 +553,11 @@ class _Span:
         self.retries = retries
         self.status = "ok"
         self.details: dict = {}
+        self.model = model
+        self.provider = provider
+        self.pattern = pattern
+        self.input_tokens = 0
+        self.output_tokens = 0
         self._start = 0.0
 
     def __enter__(self) -> _Span:
@@ -478,8 +574,17 @@ class _Span:
         if exc_type is not None and self.status == "ok":
             self.status = "error"
             self.details.setdefault("error", str(exc)[:200])
-        if not self.cost_usd and self.tokens_estimated:
-            self.cost_usd = estimate_cost(self.tokens_estimated, self._tracer.cost_per_1k)
+        # tokens : total dérivé de in/out si non fourni
+        if not self.tokens_estimated and (self.input_tokens or self.output_tokens):
+            self.tokens_estimated = self.input_tokens + self.output_tokens
+        if not self.provider and self.model:
+            self.provider = infer_provider(self.model)
+        # coût : par modèle (in/out) si possible, sinon taux plat sur le total
+        if not self.cost_usd:
+            if (self.input_tokens or self.output_tokens) and self.model:
+                self.cost_usd = estimate_cost_io(self.input_tokens, self.output_tokens, self.model)
+            elif self.tokens_estimated:
+                self.cost_usd = estimate_cost(self.tokens_estimated, self._tracer.cost_per_1k)
         self._tracer.record(TraceEntry(
             tool=self.tool,
             operation=self.operation,
@@ -493,6 +598,11 @@ class _Span:
             trace_id=self.trace_id,
             cost_usd=round(self.cost_usd, 6),
             retries=self.retries,
+            model=self.model,
+            provider=self.provider,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            pattern=self.pattern,
         ))
         stack = self._tracer._span_stack
         if stack and stack[-1] is self:
@@ -521,9 +631,19 @@ def synapse_traced(tool_name: str, operation: str, agent: str = ""):
                 result = func(*args, **kwargs)
                 if isinstance(result, dict):
                     span.details["result_status"] = result.get("status", "")
+                    if result.get("model"):
+                        span.model = str(result["model"])
+                    if result.get("provider"):
+                        span.provider = str(result["provider"])
                     with contextlib.suppress(TypeError, ValueError):
                         if result.get("tokens") is not None:
                             span.tokens_estimated = int(result["tokens"])
+                    with contextlib.suppress(TypeError, ValueError):
+                        if result.get("input_tokens") is not None:
+                            span.input_tokens = int(result["input_tokens"])
+                    with contextlib.suppress(TypeError, ValueError):
+                        if result.get("output_tokens") is not None:
+                            span.output_tokens = int(result["output_tokens"])
                     with contextlib.suppress(TypeError, ValueError):
                         if result.get("retries") is not None:
                             span.retries = int(result["retries"])
@@ -624,11 +744,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  Période : {stats.oldest_entry} → {stats.newest_entry}")
             print(f"  Durée totale : {stats.total_duration_ms:,.0f}ms")
             print(f"  Tokens totaux : ~{stats.total_tokens:,}")
+            if stats.total_input_tokens or stats.total_output_tokens:
+                print(f"  Tokens in/out : {stats.total_input_tokens:,} / {stats.total_output_tokens:,}")
             if stats.total_cost_usd:
                 print(f"  Coût estimé : ${stats.total_cost_usd:,.4f}")
             if stats.total_retries:
                 print(f"  Retries : {stats.total_retries}")
             print(f"  Erreurs : {stats.errors_count}")
+            if stats.by_model:
+                total = sum(stats.by_model.values()) or 1
+                print("\n  Par modèle :")
+                for m, c in sorted(stats.by_model.items(), key=lambda x: -x[1]):
+                    cost = stats.cost_by_model.get(m, 0.0)
+                    print(f"    {m}: {c} ({c / total:.0%}) · ${cost:.4f}")
             print("\n  Par outil :")
             for t, c in sorted(stats.by_tool.items(), key=lambda x: -x[1]):
                 print(f"    {t}: {c}")

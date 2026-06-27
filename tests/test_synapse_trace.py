@@ -814,5 +814,104 @@ class TestDecoratorEnriched(unittest.TestCase):
         self.assertEqual(child_e.trace_id, parent_e.trace_id)
 
 
+# ── Model pricing & multi-LLM tests ──────────────────────────────────────────
+
+
+class TestModelPricing(unittest.TestCase):
+    """Test la table de prix par modèle et le coût in/out."""
+
+    def test_pricing_prefix_match(self):
+        in_r, out_r, prov = mod.model_pricing("claude-opus-4-8")
+        self.assertEqual(prov, "anthropic")
+        self.assertGreater(out_r, in_r)
+
+    def test_infer_provider(self):
+        self.assertEqual(mod.infer_provider("gpt-5.3-codex"), "openai")
+        self.assertEqual(mod.infer_provider("gemini-3-pro"), "google")
+        self.assertEqual(mod.infer_provider("qwen3-coder"), "local")
+        self.assertEqual(mod.infer_provider("unknown-model"), "")
+
+    def test_cost_io_uses_model_rates(self):
+        # opus: 1000 in @0.015 + 1000 out @0.075 = 0.09
+        c = mod.estimate_cost_io(1000, 1000, "claude-opus-4-8")
+        self.assertAlmostEqual(c, 0.09)
+
+    def test_cost_io_fallback_flat(self):
+        # modèle inconnu -> taux plat sur le total
+        c = mod.estimate_cost_io(1000, 1000, "unknown")
+        self.assertAlmostEqual(c, mod.estimate_cost(2000))
+
+
+class TestSpanModel(unittest.TestCase):
+    """Spans avec modèle/provider/tokens in-out."""
+
+    def setUp(self):
+        self.tracer = mod.SynapseTracer(Path(tempfile.mkdtemp()), dry_run=True)
+
+    def tearDown(self):
+        mod.reset_global_tracer()
+
+    def test_span_model_cost_and_provider(self):
+        with self.tracer.span("llm", "generate", model="claude-opus-4-8") as s:
+            s.input_tokens, s.output_tokens = 1000, 1000
+        e = self.tracer.entries[0]
+        self.assertEqual(e.model, "claude-opus-4-8")
+        self.assertEqual(e.provider, "anthropic")  # déduit
+        self.assertEqual(e.tokens_estimated, 2000)  # dérivé de in+out
+        self.assertAlmostEqual(e.cost_usd, 0.09)
+
+    def test_span_roundtrip_model_fields(self):
+        e = mod.TraceEntry(tool="llm", operation="g", model="gpt-5", provider="openai",
+                           input_tokens=10, output_tokens=20, pattern="P-12")
+        r = mod.TraceEntry.from_dict(e.to_dict())
+        self.assertEqual(r.model, "gpt-5")
+        self.assertEqual(r.input_tokens, 10)
+        self.assertEqual(r.pattern, "P-12")
+
+    def test_markdown_roundtrip_model(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            t1 = mod.SynapseTracer(Path(tmp))
+            t1.record(mod.TraceEntry(tool="llm", operation="call", model="gemini-3-pro",
+                                     provider="google", input_tokens=100, output_tokens=200))
+            t2 = mod.SynapseTracer(Path(tmp))
+            t2.load_from_file()
+            e = t2.entries[0]
+            self.assertEqual(e.model, "gemini-3-pro")
+            self.assertEqual(e.provider, "google")
+            self.assertEqual(e.input_tokens, 100)
+            self.assertEqual(e.output_tokens, 200)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+            mod.reset_global_tracer()
+
+    def test_stats_by_model_and_provider(self):
+        self.tracer.record(mod.TraceEntry(tool="llm", operation="a", model="claude-opus-4-8",
+                                          provider="anthropic", cost_usd=0.05, input_tokens=100, output_tokens=50))
+        self.tracer.record(mod.TraceEntry(tool="llm", operation="b", model="gpt-5",
+                                          provider="openai", cost_usd=0.02, input_tokens=200, output_tokens=80))
+        st = self.tracer.get_stats()
+        self.assertEqual(st.by_model.get("claude-opus-4-8"), 1)
+        self.assertEqual(st.by_provider.get("openai"), 1)
+        self.assertAlmostEqual(st.cost_by_model.get("claude-opus-4-8"), 0.05)
+        self.assertEqual(st.total_input_tokens, 300)
+        self.assertEqual(st.total_output_tokens, 130)
+
+    def test_decorator_captures_model_io(self):
+        mod.set_global_tracer(self.tracer)
+
+        @mod.synapse_traced("llm", "call")
+        def fn():
+            return {"status": "ok", "model": "claude-sonnet-4-6",
+                    "input_tokens": 500, "output_tokens": 300}
+
+        fn()
+        e = self.tracer.entries[0]
+        self.assertEqual(e.model, "claude-sonnet-4-6")
+        self.assertEqual(e.provider, "anthropic")
+        self.assertGreater(e.cost_usd, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

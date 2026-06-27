@@ -204,9 +204,13 @@ Synapse porte, en plus de la durée et des tokens :
 | `span_id` | Identifiant unique de l'opération |
 | `parent_span_id` | Span déclencheur — reconstitue l'arbre parent→enfant |
 | `trace_id` | Racine corrélant tout l'arbre d'une requête |
-| `cost_usd` | Coût estimé (dérivé des tokens × taux configurable) |
+| `cost_usd` | Coût estimé (par modèle si in/out connus, sinon taux plat) |
 | `retries` | Tentatives avant l'issue finale |
 | `status` | Issue : `ok` \| `error` \| `timeout` |
+| `model` | Modèle invoqué (ex : `claude-opus-4-8`, `gpt-5.3-codex`, `gemini-3-pro`) |
+| `provider` | `anthropic` \| `openai` \| `google` \| `local` (déduit du modèle) |
+| `input_tokens` / `output_tokens` | Tokens en entrée / sortie (coût détaillé) |
+| `pattern` | Pattern gouverné mobilisé (optionnel) |
 
 La causalité est capturée **automatiquement** via un context manager qui empile les
 spans actifs : un span ouvert à l'intérieur d'un autre hérite de son `parent_span_id`

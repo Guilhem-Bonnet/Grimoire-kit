@@ -482,15 +482,20 @@ def _git_releases(root: Path) -> list[dict]:
     return rels
 
 
-def _token_usage(root: Path) -> dict:
-    """Consommation de tokens par jour (réelle) depuis _grimoire/_memory/token-usage.jsonl."""
+def _context_pressure(root: Path) -> dict:
+    """Pression de la fenêtre de contexte (réelle) depuis token-usage.jsonl.
+
+    NB : ce log contient des SNAPSHOTS d'occupation de contexte (used/window/pct),
+    PAS de la consommation par appel — on en tire le pic et la moyenne d'occupation.
+    La vraie consommation de tokens vient désormais des spans Synapse (in/out par modèle).
+    """
     path = root / "_grimoire/_memory/token-usage.jsonl"
     if not path.is_file():
         return {}
-    by_day: dict[str, int] = {}
+    by_day: dict[str, list[float]] = {}
     models: dict[str, int] = {}
-    total = 0
-    n = 0
+    window = 0
+    rows = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -499,20 +504,28 @@ def _token_usage(root: Path) -> dict:
             r = json.loads(line)
         except json.JSONDecodeError:
             continue
+        pct = float(r.get("pct") or 0)
         day = (r.get("ts") or "")[:10]
-        used = int(r.get("used") or 0)
         if day:
-            by_day[day] = by_day.get(day, 0) + used
+            by_day.setdefault(day, []).append(pct)
+        window = max(window, int(r.get("window") or 0))
         model = (r.get("model") or "").split("-2025")[0] or "?"
         models[model] = models.get(model, 0) + 1
-        total += used
-        n += 1
+        rows += 1
+    all_pct = [p for v in by_day.values() for p in v]
     return {
-        "total_tokens": total,
-        "samples": n,
+        "samples": rows,
         "active_days": len(by_day),
+        "window": window,
+        "peak_pct": round(max(all_pct), 4) if all_pct else 0.0,
+        "avg_pct": round(sum(all_pct) / len(all_pct), 4) if all_pct else 0.0,
         "models": models,
-        "by_day": [{"date": d, "tokens": by_day[d]} for d in sorted(by_day)],
+        "by_day": [{
+            "date": d,
+            "peak_pct": round(max(by_day[d]), 4),
+            "avg_pct": round(sum(by_day[d]) / len(by_day[d]), 4),
+            "samples": len(by_day[d]),
+        } for d in sorted(by_day)],
     }
 
 
@@ -526,7 +539,7 @@ def build_activity(root: Path) -> dict:
         "pulls_open": gh.get("pulls_open", 0),
         "repo": gh["repo"],
         "releases": _git_releases(root),
-        "usage": _token_usage(root),
+        "context_pressure": _context_pressure(root),
     }
 
 
