@@ -20,6 +20,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 try:
@@ -697,6 +699,71 @@ def build_economy(root: Path) -> dict:
     return {"rtk": _rtk_economy(root), "ccusage": _ccusage(root)}
 
 
+def _ci_runs(root: Path) -> list[dict]:
+    """Derniers runs CI (réels, via gh)."""
+    data = _gh_json(["run", "list", "--limit", "6", "--json",
+                     "name,status,conclusion,createdAt,url,headBranch,event"], root)
+    if not isinstance(data, list):
+        return []
+    return [{
+        "name": r.get("name", ""),
+        "status": r.get("status", ""),
+        "conclusion": r.get("conclusion", ""),
+        "event": r.get("event", ""),
+        "branch": r.get("headBranch", ""),
+        "created_at": r.get("createdAt", ""),
+        "url": r.get("url", ""),
+    } for r in data]
+
+
+def _ci_status(runs: list[dict]) -> str:
+    """Statut global : dernier run par workflow → pire conclusion."""
+    latest: dict[str, dict] = {}
+    for r in runs:
+        latest.setdefault(r["name"], r)
+    runs_l = list(latest.values())
+    if any(r["status"] != "completed" for r in runs_l):
+        return "in_progress"
+    concls = [r["conclusion"] for r in runs_l if r["conclusion"]]
+    if "failure" in concls:
+        return "failure"
+    return "success" if concls else "unknown"
+
+
+def _pypi_downloads(pkg: str = "grimoire-kit") -> dict:
+    """Téléchargements PyPI récents (réels, API pypistats, best-effort)."""
+    try:
+        req = urllib.request.Request(
+            f"https://pypistats.org/api/packages/{pkg}/recent",
+            headers={"User-Agent": "grimoire-site-data"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:  # noqa: S310 — URL fixe pypistats
+            return json.loads(resp.read().decode()).get("data", {})
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return {}
+
+
+def _coverage(root: Path) -> dict:
+    """Couverture de tests depuis .coverage (best-effort, sans relancer la suite)."""
+    if not (root / ".coverage").exists():
+        return {}
+    # --fail-under=0 : force un exit 0 (sinon le seuil du projet fait échouer la commande)
+    raw = _run([sys.executable, "-m", "coverage", "report", "--fail-under=0"], root, timeout=60)
+    m = re.search(r"^TOTAL\s+.*?(\d+(?:\.\d+)?)%", raw, re.MULTILINE)
+    return {"percent": float(m.group(1))} if m else {}
+
+
+def build_tracking(root: Path) -> dict:
+    """Travail suivi : CI, couverture, PyPI (réels, best-effort)."""
+    runs = _ci_runs(root)
+    return {
+        "ci": runs,
+        "ci_status": _ci_status(runs),
+        "coverage": _coverage(root),
+        "pypi": _pypi_downloads(),
+    }
+
+
 def build_activity(root: Path) -> dict:
     """Signaux projet 100% réels (git + GitHub + usage tokens) pour la page observability."""
     gh = _github(root)
@@ -709,6 +776,7 @@ def build_activity(root: Path) -> dict:
         "releases": _git_releases(root),
         "context_pressure": _context_pressure(root),
         "economy": build_economy(root),
+        "tracking": build_tracking(root),
     }
 
 

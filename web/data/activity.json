@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-06-27T20:30:23+00:00",
+  "generated_at": "2026-06-27T20:36:57+00:00",
   "git": {
-    "commits_total": 340,
+    "commits_total": 342,
     "per_day": [
       {
         "date": "2026-05-29",
@@ -121,17 +121,17 @@
       },
       {
         "date": "2026-06-27",
-        "count": 3
+        "count": 5
       }
     ],
-    "commits_30d": 97,
-    "commits_7d": 56,
-    "avg_per_day_30d": 3.23,
+    "commits_30d": 99,
+    "commits_7d": 58,
+    "avg_per_day_30d": 3.3,
     "contributor_count": 5,
     "contributors": [
       {
         "name": "guilhem-bonnet",
-        "commits": 276
+        "commits": 278
       },
       {
         "name": "Guilhèm",
@@ -151,9 +151,9 @@
       }
     ],
     "last_commit": {
-      "sha": "a9e9395d",
-      "message": "feat(web): surfacer le multi-LLM dans le data layer (coût/% par modèle)",
-      "date": "2026-06-27T15:49:01-04:00",
+      "sha": "8a1b88a7",
+      "message": "feat(web): métriques de performance dérivées des spans",
+      "date": "2026-06-27T16:32:24-04:00",
       "author": "guilhem-bonnet"
     }
   },
@@ -300,21 +300,88 @@
   },
   "economy": {
     "rtk": {
-      "total_commands": 454,
-      "input_tokens": 3754076,
-      "output_tokens": 145574,
-      "saved_tokens": 3608801,
+      "total_commands": 457,
+      "input_tokens": 3757629,
+      "output_tokens": 145778,
+      "saved_tokens": 3612150,
       "savings_pct": 96.1,
-      "total_time_ms": 588435,
+      "total_time_ms": 588707,
       "monthly": [
         {
           "month": "2026-06",
-          "commands": 454,
-          "saved_tokens": 3608801,
+          "commands": 457,
+          "saved_tokens": 3612150,
           "savings_pct": 96.1
         }
       ]
     },
     "ccusage": {}
+  },
+  "tracking": {
+    "ci": [
+      {
+        "name": "CodeQL",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:32:28Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987020"
+      },
+      {
+        "name": "Deploy site",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:32:28Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987017"
+      },
+      {
+        "name": "Release Drafter",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:32:28Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987001"
+      },
+      {
+        "name": "Deploy site",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:30:42Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940475"
+      },
+      {
+        "name": "Release Drafter",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:30:42Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940474"
+      },
+      {
+        "name": "CodeQL",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-27T20:30:42Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940473"
+      }
+    ],
+    "ci_status": "success",
+    "coverage": {
+      "percent": 65.92
+    },
+    "pypi": {
+      "last_day": 100,
+      "last_month": 589,
+      "last_week": 109
+    }
   }
 }
