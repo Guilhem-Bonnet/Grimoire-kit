@@ -350,6 +350,7 @@ def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) ->
         "trace_count": n_traces,
         "p50_latency_ms": _percentile(durs, 50),
         "p95_latency_ms": _percentile(durs, 95),
+        "p99_latency_ms": _percentile(durs, 99),
         "throughput_per_min": tput,
         "error_rate": round(errors / n_spans, 3) if n_spans else 0.0,
         "avg_trust": round(sum(trusts) / len(trusts), 3) if trusts else 0.0,
@@ -365,6 +366,51 @@ def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) ->
         "by_model": by_model,
         "by_provider": by_provider,
         "cost_by_model": cost_by_model,
+    }
+
+
+def _perf_metrics(spans: list[dict]) -> dict:
+    """Performances dérivées des spans : latences p50/p95/p99, par outil/agent/modèle, outliers."""
+    durs = [sp.get("duration_ms", 0) for sp in spans]
+
+    def agg(key: str) -> dict:
+        groups: dict[str, dict] = {}
+        for sp in spans:
+            k = sp.get(key)
+            if not k:
+                continue
+            e = groups.setdefault(k, {"count": 0, "total_ms": 0.0, "_durs": []})
+            e["count"] += 1
+            e["total_ms"] += sp.get("duration_ms", 0)
+            e["_durs"].append(sp.get("duration_ms", 0))
+        out = {}
+        for k, e in groups.items():
+            out[k] = {
+                "count": e["count"],
+                "total_ms": round(e["total_ms"], 1),
+                "avg_ms": round(e["total_ms"] / e["count"], 1) if e["count"] else 0.0,
+                "p50_ms": _percentile(e["_durs"], 50),
+                "p95_ms": _percentile(e["_durs"], 95),
+            }
+        return out
+
+    slowest = sorted(spans, key=lambda s: s.get("duration_ms", 0), reverse=True)[:6]
+    return {
+        "p50_ms": _percentile(durs, 50),
+        "p95_ms": _percentile(durs, 95),
+        "p99_ms": _percentile(durs, 99),
+        "avg_ms": round(sum(durs) / len(durs), 1) if durs else 0.0,
+        "by_tool": agg("tool"),
+        "by_agent": agg("agent"),
+        "by_model": agg("model"),
+        "slowest": [{
+            "label": f'{s.get("tool", "")}.{s.get("operation", "")}',
+            "agent": s.get("agent", ""),
+            "model": s.get("model", ""),
+            "duration_ms": s.get("duration_ms", 0),
+            "cost_usd": s.get("cost_usd", 0),
+            "status": s.get("status", "ok"),
+        } for s in slowest],
     }
 
 
@@ -435,6 +481,7 @@ def build_observatory(root: Path) -> dict | None:
             "spans": spans,
         }
     out["metrics"] = _compute_metrics(out.get("traces", []), out.get("spans", []), out.get("relationships", []))
+    out["perf"] = _perf_metrics(out.get("spans", []))
     return out
 
 
