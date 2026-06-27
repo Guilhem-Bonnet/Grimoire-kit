@@ -1,12 +1,8 @@
 {
-  "generated_at": "2026-06-27T02:45:46+00:00",
+  "generated_at": "2026-06-27T04:03:41+00:00",
   "git": {
-    "commits_total": 336,
+    "commits_total": 337,
     "per_day": [
-      {
-        "date": "2026-05-28",
-        "count": 14
-      },
       {
         "date": "2026-05-29",
         "count": 25
@@ -121,17 +117,21 @@
       },
       {
         "date": "2026-06-26",
-        "count": 24
+        "count": 25
+      },
+      {
+        "date": "2026-06-27",
+        "count": 0
       }
     ],
-    "commits_30d": 107,
-    "commits_7d": 52,
-    "avg_per_day_30d": 3.57,
+    "commits_30d": 94,
+    "commits_7d": 53,
+    "avg_per_day_30d": 3.13,
     "contributor_count": 5,
     "contributors": [
       {
         "name": "guilhem-bonnet",
-        "commits": 272
+        "commits": 273
       },
       {
         "name": "Guilhèm",
@@ -151,9 +151,9 @@
       }
     ],
     "last_commit": {
-      "sha": "c6531742",
-      "message": "feat(web): surfacing télémétrie — spans/coût/causalité sur la page observability (B+A)",
-      "date": "2026-06-26T22:14:37-04:00",
+      "sha": "3144b72a",
+      "message": "feat(web): data layer métriques étendues — activité git/GitHub réelle + moyennes",
+      "date": "2026-06-26T22:46:39-04:00",
       "author": "guilhem-bonnet"
     }
   },
@@ -255,5 +255,35 @@
       "tag": "v3.11.4",
       "date": "2026-06-25"
     }
-  ]
+  ],
+  "usage": {
+    "total_tokens": 2206848,
+    "samples": 192,
+    "active_days": 5,
+    "models": {
+      "claude-sonnet-4": 192
+    },
+    "by_day": [
+      {
+        "date": "2026-05-29",
+        "tokens": 1103424
+      },
+      {
+        "date": "2026-06-08",
+        "tokens": 275856
+      },
+      {
+        "date": "2026-06-10",
+        "tokens": 91952
+      },
+      {
+        "date": "2026-06-26",
+        "tokens": 459760
+      },
+      {
+        "date": "2026-06-27",
+        "tokens": 275856
+      }
+    ]
+  }
 }

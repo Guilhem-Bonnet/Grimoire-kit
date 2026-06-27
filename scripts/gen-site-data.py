@@ -51,6 +51,14 @@ def _list_archetypes(root: Path) -> list[str]:
     return sorted(p.name for p in (root / "archetypes").iterdir() if p.is_dir())
 
 
+def _agents_by_archetype(root: Path) -> dict[str, list[str]]:
+    """Inventaire réel des agents (lesquels), groupés par archétype."""
+    out: dict[str, list[str]] = {}
+    for p in sorted(root.glob("archetypes/*/agents/*.md")):
+        out.setdefault(p.parent.parent.name, []).append(p.stem)
+    return out
+
+
 def _standard_counts(root: Path) -> dict:
     out = {"patterns": None, "pattern_categories": None, "profiles": None, "artifact_types": None}
     if yaml is None:
@@ -113,6 +121,9 @@ def build_meta(root: Path, with_tests: bool) -> dict:
         },
         "archetypes": _list_archetypes(root),
         "profiles": ["starter", "controlled", "orchestrated", "governed", "production"],
+        "inventory": {
+            "agents_by_archetype": _agents_by_archetype(root),
+        },
         "links": {
             "github": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
             "pypi": "https://pypi.org/project/grimoire-kit/",
@@ -471,8 +482,42 @@ def _git_releases(root: Path) -> list[dict]:
     return rels
 
 
+def _token_usage(root: Path) -> dict:
+    """Consommation de tokens par jour (réelle) depuis _grimoire/_memory/token-usage.jsonl."""
+    path = root / "_grimoire/_memory/token-usage.jsonl"
+    if not path.is_file():
+        return {}
+    by_day: dict[str, int] = {}
+    models: dict[str, int] = {}
+    total = 0
+    n = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        day = (r.get("ts") or "")[:10]
+        used = int(r.get("used") or 0)
+        if day:
+            by_day[day] = by_day.get(day, 0) + used
+        model = (r.get("model") or "").split("-2025")[0] or "?"
+        models[model] = models.get(model, 0) + 1
+        total += used
+        n += 1
+    return {
+        "total_tokens": total,
+        "samples": n,
+        "active_days": len(by_day),
+        "models": models,
+        "by_day": [{"date": d, "tokens": by_day[d]} for d in sorted(by_day)],
+    }
+
+
 def build_activity(root: Path) -> dict:
-    """Signaux projet 100% réels (git + GitHub) pour la page observability."""
+    """Signaux projet 100% réels (git + GitHub + usage tokens) pour la page observability."""
     gh = _github(root)
     return {
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
@@ -481,6 +526,7 @@ def build_activity(root: Path) -> dict:
         "pulls_open": gh.get("pulls_open", 0),
         "repo": gh["repo"],
         "releases": _git_releases(root),
+        "usage": _token_usage(root),
     }
 
 

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-27T02:45:44+00:00",
+  "generated_at": "2026-06-27T04:03:40+00:00",
   "version": "3.16.0",
   "counts": {
     "tools": 108,
@@ -30,6 +30,58 @@
     "governed",
     "production"
   ],
+  "inventory": {
+    "agents_by_archetype": {
+      "creative-studio": [
+        "blender-expert",
+        "brand-designer",
+        "content-creator",
+        "illustration-expert"
+      ],
+      "fix-loop": [
+        "fix-loop-orchestrator.tpl"
+      ],
+      "infra-ops": [
+        "backup-dr-specialist",
+        "k8s-navigator",
+        "monitoring-specialist",
+        "ops-engineer",
+        "pipeline-architect",
+        "security-hardener",
+        "systems-debugger"
+      ],
+      "meta": [
+        "agent-optimizer",
+        "art-director",
+        "concierge",
+        "creative-toolsmith",
+        "memory-keeper",
+        "project-navigator"
+      ],
+      "minimal": [
+        "custom-agent.tpl"
+      ],
+      "platform-engineering": [
+        "backend-engineer",
+        "deploy-orchestrator",
+        "platform-architect",
+        "reliability-engineer"
+      ],
+      "stack": [
+        "ansible-expert",
+        "docker-expert",
+        "go-expert",
+        "k8s-expert",
+        "python-expert",
+        "terraform-expert",
+        "typescript-expert"
+      ],
+      "web-app": [
+        "frontend-specialist",
+        "fullstack-dev"
+      ]
+    }
+  },
   "links": {
     "github": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
     "pypi": "https://pypi.org/project/grimoire-kit/",
