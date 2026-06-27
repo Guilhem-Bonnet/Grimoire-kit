@@ -76,6 +76,24 @@
     .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
     .filt { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--elev-2); color: var(--ink-soft); cursor: pointer; }
     .filt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+    /* causal chains (span waterfalls) */
+    .chain { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 10px; background: var(--elev-2); }
+    .chain:last-child { margin-bottom: 0; }
+    .chain-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; font-family: var(--font-mono); font-size: 0.62rem; flex-wrap: wrap; }
+    .chain-id { color: var(--accent); letter-spacing: 0.06em; }
+    .chain-root { color: var(--ink); }
+    .chain-meta { margin-left: auto; color: var(--ink-muted); }
+    .span-row { display: grid; grid-template-columns: 210px 1fr 168px; align-items: center; gap: 10px; padding: 3px 0; }
+    .span-lbl { font-family: var(--font-mono); font-size: 0.63rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .span-lbl .op { color: var(--ink-soft); } .span-lbl .ag { color: var(--ink-muted); }
+    .span-track { position: relative; height: 13px; background: var(--elev-3); border-radius: 3px; overflow: hidden; }
+    .span-bar { position: absolute; top: 0; height: 100%; border-radius: 3px; background: var(--accent); opacity: 0.85; transition: width 500ms var(--ease-forge); }
+    .span-bar.err { background: var(--data-red); }
+    .span-num { font-family: var(--font-mono); font-size: 0.57rem; color: var(--ink-muted); text-align: right; white-space: nowrap; }
+    .span-num .err { color: var(--data-red); } .span-num .rty { color: var(--data-amber); }
+    @media (max-width: 860px) { .span-row { grid-template-columns: 130px 1fr 96px; } }
+
     #obs-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
@@ -100,6 +118,7 @@
   <section class="obs-surface" id="obs">
     <div class="container">
       <div class="kpi-grid reveal" id="kpis"></div>
+      <div class="kpi-grid reveal" data-delay="40" id="metrics" style="display:none"></div>
 
       <div class="graph-grid">
         <div class="panel graph-panel reveal" data-delay="60">
@@ -110,6 +129,11 @@
           <div class="panel reveal" data-delay="100"><div class="panel-head"><span>Types d'événement</span><span class="sub" id="evt-total"></span></div><div id="evt-bars"></div></div>
           <div class="panel reveal" data-delay="140"><div class="panel-head"><span>Sessions</span><span class="sub" id="sess-total"></span></div><div id="sessions"></div></div>
         </div>
+      </div>
+
+      <div class="panel reveal" data-delay="110" id="chains-panel" style="display:none;margin-bottom:14px">
+        <div class="panel-head"><span>Chaînes causales — spans</span><span class="sub" id="chains-sub"></span></div>
+        <div id="chains"></div>
       </div>
 
       <div class="panel reveal" data-delay="120" style="margin-bottom:14px">
@@ -174,6 +198,9 @@
       ["TYPES D'ÉVÉNEMENTS", (d.event_types || Object.keys(countBy(traces, 'event_type'))).length],
     ];
     document.getElementById('kpis').innerHTML = kpis.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
+
+    renderMetrics(d.metrics);
+    renderChains(d.spans || []);
 
     rels.forEach((r) => { (NEIGH[r.from_agent] = NEIGH[r.from_agent] || new Set()).add(r.to_agent); (NEIGH[r.to_agent] = NEIGH[r.to_agent] || new Set()).add(r.from_agent); });
     drawGraph(agents, ids, rels, byAgent);
@@ -275,6 +302,55 @@
       el.addEventListener('focus', () => focus(el.dataset.id));
       el.addEventListener('blur', blur);
     });
+  }
+
+  const fmt = (n) => (n || 0).toLocaleString('fr-FR');
+
+  function renderMetrics(M) {
+    if (!M || (!M.span_count && !M.total_cost_usd)) return;
+    const tiles = [
+      ['COÛT ESTIMÉ', '$' + (M.total_cost_usd || 0).toFixed(4)],
+      ['TOKENS', fmt(M.total_tokens)],
+      ['LATENCE p50', (M.p50_latency_ms || 0) + ' ms'],
+      ['LATENCE p95', (M.p95_latency_ms || 0) + ' ms'],
+    ];
+    const el = document.getElementById('metrics');
+    el.innerHTML = tiles.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
+    el.style.display = 'grid';
+  }
+
+  function renderChains(spans) {
+    if (!spans.length) return;
+    const byTrace = {}, children = {};
+    spans.forEach((s) => { (byTrace[s.trace_id] = byTrace[s.trace_id] || []).push(s); });
+    spans.forEach((s) => { if (s.parent_span_id) (children[s.parent_span_id] = children[s.parent_span_id] || []).push(s); });
+
+    let html = '';
+    Object.keys(byTrace).forEach((tid) => {
+      const group = byTrace[tid];
+      const root = group.find((s) => !s.parent_span_id) || group[0];
+      const rootDur = Math.max(1, ...group.map((s) => s.duration_ms));
+      const totalCost = group.reduce((a, s) => a + (s.cost_usd || 0), 0);
+      const ord = [];
+      const dfs = (s, depth) => { ord.push([s, depth]); (children[s.span_id] || []).forEach((c) => dfs(c, depth + 1)); };
+      dfs(root, 0);
+      group.forEach((s) => { if (!ord.some((o) => o[0] === s)) ord.push([s, 0]); });
+      const rows = ord.map(([s, depth]) => {
+        const left = Math.min(depth * 5, 28);
+        const w = Math.max(2, (s.duration_ms / rootDur) * (100 - left));
+        const err = s.status && s.status !== 'ok';
+        const badges = (err ? '<span class="err">error</span> ' : '') + (s.retries ? `<span class="rty">${s.retries}↻</span> ` : '');
+        return `<div class="span-row">
+          <span class="span-lbl" style="padding-left:${depth * 12}px"><span class="op">${esc(s.tool)}.${esc(s.operation)}</span> <span class="ag">${esc(s.agent || '')}</span></span>
+          <span class="span-track"><span class="span-bar${err ? ' err' : ''}" style="left:${left}%;width:${w.toFixed(1)}%"></span></span>
+          <span class="span-num">${badges}${s.duration_ms} ms · $${(s.cost_usd || 0).toFixed(4)}</span>
+        </div>`;
+      }).join('');
+      html += `<div class="chain"><div class="chain-head"><span class="chain-id">trace ${esc(tid)}</span><span class="chain-root">${esc(root.tool)}.${esc(root.operation)}</span><span class="chain-meta">${ord.length} spans · ${root.duration_ms} ms · $${totalCost.toFixed(4)}</span></div>${rows}</div>`;
+    });
+    document.getElementById('chains').innerHTML = html;
+    document.getElementById('chains-sub').textContent = `${Object.keys(byTrace).length} traces · ${spans.length} spans`;
+    document.getElementById('chains-panel').style.display = 'block';
   }
 
   function renderLog() {

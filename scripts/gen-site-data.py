@@ -217,6 +217,107 @@ _DEMO_TRACES = [
     ("dev", "ERROR", "work/memory-runtime"), ("dev", "DECISION", "work/memory-runtime"),
 ]
 
+# Spans causaux représentatifs (3 arbres parent→enfant) — surfacés sur la page
+# observability. Le mode vue local remplace par `synapse-trace export`.
+_COST_PER_1K = 0.003  # USD / 1k tokens (estimation indicative, cf. synapse-trace.py)
+_DEMO_SPANS = [
+    # trace « main » — orchestration d'une action dev
+    {"span_id": "a1", "parent_span_id": "", "trace_id": "a1", "tool": "orchestrator", "operation": "execute", "agent": "dev", "duration_ms": 4200, "tokens": 1800, "retries": 0, "status": "ok"},
+    {"span_id": "a2", "parent_span_id": "a1", "trace_id": "a1", "tool": "router", "operation": "classify", "agent": "dev", "duration_ms": 180, "tokens": 240, "retries": 0, "status": "ok"},
+    {"span_id": "a3", "parent_span_id": "a1", "trace_id": "a1", "tool": "memory", "operation": "recall", "agent": "mnemo", "duration_ms": 320, "tokens": 90, "retries": 0, "status": "ok"},
+    {"span_id": "a4", "parent_span_id": "a1", "trace_id": "a1", "tool": "llm", "operation": "generate", "agent": "dev", "duration_ms": 3100, "tokens": 4200, "retries": 0, "status": "ok"},
+    {"span_id": "a5", "parent_span_id": "a1", "trace_id": "a1", "tool": "verify", "operation": "check", "agent": "qa", "duration_ms": 260, "tokens": 180, "retries": 0, "status": "ok"},
+    # trace « standard-bridge » — gate de vérification
+    {"span_id": "b1", "parent_span_id": "", "trace_id": "b1", "tool": "verify", "operation": "gate", "agent": "qa", "duration_ms": 1500, "tokens": 600, "retries": 0, "status": "ok"},
+    {"span_id": "b2", "parent_span_id": "b1", "trace_id": "b1", "tool": "capability", "operation": "scan", "agent": "qa", "duration_ms": 240, "tokens": 150, "retries": 0, "status": "ok"},
+    {"span_id": "b3", "parent_span_id": "b1", "trace_id": "b1", "tool": "llm", "operation": "review", "agent": "qa", "duration_ms": 1100, "tokens": 2800, "retries": 1, "status": "ok"},
+    # trace « memory-runtime » — migration mémoire (avec un échec gated)
+    {"span_id": "c1", "parent_span_id": "", "trace_id": "c1", "tool": "migrate", "operation": "run", "agent": "dev", "duration_ms": 5200, "tokens": 900, "retries": 0, "status": "ok"},
+    {"span_id": "c2", "parent_span_id": "c1", "trace_id": "c1", "tool": "weaviate", "operation": "write", "agent": "dev", "duration_ms": 1800, "tokens": 300, "retries": 0, "status": "ok"},
+    {"span_id": "c3", "parent_span_id": "c1", "trace_id": "c1", "tool": "llm", "operation": "embed", "agent": "mnemo", "duration_ms": 2600, "tokens": 5200, "retries": 0, "status": "ok"},
+    {"span_id": "c4", "parent_span_id": "c1", "trace_id": "c1", "tool": "verify", "operation": "failclosed", "agent": "qa", "duration_ms": 140, "tokens": 120, "retries": 0, "status": "error"},
+]
+
+
+def _est_cost(tokens: int) -> float:
+    return round(max(0, int(tokens or 0)) / 1000.0 * _COST_PER_1K, 6)
+
+
+def _norm_span(e: dict) -> dict:
+    """Normalise une entrée (synapse export ou démo) au schéma de la page."""
+    return {
+        "span_id": e.get("span_id", ""),
+        "parent_span_id": e.get("parent_span_id", ""),
+        "trace_id": e.get("trace_id", "") or e.get("span_id", ""),
+        "tool": e.get("tool", ""),
+        "operation": e.get("operation", ""),
+        "agent": e.get("agent", ""),
+        "duration_ms": e.get("duration_ms", 0) or 0,
+        "tokens": e.get("tokens", e.get("tokens_estimated", 0)) or 0,
+        "cost_usd": e.get("cost_usd", 0) or 0,
+        "retries": e.get("retries", 0) or 0,
+        "status": e.get("status", "ok") or "ok",
+        "timestamp": e.get("timestamp", ""),
+    }
+
+
+def _percentile(vals: list[float], p: float) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    k = (len(s) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    return round(s[f] + (s[c] - s[f]) * (k - f), 1)
+
+
+def _compute_metrics(traces: list[dict], spans: list[dict], rels: list[dict]) -> dict:
+    """Agrège les métriques runtime (coût, latence, throughput, trust) pour la page."""
+    import datetime as _d
+    durs = [sp.get("duration_ms", 0) for sp in spans]
+    tokens = sum(sp.get("tokens", 0) for sp in spans)
+    cost = round(sum(sp.get("cost_usd", 0) for sp in spans), 6)
+    roots = {sp["trace_id"] for sp in spans if not sp.get("parent_span_id")}
+    errors = sum(1 for sp in spans if sp.get("status") not in ("ok", "", None))
+    tput = 0.0
+    ts = [t.get("timestamp", "") for t in traces if t.get("timestamp")]
+    if len(ts) >= 2:
+        try:
+            parsed = [_d.datetime.fromisoformat(x) for x in ts]
+            mins = max((max(parsed) - min(parsed)).total_seconds() / 60.0, 1e-9)
+            tput = round(len(traces) / mins, 2)
+        except ValueError:
+            tput = 0.0
+    trusts = [r.get("avg_trust", 0) for r in rels if r.get("avg_trust")]
+    return {
+        "total_tokens": tokens,
+        "total_cost_usd": cost,
+        "total_duration_ms": round(sum(durs), 1),
+        "span_count": len(spans),
+        "trace_count": len(roots),
+        "p50_latency_ms": _percentile(durs, 50),
+        "p95_latency_ms": _percentile(durs, 95),
+        "throughput_per_min": tput,
+        "error_rate": round(errors / len(spans), 3) if spans else 0.0,
+        "avg_trust": round(sum(trusts) / len(trusts), 3) if trusts else 0.0,
+    }
+
+
+def _live_spans(root: Path) -> list[dict]:
+    """Spans réels via `synapse-trace.py export` (best-effort)."""
+    syn = root / "framework/tools/synapse-trace.py"
+    if not syn.is_file():
+        return []
+    try:
+        r = subprocess.run(
+            [sys.executable, str(syn), "--project-root", str(root), "export", "--format", "json"],
+            cwd=root, capture_output=True, text=True, timeout=60,
+        )
+        raw = json.loads(r.stdout) if r.stdout.strip().startswith("[") else []
+        return [_norm_span(e) for e in raw]
+    except Exception:
+        return []
+
 
 def build_observatory(root: Path) -> dict | None:
     """Runtime data for observability/game-ui — from `observatory.py export`
@@ -233,18 +334,28 @@ def build_observatory(root: Path) -> dict | None:
         except Exception:  # best-effort export; fall back to the demo snapshot
             data = None
 
+    import datetime as _d
     has_runtime = bool(data and data.get("traces"))
     if has_runtime:
         out = data
         out["is_demo"] = False
+        out["spans"] = _live_spans(root)
     else:
-        import datetime as _d
         base = _d.datetime.now(_d.UTC)
         traces = [
             {"timestamp": (base - _d.timedelta(minutes=2 * (len(_DEMO_TRACES) - i))).isoformat(timespec="seconds"),
              "agent": a, "event_type": t, "session": s, "payload": ""}
             for i, (a, t, s) in enumerate(_DEMO_TRACES)
         ]
+        # Spans démo : un horodatage par arbre, coût dérivé des tokens.
+        _trace_age = {"a": 6, "b": 4, "c": 2}  # minutes avant `base`, par trace
+        spans = []
+        for sp in _DEMO_SPANS:
+            sp = _norm_span(sp)
+            sp["cost_usd"] = _est_cost(sp["tokens"])
+            mins = _trace_age.get(sp["trace_id"][:1], 1)
+            sp["timestamp"] = (base - _d.timedelta(minutes=mins)).isoformat(timespec="seconds")
+            spans.append(sp)
         out = {
             "is_demo": True,
             "traces": traces,
@@ -255,7 +366,9 @@ def build_observatory(root: Path) -> dict | None:
             "sessions": _DEMO_OBSERVATORY["sessions"],
             "agent_ids": [a["id"] for a in _DEMO_OBSERVATORY["agents"]],
             "event_types": _DEMO_OBSERVATORY["event_types"],
+            "spans": spans,
         }
+    out["metrics"] = _compute_metrics(out.get("traces", []), out.get("spans", []), out.get("relationships", []))
     return out
 
 

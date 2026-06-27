@@ -2,126 +2,126 @@
   "is_demo": true,
   "traces": [
     {
-      "timestamp": "2026-06-26T14:37:16+00:00",
+      "timestamp": "2026-06-27T01:35:47+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:39:16+00:00",
+      "timestamp": "2026-06-27T01:37:47+00:00",
       "agent": "dev",
       "event_type": "DECISION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:41:16+00:00",
+      "timestamp": "2026-06-27T01:39:47+00:00",
       "agent": "qa",
       "event_type": "ACTION",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:43:16+00:00",
+      "timestamp": "2026-06-27T01:41:47+00:00",
       "agent": "dev",
       "event_type": "HANDOFF",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:45:16+00:00",
+      "timestamp": "2026-06-27T01:43:47+00:00",
       "agent": "mnemo",
       "event_type": "REMEMBER",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:47:16+00:00",
+      "timestamp": "2026-06-27T01:45:47+00:00",
       "agent": "atlas",
       "event_type": "CHECKPOINT",
       "session": "main",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:49:16+00:00",
+      "timestamp": "2026-06-27T01:47:47+00:00",
       "agent": "pm",
       "event_type": "ACTION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:51:16+00:00",
+      "timestamp": "2026-06-27T01:49:47+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:53:16+00:00",
+      "timestamp": "2026-06-27T01:51:47+00:00",
       "agent": "qa",
       "event_type": "WARN",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:55:16+00:00",
+      "timestamp": "2026-06-27T01:53:47+00:00",
       "agent": "sentinel",
       "event_type": "DECISION",
       "session": "work/standard-bridge",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:57:16+00:00",
+      "timestamp": "2026-06-27T01:55:47+00:00",
       "agent": "dev",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T14:59:16+00:00",
+      "timestamp": "2026-06-27T01:57:47+00:00",
       "agent": "mnemo",
       "event_type": "REMEMBER",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:01:16+00:00",
+      "timestamp": "2026-06-27T01:59:47+00:00",
       "agent": "dev",
       "event_type": "HANDOFF",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:03:16+00:00",
+      "timestamp": "2026-06-27T02:01:47+00:00",
       "agent": "tech-writer",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:05:16+00:00",
+      "timestamp": "2026-06-27T02:03:47+00:00",
       "agent": "qa",
       "event_type": "ACTION",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:07:16+00:00",
+      "timestamp": "2026-06-27T02:05:47+00:00",
       "agent": "atlas",
       "event_type": "CHECKPOINT",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:09:16+00:00",
+      "timestamp": "2026-06-27T02:07:47+00:00",
       "agent": "dev",
       "event_type": "ERROR",
       "session": "work/memory-runtime",
       "payload": ""
     },
     {
-      "timestamp": "2026-06-26T15:11:16+00:00",
+      "timestamp": "2026-06-27T02:09:47+00:00",
       "agent": "dev",
       "event_type": "DECISION",
       "session": "work/memory-runtime",
@@ -281,5 +281,187 @@
     "REMEMBER",
     "WARN",
     "ERROR"
-  ]
+  ],
+  "spans": [
+    {
+      "span_id": "a1",
+      "parent_span_id": "",
+      "trace_id": "a1",
+      "tool": "orchestrator",
+      "operation": "execute",
+      "agent": "dev",
+      "duration_ms": 4200,
+      "tokens": 1800,
+      "cost_usd": 0.0054,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:05:47+00:00"
+    },
+    {
+      "span_id": "a2",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "router",
+      "operation": "classify",
+      "agent": "dev",
+      "duration_ms": 180,
+      "tokens": 240,
+      "cost_usd": 0.00072,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:05:47+00:00"
+    },
+    {
+      "span_id": "a3",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "memory",
+      "operation": "recall",
+      "agent": "mnemo",
+      "duration_ms": 320,
+      "tokens": 90,
+      "cost_usd": 0.00027,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:05:47+00:00"
+    },
+    {
+      "span_id": "a4",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "llm",
+      "operation": "generate",
+      "agent": "dev",
+      "duration_ms": 3100,
+      "tokens": 4200,
+      "cost_usd": 0.0126,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:05:47+00:00"
+    },
+    {
+      "span_id": "a5",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "verify",
+      "operation": "check",
+      "agent": "qa",
+      "duration_ms": 260,
+      "tokens": 180,
+      "cost_usd": 0.00054,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:05:47+00:00"
+    },
+    {
+      "span_id": "b1",
+      "parent_span_id": "",
+      "trace_id": "b1",
+      "tool": "verify",
+      "operation": "gate",
+      "agent": "qa",
+      "duration_ms": 1500,
+      "tokens": 600,
+      "cost_usd": 0.0018,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:07:47+00:00"
+    },
+    {
+      "span_id": "b2",
+      "parent_span_id": "b1",
+      "trace_id": "b1",
+      "tool": "capability",
+      "operation": "scan",
+      "agent": "qa",
+      "duration_ms": 240,
+      "tokens": 150,
+      "cost_usd": 0.00045,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:07:47+00:00"
+    },
+    {
+      "span_id": "b3",
+      "parent_span_id": "b1",
+      "trace_id": "b1",
+      "tool": "llm",
+      "operation": "review",
+      "agent": "qa",
+      "duration_ms": 1100,
+      "tokens": 2800,
+      "cost_usd": 0.0084,
+      "retries": 1,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:07:47+00:00"
+    },
+    {
+      "span_id": "c1",
+      "parent_span_id": "",
+      "trace_id": "c1",
+      "tool": "migrate",
+      "operation": "run",
+      "agent": "dev",
+      "duration_ms": 5200,
+      "tokens": 900,
+      "cost_usd": 0.0027,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:09:47+00:00"
+    },
+    {
+      "span_id": "c2",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "weaviate",
+      "operation": "write",
+      "agent": "dev",
+      "duration_ms": 1800,
+      "tokens": 300,
+      "cost_usd": 0.0009,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:09:47+00:00"
+    },
+    {
+      "span_id": "c3",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "llm",
+      "operation": "embed",
+      "agent": "mnemo",
+      "duration_ms": 2600,
+      "tokens": 5200,
+      "cost_usd": 0.0156,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-27T02:09:47+00:00"
+    },
+    {
+      "span_id": "c4",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "verify",
+      "operation": "failclosed",
+      "agent": "qa",
+      "duration_ms": 140,
+      "tokens": 120,
+      "cost_usd": 0.00036,
+      "retries": 0,
+      "status": "error",
+      "timestamp": "2026-06-27T02:09:47+00:00"
+    }
+  ],
+  "metrics": {
+    "total_tokens": 16580,
+    "total_cost_usd": 0.04974,
+    "total_duration_ms": 20640,
+    "span_count": 12,
+    "trace_count": 3,
+    "p50_latency_ms": 1300.0,
+    "p95_latency_ms": 4650.0,
+    "throughput_per_min": 0.53,
+    "error_rate": 0.083,
+    "avg_trust": 0.845
+  }
 }

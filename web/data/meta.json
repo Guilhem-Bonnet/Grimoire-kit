@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-26T14:12:06+00:00",
+  "generated_at": "2026-06-27T02:11:47+00:00",
   "version": "3.16.0",
   "counts": {
     "tools": 108,
@@ -9,7 +9,7 @@
     "pattern_categories": 11,
     "profiles": 5,
     "artifact_types": 41,
-    "tests": 5917
+    "tests": 5939
   },
   "archetypes": [
     "agentic-standard",
