@@ -1,208 +1,366 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Kanban gouverné — Grimoire Kit</title>
-  <meta property="og:type" content="website"/>
-  <meta property="og:title" content="Kanban gouverné — Grimoire Kit"/>
-  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
-  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/kanban.html"/>
-  <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Le tableau agentique gouverné de Grimoire Kit : 8 états, transitions gated par la preuve. Une carte n'avance que si l'artefact requis existe." />
-  <link rel="stylesheet" href="forge-tokens.css"/>
-  <link rel="stylesheet" href="forge-base.css"/>
-  <link rel="stylesheet" href="forge-motion.css"/>
-  <style>
-    body { padding-top: 56px; }
-    #hero { padding: 64px 0 22px; }
-    #hero .container { max-width: var(--max-w); }
-    .hero-sub { color: var(--ink-soft); margin-top: 12px; font-size: 0.98rem; max-width: 640px; line-height: var(--lh-body); }
-    .board-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
-    .board-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Kanban gouverné — Grimoire Kit</title>
+<meta name="description" content="Le tableau agentique gouverné de Grimoire Kit : 8 états, transitions gated par la preuve. Une carte n'avance que si l'artefact requis existe."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"/>
+<style>
+/* ═══════════ Tokens (Forge) ═══════════ */
+:root{
+  --bg:#0B0C0E; --elev-1:#121418; --elev-2:#1A1D22; --elev-3:#22262C;
+  --ink:#F6F7F8; --ink-soft:#9BA0A8; --ink-muted:#5B6068;
+  --line:rgba(255,255,255,0.08); --line-strong:rgba(255,255,255,0.14);
+  --accent:#FF6B3D; --accent-soft:rgba(255,107,61,0.12); --accent-dim:rgba(255,107,61,0.20); --accent-glow:rgba(255,107,61,0.40);
+  --cyan:#6EE7FF; --violet:#A78BFA; --amber:#FCD34D; --green:#34D399; --red:#F87171;
+  --font-sans:'Geist',system-ui,sans-serif; --font-mono:'Geist Mono','Courier New',monospace;
+  --r-sm:4px; --r-md:8px; --r-lg:16px;
+  --ease:cubic-bezier(0.2,0.8,0.2,1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--font-sans);
+  line-height:1.55; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  min-height:100vh; overflow-x:hidden; padding-top:56px;
+}
 
-    /* ── Governed pipeline rail ── */
-    #pipe { position: relative; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--elev-1); padding: 26px 0 28px; }
-    #pipe::before { content: ''; position: absolute; inset: 0; pointer-events: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
-    #pipe .container { max-width: none; padding-left: 32px; padding-right: 32px; position: relative; z-index: 1; }
-    .pipe-label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 18px; }
-    .rail { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 8px; }
-    .rail::-webkit-scrollbar { height: 8px; } .rail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
-    .station { flex: 0 0 auto; min-width: 116px; background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--st, var(--ink-muted)); border-radius: var(--r-md); padding: 11px 13px; }
-    .station.empty { opacity: 0.5; }
-    .st-top { display: flex; align-items: center; gap: 7px; }
-    .st-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st); flex: 0 0 auto; }
-    .st-name { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.05em; color: var(--ink); text-transform: uppercase; }
-    .st-count { margin-left: auto; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--ink); }
-    .connector { flex: 0 0 auto; width: 118px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 0 4px; }
-    .connector .arrow { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent); margin-top: 6px; }
-    .connector .gates { display: flex; flex-direction: column; gap: 3px; margin-top: 7px; width: 100%; }
-    .gchip { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.02em; text-align: center; color: var(--data-green); background: rgba(52,211,153,0.10); border: 1px solid rgba(52,211,153,0.22); border-radius: var(--r-sm); padding: 2px 5px; line-height: 1.25; }
-    .branch { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
-    .branch .b-from { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); letter-spacing: 0.05em; }
-    .branch .arrow { color: var(--data-red); font-family: var(--font-mono); }
-    .branch .station { border-top-color: var(--data-red); }
-    .branch .gates { flex-direction: row; flex-wrap: wrap; width: auto; }
-    .branch .gchip { color: var(--data-red); background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.24); }
+/* ═══════════ Nav (Forge) ═══════════ */
+#forge-nav{position:fixed;top:0;left:0;right:0;height:56px;z-index:900;
+  background:rgba(11,12,14,0.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);transition:background 300ms,border-color 300ms;}
+#forge-nav.scrolled{background:rgba(18,20,24,0.95);border-bottom-color:var(--line-strong);}
+.nav-inner{max-width:1480px;margin:0 auto;padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:24px;}
+.nav-logo{font-family:var(--font-mono);font-size:0.82rem;font-weight:600;color:var(--ink);text-decoration:none;letter-spacing:0.04em;white-space:nowrap;}
+.nav-logo .logo-accent{color:var(--accent);}
+.nav-links{display:flex;gap:26px;list-style:none;}
+.nav-links a{font-family:var(--font-mono);font-size:0.72rem;color:var(--ink-muted);text-decoration:none;letter-spacing:0.06em;padding:4px 0;border-bottom:1px solid transparent;transition:color 200ms;}
+.nav-links a:hover{color:var(--ink);}
+.nav-links a.active{color:var(--accent);border-bottom-color:var(--accent);}
+.nav-cta{font-family:var(--font-mono);font-size:0.72rem;padding:7px 18px;border:1px solid var(--accent);color:var(--accent);border-radius:var(--r-sm);text-decoration:none;white-space:nowrap;transition:background 200ms,color 200ms;}
+.nav-cta:hover{background:var(--accent);color:var(--bg);}
+@media (max-width:880px){.nav-links{display:none;}}
+/* Ambient glow + blueprint grid */
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 16% 4%,rgba(255,107,61,0.06) 0%,transparent 70%);}
+body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,0.020) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.020) 1px,transparent 1px);
+  background-size:64px 64px; mask-image:linear-gradient(to bottom,transparent,black 7%,black 94%,transparent);}
+::selection{background:var(--accent-soft);color:var(--ink);}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:var(--elev-1);}
+::-webkit-scrollbar-thumb{background:var(--ink-muted);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--accent);}
 
-    /* ── Board ── */
-    #board { padding: 26px 0 80px; }
-    #board .container { max-width: none; padding-left: 32px; padding-right: 32px; }
-    .columns { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 18px; scroll-snap-type: x proximity; }
-    .columns::-webkit-scrollbar { height: 9px; } .columns::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
-    .col { flex: 0 0 268px; scroll-snap-align: start; display: flex; flex-direction: column; min-height: 200px; }
-    .col-head { display: flex; align-items: center; gap: 9px; padding: 0 4px 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-    .col-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
-    .col-name { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; color: var(--ink); text-transform: uppercase; }
-    .col-count { margin-left: auto; font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted); background: var(--elev-2); border-radius: 999px; padding: 1px 9px; }
-    .col-cards { display: flex; flex-direction: column; gap: 10px; }
-    .col-empty { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); opacity: 0.5; padding: 14px 4px; }
+main{position:relative;z-index:1;}
 
-    .card { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 13px 14px; position: relative; overflow: hidden; transition: border-color 200ms, transform 200ms, box-shadow 200ms; }
-    .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prio, var(--ink-muted)); }
-    .card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 0 24px -12px var(--accent-glow); }
-    .card-title { font-size: 0.86rem; line-height: 1.35; color: var(--ink); font-weight: 500; margin-bottom: 10px; }
-    .card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .chip { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.03em; border-radius: var(--r-sm); padding: 2px 7px; border: 1px solid var(--line); color: var(--ink-soft); background: var(--elev-3); }
-    .chip.role { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-soft); }
-    .chip.owner { color: var(--ink-soft); }
-    .card-blockers { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
-    .blocker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--data-red); display: flex; gap: 6px; align-items: flex-start; }
-    .blocker::before { content: '▲'; font-size: 0.5rem; margin-top: 2px; }
-    .card-refs { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 5px; }
-    .ref { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.04em; color: var(--data-cyan); border: 1px solid rgba(110,231,255,0.22); background: rgba(110,231,255,0.08); border-radius: var(--r-sm); padding: 1px 6px; }
+/* ═══════════ Header ═══════════ */
+header.page{padding:54px 32px 0;max-width:1480px;margin:0 auto;}
+.eyebrow{font-family:var(--font-mono);font-size:0.66rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-muted);display:flex;align-items:center;gap:10px;margin-bottom:18px;}
+.eyebrow .num{color:var(--accent);}
+.eyebrow .sep{width:30px;height:1px;background:var(--line-strong);}
+h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-height:1.05;font-size:clamp(2.1rem,4.4vw,3.4rem);
+  background:linear-gradient(135deg,var(--ink) 32%,var(--ink-soft) 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.lede{color:var(--ink-soft);font-size:1rem;line-height:1.6;max-width:680px;margin-top:16px;}
+.lede strong{color:var(--ink);font-weight:600;}
+.src-badge{display:inline-flex;align-items:center;gap:7px;margin-top:16px;font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.08em;color:var(--ink-soft);border:1px solid var(--line-strong);border-radius:2px;padding:4px 10px;}
+.src-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);}
 
-    #board-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 4px; }
-    @media (max-width: 640px) { .col { flex-basis: 80vw; } }
-  </style>
+/* ═══════════ Rule legend band ═══════════ */
+.rulebar{max-width:1480px;margin:26px auto 0;padding:0 32px;}
+.rulebar-inner{display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+  background:var(--elev-1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 18px;}
+.rule-tag{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);white-space:nowrap;}
+.rule-tag svg{width:13px;height:13px;}
+.rule-div{width:1px;align-self:stretch;background:var(--line);}
+.rule-keys{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+.keylabel{font-family:var(--font-mono);font-size:0.58rem;letter-spacing:0.06em;color:var(--ink-muted);margin-right:2px;}
+.proof{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:0.55rem;letter-spacing:0.03em;color:var(--cyan);
+  border:1px solid rgba(110,231,255,0.22);background:rgba(110,231,255,0.08);border-radius:var(--r-sm);padding:2px 7px;}
+.proof::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--cyan);box-shadow:0 0 5px rgba(110,231,255,0.6);}
+
+/* ═══════════ Board ═══════════ */
+.board{max-width:1480px;margin:0 auto;padding:24px 32px 90px;}
+.columns{display:flex;gap:14px;overflow-x:auto;padding-bottom:20px;align-items:flex-start;scroll-snap-type:x proximity;}
+.col{flex:0 0 274px;scroll-snap-align:start;display:flex;flex-direction:column;}
+
+/* Column header */
+.col-head{display:flex;align-items:center;gap:9px;padding:0 2px 11px;}
+.col-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--st);box-shadow:0 0 7px color-mix(in srgb,var(--st) 55%,transparent);}
+.col-name{font-family:var(--font-mono);font-size:0.74rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink);}
+.col-count{margin-left:auto;font-family:var(--font-mono);font-size:0.66rem;color:var(--ink-soft);background:var(--elev-2);border:1px solid var(--line);border-radius:999px;padding:1px 9px;min-width:26px;text-align:center;}
+
+/* Entry gate — the proof required to move a card INTO this column */
+.gate{display:flex;align-items:center;gap:7px;padding:7px 9px;margin-bottom:12px;border-radius:var(--r-sm);
+  border:1px solid var(--line);border-left:2px solid color-mix(in srgb,var(--st) 50%,var(--line-strong));
+  background:linear-gradient(180deg,var(--elev-1),transparent);transition:border-color var(--ease) 200ms,background 200ms;}
+.gate svg{width:12px;height:12px;color:var(--ink-soft);flex:0 0 auto;transition:color 200ms;}
+.gate-label{font-family:var(--font-mono);font-size:0.55rem;letter-spacing:0.04em;line-height:1.35;color:var(--ink-soft);}
+.gate-label b{color:var(--ink);font-weight:600;}
+.gate.open{border-left-color:var(--line);}
+.gate.open .gate-label{color:var(--ink-muted);}
+.col:hover .gate{border-color:var(--accent-dim);border-left-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),transparent);}
+.col:hover .gate svg{color:var(--accent);}
+
+/* Cards rail */
+.col-body{display:flex;flex-direction:column;gap:11px;min-height:60px;
+  padding-top:13px;border-top:1px solid var(--line);}
+.col-empty{font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.06em;color:var(--ink-muted);opacity:0.45;padding:10px 2px;}
+
+/* ═══════════ Card ═══════════ */
+.card{position:relative;overflow:hidden;background:var(--elev-2);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:13px 14px 13px 15px;transition:border-color 200ms,transform 200ms var(--ease),box-shadow 200ms;}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--prio,var(--ink-muted));}
+.card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 0 26px -12px var(--accent-glow);}
+.card-top{display:flex;align-items:flex-start;gap:8px;margin-bottom:11px;}
+.card-title{font-size:0.88rem;font-weight:500;line-height:1.32;color:var(--ink);}
+.prio-flag{margin-left:auto;flex:0 0 auto;font-family:var(--font-mono);font-size:0.5rem;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--red);border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.1);border-radius:3px;padding:1px 5px;margin-top:1px;}
+
+.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.chip{font-family:var(--font-mono);font-size:0.56rem;letter-spacing:0.03em;border-radius:var(--r-sm);padding:2px 7px;border:1px solid var(--line);color:var(--ink-soft);background:var(--elev-3);}
+.chip.owner{color:var(--ink);}
+.chip.owner b{color:var(--accent);font-weight:500;}
+.chip.role{color:var(--accent);border-color:var(--accent-dim);background:var(--accent-soft);}
+
+.blockers{margin-top:10px;display:flex;flex-direction:column;gap:5px;}
+.blocker{font-family:var(--font-mono);font-size:0.58rem;line-height:1.4;color:var(--red);display:flex;gap:7px;align-items:flex-start;
+  border:1px solid rgba(248,113,113,0.2);background:rgba(248,113,113,0.07);border-radius:var(--r-sm);padding:5px 8px;}
+.blocker::before{content:'\25B2';font-size:0.5rem;margin-top:1px;flex:0 0 auto;}
+
+.artifacts{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px;}
+.artifact{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:0.54rem;letter-spacing:0.03em;
+  color:var(--cyan);border:1px solid rgba(110,231,255,0.22);background:rgba(110,231,255,0.07);border-radius:var(--r-sm);padding:2px 6px 2px 5px;}
+.artifact::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--cyan);}
+.artifact.warn{color:var(--amber);border-color:rgba(252,211,77,0.24);background:rgba(252,211,77,0.07);}
+.artifact.warn::before{background:var(--amber);}
+
+/* Advance hint — the next gate this card faces */
+.advance{margin-top:11px;padding-top:10px;border-top:1px dashed var(--line);
+  display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:0.55rem;letter-spacing:0.02em;line-height:1.3;}
+.advance .arr{flex:0 0 auto;}
+.advance.ready{color:var(--green);}
+.advance.ready .arr{color:var(--green);}
+.advance.wait{color:var(--ink-muted);}
+.advance.wait .arr{color:var(--ink-soft);}
+.advance.stuck{color:var(--red);}
+.advance.term{color:var(--ink-muted);opacity:0.7;}
+.advance b{font-weight:600;}
+
+@media (max-width:680px){
+  header.page,.rulebar,.board,.nav-inner{padding-left:18px;padding-right:18px;}
+  .col{flex-basis:82vw;}
+  .rule-div{display:none;}
+}
+</style>
 </head>
 <body>
-<div id="scroll-progress" aria-hidden="true"></div>
-<nav id="forge-nav" aria-label="Navigation principale"></nav>
+<nav id="forge-nav" aria-label="Navigation principale">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo" aria-label="Grimoire Kit — Accueil">GRIMOIRE&nbsp;<span class="logo-accent">KIT</span></a>
+    <ul class="nav-links" role="list">
+      <li><a href="demo.html">DÉMO</a></li>
+      <li><a href="game-ui.html">GAME UI</a></li>
+      <li><a href="observability.html">OBSERVABILITY</a></li>
+      <li><a href="kanban.html" class="active">KANBAN</a></li>
+      <li><a href="documentation.html">DOCUMENTATION</a></li>
+      <li><a href="anatomy.html">ANATOMIE</a></li>
+    </ul>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" class="nav-cta" target="_blank" rel="noopener">VOIR LE PROJET →</a>
+  </div>
+</nav>
 
-<main id="main">
-  <section id="hero">
-    <div class="container">
-      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-06</span> · KANBAN GOUVERNÉ</div>
-      <h1 class="grad-text reveal" data-delay="60">Le tableau agentique.</h1>
-      <p class="hero-sub reveal" data-delay="120">
-        Huit états, des transitions <strong>gated par la preuve</strong>. Une carte n'avance pas parce qu'un agent
-        le décide — elle avance quand l'artefact requis existe : critères d'acceptation, contexte, evidence pack,
-        decision trace, gate de revue. Le travail des agents devient gouverné et rejouable.
-      </p>
-      <span class="board-badge reveal" data-delay="160" id="board-badge"><span class="dot"></span>CHARGEMENT…</span>
+<main>
+
+  <header class="page">
+    <div class="eyebrow"><span class="num">FORGE-06</span><span class="sep"></span><span>KANBAN GOUVERNÉ</span></div>
+    <h1>Le tableau agentique.</h1>
+    <p class="lede">Huit états, des transitions <strong>gated par la preuve</strong>. Une carte n'avance pas parce qu'un agent le décide — elle avance quand l'artefact requis existe. Le travail des agents devient gouverné, tracé et rejouable.</p>
+    <div class="src-badge" id="src-badge"><span class="dot"></span>CHARGEMENT…</div>
+  </header>
+
+  <!-- ═══ Rule band : les 5 preuves qui ouvrent les portes ═══ -->
+  <div class="rulebar">
+    <div class="rulebar-inner">
+      <span class="rule-tag">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+        Chaque porte exige sa preuve
+      </span>
+      <span class="rule-div"></span>
+      <div class="rule-keys">
+        <span class="keylabel">ARTEFACTS&nbsp;:</span>
+        <span class="proof">critères d'acceptation</span>
+        <span class="proof">context bundle</span>
+        <span class="proof">evidence pack</span>
+        <span class="proof">decision trace</span>
+        <span class="proof">trace de remédiation</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Board — colonnes statiques (état + porte), cartes injectées depuis data/taskboard.json ═══ -->
+  <section class="board">
+    <div class="columns" id="columns" role="list" aria-label="Colonnes du tableau gouverné">
+
+      <div class="col" style="--st:var(--ink-muted)" data-state="proposed" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Proposé</span><span class="col-count">0</span></div>
+        <div class="gate open">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12 a5 5 0 0 1 10 0"/><path d="M12 12 v6"/></svg>
+          <span class="gate-label">entrée ouverte · <b>backlog</b></span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--cyan)" data-state="ready" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Prêt</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">porte · <b>critères d'acceptation</b> validés</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--accent)" data-state="in_progress" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">En cours</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">porte · <b>context bundle</b> attaché</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--red)" data-state="blocked" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Bloqué</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">depuis tout état · <b>trace de remédiation</b> ouverte</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--amber)" data-state="review" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Revue</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">porte · <b>evidence pack</b> signé</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--green)" data-state="accepted" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Accepté</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">porte · <b>decision trace</b> + review gate</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--violet)" data-state="released" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Publié</span><span class="col-count">0</span></div>
+        <div class="gate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
+          <span class="gate-label">porte · <b>release gate</b> franchi</span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
+      <div class="col" style="--st:var(--ink-muted)" data-state="archived" role="listitem">
+        <div class="col-head"><span class="col-dot"></span><span class="col-name">Archivé</span><span class="col-count">0</span></div>
+        <div class="gate open">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8 h16 v3 H4 z"/><path d="M6 11 v8 h12 v-8"/><path d="M10 14 h4"/></svg>
+          <span class="gate-label">terminal · trace scellée &amp; <b>rejouable</b></span>
+        </div>
+        <div class="col-body"></div>
+      </div>
+
     </div>
   </section>
 
-  <section id="pipe">
-    <div class="container">
-      <div class="pipe-label reveal">Pipeline gouverné — chaque transition exige sa preuve</div>
-      <div class="rail reveal" data-delay="60" id="rail"></div>
-      <div class="branch reveal" data-delay="100" id="branch"></div>
-    </div>
-  </section>
-
-  <section id="board">
-    <div class="container">
-      <div class="columns" id="columns" role="list" aria-label="Colonnes du tableau"></div>
-      <div id="board-empty">Aucun tableau trouvé. Lance <code>grimoire standard init</code> (profil orchestrated+) pour générer un <code>task-board.yaml</code>.</div>
-    </div>
-  </section>
 </main>
-
-<footer id="forge-footer"></footer>
-
-<script src="forge-nav.js"></script>
-<script src="forge-motion.js"></script>
 <script>
-/* ── Kanban renderer — lit data/taskboard.json (réel en local, démo sur la vitrine) ── */
+  (function(){var n=document.getElementById('forge-nav');var f=function(){n.classList.toggle('scrolled',window.scrollY>80);};window.addEventListener('scroll',f,{passive:true});f();})();
+</script>
+<script>
+/* ── Câblage data — cartes injectées depuis data/taskboard.json (réel en local, snapshot démo sur la vitrine).
+     Visuel 100% issu du design claude.ai/design : on ne fait que peupler les colonnes. ── */
 (function () {
-  const STATE = {
-    proposed:   { label: 'Proposé',  c: 'var(--ink-muted)' },
-    ready:      { label: 'Prêt',     c: 'var(--data-cyan)' },
-    in_progress:{ label: 'En cours', c: 'var(--accent)' },
-    blocked:    { label: 'Bloqué',   c: 'var(--data-red)' },
-    review:     { label: 'Revue',    c: 'var(--data-amber)' },
-    accepted:   { label: 'Accepté',  c: 'var(--data-green)' },
-    released:   { label: 'Publié',   c: 'var(--data-violet)' },
-    archived:   { label: 'Archivé',  c: 'var(--ink-muted)' },
-  };
-  const PRIO = { high: 'var(--data-red)', medium: 'var(--data-amber)', low: 'var(--ink-muted)' };
-  const REF_LABEL = { acceptance_criteria: 'critères', context_bundle_ref: 'contexte', evidence_pack_ref: 'evidence', decision_trace_ref: 'décision', remediation_ref: 'remédiation' };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
-  const stMeta = (s) => STATE[s] || { label: s.replace(/_/g, ' '), c: 'var(--ink-muted)' };
+  const PRIO = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--ink-muted)' };
+  // Artefacts présents sur une carte (depuis les champs de référence du task-board)
+  const ARTS = [
+    { test: (t) => (t.acceptance_criteria || []).length, label: 'critères' },
+    { test: (t) => t.context_bundle_ref, label: 'contexte' },
+    { test: (t) => t.evidence_pack_ref, label: 'evidence' },
+    { test: (t) => t.decision_trace_ref, label: 'décision' },
+    { test: (t) => t.remediation_ref, label: 'remédiation', warn: true },
+  ];
+  // Prochaine porte que la carte affronte, selon son état courant
+  const NEXT = {
+    proposed:   { state: 'Prêt',    need: "critères d'acceptation", has: (t) => (t.acceptance_criteria || []).length },
+    ready:      { state: 'En cours', need: 'context bundle',         has: (t) => t.context_bundle_ref },
+    in_progress:{ state: 'Revue',    need: 'evidence pack',          has: (t) => t.evidence_pack_ref },
+    review:     { state: 'Accepté',  need: 'review gate',            has: (t) => t.decision_trace_ref },
+    accepted:   { state: 'Publié',   need: 'release gate',           has: () => false },
+  };
 
   fetch('data/taskboard.json', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then(render)
     .catch(() => {
-      document.getElementById('board-empty').style.display = 'block';
-      const b = document.getElementById('board-badge');
-      if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted);box-shadow:none"></span>AUCUN TABLEAU';
+      const b = document.getElementById('src-badge');
+      if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUN TABLEAU · data/taskboard.json';
     });
 
   function render(board) {
-    const badge = document.getElementById('board-badge');
-    if (badge) {
-      const live = !board.is_demo;
-      badge.innerHTML = `<span class="dot" style="background:${live ? 'var(--data-green)' : 'var(--accent)'}"></span>` +
-        (live ? `LIVE · ${esc(board.source || 'task-board.yaml')}` : 'DÉMO · standard task-board') + ` · ${board.tasks.length} TÂCHES`;
-    }
+    const tasks = board.tasks || [];
+    const live = !board.is_demo;
+    const badge = document.getElementById('src-badge');
+    if (badge) badge.innerHTML = `<span class="dot" style="background:${live ? 'var(--green)' : 'var(--accent)'}"></span>` +
+      (live ? `LIVE · ${esc(board.source || 'task-board.yaml')}` : 'SNAPSHOT DÉMO · standard task-board') + ` · ${tasks.length} TÂCHES`;
 
-    const counts = {};
-    (board.tasks || []).forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
-    const trans = board.transitions || {};
-
-    // Rail linéaire (états hors "blocked"), gates entre stations consécutives
-    const flow = (board.states || []).filter((s) => s !== 'blocked');
-    let railHtml = '';
-    flow.forEach((s, i) => {
-      const m = stMeta(s), n = counts[s] || 0;
-      railHtml += `<div class="station${n ? '' : ' empty'}" style="--st:${m.c}"><div class="st-top"><span class="st-dot"></span><span class="st-name">${esc(m.label)}</span><span class="st-count">${n}</span></div></div>`;
-      if (i < flow.length - 1) {
-        const t = trans[`${s}_to_${flow[i + 1]}`];
-        const gates = t && t.requires ? t.requires.map((r) => `<span class="gchip">${esc(r.replace(/_/g, ' '))}</span>`).join('') : '';
-        railHtml += `<div class="connector"><span class="arrow">→</span><div class="gates">${gates}</div></div>`;
-      }
-    });
-    document.getElementById('rail').innerHTML = railHtml;
-
-    // Branche "bloqué" (any → blocked)
-    const blk = trans.any_to_blocked;
-    if (blk) {
-      const m = stMeta('blocked');
-      const gates = (blk.requires || []).map((r) => `<span class="gchip">${esc(r.replace(/_/g, ' '))}</span>`).join('');
-      document.getElementById('branch').innerHTML =
-        `<span class="b-from">DEPUIS N'IMPORTE QUEL ÉTAT</span><span class="arrow">→</span>` +
-        `<div class="station" style="--st:${m.c}"><div class="st-top"><span class="st-dot"></span><span class="st-name">${esc(m.label)}</span><span class="st-count">${counts.blocked || 0}</span></div></div>` +
-        `<div class="gates">${gates}</div>`;
-    }
-
-    // Board
     const byState = {};
-    (board.tasks || []).forEach((t) => { (byState[t.status] = byState[t.status] || []).push(t); });
-    document.getElementById('columns').innerHTML = (board.states || []).map((st) => {
-      const m = stMeta(st), tasks = byState[st] || [];
-      const cards = tasks.length ? tasks.map(card).join('') : '<div class="col-empty">—</div>';
-      return `<div class="col" role="listitem">
-        <div class="col-head"><span class="col-dot" style="background:${m.c}"></span><span class="col-name">${esc(m.label)}</span><span class="col-count">${tasks.length}</span></div>
-        <div class="col-cards">${cards}</div></div>`;
-    }).join('');
+    tasks.forEach((t) => { (byState[t.status] = byState[t.status] || []).push(t); });
 
-    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
+    document.querySelectorAll('.col[data-state]').forEach((col) => {
+      const st = col.dataset.state, list = byState[st] || [];
+      const cnt = col.querySelector('.col-count'); if (cnt) cnt.textContent = list.length;
+      const body = col.querySelector('.col-body');
+      body.innerHTML = list.length ? list.map(card).join('') : '<div class="col-empty">— aucune carte</div>';
+    });
   }
 
   function card(t) {
     const prio = PRIO[t.priority] || 'var(--ink-muted)';
+    const flag = t.priority === 'high' ? '<span class="prio-flag">high</span>' : '';
+    const owner = t.owner ? `<span class="chip owner">@<b>${esc(t.owner)}</b></span>` : '';
     const roles = (t.agent_roles || []).map((r) => `<span class="chip role">${esc(r)}</span>`).join('');
-    const owner = t.owner ? `<span class="chip owner">@${esc(t.owner)}</span>` : '';
-    const blockers = (t.blockers || []).length ? `<div class="card-blockers">${t.blockers.map((b) => `<span class="blocker">${esc(b)}</span>`).join('')}</div>` : '';
-    const refs = Object.keys(REF_LABEL).filter((k) => t[k]).map((k) => `<span class="ref">${REF_LABEL[k]}</span>`).join('');
-    return `<div class="card" style="--prio:${prio}">
-      <div class="card-title">${esc(t.title)}</div>
-      <div class="card-meta">${owner}${roles}</div>
-      ${blockers}
-      ${refs ? `<div class="card-refs">${refs}</div>` : ''}</div>`;
+    const blockers = (t.blockers || []).length
+      ? `<div class="blockers">${t.blockers.map((b) => `<span class="blocker">${esc(b)}</span>`).join('')}</div>` : '';
+    const arts = ARTS.filter((a) => a.test(t)).map((a) => `<span class="artifact${a.warn ? ' warn' : ''}">${a.label}</span>`).join('');
+    const artifacts = arts ? `<div class="artifacts">${arts}</div>` : '';
+    return `<article class="card" style="--prio:${prio}">
+      <div class="card-top"><h3 class="card-title">${esc(t.title)}</h3>${flag}</div>
+      <div class="meta">${owner}${roles}</div>
+      ${blockers}${artifacts}
+      ${advance(t)}</article>`;
+  }
+
+  function advance(t) {
+    if (t.status === 'blocked')
+      return `<div class="advance stuck"><span class="arr">&times;</span><span>retour <b>En cours</b> à la levée du blocage</span></div>`;
+    if (t.status === 'archived')
+      return `<div class="advance term"><span class="arr">&bull;</span><span>scellé · trace rejouable</span></div>`;
+    if (t.status === 'released')
+      return `<div class="advance term"><span class="arr">&rarr;</span><span>Archivé après fenêtre de rétention</span></div>`;
+    const ng = NEXT[t.status];
+    if (!ng) return '';
+    const ready = !!ng.has(t);
+    const txt = ready ? `${ng.state} · <b>${ng.need}</b> prêt` : `${ng.state} · requiert <b>${ng.need}</b>`;
+    return `<div class="advance ${ready ? 'ready' : 'wait'}"><span class="arr">&rarr;</span><span>${txt}</span></div>`;
   }
 })();
 </script>
