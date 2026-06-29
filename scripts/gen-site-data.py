@@ -34,6 +34,22 @@ def _num(s: object) -> float | int:
     g = m.group()
     return float(g) if "." in g else int(g)
 
+
+def _parse_iso(s: str):
+    """Parse un timestamp ISO (le suffixe Z est géré par fromisoformat ≥ 3.11). None si invalide."""
+    try:
+        return _dt.datetime.fromisoformat(str(s))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _days_since(s: str) -> int | None:
+    d = _parse_iso(s)
+    if not d:
+        return None
+    now = _dt.datetime.now(_dt.UTC)
+    return (now - d).days if d.tzinfo else (now.replace(tzinfo=None) - d).days
+
 try:
     import yaml
 except ImportError:  # pragma: no cover
@@ -426,6 +442,27 @@ def _perf_metrics(spans: list[dict]) -> dict:
     }
 
 
+def _graph_stats(rels: list[dict], agent_ids: list[str]) -> dict:
+    """Métriques du graphe d'agents : densité, degré moyen, agent le plus central."""
+    if not rels:
+        return {}
+    degree: dict[str, int] = {}
+    for r in rels:
+        for a in (r.get("from_agent"), r.get("to_agent")):
+            if a:
+                degree[a] = degree.get(a, 0) + 1
+    nodes = len(set(agent_ids) | set(degree))
+    edges = len(rels)
+    most = max(degree.items(), key=lambda x: x[1]) if degree else ("", 0)
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "avg_degree": round(sum(degree.values()) / nodes, 2) if nodes else 0.0,
+        "density": round(edges / (nodes * (nodes - 1) / 2), 3) if nodes > 1 else 0.0,
+        "most_central": {"agent": most[0], "degree": most[1]},
+    }
+
+
 def _live_spans(root: Path) -> list[dict]:
     """Spans réels via `synapse-trace.py export` (best-effort)."""
     syn = root / "framework/tools/synapse-trace.py"
@@ -494,6 +531,7 @@ def build_observatory(root: Path) -> dict | None:
         }
     out["metrics"] = _compute_metrics(out.get("traces", []), out.get("spans", []), out.get("relationships", []))
     out["perf"] = _perf_metrics(out.get("spans", []))
+    out["graph_stats"] = _graph_stats(out.get("relationships", []), out.get("agent_ids", []))
     return out
 
 
@@ -659,6 +697,16 @@ def _rtk_economy(root: Path) -> dict:
             "saved_tokens": m.get("saved_tokens", 0),
             "savings_pct": round(m.get("savings_pct", 0), 1),
         } for m in (d.get("monthly") or [])],
+        "weekly": [{
+            "week": w.get("week"),
+            "saved_tokens": w.get("saved_tokens", 0),
+            "savings_pct": round(w.get("savings_pct", 0), 1),
+        } for w in (d.get("weekly") or [])],
+        "daily": [{
+            "date": x.get("day") or x.get("date"),
+            "saved_tokens": x.get("saved_tokens", 0),
+            "savings_pct": round(x.get("savings_pct", 0), 1),
+        } for x in (d.get("daily") or [])][-30:],
     }
 
 
@@ -681,9 +729,13 @@ def _ccusage(root: Path) -> dict:
         return {}
     by_model: dict[str, dict] = {}
     total_cost = 0.0
+    cache_read = cache_create = input_tok = 0
     series = []
     for day in days:
         total_cost += day.get("totalCost", 0)
+        cache_read += day.get("cacheReadTokens", 0)
+        cache_create += day.get("cacheCreationTokens", 0)
+        input_tok += day.get("inputTokens", 0)
         series.append({
             "date": day.get("period"),
             "cost": round(day.get("totalCost", 0), 4),
@@ -698,11 +750,17 @@ def _ccusage(root: Path) -> dict:
             e["output"] += mb.get("outputTokens", 0)
     for e in by_model.values():
         e["cost"] = round(e["cost"], 4)
+    cache_denom = input_tok + cache_read
     return {
         "total_cost": round(total_cost, 2),
         "by_model": by_model,
         "models_used": sorted(by_model),
         "days": series[-60:],
+        "cache": {
+            "read_tokens": cache_read,
+            "creation_tokens": cache_create,
+            "hit_ratio": round(cache_read / cache_denom, 4) if cache_denom else 0.0,
+        },
     }
 
 
@@ -776,6 +834,41 @@ def build_tracking(root: Path) -> dict:
     }
 
 
+def _delivery(root: Path) -> dict:
+    """Métriques de livraison type DORA (réelles, via gh)."""
+    runs = _gh_json(["run", "list", "--limit", "50", "--json",
+                     "workflowName,conclusion,status,startedAt,updatedAt"], root)
+    out: dict = {}
+    if isinstance(runs, list) and runs:
+        completed = [r for r in runs if r.get("status") == "completed"]
+        concl = [r.get("conclusion") for r in completed if r.get("conclusion")]
+        fails = sum(1 for c in concl if c in ("failure", "timed_out", "cancelled"))
+        out["change_failure_rate"] = round(fails / len(concl), 3) if concl else 0.0
+        durs = []
+        for r in completed:
+            a, b = _parse_iso(r.get("startedAt")), _parse_iso(r.get("updatedAt"))
+            if a and b:
+                durs.append((b - a).total_seconds())
+        out["ci_avg_duration_s"] = round(sum(durs) / len(durs), 1) if durs else 0.0
+        deploys = [r for r in runs if "deploy" in (r.get("workflowName") or "").lower()
+                   and r.get("conclusion") == "success"]
+        recent = [r for r in deploys if (_days_since(r.get("updatedAt")) or 999) <= 7]
+        out["deploy_freq_7d"] = len(recent)
+    merged = _gh_json(["pr", "list", "--state", "merged", "--limit", "30", "--json",
+                       "createdAt,mergedAt"], root)
+    if isinstance(merged, list) and merged:
+        leads = []
+        for p in merged:
+            a, b = _parse_iso(p.get("createdAt")), _parse_iso(p.get("mergedAt"))
+            if a and b:
+                leads.append((b - a).total_seconds() / 3600.0)
+        if leads:
+            leads.sort()
+            out["pr_lead_time_median_h"] = round(leads[len(leads) // 2], 2)
+            out["pr_merged_sample"] = len(leads)
+    return out
+
+
 def build_activity(root: Path) -> dict:
     """Signaux projet 100% réels (git + GitHub + usage tokens) pour la page observability."""
     gh = _github(root)
@@ -789,6 +882,7 @@ def build_activity(root: Path) -> dict:
         "context_pressure": _context_pressure(root),
         "economy": build_economy(root),
         "tracking": build_tracking(root),
+        "delivery": _delivery(root),
     }
 
 
@@ -963,6 +1057,41 @@ def build_insights(root: Path) -> dict:
     }
 
 
+def _efficiency(meta: dict, act: dict, ins: dict) -> dict:
+    """Ratios d'efficience dérivés (réels) — calculés depuis les données déjà bâties."""
+    git = act.get("git", {})
+    code = ins.get("code", {})
+    rtk = act.get("economy", {}).get("rtk", {})
+    commits = git.get("commits_total", 0)
+    tags = code.get("tags_total", 0)
+    loc = code.get("loc", 0)
+    tests = meta.get("counts", {}).get("tests", 0)
+    cmds = rtk.get("total_commands", 0)
+    return {
+        "commits_per_release": round(commits / tags, 1) if tags else 0.0,
+        "tests_per_kloc": round(tests / (loc / 1000), 1) if loc else 0.0,
+        "tests_code_loc_ratio": code.get("tests_code_ratio", 0.0),
+        "rtk_saved_per_command": round(rtk.get("saved_tokens", 0) / cmds) if cmds else 0,
+        "rtk_savings_pct": rtk.get("savings_pct", 0.0),
+    }
+
+
+def _freshness(act: dict, ins: dict) -> dict:
+    """Récence des signaux (jours) — confiance dans la fraîcheur du dashboard."""
+    git = act.get("git", {})
+    releases = act.get("releases", [])
+    reports = ins.get("bench", {}).get("reports", [])
+    out: dict = {
+        "days_since_commit": _days_since(git.get("last_commit", {}).get("date", "")),
+        "generated_at": ins.get("generated_at", ""),
+    }
+    if releases:
+        out["days_since_release"] = _days_since(releases[0].get("date", ""))
+    if reports:
+        out["days_since_bench"] = _days_since(reports[-1])
+    return out
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
     ap.add_argument("--root", type=Path, default=Path.cwd())
@@ -996,6 +1125,8 @@ def main(argv: list[str]) -> int:
     print(f"[OK] web/data/activity.json — {g.get('commits_total', 0)} commits · {g.get('commits_7d', 0)} cette semaine · {len(act.get('pulls', []))} PRs · {g.get('contributor_count', 0)} contributeurs")
 
     ins = build_insights(root)
+    ins["efficiency"] = _efficiency(meta, act, ins)
+    ins["freshness"] = _freshness(act, ins)
     (out_dir / "insights.json").write_text(json.dumps(ins, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     code = ins.get("code", {})
     print(f"[OK] web/data/insights.json — {len(ins.get('bench', {}).get('latest', []))} agents bench · {ins.get('routing', {}).get('samples', 0)} routings · {code.get('loc', 0)} LOC · {code.get('tags_total', 0)} tags")

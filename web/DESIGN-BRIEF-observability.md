@@ -52,6 +52,7 @@ Seules les contraintes du §2 sont fermes. Le reste, c'est ton métier.
 Quatre fichiers JSON, lus par `fetch`. Exemples = vraies valeurs actuelles.
 
 ### `meta.json` — identité du projet
+
 ```jsonc
 { "version":"3.16.0",
   "counts": { "tools":108,"agents":33,"archetypes":10,"patterns":36,
@@ -63,6 +64,7 @@ Quatre fichiers JSON, lus par `fetch`. Exemples = vraies valeurs actuelles.
 ```
 
 ### `observatory.json` — runtime (réel local / snapshot démo)
+
 ```jsonc
 { "is_demo": true,
   "traces":[{timestamp,agent,event_type,session,payload}],   // ACTION|DECISION|HANDOFF|CHECKPOINT|REMEMBER|WARN|ERROR
@@ -78,6 +80,7 @@ Quatre fichiers JSON, lus par `fetch`. Exemples = vraies valeurs actuelles.
   "perf": { p50_ms, p95_ms, p99_ms, avg_ms,
             by_tool:{tool:{count,total_ms,avg_ms,p50_ms,p95_ms}}, by_agent:{}, by_model:{},
             slowest:[{label,agent,model,duration_ms,cost_usd,status}] },
+  "graph_stats": { nodes, edges, avg_degree, density, most_central:{agent,degree} },
   "sessions":[], "event_types":[] }
 ```
 Valeurs démo : 18 traces · 7 agents · coût $0.27 · p50/p95/p99 1300/4650/5090 ms ·
@@ -85,6 +88,7 @@ Valeurs démo : 18 traces · 7 agents · coût $0.27 · p50/p95/p99 1300/4650/50
 Spans groupés par `trace_id` = arbres causaux parent→enfant (waterfall).
 
 ### `activity.json` — projet & coût
+
 ```jsonc
 { "git": { commits_total:343, commits_7d, commits_30d, avg_per_day_30d,
            per_day:[{date,count}], contributor_count, contributors:[{name,commits}], last_commit:{} },
@@ -92,15 +96,20 @@ Spans groupés par `trace_id` = arbres causaux parent→enfant (waterfall).
   "repo":{stars:4,forks:1,url,name}, "releases":[{tag,date}],
   "context_pressure":{ peak_pct:0.0575, avg_pct, window:200000, by_day:[{date,peak_pct,avg_pct}] },
   "economy": {
-    "rtk": { total_commands:454, saved_tokens:3608801, savings_pct:96.1,
-             input_tokens, output_tokens, monthly:[{month,commands,saved_tokens,savings_pct}] },
-    "ccusage": {}   // PRIVÉ — vide en public ; en local opt-in : {total_cost,by_model,models_used,days[]}
+    "rtk": { total_commands:454, saved_tokens:3608801, savings_pct:96.1, input_tokens, output_tokens,
+             monthly:[{month,commands,saved_tokens,savings_pct}], weekly:[{week,...}], daily:[{date,...}] },
+    "ccusage": {}   // PRIVÉ — vide en public ; en local opt-in :
+    //   { total_cost, by_model, models_used, days:[{date,cost,input,output,total}],
+    //     cache:{ read_tokens, creation_tokens, hit_ratio } }
   },
   "tracking": { ci:[{name,status,conclusion,event,branch,created_at,url}], ci_status:"success",
-                coverage:{percent:65.92}, pypi:{last_day:100,last_week:109,last_month:589} } }
+                coverage:{percent:65.92}, pypi:{last_day:100,last_week:109,last_month:589} },
+  "delivery": { deploy_freq_7d:13, change_failure_rate:0.0, ci_avg_duration_s:57.8,
+                pr_lead_time_median_h:132.97, pr_merged_sample:24 } }
 ```
 
 ### `insights.json` — métriques avancées
+
 ```jsonc
 { "governance": { "antifragile": { score:42, level:"ROBUST", evidence:12, summary,
                                    dimensions:{ "Récupération":80, "Tendance signaux SIL":70,
@@ -110,7 +119,10 @@ Spans groupés par `trace_id` = arbres causaux parent→enfant (waterfall).
   "routing": { samples:43, by_model:{"gpt-4o":43}, by_task_type:{"coding":43}, by_complexity:{}, est_cost_total },
   "memory": { contradictions:4, failures:5, decisions:0, learnings_files:8, backends:[] },
   "code": { loc:104184, py_files, test_loc, tests_code_ratio:0.57, tags_total:187,
-            releases_30d:21, churn_top:[{file,changes}], issues_open:1, issues_closed } }
+            releases_30d:21, churn_top:[{file,changes}], issues_open:1, issues_closed },
+  "efficiency": { commits_per_release:1.9, tests_per_kloc:57.1, tests_code_loc_ratio:0.57,
+                  rtk_saved_per_command, rtk_savings_pct:96.8 },
+  "freshness": { days_since_commit:0, days_since_release:4, days_since_bench:0, generated_at } }
 ```
 
 ## 5. Trame indicative (à réorganiser librement)
@@ -133,27 +145,20 @@ propre. Une section qui n'a pas de données (`is_demo` faux + vide, `ccusage` vi
 
 ## 7. Pistes complémentaires (optionnelles — à toi de juger l'intérêt)
 
-Métriques non encore dans le data layer, que je peux ajouter si tu les veux.
-Légende : ✅ réel dispo · 🔶 petit câblage en plus · 🔒 privé (ccusage/local).
+**Implémenté depuis (voir §4)** : efficacité du cache (`economy.ccusage.cache`, privé),
+livraison DORA (`activity.delivery`), ratios d'efficience (`insights.efficiency`),
+fraîcheur des signaux (`insights.freshness`), centralité du graphe (`observatory.graph_stats`),
+tendance RTK (`economy.rtk.weekly/daily`).
 
-- **Efficacité du cache** 🔒 — ratio cache-read / total (ccusage expose `cacheReadTokens`) :
-  un énorme levier de coût, souvent 80%+ des tokens.
-- **Livraison (type DORA)** 🔶 — fréquence de déploiement (runs « Deploy site »/semaine),
-  **lead time PR** (created→merged), **change failure rate** (runs CI échoués/total),
-  durée moyenne de CI.
-- **Ratios d'efficience** ✅ — $/commit, $/PR, tokens/artefact, coût/tâche livrée.
+Restantes, à ajouter si utiles (légende : ✅ réel · 🔶 câblage en plus · 🔒 privé) :
+
 - **Concentration fournisseurs** ✅ — répartition % par provider (risque vendor),
-  diversité des modèles.
-- **Fraîcheur des signaux** ✅ — âge du dernier commit / release / bench / export :
-  une « barre de confiance » sur la récence de chaque donnée.
-- **Centralité du graphe d'agents** ✅ — degré moyen, agent le plus central,
-  clusters de collaboration (dérivé des `relationships`).
-- **Posture des hooks de gouvernance** 🔶 — hooks par mode enforced/shadow/canary
-  (si un registre de hooks est présent) — très on-brand.
+  diversité des modèles (dérivable de `by_provider` / routing).
+- **Posture des hooks de gouvernance** 🔶 — hooks par mode enforced/shadow/canary :
+  **absent de ce dépôt** (`.github/hooks/` vide) — à activer si un registre apparaît.
 - **Couverture documentaire** 🔶 — % de docstrings, nb de docs, fraîcheur du README.
 - **Budget d'erreur / SLO** ✅ — error rate vs une cible, tendance.
 - **Anomalies** ✅ — drapeaux dérivés : spans au-delà du p95, pics de coût, clusters d'erreurs.
-- **Tendance d'économie RTK** ✅ — économie et coût/1k tokens dans le temps (RTK `monthly`).
 
 ---
 

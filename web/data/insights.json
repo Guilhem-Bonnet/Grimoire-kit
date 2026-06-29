@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-27T21:04:59+00:00",
+  "generated_at": "2026-06-29T12:53:51+00:00",
   "governance": {
     "antifragile": {
       "score": 42.0,
@@ -17,16 +17,16 @@
     }
   },
   "bench": {
-    "report_count": 17,
+    "report_count": 18,
     "reports": [
-      "2026-05-04",
       "2026-05-11",
       "2026-05-18",
       "2026-05-25",
       "2026-06-01",
       "2026-06-08",
       "2026-06-15",
-      "2026-06-22"
+      "2026-06-22",
+      "2026-06-29"
     ],
     "latest": [],
     "as_of": ""
@@ -58,7 +58,7 @@
     "test_files": 189,
     "tests_code_ratio": 0.57,
     "tags_total": 187,
-    "releases_30d": 21,
+    "releases_30d": 19,
     "churn_top": [
       {
         "file": "CHANGELOG.md",
@@ -78,7 +78,7 @@
       },
       {
         "file": "scripts/gen-site-data.py",
-        "changes": 12
+        "changes": 13
       },
       {
         "file": "tests/unit/cli/test_app.py",
@@ -95,5 +95,18 @@
     ],
     "issues_open": 1,
     "issues_closed": 0
+  },
+  "efficiency": {
+    "commits_per_release": 1.9,
+    "tests_per_kloc": 57.1,
+    "tests_code_loc_ratio": 0.57,
+    "rtk_saved_per_command": 9950,
+    "rtk_savings_pct": 96.8
+  },
+  "freshness": {
+    "days_since_commit": 0,
+    "generated_at": "2026-06-29T12:53:51+00:00",
+    "days_since_release": 4,
+    "days_since_bench": 0
   }
 }

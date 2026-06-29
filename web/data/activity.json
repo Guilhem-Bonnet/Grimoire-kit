@@ -1,16 +1,8 @@
 {
-  "generated_at": "2026-06-27T20:36:57+00:00",
+  "generated_at": "2026-06-29T12:53:48+00:00",
   "git": {
-    "commits_total": 342,
+    "commits_total": 346,
     "per_day": [
-      {
-        "date": "2026-05-29",
-        "count": 25
-      },
-      {
-        "date": "2026-05-30",
-        "count": 0
-      },
       {
         "date": "2026-05-31",
         "count": 0
@@ -121,17 +113,25 @@
       },
       {
         "date": "2026-06-27",
-        "count": 5
+        "count": 7
+      },
+      {
+        "date": "2026-06-28",
+        "count": 0
+      },
+      {
+        "date": "2026-06-29",
+        "count": 2
       }
     ],
-    "commits_30d": 99,
-    "commits_7d": 58,
-    "avg_per_day_30d": 3.3,
+    "commits_30d": 78,
+    "commits_7d": 60,
+    "avg_per_day_30d": 2.6,
     "contributor_count": 5,
     "contributors": [
       {
         "name": "guilhem-bonnet",
-        "commits": 278
+        "commits": 281
       },
       {
         "name": "Guilhèm",
@@ -143,7 +143,7 @@
       },
       {
         "name": "Grimoire Bench Bot",
-        "commits": 16
+        "commits": 17
       },
       {
         "name": "BMAD Bench Bot",
@@ -151,9 +151,9 @@
       }
     ],
     "last_commit": {
-      "sha": "8a1b88a7",
-      "message": "feat(web): métriques de performance dérivées des spans",
-      "date": "2026-06-27T16:32:24-04:00",
+      "sha": "743ffc75",
+      "message": "docs(web): brief design consolidé observability/insights",
+      "date": "2026-06-29T08:48:34-04:00",
       "author": "guilhem-bonnet"
     }
   },
@@ -300,18 +300,52 @@
   },
   "economy": {
     "rtk": {
-      "total_commands": 457,
-      "input_tokens": 3757629,
-      "output_tokens": 145778,
-      "saved_tokens": 3612150,
-      "savings_pct": 96.1,
-      "total_time_ms": 588707,
+      "total_commands": 560,
+      "input_tokens": 5755231,
+      "output_tokens": 183536,
+      "saved_tokens": 5572016,
+      "savings_pct": 96.8,
+      "total_time_ms": 597555,
       "monthly": [
         {
           "month": "2026-06",
-          "commands": 457,
-          "saved_tokens": 3612150,
-          "savings_pct": 96.1
+          "commands": 560,
+          "saved_tokens": 5572016,
+          "savings_pct": 96.8
+        }
+      ],
+      "weekly": [
+        {
+          "week": null,
+          "saved_tokens": 5570030,
+          "savings_pct": 97.1
+        },
+        {
+          "week": null,
+          "saved_tokens": 1986,
+          "savings_pct": 10.2
+        }
+      ],
+      "daily": [
+        {
+          "date": "2026-06-26",
+          "saved_tokens": 395650,
+          "savings_pct": 74.6
+        },
+        {
+          "date": "2026-06-27",
+          "saved_tokens": 3218632,
+          "savings_pct": 99.6
+        },
+        {
+          "date": "2026-06-28",
+          "saved_tokens": 1955748,
+          "savings_pct": 99.1
+        },
+        {
+          "date": "2026-06-29",
+          "saved_tokens": 1986,
+          "savings_pct": 10.2
         }
       ]
     },
@@ -325,17 +359,8 @@
         "conclusion": "success",
         "event": "push",
         "branch": "main",
-        "created_at": "2026-06-27T20:32:28Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987020"
-      },
-      {
-        "name": "Deploy site",
-        "status": "completed",
-        "conclusion": "success",
-        "event": "push",
-        "branch": "main",
-        "created_at": "2026-06-27T20:32:28Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987017"
+        "created_at": "2026-06-29T12:48:49Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28373169300"
       },
       {
         "name": "Release Drafter",
@@ -343,8 +368,8 @@
         "conclusion": "success",
         "event": "push",
         "branch": "main",
-        "created_at": "2026-06-27T20:32:28Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300987001"
+        "created_at": "2026-06-29T12:48:49Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28373169282"
       },
       {
         "name": "Deploy site",
@@ -352,26 +377,35 @@
         "conclusion": "success",
         "event": "push",
         "branch": "main",
-        "created_at": "2026-06-27T20:30:42Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940475"
+        "created_at": "2026-06-29T12:48:49Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28373169280"
       },
       {
-        "name": "Release Drafter",
+        "name": "Stale Issues",
         "status": "completed",
         "conclusion": "success",
-        "event": "push",
+        "event": "schedule",
         "branch": "main",
-        "created_at": "2026-06-27T20:30:42Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940474"
+        "created_at": "2026-06-29T07:53:12Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28356987303"
       },
       {
-        "name": "CodeQL",
+        "name": "Grimoire Weekly Benchmark",
         "status": "completed",
         "conclusion": "success",
-        "event": "push",
+        "event": "schedule",
         "branch": "main",
-        "created_at": "2026-06-27T20:30:42Z",
-        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28300940473"
+        "created_at": "2026-06-29T07:47:23Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28356699489"
+      },
+      {
+        "name": "pip in /. - Update #1438247629",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "dynamic",
+        "branch": "main",
+        "created_at": "2026-06-29T04:33:47Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28348839683"
       }
     ],
     "ci_status": "success",
@@ -379,9 +413,16 @@
       "percent": 65.92
     },
     "pypi": {
-      "last_day": 100,
-      "last_month": 589,
-      "last_week": 109
+      "last_day": 4,
+      "last_month": 392,
+      "last_week": 120
     }
+  },
+  "delivery": {
+    "change_failure_rate": 0.0,
+    "ci_avg_duration_s": 57.8,
+    "deploy_freq_7d": 13,
+    "pr_lead_time_median_h": 132.97,
+    "pr_merged_sample": 24
   }
 }
