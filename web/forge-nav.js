@@ -20,6 +20,7 @@
           <a href="index.html" class="nav-logo" aria-label="Grimoire Kit — Accueil">
             GRIMOIRE&nbsp;<span class="logo-accent" id="forge-word">KIT</span>
           </a>
+          <span id="fp-slot"></span>
           <ul class="nav-links" role="list">
             <li><a href="demo.html"         class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>
             <li><a href="game-ui.html"       class="${isActive('game-ui.html') ? 'active' : ''}">GAME UI</a></li>
@@ -32,6 +33,82 @@
           <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" class="nav-cta" target="_blank" rel="noopener">VOIR LE PROJET →</a>
         </div>
       </div>`;
+  }
+
+  /* ── Sélecteur de projet (multi-projets) — CSS-only dropdown, data-driven ── */
+  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  if (navEl && !document.getElementById('forge-projects-css')) {
+    const st = document.createElement('style');
+    st.id = 'forge-projects-css';
+    st.textContent = `
+      .forge-projects{--fp-accent:var(--accent,#FF6B3D);--fp-bg:var(--elev-1,#121418);--fp-bg-2:var(--elev-2,#1A1D22);--fp-line:var(--line,rgba(255,255,255,0.08));--fp-line-s:var(--line-strong,rgba(255,255,255,0.14));--fp-ink:var(--ink,#F6F7F8);--fp-soft:var(--ink-soft,#9BA0A8);--fp-muted:var(--ink-muted,#5B6068);--fp-green:var(--data-green,#34D399);--fp-red:var(--data-red,#F87171);--fp-mono:var(--font-mono,'Geist Mono',monospace);position:relative;display:inline-block;user-select:none;margin-left:6px}
+      .forge-projects[open]{z-index:60}
+      .fp-trigger{list-style:none;display:flex;align-items:center;gap:10px;height:34px;padding:0 10px 0 12px;border:1px solid var(--fp-line-s);border-radius:var(--r-md,8px);background:var(--fp-bg);cursor:pointer;transition:border-color 160ms,background 160ms}
+      .fp-trigger::-webkit-details-marker{display:none}
+      .fp-trigger:hover,.forge-projects[open] .fp-trigger{border-color:var(--fp-accent);background:var(--fp-bg-2)}
+      .fp-trigger-label{display:flex;flex-direction:column;line-height:1;gap:3px}
+      .fp-eyebrow{font-family:var(--fp-mono);font-size:.56rem;letter-spacing:.16em;color:var(--fp-muted);text-transform:uppercase}
+      .fp-current{font-family:var(--fp-mono);font-size:.74rem;font-weight:600;color:var(--fp-ink);letter-spacing:.02em}
+      .fp-caret{width:7px;height:7px;margin-left:2px;border-right:1.5px solid var(--fp-soft);border-bottom:1.5px solid var(--fp-soft);transform:rotate(45deg) translateY(-1px);transition:transform 200ms,border-color 160ms}
+      .forge-projects[open] .fp-caret{transform:rotate(-135deg) translateY(-1px);border-color:var(--fp-accent)}
+      .fp-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--fp-muted)}
+      .fp-dot--pass{background:var(--fp-green);box-shadow:0 0 0 3px color-mix(in oklab,var(--fp-green) 22%,transparent)}
+      .fp-dot--fail{background:var(--fp-red);box-shadow:0 0 0 3px color-mix(in oklab,var(--fp-red) 22%,transparent)}
+      .fp-panel{position:absolute;top:calc(100% + 8px);left:0;width:320px;max-width:88vw;background:var(--fp-bg);border:1px solid var(--fp-line-s);border-radius:var(--r-md,8px);box-shadow:0 18px 48px rgba(0,0,0,.55);padding:6px;animation:fp-in 180ms cubic-bezier(0,0,.2,1)}
+      @keyframes fp-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+      @media (prefers-reduced-motion:reduce){.fp-panel{animation:none}}
+      .fp-panel-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 10px;font-family:var(--fp-mono);font-size:.58rem;letter-spacing:.16em;color:var(--fp-muted);text-transform:uppercase}
+      .fp-count{font-size:.6rem;letter-spacing:0;color:var(--fp-soft);border:1px solid var(--fp-line);border-radius:999px;padding:1px 7px}
+      .fp-item{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:var(--r-sm,4px);text-decoration:none;border:1px solid transparent;transition:background 140ms,border-color 140ms}
+      .fp-item:hover{background:var(--fp-bg-2)}
+      .fp-item.is-active{background:var(--accent-soft,rgba(255,107,61,.12));border-color:color-mix(in oklab,var(--fp-accent) 40%,transparent)}
+      .fp-meta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+      .fp-name{font-family:var(--font-sans,system-ui);font-size:.82rem;font-weight:500;color:var(--fp-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .fp-item.is-active .fp-name{color:var(--fp-accent)}
+      .fp-slug{font-family:var(--fp-mono);font-size:.62rem;letter-spacing:.04em;color:var(--fp-muted)}
+      .fp-stats{display:flex;align-items:center;gap:10px;flex:none}
+      .fp-cost{font-family:var(--fp-mono);font-size:.7rem;font-weight:500;color:var(--fp-soft);font-variant-numeric:tabular-nums}
+      .fp-af{font-family:var(--fp-mono);font-size:.72rem;font-weight:600;color:var(--fp-ink);font-variant-numeric:tabular-nums;display:inline-flex;align-items:baseline;gap:2px;padding:2px 7px;border-radius:var(--r-sm,4px);border:1px solid var(--fp-line);background:rgba(255,255,255,.02)}
+      .fp-af small{font-size:.5rem;letter-spacing:.08em;color:var(--fp-muted);font-weight:500}
+      .fp-af[data-grade="a"]{color:var(--fp-green);border-color:color-mix(in oklab,var(--fp-green) 30%,transparent)}
+      .fp-af[data-grade="b"]{color:var(--data-amber,#FCD34D);border-color:color-mix(in oklab,var(--data-amber,#FCD34D) 30%,transparent)}
+      .fp-af[data-grade="c"]{color:var(--fp-red);border-color:color-mix(in oklab,var(--fp-red) 30%,transparent)}
+      .fp-af[data-grade] small{color:inherit;opacity:.7}
+      .fp-portfolio{display:flex;align-items:center;justify-content:space-between;margin-top:6px;padding:11px 12px;border-top:1px solid var(--fp-line);font-family:var(--fp-mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fp-soft);text-decoration:none;transition:color 140ms}
+      .fp-portfolio:hover{color:var(--fp-accent)}
+      .fp-portfolio-arrow{transition:transform 180ms}
+      .fp-portfolio:hover .fp-portfolio-arrow{transform:translateX(4px)}
+      .forge-projects--solo{display:inline-flex;align-items:center;gap:10px;height:34px;padding:0 12px;border:1px solid var(--fp-line);border-radius:var(--r-md,8px);background:transparent;margin-left:6px}
+      @media (max-width:880px){.fp-eyebrow{display:none}.fp-panel{width:280px}}`;
+    document.head.appendChild(st);
+
+    const grade = (s) => (s == null ? '' : (s >= 85 ? 'a' : (s >= 70 ? 'b' : 'c')));
+    const dotCls = (ci) => (ci === 'failure' ? 'fp-dot--fail' : 'fp-dot--pass');
+    fetch('data/projects.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((idx) => {
+        const slot = document.getElementById('fp-slot');
+        if (!slot || !idx || !(idx.projects || []).length) return;
+        const cur = new URLSearchParams(location.search).get('project') || idx.primary;
+        const active = idx.projects.find((p) => p.slug === cur) || idx.projects[0];
+        const soloLabel = `<span class="fp-dot ${dotCls(active.ci_status)}"></span><span class="fp-trigger-label"><span class="fp-eyebrow">PROJET</span><span class="fp-current">${_esc(active.name)}</span></span>`;
+        if (idx.projects.length <= 1) {
+          slot.innerHTML = `<span class="forge-projects forge-projects--solo">${soloLabel}</span>`;
+          return;
+        }
+        const items = idx.projects.map((p) => {
+          const af = p.antifragile;
+          return `<a href="?project=${encodeURIComponent(p.slug)}" class="fp-item ${p.slug === cur ? 'is-active' : ''}" role="menuitem"${p.slug === cur ? ' aria-current="true"' : ''}>` +
+            `<span class="fp-dot ${dotCls(p.ci_status)}"></span>` +
+            `<span class="fp-meta"><span class="fp-name">${_esc(p.name)}</span><span class="fp-slug">${_esc(p.slug)}</span></span>` +
+            `<span class="fp-stats"><span class="fp-cost">$${(p.total_cost_usd || 0).toFixed(2)}</span>` +
+            (af != null ? `<span class="fp-af" data-grade="${grade(af)}">${Math.round(af)}<small>AF</small></span>` : '') +
+            `</span></a>`;
+        }).join('');
+        slot.innerHTML = `<details class="forge-projects" id="forge-projects"><summary class="fp-trigger">${soloLabel}<span class="fp-caret"></span></summary>` +
+          `<div class="fp-panel" role="menu"><div class="fp-panel-head"><span>SÉLECTIONNER UN PROJET</span><span class="fp-count">${idx.projects.length}</span></div>` +
+          items + `<a href="portfolio.html" class="fp-portfolio" role="menuitem">Portefeuille <span class="fp-portfolio-arrow">→</span></a></div></details>`;
+      }).catch(() => {});
   }
 
   /* ── Footer HTML ── */

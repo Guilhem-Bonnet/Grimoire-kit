@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Portefeuille — Grimoire Kit</title>
+  <meta name="description" content="Cockpit de gouvernance de tous les projets Grimoire locaux : coût agrégé, CI, contradictions, score antifragile et mémoire. Une carte par projet, lié à l'observabilité et à la mémoire."/>
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+    .wrap { max-width: var(--max-w); margin: 0 auto; padding: 0 var(--gap); position: relative; z-index: 1; }
+
+    /* ── HERO ── */
+    #hero { padding: 64px 0 10px; }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 0.98rem; max-width: 640px; line-height: var(--lh-body); }
+    .hero-meta { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+    .obs-badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 5px 11px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    #pf-source { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em; color: var(--ink-muted); }
+
+    /* ── Band ── */
+    .band { position: relative; padding: 30px 0 56px; border-top: 1px solid var(--line); background: var(--elev-1); overflow: hidden; }
+    .band.alt { background: var(--bg); }
+    .band::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
+    .band .wrap { position: relative; z-index: 1; }
+    .band-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 26px 0 6px; flex-wrap: wrap; }
+    .band-head h2 { font-size: clamp(1.4rem, 2.2vw, 1.85rem); }
+    .band-head .lead { font-size: 0.84rem; color: var(--ink-soft); max-width: 520px; line-height: 1.55; margin-top: 10px; }
+    .band-divider { height: 1px; background: var(--accent); width: 0%; margin: 16px 0 24px; transition: width var(--dur-draw) var(--ease-out); }
+    .band-divider.drawn { width: 100%; }
+    .status-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--line); color: var(--ink-muted); white-space: nowrap; }
+    .status-tag .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .status-tag.snapshot { color: var(--accent); border-color: var(--accent-dim); }
+    .subhead { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 10px; }
+
+    /* ── Bandeau agrégé (KPI) ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 8px; }
+    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: var(--r-md); padding: 16px 17px; }
+    .kpi.warn { border-top-color: var(--data-amber); }
+    .kpi.bad  { border-top-color: var(--data-red); }
+    .kpi-lbl { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 9px; text-transform: uppercase; }
+    .kpi-val { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 600; color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums; }
+    .kpi-val small { font-size: 0.9rem; color: var(--ink-soft); margin-left: 3px; }
+    .kpi-val.good { color: var(--data-green); }
+    .kpi-val.amber { color: var(--data-amber); }
+    .kpi-val.red { color: var(--data-red); }
+    .kpi-sub { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); margin-top: 8px; }
+    @media (max-width: 920px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 560px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    /* ── À surveiller ── */
+    #watch-band { display: none; }
+    .watch-list { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-left: 2px solid var(--data-amber); border-radius: var(--r-md); overflow: hidden; }
+    .watch-row { display: grid; grid-template-columns: 9px 1.4fr 2fr auto; align-items: center; gap: 14px; padding: 13px 16px; background: var(--elev-2); text-decoration: none; transition: background 150ms; }
+    .band.alt .watch-row { background: var(--elev-1); }
+    .watch-row:hover { background: var(--elev-3); }
+    .watch-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .watch-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .watch-name b { font-size: 0.84rem; font-weight: 600; color: var(--ink); }
+    .watch-name span { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .watch-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .reason { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; }
+    .reason.ci   { color: var(--data-red); }
+    .reason.ctr  { color: var(--data-amber); }
+    .reason.af   { color: var(--data-violet); }
+    .watch-go { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.06em; white-space: nowrap; }
+    .watch-row:hover .watch-go { color: var(--accent); }
+    @media (max-width: 720px) { .watch-row { grid-template-columns: 9px 1fr; } .watch-reasons, .watch-go { grid-column: 2; } }
+
+    /* ── Grille de cartes projet ── */
+    .pf-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    @media (max-width: 860px) { .pf-grid { grid-template-columns: 1fr; } }
+
+    .pf-card { display: flex; flex-direction: column; background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; transition: border-color 200ms, box-shadow 200ms; }
+    .band.alt .pf-card { background: var(--elev-1); }
+    .pf-card:hover { border-color: var(--line-strong); }
+    .pf-card.flagged { border-left: 2px solid var(--data-amber); }
+    .pf-card.flagged.ci-fail { border-left-color: var(--data-red); }
+
+    .pf-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+    .pf-title { min-width: 0; }
+    .pf-title h3 { font-size: 1.08rem; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+    .pf-ver { font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500; color: var(--ink-muted); letter-spacing: 0.04em; }
+    .pf-desc { font-size: 0.74rem; color: var(--ink-soft); margin-top: 5px; line-height: 1.45; }
+    .pf-ci { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.06em; padding: 5px 9px; border-radius: 2px; border: 1px solid var(--line); white-space: nowrap; flex: none; }
+    .pf-ci .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .pf-ci.pass { color: var(--data-green); border-color: color-mix(in oklab, var(--data-green) 30%, transparent); }
+    .pf-ci.pass .dot { background: var(--data-green); box-shadow: 0 0 6px var(--data-green); }
+    .pf-ci.fail { color: var(--data-red); border-color: color-mix(in oklab, var(--data-red) 35%, transparent); }
+    .pf-ci.fail .dot { background: var(--data-red); box-shadow: 0 0 6px var(--data-red); }
+
+    /* metrics */
+    .pf-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+    .pf-m { background: var(--elev-2); padding: 13px 16px; display: flex; flex-direction: column; gap: 6px; }
+    .band.alt .pf-m { background: var(--elev-1); }
+    .pf-m-lbl { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
+    .pf-m-val { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 600; color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums; }
+    .pf-m-val small { font-size: 0.62rem; color: var(--ink-soft); font-weight: 500; }
+    .pf-m-val.good { color: var(--data-green); }
+    .pf-m-val.amber { color: var(--data-amber); }
+    .pf-m-val.red { color: var(--data-red); }
+    .pf-m-sub { font-family: var(--font-mono); font-size: 0.52rem; color: var(--ink-muted); }
+
+    /* antifragile row */
+    .pf-af { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--line); }
+    .pf-af-score { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+    .pf-af-score small { font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.08em; margin-left: 2px; }
+    .pf-af-meta { flex: 1; min-width: 0; }
+    .pf-af-level { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.12em; }
+    .pf-af-bar { height: 5px; background: var(--elev-3); border-radius: 999px; overflow: hidden; margin-top: 7px; }
+    .pf-af-fill { height: 100%; border-radius: 999px; transition: width 800ms var(--ease-forge); }
+    .grade-a { color: var(--data-green); }
+    .grade-b { color: var(--data-amber); }
+    .grade-c { color: var(--data-red); }
+
+    /* coverage + mem footer line */
+    .pf-cov { padding: 0 20px 14px; }
+    .pf-cov-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+    .pf-cov-lbl { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
+    .pf-cov-val { font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .pf-cov-track { height: 6px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .pf-cov-fill { height: 100%; border-radius: 999px; transition: width 800ms var(--ease-forge); }
+
+    /* links footer */
+    .pf-links { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); margin-top: auto; border-top: 1px solid var(--line); }
+    .pf-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 18px; background: var(--elev-2); text-decoration: none; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em; color: var(--ink-soft); transition: background 160ms, color 160ms; }
+    .band.alt .pf-link { background: var(--elev-1); }
+    .pf-link:hover { background: var(--elev-3); color: var(--accent); }
+    .pf-link .arr { transition: transform 180ms var(--ease-forge); }
+    .pf-link:hover .arr { transform: translateX(3px); }
+
+    #pf-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
+  </style>
+</head>
+<body>
+<a href="#main" class="skip-link">Aller au contenu</a>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+  <!-- ════════════ HERO ════════════ -->
+  <section id="hero">
+    <div class="wrap">
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-08</span> · PORTEFEUILLE</div>
+      <h1 class="grad-text reveal" data-delay="60">Le cockpit de gouvernance.</h1>
+      <p class="hero-sub reveal" data-delay="120">
+        Tous les projets Grimoire locaux sur une seule vue : coût agrégé, intégrité CI,
+        contradictions accumulées et antifragilité moyenne. Une carte par projet, reliée à
+        son observabilité et à sa mémoire. Lu depuis <code>data/projects.json</code>.
+      </p>
+      <div class="hero-meta reveal" data-delay="160">
+        <span class="obs-badge"><span class="dot"></span>GOUVERNANCE LOCALE</span>
+        <span id="pf-source">data/projects.json</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ BANDEAU AGRÉGÉ ════════════ -->
+  <section class="band" id="band-agg">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">A</span> · VUE D'ENSEMBLE</div>
+          <h2>L'état du portefeuille.</h2>
+          <p class="lead">Agrégats calculés sur l'ensemble des projets suivis. Un seul rouge dans une colonne suffit à exiger une revue.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+      <div class="kpi-grid reveal" id="agg-kpis"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ À SURVEILLER ════════════ -->
+  <section class="band alt" id="watch-band">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">B</span> · À SURVEILLER</div>
+          <h2>Ce qui demande une revue.</h2>
+          <p class="lead">Projets en échec CI, à contradictions non résolues ou à antifragilité faible — triés par sévérité.</p>
+        </div>
+        <span class="status-tag" id="watch-count"><span class="dot"></span>—</span>
+      </div>
+      <div class="band-divider"></div>
+      <div class="watch-list" id="watch-list"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ GRILLE DE PROJETS ════════════ -->
+  <section class="band" id="band-grid">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">C</span> · PROJETS</div>
+          <h2>Une carte par projet.</h2>
+          <p class="lead">Version, CI, commits, coût, antifragilité, mémoire, contradictions et couverture. Les projets à surveiller remontent en tête.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+      <div class="pf-grid reveal" id="pf-grid"></div>
+      <div id="pf-empty">Aucun projet dans <code>data/projects.json</code>.</div>
+    </div>
+  </section>
+</main>
+
+<footer id="forge-footer"></footer>
+
+<script src="forge-nav.js"></script>
+<script>
+/* ══════════════════════════════════════════════════════════════
+   PORTEFEUILLE — cockpit de gouvernance
+   Lit data/projects.json (schéma réel gen-site-data) et normalise
+   vers les champs de rendu. FALLBACK démo si fetch échoue (file://).
+   ══════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  /* ── Fallback : projets démo (si fetch échoue, ex. file://) ── */
+  const FALLBACK = [
+    { slug: 'grimoire-core', name: 'Grimoire Core', desc: 'Noyau agentique — runtime typé',       ci: 'pass', ci_label: 'build #1284 vert', cost: '$0.38', antifragile: 94, version: 'v2.4.1', commits: 1284, commits_7j: 47, memory: 'SQLite + FAISS', contradictions: 0, coverage: 96 },
+    { slug: 'atlas-ops',     name: 'Atlas Ops',     desc: 'Pipeline infra-ops k8s',               ci: 'pass', ci_label: 'build #872 vert',  cost: '$1.24', antifragile: 88, version: 'v1.8.0', commits: 872,  commits_7j: 23, memory: 'Redis + Qdrant', contradictions: 2, coverage: 84 },
+    { slug: 'sentinel-sec',  name: 'Sentinel Sec',  desc: 'Surface sécurité — threat model',      ci: 'fail', ci_label: 'build #503 rouge', cost: '$0.61', antifragile: 71, version: 'v0.9.3', commits: 503,  commits_7j: 12, memory: 'JSONL + Chroma', contradictions: 7, coverage: 68 },
+    { slug: 'ledger-data',   name: 'Ledger Data',   desc: 'ETL + schema-keeper',                  ci: 'pass', ci_label: 'build #2041 vert', cost: '$2.07', antifragile: 82, version: 'v3.1.2', commits: 2041, commits_7j: 31, memory: 'Postgres + pgvector', contradictions: 1, coverage: 79 },
+  ];
+
+  /* ── Normalisation : schéma projects.json (gen-site-data) → champs de rendu ── */
+  function norm(p) {
+    return {
+      slug: p.slug, name: p.name, version: p.version || '',
+      desc: '',
+      commits: p.commits_total || 0, commits_7j: p.commits_7d || 0,
+      cost: '$' + Number(p.total_cost_usd || 0).toFixed(2),
+      ci: p.ci_status === 'failure' ? 'fail' : 'pass',
+      ci_label: 'CI ' + (p.ci_status || ''),
+      antifragile: Math.round(p.antifragile || 0),
+      contradictions: p.contradictions || 0,
+      coverage: Math.round(p.coverage || 0),
+      memory: p.memory_backend || '—',
+    };
+  }
+
+  /* ── Helpers gouvernance ── */
+  const isFail = (ci) => ci === 'fail' || ci === 'red' || ci === 'ko';
+  const grade  = (n) => (n >= 85 ? 'a' : n >= 78 ? 'b' : 'c');
+  const level  = (n) => (n >= 90 ? 'ANTIFRAGILE' : n >= 80 ? 'ROBUSTE' : n >= 70 ? 'RÉSILIENT' : 'FRAGILE');
+  const afColor = (n) => `var(--data-${n >= 85 ? 'green' : n >= 78 ? 'amber' : 'red'})`;
+  const covColor = (n) => `var(--data-${n >= 85 ? 'green' : n >= 70 ? 'amber' : 'red'})`;
+  const covClass = (n) => (n >= 85 ? 'good' : n >= 70 ? 'amber' : 'red');
+  const parseCost = (c) => parseFloat(String(c).replace(/[^0-9.]/g, '')) || 0;
+
+  /* projet à surveiller ? + raisons + sévérité (tri) */
+  function watchInfo(p) {
+    const reasons = [];
+    let sev = 0;
+    if (isFail(p.ci))           { reasons.push({ cls: 'ci',  txt: 'CI ROUGE' });                  sev += 100; }
+    if ((p.contradictions || 0) > 0) { reasons.push({ cls: 'ctr', txt: `${p.contradictions} CONTRADICTION${p.contradictions > 1 ? 'S' : ''}` }); sev += p.contradictions * 5; }
+    if ((p.antifragile || 0) < 78)   { reasons.push({ cls: 'af',  txt: `ANTIFRAGILE ${p.antifragile}` }); sev += (78 - p.antifragile); }
+    return { flagged: reasons.length > 0, reasons, sev };
+  }
+
+  /* ── Bandeau agrégé ── */
+  function renderAgg(list) {
+    const total = list.length;
+    const cost = list.reduce((s, p) => s + parseCost(p.cost), 0);
+    const ciRed = list.filter((p) => isFail(p.ci)).length;
+    const ctr = list.reduce((s, p) => s + (p.contradictions || 0), 0);
+    const afAvg = total ? Math.round(list.reduce((s, p) => s + (p.antifragile || 0), 0) / total) : 0;
+
+    const cells = [
+      { lbl: 'Projets suivis', val: total, sub: 'locaux, instrumentés', cls: '', tone: '' },
+      { lbl: 'Coût total · run', val: '$' + cost.toFixed(2), sub: 'somme des coûts run', cls: '', tone: '' },
+      { lbl: 'Projets CI rouge', val: ciRed, sub: ciRed ? 'build cassé — bloquant' : 'tout au vert', cls: ciRed ? 'bad' : '', tone: ciRed ? 'red' : 'good' },
+      { lbl: 'Contradictions cumulées', val: ctr, sub: ctr ? 'à arbitrer en mémoire' : 'aucune en attente', cls: ctr ? 'warn' : '', tone: ctr ? 'amber' : 'good' },
+      { lbl: 'Antifragile moyen', val: afAvg, sub: level(afAvg), cls: '', tone: afAvg >= 85 ? 'good' : afAvg >= 78 ? 'amber' : 'red' },
+    ];
+    document.getElementById('agg-kpis').innerHTML = cells.map((c) => `
+      <div class="kpi ${c.cls}">
+        <div class="kpi-lbl">${esc(c.lbl)}</div>
+        <div class="kpi-val ${c.tone}">${esc(c.val)}</div>
+        <div class="kpi-sub">${esc(c.sub)}</div>
+      </div>`).join('');
+  }
+
+  /* ── À surveiller ── */
+  function renderWatch(list) {
+    const flagged = list
+      .map((p) => ({ p, w: watchInfo(p) }))
+      .filter((x) => x.w.flagged)
+      .sort((a, b) => b.w.sev - a.w.sev);
+
+    if (!flagged.length) return;
+    document.getElementById('watch-band').style.display = '';
+    const ct = document.getElementById('watch-count');
+    ct.classList.add(flagged.some((x) => isFail(x.p.ci)) ? 'bad' : 'warn');
+    ct.style.color = flagged.some((x) => isFail(x.p.ci)) ? 'var(--data-red)' : 'var(--data-amber)';
+    ct.style.borderColor = 'currentColor';
+    ct.innerHTML = `<span class="dot"></span>${flagged.length} À SURVEILLER`;
+
+    document.getElementById('watch-list').innerHTML = flagged.map(({ p, w }) => `
+      <a class="watch-row" href="observability.html?project=${esc(p.slug)}">
+        <span class="watch-dot" style="background:${isFail(p.ci) ? 'var(--data-red)' : 'var(--data-amber)'}"></span>
+        <span class="watch-name"><b>${esc(p.name)}</b><span>${esc(p.slug)} · ${esc(p.version || '')}</span></span>
+        <span class="watch-reasons">${w.reasons.map((r) => `<span class="reason ${r.cls}">${esc(r.txt)}</span>`).join('')}</span>
+        <span class="watch-go">OUVRIR L'OBSERVATOIRE →</span>
+      </a>`).join('');
+  }
+
+  /* ── Carte projet (markup répétable) ── */
+  function cardHTML(p) {
+    const w = watchInfo(p);
+    const g = grade(p.antifragile || 0);
+    const ciFail = isFail(p.ci);
+    const ctr = p.contradictions || 0;
+    const cov = p.coverage || 0;
+    return `
+    <article class="pf-card${w.flagged ? ' flagged' : ''}${ciFail ? ' ci-fail' : ''}">
+      <div class="pf-card-head">
+        <div class="pf-title">
+          <h3>${esc(p.name)} <span class="pf-ver">${esc(p.version || '')}</span></h3>
+          <p class="pf-desc">${esc(p.desc || '')}</p>
+        </div>
+        <span class="pf-ci ${ciFail ? 'fail' : 'pass'}" title="${esc(p.ci_label || '')}">
+          <span class="dot"></span>${ciFail ? 'CI ROUGE' : 'CI VERT'}
+        </span>
+      </div>
+
+      <div class="pf-metrics">
+        <div class="pf-m">
+          <div class="pf-m-lbl">Commits</div>
+          <div class="pf-m-val">${esc((p.commits || 0).toLocaleString('fr-FR'))}</div>
+          <div class="pf-m-sub">+${esc(p.commits_7j || 0)} sur 7j</div>
+        </div>
+        <div class="pf-m">
+          <div class="pf-m-lbl">Coût · run</div>
+          <div class="pf-m-val">${esc(p.cost || '—')}</div>
+          <div class="pf-m-sub">${esc(p.ci_label || '')}</div>
+        </div>
+        <div class="pf-m">
+          <div class="pf-m-lbl">Contradictions</div>
+          <div class="pf-m-val ${ctr === 0 ? 'good' : ctr <= 3 ? 'amber' : 'red'}">${ctr}</div>
+          <div class="pf-m-sub">${ctr === 0 ? 'aucune' : 'à arbitrer'}</div>
+        </div>
+      </div>
+
+      <div class="pf-af">
+        <div class="pf-af-score grade-${g}">${esc(p.antifragile || 0)}<small>/100</small></div>
+        <div class="pf-af-meta">
+          <div class="pf-af-level grade-${g}">${level(p.antifragile || 0)}</div>
+          <div class="pf-af-bar"><div class="pf-af-fill" style="width:${p.antifragile || 0}%;background:${afColor(p.antifragile || 0)}"></div></div>
+        </div>
+      </div>
+
+      <div class="pf-cov">
+        <div class="pf-cov-top">
+          <span class="pf-cov-lbl">Couverture · mémoire ${esc(p.memory || '—')}</span>
+          <span class="pf-cov-val ${covClass(cov)}">${cov}%</span>
+        </div>
+        <div class="pf-cov-track"><div class="pf-cov-fill" style="width:${cov}%;background:${covColor(cov)}"></div></div>
+      </div>
+
+      <div class="pf-links">
+        <a class="pf-link" href="observability.html?project=${esc(p.slug)}">OBSERVABILITÉ <span class="arr">→</span></a>
+        <a class="pf-link" href="memory.html?project=${esc(p.slug)}">MÉMOIRE <span class="arr">→</span></a>
+      </div>
+    </article>`;
+  }
+
+  /* ── Grille : projets à surveiller en tête ── */
+  function renderGrid(list) {
+    const grid = document.getElementById('pf-grid');
+    if (!list.length) { grid.style.display = 'none'; document.getElementById('pf-empty').style.display = 'block'; return; }
+    const sorted = list.slice().sort((a, b) => watchInfo(b).sev - watchInfo(a).sev);
+    grid.innerHTML = sorted.map(cardHTML).join('');
+  }
+
+  function render(list) {
+    renderAgg(list);
+    renderWatch(list);
+    renderGrid(list);
+  }
+
+  /* ── Chargement : projects.json normalisé ── */
+  fetch('data/projects.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((data) => {
+      const base = (data && data.projects) || [];
+      if (!base.length) return Promise.reject('empty');
+      render(base.map(norm));
+    })
+    .catch(() => { render(FALLBACK); });
+
+  /* dividers */
+  const obs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); obs.unobserve(e.target); } }), { threshold: 0.5 });
+  document.querySelectorAll('.band-divider').forEach((d) => obs.observe(d));
+})();
+</script>
+</body>
+</html>
