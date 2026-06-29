@@ -76,12 +76,16 @@ packages = ["src/grimoire"]
 [tool.hatch.build.targets.wheel.force-include]
 "archetypes" = "grimoire/archetypes"
 "framework" = "grimoire/data/framework"
+"web" = "grimoire/data/web"
+"scripts/gen-site-data.py" = "grimoire/data/site-scripts/gen-site-data.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/grimoire/",
     "archetypes/",
     "framework/",
+    "web/",
+    "scripts/gen-site-data.py",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
