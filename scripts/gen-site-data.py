@@ -1106,11 +1106,15 @@ def _memory_entries(root: Path, limit: int = 40) -> tuple[list[dict], int]:
     entries = []
     for e in data:
         if isinstance(e, dict):
+            tags = e.get("tags") or []
+            tl = [str(t).lower() for t in tags] if isinstance(tags, list) else []
+            typ = next((t for t in ("decision", "contradiction", "failure", "learning") if t in tl), "memory")
             entries.append({
                 "id": str(e.get("id", ""))[:8],
+                "type": typ,
                 "text": (e.get("text", "") or "")[:160],
-                "tags": e.get("tags") or [],
-                "created_at": e.get("created_at", ""),
+                "tags": tags if isinstance(tags, list) else [],
+                "created_at": (e.get("created_at", "") or "")[:10],
             })
     return entries[:limit], len(data)
 
@@ -1157,20 +1161,28 @@ def build_memory(root: Path) -> dict:
     """Couche données du Memory Manager (lecture : inspection + vault + consoles)."""
     entries, total = _memory_entries(root)
     health = _memory_health(root)
+    lint = _memory_lint(root)
+    # tags uniques + orphelines (sur l'échantillon)
+    tags_seen = {t for e in entries for t in e.get("tags", [])}
+    orphans = sum(1 for e in entries if not e.get("tags"))
+    # santé lint : indicatif, dérivé du nombre de findings
+    n_issues = len(lint.get("issues") or []) if isinstance(lint, dict) else 0
+    lint_health = max(40, 100 - n_issues * 3) if lint else None
     return {
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "backend": _memory_backends(root),
-        "store": {"total_entries": total, "sample": entries},
-        "counts_by_type": {
-            "memories": total,
-            "contradictions": health.get("contradictions", 0),
-            "failures": health.get("failures", 0),
-            "learnings": health.get("learnings_files", 0),
-            "decisions": health.get("decisions", 0),
-        },
+        "store": {"total_entries": total, "sample": entries,
+                  "tags_unique": len(tags_seen), "orphans": orphans},
+        "counts_by_type": (lambda c, f, le, de: {
+            # « mémoires » = base (total − sous-types gouvernés) pour que la somme = total
+            "memories": max(0, total - c - f - le - de),
+            "contradictions": c, "failures": f, "learnings": le, "decisions": de,
+        })(health.get("contradictions", 0), health.get("failures", 0),
+           health.get("learnings_files", 0), health.get("decisions", 0)),
         "graph": _memory_graph(entries),
         "vector_projection": _vector_projection_demo(),
-        "lint": _memory_lint(root),
+        "lint": lint,
+        "lint_health": lint_health,
         "consoles": _MEMORY_CONSOLES,
     }
 

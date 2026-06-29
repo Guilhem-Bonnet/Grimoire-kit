@@ -328,27 +328,27 @@
               <svg width="22" height="22" viewBox="0 0 22 22"><path d="M11 2L19 6.5V15.5L11 20L3 15.5V6.5L11 2Z" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11" cy="11" r="3" fill="var(--accent)"/></svg>
             </div>
             <div>
-              <div class="be-name">Qdrant</div>
-              <div class="be-role">vector store · localhost:6333</div>
+              <div class="be-name" id="be-name">Qdrant</div>
+              <div class="be-role" id="be-role">vector store · localhost:6333</div>
             </div>
             <span class="status-tag real" style="margin-left:auto"><span class="dot"></span>OPÉRATIONNEL</span>
           </div>
         </div>
         <div class="panel reveal" data-delay="60">
           <div class="panel-head"><span>Extras installés</span><span class="sub">modules disponibles</span></div>
-          <div class="extras">
+          <div class="extras" id="extras-list">
             <span class="extra on"><span class="led"></span>qdrant</span>
             <span class="extra on"><span class="led"></span>ollama</span>
             <span class="extra"><span class="led"></span>neo4j</span>
             <span class="extra"><span class="led"></span>redis</span>
             <span class="extra"><span class="led"></span>weaviate</span>
           </div>
-          <p class="dist-note">Modules détectés : local · ollama · qdrant_local · qdrant_server. Les backends absents sont masqués des consoles.</p>
+          <p class="dist-note" id="modules-note">Modules détectés : local · ollama · qdrant_local · qdrant_server. Les backends absents sont masqués des consoles.</p>
         </div>
       </div>
 
       <!-- KPIs -->
-      <div class="kpi-grid reveal" data-delay="80">
+      <div class="kpi-grid reveal" data-delay="80" id="mem-kpis">
         <div class="kpi"><div class="kpi-lbl">ENTRÉES</div><div class="kpi-val">141</div></div>
         <div class="kpi"><div class="kpi-lbl">TYPES</div><div class="kpi-val">5</div></div>
         <div class="kpi"><div class="kpi-lbl">TAGS UNIQUES</div><div class="kpi-val">24</div></div>
@@ -360,7 +360,7 @@
       <!-- Topology -->
       <div class="panel reveal" data-delay="100" style="margin-bottom:14px">
         <div class="panel-head"><span>Topologie · Memory OS</span><span class="sub">les couches en place</span></div>
-        <div class="topo">
+        <div class="topo" id="topo">
           <div class="layer on">
             <span class="layer-idx">01</span>
             <span class="layer-name">Vector store<span>embeddings &amp; recherche sémantique</span></span>
@@ -401,7 +401,7 @@
           <div>
             <svg viewBox="0 0 150 150" class="donut-svg" id="dist-donut" aria-hidden="true"></svg>
           </div>
-          <div>
+          <div id="dist-bars">
             <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--ink-soft)"></span>mémoires</span><span class="bar-track"><span class="bar-fill" style="width:88%;background:var(--ink-soft)"></span></span><span class="bar-val">124</span></div>
             <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-amber)"></span>learnings</span><span class="bar-track"><span class="bar-fill" style="width:38%;background:var(--data-amber)"></span></span><span class="bar-val">8</span></div>
             <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-red)"></span>failures</span><span class="bar-track"><span class="bar-fill" style="width:26%;background:var(--data-red)"></span></span><span class="bar-val">5</span></div>
@@ -504,9 +504,9 @@
         <div class="lint-grid">
           <div>
             <svg viewBox="0 0 180 110" class="gauge-svg" id="lint-gauge" aria-hidden="true"></svg>
-            <p class="lint-summary">5 catégories de findings<br/>12 entrées concernées</p>
+            <p class="lint-summary" id="lint-summary">5 catégories de findings<br/>12 entrées concernées</p>
           </div>
-          <div>
+          <div id="lint-findings">
             <div class="finding"><span class="find-sev error">ERROR</span><span><span class="find-label">Graphe : « neo4j requis » contredit « liens dérivés des tags »</span><span class="find-type">unresolved_contradiction · con-01</span></span><span class="find-count">1</span></div>
             <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Seuils de cache divergents (0.8 vs 0.6) sur entrées proches</span><span class="find-type">drift · con-02</span></span><span class="find-count">2</span></div>
             <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Décision backend non revue depuis 58 jours</span><span class="find-type">stale · dec-01</span></span><span class="find-count">1</span></div>
@@ -519,7 +519,7 @@
       <!-- Consoles -->
       <div class="panel reveal" data-delay="60" style="margin-bottom:14px">
         <div class="panel-head"><span>Consoles natives</span><span class="sub">redirection · admin brut du moteur</span></div>
-        <div class="consoles-grid">
+        <div class="consoles-grid" id="consoles-grid">
           <a class="console on" href="http://localhost:6333/dashboard" target="_blank" rel="noopener">
             <span class="console-led"></span>
             <span class="console-body">
@@ -833,6 +833,132 @@
   /* ── Band dividers draw on scroll ── */
   const dObs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); dObs.unobserve(e.target); } }), { threshold: 0.5 });
   document.querySelectorAll('.band-divider').forEach((d) => dObs.observe(d));
+})();
+</script>
+<script>
+/* ── Câblage data-driven : surcharge le rendu statique avec data/memory.json (?project). ── */
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const TC = { memory: 'var(--ink-soft)', learning: 'var(--data-amber)', failure: 'var(--data-red)', contradiction: 'var(--data-violet)', decision: 'var(--data-cyan)' };
+  const TL = { memory: 'mémoire', learning: 'learning', failure: 'failure', contradiction: 'contradiction', decision: 'decision' };
+  const tc = (t) => TC[t] || 'var(--ink-soft)';
+  const ROLE = { qdrant: 'vector store · localhost:6333', local: 'store local · sqlite', neo4j: 'graph store · localhost:7474', redis: 'cache · localhost:6379', weaviate: 'vector store', ollama: 'embeddings local' };
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '—');
+  const slug = new URLSearchParams(location.search).get('project');
+  const DATA = slug ? 'data/projects/' + slug.replace(/[^a-z0-9-]/gi, '') + '/' : 'data/';
+  let ENTRIES = [], activeType = 'all', query = '', selectedId = null;
+
+  fetch(DATA + 'memory.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) render(d); }).catch(() => {});
+
+  function donut(svg, segs) {
+    if (!svg) return; const R = 56, S = 16, C = 2 * Math.PI * R, tot = segs.reduce((a, s) => a + s.value, 0) || 1; let off = 0, arcs = '';
+    segs.forEach((s) => { if (s.value <= 0) return; const len = s.value / tot * C; arcs += `<circle cx="75" cy="75" r="${R}" fill="none" stroke="${s.color}" stroke-width="${S}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 75 75)"><title>${esc(s.label)} · ${s.value}</title></circle>`; off += len; });
+    svg.innerHTML = `<circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--elev-3)" stroke-width="${S}"/>${arcs}<text x="75" y="72" text-anchor="middle" class="donut-c1">${segs.reduce((a, s) => a + s.value, 0)}</text><text x="75" y="88" text-anchor="middle" class="donut-c2">ENTRÉES</text>`;
+  }
+  function gauge(svg, value) {
+    if (!svg) return; const cx = 90, cy = 88, r = 70, frac = Math.max(0, Math.min(1, value / 100)), end = -90 + frac * 180;
+    const polar = (deg) => { const a = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+    const arc = (a0, a1) => { const [x0, y0] = polar(a0), [x1, y1] = polar(a1); const large = (a1 - a0) % 360 > 180 ? 1 : 0; return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; };
+    const col = value >= 85 ? 'var(--data-green)' : (value >= 60 ? 'var(--data-amber)' : 'var(--data-red)');
+    svg.innerHTML = `<path d="${arc(-90, 90)}" fill="none" stroke="var(--elev-3)" stroke-width="12" stroke-linecap="round"/><path d="${arc(-90, end)}" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round"/><text x="90" y="80" text-anchor="middle" class="gauge-num" style="fill:${col}">${value}%</text><text x="90" y="100" text-anchor="middle" class="gauge-sub">SANTÉ DU STORE</text>`;
+  }
+
+  function render(d) {
+    const be = d.backend || {}, counts = d.counts_by_type || {}, store = d.store || {};
+    ENTRIES = (store.sample || []).map((e) => ({ id: e.id, type: e.type || 'memory', text: e.text || '', tags: e.tags || [], date: e.created_at || '' }));
+    if ($('be-name')) $('be-name').textContent = cap(be.active);
+    if ($('be-role')) $('be-role').textContent = ROLE[be.active] || 'store';
+    if ($('extras-list')) $('extras-list').innerHTML = ['qdrant', 'ollama', 'neo4j', 'redis', 'weaviate'].map((k) => `<span class="extra ${be.extras_installed && be.extras_installed[k] ? 'on' : ''}"><span class="led"></span>${k}</span>`).join('');
+    if ($('modules-note')) $('modules-note').textContent = 'Modules détectés : ' + ((be.modules || []).join(' · ') || '—') + '. Les backends absents sont masqués des consoles.';
+    const typesN = Object.values(counts).filter((v) => v > 0).length;
+    const lh = d.lint_health != null ? d.lint_health : 90;
+    if ($('mem-kpis')) $('mem-kpis').innerHTML = [
+      ['ENTRÉES', store.total_entries || 0], ['TYPES', typesN], ['TAGS UNIQUES', store.tags_unique || 0],
+      ['ORPHELINES', store.orphans || 0], ['BACKEND', cap(be.active)], ['SANTÉ LINT', lh + '<small>%</small>'],
+    ].map(([l, v], i) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val"${i >= 4 ? ' style="font-size:1.05rem"' : ''}>${v}</div></div>`).join('');
+    if ($('topo')) {
+      const edges = ((d.graph && d.graph.edges) || []).length;
+      const L = [
+        ['01', 'Vector store', 'embeddings &amp; recherche sémantique', `${cap(be.active)} détecté · embeddings ${be.extras_installed && be.extras_installed.ollama ? 'ollama' : 'externes'}.`, store.total_entries || 0, 'entrées', 'on'],
+        ['02', 'Graph store', 'liens entre entrées', `neo4j ${be.extras_installed && be.extras_installed.neo4j ? 'installé' : 'absent → liens dérivés des tags'}.`, edges, 'arêtes', 'derived'],
+        ['03', 'Shared-context', 'contexte porté entre agents', 'Handoffs et spec transmis via le shared-context.', 'actif', 'runtime', 'on'],
+        ['04', 'Learnings', 'connaissances promues', 'Enseignements candidats à la promotion.', counts.learnings || 0, 'learnings', (counts.learnings || 0) > 0 ? 'on' : 'empty'],
+        ['05', 'Decisions', 'choix gravés &amp; tracés', 'Promotion en cockpit local.', counts.decisions || 0, 'decisions', (counts.decisions || 0) > 0 ? 'on' : 'empty'],
+      ];
+      $('topo').innerHTML = L.map(([idx, n, sub, desc, stat, unit, cls]) => `<div class="layer ${cls}"><span class="layer-idx">${idx}</span><span class="layer-name">${n}<span>${sub}</span></span><span class="layer-desc">${esc(desc)}</span><span class="layer-stat"><b>${stat}</b>${unit}</span></div>`).join('');
+    }
+    const segs = [
+      { label: 'mémoires', value: counts.memories || 0, color: 'var(--ink-soft)' },
+      { label: 'learnings', value: counts.learnings || 0, color: 'var(--data-amber)' },
+      { label: 'failures', value: counts.failures || 0, color: 'var(--data-red)' },
+      { label: 'contradictions', value: counts.contradictions || 0, color: 'var(--data-violet)' },
+      { label: 'decisions', value: counts.decisions || 0, color: 'var(--data-cyan)' },
+    ];
+    donut($('dist-donut'), segs);
+    if ($('dist-bars')) {
+      const mx = Math.max(1, ...segs.map((s) => s.value));
+      $('dist-bars').innerHTML = segs.map((s) => `<div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:${s.color}"></span>${s.label}</span><span class="bar-track"><span class="bar-fill" style="width:${(s.value / mx * 100).toFixed(0)}%;background:${s.color}"></span></span><span class="bar-val">${s.value}</span></div>`).join('') + `<p class="dist-note">« mémoires » = total des entrées ; les autres en sont les sous-types gouvernés.</p>`;
+    }
+    const sc = $('scatter'), pts = (d.vector_projection && d.vector_projection.points) || [];
+    if (sc && pts.length) sc.innerHTML = pts.map((p) => { const x = Math.max(8, Math.min(292, 150 + (p.x || 0) * 42)), y = Math.max(8, Math.min(192, 100 + (p.y || 0) * 30)); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${tc(p.type)}"/>`; }).join('');
+    if (d.lint_health != null) gauge($('lint-gauge'), d.lint_health);
+    const issues = (d.lint && d.lint.issues) || [];
+    if ($('lint-findings')) {
+      const sevc = { error: 'error', warn: 'warn', warning: 'warn', info: 'info' };
+      $('lint-findings').innerHTML = issues.length ? issues.slice(0, 6).map((it) => {
+        const sev = String(it.severity || it.level || it.sev || 'info').toLowerCase();
+        return `<div class="finding"><span class="find-sev ${sevc[sev] || 'info'}">${esc(sev.toUpperCase())}</span><span><span class="find-label">${esc(it.message || it.label || it.rule || it.title || 'finding')}</span><span class="find-type">${esc(it.type || it.rule || it.category || '')}</span></span><span class="find-count">${it.count || 1}</span></div>`;
+      }).join('') : `<div class="finding"><span class="find-sev info">OK</span><span><span class="find-label">Aucun finding — mémoire saine</span><span class="find-type">memory-lint</span></span><span class="find-count">0</span></div>`;
+    }
+    if ($('lint-summary')) $('lint-summary').innerHTML = `${issues.length} finding(s)<br/>${(d.lint && d.lint.entries_scanned) || store.total_entries || 0} entrées scannées`;
+    if ($('consoles-grid')) {
+      const cons = d.consoles || {};
+      $('consoles-grid').innerHTML = ['qdrant', 'neo4j', 'redis', 'weaviate'].map((k) => {
+        const c = cons[k]; if (!c) return ''; const on = be.extras_installed && be.extras_installed[k];
+        if (on) return `<a class="console on" href="${esc(c.url)}" target="_blank" rel="noopener"><span class="console-led"></span><span class="console-body"><span class="console-name">${esc(c.label)}</span><span class="console-role">${k} · installé</span><span class="console-url">${esc(c.url.replace(/^https?:\/\//, ''))}</span></span><span class="console-arrow">↗</span></a>`;
+        return `<span class="console off" aria-disabled="true"><span class="console-led"></span><span class="console-body"><span class="console-name">${esc(c.label)}</span><span class="console-role">${k} · extra non installé</span><span class="console-url">pip install grimoire-kit[${k}]</span></span><span class="console-arrow">—</span></span>`;
+      }).join('');
+    }
+    renderGraph(); renderVault();
+  }
+
+  function renderGraph() {
+    const svg = $('graph'); if (!svg) return;
+    const W = 640, H = 460, cx = W / 2, cy = H / 2, rx = 252, ry = 176, nodes = ENTRIES, NEIGH = {}, edges = [];
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) { const sh = nodes[i].tags.filter((t) => nodes[j].tags.includes(t)); if (sh.length) { edges.push({ a: nodes[i].id, b: nodes[j].id, tags: sh }); (NEIGH[nodes[i].id] = NEIGH[nodes[i].id] || new Set()).add(nodes[j].id); (NEIGH[nodes[j].id] = NEIGH[nodes[j].id] || new Set()).add(nodes[i].id); } }
+    const deg = (id) => (NEIGH[id] ? NEIGH[id].size : 0), maxDeg = Math.max(1, ...nodes.map((n) => deg(n.id))), POS = {};
+    nodes.forEach((n, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / Math.max(1, nodes.length); POS[n.id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), r: 8 + deg(n.id) / maxDeg * 9 }; });
+    let e = '', nn = '';
+    edges.forEach((ed) => { const a = POS[ed.a], b = POS[ed.b]; if (!a || !b) return; const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, qx = mx + (cx - mx) * 0.32, qy = my + (cy - my) * 0.32; e += `<path class="edge" data-a="${ed.a}" data-b="${ed.b}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}"><title>${esc(ed.a)} ↔ ${esc(ed.b)} · #${ed.tags.join(' #')}</title></path>`; });
+    nodes.forEach((n) => { const p = POS[n.id], col = tc(n.type); nn += `<g class="gnode" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.id)}"><circle class="halo" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.3"/><circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${col}"/><text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 12).toFixed(1)}" text-anchor="middle">${esc(n.id)}</text></g>`; });
+    svg.innerHTML = e + nn;
+    if ($('graph-stats')) $('graph-stats').innerHTML = `<span><b>${nodes.length}</b> nœuds</span><span><b>${edges.length}</b> arêtes</span><span><b>${new Set(nodes.flatMap((n) => n.tags)).size}</b> tags uniques</span>`;
+    const focus = (id) => { svg.classList.add('focus'); const near = NEIGH[id] || new Set(); svg.querySelectorAll('.gnode').forEach((g) => { g.classList.toggle('src', g.dataset.id === id); g.classList.toggle('lit', near.has(g.dataset.id)); }); svg.querySelectorAll('.edge').forEach((ed) => ed.classList.toggle('lit', ed.dataset.a === id || ed.dataset.b === id)); };
+    const clear = () => { svg.classList.remove('focus'); svg.querySelectorAll('.src,.lit').forEach((el) => el.classList.remove('src', 'lit')); };
+    svg.querySelectorAll('.gnode').forEach((g) => { const id = g.dataset.id; g.addEventListener('mouseenter', () => focus(id)); g.addEventListener('mouseleave', clear); g.addEventListener('focus', () => focus(id)); g.addEventListener('blur', clear); g.addEventListener('click', () => selectEntry(id)); });
+  }
+
+  function renderVault() {
+    const q = $('vault-q'); if (q) { const nq = q.cloneNode(true); q.parentNode.replaceChild(nq, q); nq.addEventListener('input', (ev) => { query = ev.target.value.trim().toLowerCase(); renderList(); }); }
+    const fil = $('vault-filters'); if (fil) { fil.querySelectorAll('.filt').forEach((b) => { const nb = b.cloneNode(true); b.parentNode.replaceChild(nb, b); nb.addEventListener('click', () => { fil.querySelectorAll('.filt').forEach((x) => x.classList.remove('active')); nb.classList.add('active'); activeType = nb.dataset.type; renderList(); }); }); }
+    renderList();
+  }
+  function renderList() {
+    const f = ENTRIES.filter((e) => { if (activeType !== 'all' && e.type !== activeType) return false; if (query) { const h = (e.id + ' ' + e.text + ' ' + e.tags.join(' ')).toLowerCase(); if (!h.includes(query)) return false; } return true; });
+    const list = $('vault-list'); if (!list) return;
+    list.innerHTML = f.length ? f.map((e) => `<div class="ventry" data-id="${e.id}" data-type="${e.type}"><div class="ventry-top"><span class="ventry-id">${esc(e.id)}</span><span class="type-pill" style="color:${tc(e.type)}">${esc(TL[e.type] || e.type)}</span><span class="ventry-date">${esc(e.date)}</span></div><div class="ventry-text">${esc(e.text)}</div><div class="vtags">${e.tags.map((t) => `<span class="vtag">#${esc(t)}</span>`).join('')}</div></div>`).join('') : `<div class="ventry" style="cursor:default"><div class="ventry-text" style="color:var(--ink-muted);font-family:var(--font-mono);font-size:.7rem">Aucune entrée ne correspond.</div></div>`;
+    if ($('vault-count')) $('vault-count').textContent = `échantillon · ${f.length} / ${ENTRIES.length} entrées`;
+    list.querySelectorAll('.ventry[data-id]').forEach((el) => { el.classList.toggle('sel', el.dataset.id === selectedId); el.addEventListener('click', () => selectEntry(el.dataset.id)); });
+  }
+  function selectEntry(id) {
+    selectedId = id; const e = ENTRIES.find((x) => x.id === id); if (!e) return;
+    const links = ENTRIES.filter((o) => o.id !== id && o.tags.some((t) => e.tags.includes(t))).map((o) => ({ o, shared: o.tags.filter((t) => e.tags.includes(t)) }));
+    const det = $('vault-detail');
+    if (det) det.innerHTML = `<div class="vd-top"><span class="vd-id">${esc(e.id)}</span><span class="type-pill" style="color:${tc(e.type)}">${esc(TL[e.type] || e.type)}</span><span class="status-tag snapshot" style="margin-left:auto"><span class="dot"></span>SNAPSHOT</span></div><div class="vd-text">${esc(e.text)}</div><div class="vd-meta"><div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date)}</span></div><div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.map((t) => '#' + esc(t)).join('  ') || '—'}</span></div><div class="vd-row"><span class="vd-k">Liens (${links.length})</span><span class="vd-links">${links.length ? links.map((l) => `<span class="vd-link"><span class="sw" style="background:${tc(l.o.type)}"></span>${esc(l.o.id)} <b>· #${esc(l.shared.join(' #'))}</b></span>`).join('') : '<span class="vd-v" style="color:var(--ink-muted)">aucun lien — entrée orpheline</span>'}</span></div></div>`;
+    $('vault-list').querySelectorAll('.ventry[data-id]').forEach((el) => el.classList.toggle('sel', el.dataset.id === id));
+  }
 })();
 </script>
 </body>

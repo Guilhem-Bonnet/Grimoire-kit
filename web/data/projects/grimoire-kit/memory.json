@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T17:47:31+00:00",
+  "generated_at": "2026-06-29T18:49:42+00:00",
   "backend": {
     "active": "qdrant",
     "modules": [
@@ -21,248 +21,290 @@
     "sample": [
       {
         "id": "66b8959f",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:26:10"
+        "created_at": "2026-05-29"
       },
       {
         "id": "2c141ef0",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:26:10"
+        "created_at": "2026-05-29"
       },
       {
         "id": "f6f98c38",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:26:10"
+        "created_at": "2026-05-29"
       },
       {
         "id": "448bf04e",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:37:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "3d8ff4d2",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:37:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "81c16c3b",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:37:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "6c07fc5b",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:40:14"
+        "created_at": "2026-05-29"
       },
       {
         "id": "43668136",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:40:14"
+        "created_at": "2026-05-29"
       },
       {
         "id": "d820ebc0",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:40:14"
+        "created_at": "2026-05-29"
       },
       {
         "id": "302142df",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:40:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "17a0de3c",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:40:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "cad27a53",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:40:55"
+        "created_at": "2026-05-29"
       },
       {
         "id": "ab489696",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:41:50"
+        "created_at": "2026-05-29"
       },
       {
         "id": "7f811d0d",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:41:50"
+        "created_at": "2026-05-29"
       },
       {
         "id": "d3b03bc0",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:41:50"
+        "created_at": "2026-05-29"
       },
       {
         "id": "b363272d",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T11:49:03"
+        "created_at": "2026-05-29"
       },
       {
         "id": "076b9f87",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T11:49:03"
+        "created_at": "2026-05-29"
       },
       {
         "id": "19ff09f4",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T11:49:03"
+        "created_at": "2026-05-29"
       },
       {
         "id": "feeeb695",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T12:03:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "a7398c4c",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T12:03:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "f4065bc0",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T12:03:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "aa8a04df",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T12:14:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "e9dfe326",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T12:14:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "4bcf0e9e",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T12:14:11"
+        "created_at": "2026-05-29"
       },
       {
         "id": "b35ea26f",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T12:27:47"
+        "created_at": "2026-05-29"
       },
       {
         "id": "6e5f6102",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T12:27:47"
+        "created_at": "2026-05-29"
       },
       {
         "id": "a608a655",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T12:27:47"
+        "created_at": "2026-05-29"
       },
       {
         "id": "09c68d05",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T12:36:04"
+        "created_at": "2026-05-29"
       },
       {
         "id": "41933358",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T12:36:04"
+        "created_at": "2026-05-29"
       },
       {
         "id": "66af6517",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T12:36:04"
+        "created_at": "2026-05-29"
       },
       {
         "id": "aaf76074",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T13:14:30"
+        "created_at": "2026-05-29"
       },
       {
         "id": "741be212",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T13:14:30"
+        "created_at": "2026-05-29"
       },
       {
         "id": "d449be3e",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T13:14:30"
+        "created_at": "2026-05-29"
       },
       {
         "id": "79c8298c",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T16:10:46"
+        "created_at": "2026-05-29"
       },
       {
         "id": "a8e4f1a3",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T16:10:46"
+        "created_at": "2026-05-29"
       },
       {
         "id": "532f5460",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T16:10:46"
+        "created_at": "2026-05-29"
       },
       {
         "id": "12d14f70",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T16:16:13"
+        "created_at": "2026-05-29"
       },
       {
         "id": "c6dacebc",
+        "type": "memory",
         "text": "user fact",
         "tags": [],
-        "created_at": "2026-05-29T16:16:13"
+        "created_at": "2026-05-29"
       },
       {
         "id": "bf1c86a7",
+        "type": "memory",
         "text": "python is the best language",
         "tags": [],
-        "created_at": "2026-05-29T16:16:13"
+        "created_at": "2026-05-29"
       },
       {
         "id": "6a8c0733",
+        "type": "memory",
         "text": "important fact",
         "tags": [],
-        "created_at": "2026-05-29T16:16:53"
+        "created_at": "2026-05-29"
       }
-    ]
+    ],
+    "tags_unique": 0,
+    "orphans": 40
   },
   "counts_by_type": {
-    "memories": 141,
+    "memories": 124,
     "contradictions": 4,
     "failures": 5,
     "learnings": 8,
@@ -691,6 +733,7 @@
     },
     "issues": []
   },
+  "lint_health": 100,
   "consoles": {
     "qdrant": {
       "label": "Qdrant Web UI",
