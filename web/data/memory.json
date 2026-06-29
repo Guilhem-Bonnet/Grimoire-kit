@@ -1,0 +1,712 @@
+{
+  "generated_at": "2026-06-29T14:20:00+00:00",
+  "backend": {
+    "active": "qdrant",
+    "modules": [
+      "local",
+      "ollama",
+      "qdrant_local",
+      "qdrant_server"
+    ],
+    "extras_installed": {
+      "qdrant": true,
+      "weaviate": false,
+      "neo4j": false,
+      "redis": false,
+      "ollama": true
+    }
+  },
+  "store": {
+    "total_entries": 141,
+    "sample": [
+      {
+        "id": "66b8959f",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:26:10"
+      },
+      {
+        "id": "2c141ef0",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:26:10"
+      },
+      {
+        "id": "f6f98c38",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:26:10"
+      },
+      {
+        "id": "448bf04e",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:37:55"
+      },
+      {
+        "id": "3d8ff4d2",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:37:55"
+      },
+      {
+        "id": "81c16c3b",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:37:55"
+      },
+      {
+        "id": "6c07fc5b",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:14"
+      },
+      {
+        "id": "43668136",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:14"
+      },
+      {
+        "id": "d820ebc0",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:14"
+      },
+      {
+        "id": "302142df",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:55"
+      },
+      {
+        "id": "17a0de3c",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:55"
+      },
+      {
+        "id": "cad27a53",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:40:55"
+      },
+      {
+        "id": "ab489696",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:41:50"
+      },
+      {
+        "id": "7f811d0d",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:41:50"
+      },
+      {
+        "id": "d3b03bc0",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:41:50"
+      },
+      {
+        "id": "b363272d",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:49:03"
+      },
+      {
+        "id": "076b9f87",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T11:49:03"
+      },
+      {
+        "id": "19ff09f4",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T11:49:03"
+      },
+      {
+        "id": "feeeb695",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:03:11"
+      },
+      {
+        "id": "a7398c4c",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:03:11"
+      },
+      {
+        "id": "f4065bc0",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T12:03:11"
+      },
+      {
+        "id": "aa8a04df",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:14:11"
+      },
+      {
+        "id": "e9dfe326",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:14:11"
+      },
+      {
+        "id": "4bcf0e9e",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T12:14:11"
+      },
+      {
+        "id": "b35ea26f",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:27:47"
+      },
+      {
+        "id": "6e5f6102",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:27:47"
+      },
+      {
+        "id": "a608a655",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T12:27:47"
+      },
+      {
+        "id": "09c68d05",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:36:04"
+      },
+      {
+        "id": "41933358",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T12:36:04"
+      },
+      {
+        "id": "66af6517",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T12:36:04"
+      },
+      {
+        "id": "aaf76074",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T13:14:30"
+      },
+      {
+        "id": "741be212",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T13:14:30"
+      },
+      {
+        "id": "d449be3e",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T13:14:30"
+      },
+      {
+        "id": "79c8298c",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T16:10:46"
+      },
+      {
+        "id": "a8e4f1a3",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T16:10:46"
+      },
+      {
+        "id": "532f5460",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T16:10:46"
+      },
+      {
+        "id": "12d14f70",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T16:16:13"
+      },
+      {
+        "id": "c6dacebc",
+        "text": "user fact",
+        "tags": [],
+        "created_at": "2026-05-29T16:16:13"
+      },
+      {
+        "id": "bf1c86a7",
+        "text": "python is the best language",
+        "tags": [],
+        "created_at": "2026-05-29T16:16:13"
+      },
+      {
+        "id": "6a8c0733",
+        "text": "important fact",
+        "tags": [],
+        "created_at": "2026-05-29T16:16:53"
+      }
+    ]
+  },
+  "counts_by_type": {
+    "memories": 141,
+    "contradictions": 4,
+    "failures": 5,
+    "learnings": 8,
+    "decisions": 0
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "66b8959f",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "2c141ef0",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "f6f98c38",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "448bf04e",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "3d8ff4d2",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "81c16c3b",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "6c07fc5b",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "43668136",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "d820ebc0",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "302142df",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "17a0de3c",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "cad27a53",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "ab489696",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "7f811d0d",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "d3b03bc0",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "b363272d",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "076b9f87",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "19ff09f4",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "feeeb695",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "a7398c4c",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "f4065bc0",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "aa8a04df",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "e9dfe326",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "4bcf0e9e",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "b35ea26f",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "6e5f6102",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "a608a655",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "09c68d05",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "41933358",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "66af6517",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "aaf76074",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "741be212",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "d449be3e",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "79c8298c",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "a8e4f1a3",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "532f5460",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "12d14f70",
+        "label": "important fact",
+        "tags": []
+      },
+      {
+        "id": "c6dacebc",
+        "label": "user fact",
+        "tags": []
+      },
+      {
+        "id": "bf1c86a7",
+        "label": "python is the best language",
+        "tags": []
+      },
+      {
+        "id": "6a8c0733",
+        "label": "important fact",
+        "tags": []
+      }
+    ],
+    "edges": []
+  },
+  "vector_projection": {
+    "is_demo": true,
+    "points": [
+      {
+        "x": -2.079,
+        "y": 0.905,
+        "type": "decision"
+      },
+      {
+        "x": -2.061,
+        "y": 1.386,
+        "type": "decision"
+      },
+      {
+        "x": -2.07,
+        "y": 0.176,
+        "type": "decision"
+      },
+      {
+        "x": -1.817,
+        "y": 0.853,
+        "type": "decision"
+      },
+      {
+        "x": -2.119,
+        "y": 1.064,
+        "type": "decision"
+      },
+      {
+        "x": -1.872,
+        "y": 1.64,
+        "type": "decision"
+      },
+      {
+        "x": -1.639,
+        "y": 1.061,
+        "type": "decision"
+      },
+      {
+        "x": -2.406,
+        "y": 0.442,
+        "type": "decision"
+      },
+      {
+        "x": 2.135,
+        "y": 2.221,
+        "type": "learning"
+      },
+      {
+        "x": 2.023,
+        "y": 1.442,
+        "type": "learning"
+      },
+      {
+        "x": 2.292,
+        "y": 0.701,
+        "type": "learning"
+      },
+      {
+        "x": 1.828,
+        "y": 1.77,
+        "type": "learning"
+      },
+      {
+        "x": 2.48,
+        "y": 1.368,
+        "type": "learning"
+      },
+      {
+        "x": 2.207,
+        "y": 1.637,
+        "type": "learning"
+      },
+      {
+        "x": 2.43,
+        "y": 0.888,
+        "type": "learning"
+      },
+      {
+        "x": 2.313,
+        "y": 0.667,
+        "type": "learning"
+      },
+      {
+        "x": -2.941,
+        "y": -2.334,
+        "type": "contradiction"
+      },
+      {
+        "x": -2.004,
+        "y": -1.518,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.135,
+        "y": -2.67,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.034,
+        "y": -2.551,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.547,
+        "y": -2.162,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.437,
+        "y": -1.55,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.149,
+        "y": -1.808,
+        "type": "contradiction"
+      },
+      {
+        "x": -1.143,
+        "y": -1.737,
+        "type": "contradiction"
+      },
+      {
+        "x": 1.155,
+        "y": -1.895,
+        "type": "failure"
+      },
+      {
+        "x": 1.242,
+        "y": -1.225,
+        "type": "failure"
+      },
+      {
+        "x": 1.362,
+        "y": -0.215,
+        "type": "failure"
+      },
+      {
+        "x": 1.049,
+        "y": -2.104,
+        "type": "failure"
+      },
+      {
+        "x": 1.923,
+        "y": -0.718,
+        "type": "failure"
+      },
+      {
+        "x": 1.778,
+        "y": -1.04,
+        "type": "failure"
+      },
+      {
+        "x": 2.284,
+        "y": -1.552,
+        "type": "failure"
+      },
+      {
+        "x": 0.717,
+        "y": -1.793,
+        "type": "failure"
+      },
+      {
+        "x": 0.524,
+        "y": -0.794,
+        "type": "context"
+      },
+      {
+        "x": 0.018,
+        "y": 0.139,
+        "type": "context"
+      },
+      {
+        "x": -0.174,
+        "y": 0.398,
+        "type": "context"
+      },
+      {
+        "x": 0.319,
+        "y": 1.277,
+        "type": "context"
+      },
+      {
+        "x": 0.341,
+        "y": -0.335,
+        "type": "context"
+      },
+      {
+        "x": -0.309,
+        "y": -0.457,
+        "type": "context"
+      },
+      {
+        "x": 0.524,
+        "y": -0.312,
+        "type": "context"
+      },
+      {
+        "x": -0.039,
+        "y": 0.412,
+        "type": "context"
+      }
+    ],
+    "note": "projection représentative — vecteurs réels quand le store vectoriel est peuplé"
+  },
+  "lint": {
+    "version": "1.1.0",
+    "files_scanned": 1,
+    "entries_scanned": 4,
+    "summary": {
+      "errors": 0,
+      "warnings": 0,
+      "info": 0,
+      "total": 0
+    },
+    "issues": []
+  },
+  "consoles": {
+    "qdrant": {
+      "label": "Qdrant Web UI",
+      "url": "http://localhost:6333/dashboard"
+    },
+    "neo4j": {
+      "label": "Neo4j Browser",
+      "url": "http://localhost:7474"
+    },
+    "redis": {
+      "label": "RedisInsight",
+      "url": "https://redis.io/insight/"
+    },
+    "weaviate": {
+      "label": "Weaviate Console",
+      "url": "https://console.weaviate.io/"
+    }
+  }
+}

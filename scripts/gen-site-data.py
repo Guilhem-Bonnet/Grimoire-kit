@@ -18,6 +18,7 @@ import contextlib
 import datetime as _dt
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -1057,6 +1058,116 @@ def build_insights(root: Path) -> dict:
     }
 
 
+# ── Memory Manager (P1 inspect + P2a vault-read + P2b consoles) ──────────────
+
+# Consoles natives par backend (redirection — on ne réimplémente pas l'admin brut).
+_MEMORY_CONSOLES = {
+    "qdrant": {"label": "Qdrant Web UI", "url": "http://localhost:6333/dashboard"},
+    "neo4j": {"label": "Neo4j Browser", "url": "http://localhost:7474"},
+    "redis": {"label": "RedisInsight", "url": "https://redis.io/insight/"},
+    "weaviate": {"label": "Weaviate Console", "url": "https://console.weaviate.io/"},
+}
+
+
+def _memory_backends(root: Path) -> dict:
+    """Backends mémoire : modules présents, extras pip installés, backend actif (best-effort)."""
+    bdir = root / "_grimoire/_memory/backends"
+    modules = sorted(p.stem.replace("backend_", "") for p in bdir.glob("backend_*.py")) if bdir.is_dir() else []
+    extras = {}
+    for name, mod in (("qdrant", "qdrant_client"), ("weaviate", "weaviate"),
+                      ("neo4j", "neo4j"), ("redis", "redis"), ("ollama", "ollama")):
+        try:
+            __import__(mod)
+            extras[name] = True
+        except ImportError:
+            extras[name] = False
+    active = "qdrant" if (root / "_grimoire-output/.qdrant_data").exists() else "local"
+    return {"active": active, "modules": modules, "extras_installed": extras}
+
+
+def _memory_entries(root: Path, limit: int = 40) -> tuple[list[dict], int]:
+    """Échantillon d'entrées du store (vault browse) + total réel."""
+    p = root / "_grimoire/_memory/grimoire.json"
+    if not p.is_file():
+        return [], 0
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return [], 0
+    if not isinstance(data, list):
+        return [], 0
+    entries = []
+    for e in data:
+        if isinstance(e, dict):
+            entries.append({
+                "id": str(e.get("id", ""))[:8],
+                "text": (e.get("text", "") or "")[:160],
+                "tags": e.get("tags") or [],
+                "created_at": e.get("created_at", ""),
+            })
+    return entries[:limit], len(data)
+
+
+def _memory_graph(entries: list[dict]) -> dict:
+    """Graphe : entrées = nœuds, arêtes = tags partagés (liens réels)."""
+    nodes = [{"id": e["id"], "label": e["text"][:48], "tags": e["tags"]} for e in entries]
+    by_tag: dict[str, list[str]] = {}
+    for e in entries:
+        for t in (e["tags"] if isinstance(e["tags"], list) else []):
+            by_tag.setdefault(str(t), []).append(e["id"])
+    edges = []
+    for t, ids in by_tag.items():
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                edges.append({"from": ids[i], "to": ids[j], "tag": t})
+    return {"nodes": nodes, "edges": edges[:200]}
+
+
+def _vector_projection_demo() -> dict:
+    """Projection 2D représentative (embeddings absents du store actuel → démo honnête)."""
+    rng = random.Random(42)  # noqa: S311 — cosmétique (nuage de démo), pas crypto
+    clusters = [("decision", -2.0, 1.0), ("learning", 2.0, 1.5), ("contradiction", -1.5, -2.0),
+                ("failure", 1.5, -1.5), ("context", 0.0, 0.0)]
+    points = [{"x": round(cx + rng.gauss(0, 0.55), 3), "y": round(cy + rng.gauss(0, 0.55), 3), "type": name}
+              for name, cx, cy in clusters for _ in range(8)]
+    return {"is_demo": True, "points": points,
+            "note": "projection représentative — vecteurs réels quand le store vectoriel est peuplé"}
+
+
+def _memory_lint(root: Path) -> dict:
+    raw = _run([sys.executable, str(root / "framework/tools/memory-lint.py"),
+                "--project-root", str(root), "--json"], root, timeout=45, check=False)
+    mjson = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not mjson:
+        return {}
+    try:
+        return json.loads(mjson.group())
+    except json.JSONDecodeError:
+        return {}
+
+
+def build_memory(root: Path) -> dict:
+    """Couche données du Memory Manager (lecture : inspection + vault + consoles)."""
+    entries, total = _memory_entries(root)
+    health = _memory_health(root)
+    return {
+        "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "backend": _memory_backends(root),
+        "store": {"total_entries": total, "sample": entries},
+        "counts_by_type": {
+            "memories": total,
+            "contradictions": health.get("contradictions", 0),
+            "failures": health.get("failures", 0),
+            "learnings": health.get("learnings_files", 0),
+            "decisions": health.get("decisions", 0),
+        },
+        "graph": _memory_graph(entries),
+        "vector_projection": _vector_projection_demo(),
+        "lint": _memory_lint(root),
+        "consoles": _MEMORY_CONSOLES,
+    }
+
+
 def _efficiency(meta: dict, act: dict, ins: dict) -> dict:
     """Ratios d'efficience dérivés (réels) — calculés depuis les données déjà bâties."""
     git = act.get("git", {})
@@ -1130,6 +1241,11 @@ def main(argv: list[str]) -> int:
     (out_dir / "insights.json").write_text(json.dumps(ins, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     code = ins.get("code", {})
     print(f"[OK] web/data/insights.json — {len(ins.get('bench', {}).get('latest', []))} agents bench · {ins.get('routing', {}).get('samples', 0)} routings · {code.get('loc', 0)} LOC · {code.get('tags_total', 0)} tags")
+
+    mem = build_memory(root)
+    (out_dir / "memory.json").write_text(json.dumps(mem, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    b = mem.get("backend", {})
+    print(f"[OK] web/data/memory.json — backend {b.get('active', '?')} · {mem.get('store', {}).get('total_entries', 0)} entrées · {len(mem.get('graph', {}).get('edges', []))} liens · extras {sum(1 for v in b.get('extras_installed', {}).values() if v)}/5")
     return 0
 
 
