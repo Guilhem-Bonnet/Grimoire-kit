@@ -1,0 +1,708 @@
+{
+  "is_demo": true,
+  "traces": [
+    {
+      "timestamp": "2026-06-29T17:11:25+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:13:25+00:00",
+      "agent": "dev",
+      "event_type": "DECISION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:15:25+00:00",
+      "agent": "qa",
+      "event_type": "ACTION",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:17:25+00:00",
+      "agent": "dev",
+      "event_type": "HANDOFF",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:19:25+00:00",
+      "agent": "mnemo",
+      "event_type": "REMEMBER",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:21:25+00:00",
+      "agent": "atlas",
+      "event_type": "CHECKPOINT",
+      "session": "main",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:23:25+00:00",
+      "agent": "pm",
+      "event_type": "ACTION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:25:25+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:27:25+00:00",
+      "agent": "qa",
+      "event_type": "WARN",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:29:25+00:00",
+      "agent": "sentinel",
+      "event_type": "DECISION",
+      "session": "work/standard-bridge",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:31:25+00:00",
+      "agent": "dev",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:33:25+00:00",
+      "agent": "mnemo",
+      "event_type": "REMEMBER",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:35:25+00:00",
+      "agent": "dev",
+      "event_type": "HANDOFF",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:37:25+00:00",
+      "agent": "tech-writer",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:39:25+00:00",
+      "agent": "qa",
+      "event_type": "ACTION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:41:25+00:00",
+      "agent": "atlas",
+      "event_type": "CHECKPOINT",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:43:25+00:00",
+      "agent": "dev",
+      "event_type": "ERROR",
+      "session": "work/memory-runtime",
+      "payload": ""
+    },
+    {
+      "timestamp": "2026-06-29T17:45:25+00:00",
+      "agent": "dev",
+      "event_type": "DECISION",
+      "session": "work/memory-runtime",
+      "payload": ""
+    }
+  ],
+  "events": [],
+  "agents": [
+    {
+      "id": "atlas",
+      "persona": "Project Navigator",
+      "capabilities": [
+        "navigation",
+        "coordination"
+      ],
+      "metrics": {
+        "traces": 9
+      }
+    },
+    {
+      "id": "mnemo",
+      "persona": "Memory Keeper",
+      "capabilities": [
+        "memory",
+        "contradiction-detection"
+      ],
+      "metrics": {
+        "traces": 6
+      }
+    },
+    {
+      "id": "sentinel",
+      "persona": "Agent Optimizer",
+      "capabilities": [
+        "quality",
+        "self-healing"
+      ],
+      "metrics": {
+        "traces": 4
+      }
+    },
+    {
+      "id": "dev",
+      "persona": "Amelia",
+      "capabilities": [
+        "implement",
+        "refactor",
+        "test"
+      ],
+      "metrics": {
+        "traces": 12
+      }
+    },
+    {
+      "id": "qa",
+      "persona": "Quinn",
+      "capabilities": [
+        "test",
+        "review"
+      ],
+      "metrics": {
+        "traces": 7
+      }
+    },
+    {
+      "id": "pm",
+      "persona": "John",
+      "capabilities": [
+        "spec",
+        "prd"
+      ],
+      "metrics": {
+        "traces": 5
+      }
+    },
+    {
+      "id": "tech-writer",
+      "persona": "Paige",
+      "capabilities": [
+        "docs"
+      ],
+      "metrics": {
+        "traces": 3
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from_agent": "atlas",
+      "to_agent": "dev",
+      "type": "handoff",
+      "strength": 0.9,
+      "interactions": 8,
+      "avg_trust": 0.92
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "qa",
+      "type": "handoff",
+      "strength": 0.85,
+      "interactions": 6,
+      "avg_trust": 0.88
+    },
+    {
+      "from_agent": "pm",
+      "to_agent": "dev",
+      "type": "spec",
+      "strength": 0.7,
+      "interactions": 4,
+      "avg_trust": 0.8
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "mnemo",
+      "type": "memory",
+      "strength": 0.6,
+      "interactions": 5,
+      "avg_trust": 0.9
+    },
+    {
+      "from_agent": "qa",
+      "to_agent": "sentinel",
+      "type": "escalation",
+      "strength": 0.5,
+      "interactions": 2,
+      "avg_trust": 0.75
+    },
+    {
+      "from_agent": "dev",
+      "to_agent": "tech-writer",
+      "type": "handoff",
+      "strength": 0.5,
+      "interactions": 3,
+      "avg_trust": 0.82
+    }
+  ],
+  "shared_state": {},
+  "sessions": [
+    "main",
+    "work/standard-bridge",
+    "work/memory-runtime"
+  ],
+  "agent_ids": [
+    "atlas",
+    "mnemo",
+    "sentinel",
+    "dev",
+    "qa",
+    "pm",
+    "tech-writer"
+  ],
+  "event_types": [
+    "ACTION",
+    "DECISION",
+    "HANDOFF",
+    "CHECKPOINT",
+    "REMEMBER",
+    "WARN",
+    "ERROR"
+  ],
+  "spans": [
+    {
+      "span_id": "a1",
+      "parent_span_id": "",
+      "trace_id": "a1",
+      "tool": "orchestrator",
+      "operation": "execute",
+      "agent": "dev",
+      "duration_ms": 4200,
+      "tokens": 1800,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.0054,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:41:25+00:00"
+    },
+    {
+      "span_id": "a2",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "router",
+      "operation": "classify",
+      "agent": "dev",
+      "duration_ms": 180,
+      "tokens": 240,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.00072,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:41:25+00:00"
+    },
+    {
+      "span_id": "a3",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "memory",
+      "operation": "recall",
+      "agent": "mnemo",
+      "duration_ms": 320,
+      "tokens": 90,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.00027,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:41:25+00:00"
+    },
+    {
+      "span_id": "a4",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "llm",
+      "operation": "generate",
+      "agent": "dev",
+      "duration_ms": 3100,
+      "tokens": 4200,
+      "input_tokens": 1400,
+      "output_tokens": 2800,
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "cost_usd": 0.231,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:41:25+00:00"
+    },
+    {
+      "span_id": "a5",
+      "parent_span_id": "a1",
+      "trace_id": "a1",
+      "tool": "verify",
+      "operation": "check",
+      "agent": "qa",
+      "duration_ms": 260,
+      "tokens": 180,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.00054,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:41:25+00:00"
+    },
+    {
+      "span_id": "b1",
+      "parent_span_id": "",
+      "trace_id": "b1",
+      "tool": "verify",
+      "operation": "gate",
+      "agent": "qa",
+      "duration_ms": 1500,
+      "tokens": 600,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.0018,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:43:25+00:00"
+    },
+    {
+      "span_id": "b2",
+      "parent_span_id": "b1",
+      "trace_id": "b1",
+      "tool": "capability",
+      "operation": "scan",
+      "agent": "qa",
+      "duration_ms": 240,
+      "tokens": 150,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.00045,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:43:25+00:00"
+    },
+    {
+      "span_id": "b3",
+      "parent_span_id": "b1",
+      "trace_id": "b1",
+      "tool": "llm",
+      "operation": "review",
+      "agent": "qa",
+      "duration_ms": 1100,
+      "tokens": 2800,
+      "input_tokens": 2000,
+      "output_tokens": 800,
+      "model": "gpt-5.3-codex",
+      "provider": "openai",
+      "cost_usd": 0.022,
+      "retries": 1,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:43:25+00:00"
+    },
+    {
+      "span_id": "c1",
+      "parent_span_id": "",
+      "trace_id": "c1",
+      "tool": "migrate",
+      "operation": "run",
+      "agent": "dev",
+      "duration_ms": 5200,
+      "tokens": 900,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.0027,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:45:25+00:00"
+    },
+    {
+      "span_id": "c2",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "weaviate",
+      "operation": "write",
+      "agent": "dev",
+      "duration_ms": 1800,
+      "tokens": 300,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.0009,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:45:25+00:00"
+    },
+    {
+      "span_id": "c3",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "llm",
+      "operation": "embed",
+      "agent": "mnemo",
+      "duration_ms": 2600,
+      "tokens": 5200,
+      "input_tokens": 5200,
+      "output_tokens": 0,
+      "model": "gemini-3-pro",
+      "provider": "google",
+      "cost_usd": 0.0065,
+      "retries": 0,
+      "status": "ok",
+      "timestamp": "2026-06-29T17:45:25+00:00"
+    },
+    {
+      "span_id": "c4",
+      "parent_span_id": "c1",
+      "trace_id": "c1",
+      "tool": "verify",
+      "operation": "failclosed",
+      "agent": "qa",
+      "duration_ms": 140,
+      "tokens": 120,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "model": "",
+      "provider": "",
+      "cost_usd": 0.00036,
+      "retries": 0,
+      "status": "error",
+      "timestamp": "2026-06-29T17:45:25+00:00"
+    }
+  ],
+  "metrics": {
+    "total_tokens": 16580,
+    "total_cost_usd": 0.61,
+    "total_duration_ms": 20640,
+    "span_count": 12,
+    "trace_count": 3,
+    "p50_latency_ms": 1300.0,
+    "p95_latency_ms": 4650.0,
+    "p99_latency_ms": 5090.0,
+    "throughput_per_min": 0.53,
+    "error_rate": 0.083,
+    "avg_trust": 0.845,
+    "avg_cost_per_trace": 0.203333,
+    "avg_tokens_per_span": 1382,
+    "avg_duration_ms": 1720.0,
+    "avg_spans_per_trace": 4.0,
+    "retry_rate": 0.083,
+    "total_input_tokens": 8600,
+    "total_output_tokens": 3600,
+    "by_model": {
+      "claude-opus-4-8": 1,
+      "gpt-5.3-codex": 1,
+      "gemini-3-pro": 1
+    },
+    "by_provider": {
+      "anthropic": 1,
+      "openai": 1,
+      "google": 1
+    },
+    "cost_by_model": {
+      "claude-opus-4-8": 0.516835,
+      "gpt-5.3-codex": 0.049222,
+      "gemini-3-pro": 0.014543
+    }
+  },
+  "perf": {
+    "p50_ms": 1300.0,
+    "p95_ms": 4650.0,
+    "p99_ms": 5090.0,
+    "avg_ms": 1720.0,
+    "by_tool": {
+      "orchestrator": {
+        "count": 1,
+        "total_ms": 4200.0,
+        "avg_ms": 4200.0,
+        "p50_ms": 4200.0,
+        "p95_ms": 4200.0
+      },
+      "router": {
+        "count": 1,
+        "total_ms": 180.0,
+        "avg_ms": 180.0,
+        "p50_ms": 180.0,
+        "p95_ms": 180.0
+      },
+      "memory": {
+        "count": 1,
+        "total_ms": 320.0,
+        "avg_ms": 320.0,
+        "p50_ms": 320.0,
+        "p95_ms": 320.0
+      },
+      "llm": {
+        "count": 3,
+        "total_ms": 6800.0,
+        "avg_ms": 2266.7,
+        "p50_ms": 2600.0,
+        "p95_ms": 3050.0
+      },
+      "verify": {
+        "count": 3,
+        "total_ms": 1900.0,
+        "avg_ms": 633.3,
+        "p50_ms": 260.0,
+        "p95_ms": 1376.0
+      },
+      "capability": {
+        "count": 1,
+        "total_ms": 240.0,
+        "avg_ms": 240.0,
+        "p50_ms": 240.0,
+        "p95_ms": 240.0
+      },
+      "migrate": {
+        "count": 1,
+        "total_ms": 5200.0,
+        "avg_ms": 5200.0,
+        "p50_ms": 5200.0,
+        "p95_ms": 5200.0
+      },
+      "weaviate": {
+        "count": 1,
+        "total_ms": 1800.0,
+        "avg_ms": 1800.0,
+        "p50_ms": 1800.0,
+        "p95_ms": 1800.0
+      }
+    },
+    "by_agent": {
+      "dev": {
+        "count": 5,
+        "total_ms": 14480.0,
+        "avg_ms": 2896.0,
+        "p50_ms": 3100.0,
+        "p95_ms": 5000.0
+      },
+      "mnemo": {
+        "count": 2,
+        "total_ms": 2920.0,
+        "avg_ms": 1460.0,
+        "p50_ms": 1460.0,
+        "p95_ms": 2486.0
+      },
+      "qa": {
+        "count": 5,
+        "total_ms": 3240.0,
+        "avg_ms": 648.0,
+        "p50_ms": 260.0,
+        "p95_ms": 1420.0
+      }
+    },
+    "by_model": {
+      "claude-opus-4-8": {
+        "count": 1,
+        "total_ms": 3100.0,
+        "avg_ms": 3100.0,
+        "p50_ms": 3100.0,
+        "p95_ms": 3100.0
+      },
+      "gpt-5.3-codex": {
+        "count": 1,
+        "total_ms": 1100.0,
+        "avg_ms": 1100.0,
+        "p50_ms": 1100.0,
+        "p95_ms": 1100.0
+      },
+      "gemini-3-pro": {
+        "count": 1,
+        "total_ms": 2600.0,
+        "avg_ms": 2600.0,
+        "p50_ms": 2600.0,
+        "p95_ms": 2600.0
+      }
+    },
+    "slowest": [
+      {
+        "label": "migrate.run",
+        "agent": "dev",
+        "model": "",
+        "duration_ms": 5200,
+        "cost_usd": 0.0027,
+        "status": "ok"
+      },
+      {
+        "label": "orchestrator.execute",
+        "agent": "dev",
+        "model": "",
+        "duration_ms": 4200,
+        "cost_usd": 0.0054,
+        "status": "ok"
+      },
+      {
+        "label": "llm.generate",
+        "agent": "dev",
+        "model": "claude-opus-4-8",
+        "duration_ms": 3100,
+        "cost_usd": 0.231,
+        "status": "ok"
+      },
+      {
+        "label": "llm.embed",
+        "agent": "mnemo",
+        "model": "gemini-3-pro",
+        "duration_ms": 2600,
+        "cost_usd": 0.0065,
+        "status": "ok"
+      },
+      {
+        "label": "weaviate.write",
+        "agent": "dev",
+        "model": "",
+        "duration_ms": 1800,
+        "cost_usd": 0.0009,
+        "status": "ok"
+      },
+      {
+        "label": "verify.gate",
+        "agent": "qa",
+        "model": "",
+        "duration_ms": 1500,
+        "cost_usd": 0.0018,
+        "status": "ok"
+      }
+    ]
+  },
+  "graph_stats": {
+    "nodes": 7,
+    "edges": 6,
+    "avg_degree": 1.71,
+    "density": 0.286,
+    "most_central": {
+      "agent": "dev",
+      "degree": 5
+    }
+  }
+}

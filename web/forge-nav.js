@@ -84,9 +84,13 @@
 
     const grade = (s) => (s == null ? '' : (s >= 85 ? 'a' : (s >= 70 ? 'b' : 'c')));
     const dotCls = (ci) => (ci === 'failure' ? 'fp-dot--fail' : 'fp-dot--pass');
+    // Env : vitrine publique (features de pilotage bloquées) vs cockpit local.
+    const hostVitrine = /github\.io$/.test(location.hostname);
+    document.documentElement.dataset.env = hostVitrine ? 'vitrine' : 'local';
     fetch('data/projects.json', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((idx) => {
+        if (idx && idx.env) document.documentElement.dataset.env = idx.env;
         const slot = document.getElementById('fp-slot');
         if (!slot || !idx || !(idx.projects || []).length) return;
         const cur = new URLSearchParams(location.search).get('project') || idx.primary;
