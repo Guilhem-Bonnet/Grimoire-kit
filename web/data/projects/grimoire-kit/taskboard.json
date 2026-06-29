@@ -1,0 +1,198 @@
+{
+  "source": "framework/agentic-standard/templates/task-board.yaml",
+  "is_demo": true,
+  "states": [
+    "proposed",
+    "ready",
+    "in_progress",
+    "blocked",
+    "review",
+    "accepted",
+    "released",
+    "archived"
+  ],
+  "transitions": {
+    "proposed_to_ready": {
+      "requires": [
+        "acceptance_criteria",
+        "owner_or_agent_role"
+      ]
+    },
+    "ready_to_in_progress": {
+      "requires": [
+        "context_bundle",
+        "provider_policy"
+      ]
+    },
+    "in_progress_to_review": {
+      "requires": [
+        "evidence_pack",
+        "decision_trace"
+      ]
+    },
+    "review_to_accepted": {
+      "requires": [
+        "review_gate",
+        "evidence_gate"
+      ]
+    },
+    "accepted_to_released": {
+      "requires": [
+        "compliance_score",
+        "release_authorization"
+      ]
+    },
+    "any_to_blocked": {
+      "requires": [
+        "blocker_reason",
+        "remediation_plan"
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "bootstrap",
+      "title": "Bootstrap agentic standard runtime",
+      "status": "proposed",
+      "priority": "medium",
+      "owner": "project-maintainer",
+      "agent_roles": [
+        "planner",
+        "context_orchestrator"
+      ],
+      "acceptance_criteria": [
+        "Standard artifacts are generated and verified."
+      ],
+      "blockers": [],
+      "context_bundle_ref": "_grimoire-output/context/bootstrap/context-bundle.yaml",
+      "decision_trace_ref": "_grimoire-output/decisions/bootstrap/decision-trace.yaml",
+      "evidence_pack_ref": "_grimoire-output/evidence/bootstrap/evidence-pack.md",
+      "remediation_ref": "_grimoire/standard/remediation-plan.yaml"
+    },
+    {
+      "task_id": "kb-index",
+      "title": "Indexer la base de connaissances externe",
+      "status": "proposed",
+      "priority": "medium",
+      "owner": "project-maintainer",
+      "agent_roles": [
+        "planner",
+        "context_orchestrator"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "verify-failclosed",
+      "title": "Verify fail-closed sur capability-map",
+      "status": "ready",
+      "priority": "high",
+      "owner": "qa",
+      "agent_roles": [
+        "qa",
+        "planner"
+      ],
+      "acceptance_criteria": [
+        "verify retourne non-zéro si un pattern requis manque"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "mcp-bridge",
+      "title": "Bridge MCP pour Claude Desktop",
+      "status": "ready",
+      "priority": "medium",
+      "owner": "dev",
+      "agent_roles": [
+        "dev"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "mem-weaviate",
+      "title": "Migration mémoire Weaviate (depuis qdrant)",
+      "status": "in_progress",
+      "priority": "high",
+      "owner": "dev",
+      "agent_roles": [
+        "dev",
+        "memory_keeper"
+      ],
+      "evidence_pack_ref": "_grimoire-output/evidence/mem-weaviate/evidence-pack.md",
+      "blockers": []
+    },
+    {
+      "task_id": "obs-graph",
+      "title": "Observatory — export du graphe d'agents",
+      "status": "in_progress",
+      "priority": "medium",
+      "owner": "dev",
+      "agent_roles": [
+        "dev"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "release-gates",
+      "title": "Release gates v3.17",
+      "status": "blocked",
+      "priority": "high",
+      "owner": "dev",
+      "agent_roles": [
+        "dev",
+        "qa"
+      ],
+      "blockers": [
+        "compliance_score sous le seuil governed"
+      ],
+      "remediation_ref": "_grimoire/standard/remediation-plan.yaml"
+    },
+    {
+      "task_id": "adv-review-cli",
+      "title": "Revue adversariale du fix CLI (marqueurs [OK])",
+      "status": "review",
+      "priority": "medium",
+      "owner": "challenger",
+      "agent_roles": [
+        "challenger",
+        "qa"
+      ],
+      "evidence_pack_ref": "_grimoire-output/evidence/cli-markers/evidence-pack.md",
+      "decision_trace_ref": "_grimoire-output/decisions/cli-markers/decision-trace.yaml",
+      "blockers": []
+    },
+    {
+      "task_id": "governed-policies",
+      "title": "Profil governed — politiques par environnement",
+      "status": "accepted",
+      "priority": "medium",
+      "owner": "planner",
+      "agent_roles": [
+        "planner"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "rel-3160",
+      "title": "v3.16 — purge BMAD + standard agentique gouverné",
+      "status": "released",
+      "priority": "high",
+      "owner": "project-maintainer",
+      "agent_roles": [
+        "dev",
+        "qa"
+      ],
+      "blockers": []
+    },
+    {
+      "task_id": "scaffold-v2v3",
+      "title": "Scaffold migration v2 → v3",
+      "status": "archived",
+      "priority": "low",
+      "owner": "dev",
+      "agent_roles": [
+        "dev"
+      ],
+      "blockers": []
+    }
+  ]
+}

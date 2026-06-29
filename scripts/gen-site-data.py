@@ -20,11 +20,18 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+
+def _slug(name: str) -> str:
+    """Slug ASCII kebab-case pour un nom de projet."""
+    s = re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-")
+    return s or "projet"
 
 
 def _num(s: object) -> float | int:
@@ -1203,49 +1210,95 @@ def _freshness(act: dict, ins: dict) -> dict:
     return out
 
 
-def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Generate web/ data layer from the project")
-    ap.add_argument("--root", type=Path, default=Path.cwd())
-    ap.add_argument("--out-dir", type=Path, default=None, help="where to write the JSON (default: <root>/web/data)")
-    ap.add_argument("--with-tests", action="store_true", help="run pytest --collect-only for the exact test count")
-    args = ap.parse_args(argv)
-    root = args.root.resolve()
+def _write(out_dir: Path, name: str, data: dict) -> None:
+    (out_dir / name).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    out_dir = (args.out_dir.resolve() if args.out_dir else root / "web" / "data")
+
+def build_project(root: Path, out_dir: Path, with_tests: bool) -> dict:
+    """Génère tous les JSON d'un projet dans out_dir et renvoie une fiche d'en-tête (portefeuille)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    meta = build_meta(root, args.with_tests)
-    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"[OK] web/data/meta.json — v{meta['version']} · {meta['counts']}")
-
+    meta = build_meta(root, with_tests)
+    _write(out_dir, "meta.json", meta)
     board = build_taskboard(root)
     if board is not None:
-        (out_dir / "taskboard.json").write_text(json.dumps(board, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tag = "demo" if board["is_demo"] else "live"
-        print(f"[OK] web/data/taskboard.json — {tag} · {len(board['states'])} états · {len(board['tasks'])} tâches · {board['source']}")
-
-    obs = build_observatory(root)
-    if obs is not None:
-        (out_dir / "observatory.json").write_text(json.dumps(obs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tag = "demo" if obs.get("is_demo") else "live"
-        print(f"[OK] web/data/observatory.json — {tag} · {len(obs.get('traces', []))} traces · {len(obs.get('agents', []))} agents · {len(obs.get('relationships', []))} relations")
-
+        _write(out_dir, "taskboard.json", board)
+    obs = build_observatory(root) or {}
+    _write(out_dir, "observatory.json", obs)
     act = build_activity(root)
-    (out_dir / "activity.json").write_text(json.dumps(act, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    g = act.get("git", {})
-    print(f"[OK] web/data/activity.json — {g.get('commits_total', 0)} commits · {g.get('commits_7d', 0)} cette semaine · {len(act.get('pulls', []))} PRs · {g.get('contributor_count', 0)} contributeurs")
-
+    _write(out_dir, "activity.json", act)
     ins = build_insights(root)
     ins["efficiency"] = _efficiency(meta, act, ins)
     ins["freshness"] = _freshness(act, ins)
-    (out_dir / "insights.json").write_text(json.dumps(ins, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    code = ins.get("code", {})
-    print(f"[OK] web/data/insights.json — {len(ins.get('bench', {}).get('latest', []))} agents bench · {ins.get('routing', {}).get('samples', 0)} routings · {code.get('loc', 0)} LOC · {code.get('tags_total', 0)} tags")
-
+    _write(out_dir, "insights.json", ins)
     mem = build_memory(root)
-    (out_dir / "memory.json").write_text(json.dumps(mem, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    b = mem.get("backend", {})
-    print(f"[OK] web/data/memory.json — backend {b.get('active', '?')} · {mem.get('store', {}).get('total_entries', 0)} entrées · {len(mem.get('graph', {}).get('edges', []))} liens · extras {sum(1 for v in b.get('extras_installed', {}).values() if v)}/5")
+    _write(out_dir, "memory.json", mem)
+    # Fiche d'en-tête pour la vue portefeuille
+    af = (ins.get("governance", {}).get("antifragile") or {})
+    return {
+        "version": meta.get("version"),
+        "is_demo": obs.get("is_demo", True),
+        "commits_total": act.get("git", {}).get("commits_total", 0),
+        "commits_7d": act.get("git", {}).get("commits_7d", 0),
+        "total_cost_usd": obs.get("metrics", {}).get("total_cost_usd", 0),
+        "traces": len(obs.get("traces", [])),
+        "agents": len(obs.get("agent_ids", []) or obs.get("agents", [])),
+        "ci_status": act.get("tracking", {}).get("ci_status", "unknown"),
+        "antifragile": af.get("score"),
+        "antifragile_level": af.get("level"),
+        "memory_backend": mem.get("backend", {}).get("active"),
+        "memory_entries": mem.get("store", {}).get("total_entries", 0),
+        "contradictions": mem.get("counts_by_type", {}).get("contradictions", 0),
+        "coverage": (act.get("tracking", {}).get("coverage", {}) or {}).get("percent"),
+        "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+    }
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description="Generate web/ data layer from the project(s)")
+    ap.add_argument("--root", type=Path, default=Path.cwd())
+    ap.add_argument("--out-dir", type=Path, default=None, help="where to write the JSON (default: <root>/web/data)")
+    ap.add_argument("--with-tests", action="store_true", help="run pytest --collect-only for the exact test count")
+    ap.add_argument("--registry", type=Path, default=None,
+                    help="JSON list [{name, path}] de projets → mode multi-projets (cockpit local)")
+    ap.add_argument("--name", default=None, help="nom du projet (mono-projet)")
+    args = ap.parse_args(argv)
+    root = args.root.resolve()
+    out_dir = (args.out_dir.resolve() if args.out_dir else root / "web" / "data")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Liste de projets : registre (multi) ou projet unique (mono / vitrine)
+    if args.registry and args.registry.is_file():
+        try:
+            projects = json.loads(args.registry.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            projects = []
+    else:
+        projects = [{"name": args.name or root.name, "path": str(root)}]
+
+    heads = []
+    for i, proj in enumerate(projects):
+        proot = Path(proj.get("path", root)).resolve()
+        name = proj.get("name") or proot.name
+        slug = _slug(proj.get("slug") or name)
+        pdir = out_dir / "projects" / slug
+        head = build_project(proot, pdir, args.with_tests)
+        head.update(slug=slug, name=name, path=str(proot))
+        heads.append(head)
+        # Le projet primaire alimente aussi le flat data/ (rétro-compat vitrine mono-projet)
+        if i == 0:
+            for f in pdir.glob("*.json"):
+                shutil.copy2(f, out_dir / f.name)
+        print(f"[OK] {slug} — v{head['version']} · {head['commits_total']} commits · "
+              f"antifragile {head.get('antifragile')} · mémoire {head.get('memory_backend')}")
+
+    index = {
+        "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "primary": heads[0]["slug"] if heads else None,
+        "multi": len(heads) > 1,
+        "projects": heads,
+    }
+    _write(out_dir, "projects.json", index)
+    print(f"[OK] web/data/projects.json — {len(heads)} projet(s)" + (" · multi" if index["multi"] else " · mono"))
     return 0
 
 

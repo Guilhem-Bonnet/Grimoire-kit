@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-06-29T17:47:32+00:00",
+  "primary": "grimoire-kit",
+  "multi": false,
+  "projects": [
+    {
+      "version": "3.16.0",
+      "is_demo": true,
+      "commits_total": 349,
+      "commits_7d": 63,
+      "total_cost_usd": 0.27264,
+      "traces": 18,
+      "agents": 7,
+      "ci_status": "success",
+      "antifragile": 42.0,
+      "antifragile_level": "ROBUST",
+      "memory_backend": "qdrant",
+      "memory_entries": 141,
+      "contradictions": 4,
+      "coverage": 65.92,
+      "generated_at": "2026-06-29T17:47:32+00:00",
+      "slug": "grimoire-kit",
+      "name": "Grimoire Kit",
+      "path": "/mnt/Travail/Projets/Dev/Grimoire-kit-agentic-standard-bridge"
+    }
+  ]
+}

@@ -131,13 +131,16 @@
   let OBS = null, META = null, ACT = null, INS = null, filter = null;
   const NEIGH = {};
 
-  function getJSON(path) { return fetch(path, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null); }
+  // Multi-projets (cockpit local) : ?project=<slug> → data/projects/<slug>/ ; sinon flat data/ (vitrine mono).
+  const _slug = new URLSearchParams(location.search).get('project');
+  const DATA = _slug ? 'data/projects/' + _slug.replace(/[^a-z0-9-]/gi, '') + '/' : 'data/';
+  function getJSON(path) { return fetch(DATA + path, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null); }
 
   Promise.all([
-    getJSON('data/observatory.json'),
-    getJSON('data/meta.json'),
-    getJSON('data/activity.json'),
-    getJSON('data/insights.json'),
+    getJSON('observatory.json'),
+    getJSON('meta.json'),
+    getJSON('activity.json'),
+    getJSON('insights.json'),
   ]).then(([obs, meta, act, ins]) => {
     OBS = obs; META = meta; ACT = act; INS = ins;
     if (!obs) { const e = $('obs-empty'); if (e) e.style.display = 'block'; const b = $('obs-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; }
