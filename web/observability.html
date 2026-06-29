@@ -5,39 +5,139 @@
   <title>Observatory — Grimoire Kit</title>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Observatory — Grimoire Kit"/>
-  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
+  <meta property="og:description" content="Observabilité du runtime agentique Grimoire Kit : traces, spans, coût multi-LLM, constellation d'agents, gouvernance antifragile, économie RTK et santé projet. Tout est tracé, vérifiable, rejouable."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/observability.html"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Observabilité du runtime Grimoire Kit : constellation d'agents, relations pondérées, types d'événements, sessions et trace log — depuis observatory.py (réel en local, snapshot sur la vitrine)." />
+  <meta name="description" content="Observatory Grimoire Kit — runtime observé : performance, coût multi-LLM, chaînes causales, gouvernance, économie de tokens et santé projet, depuis observatory.py (réel en local, snapshot démo sur la vitrine)."/>
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
   <style>
     body { padding-top: 56px; }
-    #hero { padding: 64px 0 14px; }
-    #hero .container, #obs .container { max-width: var(--max-w); }
-    .hero-sub { color: var(--ink-soft); margin-top: 12px; font-size: 0.98rem; max-width: 620px; line-height: var(--lh-body); }
-    .obs-badge { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
-    .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .wrap { max-width: var(--max-w); margin: 0 auto; padding: 0 var(--gap); position: relative; z-index: 1; }
 
-    /* blueprint surface */
-    .obs-surface { position: relative; overflow: hidden; border-top: 1px solid var(--line); background: var(--elev-1); padding: 26px 0 80px; }
-    .obs-surface::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    /* ── HERO ── */
+    #hero { padding: 64px 0 10px; }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 0.98rem; max-width: 640px; line-height: var(--lh-body); }
+    .hero-meta { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+    .obs-badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 5px 11px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .obs-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    #obs-version { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em; color: var(--ink-muted); }
+
+    /* ── Bands & section headers ── */
+    .band { position: relative; padding: 30px 0 56px; border-top: 1px solid var(--line); background: var(--elev-1); overflow: hidden; }
+    .band.alt { background: var(--bg); }
+    .band::before { content: ''; position: absolute; inset: 0; pointer-events: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
-    #obs .container { position: relative; z-index: 1; }
+    .band .wrap { position: relative; z-index: 1; }
+    .band-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 26px 0 6px; flex-wrap: wrap; }
+    .band-head h2 { font-size: clamp(1.4rem, 2.2vw, 1.85rem); }
+    .band-head .lead { font-size: 0.84rem; color: var(--ink-soft); max-width: 480px; line-height: 1.55; margin-top: 10px; }
+    .band-divider { height: 1px; background: var(--accent); width: 0%; margin: 16px 0 24px; transition: width var(--dur-draw) var(--ease-out); }
+    .band-divider.drawn { width: 100%; }
 
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 0 0 22px; }
-    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: var(--r-md); padding: 16px 18px; }
-    .kpi-lbl { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
-    .kpi-val { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 600; color: var(--ink); line-height: 1; }
+    /* ── Status tags (honnêteté des données) ── */
+    .status-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--line); color: var(--ink-muted); white-space: nowrap; }
+    .status-tag .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .status-tag.snapshot { color: var(--accent); border-color: var(--accent-dim); }
+    .status-tag.real { color: var(--data-green); border-color: rgba(52,211,153,0.25); }
+    .status-tag.private { color: var(--ink-muted); border-color: var(--line); }
 
-    .panel { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px; }
-    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: baseline; }
-    .panel-head .sub { color: var(--ink-muted); }
+    /* ── Panels ── */
+    .panel { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px; }
+    .band.alt .panel { background: var(--elev-1); }
+    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .panel-head .sub { color: var(--ink-muted); font-size: 0.58rem; }
+    .subhead { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 10px; }
 
-    /* graph + side */
+    .row { display: grid; gap: 14px; margin-bottom: 14px; }
+    .row.g2 { grid-template-columns: 1fr 1fr; }
+    .row.s-1-13 { grid-template-columns: 1fr 1.3fr; }
+    .row.s-14-1 { grid-template-columns: 1.4fr 1fr; }
+    .row.s-13-1 { grid-template-columns: 1.3fr 1fr; }
+    @media (max-width: 920px) { .row.g2, .row.s-1-13, .row.s-14-1, .row.s-13-1 { grid-template-columns: 1fr; } }
+
+    /* ── KPI strip ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: var(--r-md); padding: 15px 16px; }
+    .band.alt .kpi { background: var(--elev-1); }
+    .kpi-lbl { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
+    .kpi-val { font-family: var(--font-mono); font-size: 1.7rem; font-weight: 600; color: var(--ink); line-height: 1; }
+    @media (max-width: 920px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 560px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    /* ── Ministat grids ── */
+    .ministats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .ministat { background: var(--elev-2); padding: 13px 15px; display: flex; flex-direction: column; gap: 7px; }
+    .band.alt .ministat { background: var(--elev-1); }
+    .ms-lbl { font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
+    .ms-val { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 600; color: var(--ink); line-height: 1; }
+
+    /* ── Bars ── */
+    .bar-row { display: grid; grid-template-columns: 116px 1fr 52px; align-items: center; gap: 10px; margin-bottom: 9px; }
+    .bar-lbl { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { height: 8px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; transition: width 700ms var(--ease-forge); }
+    .bar-val { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); text-align: right; }
+
+    /* ── Chips & legends ── */
+    .chip { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.03em; color: var(--ink-soft); background: var(--elev-3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .leg { display: flex; flex-direction: column; gap: 8px; }
+    .leg-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 9px; }
+    .leg-dot { width: 9px; height: 9px; border-radius: 2px; }
+    .leg-lbl { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
+    .leg-val { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); }
+    .leg-inline { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); margin-right: 12px; }
+
+    /* ── Donut / gauge / radar / line ── */
+    .donut-svg { width: 140px; height: 140px; }
+    .donut-seg { transition: stroke-dasharray 800ms var(--ease-forge); }
+    .donut-c1 { font-family: var(--font-mono); font-size: 17px; font-weight: 600; fill: var(--ink); }
+    .donut-c2 { font-family: var(--font-mono); font-size: 7px; letter-spacing: 0.12em; fill: var(--ink-muted); }
+    .gauge-svg { width: 100%; max-width: 200px; }
+    .gauge-val { transition: stroke-dashoffset 900ms var(--ease-forge); }
+    .gauge-num { font-family: var(--font-mono); font-size: 26px; font-weight: 600; }
+    .gauge-sub { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; fill: var(--ink-muted); }
+    .radar-svg { width: 100%; max-width: 300px; }
+    .radar-lbl { font-family: var(--font-mono); font-size: 8.5px; fill: var(--ink-soft); }
+    .radar-val { font-family: var(--font-mono); font-size: 8.5px; font-weight: 600; fill: var(--accent); }
+    .line-svg { width: 100%; height: auto; display: block; }
+
+    /* ── Column chart ── */
+    .cols { display: flex; align-items: flex-end; gap: 4px; height: 96px; }
+    .col-item { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+    .col-bar-wrap { width: 100%; height: 100%; display: flex; align-items: flex-end; }
+    .col-bar { width: 100%; min-height: 2px; border-radius: 2px 2px 0 0; position: relative; transition: height 700ms var(--ease-forge); }
+    .col-bar:hover { filter: brightness(1.25); }
+    .col-tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 6px; background: var(--elev-3); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 4px 8px; font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-soft); white-space: nowrap; z-index: 5; }
+    .col-bar:hover .col-tip { display: block; }
+    .col-lbls { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.5rem; color: var(--ink-muted); margin-top: 6px; }
+
+    /* ── Perf: SLO + slowest ── */
+    .slo-row { margin-bottom: 14px; }
+    .slo-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+    .slo-lbl { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.06em; color: var(--ink-soft); text-transform: uppercase; }
+    .slo-val { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; }
+    .slo-tgt { color: var(--ink-muted); font-weight: 400; font-size: 0.6rem; }
+    .slo-track { position: relative; height: 8px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .slo-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; transition: width 700ms var(--ease-forge); }
+    .slo-mark { position: absolute; top: -2px; bottom: -2px; width: 1.5px; background: var(--ink); opacity: 0.5; }
+    .slow-row { display: grid; grid-template-columns: 38px 1.4fr 1.2fr 56px 50px; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); position: relative; }
+    .slow-row:last-child { border-bottom: none; }
+    .slow-bar { height: 4px; border-radius: 2px; min-width: 4px; }
+    .slow-lbl { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .slow-meta { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .slow-dur, .slow-cost { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); text-align: right; }
+
+    /* ── LLM ── */
+    .llm-center { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+    .llm-prov-note { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); margin-top: 12px; line-height: 1.5; }
+
+    /* ── Constellation ── */
     .graph-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 14px; margin-bottom: 14px; }
-    .graph-panel { padding: 6px 6px 10px; }
+    @media (max-width: 920px) { .graph-grid { grid-template-columns: 1fr; } }
+    .graph-panel { padding: 6px 6px 12px; }
     #graph { width: 100%; display: block; }
     #graph .edge { fill: none; stroke: var(--ink-soft); opacity: 0.16; transition: opacity 200ms, stroke-width 200ms; }
     #graph.focus .edge { opacity: 0.05; }
@@ -46,18 +146,14 @@
     #graph .gnode text { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-soft); pointer-events: none; }
     #graph.focus .gnode:not(.lit):not(.src) { opacity: 0.25; }
     #graph .gnode.src circle { stroke: var(--ink); stroke-width: 2; }
+    .graph-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; flex-wrap: wrap; }
+    .graph-stats { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .graph-stats b { color: var(--ink-soft); }
     .side-col { display: flex; flex-direction: column; gap: 14px; }
-    @media (max-width: 920px) { .graph-grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: 1fr 1fr; } }
 
-    .bar-row { display: grid; grid-template-columns: 96px 1fr 36px; align-items: center; gap: 10px; margin-bottom: 9px; }
-    .bar-lbl { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .bar-track { height: 8px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
-    .bar-fill { height: 100%; border-radius: 999px; transition: width 600ms var(--ease-forge); }
-    .bar-val { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); text-align: right; }
-
-    /* agent roster */
-    .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; margin-bottom: 14px; }
-    .ag-card { background: var(--elev-2); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim); border-radius: var(--r-md); padding: 12px 14px; cursor: pointer; transition: border-color 180ms, box-shadow 180ms, opacity 180ms; }
+    /* ── Roster ── */
+    .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+    .ag-card { background: var(--elev-3); border: 1px solid var(--line); border-left: 2px solid var(--accent-dim); border-radius: var(--r-md); padding: 12px 14px; cursor: pointer; transition: border-color 180ms, box-shadow 180ms, opacity 180ms; }
     .ag-card:hover, .ag-card.lit { border-color: var(--accent); box-shadow: 0 0 24px -10px var(--accent-glow); }
     .ag-card.src { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 28px -8px var(--accent-glow); }
     .roster.focus .ag-card:not(.lit):not(.src) { opacity: 0.3; }
@@ -66,64 +162,198 @@
     .ag-tr { font-family: var(--font-mono); font-size: 0.62rem; color: var(--accent); }
     .ag-persona { font-size: 0.68rem; color: var(--ink-muted); margin: 2px 0 8px; }
     .ag-caps { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ag-cap { font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.03em; color: var(--ink-soft); background: var(--elev-3); border-radius: 3px; padding: 1px 6px; }
+    .ag-cap { font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.03em; color: var(--ink-soft); background: var(--elev-2); border-radius: 3px; padding: 1px 6px; }
 
+    /* ── Chaînes causales (waterfall) ── */
+    .chains { display: flex; flex-direction: column; gap: 14px; }
+    .chain { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; background: var(--elev-3); }
+    .band.alt .chain { background: var(--elev-2); }
+    .chain-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .chain-id { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); letter-spacing: 0.06em; }
+    .chain-err { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.08em; color: var(--data-red); border: 1px solid var(--data-red); border-radius: 2px; padding: 1px 6px; }
+    .chain-meta { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); margin-left: auto; }
+    .wf-row { display: grid; grid-template-columns: 1.7fr 0.7fr 2.4fr 1fr 56px; align-items: center; gap: 10px; padding: 4px 0; }
+    .wf-lbl { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .wf-tool { color: var(--ink); }
+    .wf-agent { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .wf-track { position: relative; height: 14px; }
+    .wf-bar { position: absolute; left: 0; top: 1px; height: 12px; border-radius: 2px; opacity: 0.85; transition: width 700ms var(--ease-forge); display: flex; align-items: center; justify-content: flex-end; }
+    .wf-bar.err { outline: 1px solid var(--data-red); }
+    .wf-retry { font-family: var(--font-mono); font-size: 0.5rem; color: var(--bg); padding-right: 4px; }
+    .wf-model { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); text-align: right; white-space: nowrap; }
+    .wf-dur { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); text-align: right; }
+    @media (max-width: 720px) { .wf-row { grid-template-columns: 1.6fr 2fr 50px; } .wf-agent, .wf-model { display: none; } }
+
+    /* ── Trace log ── */
     .tracelog { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.66rem; }
-    .tracelog th { text-align: left; color: var(--ink-muted); font-weight: 500; letter-spacing: 0.06em; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 0.56rem; }
+    .tracelog th { text-align: left; color: var(--ink-muted); font-weight: 500; letter-spacing: 0.06em; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 0.54rem; }
     .tracelog td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
     .tracelog tr:hover td { background: rgba(255,255,255,0.02); }
-    .ev-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.56rem; letter-spacing: 0.04em; border: 1px solid var(--line); }
+    .ev-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.54rem; letter-spacing: 0.04em; border: 1px solid var(--line); }
     .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-    .filt { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.04em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--elev-2); color: var(--ink-soft); cursor: pointer; }
+    .filt { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.04em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--elev-3); color: var(--ink-soft); cursor: pointer; transition: all 150ms; }
     .filt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-    /* causal chains (span waterfalls) */
-    .chain { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 10px; background: var(--elev-2); }
-    .chain:last-child { margin-bottom: 0; }
-    .chain-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; font-family: var(--font-mono); font-size: 0.62rem; flex-wrap: wrap; }
-    .chain-id { color: var(--accent); letter-spacing: 0.06em; }
-    .chain-root { color: var(--ink); }
-    .chain-meta { margin-left: auto; color: var(--ink-muted); }
-    .span-row { display: grid; grid-template-columns: 210px 1fr 168px; align-items: center; gap: 10px; padding: 3px 0; }
-    .span-lbl { font-family: var(--font-mono); font-size: 0.63rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .span-lbl .op { color: var(--ink-soft); } .span-lbl .ag { color: var(--ink-muted); }
-    .span-track { position: relative; height: 13px; background: var(--elev-3); border-radius: 3px; overflow: hidden; }
-    .span-bar { position: absolute; top: 0; height: 100%; border-radius: 3px; background: var(--accent); opacity: 0.85; transition: width 500ms var(--ease-forge); }
-    .span-bar.err { background: var(--data-red); }
-    .span-num { font-family: var(--font-mono); font-size: 0.57rem; color: var(--ink-muted); text-align: right; white-space: nowrap; }
-    .span-num .err { color: var(--data-red); } .span-num .rty { color: var(--data-amber); }
-    @media (max-width: 860px) { .span-row { grid-template-columns: 130px 1fr 96px; } }
+    /* ── Antifragile ── */
+    .af-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: 24px; align-items: center; }
+    @media (max-width: 920px) { .af-grid { grid-template-columns: 1fr; } }
+    .af-left { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+    .af-level { font-family: var(--font-mono); font-size: 0.82rem; letter-spacing: 0.14em; color: var(--accent); font-weight: 600; }
+    .af-evidence { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .af-summary { font-size: 0.78rem; color: var(--ink-soft); line-height: 1.6; max-width: 320px; margin-top: 6px; }
+    .af-radar-wrap { display: flex; justify-content: center; }
+
+    /* ── Bench ── */
+    .bench-top { display: flex; align-items: flex-end; gap: 18px; margin-bottom: 16px; }
+    .bh-num { font-family: var(--font-mono); font-size: 2.2rem; font-weight: 600; color: var(--data-cyan); line-height: 1; }
+    .bh-delta { font-family: var(--font-mono); font-size: 0.72rem; padding-bottom: 6px; }
+    .bh-delta.up { color: var(--data-green); }
+    .bh-delta.down { color: var(--data-red); }
+    .bench-row { display: grid; grid-template-columns: 96px 1fr 32px 60px 56px; align-items: center; gap: 10px; padding: 5px 0; }
+    .bench-ag { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); }
+    .bench-score { font-family: var(--font-mono); font-size: 0.64rem; color: var(--data-cyan); text-align: right; }
+    .bench-ac { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); text-align: right; }
+    .bench-fail { font-family: var(--font-mono); font-size: 0.56rem; text-align: right; }
+    @media (max-width: 560px) { .bench-row { grid-template-columns: 70px 1fr 28px; } .bench-ac, .bench-fail { display: none; } }
+
+    /* ── Routing ── */
+    .rt-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .rt-line .ms-lbl { min-width: 64px; }
+
+    /* ── RTK ── */
+    .rtk-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 28px; align-items: center; }
+    @media (max-width: 920px) { .rtk-grid { grid-template-columns: 1fr; } }
+    .rtk-hero { display: flex; flex-direction: column; gap: 14px; }
+    .rtk-big { font-family: var(--font-mono); font-size: clamp(3rem, 7vw, 4.6rem); font-weight: 600; color: var(--accent); line-height: 0.95; }
+    .rtk-big small { font-size: 0.9rem; color: var(--ink-soft); display: block; letter-spacing: 0.1em; margin-top: 8px; }
+    .rtk-pair { display: flex; gap: 28px; }
+    .rtk-pair div span { display: block; }
+    .rtk-pv { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 600; color: var(--ink); }
+    .rtk-pl { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; color: var(--ink-muted); text-transform: uppercase; margin-top: 4px; }
+
+    /* ── Activity ── */
+    .act-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; }
+    @media (max-width: 920px) { .act-grid { grid-template-columns: 1fr; } }
+    .pr-row { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--line); text-decoration: none; }
+    .pr-row:last-child { border-bottom: none; }
+    .pr-num { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); }
+    .pr-title { font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pr-row:hover .pr-title { color: var(--ink); }
+    .pr-state { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.06em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--data-green); color: var(--data-green); }
+    .rel-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .rel-row:last-child { border-bottom: none; }
+    .rel-row.latest .rel-tag { color: var(--accent); }
+    .rel-tag { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
+    .rel-date { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+
+    /* ── CI / tracked ── */
+    .tracked-grid { display: grid; grid-template-columns: 1fr 0.9fr 1fr; gap: 18px; align-items: center; }
+    @media (max-width: 720px) { .tracked-grid { grid-template-columns: 1fr; } }
+    .ci-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .ci-row:last-child { border-bottom: none; }
+    .ci-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .ci-name { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
+    .ci-concl { font-family: var(--font-mono); font-size: 0.56rem; margin-left: auto; }
+    .gauge-center { display: flex; justify-content: center; }
+
+    /* ── Signals ── */
+    .sig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 720px) { .sig-grid { grid-template-columns: 1fr; } }
+    .cp-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+    .cp-num { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; color: var(--data-violet); }
+    .cp-sub { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); }
+
+    /* ── Private (PRIVÉ) panel ── */
+    .private-panel { display: flex; align-items: center; gap: 18px; border-style: dashed; }
+    .private-icon { width: 34px; height: 34px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; }
+    .private-body h3 { font-size: 0.86rem; margin-bottom: 4px; }
+    .private-body p { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.5; font-family: var(--font-mono); }
 
     #obs-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
 <body>
+<a href="#main" class="skip-link">Aller au contenu</a>
 <div id="scroll-progress" aria-hidden="true"></div>
 <nav id="forge-nav" aria-label="Navigation principale"></nav>
 
 <main id="main">
+  <!-- ════════════ HERO ════════════ -->
   <section id="hero">
-    <div class="container">
-      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-02</span> · OBSERVABILITY</div>
+    <div class="wrap">
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-02</span> · OBSERVATORY</div>
       <h1 class="grad-text reveal" data-delay="60">Le runtime, observé.</h1>
       <p class="hero-sub reveal" data-delay="120">
-        Chaque action, décision, handoff et checkpoint est tracé. Cette constellation est générée par
+        Chaque action, décision, span et coût est tracé, hashé, rejouable. Cette vue est générée par
         <code>observatory.py</code> à partir de la trace du projet — <strong>réelle en local</strong>,
-        snapshot représentatif sur la vitrine. Survolez un agent pour suivre ses relations.
+        snapshot représentatif sur la vitrine. L'observabilité n'est pas un add-on : c'est le contrat du runtime.
       </p>
-      <span class="obs-badge reveal" data-delay="160" id="obs-badge"><span class="dot"></span>CHARGEMENT…</span>
+      <div class="hero-meta reveal" data-delay="160">
+        <span class="obs-badge" id="obs-badge"><span class="dot"></span>CHARGEMENT…</span>
+        <span id="obs-version">grimoire-kit</span>
+      </div>
     </div>
+    <div id="obs-empty" class="wrap">Données runtime indisponibles (<code>data/observatory.json</code>). Lance <code>grimoire observatory export</code> dans un projet instrumenté.</div>
   </section>
 
-  <section class="obs-surface" id="obs">
-    <div class="container">
-      <div class="kpi-grid reveal" id="kpis"></div>
-      <div class="kpi-grid reveal" data-delay="40" id="metrics" style="display:none"></div>
+  <!-- ════════════ BAND A — RUNTIME VIVANT ════════════ -->
+  <section class="band" id="band-runtime">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">A</span> · RUNTIME VIVANT</div>
+          <h2>Ce que fait le runtime.</h2>
+          <p class="lead">Traces, spans, coût multi-LLM, relations entre agents et chaînes causales — l'activité observée d'un projet instrumenté.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
 
+      <div class="kpi-grid reveal" id="kpis"></div>
+
+      <!-- Performance -->
+      <div class="panel reveal" style="margin-bottom:14px">
+        <div class="panel-head"><span>Performance &amp; coût</span><span class="sub">spans agrégés</span></div>
+        <div class="ministats" id="perf-stats" style="margin-bottom:16px"></div>
+        <div class="row s-1-13" style="margin-bottom:0">
+          <div>
+            <div class="subhead">Latence (ms)</div>
+            <div id="perf-latency" style="margin-bottom:18px"></div>
+            <div class="subhead">Budget d'erreur · SLO</div>
+            <div id="perf-slo"></div>
+          </div>
+          <div>
+            <div class="subhead">Spans les plus lents · anomalies</div>
+            <div id="perf-slowest"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Multi-LLM -->
+      <div class="panel reveal" id="card-llm" style="margin-bottom:14px">
+        <div class="panel-head"><span>Multi-LLM · coût &amp; concentration</span><span class="sub">risque fournisseur</span></div>
+        <div class="row s-1-13" style="margin-bottom:0">
+          <div class="llm-center">
+            <div id="llm-donut"></div>
+            <div id="llm-legend" style="flex:1;min-width:160px"></div>
+          </div>
+          <div>
+            <div class="subhead">Tokens par fournisseur</div>
+            <div id="llm-prov"></div>
+            <div class="llm-prov-note" id="llm-prov-note"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Constellation -->
       <div class="graph-grid">
         <div class="panel graph-panel reveal" data-delay="60">
           <div class="panel-head" style="padding:12px 14px 0"><span>Constellation d'agents</span><span class="sub" id="graph-sub"></span></div>
-          <svg id="graph" viewBox="0 0 640 460" aria-label="Graphe des agents et relations"></svg>
+          <svg id="graph" viewBox="0 0 640 460" aria-label="Graphe des agents et relations pondérées"></svg>
+          <div class="graph-foot">
+            <div class="graph-stats" id="graph-stats"></div>
+            <div id="graph-legend"></div>
+          </div>
         </div>
         <div class="side-col">
           <div class="panel reveal" data-delay="100"><div class="panel-head"><span>Types d'événement</span><span class="sub" id="evt-total"></span></div><div id="evt-bars"></div></div>
@@ -131,23 +361,193 @@
         </div>
       </div>
 
-      <div class="panel reveal" data-delay="110" id="chains-panel" style="display:none;margin-bottom:14px">
-        <div class="panel-head"><span>Chaînes causales — spans</span><span class="sub" id="chains-sub"></span></div>
-        <div id="chains"></div>
-      </div>
-
+      <!-- Roster -->
       <div class="panel reveal" data-delay="120" style="margin-bottom:14px">
         <div class="panel-head"><span>Agents</span><span class="sub" id="roster-sub"></span></div>
         <div class="roster" id="roster"></div>
       </div>
 
+      <!-- Chaînes causales -->
+      <div class="panel reveal" id="card-chains" style="margin-bottom:14px">
+        <div class="panel-head"><span>Chaînes causales · spans</span><span class="sub" id="chains-sub"></span></div>
+        <div class="chains" id="chains"></div>
+      </div>
+
+      <!-- Trace log -->
       <div class="panel reveal" data-delay="160">
         <div class="panel-head"><span>Trace log</span><span class="sub" id="tl-count"></span></div>
         <div class="filters" id="tl-filters"></div>
         <div style="overflow-x:auto"><table class="tracelog"><thead><tr><th>HEURE</th><th>AGENT</th><th>TYPE</th><th>SESSION</th></tr></thead><tbody id="tl-body"></tbody></table></div>
       </div>
+    </div>
+  </section>
 
-      <div id="obs-empty">Données runtime indisponibles (<code>data/observatory.json</code>). Lance <code>grimoire observatory export</code> dans un projet instrumenté.</div>
+  <!-- ════════════ BAND B — GOUVERNANCE ════════════ -->
+  <section class="band alt" id="band-gov">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">B</span> · GOUVERNANCE</div>
+          <h2>Le système se gouverne.</h2>
+          <p class="lead">Antifragilité, mémoire des contradictions et des échecs, bench par agent et routing — les signaux qui rendent le runtime auditable.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+
+      <!-- Antifragile -->
+      <div class="panel reveal" id="card-af" style="margin-bottom:14px">
+        <div class="panel-head"><span>Score antifragile</span><span class="sub">6 dimensions · preuves</span></div>
+        <div class="af-grid">
+          <div class="af-left">
+            <div id="af-gauge"></div>
+            <div class="af-level" id="af-level">—</div>
+            <div class="af-evidence" id="af-evidence"></div>
+            <p class="af-summary" id="af-summary"></p>
+          </div>
+          <div class="af-radar-wrap"><div id="af-radar"></div></div>
+        </div>
+      </div>
+
+      <!-- Bench -->
+      <div class="panel reveal" id="card-bench" style="margin-bottom:14px">
+        <div class="panel-head"><span>Bench agents · tendance</span><span class="sub" id="bench-sub"></span></div>
+        <div class="row s-1-13" style="margin-bottom:0">
+          <div>
+            <div class="bench-top"><div id="bench-headline"></div></div>
+            <div id="bench-trend"></div>
+          </div>
+          <div>
+            <div class="subhead">Dernier rapport · score par agent</div>
+            <div id="bench-latest"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g2">
+        <div class="panel reveal" id="card-mem">
+          <div class="panel-head"><span>Mémoire</span><span class="sub">Memory OS</span></div>
+          <div class="ministats" id="mem-stats" style="margin-bottom:12px"></div>
+          <div class="subhead">Backends</div>
+          <div class="chips" id="mem-backends"></div>
+        </div>
+        <div class="panel reveal" id="card-routing">
+          <div class="panel-head"><span>Routing</span><span class="sub">par complexité</span></div>
+          <div class="row s-1-13" style="margin-bottom:0;gap:18px">
+            <div class="llm-center"><div id="routing-donut"></div><div id="routing-legend" style="flex:1;min-width:120px"></div></div>
+            <div id="routing-meta"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ BAND C — PROJET & ÉCONOMIE ════════════ -->
+  <section class="band" id="band-proj">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">C</span> · PROJET &amp; ÉCONOMIE</div>
+          <h2>Ce que coûte le projet.</h2>
+          <p class="lead">Économie de tokens RTK, activité git, livraison DORA, CI &amp; couverture, code et signaux de fraîcheur. Les coûts ccusage restent privés.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+
+      <!-- RTK economy -->
+      <div class="panel reveal" id="card-rtk" style="margin-bottom:14px">
+        <div class="panel-head"><span>Économie RTK · tokens épargnés</span><span class="sub">run-tool-kit</span></div>
+        <div class="rtk-grid">
+          <div class="rtk-hero">
+            <div class="rtk-big"><span id="rtk-pct">—</span><small>D'ÉPARGNE MOYENNE SUR LES COMMANDES OUTILLÉES</small></div>
+            <div class="rtk-pair">
+              <div><span class="rtk-pv" id="rtk-saved">—</span><span class="rtk-pl">tokens épargnés</span></div>
+              <div><span class="rtk-pv" id="rtk-cmds">—</span><span class="rtk-pl">commandes</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="subhead">Tokens épargnés par mois</div>
+            <div id="rtk-trend"></div>
+            <div class="col-lbls" id="rtk-trend-lbls"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity -->
+      <div class="panel reveal" id="card-activity" style="margin-bottom:14px">
+        <div class="panel-head"><span>Activité projet</span><span class="sub" id="repo-meta"></span></div>
+        <div class="ministats" id="act-stats" style="margin-bottom:16px"></div>
+        <div class="act-grid">
+          <div>
+            <div class="subhead">Commits / jour · 30 derniers jours</div>
+            <div id="commits-chart"></div>
+          </div>
+          <div>
+            <div class="subhead">Contributeurs</div>
+            <div id="contributors" style="margin-bottom:16px"></div>
+            <div class="subhead">Pull requests · <span id="pulls-sub"></span></div>
+            <div id="pulls" style="margin-bottom:16px"></div>
+            <div class="subhead">Releases</div>
+            <div id="releases"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g2">
+        <!-- DORA -->
+        <div class="panel reveal" id="card-dora">
+          <div class="panel-head"><span>Livraison · DORA</span><span class="sub" id="dora-sub"></span></div>
+          <div class="ministats" id="dora-stats"></div>
+        </div>
+        <!-- Tracked -->
+        <div class="panel reveal" id="card-tracked">
+          <div class="panel-head"><span>Travail suivi</span><span class="sub">CI · couverture · PyPI</span></div>
+          <div class="tracked-grid">
+            <div><div class="subhead">CI</div><div id="ci-checks"></div></div>
+            <div class="gauge-center"><div id="coverage-gauge"></div></div>
+            <div><div class="subhead">Téléchargements PyPI</div><div class="ministats" id="pypi-stats"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g2">
+        <!-- Code -->
+        <div class="panel reveal" id="card-code">
+          <div class="panel-head"><span>Code</span><span class="sub">LOC · tests · churn</span></div>
+          <div class="ministats" id="code-stats" style="margin-bottom:16px"></div>
+          <div class="subhead">Fichiers les plus remaniés (churn)</div>
+          <div id="churn"></div>
+        </div>
+        <!-- Signals -->
+        <div class="panel reveal" id="card-signals">
+          <div class="panel-head"><span>Signaux</span><span class="sub">fraîcheur · pression · efficience</span></div>
+          <div class="ministats" id="fresh-stats" style="margin-bottom:16px"></div>
+          <div class="sig-grid" id="cp-block">
+            <div>
+              <div class="subhead">Pression de contexte · pic / jour</div>
+              <div class="cp-top"><span class="cp-num" id="cp-peak">—</span><span class="cp-sub" id="cp-sub"></span></div>
+              <div id="cp-chart"></div>
+            </div>
+            <div>
+              <div class="subhead">Efficience</div>
+              <div class="ministats" id="eff-stats"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PRIVÉ — ccusage jamais publié -->
+      <div class="panel private-panel reveal" id="card-private-locked">
+        <div class="private-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="6.5" rx="1" stroke="var(--ink-muted)" stroke-width="1.2"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="var(--ink-muted)" stroke-width="1.2"/></svg>
+        </div>
+        <div class="private-body">
+          <h3>Coûts ccusage — <span style="color:var(--ink-muted)">privé</span></h3>
+          <p>Coût réel par modèle, ratio de cache et fenêtre de tokens. Jamais publié sur la vitrine ; disponible en local en opt-in (<code>grimoire economy --ccusage</code>).</p>
+        </div>
+        <span class="status-tag private" style="margin-left:auto"><span class="dot"></span>PRIVÉ · NON PUBLIÉ</span>
+      </div>
     </div>
   </section>
 </main>
@@ -156,212 +556,13 @@
 
 <script src="forge-nav.js"></script>
 <script src="forge-motion.js"></script>
+<script src="forge-observatory.js"></script>
 <script>
-/* ── Observability — piloté par data/observatory.json (observatory.py export) ── */
-(function () {
-  const EVT_COLOR = {
-    ACTION: 'var(--accent)', DECISION: 'var(--data-cyan)', HANDOFF: 'var(--data-violet)',
-    CHECKPOINT: 'var(--data-green)', REMEMBER: 'var(--data-amber)', WARN: 'var(--data-amber)', ERROR: 'var(--data-red)',
-  };
-  const REL_COLOR = { handoff: 'var(--data-violet)', spec: 'var(--data-cyan)', memory: 'var(--data-amber)', escalation: 'var(--data-red)' };
-  const SVGNS = 'http://www.w3.org/2000/svg';
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
-  const evColor = (t) => EVT_COLOR[t] || 'var(--ink-soft)';
-  const relColor = (t) => REL_COLOR[t] || 'var(--accent)';
-  let DATA = null, filter = null; const NEIGH = {};
-
-  fetch('data/observatory.json', { cache: 'no-store' })
-    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-    .then(render)
-    .catch(() => { document.getElementById('obs-empty').style.display = 'block'; const b = document.getElementById('obs-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; });
-
-  function countBy(arr, key) { const m = {}; arr.forEach((x) => { const k = typeof key === 'function' ? key(x) : x[key]; if (k) m[k] = (m[k] || 0) + 1; }); return m; }
-  function bars(map, colorFn) {
-    const max = Math.max(1, ...Object.values(map));
-    return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
-      `<div class="bar-row"><span class="bar-lbl">${esc(k)}</span><span class="bar-track"><span class="bar-fill" style="width:${(v / max * 100).toFixed(0)}%;background:${colorFn ? colorFn(k) : 'var(--accent)'}"></span></span><span class="bar-val">${v}</span></div>`
-    ).join('');
-  }
-
-  function render(d) {
-    DATA = d;
-    const traces = d.traces || [], agents = d.agents || [], rels = d.relationships || [];
-    const ids = d.agent_ids || agents.map((a) => a.id);
-    const byAgent = countBy(traces, 'agent');
-
-    const badge = document.getElementById('obs-badge');
-    badge.innerHTML = `<span class="dot" style="background:${d.is_demo ? 'var(--accent)' : 'var(--data-green)'}"></span>` + (d.is_demo ? 'SNAPSHOT DÉMO' : 'LIVE · observatory.py') + ` · ${traces.length} traces`;
-
-    const kpis = [
-      ['TRACES', traces.length], ['AGENTS', ids.length],
-      ['SESSIONS', (d.sessions || []).length],
-      ["TYPES D'ÉVÉNEMENTS", (d.event_types || Object.keys(countBy(traces, 'event_type'))).length],
-    ];
-    document.getElementById('kpis').innerHTML = kpis.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
-
-    renderMetrics(d.metrics);
-    renderChains(d.spans || []);
-
-    rels.forEach((r) => { (NEIGH[r.from_agent] = NEIGH[r.from_agent] || new Set()).add(r.to_agent); (NEIGH[r.to_agent] = NEIGH[r.to_agent] || new Set()).add(r.from_agent); });
-    drawGraph(agents, ids, rels, byAgent);
-    document.getElementById('graph-sub').textContent = `${ids.length} agents · ${rels.length} relations`;
-
-    drawRoster(agents, ids, byAgent);
-
-    const byType = countBy(traces, 'event_type');
-    document.getElementById('evt-bars').innerHTML = bars(byType, evColor) || '<div class="bar-val">—</div>';
-    document.getElementById('evt-total').textContent = Object.keys(byType).length + ' types';
-
-    document.getElementById('sessions').innerHTML = (d.sessions || []).map((s) => {
-      const n = traces.filter((t) => t.session === s).length;
-      return `<div class="bar-row"><span class="bar-lbl" title="${esc(s)}">${esc(s)}</span><span class="bar-track"><span class="bar-fill" style="width:${(n / Math.max(1, traces.length) * 100).toFixed(0)}%"></span></span><span class="bar-val">${n}</span></div>`;
-    }).join('') || '<div class="bar-val">—</div>';
-    document.getElementById('sess-total').textContent = (d.sessions || []).length + ' sessions';
-
-    document.getElementById('tl-filters').innerHTML =
-      `<span class="filt active" data-f="">TOUT</span>` +
-      Object.keys(byType).map((t) => `<span class="filt" data-f="${esc(t)}" style="border-color:${evColor(t)}">${esc(t)}</span>`).join('');
-    document.querySelectorAll('#tl-filters .filt').forEach((el) => el.addEventListener('click', () => {
-      filter = el.dataset.f || null;
-      document.querySelectorAll('#tl-filters .filt').forEach((x) => x.classList.toggle('active', x === el));
-      renderLog();
-    }));
-    renderLog();
-
-    requestAnimationFrame(() => document.querySelectorAll('.reveal').forEach((el) => el.classList.add('visible')));
-  }
-
-  /* ── Constellation : agents sur ellipse, relations en chordes pondérées ── */
-  function drawGraph(agents, ids, rels, byAgent) {
-    const svg = document.getElementById('graph');
-    const W = 640, H = 460, cx = W / 2, cy = H / 2 + 6, rx = 250, ry = 168;
-    const trOf = (id) => (byAgent[id] || (agents.find((a) => a.id === id) || {}).metrics?.traces || 0);
-    const maxTr = Math.max(1, ...ids.map(trOf));
-    const POS = {};
-    ids.forEach((id, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / ids.length; POS[id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), r: 13 + trOf(id) / maxTr * 15 }; });
-
-    let edges = '', nodes = '';
-    const maxStr = Math.max(0.0001, ...rels.map((r) => r.strength || 0));
-    rels.forEach((r) => {
-      const a = POS[r.from_agent], b = POS[r.to_agent]; if (!a || !b) return;
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; const qx = mx + (cx - mx) * 0.35, qy = my + (cy - my) * 0.35;
-      const w = 1 + (r.strength || 0) / maxStr * 3.4;
-      edges += `<path class="edge" data-a="${esc(r.from_agent)}" data-b="${esc(r.to_agent)}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}" style="stroke:${relColor(r.type)};stroke-width:${w.toFixed(2)}"><title>${esc(r.from_agent)} → ${esc(r.to_agent)} · ${esc(r.type || '')} · ${r.interactions || 0}× · trust ${(r.avg_trust || 0).toFixed(2)}</title></path>`;
-    });
-    ids.forEach((id) => {
-      const p = POS[id];
-      nodes += `<g class="gnode" data-id="${esc(id)}" tabindex="0" role="button" aria-label="${esc(id)}">
-        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
-        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="var(--accent)"/>
-        <text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 14).toFixed(1)}" text-anchor="middle">${esc(id)}</text>
-      </g>`;
-    });
-    svg.innerHTML = edges + nodes;
-
-    svg.querySelectorAll('.gnode').forEach((g) => {
-      const id = g.dataset.id;
-      g.addEventListener('mouseenter', () => focus(id));
-      g.addEventListener('mouseleave', blur);
-      g.addEventListener('focus', () => focus(id));
-      g.addEventListener('blur', blur);
-    });
-  }
-
-  function focus(id) {
-    const nb = NEIGH[id] || new Set();
-    const g = document.getElementById('graph'); g.classList.add('focus');
-    g.querySelectorAll('.gnode').forEach((el) => { el.classList.toggle('src', el.dataset.id === id); el.classList.toggle('lit', nb.has(el.dataset.id)); });
-    g.querySelectorAll('.edge').forEach((p) => p.classList.toggle('lit', p.dataset.a === id || p.dataset.b === id));
-    const r = document.getElementById('roster'); r.classList.add('focus');
-    r.querySelectorAll('.ag-card').forEach((el) => { el.classList.toggle('src', el.dataset.id === id); el.classList.toggle('lit', nb.has(el.dataset.id)); });
-  }
-  function blur() {
-    const g = document.getElementById('graph'); g.classList.remove('focus');
-    g.querySelectorAll('.gnode').forEach((el) => el.classList.remove('src', 'lit'));
-    g.querySelectorAll('.edge').forEach((p) => p.classList.remove('lit'));
-    const r = document.getElementById('roster'); r.classList.remove('focus');
-    r.querySelectorAll('.ag-card').forEach((el) => el.classList.remove('src', 'lit'));
-  }
-
-  function drawRoster(agents, ids, byAgent) {
-    const roster = document.getElementById('roster');
-    const ordered = ids.slice().sort((a, b) => (byAgent[b] || 0) - (byAgent[a] || 0));
-    roster.innerHTML = ordered.map((id) => {
-      const a = agents.find((x) => x.id === id) || {};
-      const caps = (a.capabilities || []).map((c) => `<span class="ag-cap">${esc(c)}</span>`).join('');
-      const tr = byAgent[id] || (a.metrics && a.metrics.traces) || 0;
-      return `<div class="ag-card" data-id="${esc(id)}" tabindex="0">
-        <div class="ag-top"><span class="ag-id">${esc(id)}</span><span class="ag-tr">${tr} tr</span></div>
-        <div class="ag-persona">${esc(a.persona || '—')}</div>
-        <div class="ag-caps">${caps}</div></div>`;
-    }).join('');
-    document.getElementById('roster-sub').textContent = ids.length + ' agents · taille du nœud ∝ volume de traces';
-    roster.querySelectorAll('.ag-card').forEach((el) => {
-      el.addEventListener('mouseenter', () => focus(el.dataset.id));
-      el.addEventListener('mouseleave', blur);
-      el.addEventListener('focus', () => focus(el.dataset.id));
-      el.addEventListener('blur', blur);
-    });
-  }
-
-  const fmt = (n) => (n || 0).toLocaleString('fr-FR');
-
-  function renderMetrics(M) {
-    if (!M || (!M.span_count && !M.total_cost_usd)) return;
-    const tiles = [
-      ['COÛT ESTIMÉ', '$' + (M.total_cost_usd || 0).toFixed(4)],
-      ['TOKENS', fmt(M.total_tokens)],
-      ['LATENCE p50', (M.p50_latency_ms || 0) + ' ms'],
-      ['LATENCE p95', (M.p95_latency_ms || 0) + ' ms'],
-    ];
-    const el = document.getElementById('metrics');
-    el.innerHTML = tiles.map(([l, v]) => `<div class="kpi"><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div></div>`).join('');
-    el.style.display = 'grid';
-  }
-
-  function renderChains(spans) {
-    if (!spans.length) return;
-    const byTrace = {}, children = {};
-    spans.forEach((s) => { (byTrace[s.trace_id] = byTrace[s.trace_id] || []).push(s); });
-    spans.forEach((s) => { if (s.parent_span_id) (children[s.parent_span_id] = children[s.parent_span_id] || []).push(s); });
-
-    let html = '';
-    Object.keys(byTrace).forEach((tid) => {
-      const group = byTrace[tid];
-      const root = group.find((s) => !s.parent_span_id) || group[0];
-      const rootDur = Math.max(1, ...group.map((s) => s.duration_ms));
-      const totalCost = group.reduce((a, s) => a + (s.cost_usd || 0), 0);
-      const ord = [];
-      const dfs = (s, depth) => { ord.push([s, depth]); (children[s.span_id] || []).forEach((c) => dfs(c, depth + 1)); };
-      dfs(root, 0);
-      group.forEach((s) => { if (!ord.some((o) => o[0] === s)) ord.push([s, 0]); });
-      const rows = ord.map(([s, depth]) => {
-        const left = Math.min(depth * 5, 28);
-        const w = Math.max(2, (s.duration_ms / rootDur) * (100 - left));
-        const err = s.status && s.status !== 'ok';
-        const badges = (err ? '<span class="err">error</span> ' : '') + (s.retries ? `<span class="rty">${s.retries}↻</span> ` : '');
-        return `<div class="span-row">
-          <span class="span-lbl" style="padding-left:${depth * 12}px"><span class="op">${esc(s.tool)}.${esc(s.operation)}</span> <span class="ag">${esc(s.agent || '')}</span></span>
-          <span class="span-track"><span class="span-bar${err ? ' err' : ''}" style="left:${left}%;width:${w.toFixed(1)}%"></span></span>
-          <span class="span-num">${badges}${s.duration_ms} ms · $${(s.cost_usd || 0).toFixed(4)}</span>
-        </div>`;
-      }).join('');
-      html += `<div class="chain"><div class="chain-head"><span class="chain-id">trace ${esc(tid)}</span><span class="chain-root">${esc(root.tool)}.${esc(root.operation)}</span><span class="chain-meta">${ord.length} spans · ${root.duration_ms} ms · $${totalCost.toFixed(4)}</span></div>${rows}</div>`;
-    });
-    document.getElementById('chains').innerHTML = html;
-    document.getElementById('chains-sub').textContent = `${Object.keys(byTrace).length} traces · ${spans.length} spans`;
-    document.getElementById('chains-panel').style.display = 'block';
-  }
-
-  function renderLog() {
-    const traces = (DATA.traces || []).filter((t) => !filter || t.event_type === filter).slice().reverse();
-    document.getElementById('tl-count').textContent = traces.length + ' entrées';
-    document.getElementById('tl-body').innerHTML = traces.map((t) => {
-      const hh = (t.timestamp || '').replace('T', ' ').replace(/(\+\d\d:\d\d|Z)$/, '').slice(5, 16);
-      return `<tr><td>${esc(hh)}</td><td>${esc(t.agent)}</td><td><span class="ev-pill" style="color:${evColor(t.event_type)};border-color:${evColor(t.event_type)}">${esc(t.event_type)}</span></td><td style="color:var(--ink-muted)">${esc(t.session)}</td></tr>`;
-    }).join('') || '<tr><td colspan="4" style="color:var(--ink-muted)">—</td></tr>';
-  }
-})();
+  /* band dividers draw on scroll */
+  (function () {
+    const obs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); obs.unobserve(e.target); } }), { threshold: 0.6 });
+    document.querySelectorAll('.band-divider').forEach((d) => obs.observe(d));
+  })();
 </script>
 </body>
 </html>

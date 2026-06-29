@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Memory Manager — Grimoire Kit</title>
+  <meta property="og:type" content="website"/>
+  <meta property="og:title" content="Memory Manager — Grimoire Kit"/>
+  <meta property="og:description" content="La mémoire agentique de Grimoire Kit, inspectable et vérifiable : store, topologie du Memory OS, graphe de connaissances, vault browser, santé memory-lint et consoles natives. Lecture seule sur la vitrine, pilotée en cockpit local."/>
+  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/memory.html"/>
+  <meta name="twitter:card" content="summary"/>
+  <meta name="description" content="Memory Manager Grimoire Kit — voir et comprendre la mémoire agentique : 141 entrées, graphe par tags partagés, santé du store et redirections vers les consoles natives. Réel en local, snapshot démo sur la vitrine."/>
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+    .wrap { max-width: var(--max-w); margin: 0 auto; padding: 0 var(--gap); position: relative; z-index: 1; }
+
+    /* ── HERO ── */
+    #hero { padding: 64px 0 4px; }
+    .hero-sub { color: var(--ink-soft); margin-top: 14px; font-size: 0.98rem; max-width: 660px; line-height: var(--lh-body); }
+    .hero-meta { display: flex; align-items: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+    .mem-badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; padding: 5px 11px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+    .mem-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--data-green); box-shadow: 0 0 6px var(--data-green); }
+    .mem-badge.mode .dot { background: var(--accent); box-shadow: none; }
+
+    /* ── Two-faces / mode banner ── */
+    #mode-banner { padding: 14px 0 4px; }
+    .faces { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+    @media (max-width: 760px) { .faces { grid-template-columns: 1fr; } }
+    .face { background: var(--elev-1); padding: 20px 22px; position: relative; }
+    .face.active { background: var(--elev-2); }
+    .face-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .face-name { font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.08em; color: var(--ink); font-weight: 600; }
+    .face-kind { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); }
+    .face-caps { display: flex; flex-direction: column; gap: 7px; }
+    .face-cap { display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 9px; font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
+    .cap-mk { width: 13px; height: 13px; display: flex; align-items: center; justify-content: center; }
+    .face-cap.no { color: var(--ink-muted); }
+    .face-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-top: 14px; line-height: 1.6; }
+    .face.active .face-note { color: var(--accent); }
+
+    /* ── Bands & section headers ── */
+    .band { position: relative; padding: 30px 0 56px; border-top: 1px solid var(--line); background: var(--elev-1); overflow: hidden; }
+    .band.alt { background: var(--bg); }
+    .band::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48,0 L0,0 0,48' fill='none' stroke='%23FF6B3D' stroke-width='0.4' opacity='0.05'/%3E%3C/svg%3E"); }
+    .band .wrap { position: relative; z-index: 1; }
+    .band-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 26px 0 6px; flex-wrap: wrap; }
+    .band-head h2 { font-size: clamp(1.4rem, 2.2vw, 1.85rem); }
+    .band-head .lead { font-size: 0.84rem; color: var(--ink-soft); max-width: 520px; line-height: 1.55; margin-top: 10px; }
+    .band-divider { height: 1px; background: var(--accent); width: 0%; margin: 16px 0 24px; transition: width var(--dur-draw) var(--ease-out); }
+    .band-divider.drawn { width: 100%; }
+
+    /* ── Status tags (honnêteté des données) ── */
+    .status-tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--line); color: var(--ink-muted); white-space: nowrap; }
+    .status-tag .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .status-tag.snapshot { color: var(--accent); border-color: var(--accent-dim); }
+    .status-tag.real { color: var(--data-green); border-color: rgba(52,211,153,0.25); }
+    .status-tag.demo { color: var(--data-violet); border-color: rgba(167,139,250,0.3); }
+    .status-tag.private { color: var(--ink-muted); border-color: var(--line); }
+
+    /* ── Panels ── */
+    .panel { background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px; }
+    .band.alt .panel { background: var(--elev-1); }
+    .panel-head { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-soft); text-transform: uppercase; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .panel-head .sub { color: var(--ink-muted); font-size: 0.58rem; }
+    .subhead { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.1em; color: var(--ink-muted); text-transform: uppercase; margin-bottom: 10px; }
+
+    .row { display: grid; gap: 14px; margin-bottom: 14px; }
+    .row.g2 { grid-template-columns: 1fr 1fr; }
+    .row.s-13-1 { grid-template-columns: 1.3fr 1fr; }
+    .row.s-1-13 { grid-template-columns: 1fr 1.3fr; }
+    @media (max-width: 920px) { .row.g2, .row.s-13-1, .row.s-1-13 { grid-template-columns: 1fr; } }
+
+    /* ── Backend header ── */
+    .backend-strip { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    @media (max-width: 760px) { .backend-strip { grid-template-columns: 1fr; } }
+    .be-active { display: flex; align-items: center; gap: 16px; }
+    .be-glyph { width: 46px; height: 46px; flex-shrink: 0; border: 1px solid var(--accent-dim); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; background: var(--accent-soft); }
+    .be-name { font-size: 1.05rem; font-weight: 700; color: var(--ink); }
+    .be-role { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.06em; color: var(--ink-muted); text-transform: uppercase; margin-top: 3px; }
+    .extras { display: flex; flex-wrap: wrap; gap: 7px; }
+    .extra { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.04em; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-muted); }
+    .extra .led { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-muted); }
+    .extra.on { color: var(--data-green); border-color: rgba(52,211,153,0.28); }
+    .extra.on .led { background: var(--data-green); box-shadow: 0 0 5px var(--data-green); }
+
+    /* ── KPI strip ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 14px; }
+    .kpi { background: var(--elev-2); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: var(--r-md); padding: 15px 16px; }
+    .band.alt .kpi { background: var(--elev-1); }
+    .kpi-lbl { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 8px; }
+    .kpi-val { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600; color: var(--ink); line-height: 1; }
+    .kpi-val small { font-size: 0.7rem; color: var(--ink-muted); }
+    @media (max-width: 920px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 480px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    /* ── Topology layers ── */
+    .topo { display: flex; flex-direction: column; gap: 8px; }
+    .layer { display: grid; grid-template-columns: 18px 1.1fr 1.4fr auto; align-items: center; gap: 16px; padding: 13px 16px; background: var(--elev-3); border: 1px solid var(--line); border-left: 2px solid var(--ink-muted); border-radius: var(--r-md); transition: border-color 200ms, transform 200ms; }
+    .band.alt .layer { background: var(--elev-2); }
+    .layer:hover { transform: translateX(3px); }
+    .layer.on { border-left-color: var(--accent); }
+    .layer.derived { border-left-color: var(--data-cyan); }
+    .layer.empty { opacity: 0.62; }
+    .layer-idx { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); }
+    .layer-name { font-size: 0.88rem; font-weight: 600; color: var(--ink); }
+    .layer-name span { display: block; font-family: var(--font-mono); font-size: 0.56rem; font-weight: 400; color: var(--ink-muted); letter-spacing: 0.04em; margin-top: 3px; }
+    .layer-desc { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); line-height: 1.5; }
+    .layer-stat { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.06em; text-align: right; white-space: nowrap; }
+    .layer-stat b { display: block; font-size: 1.1rem; color: var(--ink); }
+    .layer.on .layer-stat b { color: var(--accent); }
+    .layer.derived .layer-stat b { color: var(--data-cyan); }
+    @media (max-width: 760px) { .layer { grid-template-columns: 16px 1fr auto; } .layer-desc { display: none; } }
+
+    /* ── Distribution by type ── */
+    .dist-grid { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 24px; align-items: center; }
+    @media (max-width: 760px) { .dist-grid { grid-template-columns: 1fr; } }
+    .donut-svg { width: 150px; height: 150px; display: block; margin: 0 auto; }
+    .donut-c1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; fill: var(--ink); }
+    .donut-c2 { font-family: var(--font-mono); font-size: 7px; letter-spacing: 0.12em; fill: var(--ink-muted); }
+    .bar-row { display: grid; grid-template-columns: 132px 1fr 64px; align-items: center; gap: 12px; margin-bottom: 11px; }
+    .bar-lbl { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .bar-lbl .sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .bar-track { height: 9px; background: var(--elev-3); border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; transition: width 800ms var(--ease-forge); }
+    .bar-val { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted); text-align: right; }
+    .dist-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-top: 8px; line-height: 1.6; }
+
+    /* ── Graph ── */
+    .graph-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; }
+    @media (max-width: 920px) { .graph-grid { grid-template-columns: 1fr; } }
+    .graph-panel { padding: 8px 8px 14px; }
+    #graph { width: 100%; display: block; cursor: grab; }
+    #graph .edge { fill: none; stroke: var(--ink-soft); opacity: 0.16; transition: opacity 200ms, stroke-width 200ms; }
+    #graph.focus .edge { opacity: 0.04; }
+    #graph.focus .edge.lit { opacity: 0.7; }
+    #graph .gnode { cursor: pointer; transition: opacity 180ms; }
+    #graph .gnode circle.halo { transition: r 180ms; }
+    #graph .gnode text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--ink-muted); pointer-events: none; transition: fill 180ms; }
+    #graph.focus .gnode:not(.lit):not(.src) { opacity: 0.22; }
+    #graph .gnode.src text, #graph .gnode.lit text { fill: var(--ink); }
+    #graph .gnode.src circle.halo { stroke: var(--ink); stroke-width: 1.6; }
+    .graph-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px 0; flex-wrap: wrap; }
+    .graph-stats { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .graph-stats b { color: var(--ink-soft); }
+    .leg-inline { display: flex; flex-wrap: wrap; gap: 12px; }
+    .leg-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .leg-item .sw { width: 9px; height: 9px; border-radius: 2px; }
+    .side-col { display: flex; flex-direction: column; gap: 14px; }
+
+    /* ── Scatter (demo) ── */
+    #scatter { width: 100%; display: block; }
+    #scatter circle { opacity: 0.7; transition: opacity 160ms; }
+    .scatter-note { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); line-height: 1.6; margin-top: 10px; }
+    .scatter-note b { color: var(--data-violet); }
+
+    /* ── Vault browser ── */
+    .vault-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .vault-search { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 9px; background: var(--elev-3); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 12px; transition: border-color 180ms; }
+    .vault-search:focus-within { border-color: var(--accent); }
+    .vault-search input { flex: 1; background: none; border: none; outline: none; color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem; }
+    .vault-search input::placeholder { color: var(--ink-muted); }
+    .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filt { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.04em; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--elev-3); color: var(--ink-soft); cursor: pointer; transition: all 150ms; display: inline-flex; align-items: center; gap: 6px; }
+    .filt .sw { width: 7px; height: 7px; border-radius: 2px; }
+    .filt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .vault-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 920px) { .vault-layout { grid-template-columns: 1fr; } }
+    .vault-list { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; max-height: 460px; overflow-y: auto; }
+    .ventry { background: var(--elev-3); padding: 12px 14px; cursor: pointer; border-left: 2px solid transparent; transition: background 150ms, border-color 150ms; }
+    .band.alt .ventry { background: var(--elev-2); }
+    .ventry:hover { background: var(--elev-2); }
+    .band.alt .ventry:hover { background: var(--elev-3); }
+    .ventry.sel { border-left-color: var(--accent); background: var(--elev-2); }
+    .ventry-top { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+    .ventry-id { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); letter-spacing: 0.04em; }
+    .type-pill { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid currentColor; }
+    .ventry-date { font-family: var(--font-mono); font-size: 0.56rem; color: var(--ink-muted); margin-left: auto; }
+    .ventry-text { font-size: 0.74rem; color: var(--ink-soft); line-height: 1.5; }
+    .vtags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .vtag { font-family: var(--font-mono); font-size: 0.52rem; color: var(--ink-muted); background: var(--elev-2); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; }
+    .band.alt .vtag { background: var(--elev-1); }
+
+    .vault-detail { background: var(--elev-3); border: 1px solid var(--line); border-radius: var(--r-md); padding: 18px 20px; position: sticky; top: 72px; align-self: start; }
+    .band.alt .vault-detail { background: var(--elev-2); }
+    .vd-empty { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted); line-height: 1.6; text-align: center; padding: 40px 10px; }
+    .vd-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .vd-id { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink); letter-spacing: 0.04em; }
+    .vd-text { font-size: 0.92rem; color: var(--ink); line-height: 1.6; margin-bottom: 16px; }
+    .vd-meta { display: flex; flex-direction: column; gap: 10px; }
+    .vd-row { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; }
+    .vd-k { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
+    .vd-v { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
+    .vd-links { display: flex; flex-direction: column; gap: 6px; }
+    .vd-link { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); }
+    .vd-link .sw { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+    .vd-link b { color: var(--ink-muted); font-weight: 400; }
+
+    /* ── Lint health ── */
+    .lint-grid { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 24px; align-items: center; }
+    @media (max-width: 760px) { .lint-grid { grid-template-columns: 1fr; } }
+    .gauge-svg { width: 100%; max-width: 190px; display: block; margin: 0 auto; }
+    .gauge-num { font-family: var(--font-mono); font-size: 25px; font-weight: 600; }
+    .gauge-sub { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; fill: var(--ink-muted); }
+    .lint-summary { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); text-align: center; margin-top: 8px; line-height: 1.6; }
+    .finding { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+    .finding:last-child { border-bottom: none; }
+    .find-sev { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; }
+    .find-sev.error { color: var(--data-red); }
+    .find-sev.warn { color: var(--data-amber); }
+    .find-sev.info { color: var(--ink-muted); }
+    .find-label { font-size: 0.76rem; color: var(--ink-soft); line-height: 1.45; }
+    .find-type { font-family: var(--font-mono); font-size: 0.54rem; color: var(--ink-muted); margin-top: 3px; letter-spacing: 0.04em; }
+    .find-count { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 600; color: var(--ink); text-align: right; }
+
+    /* ── Consoles ── */
+    .consoles-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    @media (max-width: 640px) { .consoles-grid { grid-template-columns: 1fr; } }
+    .console { display: flex; align-items: center; gap: 14px; padding: 15px 16px; background: var(--elev-3); border: 1px solid var(--line); border-radius: var(--r-md); text-decoration: none; transition: border-color 180ms, box-shadow 180ms, transform 180ms; }
+    .band.alt .console { background: var(--elev-2); }
+    .console.on:hover { border-color: var(--accent); box-shadow: 0 0 26px -12px var(--accent-glow); transform: translateY(-2px); }
+    .console.off { opacity: 0.55; cursor: not-allowed; }
+    .console-led { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--ink-muted); }
+    .console.on .console-led { background: var(--data-green); box-shadow: 0 0 6px var(--data-green); }
+    .console-body { flex: 1; min-width: 0; }
+    .console-name { font-size: 0.86rem; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+    .console-role { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.06em; color: var(--ink-muted); text-transform: uppercase; margin-top: 3px; }
+    .console-url { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-soft); margin-top: 6px; word-break: break-all; }
+    .console.off .console-url { color: var(--ink-muted); }
+    .console-arrow { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); flex-shrink: 0; }
+    .console.off .console-arrow { color: var(--ink-muted); }
+    .consoles-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-top: 14px; line-height: 1.6; }
+
+    /* ── Actions locked (cockpit hook) ── */
+    .actions-panel { border-style: dashed; }
+    .actions-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+    .actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    @media (max-width: 760px) { .actions-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 440px) { .actions-grid { grid-template-columns: 1fr; } }
+    .action { padding: 16px; background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); position: relative; opacity: 0.66; }
+    .band.alt .action { background: var(--elev-1); }
+    .action-lock { position: absolute; top: 12px; right: 12px; color: var(--ink-muted); }
+    .action-name { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 6px; }
+    .action-cmd { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
+    .action-desc { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); margin-top: 9px; line-height: 1.55; }
+    .actions-foot { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); margin-top: 16px; line-height: 1.6; }
+    .actions-foot b { color: var(--ink-soft); }
+  </style>
+</head>
+<body>
+<a href="#main" class="skip-link">Aller au contenu</a>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+  <!-- ════════════ HERO ════════════ -->
+  <section id="hero">
+    <div class="wrap">
+      <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-03</span> · MEMORY MANAGER</div>
+      <h1 class="grad-text reveal" data-delay="60">La mémoire, inspectable.</h1>
+      <p class="hero-sub reveal" data-delay="120">
+        La mémoire de Grimoire <strong>est</strong> une base de connaissances — 141 entrées : décisions,
+        learnings, contradictions, failures, handoffs. Cette page est un <em>Obsidian pour la mémoire
+        agentique</em> : on voit le contenu, ses liens, son graphe, sa santé et le backend en place.
+        <strong>Réelle en local</strong>, snapshot démo sur la vitrine. La mémoire est inspectable et vérifiable — pas une boîte noire.
+      </p>
+      <div class="hero-meta reveal" data-delay="160">
+        <span class="mem-badge"><span class="dot"></span>QDRANT · OPÉRATIONNEL</span>
+        <span class="mem-badge mode"><span class="dot"></span>LECTURE SEULE · VITRINE</span>
+        <span class="mem-badge" style="border-style:dashed">141 ENTRÉES</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ MODE BANNER — les deux visages ════════════ -->
+  <section id="mode-banner">
+    <div class="wrap">
+      <div class="faces reveal">
+        <div class="face active">
+          <div class="face-top">
+            <span class="face-name">VITRINE</span>
+            <span class="face-kind">GitHub Pages · public</span>
+          </div>
+          <div class="face-caps">
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Inspecter · browse · graphe · recherche</div>
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Redirection vers les consoles natives</div>
+            <div class="face-cap no"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M3.5 3.5l6 6M9.5 3.5l-6 6" fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round"/></svg></span>Éditer · init · upgrade · migrer</div>
+          </div>
+          <p class="face-note">Vous êtes ici. Lecture seule sur snapshot démo — aucune écriture n'est possible, ni jamais publiée.</p>
+        </div>
+        <div class="face">
+          <div class="face-top">
+            <span class="face-name">COCKPIT LOCAL</span>
+            <span class="face-kind">localhost · privé · gated</span>
+          </div>
+          <div class="face-caps">
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Tout l'inspectable, sur données réelles</div>
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Édition gouvernée via l'API Memory OS</div>
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>init · upgrade · migration (memory-sync)</div>
+          </div>
+          <p class="face-note">Lot suivant. <code>serve-site.sh</code> détecte le mode local et déverrouille le pilotage — jamais via SQL brut, jamais sur la vitrine.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ BAND A — LE STORE ════════════ -->
+  <section class="band" id="band-store">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">A</span> · LE STORE</div>
+          <h2>Ce que contient la mémoire.</h2>
+          <p class="lead">Backend détecté, extras installés, topologie du Memory OS et répartition des 141 entrées par type. La couche sémantique nous appartient ; l'admin brut du moteur reste aux consoles natives.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+
+      <!-- Backend header -->
+      <div class="backend-strip">
+        <div class="panel reveal">
+          <div class="panel-head"><span>Backend actif</span><span class="sub">détecté au démarrage</span></div>
+          <div class="be-active">
+            <div class="be-glyph" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 22 22"><path d="M11 2L19 6.5V15.5L11 20L3 15.5V6.5L11 2Z" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11" cy="11" r="3" fill="var(--accent)"/></svg>
+            </div>
+            <div>
+              <div class="be-name">Qdrant</div>
+              <div class="be-role">vector store · localhost:6333</div>
+            </div>
+            <span class="status-tag real" style="margin-left:auto"><span class="dot"></span>OPÉRATIONNEL</span>
+          </div>
+        </div>
+        <div class="panel reveal" data-delay="60">
+          <div class="panel-head"><span>Extras installés</span><span class="sub">modules disponibles</span></div>
+          <div class="extras">
+            <span class="extra on"><span class="led"></span>qdrant</span>
+            <span class="extra on"><span class="led"></span>ollama</span>
+            <span class="extra"><span class="led"></span>neo4j</span>
+            <span class="extra"><span class="led"></span>redis</span>
+            <span class="extra"><span class="led"></span>weaviate</span>
+          </div>
+          <p class="dist-note">Modules détectés : local · ollama · qdrant_local · qdrant_server. Les backends absents sont masqués des consoles.</p>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpi-grid reveal" data-delay="80">
+        <div class="kpi"><div class="kpi-lbl">ENTRÉES</div><div class="kpi-val">141</div></div>
+        <div class="kpi"><div class="kpi-lbl">TYPES</div><div class="kpi-val">5</div></div>
+        <div class="kpi"><div class="kpi-lbl">TAGS UNIQUES</div><div class="kpi-val">24</div></div>
+        <div class="kpi"><div class="kpi-lbl">ORPHELINES</div><div class="kpi-val">5</div></div>
+        <div class="kpi"><div class="kpi-lbl">BACKEND</div><div class="kpi-val" style="font-size:1.05rem">qdrant</div></div>
+        <div class="kpi"><div class="kpi-lbl">SANTÉ LINT</div><div class="kpi-val">94<small>%</small></div></div>
+      </div>
+
+      <!-- Topology -->
+      <div class="panel reveal" data-delay="100" style="margin-bottom:14px">
+        <div class="panel-head"><span>Topologie · Memory OS</span><span class="sub">les couches en place</span></div>
+        <div class="topo">
+          <div class="layer on">
+            <span class="layer-idx">01</span>
+            <span class="layer-name">Vector store<span>embeddings &amp; recherche sémantique</span></span>
+            <span class="layer-desc">Qdrant détecté · embeddings ollama en local. Pas encore d'extraction vectorielle persistée.</span>
+            <span class="layer-stat"><b>141</b>entrées</span>
+          </div>
+          <div class="layer derived">
+            <span class="layer-idx">02</span>
+            <span class="layer-name">Graph store<span>liens entre entrées</span></span>
+            <span class="layer-desc">neo4j non installé → liens dérivés des tags partagés (réel) — 10 sur l'échantillon affiché.</span>
+            <span class="layer-stat"><b>10</b>arêtes</span>
+          </div>
+          <div class="layer on">
+            <span class="layer-idx">03</span>
+            <span class="layer-name">Shared-context<span>contexte porté entre agents</span></span>
+            <span class="layer-desc">Handoffs et spec transmis via le shared-context du runtime.</span>
+            <span class="layer-stat"><b>actif</b>runtime</span>
+          </div>
+          <div class="layer on">
+            <span class="layer-idx">04</span>
+            <span class="layer-name">Learnings<span>connaissances promues</span></span>
+            <span class="layer-desc">Enseignements extraits des sessions, candidats à la promotion en décision.</span>
+            <span class="layer-stat"><b>8</b>learnings</span>
+          </div>
+          <div class="layer empty">
+            <span class="layer-idx">05</span>
+            <span class="layer-name">Decisions<span>choix gravés &amp; tracés</span></span>
+            <span class="layer-desc">Aucune décision figée pour l'instant — la promotion se fait en cockpit local.</span>
+            <span class="layer-stat"><b>0</b>decisions</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Distribution by type -->
+      <div class="panel reveal" data-delay="120">
+        <div class="panel-head"><span>Répartition par type</span><span class="sub">141 entrées</span></div>
+        <div class="dist-grid">
+          <div>
+            <svg viewBox="0 0 150 150" class="donut-svg" id="dist-donut" aria-hidden="true"></svg>
+          </div>
+          <div>
+            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--ink-soft)"></span>mémoires</span><span class="bar-track"><span class="bar-fill" style="width:88%;background:var(--ink-soft)"></span></span><span class="bar-val">124</span></div>
+            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-amber)"></span>learnings</span><span class="bar-track"><span class="bar-fill" style="width:38%;background:var(--data-amber)"></span></span><span class="bar-val">8</span></div>
+            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-red)"></span>failures</span><span class="bar-track"><span class="bar-fill" style="width:26%;background:var(--data-red)"></span></span><span class="bar-val">5</span></div>
+            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-violet)"></span>contradictions</span><span class="bar-track"><span class="bar-fill" style="width:22%;background:var(--data-violet)"></span></span><span class="bar-val">4</span></div>
+            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-cyan)"></span>decisions</span><span class="bar-track"><span class="bar-fill" style="width:2%;background:var(--data-cyan)"></span></span><span class="bar-val">0</span></div>
+            <p class="dist-note">« mémoires » est le type de base : les 141 entrées au total. Learnings, failures, contradictions et decisions en sont les sous-types gouvernés.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ BAND B — LE GRAPHE ════════════ -->
+  <section class="band alt" id="band-graph">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">B</span> · LE GRAPHE</div>
+          <h2>Comment les souvenirs se lient.</h2>
+          <p class="lead">Chaque entrée est un nœud ; les arêtes sont les tags partagés — réelles, calculées depuis le store. Survolez un nœud pour isoler son voisinage, cliquez pour l'ouvrir dans le vault.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+
+      <div class="graph-grid" style="margin-bottom:14px">
+        <div class="panel graph-panel reveal">
+          <div class="panel-head" style="padding:10px 12px 0"><span>Graphe de connaissances</span><span class="sub">nœuds = entrées · arêtes = tags partagés</span></div>
+          <svg id="graph" viewBox="0 0 640 460" aria-label="Graphe des entrées mémoire reliées par tags partagés"></svg>
+          <div class="graph-foot">
+            <div class="graph-stats" id="graph-stats"></div>
+            <div class="leg-inline">
+              <span class="leg-item"><span class="sw" style="background:var(--ink-soft)"></span>mémoire</span>
+              <span class="leg-item"><span class="sw" style="background:var(--data-amber)"></span>learning</span>
+              <span class="leg-item"><span class="sw" style="background:var(--data-red)"></span>failure</span>
+              <span class="leg-item"><span class="sw" style="background:var(--data-violet)"></span>contradiction</span>
+              <span class="leg-item"><span class="sw" style="background:var(--data-cyan)"></span>decision</span>
+            </div>
+          </div>
+        </div>
+        <div class="side-col">
+          <div class="panel reveal" data-delay="60">
+            <div class="panel-head"><span>Projection vectorielle</span><span class="sub">vue complémentaire</span></div>
+            <svg id="scatter" viewBox="0 0 300 200" aria-hidden="true"></svg>
+            <p class="scatter-note"><b>DÉMO — sans embeddings.</b> Le store n'a pas encore de vecteurs extraits ; ces points sont factices. À remplacer par un UMAP / t-SNE sur embeddings réels.</p>
+          </div>
+          <div class="panel reveal" data-delay="100">
+            <div class="panel-head"><span>Densité de tags</span><span class="sub">les plus partagés</span></div>
+            <div class="bar-row"><span class="bar-lbl">vector</span><span class="bar-track"><span class="bar-fill" style="width:100%;background:var(--accent)"></span></span><span class="bar-val">3×</span></div>
+            <div class="bar-row"><span class="bar-lbl">governance</span><span class="bar-track"><span class="bar-fill" style="width:66%;background:var(--accent-dim)"></span></span><span class="bar-val">2×</span></div>
+            <div class="bar-row"><span class="bar-lbl">graph</span><span class="bar-track"><span class="bar-fill" style="width:66%;background:var(--accent-dim)"></span></span><span class="bar-val">2×</span></div>
+            <div class="bar-row"><span class="bar-lbl">perf</span><span class="bar-track"><span class="bar-fill" style="width:66%;background:var(--accent-dim)"></span></span><span class="bar-val">2×</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vault browser -->
+      <div class="panel reveal" data-delay="80">
+        <div class="panel-head"><span>Vault browser</span><span class="sub" id="vault-count">échantillon · 14 entrées</span></div>
+        <div class="vault-bar">
+          <label class="vault-search">
+            <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><circle cx="5.5" cy="5.5" r="4" fill="none" stroke="var(--ink-muted)" stroke-width="1.3"/><path d="M8.5 8.5L11.5 11.5" stroke="var(--ink-muted)" stroke-width="1.3" stroke-linecap="round"/></svg>
+            <input type="text" id="vault-q" placeholder="rechercher dans le texte, l'id, les tags…" aria-label="Rechercher une entrée"/>
+          </label>
+          <div class="filters" id="vault-filters">
+            <button class="filt active" data-type="all">tous</button>
+            <button class="filt" data-type="memory"><span class="sw" style="background:var(--ink-soft)"></span>mémoire</button>
+            <button class="filt" data-type="learning"><span class="sw" style="background:var(--data-amber)"></span>learning</button>
+            <button class="filt" data-type="failure"><span class="sw" style="background:var(--data-red)"></span>failure</button>
+            <button class="filt" data-type="contradiction"><span class="sw" style="background:var(--data-violet)"></span>contradiction</button>
+            <button class="filt" data-type="decision"><span class="sw" style="background:var(--data-cyan)"></span>decision</button>
+          </div>
+        </div>
+        <div class="vault-layout">
+          <div class="vault-list" id="vault-list"></div>
+          <div class="vault-detail" id="vault-detail">
+            <div class="vd-empty">Sélectionnez une entrée<br/>pour voir son détail, ses tags et ses liens.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ BAND C — SANTÉ & PILOTAGE ════════════ -->
+  <section class="band" id="band-health">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">C</span> · SANTÉ &amp; PILOTAGE</div>
+          <h2>Vérifier, rediriger, gouverner.</h2>
+          <p class="lead">memory-lint expose drift, doublons et contradictions non résolues. Pour l'admin brut du moteur, on redirige vers les consoles natives. Le pilotage (édition, infra) reste au cockpit local.</p>
+        </div>
+        <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
+      </div>
+      <div class="band-divider"></div>
+
+      <!-- Lint -->
+      <div class="panel reveal" style="margin-bottom:14px">
+        <div class="panel-head"><span>Santé · memory-lint</span><span class="sub">v0.7 · 141 entrées scannées</span></div>
+        <div class="lint-grid">
+          <div>
+            <svg viewBox="0 0 180 110" class="gauge-svg" id="lint-gauge" aria-hidden="true"></svg>
+            <p class="lint-summary">5 catégories de findings<br/>12 entrées concernées</p>
+          </div>
+          <div>
+            <div class="finding"><span class="find-sev error">ERROR</span><span><span class="find-label">Graphe : « neo4j requis » contredit « liens dérivés des tags »</span><span class="find-type">unresolved_contradiction · con-01</span></span><span class="find-count">1</span></div>
+            <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Seuils de cache divergents (0.8 vs 0.6) sur entrées proches</span><span class="find-type">drift · con-02</span></span><span class="find-count">2</span></div>
+            <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Décision backend non revue depuis 58 jours</span><span class="find-type">stale · dec-01</span></span><span class="find-count">1</span></div>
+            <div class="finding"><span class="find-sev info">INFO</span><span><span class="find-label">Learnings quasi-identiques sur les embeddings locaux</span><span class="find-type">duplicate · lrn-01</span></span><span class="find-count">3</span></div>
+            <div class="finding"><span class="find-sev info">INFO</span><span><span class="find-label">Entrées sans tag — exclues du graphe</span><span class="find-type">orphan</span></span><span class="find-count">5</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Consoles -->
+      <div class="panel reveal" data-delay="60" style="margin-bottom:14px">
+        <div class="panel-head"><span>Consoles natives</span><span class="sub">redirection · admin brut du moteur</span></div>
+        <div class="consoles-grid">
+          <a class="console on" href="http://localhost:6333/dashboard" target="_blank" rel="noopener">
+            <span class="console-led"></span>
+            <span class="console-body">
+              <span class="console-name">Qdrant Dashboard</span>
+              <span class="console-role">vector store · installé</span>
+              <span class="console-url">localhost:6333/dashboard</span>
+            </span>
+            <span class="console-arrow">↗</span>
+          </a>
+          <span class="console off" aria-disabled="true">
+            <span class="console-led"></span>
+            <span class="console-body">
+              <span class="console-name">Neo4j Browser</span>
+              <span class="console-role">graph store · extra non installé</span>
+              <span class="console-url">pip install grimoire-kit[neo4j]</span>
+            </span>
+            <span class="console-arrow">—</span>
+          </span>
+          <span class="console off" aria-disabled="true">
+            <span class="console-led"></span>
+            <span class="console-body">
+              <span class="console-name">RedisInsight</span>
+              <span class="console-role">cache · extra non installé</span>
+              <span class="console-url">pip install grimoire-kit[redis]</span>
+            </span>
+            <span class="console-arrow">—</span>
+          </span>
+          <span class="console off" aria-disabled="true">
+            <span class="console-led"></span>
+            <span class="console-body">
+              <span class="console-name">Weaviate Console</span>
+              <span class="console-role">vector store · extra non installé</span>
+              <span class="console-url">pip install grimoire-kit[weaviate]</span>
+            </span>
+            <span class="console-arrow">—</span>
+          </span>
+        </div>
+        <p class="consoles-note">On possède la couche sémantique (browse, lien, graphe, recherche). On <strong>redirige</strong> vers les consoles natives pour l'admin brut — Redis étant un pur cache, redirection seule. Seuls les backends détectés sont actifs.</p>
+      </div>
+
+      <!-- Actions locked -->
+      <div class="panel actions-panel reveal" data-delay="100">
+        <div class="actions-head">
+          <div class="panel-head" style="margin-bottom:0"><span>Pilotage</span><span class="sub">init · upgrade · édition · migration</span></div>
+          <span class="status-tag private"><span class="dot"></span>DISPONIBLE EN COCKPIT LOCAL</span>
+        </div>
+        <div class="actions-grid">
+          <div class="action">
+            <span class="action-lock" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="6.5" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></span>
+            <div class="action-name">Init</div>
+            <div class="action-cmd">memory init</div>
+            <div class="action-desc">Créer le store et choisir le backend.</div>
+          </div>
+          <div class="action">
+            <span class="action-lock" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="6.5" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></span>
+            <div class="action-name">Upgrade backend</div>
+            <div class="action-cmd">pip install …[extra]</div>
+            <div class="action-desc">Installer un extra (neo4j, redis…).</div>
+          </div>
+          <div class="action">
+            <span class="action-lock" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="6.5" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></span>
+            <div class="action-name">Édition gouvernée</div>
+            <div class="action-cmd">Memory OS API · CRUD</div>
+            <div class="action-desc">Résoudre contradictions, promouvoir learnings.</div>
+          </div>
+          <div class="action">
+            <span class="action-lock" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="6.5" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></span>
+            <div class="action-name">Migration</div>
+            <div class="action-cmd">memory-sync</div>
+            <div class="action-desc">Migrer entre backends, sans perte.</div>
+          </div>
+        </div>
+        <p class="actions-foot">Toute écriture passera par l'<b>API Memory OS</b> — jamais de SQL ni d'accès brut — <b>localhost uniquement</b>, <b>jamais sur la vitrine</b>. Cette page détecte son mode et masque toute action hors cockpit local. C'est le hook du lot suivant.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer id="forge-footer"></footer>
+
+<script src="forge-nav.js"></script>
+<script src="forge-motion.js"></script>
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   memory.html — rendu autoporté (pas de JS externe).
+   Exemples statiques réalistes ; une boucle sur data/memory.json
+   les remplacera plus tard (CSS/classes conservés). Honnêteté des
+   données : SNAPSHOT DÉMO · DÉMO (projection) · COCKPIT LOCAL.
+   ════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+
+  const TYPE_COLOR = {
+    memory: 'var(--ink-soft)', learning: 'var(--data-amber)', failure: 'var(--data-red)',
+    contradiction: 'var(--data-violet)', decision: 'var(--data-cyan)',
+  };
+  const TYPE_LABEL = { memory: 'mémoire', learning: 'learning', failure: 'failure', contradiction: 'contradiction', decision: 'decision' };
+  const tc = (t) => TYPE_COLOR[t] || 'var(--ink-soft)';
+
+  /* ── Échantillon du vault (data/memory.json → store.sample) ── */
+  const ENTRIES = [
+    { id: 'dec-01', type: 'decision',      text: "Qdrant retenu comme vector store par défaut ; fallback local si l'extra est absent.", tags: ['backend', 'vector', 'qdrant'],          date: '2026-05-02' },
+    { id: 'lrn-01', type: 'learning',      text: "Les embeddings locaux via ollama suffisent sous ~2k entrées ; latence < 40 ms.",       tags: ['vector', 'ollama', 'perf'],            date: '2026-05-04' },
+    { id: 'con-01', type: 'contradiction', text: "La doc dit « neo4j requis pour le graphe » mais les liens sont dérivés des tags.",       tags: ['graph', 'doc', 'neo4j'],               date: '2026-05-06' },
+    { id: 'fai-01', type: 'failure',       text: "memory-sync v0.3 a dédupliqué trop agressivement : 3 learnings fusionnés à tort.",       tags: ['sync', 'migration', 'dedupe'],         date: '2026-05-09' },
+    { id: 'lrn-02', type: 'learning',      text: "Les tags partagés sont un proxy fiable de proximité sémantique pour le graphe.",         tags: ['graph', 'tags', 'semantic'],           date: '2026-05-11' },
+    { id: 'dec-02', type: 'decision',      text: "Toute écriture mémoire passe par l'API Memory OS, jamais de SQL ou d'accès brut.",       tags: ['api', 'governance', 'write'],          date: '2026-05-13' },
+    { id: 'mem-01', type: 'memory',        text: "Le handoff dev→qa porte le contexte de spec dans le shared-context.",                   tags: ['handoff', 'shared-context', 'agents'], date: '2026-05-15' },
+    { id: 'con-02', type: 'contradiction', text: "Deux entrées affirment des seuils de cache différents (0.8 vs 0.6).",                    tags: ['cache', 'perf', 'drift'],              date: '2026-05-17' },
+    { id: 'fai-02', type: 'failure',       text: "Le reindex Qdrant a échoué sur une collection vide : guard manquant.",                  tags: ['qdrant', 'reindex', 'guard'],          date: '2026-05-19' },
+    { id: 'lrn-03', type: 'learning',      text: "Le lint détecte le drift via la divergence de tags entre entrées proches.",             tags: ['lint', 'drift', 'quality'],            date: '2026-05-21' },
+    { id: 'mem-02', type: 'memory',        text: "RedisInsight reste l'outil d'admin du cache : on ne le réimplémente pas.",              tags: ['redis', 'console', 'cache'],           date: '2026-05-23' },
+    { id: 'dec-03', type: 'decision',      text: "L'édition gouvernée (CRUD) est réservée au cockpit local, jamais sur la vitrine.",       tags: ['governance', 'boundary', 'write'],     date: '2026-05-25' },
+    { id: 'lrn-04', type: 'learning',      text: "La projection 2D exige de vrais embeddings ; placeholder démo en attendant.",           tags: ['vector', 'projection', 'demo'],        date: '2026-05-27' },
+    { id: 'fai-03', type: 'failure',       text: "La promotion d'un learning en decision a perdu ses tags d'origine.",                    tags: ['promotion', 'tags', 'decision'],       date: '2026-05-29' },
+  ];
+
+  /* ── Donut : répartition par type ── */
+  function donut(svg, segs) {
+    const R = 56, S = 16, C = 2 * Math.PI * R, tot = segs.reduce((a, s) => a + s.value, 0) || 1;
+    let off = 0, arcs = '';
+    segs.forEach((s) => {
+      if (s.value <= 0) return;
+      const len = s.value / tot * C;
+      arcs += `<circle cx="75" cy="75" r="${R}" fill="none" stroke="${s.color}" stroke-width="${S}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 75 75)"><title>${esc(s.label)} · ${s.value}</title></circle>`;
+      off += len;
+    });
+    svg.innerHTML = `<circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--elev-3)" stroke-width="${S}"/>${arcs}` +
+      `<text x="75" y="72" text-anchor="middle" class="donut-c1">141</text>` +
+      `<text x="75" y="88" text-anchor="middle" class="donut-c2">ENTRÉES</text>`;
+  }
+  donut($('dist-donut'), [
+    { label: 'mémoires', value: 124, color: 'var(--ink-soft)' },
+    { label: 'learnings', value: 8, color: 'var(--data-amber)' },
+    { label: 'failures', value: 5, color: 'var(--data-red)' },
+    { label: 'contradictions', value: 4, color: 'var(--data-violet)' },
+    { label: 'decisions', value: 0, color: 'var(--data-cyan)' },
+  ]);
+
+  /* ── Gauge : santé lint ── */
+  function gauge(svg, value) {
+    const cx = 90, cy = 88, r = 70, frac = Math.max(0, Math.min(1, value / 100));
+    const end = -90 + frac * 180;
+    const polar = (deg) => { const a = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+    const arc = (a0, a1) => { const [x0, y0] = polar(a0), [x1, y1] = polar(a1); const large = (a1 - a0) % 360 > 180 ? 1 : 0; return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; };
+    const col = value >= 85 ? 'var(--data-green)' : (value >= 60 ? 'var(--data-amber)' : 'var(--data-red)');
+    svg.innerHTML = `<path d="${arc(-90, 90)}" fill="none" stroke="var(--elev-3)" stroke-width="12" stroke-linecap="round"/>` +
+      `<path d="${arc(-90, end)}" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round"/>` +
+      `<text x="90" y="80" text-anchor="middle" class="gauge-num" style="fill:${col}">${value}%</text>` +
+      `<text x="90" y="100" text-anchor="middle" class="gauge-sub">SANTÉ DU STORE</text>`;
+  }
+  gauge($('lint-gauge'), 94);
+
+  /* ── Graphe : nœuds = entrées, arêtes = tags partagés ── */
+  (function renderGraph() {
+    const svg = $('graph'), W = 640, H = 460, cx = W / 2, cy = H / 2, rx = 252, ry = 176;
+    const nodes = ENTRIES;
+    // arêtes réelles : deux entrées partageant ≥1 tag
+    const edges = [];
+    const NEIGH = {};
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const shared = nodes[i].tags.filter((t) => nodes[j].tags.includes(t));
+        if (shared.length) {
+          edges.push({ a: nodes[i].id, b: nodes[j].id, tags: shared });
+          (NEIGH[nodes[i].id] = NEIGH[nodes[i].id] || new Set()).add(nodes[j].id);
+          (NEIGH[nodes[j].id] = NEIGH[nodes[j].id] || new Set()).add(nodes[i].id);
+        }
+      }
+    }
+    const deg = (id) => (NEIGH[id] ? NEIGH[id].size : 0);
+    const maxDeg = Math.max(1, ...nodes.map((n) => deg(n.id)));
+    const POS = {};
+    nodes.forEach((n, i) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / nodes.length;
+      POS[n.id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), r: 8 + deg(n.id) / maxDeg * 9 };
+    });
+    let eHTML = '';
+    edges.forEach((e) => {
+      const a = POS[e.a], b = POS[e.b];
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, qx = mx + (cx - mx) * 0.32, qy = my + (cy - my) * 0.32;
+      eHTML += `<path class="edge" data-a="${e.a}" data-b="${e.b}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}"><title>${e.a} ↔ ${e.b} · #${e.tags.join(' #')}</title></path>`;
+    });
+    let nHTML = '';
+    nodes.forEach((n) => {
+      const p = POS[n.id], col = tc(n.type);
+      nHTML += `<g class="gnode" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.id)} · ${esc(n.text)}">` +
+        `<circle class="halo" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.3"/>` +
+        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${col}"/>` +
+        `<text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 12).toFixed(1)}" text-anchor="middle">${esc(n.id)}</text></g>`;
+    });
+    svg.innerHTML = eHTML + nHTML;
+    $('graph-stats').innerHTML = `<span><b>${nodes.length}</b> nœuds</span><span><b>${edges.length}</b> arêtes</span><span><b>24</b> tags uniques</span>`;
+
+    function focus(id) {
+      svg.classList.add('focus');
+      const near = NEIGH[id] || new Set();
+      svg.querySelectorAll('.gnode').forEach((g) => {
+        g.classList.toggle('src', g.dataset.id === id);
+        g.classList.toggle('lit', near.has(g.dataset.id));
+      });
+      svg.querySelectorAll('.edge').forEach((e) => {
+        e.classList.toggle('lit', e.dataset.a === id || e.dataset.b === id);
+      });
+    }
+    function clear() { svg.classList.remove('focus'); svg.querySelectorAll('.src,.lit').forEach((el) => el.classList.remove('src', 'lit')); }
+
+    svg.querySelectorAll('.gnode').forEach((g) => {
+      const id = g.dataset.id;
+      g.addEventListener('mouseenter', () => focus(id));
+      g.addEventListener('focus', () => focus(id));
+      g.addEventListener('mouseleave', clear);
+      g.addEventListener('blur', clear);
+      g.addEventListener('click', () => selectEntry(id, true));
+      g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectEntry(id, true); } });
+    });
+  })();
+
+  /* ── Scatter (DÉMO, sans embeddings) ── */
+  (function renderScatter() {
+    const svg = $('scatter'), W = 300, H = 200;
+    // points pseudo-aléatoires déterministes, colorés par type — placeholder démo assumé
+    const types = ['memory', 'memory', 'memory', 'learning', 'failure', 'contradiction', 'decision'];
+    let seed = 7, rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    let html = '';
+    for (let i = 0; i < 64; i++) {
+      const t = types[Math.floor(rnd() * types.length)];
+      // deux nuages mous pour évoquer une projection
+      const cxc = rnd() > 0.5 ? 110 : 195, cyc = rnd() > 0.5 ? 80 : 130;
+      const x = Math.max(8, Math.min(W - 8, cxc + (rnd() - 0.5) * 120));
+      const y = Math.max(8, Math.min(H - 8, cyc + (rnd() - 0.5) * 110));
+      html += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(2 + rnd() * 2).toFixed(1)}" fill="${tc(t)}"/>`;
+    }
+    svg.innerHTML = html;
+  })();
+
+  /* ── Vault browser : liste + recherche + filtre + détail ── */
+  let activeType = 'all', query = '', selectedId = null;
+
+  function entryRow(e) {
+    return `<div class="ventry" data-id="${e.id}" data-type="${e.type}">` +
+      `<div class="ventry-top">` +
+        `<span class="ventry-id">${esc(e.id)}</span>` +
+        `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type])}</span>` +
+        `<span class="ventry-date">${esc(e.date)}</span>` +
+      `</div>` +
+      `<div class="ventry-text">${esc(e.text)}</div>` +
+      `<div class="vtags">${e.tags.map((t) => `<span class="vtag">#${esc(t)}</span>`).join('')}</div>` +
+    `</div>`;
+  }
+
+  function renderList() {
+    const filtered = ENTRIES.filter((e) => {
+      if (activeType !== 'all' && e.type !== activeType) return false;
+      if (query) {
+        const hay = (e.id + ' ' + e.text + ' ' + e.tags.join(' ')).toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    });
+    const list = $('vault-list');
+    list.innerHTML = filtered.length ? filtered.map(entryRow).join('')
+      : `<div class="ventry" style="cursor:default"><div class="ventry-text" style="color:var(--ink-muted);font-family:var(--font-mono);font-size:0.7rem">Aucune entrée ne correspond.</div></div>`;
+    $('vault-count').textContent = `échantillon · ${filtered.length} / ${ENTRIES.length} entrées`;
+    list.querySelectorAll('.ventry[data-id]').forEach((el) => {
+      el.classList.toggle('sel', el.dataset.id === selectedId);
+      el.addEventListener('click', () => selectEntry(el.dataset.id, false));
+    });
+  }
+
+  function selectEntry(id, scroll) {
+    selectedId = id;
+    const e = ENTRIES.find((x) => x.id === id);
+    if (!e) return;
+    // liens = entrées partageant ≥1 tag
+    const links = ENTRIES.filter((o) => o.id !== id && o.tags.some((t) => e.tags.includes(t)))
+      .map((o) => ({ o, shared: o.tags.filter((t) => e.tags.includes(t)) }));
+    $('vault-detail').innerHTML =
+      `<div class="vd-top"><span class="vd-id">${esc(e.id)}</span>` +
+      `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type])}</span>` +
+      `<span class="status-tag snapshot" style="margin-left:auto"><span class="dot"></span>SNAPSHOT</span></div>` +
+      `<div class="vd-text">${esc(e.text)}</div>` +
+      `<div class="vd-meta">` +
+        `<div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date)}</span></div>` +
+        `<div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.map((t) => '#' + esc(t)).join('  ')}</span></div>` +
+        `<div class="vd-row"><span class="vd-k">Liens (${links.length})</span><span class="vd-links">` +
+          (links.length ? links.map((l) => `<span class="vd-link"><span class="sw" style="background:${tc(l.o.type)}"></span>${esc(l.o.id)} <b>· #${esc(l.shared.join(' #'))}</b></span>`).join('')
+            : `<span class="vd-v" style="color:var(--ink-muted)">aucun lien — entrée orpheline</span>`) +
+        `</span></div>` +
+      `</div>`;
+    $('vault-list').querySelectorAll('.ventry[data-id]').forEach((el) => el.classList.toggle('sel', el.dataset.id === id));
+    if (scroll) {
+      const target = $('vault-list').querySelector(`.ventry[data-id="${id}"]`);
+      if (target) $('vault-list').scrollTop = target.offsetTop - $('vault-list').offsetTop - 8;
+    }
+  }
+
+  $('vault-q').addEventListener('input', (ev) => { query = ev.target.value.trim().toLowerCase(); renderList(); });
+  $('vault-filters').querySelectorAll('.filt').forEach((b) => {
+    b.addEventListener('click', () => {
+      $('vault-filters').querySelectorAll('.filt').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      activeType = b.dataset.type;
+      renderList();
+    });
+  });
+  renderList();
+
+  /* ── Band dividers draw on scroll ── */
+  const dObs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); dObs.unobserve(e.target); } }), { threshold: 0.5 });
+  document.querySelectorAll('.band-divider').forEach((d) => dObs.observe(d));
+})();
+</script>
+</body>
+</html>
