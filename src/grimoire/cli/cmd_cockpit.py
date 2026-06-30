@@ -87,6 +87,31 @@ def _looks_grimoire(p: Path) -> bool:
     )
 
 
+def register_project(path: Path, name: str | None = None) -> str | None:
+    """Register a project in the cockpit registry (idempotent).
+
+    Returns the assigned slug if newly added, or ``None`` if the path is not a
+    directory or is already registered. Shared by ``cockpit add`` and by
+    ``grimoire init`` (auto-enrols a freshly scaffolded project).
+    """
+    proot = path.expanduser().resolve()
+    if not proot.is_dir():
+        return None
+    projects = _load_registry()
+    if any(p.get("path") == str(proot) for p in projects):
+        return None
+    disp = name or proot.name
+    slug = _slug(disp)
+    existing = {p.get("slug") for p in projects}
+    base_slug, n = slug, 2
+    while slug in existing:
+        slug = f"{base_slug}-{n}"
+        n += 1
+    projects.append({"name": disp, "path": str(proot), "slug": slug})
+    _save_registry(projects)
+    return slug
+
+
 def _resolve_project_path(slug: str | None) -> Path | None:
     """Map a registry slug to its absolute project path (first project if slug is empty)."""
     projects = _load_registry()
@@ -213,20 +238,11 @@ def add(
     if not proot.is_dir():
         console.print(f"[red]✗[/red] Not a directory: {proot}")
         raise typer.Exit(1)
-    disp = name or proot.name
-    slug = _slug(disp)
-    projects = _load_registry()
-    if any(p.get("path") == str(proot) for p in projects):
+    slug = register_project(proot, name)
+    if slug is None:
         console.print(f"[yellow]•[/yellow] Already registered: {proot}")
         return
-    # Disambiguate slug collisions.
-    existing = {p.get("slug") for p in projects}
-    base_slug, n = slug, 2
-    while slug in existing:
-        slug = f"{base_slug}-{n}"
-        n += 1
-    projects.append({"name": disp, "path": str(proot), "slug": slug})
-    _save_registry(projects)
+    disp = name or proot.name
     mark = "" if _looks_grimoire(proot) else "  [yellow](pas de marqueur Grimoire détecté)[/yellow]"
     console.print(f"[green]+[/green] {disp} [dim]({slug})[/dim] → {proot}{mark}")
 

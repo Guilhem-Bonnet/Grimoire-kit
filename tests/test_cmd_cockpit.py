@@ -171,6 +171,36 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     assert cmd_cockpit._resolve_project_path("unknown") is None
 
 
+def test_register_project_helper(tmp_path: Path) -> None:
+    proj = _project(tmp_path, "reg")
+    assert cmd_cockpit.register_project(proj, "Reg") == "reg"
+    assert cmd_cockpit.register_project(proj) is None  # idempotent
+    assert cmd_cockpit.register_project(tmp_path / "nope") is None  # not a directory
+
+
+def test_register_project_slug_collision(tmp_path: Path) -> None:
+    a = _project(tmp_path, "a")
+    b = _project(tmp_path, "b")
+    cmd_cockpit.register_project(a, "Same")
+    assert cmd_cockpit.register_project(b, "Same") == "same-2"
+
+
+def test_init_hook_registers_project(tmp_path: Path) -> None:
+    from grimoire.cli import cmd_init
+
+    proj = _project(tmp_path, "fromsetup")
+    cmd_init._maybe_register_cockpit(proj, "From Setup", "text")
+    assert "from-setup" in [p["slug"] for p in cmd_cockpit._load_registry()]
+
+
+def test_init_hook_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.cli import cmd_init
+
+    monkeypatch.setenv("GRIMOIRE_NO_COCKPIT", "1")
+    cmd_init._maybe_register_cockpit(_project(tmp_path, "skip"), "Skip", "text")
+    assert cmd_cockpit._load_registry() == []
+
+
 def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/memory",

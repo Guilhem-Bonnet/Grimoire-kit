@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -600,6 +601,27 @@ def _display_json(
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 
+def _maybe_register_cockpit(target: Path, project_name: str, fmt: str) -> None:
+    """Auto-enrol the freshly scaffolded project in the local cockpit registry.
+
+    Best-effort and non-fatal: a registry write failure never breaks ``init``.
+    Opt out with ``GRIMOIRE_NO_COCKPIT``.
+    """
+    if os.environ.get("GRIMOIRE_NO_COCKPIT"):
+        return
+    try:
+        from grimoire.cli.cmd_cockpit import register_project
+
+        slug = register_project(target, project_name)
+    except OSError:
+        return
+    if slug and fmt != "json":
+        console.print(
+            f"[dim]Cockpit local : projet enregistré ([b]{slug}[/b]) — "
+            "lance [b]grimoire cockpit[/b] pour gouverner tous tes projets.[/dim]"
+        )
+
+
 def run_init(
     ctx: typer.Context,
     target: Path,
@@ -753,3 +775,5 @@ def run_init(
             qdrant_docker_started=qdrant_docker_started,
             qdrant_docker_message=qdrant_docker_message,
         )
+
+    _maybe_register_cockpit(target, project_name, fmt)
