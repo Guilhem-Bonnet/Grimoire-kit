@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-06-29T17:47:32+00:00",
   "primary": "grimoire-kit",
-  "multi": false,
+  "multi": true,
   "projects": [
     {
       "version": "3.16.0",
@@ -22,6 +22,67 @@
       "slug": "grimoire-kit",
       "name": "Grimoire Kit",
       "path": "/mnt/Travail/Projets/Dev/Grimoire-kit-agentic-standard-bridge"
+    },
+    {
+      "slug": "atlas-ops",
+      "name": "Atlas Ops",
+      "path": "(démo)",
+      "version": "1.8.0",
+      "is_demo": true,
+      "commits_total": 872,
+      "commits_7d": 23,
+      "total_cost_usd": 1.24,
+      "traces": 18,
+      "agents": 7,
+      "ci_status": "failure",
+      "antifragile": 71,
+      "antifragile_level": "RÉSILIENT",
+      "memory_backend": "redis",
+      "memory_entries": 141,
+      "contradictions": 3,
+      "coverage": 58.0,
+      "generated_at": "2026-06-29T17:47:25+00:00"
+    },
+    {
+      "slug": "sentinel-sec",
+      "name": "Sentinel Sec",
+      "path": "(démo)",
+      "version": "0.9.3",
+      "is_demo": true,
+      "commits_total": 503,
+      "commits_7d": 12,
+      "total_cost_usd": 0.61,
+      "traces": 18,
+      "agents": 7,
+      "ci_status": "success",
+      "antifragile": 68,
+      "antifragile_level": "RÉSILIENT",
+      "memory_backend": "weaviate",
+      "memory_entries": 141,
+      "contradictions": 7,
+      "coverage": 63.0,
+      "generated_at": "2026-06-29T17:47:25+00:00"
+    },
+    {
+      "slug": "ledger-data",
+      "name": "Ledger Data",
+      "path": "(démo)",
+      "version": "3.1.2",
+      "is_demo": true,
+      "commits_total": 2041,
+      "commits_7d": 31,
+      "total_cost_usd": 2.07,
+      "traces": 18,
+      "agents": 7,
+      "ci_status": "success",
+      "antifragile": 88,
+      "antifragile_level": "ROBUSTE",
+      "memory_backend": "neo4j",
+      "memory_entries": 141,
+      "contradictions": 0,
+      "coverage": 91.0,
+      "generated_at": "2026-06-29T17:47:25+00:00"
     }
-  ]
+  ],
+  "env": "vitrine"
 }

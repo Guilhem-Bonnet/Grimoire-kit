@@ -1,0 +1,429 @@
+{
+  "generated_at": "2026-06-29T17:47:26+00:00",
+  "git": {
+    "commits_total": 872,
+    "per_day": [
+      {
+        "date": "2026-05-31",
+        "count": 0
+      },
+      {
+        "date": "2026-06-01",
+        "count": 1
+      },
+      {
+        "date": "2026-06-02",
+        "count": 0
+      },
+      {
+        "date": "2026-06-03",
+        "count": 0
+      },
+      {
+        "date": "2026-06-04",
+        "count": 0
+      },
+      {
+        "date": "2026-06-05",
+        "count": 0
+      },
+      {
+        "date": "2026-06-06",
+        "count": 0
+      },
+      {
+        "date": "2026-06-07",
+        "count": 0
+      },
+      {
+        "date": "2026-06-08",
+        "count": 3
+      },
+      {
+        "date": "2026-06-09",
+        "count": 6
+      },
+      {
+        "date": "2026-06-10",
+        "count": 2
+      },
+      {
+        "date": "2026-06-11",
+        "count": 0
+      },
+      {
+        "date": "2026-06-12",
+        "count": 0
+      },
+      {
+        "date": "2026-06-13",
+        "count": 0
+      },
+      {
+        "date": "2026-06-14",
+        "count": 0
+      },
+      {
+        "date": "2026-06-15",
+        "count": 4
+      },
+      {
+        "date": "2026-06-16",
+        "count": 0
+      },
+      {
+        "date": "2026-06-17",
+        "count": 0
+      },
+      {
+        "date": "2026-06-18",
+        "count": 0
+      },
+      {
+        "date": "2026-06-19",
+        "count": 0
+      },
+      {
+        "date": "2026-06-20",
+        "count": 0
+      },
+      {
+        "date": "2026-06-21",
+        "count": 0
+      },
+      {
+        "date": "2026-06-22",
+        "count": 2
+      },
+      {
+        "date": "2026-06-23",
+        "count": 0
+      },
+      {
+        "date": "2026-06-24",
+        "count": 0
+      },
+      {
+        "date": "2026-06-25",
+        "count": 26
+      },
+      {
+        "date": "2026-06-26",
+        "count": 25
+      },
+      {
+        "date": "2026-06-27",
+        "count": 7
+      },
+      {
+        "date": "2026-06-28",
+        "count": 0
+      },
+      {
+        "date": "2026-06-29",
+        "count": 5
+      }
+    ],
+    "commits_30d": 81,
+    "commits_7d": 23,
+    "avg_per_day_30d": 2.7,
+    "contributor_count": 5,
+    "contributors": [
+      {
+        "name": "guilhem-bonnet",
+        "commits": 284
+      },
+      {
+        "name": "Guilhèm",
+        "commits": 28
+      },
+      {
+        "name": "dependabot[bot]",
+        "commits": 19
+      },
+      {
+        "name": "Grimoire Bench Bot",
+        "commits": 17
+      },
+      {
+        "name": "BMAD Bench Bot",
+        "commits": 1
+      }
+    ],
+    "last_commit": {
+      "sha": "1aee8f63",
+      "message": "feat(web): câblage des pages observability + memory (design claude.ai/design)",
+      "date": "2026-06-29T13:36:54-04:00",
+      "author": "guilhem-bonnet"
+    }
+  },
+  "pulls": [
+    {
+      "number": 29,
+      "title": "feat(memory): exposer l'option vector_database a l'init + docs/CHANGELOG",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/29",
+      "state": "merged",
+      "author": "Guilhem-Bonnet",
+      "created_at": "2026-06-26T05:40:12Z"
+    },
+    {
+      "number": 28,
+      "title": "feat(memory): backend lexical sans DB vectorielle + toggle setup + seed",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/28",
+      "state": "merged",
+      "author": "Guilhem-Bonnet",
+      "created_at": "2026-06-26T05:26:49Z"
+    },
+    {
+      "number": 27,
+      "title": "chore(ci): bump actions/checkout from 4 to 7",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/27",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-22T04:34:15Z"
+    },
+    {
+      "number": 26,
+      "title": "chore(ci): bump actions/checkout from 4 to 6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/26",
+      "state": "closed",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:25Z"
+    },
+    {
+      "number": 25,
+      "title": "chore(ci): bump codecov/codecov-action from 6 to 7",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/25",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:19Z"
+    },
+    {
+      "number": 24,
+      "title": "chore(ci): bump actions/upload-pages-artifact from 4 to 5",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/24",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:15Z"
+    },
+    {
+      "number": 23,
+      "title": "chore(ci): bump actions/setup-python from 5 to 6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/23",
+      "state": "merged",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:35:13Z"
+    },
+    {
+      "number": 22,
+      "title": "chore(deps): update chromadb requirement from <0.7,>=0.6 to >=0.6,<1.6",
+      "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/pull/22",
+      "state": "open",
+      "author": "app/dependabot",
+      "created_at": "2026-06-15T04:34:48Z"
+    }
+  ],
+  "pulls_open": 2,
+  "repo": {
+    "stars": 4,
+    "forks": 1,
+    "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+    "name": "Guilhem-Bonnet/Grimoire-kit"
+  },
+  "releases": [
+    {
+      "tag": "v3.16.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.14.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.13.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.12.0",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.11.5",
+      "date": "2026-06-25"
+    },
+    {
+      "tag": "v3.11.4",
+      "date": "2026-06-25"
+    }
+  ],
+  "context_pressure": {
+    "samples": 200,
+    "active_days": 5,
+    "window": 200000,
+    "peak_pct": 0.0575,
+    "avg_pct": 0.0575,
+    "models": {
+      "claude-sonnet-4": 200
+    },
+    "by_day": [
+      {
+        "date": "2026-05-29",
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 96
+      },
+      {
+        "date": "2026-06-08",
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 24
+      },
+      {
+        "date": "2026-06-10",
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 8
+      },
+      {
+        "date": "2026-06-26",
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 40
+      },
+      {
+        "date": "2026-06-27",
+        "peak_pct": 0.0575,
+        "avg_pct": 0.0575,
+        "samples": 32
+      }
+    ]
+  },
+  "economy": {
+    "rtk": {
+      "total_commands": 575,
+      "input_tokens": 5757073,
+      "output_tokens": 184623,
+      "saved_tokens": 5572771,
+      "savings_pct": 96.8,
+      "total_time_ms": 597617,
+      "monthly": [
+        {
+          "month": "2026-06",
+          "commands": 575,
+          "saved_tokens": 5572771,
+          "savings_pct": 96.8
+        }
+      ],
+      "weekly": [
+        {
+          "week": null,
+          "saved_tokens": 5570030,
+          "savings_pct": 97.1
+        },
+        {
+          "week": null,
+          "saved_tokens": 2741,
+          "savings_pct": 12.9
+        }
+      ],
+      "daily": [
+        {
+          "date": "2026-06-26",
+          "saved_tokens": 395650,
+          "savings_pct": 74.6
+        },
+        {
+          "date": "2026-06-27",
+          "saved_tokens": 3218632,
+          "savings_pct": 99.6
+        },
+        {
+          "date": "2026-06-28",
+          "saved_tokens": 1955748,
+          "savings_pct": 99.1
+        },
+        {
+          "date": "2026-06-29",
+          "saved_tokens": 2741,
+          "savings_pct": 12.9
+        }
+      ]
+    },
+    "ccusage": {}
+  },
+  "tracking": {
+    "ci": [
+      {
+        "name": "Release Drafter",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T17:36:58Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28391101782"
+      },
+      {
+        "name": "CodeQL",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T17:36:58Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28391101741"
+      },
+      {
+        "name": "Deploy site",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T17:36:57Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28391101701"
+      },
+      {
+        "name": "Deploy site",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T14:22:40Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28379071668"
+      },
+      {
+        "name": "Release Drafter",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T14:22:40Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28379071572"
+      },
+      {
+        "name": "CodeQL",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "branch": "main",
+        "created_at": "2026-06-29T14:22:39Z",
+        "url": "https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/28379071523"
+      }
+    ],
+    "ci_status": "failure",
+    "coverage": {
+      "percent": 58.0
+    },
+    "pypi": {
+      "last_day": 4,
+      "last_month": 392,
+      "last_week": 120
+    }
+  },
+  "delivery": {
+    "change_failure_rate": 0.0,
+    "ci_avg_duration_s": 64.6,
+    "deploy_freq_7d": 10,
+    "pr_lead_time_median_h": 132.97,
+    "pr_merged_sample": 24
+  },
+  "is_demo": true
+}

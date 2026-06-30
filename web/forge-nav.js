@@ -84,9 +84,17 @@
 
     const grade = (s) => (s == null ? '' : (s >= 85 ? 'a' : (s >= 70 ? 'b' : 'c')));
     const dotCls = (ci) => (ci === 'failure' ? 'fp-dot--fail' : 'fp-dot--pass');
+    // Env : vitrine publique (features de pilotage bloquées) vs cockpit local.
+    // Un site servi en localhost est TOUJOURS local — même s'il affiche le
+    // snapshot démo committé (env=vitrine) tant qu'aucun projet réel n'est ajouté.
+    const isLocal = /^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname) ||
+      location.hostname === '::1' || location.hostname.endsWith('.local') || location.hostname === '';
+    const hostVitrine = /github\.io$/.test(location.hostname);
+    document.documentElement.dataset.env = hostVitrine ? 'vitrine' : 'local';
     fetch('data/projects.json', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((idx) => {
+        if (idx && idx.env && !isLocal) document.documentElement.dataset.env = idx.env;
         const slot = document.getElementById('fp-slot');
         if (!slot || !idx || !(idx.projects || []).length) return;
         const cur = new URLSearchParams(location.search).get('project') || idx.primary;

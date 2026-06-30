@@ -1,0 +1,113 @@
+{
+  "generated_at": "2026-06-29T17:47:30+00:00",
+  "governance": {
+    "antifragile": {
+      "score": 68,
+      "level": "RÉSILIENT",
+      "evidence": 12,
+      "summary": "Le système est ROBUST — il survit aux échecs mais n'en tire pas assez de bénéfices. Potentiel d'amélioration.",
+      "dimensions": {
+        "Récupération": 80.0,
+        "Vélocité d'apprentissage": 0.0,
+        "Résolution contradictions": 0.0,
+        "Tendance signaux SIL": 70.0,
+        "Qualité des décisions": 50.0,
+        "Non-récurrence patterns": 43.3
+      }
+    }
+  },
+  "bench": {
+    "report_count": 18,
+    "reports": [
+      "2026-05-11",
+      "2026-05-18",
+      "2026-05-25",
+      "2026-06-01",
+      "2026-06-08",
+      "2026-06-15",
+      "2026-06-22",
+      "2026-06-29"
+    ],
+    "latest": [],
+    "as_of": ""
+  },
+  "routing": {
+    "samples": 43,
+    "by_model": {
+      "gpt-4o": 43
+    },
+    "by_task_type": {
+      "coding": 43
+    },
+    "by_complexity": {
+      "standard": 43
+    },
+    "est_cost_total": 0.000645
+  },
+  "memory": {
+    "contradictions": 7,
+    "failures": 5,
+    "decisions": 0,
+    "learnings_files": 8,
+    "backends": []
+  },
+  "code": {
+    "loc": 104184,
+    "py_files": 220,
+    "test_loc": 59368,
+    "test_files": 189,
+    "tests_code_ratio": 0.57,
+    "tags_total": 187,
+    "releases_30d": 19,
+    "churn_top": [
+      {
+        "file": "CHANGELOG.md",
+        "changes": 26
+      },
+      {
+        "file": "src/grimoire/__version__.py",
+        "changes": 22
+      },
+      {
+        "file": "tests/test_agentic_standard.py",
+        "changes": 20
+      },
+      {
+        "file": "scripts/gen-site-data.py",
+        "changes": 15
+      },
+      {
+        "file": "src/grimoire/core/agentic_standard.py",
+        "changes": 15
+      },
+      {
+        "file": "tests/unit/cli/test_app.py",
+        "changes": 11
+      },
+      {
+        "file": ".github/workflows/ci-sdk.yml",
+        "changes": 11
+      },
+      {
+        "file": "README.md",
+        "changes": 10
+      }
+    ],
+    "issues_open": 1,
+    "issues_closed": 0
+  },
+  "efficiency": {
+    "commits_per_release": 1.9,
+    "tests_per_kloc": 57.1,
+    "tests_code_loc_ratio": 0.57,
+    "rtk_saved_per_command": 9692,
+    "rtk_savings_pct": 96.8
+  },
+  "freshness": {
+    "days_since_commit": 0,
+    "generated_at": "2026-06-29T17:47:30+00:00",
+    "days_since_release": 4,
+    "days_since_bench": 0
+  },
+  "is_demo": true
+}
