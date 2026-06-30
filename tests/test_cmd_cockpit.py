@@ -117,13 +117,60 @@ def test_serve_refresh_empty_registry_mocked(runner: CliRunner, monkeypatch: pyt
     assert res.exit_code == 0  # empty registry → no subprocess, demo fallback
 
 
-def test_default_callback_invokes_serve(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", _FakeHTTPD)
+def _mock_daemon(monkeypatch: pytest.MonkeyPatch, pid: int = 4321, alive: bool = True) -> list[str]:
+    """Mock the daemon side-effects (spawn, liveness, browser, sleep). Returns opened URLs."""
     opened: list[str] = []
+    monkeypatch.setattr(cmd_cockpit, "_spawn_detached", lambda cmd: pid)
+    monkeypatch.setattr(cmd_cockpit, "_port_alive", lambda port: alive)
     monkeypatch.setattr(cmd_cockpit.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    monkeypatch.setattr(cmd_cockpit.time, "sleep", lambda s: None)
+    return opened
+
+
+def test_default_callback_invokes_start(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    opened = _mock_daemon(monkeypatch, pid=555)
     res = runner.invoke(app, ["cockpit"])
     assert res.exit_code == 0
     assert opened and opened[0].endswith("/portfolio.html")
+
+
+def test_start_status_stop_lifecycle(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_daemon(monkeypatch, pid=4321)
+    killed: dict[str, int] = {}
+    monkeypatch.setattr(cmd_cockpit, "_terminate", lambda pid: bool(killed.update(pid=pid)) or True)
+
+    res = runner.invoke(app, ["cockpit", "start", "--no-open", "--port", "9191"])
+    assert res.exit_code == 0
+    state = cmd_cockpit._read_state()
+    assert state is not None and state["pid"] == 4321 and state["port"] == 9191
+
+    res = runner.invoke(app, ["cockpit", "status"])
+    assert "En cours" in res.output
+
+    res = runner.invoke(app, ["cockpit", "start", "--no-open"])  # already running
+    assert "déjà démarré" in res.output
+
+    res = runner.invoke(app, ["cockpit", "stop"])
+    assert res.exit_code == 0
+    assert killed["pid"] == 4321
+    assert cmd_cockpit._read_state() is None
+
+
+def test_stop_when_not_running(runner: CliRunner) -> None:
+    res = runner.invoke(app, ["cockpit", "stop"])
+    assert "Aucun cockpit" in res.output
+
+
+def test_status_when_stopped(runner: CliRunner) -> None:
+    res = runner.invoke(app, ["cockpit", "status"])
+    assert "arrêté" in res.output
+
+
+def test_start_timeout_fails(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_daemon(monkeypatch, pid=1, alive=False)
+    res = runner.invoke(app, ["cockpit", "start", "--no-open", "--port", "9192"])
+    assert res.exit_code == 1
+    assert cmd_cockpit._read_state() is None
 
 
 def test_serve_port_in_use(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:

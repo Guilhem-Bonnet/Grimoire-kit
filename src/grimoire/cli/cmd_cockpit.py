@@ -17,14 +17,17 @@ import json
 import os
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import time
 import webbrowser
 from dataclasses import dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -56,9 +59,63 @@ def _serve_dir() -> Path:
     return _home() / "serve"
 
 
+def _state_file() -> Path:
+    return _home() / "cockpit.json"
+
+
 def _slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return s or "project"
+
+
+# ── Daemon helpers (background start/stop) ────────────────────────────────────
+
+def _read_state() -> dict[str, Any] | None:
+    f = _state_file()
+    if not f.is_file():
+        return None
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_state(state: dict[str, Any]) -> None:
+    f = _state_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
+def _clear_state() -> None:
+    _state_file().unlink(missing_ok=True)
+
+
+def _port_alive(port: int) -> bool:
+    """True if something accepts connections on 127.0.0.1:<port> (cross-platform)."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _spawn_detached(cmd: list[str]) -> int:
+    """Launch a fully detached background process and return its PID."""
+    if os.name == "posix":
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    else:
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    return proc.pid
+
+
+def _terminate(pid: int) -> bool:
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
 
 
 # ── Registry I/O ──────────────────────────────────────────────────────────────
@@ -365,8 +422,87 @@ def serve(
         httpd.server_close()
 
 
+@cockpit_app.command("start")
+def start(
+    port: Annotated[int, typer.Option("--port", "-p", help="Local port.")] = 8420,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
+    with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+) -> None:
+    """Start the cockpit in the background (non-blocking) and open it."""
+    state = _read_state()
+    if state and _port_alive(int(state.get("port", 0))):
+        console.print(f"[yellow]•[/yellow] Cockpit déjà démarré → [link]{state['url']}[/link]")
+        if open_browser:
+            webbrowser.open(str(state["url"]))
+        return
+
+    serve_dir = _serve_dir()
+    _sync_site(serve_dir)
+    if _generate_data(serve_dir, with_tests):
+        console.print("[green]✓[/green] Data layer régénéré depuis le registre.")
+    else:
+        console.print("[dim]Registre vide → données de démo bundlées. [b]grimoire cockpit add <path>[/b][/dim]")
+
+    cmd = [sys.executable, "-m", "grimoire", "cockpit", "serve",
+           "--port", str(port), "--no-open", "--no-refresh"]
+    pid = _spawn_detached(cmd)
+    url = f"http://127.0.0.1:{port}/portfolio.html"
+    for _ in range(24):
+        if _port_alive(port):
+            break
+        time.sleep(0.25)
+    else:
+        console.print("[red]✗[/red] Le cockpit n'a pas démarré à temps (port occupé ?).")
+        raise typer.Exit(1)
+
+    _write_state({"pid": pid, "port": port, "url": url})
+    console.print(f"[bold green]Cockpit démarré[/bold green] → [link]{url}[/link]")
+    console.print("[dim]Arrêt : [b]grimoire cockpit stop[/b] · état : [b]grimoire cockpit status[/b][/dim]")
+    if open_browser:
+        webbrowser.open(url)
+
+
+@cockpit_app.command("stop")
+def stop() -> None:
+    """Stop the background cockpit."""
+    state = _read_state()
+    if not state:
+        console.print("[dim]Aucun cockpit en cours.[/dim]")
+        return
+    pid = int(state.get("pid", 0))
+    killed = _terminate(pid) if pid else False
+    _clear_state()
+    if killed:
+        console.print("[green]−[/green] Cockpit arrêté.")
+    else:
+        console.print("[yellow]•[/yellow] Cockpit déjà arrêté (état nettoyé).")
+
+
+@cockpit_app.command("status")
+def status() -> None:
+    """Show whether the cockpit is running."""
+    state = _read_state()
+    if state and _port_alive(int(state.get("port", 0))):
+        console.print(f"[green]●[/green] En cours → [link]{state['url']}[/link]")
+        return
+    if state:
+        _clear_state()
+    console.print("[dim]○ Cockpit arrêté — démarre-le : [b]grimoire cockpit start[/b][/dim]")
+
+
+@cockpit_app.command("open")
+def open_browser_cmd() -> None:
+    """Open the running cockpit in the browser."""
+    state = _read_state()
+    if state and _port_alive(int(state.get("port", 0))):
+        webbrowser.open(str(state["url"]))
+        console.print(f"[green]→[/green] {state['url']}")
+        return
+    console.print("[yellow]•[/yellow] Cockpit arrêté — lance [b]grimoire cockpit start[/b].")
+
+
 @cockpit_app.callback(invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
-    """Default to ``serve`` when no subcommand is given."""
+    """Default to ``start`` (background) when no subcommand is given."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(serve)
+        ctx.invoke(start)
