@@ -78,6 +78,86 @@ def test_remove(runner: CliRunner, tmp_path: Path) -> None:
     assert cmd_cockpit._load_registry() == []
 
 
+class _FakeHTTPD:
+    """Stand-in for ThreadingHTTPServer that exits serve_forever immediately."""
+
+    def __init__(self, addr: tuple[str, int], handler: object) -> None:
+        self.addr = addr
+
+    def serve_forever(self) -> None:
+        raise KeyboardInterrupt
+
+    def server_close(self) -> None:
+        pass
+
+
+def test_refresh_empty_registry(runner: CliRunner) -> None:
+    res = runner.invoke(app, ["cockpit", "refresh"])
+    assert res.exit_code == 0
+    assert "démo" in res.output  # bundled demo data kept as fallback
+
+
+def test_serve_no_refresh_mocked(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", _FakeHTTPD)
+    monkeypatch.setattr(cmd_cockpit.webbrowser, "open", lambda *a, **k: None)
+    res = runner.invoke(app, ["cockpit", "serve", "--no-open", "--no-refresh", "--port", "0"])
+    assert res.exit_code == 0
+    assert "Cockpit" in res.output
+
+
+def test_serve_refresh_empty_registry_mocked(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", _FakeHTTPD)
+    monkeypatch.setattr(cmd_cockpit.webbrowser, "open", lambda *a, **k: None)
+    res = runner.invoke(app, ["cockpit", "serve", "--no-open", "--port", "0"])
+    assert res.exit_code == 0  # empty registry → no subprocess, demo fallback
+
+
+def test_default_callback_invokes_serve(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", _FakeHTTPD)
+    opened: list[str] = []
+    monkeypatch.setattr(cmd_cockpit.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    res = runner.invoke(app, ["cockpit"])
+    assert res.exit_code == 0
+    assert opened and opened[0].endswith("/portfolio.html")
+
+
+def test_serve_port_in_use(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(addr: object, handler: object) -> None:
+        raise OSError("address already in use")
+
+    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", _boom)
+    res = runner.invoke(app, ["cockpit", "serve", "--no-open", "--no-refresh", "--port", "0"])
+    assert res.exit_code == 1
+
+
+class _FakeProc:
+    def __init__(self, returncode: int, stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stderr = stderr
+        self.stdout = ""
+
+
+def test_refresh_generates_when_project_registered(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proj = _project(tmp_path, "delta")
+    runner.invoke(app, ["cockpit", "add", str(proj)])
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    res = runner.invoke(app, ["cockpit", "refresh"])
+    assert res.exit_code == 0
+    assert "régénérées" in res.output
+
+
+def test_generate_data_warns_on_subprocess_failure(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proj = _project(tmp_path, "epsilon")
+    runner.invoke(app, ["cockpit", "add", str(proj)])
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(1, "trace\nlast error line"))
+    res = runner.invoke(app, ["cockpit", "refresh"])
+    assert res.exit_code == 0  # partial generation is non-fatal
+
+
 def test_sync_site_seeds_demo_and_preserves_generated_data(tmp_path: Path) -> None:
     serve = tmp_path / "serve"
 
