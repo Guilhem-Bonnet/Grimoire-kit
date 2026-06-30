@@ -173,7 +173,7 @@
     },
     {
       "task_id": "rel-3160",
-      "title": "v3.16 — purge BMAD + standard agentique gouverné",
+      "title": "v3.16 — standard agentique gouverné",
       "status": "released",
       "priority": "high",
       "owner": "project-maintainer",

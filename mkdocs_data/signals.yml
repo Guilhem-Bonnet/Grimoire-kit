@@ -1,9 +1,9 @@
 signals:
-  - title: Kit gouverné — héritage BMAD retiré, sortie CLI normalisée
+  - title: Kit gouverné — outillage unifié, sortie CLI normalisée
     path: changelog.md
     date: 2026-06-26
-    kicker: v3.16 · zéro BMAD · marqueurs ASCII
-    summary: Suppression complète de l'héritage BMAD (code, outillage, layout) et purge des emojis de la sortie terminal au profit de marqueurs ASCII lisibles et stables.
+    kicker: v3.16 · outillage unifié · marqueurs ASCII
+    summary: Unification du code, de l'outillage et du layout sous l'identité Grimoire, et passage des emojis de la sortie terminal à des marqueurs ASCII lisibles et stables.
     featured: true
     proof: false
 

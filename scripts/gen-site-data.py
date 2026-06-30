@@ -196,7 +196,7 @@ _DEMO_TASKS = [
      "decision_trace_ref": "_grimoire-output/decisions/cli-markers/decision-trace.yaml", "blockers": []},
     {"task_id": "governed-policies", "title": "Profil governed — politiques par environnement", "status": "accepted",
      "priority": "medium", "owner": "planner", "agent_roles": ["planner"], "blockers": []},
-    {"task_id": "rel-3160", "title": "v3.16 — purge BMAD + standard agentique gouverné", "status": "released",
+    {"task_id": "rel-3160", "title": "v3.16 — standard agentique gouverné", "status": "released",
      "priority": "high", "owner": "project-maintainer", "agent_roles": ["dev", "qa"], "blockers": []},
     {"task_id": "scaffold-v2v3", "title": "Scaffold migration v2 → v3", "status": "archived",
      "priority": "low", "owner": "dev", "agent_roles": ["dev"], "blockers": []},
@@ -579,7 +579,9 @@ def _git_activity(root: Path) -> dict:
     for line in _run(["git", "shortlog", "-sne", "HEAD"], root).splitlines():
         m = re.match(r"\s*(\d+)\s+(.+?)\s+<", line)
         if m:
-            contributors.append({"name": m.group(2), "commits": int(m.group(1))})
+            # Normalise les bots de bench : "<préfixe> Bench Bot" → "Bench Bot".
+            name = re.sub(r"^\S+\s+(Bench Bot)$", r"\1", m.group(2))
+            contributors.append({"name": name, "commits": int(m.group(1))})
     out["contributor_count"] = len(contributors)
     out["contributors"] = contributors[:6]
 
