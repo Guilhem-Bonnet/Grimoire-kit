@@ -592,7 +592,7 @@
             <div class="action-desc">Migrer entre backends, sans perte.</div>
           </div>
         </div>
-        <p class="actions-foot">Toute écriture passera par l'<b>API Memory OS</b> — jamais de SQL ni d'accès brut — <b>localhost uniquement</b>, <b>jamais sur la vitrine</b>. Cette page détecte son mode et masque toute action hors cockpit local. C'est le hook du lot suivant.</p>
+        <p class="actions-foot">En cockpit local, l'<b>introspection gouvernée</b> (statut · lint · taxonomie · recherche) tourne en direct via l'<b>API Memory OS</b> — jamais de SQL ni d'accès brut, <b>localhost uniquement</b>, <b>jamais sur la vitrine</b>. Les écritures (résolution de contradictions, migration) arrivent au prochain cran, derrière confirmation explicite.</p>
       </div>
     </div>
   </section>
@@ -959,6 +959,90 @@
     if (det) det.innerHTML = `<div class="vd-top"><span class="vd-id">${esc(e.id)}</span><span class="type-pill" style="color:${tc(e.type)}">${esc(TL[e.type] || e.type)}</span><span class="status-tag snapshot" style="margin-left:auto"><span class="dot"></span>SNAPSHOT</span></div><div class="vd-text">${esc(e.text)}</div><div class="vd-meta"><div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date)}</span></div><div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.map((t) => '#' + esc(t)).join('  ') || '—'}</span></div><div class="vd-row"><span class="vd-k">Liens (${links.length})</span><span class="vd-links">${links.length ? links.map((l) => `<span class="vd-link"><span class="sw" style="background:${tc(l.o.type)}"></span>${esc(l.o.id)} <b>· #${esc(l.shared.join(' #'))}</b></span>`).join('') : '<span class="vd-v" style="color:var(--ink-muted)">aucun lien — entrée orpheline</span>'}</span></div></div>`;
     $('vault-list').querySelectorAll('.ventry[data-id]').forEach((el) => el.classList.toggle('sel', el.dataset.id === id));
   }
+})();
+</script>
+<!-- ════════════ Pilotage live (cockpit local uniquement) ════════════ -->
+<style>
+  .pilotage-live { margin-top: 14px; border-top: 1px solid var(--line, #1c1f24); padding-top: 14px; }
+  .pilotage-live .pl-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pilotage-live .pl-btn { font: 600 12px/1 'Geist', system-ui, sans-serif; color: var(--ink, #e8eaed);
+    background: #14161a; border: 1px solid #2a2e35; border-radius: 7px; padding: 8px 12px; cursor: pointer; }
+  .pilotage-live .pl-btn:hover { border-color: var(--accent, #ff6b3d); color: #fff; }
+  .pilotage-live .pl-btn:disabled { opacity: .5; cursor: progress; }
+  .pilotage-live .pl-q { flex: 1; min-width: 140px; background: #0d0f12; border: 1px solid #2a2e35;
+    border-radius: 7px; padding: 8px 10px; color: var(--ink, #e8eaed); font: 13px 'Geist Mono', monospace; }
+  .pilotage-live .pl-out { margin: 12px 0 0; max-height: 280px; overflow: auto; background: #0a0c0e;
+    border: 1px solid #1c1f24; border-radius: 8px; padding: 12px; color: #9fe7c8;
+    font: 12px/1.5 'Geist Mono', monospace; white-space: pre-wrap; word-break: break-word; }
+  .pilotage-live .pl-out.err { color: #f8a5a5; }
+  .actions-panel[data-cockpit="active"] .action-lock { display: none; }
+  .status-tag.cockpit-active { color: #34d399; }
+  .status-tag.cockpit-active .dot { background: #34d399; }
+</style>
+<script>
+(function () {
+  const host = location.hostname;
+  const isLocal = /^(localhost|127\.|0\.0\.0\.0)/.test(host) || host === '::1' ||
+    host.endsWith('.local') || host === '';
+  if (!isLocal) return; // vitrine publique : pilotage verrouillé, jamais d'API.
+
+  const panel = document.querySelector('.actions-panel');
+  if (!panel) return;
+  panel.dataset.cockpit = 'active';
+  const tag = panel.querySelector('.status-tag');
+  if (tag) { tag.classList.add('cockpit-active'); tag.lastChild.textContent = 'COCKPIT LOCAL — ACTIF'; }
+
+  const slug = new URLSearchParams(location.search).get('project');
+  const live = document.createElement('div');
+  live.className = 'pilotage-live';
+  live.innerHTML =
+    '<div class="pl-bar">' +
+    '<button class="pl-btn" data-action="status">Statut</button>' +
+    '<button class="pl-btn" data-action="gate">Lint mémoire</button>' +
+    '<button class="pl-btn" data-action="taxonomy">Taxonomie</button>' +
+    '<input class="pl-q" type="search" placeholder="rechercher dans la mémoire…" aria-label="recherche mémoire">' +
+    '<button class="pl-btn" data-action="search">Rechercher</button>' +
+    '</div><pre class="pl-out" hidden></pre>';
+  panel.appendChild(live);
+
+  const out = live.querySelector('.pl-out');
+  const qInput = live.querySelector('.pl-q');
+  const buttons = Array.from(live.querySelectorAll('.pl-btn'));
+
+  function render(text, isErr) {
+    out.hidden = false;
+    out.classList.toggle('err', !!isErr);
+    out.textContent = text;
+  }
+
+  async function run(action) {
+    const body = { action, project: slug || '' };
+    if (action === 'search') {
+      const q = (qInput.value || '').trim();
+      if (!q) { render('Saisis une requête de recherche.', true); return; }
+      body.query = q;
+    }
+    buttons.forEach((b) => (b.disabled = true));
+    render('… exécution de `grimoire memory ' + action + '` …', false);
+    try {
+      const r = await fetch('/api/memory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        render((d.error || 'échec') + (d.stderr ? '\n\n' + d.stderr : ''), true);
+      } else {
+        render((d.stdout || '').trim() || '(aucune sortie)', false);
+      }
+    } catch (e) {
+      render('API cockpit indisponible : ' + e.message, true);
+    } finally {
+      buttons.forEach((b) => (b.disabled = false));
+    }
+  }
+
+  buttons.forEach((b) => b.addEventListener('click', () => run(b.dataset.action)));
+  qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run('search'); });
 })();
 </script>
 </body>

@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import threading
+import urllib.error
+import urllib.request
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -131,10 +136,10 @@ def test_serve_port_in_use(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -
 
 
 class _FakeProc:
-    def __init__(self, returncode: int, stderr: str = "") -> None:
+    def __init__(self, returncode: int, stderr: str = "", stdout: str = "") -> None:
         self.returncode = returncode
         self.stderr = stderr
-        self.stdout = ""
+        self.stdout = stdout
 
 
 def test_refresh_generates_when_project_registered(
@@ -156,6 +161,88 @@ def test_generate_data_warns_on_subprocess_failure(
     monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(1, "trace\nlast error line"))
     res = runner.invoke(app, ["cockpit", "refresh"])
     assert res.exit_code == 0  # partial generation is non-fatal
+
+
+def test_resolve_project_path(tmp_path: Path) -> None:
+    proj = _project(tmp_path, "zeta")
+    cmd_cockpit._save_registry([{"name": "Zeta", "path": str(proj), "slug": "zeta"}])
+    assert cmd_cockpit._resolve_project_path("zeta") == proj
+    assert cmd_cockpit._resolve_project_path("") == proj  # empty → first
+    assert cmd_cockpit._resolve_project_path("unknown") is None
+
+
+def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/memory",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+@pytest.fixture
+def api_server(tmp_path: Path):  # type: ignore[no-untyped-def]
+    proj = _project(tmp_path, "served")
+    cmd_cockpit._save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
+    httpd = cmd_cockpit.ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield httpd.server_address[1]
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_api_dispatches_allowlisted_action(
+    api_server: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        captured["cmd"] = cmd
+        captured["cwd"] = kw.get("cwd")
+        return _FakeProc(0, stdout='{"backend": "qdrant"}')
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    status, body = _post_api(api_server, {"action": "status", "project": "served"})
+    assert status == 200
+    assert body["ok"] is True
+    assert "qdrant" in body["stdout"]
+    assert captured["cmd"][-3:] == ["memory", "status"] or "status" in captured["cmd"]
+
+
+def test_api_rejects_unknown_action(api_server: int) -> None:
+    status, body = _post_api(api_server, {"action": "rm -rf", "project": "served"})
+    assert status == 400
+    assert body["ok"] is False
+
+
+def test_api_search_requires_query(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    status, _ = _post_api(api_server, {"action": "search", "project": "served", "query": ""})
+    assert status == 400
+
+
+def test_api_unknown_project(api_server: int) -> None:
+    status, _ = _post_api(api_server, {"action": "status", "project": "ghost"})
+    assert status == 400
+
+
+def test_api_404_on_other_path(api_server: int) -> None:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST"
+    )
+    try:
+        urllib.request.urlopen(req, timeout=5)  # noqa: S310
+        raise AssertionError("expected 404")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 404
 
 
 def test_sync_site_seeds_demo_and_preserves_generated_data(tmp_path: Path) -> None:

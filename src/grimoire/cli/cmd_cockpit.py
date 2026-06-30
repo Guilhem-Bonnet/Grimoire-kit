@@ -86,6 +86,87 @@ def _looks_grimoire(p: Path) -> bool:
     )
 
 
+def _resolve_project_path(slug: str | None) -> Path | None:
+    """Map a registry slug to its absolute project path (first project if slug is empty)."""
+    projects = _load_registry()
+    if slug:
+        for p in projects:
+            if p.get("slug") == slug:
+                return Path(p["path"])
+        return None
+    return Path(projects[0]["path"]) if projects else None
+
+
+# ── Local API (cockpit only) ──────────────────────────────────────────────────
+# A read-only governance API: dispatches an allowlisted ``grimoire memory``
+# subcommand against a registered project. Bound to 127.0.0.1 only — never the
+# vitrine. Mutations are intentionally NOT exposed here yet (next increment,
+# behind explicit confirmation, still via the Memory OS CLI — never raw SQL).
+
+_ALLOWED_ACTIONS: dict[str, list[str]] = {
+    "status": [],
+    "gate": ["--soft"],
+    "search": [],  # requires a query argument
+    "list": [],
+    "taxonomy": [],
+}
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+class _CockpitHandler(SimpleHTTPRequestHandler):
+    """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
+
+    def log_message(self, *args: object) -> None:
+        return  # quiet by default
+
+    def _send_json(self, code: int, payload: dict[str, object]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:  # http.server contract
+        if self.path != "/api/memory":
+            self._send_json(404, {"ok": False, "error": "not found"})
+            return
+        if self.client_address[0] not in _LOCAL_HOSTS:
+            self._send_json(403, {"ok": False, "error": "cockpit local only"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "bad json"})
+            return
+        action = str(data.get("action", ""))
+        if action not in _ALLOWED_ACTIONS:
+            self._send_json(400, {"ok": False, "error": f"action non autorisée: {action}"})
+            return
+        proot = _resolve_project_path(str(data.get("project", "")) or None)
+        if proot is None or not proot.is_dir():
+            self._send_json(400, {"ok": False, "error": "projet inconnu"})
+            return
+        extra = list(_ALLOWED_ACTIONS[action])
+        if action == "search":
+            query = str(data.get("query", "")).strip()
+            if not query:
+                self._send_json(400, {"ok": False, "error": "query requise"})
+                return
+            extra = [query, *extra]
+        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", action, *extra]
+        try:
+            res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            self._send_json(504, {"ok": False, "error": "timeout"})
+            return
+        self._send_json(200, {
+            "ok": res.returncode == 0, "code": res.returncode,
+            "stdout": res.stdout, "stderr": res.stderr, "action": action,
+        })
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 @cockpit_app.command("add")
@@ -210,7 +291,7 @@ def serve(
             console.print("[dim]Registre vide → site servi avec les données de démo bundlées.[/dim]")
             console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b][/dim]")
 
-    handler = partial(SimpleHTTPRequestHandler, directory=str(serve_dir))
+    handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as exc:
