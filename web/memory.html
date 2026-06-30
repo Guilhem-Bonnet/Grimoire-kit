@@ -592,7 +592,7 @@
             <div class="action-desc">Migrer entre backends, sans perte.</div>
           </div>
         </div>
-        <p class="actions-foot">En cockpit local, l'<b>introspection gouvernée</b> (statut · lint · taxonomie · recherche) tourne en direct via l'<b>API Memory OS</b> — jamais de SQL ni d'accès brut, <b>localhost uniquement</b>, <b>jamais sur la vitrine</b>. Les écritures (résolution de contradictions, migration) arrivent au prochain cran, derrière confirmation explicite.</p>
+        <p class="actions-foot">En cockpit local, l'<b>introspection gouvernée</b> (statut · lint · taxonomie · recherche) et les <b>écritures</b> (consolidation, suppression d'entrée) tournent en direct via l'<b>API Memory OS</b> — jamais de SQL ni d'accès brut, <b>localhost uniquement</b>, <b>jamais sur la vitrine</b>. Toute écriture exige une <b>confirmation explicite</b>.</p>
       </div>
     </div>
   </section>
@@ -975,6 +975,11 @@
     border: 1px solid #1c1f24; border-radius: 8px; padding: 12px; color: #9fe7c8;
     font: 12px/1.5 'Geist Mono', monospace; white-space: pre-wrap; word-break: break-word; }
   .pilotage-live .pl-out.err { color: #f8a5a5; }
+  .pilotage-live .pl-mut { margin-top: 10px; }
+  .pilotage-live .pl-mut-label { font: 600 11px/1 'Geist', system-ui, sans-serif; color: var(--ink-muted, #8a8f98);
+    text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
+  .pilotage-live .pl-btn.pl-danger { border-color: #5a2b2b; color: #f8a5a5; }
+  .pilotage-live .pl-btn.pl-danger:hover { border-color: #f87171; color: #fff; }
   .actions-panel[data-cockpit="active"] .action-lock { display: none; }
   .status-tag.cockpit-active { color: #34d399; }
   .status-tag.cockpit-active .dot { background: #34d399; }
@@ -1002,8 +1007,19 @@
     '<button class="pl-btn" data-action="taxonomy">Taxonomie</button>' +
     '<input class="pl-q" type="search" placeholder="rechercher dans la mémoire…" aria-label="recherche mémoire">' +
     '<button class="pl-btn" data-action="search">Rechercher</button>' +
-    '</div><pre class="pl-out" hidden></pre>';
+    '</div>' +
+    '<div class="pl-bar pl-mut">' +
+    '<span class="pl-mut-label">Écritures gouvernées</span>' +
+    '<button class="pl-btn pl-danger" data-action="gc">Consolider (gc)</button>' +
+    '<button class="pl-btn pl-danger" data-action="delete">Supprimer une entrée…</button>' +
+    '</div>' +
+    '<pre class="pl-out" hidden></pre>';
   panel.appendChild(live);
+
+  const MUTATIONS = {
+    gc: 'Consolider et compacter la mémoire ? Cette action modifie le store.',
+    delete: 'Supprimer définitivement cette entrée de la mémoire ?',
+  };
 
   const out = live.querySelector('.pl-out');
   const qInput = live.querySelector('.pl-q');
@@ -1021,6 +1037,16 @@
       const q = (qInput.value || '').trim();
       if (!q) { render('Saisis une requête de recherche.', true); return; }
       body.query = q;
+    }
+    if (action in MUTATIONS) {
+      if (action === 'delete') {
+        const id = (window.prompt('ID de l\'entrée à supprimer :') || '').trim();
+        if (!id) return;
+        body.id = id;
+      }
+      const msg = MUTATIONS[action] + (body.id ? '\n\nEntrée : ' + body.id : '');
+      if (!window.confirm(msg)) return;
+      body.confirm = true;
     }
     buttons.forEach((b) => (b.disabled = true));
     render('… exécution de `grimoire memory ' + action + '` …', false);

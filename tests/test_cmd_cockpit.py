@@ -234,6 +234,49 @@ def test_api_unknown_project(api_server: int) -> None:
     assert status == 400
 
 
+def test_api_mutation_requires_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    status, body = _post_api(api_server, {"action": "gc", "project": "served"})
+    assert status == 403
+    assert body["ok"] is False
+
+
+def test_api_gc_runs_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        captured["cmd"] = cmd
+        return _FakeProc(0, stdout='{"consolidated": 3}')
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    status, body = _post_api(api_server, {"action": "gc", "project": "served", "confirm": True})
+    assert status == 200
+    assert body["ok"] is True and body["mutation"] is True
+    assert captured["cmd"][-1] == "gc"
+
+
+def test_api_delete_requires_id(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    status, _ = _post_api(api_server, {"action": "delete", "project": "served", "confirm": True})
+    assert status == 400
+
+
+def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        captured["cmd"] = cmd
+        return _FakeProc(0, stdout='{"deleted": true}')
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    status, body = _post_api(
+        api_server, {"action": "delete", "project": "served", "confirm": True, "id": "dec-03"}
+    )
+    assert status == 200
+    assert body["ok"] is True
+    assert captured["cmd"][-3:] == ["delete", "dec-03", "--yes"]
+
+
 def test_api_404_on_other_path(api_server: int) -> None:
     req = urllib.request.Request(
         f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST"

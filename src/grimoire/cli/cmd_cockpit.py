@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import webbrowser
+from dataclasses import dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -110,6 +111,23 @@ _ALLOWED_ACTIONS: dict[str, list[str]] = {
     "list": [],
     "taxonomy": [],
 }
+
+
+@dataclass(frozen=True)
+class _Mutation:
+    """A governed write action — runs only with explicit confirmation."""
+
+    args: tuple[str, ...] = ()
+    needs_id: bool = False
+
+
+# Mutations stay deliberately small and well-defined; each maps to a real
+# ``grimoire memory`` command and runs only when the request carries
+# ``confirm: true`` (the UI gates this behind an explicit confirmation).
+_MUTATION_ACTIONS: dict[str, _Mutation] = {
+    "gc": _Mutation(),  # consolidate / compact the store
+    "delete": _Mutation(args=("--yes",), needs_id=True),  # remove one entry by id
+}
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -141,20 +159,35 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "bad json"})
             return
         action = str(data.get("action", ""))
-        if action not in _ALLOWED_ACTIONS:
+        is_read = action in _ALLOWED_ACTIONS
+        is_mutation = action in _MUTATION_ACTIONS
+        if not (is_read or is_mutation):
             self._send_json(400, {"ok": False, "error": f"action non autorisée: {action}"})
+            return
+        if is_mutation and data.get("confirm") is not True:
+            self._send_json(403, {"ok": False, "error": "confirmation explicite requise"})
             return
         proot = _resolve_project_path(str(data.get("project", "")) or None)
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
-        extra = list(_ALLOWED_ACTIONS[action])
-        if action == "search":
-            query = str(data.get("query", "")).strip()
-            if not query:
-                self._send_json(400, {"ok": False, "error": "query requise"})
-                return
-            extra = [query, *extra]
+        if is_read:
+            extra = list(_ALLOWED_ACTIONS[action])
+            if action == "search":
+                query = str(data.get("query", "")).strip()
+                if not query:
+                    self._send_json(400, {"ok": False, "error": "query requise"})
+                    return
+                extra = [query, *extra]
+        else:
+            spec = _MUTATION_ACTIONS[action]
+            extra = list(spec.args)
+            if spec.needs_id:
+                entry_id = str(data.get("id", "")).strip()
+                if not entry_id:
+                    self._send_json(400, {"ok": False, "error": "id d'entrée requis"})
+                    return
+                extra = [entry_id, *extra]
         cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", action, *extra]
         try:
             res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
@@ -164,6 +197,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self._send_json(200, {
             "ok": res.returncode == 0, "code": res.returncode,
             "stdout": res.stdout, "stderr": res.stderr, "action": action,
+            "mutation": is_mutation,
         })
 
 
