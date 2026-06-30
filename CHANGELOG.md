@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-06-29
+
 ### Ajouté
 
 - **Cockpit local — dashboard multi-projets** (`grimoire cockpit`) — un site web local,
