@@ -144,6 +144,7 @@ class _Mutation:
 
     args: tuple[str, ...] = ()
     needs_id: bool = False
+    subcommand: str | None = None  # defaults to the action name
 
 
 # Mutations stay deliberately small and well-defined; each maps to a real
@@ -152,6 +153,8 @@ class _Mutation:
 _MUTATION_ACTIONS: dict[str, _Mutation] = {
     "gc": _Mutation(),  # consolidate / compact the store
     "delete": _Mutation(args=("--yes",), needs_id=True),  # remove one entry by id
+    # resync the Weaviate / Neo4j projections from the source store (reindex, no loss)
+    "sync": _Mutation(subcommand="gate", args=("--sync", "--soft")),
 }
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -196,6 +199,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
+        subcmd = action
         if is_read:
             extra = list(_ALLOWED_ACTIONS[action])
             if action == "search":
@@ -206,6 +210,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 extra = [query, *extra]
         else:
             spec = _MUTATION_ACTIONS[action]
+            subcmd = spec.subcommand or action
             extra = list(spec.args)
             if spec.needs_id:
                 entry_id = str(data.get("id", "")).strip()
@@ -213,7 +218,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                     self._send_json(400, {"ok": False, "error": "id d'entrée requis"})
                     return
                 extra = [entry_id, *extra]
-        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", action, *extra]
+        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *extra]
         try:
             res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:

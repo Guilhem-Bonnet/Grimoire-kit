@@ -307,6 +307,25 @@ def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.
     assert captured["cmd"][-3:] == ["delete", "dec-03", "--yes"]
 
 
+def test_api_sync_maps_to_gate_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        captured["cmd"] = cmd
+        return _FakeProc(0, stdout='{"synced": true}')
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    status, body = _post_api(api_server, {"action": "sync", "project": "served", "confirm": True})
+    assert status == 200
+    assert body["ok"] is True and body["mutation"] is True
+    assert captured["cmd"][-3:] == ["gate", "--sync", "--soft"]
+
+
+def test_api_sync_requires_confirm(api_server: int) -> None:
+    status, _ = _post_api(api_server, {"action": "sync", "project": "served"})
+    assert status == 403
+
+
 def test_api_404_on_other_path(api_server: int) -> None:
     req = urllib.request.Request(
         f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST"

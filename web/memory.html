@@ -1010,6 +1010,7 @@
     '</div>' +
     '<div class="pl-bar pl-mut">' +
     '<span class="pl-mut-label">Écritures gouvernées</span>' +
+    '<button class="pl-btn" data-action="sync">Resynchroniser (sync)</button>' +
     '<button class="pl-btn pl-danger" data-action="gc">Consolider (gc)</button>' +
     '<button class="pl-btn pl-danger" data-action="delete">Supprimer une entrée…</button>' +
     '</div>' +
@@ -1017,6 +1018,7 @@
   panel.appendChild(live);
 
   const MUTATIONS = {
+    sync: 'Resynchroniser les projections (Weaviate / Neo4j) depuis la source ? Réindexation, sans perte de données.',
     gc: 'Consolider et compacter la mémoire ? Cette action modifie le store.',
     delete: 'Supprimer définitivement cette entrée de la mémoire ?',
   };
