@@ -114,6 +114,9 @@ grimoire doctor
 # Migrer un projet v2 → v3
 grimoire upgrade --dry-run   # aperçu
 grimoire upgrade             # exécuter
+
+# Cockpit local — dashboard multi-projets (arrière-plan + navigateur)
+grimoire cockpit             # démarre + ouvre ; 'stop' pour arrêter
 ```
 
 > **Multi-assistant** — `grimoire init` génère des entrypoints portables
@@ -122,6 +125,32 @@ grimoire upgrade             # exécuter
 > Codex, Gemini CLI et Cursor sans duplication. Un `.mcp.json` enregistre aussi le
 > serveur MCP Grimoire (OS-neutre, via `grimoire-mcp`).
 
+
+### <img src="docs/assets/icons/chart.svg" width="24" height="24" alt=""> Cockpit local — gouverne tous tes projets
+
+Le **cockpit** est un dashboard web local qui réunit tous tes projets Grimoire de la
+machine : portefeuille, observabilité (coûts/traces), santé CI, et **gestion mémoire
+gouvernée** (statut, lint, recherche + écritures `gc`/`delete`/`sync` sous confirmation).
+Le site est embarqué dans le paquet — aucune installation séparée.
+
+```bash
+grimoire cockpit              # démarre en arrière-plan + ouvre le navigateur
+grimoire cockpit status       # ● en cours → URL  /  ○ arrêté
+grimoire cockpit stop         # arrête proprement
+grimoire cockpit open         # rouvre l'onglet
+grimoire cockpit serve        # mode premier-plan (logs, Ctrl-C)
+
+# Gérer les projets gouvernés
+grimoire cockpit add .        # enregistre le projet courant (auto au 'grimoire init')
+grimoire cockpit list         # liste les projets
+grimoire cockpit remove <slug>
+```
+
+`grimoire init` enregistre automatiquement le projet scaffoldé (désactivable via
+`GRIMOIRE_NO_COCKPIT`). Le cockpit sert sur `127.0.0.1` uniquement : les actions de
+pilotage sont **actives en local** et **verrouillées sur la vitrine publique** — toute
+écriture passe par l'API Memory OS, jamais d'accès brut. Registre :
+`~/.grimoire/cockpit/registry.json`.
 
 ### Installation par besoins (commencer petit)
 

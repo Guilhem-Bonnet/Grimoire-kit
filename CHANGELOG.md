@@ -9,6 +9,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Cockpit local — dashboard multi-projets** (`grimoire cockpit`) — un site web local,
+  embarqué dans le paquet, qui gouverne tous les projets Grimoire de la machine :
+  portefeuille, observabilité (coûts/traces), santé CI, et gestion mémoire gouvernée.
+  - Mode daemon convivial : `start` (arrière-plan + ouverture navigateur, non bloquant),
+    `stop`, `status`, `open`, plus `serve` (premier-plan). Cross-platform.
+  - API locale (`127.0.0.1` only) : introspection en lecture (statut, lint, recherche,
+    taxonomie) et écritures gouvernées (`gc`, `delete`, `sync`) sous confirmation
+    explicite — toujours via l'API Memory OS, jamais d'accès brut.
+  - Registre `~/.grimoire/cockpit/registry.json` géré par `add`/`remove`/`list` ;
+    `grimoire init` auto-enregistre le projet scaffoldé (opt-out `GRIMOIRE_NO_COCKPIT`).
+  - Vitrine publique vs cockpit : les actions de pilotage sont actives en local et
+    verrouillées sur la vitrine (`*.github.io`) ; données de démo multi-projets pour la
+    vitrine via `scripts/gen-demo-projects.py`.
 - **Mémoire sans base de données vectorielle** — nouveau backend `lexical` (sqlite FTS5
   BM25, accent-insensible) offrant une recherche sans aucune DB vectorielle, service ni
   réseau. Pour les environnements (corpo, régulés, air-gapped) qui interdisent une base
