@@ -69,28 +69,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Supprimé / Changé
 
-- **Purge BMAD — résidu complet** — Tout le code fonctionnel et l'outillage sont débarrassés de la marque/layout `_bmad` :
-  - `agent-lint.py` retargeté de `_bmad/*/agents/` vers `_grimoire/*/agents/` (variable `grimoire_dir`, manifeste, messages) ;
-  - `observatory.py` ne supporte plus le layout `_bmad-output` / `BMAD_TRACE.md` (Grimoire uniquement) ; tests alignés ;
+- **Nettoyage du layout legacy — résidu complet** — Tout le code fonctionnel et l'outillage sont débarrassés de l'ancien layout de modules :
+  - `agent-lint.py` retargeté de l'ancien layout `*/agents/` vers `_grimoire/*/agents/` (variable `grimoire_dir`, manifeste, messages) ;
+  - `observatory.py` ne supporte plus l'ancien layout de sortie / fichier de trace (Grimoire uniquement) ; tests alignés ;
   - `github-cc-check.yml.tpl` (framework + copie déployée) rebrandé « Grimoire Completion Contract », chemin `_grimoire/_config/custom/cc-verify.sh`, hint `grimoire init` ;
-  - `bug-finder.py` ignore désormais `.grimoire-rnd` (était `.bmad-rnd`, nom obsolète) ;
+  - `bug-finder.py` ignore désormais `.grimoire-rnd` (ancien nom obsolète) ;
   - docstrings/commentaires/aides nettoyés : `grimoire-setup.py`, `agent-test.py`, `skill-validator.py` ;
-  - `grimoire-completion.zsh` : suppression de l'alias `bmad`/`compdef` et de `bmad-master` ;
+  - `grimoire-completion.zsh` : suppression des alias legacy (`*-master`, `compdef`) ;
   - `.github/CODEOWNERS`, `.vscode/settings.json` (`git.branchPrefix`), `.vscode/snippets` (préfixes `grimoire-*`), `examples/web-app-todo`, `tests/smoke-test.sh`, `tests/run-coverage.sh`, `_grimoire/_memory/requirements-full.txt` : rebrand `_grimoire`.
-  - **Conservé** : la citation de BMAD-METHOD comme framework de référence dans `docs/agentic-standard-benchmark-corpus-2026Q2.md` (provenance/attribution, pas un usage interne).
 
 ## [3.14.0] - 2026-06-25
 
 ### Changé
 
 - **Purge emoji — terminal & exemples docs (étape 2)** — `framework/tools/context-guard.py` : `status_icon`/`role_icon` renvoient des marqueurs texte maison (`[OK]`/`[WARN]`/`[CRIT]`, `[agent]`/`[mem]`…) au lieu d'emojis (un SVG ne s'affiche pas en terminal) ; `test_python_tools` aligné. Exemples docs `creating-agents`/`archetype-guide` : emojis `icon:` → noms d'icônes maison / texte.
-- **BMAD retiré de l'outil shell legacy** — `framework/tools/grimoire-setup.py` ne synchronise plus `_bmad/{bmm,core,cis,tea,bmb}` (suppression `MODULE_CONFIGS`/`check_config_file`/`apply_config_file`) ; propage l'identité vers `project-context.yaml` + `.github/copilot-instructions.md`. `grimoire.sh` inchangé. `test_grimoire_setup` aligné. **Reste** : références `_bmad`/« BMAD » résiduelles dans ~10 autres outils framework (scanners) + emojis dans les `print()` framework — sweep dédié.
+- **Layout legacy retiré de l'outil shell** — `framework/tools/grimoire-setup.py` ne synchronise plus les modules legacy `{bmm,core,cis,tea,bmb}` (suppression `MODULE_CONFIGS`/`check_config_file`/`apply_config_file`) ; propage l'identité vers `project-context.yaml` + `.github/copilot-instructions.md`. `grimoire.sh` inchangé. `test_grimoire_setup` aligné. **Reste** : références legacy résiduelles dans ~10 autres outils framework (scanners) + emojis dans les `print()` framework — sweep dédié.
 
 ## [3.13.0] - 2026-06-25
 
 ### Changé
 
-- **BMAD retiré de `grimoire setup` (SDK)** — `grimoire setup` ne synchronise plus les configs de modules `_bmad/{bmm,core,cis,tea,bmb}/config.yaml` (taxonomie legacy que le scaffold actuel ne crée plus) ; il propage l'identité utilisateur (source `project-context.yaml`) vers `.github/copilot-instructions.md` uniquement. Docstrings (`app.py`, `project.py`) et docs (getting-started, grimoire-yaml-reference, onboarding) nettoyés de la marque « BMAD » (« BMad Master » → « Grimoire Master »). Noms de modules internes (bmm/core/cis/tea/bmb) conservés. **Reste à traiter** : l'outil shell legacy `framework/tools/grimoire-setup.py` (+ `grimoire.sh`, test non-CI) — décision standalone vs délégation SDK.
+- **Layout legacy retiré de `grimoire setup` (SDK)** — `grimoire setup` ne synchronise plus les configs de modules legacy `{bmm,core,cis,tea,bmb}/config.yaml` (taxonomie legacy que le scaffold actuel ne crée plus) ; il propage l'identité utilisateur (source `project-context.yaml`) vers `.github/copilot-instructions.md` uniquement. Docstrings (`app.py`, `project.py`) et docs (getting-started, grimoire-yaml-reference, onboarding) nettoyés de la marque d'origine (« Master » d'origine → « Grimoire Master »). Noms de modules internes (bmm/core/cis/tea/bmb) conservés. **Reste à traiter** : l'outil shell legacy `framework/tools/grimoire-setup.py` (+ `grimoire.sh`, test non-CI) — décision standalone vs délégation SDK.
 
 ## [3.12.0] - 2026-06-25
 
@@ -512,7 +511,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 #### Ajouté
 
 - **`grimoire setup`** — Nouvelle commande CLI pour synchroniser la configuration utilisateur
-  (nom, langue, niveau) depuis `project-context.yaml` vers tous les fichiers BMAD.
+  (nom, langue, niveau) depuis `project-context.yaml` vers tous les fichiers de configuration.
   Modes : `--sync`, `--check` (CI-friendly), `--json`, overrides CLI (`--user`, `--lang`, `--skill-level`)
 - **`grimoire-setup.py`** — Outil standalone (stdlib-only) pour la même synchronisation,
   utilisable sans pip via `grimoire.sh setup`
@@ -569,8 +568,8 @@ Le projet prend son indépendance sous le nom **Grimoire Kit** avec un **package
 
 #### Modifié
 
-- **Rebranding complet** — Toutes les références `bmad` renommées en `grimoire` dans le code source,
-  tests, documentation, CI, shell scripts, et noms de répertoires (`_bmad/` → `_grimoire/`)
+- **Rebranding complet** — Toutes les références de la marque d'origine renommées en `grimoire` dans le code source,
+  tests, documentation, CI, shell scripts, et noms de répertoires (ancien layout → `_grimoire/`)
 - **Entry points** — `grimoire` (CLI) et `grimoire-mcp` (serveur MCP) enregistrés
   dans `pyproject.toml`
 - **Build** — Migration vers `hatchling` comme build backend
@@ -582,7 +581,7 @@ Le projet prend son indépendance sous le nom **Grimoire Kit** avec un **package
 
 - Scripts shell standalone (remplacés par le SDK Python)
 - Dépendance à `bash` pour l'exécution des outils
-- Toute dépendance au package npm `bmad-method`
+- Toute dépendance au package npm d'origine
 
 <img src="docs/assets/divider.svg" width="100%" alt="">
 

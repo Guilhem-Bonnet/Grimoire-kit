@@ -30,7 +30,7 @@ sur le code réel (grep src/framework, pas seulement les manifestes). Statut :
 | 9 | Remote Hygiene Guard (refs obsolètes, fraîcheur) | openclaw | ✗ | absent | **P1** |
 | 10 | Decision Council Gate (quorum, veto, budget) | Claude Octopus, AutoGen, OpenAI Agents SDK | ✗ | CVTL existe côté orchestrateur Forge, pas comme contrôle kit | **P1** |
 | 11 | Local Agent Worker Pool (slots, retries, cancel) | Octogent, Conductor, Shannon | ✗ | absent | P3 |
-| 12 | Evidence-Gated Workflow FSM | Switchboard, BMAD, Shannon | ✓ | `evidence-gated-fsm` + `evidence_gates` | — |
+| 12 | Evidence-Gated Workflow FSM | Switchboard, Shannon | ✓ | `evidence-gated-fsm` + `evidence_gates` | — |
 | 13 | Agent Backend Boundary (node→backend→events→runtime) | Dify, OpenHands, Agent Framework | ✗ | core relativement monolithique | P3 |
 | 14 | Secure Local Coordinator (inbox/terminal signés, no token proxy) | Switchboard, VS Code Copilot Chat | ◐ | `governed-hook-gateway` couvre une partie | P2 |
 | 15 | Kubernetes Agent Control Plane (CRD, policies, OTel) | kagent, agent-sandbox, gas-town | ✗ | absent (profil production) | P3 |

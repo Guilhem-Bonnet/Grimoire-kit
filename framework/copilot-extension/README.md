@@ -123,13 +123,13 @@ tools:
 
 ```typescript
 import { CopilotExtensionsAPI } from "@github/copilot-extensions";
-import { BMadMCPClient } from "./mcp-client";
+import { GrimoireMCPClient } from "./mcp-client";
 
 export async function handleCopilotMessage(
   message: string,
   context: CopilotContext
 ) {
-  const mcp = new BMadMCPClient({ transport: "stdio" });
+  const mcp = new GrimoireMCPClient({ transport: "stdio" });
 
   // Parser la commande
   const [cmd, ...args] = parseCommand(message);
