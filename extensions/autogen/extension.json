@@ -1,0 +1,63 @@
+{
+  "manifestVersion": 1,
+  "id": "autogen",
+  "name": "AutoGen Bridge",
+  "version": "0.1.0",
+  "description": "Pont AutoGen (Microsoft) : conversations multi-agents exposées comme orchestrations Grimoire gouvernées — rôles bornés, tours de parole tracés, sortie en handoff packet.",
+  "license": "MIT",
+  "authors": [
+    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+  ],
+  "upstream": {
+    "repository": "https://github.com/microsoft/autogen",
+    "kind": "framework",
+    "pinnedVersion": "0.4.x"
+  },
+  "compat": { "kit": ">=3.11", "manifest": 1 },
+  "provides": {
+    "agents": ["artifacts/agents/autogen-conversation-runner.agent.md"],
+    "skills": ["artifacts/skills/autogen-conversation-design/SKILL.md"],
+    "hooks": [],
+    "workflows": [],
+    "instructions": [],
+    "nodes": [
+      {
+        "id": "autogen-conversation",
+        "label": "AutoGen Conversation",
+        "description": "Une conversation multi-agents AutoGen (équipe + terminaison) exposée comme node composite.",
+        "patterns": ["ORC-01", "ORC-03"],
+        "pins": [
+          { "id": "mission", "direction": "in", "contract": "task-envelope" },
+          { "id": "result", "direction": "out", "contract": "handoff-packet" }
+        ],
+        "compilesTo": ["agent", "workflow"]
+      }
+    ]
+  },
+  "patterns": {
+    "implements": ["ORC-01", "ORC-03"],
+    "requires": ["GOV-01"]
+  },
+  "permissions": {
+    "filesystem": "artifacts",
+    "network": true,
+    "hooks": [],
+    "memory": "none"
+  },
+  "install": {
+    "steps": [
+      { "kind": "pip", "packages": ["autogen-agentchat"] },
+      {
+        "kind": "copy",
+        "from": "artifacts/agents/autogen-conversation-runner.agent.md",
+        "to": ".github/agents/autogen-conversation-runner.agent.md"
+      },
+      {
+        "kind": "copy",
+        "from": "artifacts/skills/autogen-conversation-design",
+        "to": ".github/skills/autogen-conversation-design"
+      }
+    ],
+    "verify": "scripts/verify-install.sh"
+  }
+}

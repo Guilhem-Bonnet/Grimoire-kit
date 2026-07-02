@@ -39,3 +39,6 @@ artefacts gouvernés — les deux mécanismes sont complémentaires.
 | [crewai](crewai/extension.json) | Pont CrewAI : crews importés en Recipes gouvernées via `grimoire.runtime.crewai_adapter` | ORC-01, ORC-02, ORC-03 |
 | [langfuse](langfuse/extension.json) | Observabilité : export best-effort de la télémétrie locale vers Langfuse, conventions de traces | QUA-02, QUA-08, QUA-10 |
 | [langgraph](langgraph/extension.json) | Pont LangGraph : StateGraphs à état explicite, checkpoints audités, flow déclaré | ORC-09, ORC-10 |
+| [autogen](autogen/extension.json) | Pont AutoGen : conversations multi-agents à rôles bornés, terminaison explicite, tours tracés | ORC-01, ORC-03 |
+| [browser-use](browser-use/extension.json) | Navigation web gouvernée : preuve par action UI, allowlist, simulation avant irréversible | QUA-11, GOV-07 |
+| [haystack](haystack/extension.json) | RAG gouverné : indexation avec provenance, rappel vérifiable — contre le RAG aveugle | KNO-06, KNO-02 |
