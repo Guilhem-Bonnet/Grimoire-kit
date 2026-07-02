@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -27,6 +28,15 @@ from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 
 logger = logging.getLogger(__name__)
+
+#: Typed collections of the agent memory protocol (parity with mem0-bridge).
+MEMORY_TYPES: tuple[str, ...] = (
+    "shared-context",
+    "decisions",
+    "agent-learnings",
+    "failures",
+    "stories",
+)
 
 # Backend identifiers matching MemoryConfig.backend values
 _BACKEND_LOCAL = "local"
@@ -294,6 +304,79 @@ class MemoryManager:
 
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
         return self._backend.search(query, user_id=user_id, limit=limit)
+
+    # ── Typed memory protocol (parity with legacy mem0-bridge, ADR-003) ──────
+
+    def typed_entry_id(self, agent: str, text: str) -> str:
+        """Deterministic UUID5 — idempotent upsert key on (project, agent, text[:150]).
+
+        Mirrors the legacy mem0-bridge convention so both paths deduplicate
+        the same way during the shell → SDK transition.
+        """
+        seed = f"grimoire-{self._project_name}:{agent}:{text[:150]}"
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
+
+    def remember(
+        self,
+        type_: str,
+        agent: str,
+        text: str,
+        *,
+        tags: tuple[str, ...] = (),
+    ) -> MemoryEntry:
+        """Typed, idempotent memory write (agent protocol).
+
+        Same text from the same agent always maps to the same entry id: backends
+        with ``upsert`` replace in place; others fall back to a duplicate lookup
+        before storing, so repeated writes never create duplicates.
+        """
+        if type_ not in MEMORY_TYPES:
+            msg = f"Invalid memory type {type_!r}. Valid: {', '.join(MEMORY_TYPES)}"
+            raise GrimoireMemoryError(msg)
+        entry_id = self.typed_entry_id(agent, text)
+        metadata = {"type": type_, "agent": agent, "dedup_key": entry_id}
+        normalized = self._prepare_metadata(metadata, user_id=agent, tags=tags)
+        try:
+            entry = self._backend.upsert(entry_id, text, user_id=agent, tags=tags, metadata=normalized)
+        except NotImplementedError:
+            existing = self._find_typed_duplicate(entry_id, text, agent)
+            if existing is not None:
+                return existing
+            entry = self._backend.store(text, user_id=agent, tags=tags, metadata=normalized)
+        self._sync_memory(entry)
+        return entry
+
+    def _find_typed_duplicate(self, dedup_key: str, text: str, agent: str) -> MemoryEntry | None:
+        """Best-effort dedup for backends without ``upsert``."""
+        recalled = self._backend.recall(dedup_key)
+        if recalled is not None:
+            return recalled
+        for candidate in self._backend.search(text[:150], user_id=agent, limit=10):
+            if candidate.metadata.get("dedup_key") == dedup_key or candidate.text == text:
+                return candidate
+        return None
+
+    def recall_typed(
+        self,
+        query: str,
+        *,
+        type_: str = "",
+        agent: str = "",
+        limit: int = 5,
+    ) -> list[MemoryEntry]:
+        """Search memories written via :meth:`remember`, filtered by type/agent."""
+        if type_ and type_ not in MEMORY_TYPES:
+            msg = f"Invalid memory type {type_!r}. Valid: {', '.join(MEMORY_TYPES)}"
+            raise GrimoireMemoryError(msg)
+        candidates = self._backend.search(query, user_id=agent, limit=max(limit * 4, limit))
+        results: list[MemoryEntry] = []
+        for entry in candidates:
+            if type_ and entry.metadata.get("type") != type_ and entry.metadata.get("memory_type") != type_:
+                continue
+            results.append(entry)
+            if len(results) >= limit:
+                break
+        return results
 
     def search_taxonomy(
         self,
