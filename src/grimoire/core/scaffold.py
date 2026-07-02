@@ -15,7 +15,7 @@ import json
 import re
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from string import Template
 
 from grimoire.__version__ import __version__ as _grimoire_version
@@ -23,6 +23,18 @@ from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _is_agent_markdown(path: PurePath) -> bool:
+    """True for agent markdown files, portable across OS path separators.
+
+    A substring test on ``str(path)`` with ``"/agents/"`` never matches under
+    Windows (backslashes) — see issue #33 — hence the component-based check.
+    """
+    return path.suffix == ".md" and "agents" in path.parts
+
 
 # ── Data models ───────────────────────────────────────────────────────────────
 
@@ -626,7 +638,7 @@ class ProjectScaffolder:
         # Agent manifest (enriched with category + description)
         manifest_lines = ["name,file,category,description,icon\n"]
         for fc in p.copies:
-            if fc.dst.suffix != ".md" or "/agents/" not in str(fc.dst):
+            if not _is_agent_markdown(fc.dst):
                 continue
             name = fc.dst.stem
             category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
@@ -650,7 +662,7 @@ class ProjectScaffolder:
         gh_agents = self._target / ".github" / "agents"
         concierge_name = "concierge"
         for fc in p.copies:
-            if fc.dst.suffix != ".md" or "/agents/" not in str(fc.dst):
+            if not _is_agent_markdown(fc.dst):
                 continue
             name = fc.dst.stem
             wrapper_dst = gh_agents / f"{name}.agent.md"
@@ -746,7 +758,7 @@ class ProjectScaffolder:
         # Build enriched agents table with descriptions
         lines = ["| Agent | Role | Description |", "|-------|------|-------------|",]
         for fc in p.copies:
-            if fc.dst.suffix != ".md" or "/agents/" not in str(fc.dst):
+            if not _is_agent_markdown(fc.dst):
                 continue
             name = fc.dst.stem
             desc = self._extract_agent_description(fc.src)
@@ -844,6 +856,6 @@ class ProjectScaffolder:
         """Extract agent labels from planned copies."""
         agents: list[str] = []
         for fc in p.copies:
-            if fc.dst.suffix == ".md" and "/agents/" in str(fc.dst):
+            if _is_agent_markdown(fc.dst):
                 agents.append(fc.label or fc.dst.stem)
         return agents
