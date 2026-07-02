@@ -7,6 +7,45 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **MCP — standard gouverné consommable par les agents** : 4 nouveaux outils MCP
+  (`grimoire_standard_verify`, `grimoire_standard_audit`, `grimoire_standard_score`,
+  `grimoire_standard_gate`) exposent verify/audit/score/gate au travers de
+  `grimoire-mcp` ; l'audit inclut les actions de remédiation proposées. 12 tests.
+- **Waivers gouvernés pour l'audit de dépendances** (issue #20) :
+  `.github/security/dependency-waivers.yaml` (schéma waivers du standard, borné par
+  `expires_at`) + `scripts/depaudit-waivers.py` qui traduit les waivers actifs en
+  `--ignore-vuln` ; un waiver expiré re-durcit automatiquement le job dep-audit.
+  Waiver initial : CVE-2025-3000 (torch, transitif, sans fix amont). 5 tests.
+- **Garde anti-drift de version** : `tests/unit/test_version_sync.py` échoue si
+  `version.txt` (consommé par grimoire.sh / grimoire-init.sh / smoke-test) diverge
+  de `src/grimoire/__version__.py`.
+- `docs/rnd.md` : les features expérimentales (session branching, darwinism,
+  stigmergy, dream mode…) documentées séparément du cœur mûr.
+
+### Modifié
+
+- **README anglais** recentré sur le différenciateur (standard agentique gouverné,
+  ≈180 lignes) ; la version française complète devient `README.fr.md`.
+- Section MCP du README corrigée : liste réelle des 12 outils (l'ancienne liste
+  documentait 10 outils inexistants) ; retrait du flag `--transport sse` non
+  implémenté ; `grimoire standard gate` → `grimoire standard gate check`.
+- `version.txt` resynchronisé (3.4.2 → 3.17.0) ; badge de version statique retiré
+  du README (le badge PyPI dynamique fait foi) ; version en dur retirée
+  d'`ARCHITECTURE.md`.
+- **`framework/memory/` lint-clean** (36 erreurs ruff → 0) : corrections mécaniques
+  (implicit Optional, contextlib.suppress, pathlib, ClassVar, FURB162) +
+  `per-file-ignores` justifiés pour les patterns intentionnels (S110/S310 probing
+  tolérant, SIM112 env vars legacy rétro-compat). Zone ajoutée au scope lint
+  (Makefile + CI).
+
+### Supprimé
+
+- **Distribution npm mort-née** : `npm/`, `package.json` racine (version figée
+  3.4.3) et workflow `npm-publish.yml` retirés — le paquet n'a jamais été publié
+  sur npm ; PyPI est le canal de distribution.
+
 ## [3.17.0] - 2026-06-29
 
 ### Ajouté
