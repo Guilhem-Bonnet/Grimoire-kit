@@ -22,11 +22,14 @@ Usage standalone::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,8 +38,10 @@ __all__ = [
     "ExtensionError",
     "InstallResult",
     "install_extension",
+    "install_from_registry",
     "list_installed",
     "load_manifest",
+    "publish_extension",
     "remove_extension",
     "validate_manifest",
     "verify_extension",
@@ -311,12 +316,17 @@ def remove_extension(ext_id: str, project_root: Path, *, skip_scripts: bool = Fa
         raise ExtensionError(f"extension non installée : {ext_id}")
 
     entry = state[ext_id]
-    source = Path(entry["source"])
-    if not skip_scripts and source.is_dir():
-        manifest = load_manifest(source)
-        for step in manifest.get("uninstall", {}).get("steps", []):
-            if step.get("kind") == "script":
-                _run_script(source, project_root, step["path"], step.get("args"))
+    registry_tmp = _registry_source_dir(entry["source"])
+    source = Path(registry_tmp.name) if registry_tmp else Path(entry["source"])
+    try:
+        if not skip_scripts and source.is_dir():
+            manifest = load_manifest(source)
+            for step in manifest.get("uninstall", {}).get("steps", []):
+                if step.get("kind") == "script":
+                    _run_script(source, project_root, step["path"], step.get("args"))
+    finally:
+        if registry_tmp:
+            registry_tmp.cleanup()
 
     for rel in entry.get("files", []):
         target = project_root / rel
@@ -329,21 +339,168 @@ def remove_extension(ext_id: str, project_root: Path, *, skip_scripts: bool = Fa
     _save_state(project_root, state)
 
 
+REGISTRY_INDEX = "registry.json"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _deterministic_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.mtime = 0
+    return info
+
+
+def publish_extension(ext_dir: Path, registry_dir: Path) -> dict:
+    """Publie une extension dans un registry local (archive + entrée d'index).
+
+    L'archive est déterministe (mtime/uid normalisés) : republier une
+    extension inchangée produit le même checksum.
+    """
+    ext_dir = ext_dir.resolve()
+    registry_dir = registry_dir.resolve()
+    manifest = load_manifest(ext_dir)
+    errors = validate_manifest(manifest, ext_dir)
+    if errors:
+        raise ExtensionError("manifeste invalide :\n  - " + "\n  - ".join(errors))
+
+    ext_id, version = manifest["id"], manifest["version"]
+    dist_rel = Path("dist") / f"{ext_id}-{version}.tar.gz"
+    dist_path = registry_dir / dist_rel
+    dist_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dist_path, "w:gz") as tar:
+        for path in sorted(p for p in ext_dir.rglob("*") if p.is_file()):
+            tar.add(path, arcname=str(path.relative_to(ext_dir)), filter=_deterministic_filter)
+    checksum = _sha256(dist_path)
+
+    index_path = registry_dir / REGISTRY_INDEX
+    index = (
+        json.loads(index_path.read_text(encoding="utf-8"))
+        if index_path.is_file()
+        else {"registryVersion": 1, "extensions": {}}
+    )
+    entry = index["extensions"].setdefault(ext_id, {"versions": []})
+    release = {
+        "version": version,
+        "archive": str(dist_rel),
+        "checksum": checksum,
+        "publishedAt": datetime.now(UTC).isoformat(),
+        "summary": {
+            "name": manifest["name"],
+            "description": manifest["description"],
+            "license": manifest["license"],
+            "patterns": manifest["patterns"]["implements"],
+            "permissions": manifest["permissions"],
+            "upstream": manifest.get("upstream", {}).get("repository"),
+        },
+    }
+    entry["versions"] = [r for r in entry["versions"] if r["version"] != version]
+    entry["versions"].append(release)
+    entry["versions"].sort(key=lambda r: r["version"])
+    entry["latest"] = entry["versions"][-1]["version"]
+    index["updatedAt"] = datetime.now(UTC).isoformat()
+    index_path.write_text(
+        json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return release
+
+
+def _safe_extract(archive: Path, dest: Path) -> None:
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            if not _is_safe_relpath(member.name) or not (member.isfile() or member.isdir()):
+                raise ExtensionError(f"archive refusée, membre non sûr : {member.name}")
+        tar.extractall(dest, filter="data")
+
+
+def install_from_registry(
+    ext_id: str,
+    registry_dir: Path,
+    project_root: Path,
+    *,
+    version: str | None = None,
+    skip_scripts: bool = False,
+    force: bool = False,
+) -> InstallResult:
+    """Installe une extension depuis un registry, checksum vérifié avant extraction."""
+    registry_dir = registry_dir.resolve()
+    index_path = registry_dir / REGISTRY_INDEX
+    if not index_path.is_file():
+        raise ExtensionError(f"registry introuvable : {index_path}")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    entry = index.get("extensions", {}).get(ext_id)
+    if not entry:
+        raise ExtensionError(f"extension absente du registry : {ext_id}")
+    wanted = version or entry["latest"]
+    release = next((r for r in entry["versions"] if r["version"] == wanted), None)
+    if release is None:
+        raise ExtensionError(f"version absente du registry : {ext_id} {wanted}")
+
+    archive = registry_dir / release["archive"]
+    if not archive.is_file():
+        raise ExtensionError(f"archive absente : {archive}")
+    actual = _sha256(archive)
+    if actual != release["checksum"]:
+        raise ExtensionError(
+            f"checksum invalide pour {ext_id} {wanted} : attendu "
+            f"{release['checksum']}, obtenu {actual}"
+        )
+
+    with tempfile.TemporaryDirectory(prefix=f"grimoire-ext-{ext_id}-") as tmp:
+        _safe_extract(archive, Path(tmp))
+        result = install_extension(
+            Path(tmp), project_root, skip_scripts=skip_scripts, force=force
+        )
+
+    # Provenance registry (le dossier temporaire disparaît) : remove/verify
+    # sauront re-extraire l'archive.
+    state = _load_state(project_root.resolve())
+    state[ext_id]["source"] = f"registry:{registry_dir}#{ext_id}@{wanted}"
+    state[ext_id]["checksum"] = release["checksum"]
+    _save_state(project_root.resolve(), state)
+    return result
+
+
+def _registry_source_dir(source: str) -> tempfile.TemporaryDirectory | None:
+    """Re-extrait l'archive d'une provenance ``registry:<dir>#<id>@<version>``."""
+    if not source.startswith("registry:"):
+        return None
+    location, _, ref = source[len("registry:"):].partition("#")
+    ext_id, _, version = ref.partition("@")
+    archive = Path(location) / "dist" / f"{ext_id}-{version}.tar.gz"
+    if not archive.is_file():
+        return None
+    tmp = tempfile.TemporaryDirectory(prefix=f"grimoire-ext-{ext_id}-")
+    _safe_extract(archive, Path(tmp.name))
+    return tmp
+
+
 def verify_extension(ext_id: str, project_root: Path) -> None:
     project_root = project_root.resolve()
     state = _load_state(project_root)
     if ext_id not in state:
         raise ExtensionError(f"extension non installée : {ext_id}")
-    source = Path(state[ext_id]["source"])
-    if not source.is_dir():
-        raise ExtensionError(f"source introuvable : {source}")
-    manifest = load_manifest(source)
-    verify = manifest["install"].get("verify")
-    if not verify:
-        print(f"{ext_id} : pas de script de vérification déclaré")
-        return
-    _run_script(source, project_root, verify)
-    print(f"{ext_id} : vérification OK")
+    registry_tmp = _registry_source_dir(state[ext_id]["source"])
+    source = Path(registry_tmp.name) if registry_tmp else Path(state[ext_id]["source"])
+    try:
+        if not source.is_dir():
+            raise ExtensionError(f"source introuvable : {source}")
+        manifest = load_manifest(source)
+        verify = manifest["install"].get("verify")
+        if not verify:
+            print(f"{ext_id} : pas de script de vérification déclaré")
+            return
+        _run_script(source, project_root, verify)
+        print(f"{ext_id} : vérification OK")
+    finally:
+        if registry_tmp:
+            registry_tmp.cleanup()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -353,12 +510,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_add = sub.add_parser("add", help="Installer une extension depuis un dossier")
-    p_add.add_argument("source", type=Path)
+    p_add = sub.add_parser("add", help="Installer une extension (dossier ou registry)")
+    p_add.add_argument("source", help="Dossier d'extension, ou id si --registry")
+    p_add.add_argument("--registry", type=Path, default=None)
+    p_add.add_argument("--version", default=None)
     p_add.add_argument("--skip-scripts", action="store_true")
     p_add.add_argument("--force", action="store_true")
 
     sub.add_parser("list", help="Extensions installées")
+
+    p_publish = sub.add_parser("publish", help="Publier une extension dans un registry")
+    p_publish.add_argument("source", type=Path)
+    p_publish.add_argument("--registry", type=Path, required=True)
 
     p_remove = sub.add_parser("remove", help="Désinstaller une extension")
     p_remove.add_argument("id")
@@ -369,13 +532,29 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "add":
-            result = install_extension(
-                args.source,
-                args.project_root,
-                skip_scripts=args.skip_scripts,
-                force=args.force,
+        if args.command == "publish":
+            release = publish_extension(args.source, args.registry)
+            print(
+                f"Publié : {release['summary']['name']} {release['version']} "
+                f"— {release['archive']} ({release['checksum'][:19]}…)"
             )
+        elif args.command == "add":
+            if args.registry:
+                result = install_from_registry(
+                    str(args.source),
+                    args.registry,
+                    args.project_root,
+                    version=args.version,
+                    skip_scripts=args.skip_scripts,
+                    force=args.force,
+                )
+            else:
+                result = install_extension(
+                    Path(args.source),
+                    args.project_root,
+                    skip_scripts=args.skip_scripts,
+                    force=args.force,
+                )
             print(f"Installé : {result.extension_id} v{result.version}")
             for rel in result.copied:
                 print(f"  copie   : {rel}")
