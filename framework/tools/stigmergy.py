@@ -832,7 +832,7 @@ def render_evaporate(evaporated: int, remaining: int,
 def _intensity_bar(intensity: float, width: int = 10) -> str:
     """Barre visuelle d'intensité."""
     filled = int(intensity * width)
-    return "█" * filled + "░" * (width - filled)
+    return "#" * filled + "-" * (width - filled)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

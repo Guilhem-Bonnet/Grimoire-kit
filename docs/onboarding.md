@@ -14,16 +14,25 @@
 ### 1. Installation
 
 ```bash
-# Cloner le kit dans votre projet
-git clone <url-grimoire-kit> grimoire-kit
+# Chemin recommandé (SDK, aucun clone nécessaire)
+pipx install grimoire-kit
+cd votre-projet
+grimoire init . --name "Mon Projet" --archetype minimal
+```
 
-# Initialiser Grimoire dans votre projet
+<details>
+<summary>Chemin shell legacy (mode maintenance)</summary>
+
+```bash
+git clone <url-grimoire-kit> grimoire-kit
 cd votre-projet
 bash path/to/grimoire-kit/grimoire-init.sh \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --archetype minimal
 ```
+
+</details>
 
 ### 2. Configurer votre identité
 

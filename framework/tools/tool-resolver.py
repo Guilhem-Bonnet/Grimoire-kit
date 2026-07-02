@@ -1053,7 +1053,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if plan.recommended and not plan.ready_to_use:
             print("\n  Recommandé (après provision) :")
             for c in plan.recommended[:3]:
-                print(f"    ➡  {c['name']} [{c['provision_method']}]")
+                print(f"    ->  {c['name']} [{c['provision_method']}]")
 
         if plan.fallback_plan:
             print(f"\n  Fallback : {plan.fallback_plan}")

@@ -419,6 +419,29 @@ def doctor(
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
+    # 4bis. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
+    with _timed_phase("agents_discoverable"):
+        agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
+        agent_files = [f for f in agents_dir.glob("*.md") if not f.name.endswith(".tpl.md")] if agents_dir.is_dir() else []
+        if agent_files:
+            wrappers_dir = target / ".github" / "agents"
+            wrappers = list(wrappers_dir.glob("*.agent.md")) if wrappers_dir.is_dir() else []
+            if wrappers:
+                _record(
+                    "agents_discoverable",
+                    passed=True,
+                    detail=f"{len(wrappers)} VS Code agent wrapper(s) in .github/agents/",
+                )
+            else:
+                _record(
+                    "agents_discoverable",
+                    passed=False,
+                    detail=(
+                        f"{len(agent_files)} agent(s) deployed but .github/agents/ has no *.agent.md wrapper — "
+                        "VS Code cannot discover them; run `grimoire init . --force` to regenerate"
+                    ),
+                )
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()

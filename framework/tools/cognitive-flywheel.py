@@ -473,7 +473,7 @@ def apply_gates(corrections: list[Correction], max_corrections: int) -> list[Cor
 
 def render_scoreboard(score: FlywheelScore, patterns: list[Pattern]) -> str:
     """Render a markdown scoreboard."""
-    trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(score.trend, "")
+    trend_icon = {"improving": "", "stable": "->", "degrading": ""}.get(score.trend, "")
     lines = [
         "# Grimoire Cognitive Flywheel — Scoreboard",
         "",
@@ -666,7 +666,7 @@ def cmd_history(root: Path, _args: argparse.Namespace) -> int:
     print("=" * 60)
     for e in entries:
         grade = e.get("health_grade", "?")
-        trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(
+        trend_icon = {"improving": "", "stable": "->", "degrading": ""}.get(
             e.get("trend", ""), ""
         )
         print(
@@ -686,7 +686,7 @@ def cmd_score(root: Path, _args: argparse.Namespace) -> int:
         return 1
 
     s = report.score
-    trend_icon = {"improving": "", "stable": "➡", "degrading": ""}.get(s.trend, "?")
+    trend_icon = {"improving": "", "stable": "->", "degrading": ""}.get(s.trend, "?")
     print(
         f"Grade: {s.health_grade} {trend_icon} | "
         f"Fail rate: {s.failure_rate:.1%} | "

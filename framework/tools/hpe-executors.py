@@ -674,7 +674,7 @@ def cmd_detect(args: argparse.Namespace) -> int:
         for b in backends:
             icon = "[OK]" if b.available else "[x]"
             print(f"  {icon} [{b.priority}] {b.name} — {b.reason}")
-        print(f"\n  ➡  Recommandé : {best}")
+        print(f"\n  ->  Recommandé : {best}")
 
     return 0
 

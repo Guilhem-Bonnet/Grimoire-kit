@@ -7,6 +7,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **`grimoire doctor` : check « agents découvrables »** (suivi issue #33) — si des
+  agents sont déployés mais qu'aucun wrapper `*.agent.md` n'existe dans
+  `.github/agents/`, doctor échoue avec la remédiation (`grimoire init . --force`)
+  au lieu d'annoncer un projet sain.
+
+### Modifié
+
+- **Console 100 % cp1252-safe** : derniers glyphes non-ASCII purgés des sorties
+  terminal de `framework/tools/` (flèches `→` U+27A1 → `->`, barres `█▓░` →
+  `#=-!`) — clôt la purge emoji étapes 2-3.
+- **Docs SDK-first** : `archetype-guide.md` et `onboarding.md` présentent le
+  chemin SDK en premier ; les commandes shell restent documentées (mode
+  maintenance, certaines n'ont pas d'équivalent SDK).
+- ADR-003 : prérequis de parité documenté — `agent-base.md` reste sur
+  `mem0-bridge.py` tant que la CLI SDK n'offre pas d'écriture mémoire typée
+  (`remember --type` + dédup UUID5).
+
+
 ## [3.19.0] - 2026-07-02
 
 ### Corrigé (issue #33 — merci @zavrocKk)

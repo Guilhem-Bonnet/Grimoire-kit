@@ -900,8 +900,8 @@ def status_icon(status: str) -> str:
 def bar(pct: float, width: int = 20) -> str:
     filled = int(min(pct / 100, 1.0) * width)
     empty = width - filled
-    char = "█" if pct < THRESHOLD_WARN else ("▓" if pct < THRESHOLD_CRIT else "░")
-    return f"[{char * filled}{'·' * empty}]"
+    char = "#" if pct < THRESHOLD_WARN else ("=" if pct < THRESHOLD_CRIT else "!")
+    return f"[{char * filled}{'-' * empty}]"
 
 
 def role_icon(role: str) -> str:

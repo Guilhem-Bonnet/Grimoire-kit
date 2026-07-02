@@ -474,7 +474,7 @@ def render_trend(project_root: Path) -> str:
     if trend["trend"] == "insufficient_data":
         return "Pas assez de données pour la tendance (min 2 snapshots)."
 
-    arrows = {"improving": "", "declining": "", "stable": "➡"}
+    arrows = {"improving": "", "declining": "", "stable": "->"}
     arrow = arrows.get(trend["trend"], "")
 
     lines = [

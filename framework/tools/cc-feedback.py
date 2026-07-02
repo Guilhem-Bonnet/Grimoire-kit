@@ -339,7 +339,7 @@ def display_stats(stats: dict) -> None:
 
 def display_trend(trend: dict) -> None:
     """Affiche la tendance CC."""
-    icons = {"improving": "", "degrading": "", "stable": "➡", "neutral": "[-]"}
+    icons = {"improving": "", "degrading": "", "stable": "->", "neutral": "[-]"}
     print(f"\n{icons.get(trend['trend'], '[-]')} Tendance ({trend['window']} dernières) : {trend['trend']} — {trend['pass_rate']:.0%} pass rate\n")
 
 
