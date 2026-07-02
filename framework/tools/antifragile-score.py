@@ -710,7 +710,7 @@ def render_trend(history: list[dict]) -> str:
         last = scores[-1]
         prev = scores[-2]
         delta = last - prev
-        trend = "+" if delta > 0 else "" if delta < 0 else "➡ "
+        trend = "+" if delta > 0 else "" if delta < 0 else "-> "
         lines.extend(["", f"**Tendance** : {trend}{delta:+.1f} points depuis le dernier run"])
 
     if len(history) >= 3:

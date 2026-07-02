@@ -711,16 +711,16 @@ class TestRender(unittest.TestCase):
     def test_intensity_bar(self):
         bar = self.st._intensity_bar(0.5, width=10)
         self.assertEqual(len(bar), 10)
-        self.assertEqual(bar.count("█"), 5)
-        self.assertEqual(bar.count("░"), 5)
+        self.assertEqual(bar.count("#"), 5)
+        self.assertEqual(bar.count("-"), 5)
 
     def test_intensity_bar_full(self):
         bar = self.st._intensity_bar(1.0, width=10)
-        self.assertEqual(bar, "█" * 10)
+        self.assertEqual(bar, "#" * 10)
 
     def test_intensity_bar_empty(self):
         bar = self.st._intensity_bar(0.0, width=10)
-        self.assertEqual(bar, "░" * 10)
+        self.assertEqual(bar, "-" * 10)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

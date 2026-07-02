@@ -705,7 +705,7 @@ def _print_decision(dec: RoutingDecision) -> None:
     print(f"  Agent   : {dec.agent}")
     print(f"  Prompt  : {dec.prompt_summary}")
     _print_classification(dec.classification)
-    print(f"\n  ➡  Selected : {dec.selected_model}")
+    print(f"\n  ->  Selected : {dec.selected_model}")
     print(f"  Fallback : {dec.fallback_model}")
     print(f"  Rule     : {dec.rule_matched}")
     if dec.estimated_cost > 0:

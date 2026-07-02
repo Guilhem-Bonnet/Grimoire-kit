@@ -315,7 +315,7 @@ def display_triage(result: TriageResult) -> None:
     print(f"  Complexité : {icons.get(result.classification, '[-]')} {result.classification}")
     print(f"  Confiance  : {conf_icon} {result.confidence:.0%}")
     print()
-    print(f"  ➡  Agent recommandé : {result.agent_name} ({result.suggested_agent})")
+    print(f"  ->  Agent recommandé : {result.agent_name} ({result.suggested_agent})")
     print(f"     {result.reasoning}")
 
     if result.alternatives:
