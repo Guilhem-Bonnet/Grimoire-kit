@@ -44,11 +44,11 @@ Faits établis par investigation (2026-07-02) :
 - La documentation agent (`agent-base.md`) pourra, à terme, pointer vers
   `grimoire memory` au lieu de `mem0-bridge.py` — étape 2 de la transition,
   hors périmètre de cet ADR.
-- **Prérequis de parité (constaté 2026-07-02)** : la CLI SDK n'expose pas
-  d'écriture typée (`remember --type agent-learnings|decisions|failures` avec
-  déduplication UUID5) — uniquement `search`/`list`/`export`/`gc`/`delete`.
-  Tant que `grimoire memory` n'offre pas cet équivalent, `agent-base.md` reste
-  sur `mem0-bridge.py` : basculer avant la parité casserait le protocole
-  mémoire des agents (dual-write Qdrant + exports .md).
+- **Prérequis de parité (constaté puis levé le 2026-07-02)** : la CLI SDK
+  n'exposait pas d'écriture typée. `grimoire memory remember` / `recall`
+  (UUID5 identique à mem0-bridge : `uuid5(DNS, "grimoire-{proj}:{agent}:{text[:150]}")`,
+  mêmes 5 types) comblent l'écart — `agent-base.md` pointe désormais vers le
+  SDK avec `mem0-bridge.py` en fallback documenté. Seul `export-md` reste
+  sans équivalent SDK (mentionné tel quel dans le protocole).
 - Un contributeur qui propose une feature dans `framework/memory` est redirigé
   vers le SDK.

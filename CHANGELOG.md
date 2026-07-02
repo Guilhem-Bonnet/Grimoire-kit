@@ -7,6 +7,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Écriture mémoire typée dans le SDK** (`grimoire memory remember` /
+  `recall`) — parité complète avec le protocole agent legacy : 5 types
+  (shared-context, decisions, agent-learnings, failures, stories),
+  déduplication UUID5 identique à mem0-bridge
+  (`uuid5(DNS, "grimoire-{proj}:{agent}:{text[:150]}")`), upsert idempotent
+  avec fallback anti-doublon pour les backends sans `upsert`. 23 tests.
+
+### Modifié
+
+- **`agent-base.md` bascule sur le SDK** (étape 2 de l'ADR-003) : le protocole
+  mémoire des agents pointe vers `grimoire memory remember`/`recall`,
+  `mem0-bridge.py` devient le fallback documenté (SDK absent). Idem
+  `agent-base-compact.md` et `grimoire-trace.md`. `export-md` reste legacy
+  (pas d'équivalent SDK).
+
+
 ## [3.20.0] - 2026-07-02
 
 ### Ajouté
