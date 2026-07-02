@@ -162,10 +162,11 @@ class ForgeAPI:
         return {"installed": list_installed(self.project_root), "available": available}
 
     def extension_add(self, source: str):
-        if SLUG_RE.match(source):
-            ext_dir = self.kit_root / "extensions" / source
-        else:
-            ext_dir = Path(source)
+        ext_dir = (
+            self.kit_root / "extensions" / source
+            if SLUG_RE.match(source)
+            else Path(source)
+        )
         return install_extension(ext_dir, self.project_root)
 
     def extension_remove(self, ext_id: str) -> None:
