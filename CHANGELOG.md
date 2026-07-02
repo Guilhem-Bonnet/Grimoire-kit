@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-07-02
+
 ### Corrigé (issue #33 — merci @zavrocKk)
 
 - **Windows : agents découvrables** — la détection des fichiers agents utilisait
