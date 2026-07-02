@@ -7,11 +7,17 @@ dans un projet cible via `grimoire ext`.
 ## Commandes
 
 ```bash
-grimoire ext add extensions/crewai   # installer depuis un dossier
-grimoire ext list                    # extensions installées
-grimoire ext verify crewai           # vérification post-installation
-grimoire ext remove crewai           # désinstallation
+grimoire ext add extensions/crewai            # installer depuis un dossier
+grimoire ext add crewai --registry <clone>    # installer depuis le registry (checksum vérifié)
+grimoire ext publish extensions/crewai --registry <clone>   # publier
+grimoire ext list                             # extensions installées
+grimoire ext verify crewai                    # vérification post-installation
+grimoire ext remove crewai                    # désinstallation
 ```
+
+Le registry vit dans un repo dédié :
+[grimoire-extensions-registry](https://github.com/Guilhem-Bonnet/grimoire-extensions-registry)
+(index versionné, archives à checksum, CI de conformité, publication par PR).
 
 ## Contrat
 
