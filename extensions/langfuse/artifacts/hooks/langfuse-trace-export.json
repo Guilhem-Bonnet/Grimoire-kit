@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": ".github/hooks/scripts/langfuse-trace-export.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

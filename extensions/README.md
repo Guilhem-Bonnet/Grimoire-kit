@@ -31,3 +31,5 @@ artefacts gouvernés — les deux mécanismes sont complémentaires.
 | Extension | Description | Patterns |
 | --- | --- | --- |
 | [crewai](crewai/extension.json) | Pont CrewAI : crews importés en Recipes gouvernées via `grimoire.runtime.crewai_adapter` | ORC-01, ORC-02, ORC-03 |
+| [langfuse](langfuse/extension.json) | Observabilité : export best-effort de la télémétrie locale vers Langfuse, conventions de traces | QUA-02, QUA-08, QUA-10 |
+| [langgraph](langgraph/extension.json) | Pont LangGraph : StateGraphs à état explicite, checkpoints audités, flow déclaré | ORC-09, ORC-10 |
