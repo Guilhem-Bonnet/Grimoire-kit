@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-07-01
+
 ### Ajouté
 
 - **Démo animée quickstart** (`docs/assets/demo-quickstart.svg`) intégrée aux
