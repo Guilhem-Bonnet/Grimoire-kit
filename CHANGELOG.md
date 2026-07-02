@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Démo animée quickstart** (`docs/assets/demo-quickstart.svg`) intégrée aux
+  README EN/FR — sorties réelles validées en sandbox (init → standard init
+  `--needs solo-prototyping` → verify OK → score 81/70 → gate check OK).
+- **`docs/evals-protocol.md`** : protocole pré-enregistré (bras governed vs
+  baseline, métriques, règles d'honnêteté) pour mesurer l'effet du standard
+  avant tout claim d'efficacité public.
+- **Transition shell → SDK** : `grimoire-init.sh` passe en mode maintenance —
+  avis non bloquant au lancement pointant vers `grimoire init` (SDK),
+  supprimable via `GRIMOIRE_SUPPRESS_INIT_NOTICE=1` ; le README.fr présente le
+  chemin SDK en premier. Le script reste fonctionnel (`validate --all` vert).
 - **MCP — standard gouverné consommable par les agents** : 4 nouveaux outils MCP
   (`grimoire_standard_verify`, `grimoire_standard_audit`, `grimoire_standard_score`,
   `grimoire_standard_gate`) exposent verify/audit/score/gate au travers de
