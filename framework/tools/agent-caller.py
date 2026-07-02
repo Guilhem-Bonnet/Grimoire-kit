@@ -422,12 +422,16 @@ class AgentCaller:
         model_used = "claude-sonnet-4-20250514"  # default
         if self._router_mod:
             try:
-                router = self._router_mod.LLMRouter(project_root=self.project_root)
-                route_result = router.route(task_description=request.task)
+                router = self._router_mod.LLMRouter()
+                route_result = router.route(prompt=request.task, agent_id=request.to_agent)
                 model_used = getattr(route_result, "selected_model", model_used)
             except Exception as _exc:
-                _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
+                _log.warning(
+                    "LLM routing failed for agent '%s', falling back to '%s': %s",
+                    request.to_agent,
+                    model_used,
+                    _exc,
+                )
 
         response.model_used = model_used
 
