@@ -1,0 +1,73 @@
+{
+  "manifestVersion": 1,
+  "id": "langfuse",
+  "name": "Langfuse Observability",
+  "version": "0.1.0",
+  "description": "Pont d'observabilité Langfuse : exporte la télémétrie agentique locale (events.jsonl) vers Langfuse en mode best-effort, avec conventions de traces et guide d'installation. Hooks en shadow, jamais bloquants.",
+  "license": "MIT",
+  "authors": [
+    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+  ],
+  "upstream": {
+    "repository": "https://github.com/langfuse/langfuse",
+    "kind": "observability",
+    "pinnedVersion": "3.x"
+  },
+  "compat": {
+    "kit": ">=3.11",
+    "manifest": 1
+  },
+  "provides": {
+    "agents": [],
+    "skills": ["artifacts/skills/langfuse-tracing-setup/SKILL.md"],
+    "hooks": ["artifacts/hooks/langfuse-trace-export.json"],
+    "workflows": [],
+    "instructions": ["artifacts/instructions/langfuse-observability.instructions.md"],
+    "nodes": []
+  },
+  "patterns": {
+    "implements": ["QUA-02", "QUA-08", "QUA-10"]
+  },
+  "permissions": {
+    "filesystem": "artifacts",
+    "network": true,
+    "hooks": ["PostToolUse"],
+    "memory": "none"
+  },
+  "install": {
+    "steps": [
+      { "kind": "pip", "packages": ["langfuse"] },
+      {
+        "kind": "copy",
+        "from": "artifacts/skills/langfuse-tracing-setup",
+        "to": ".github/skills/langfuse-tracing-setup"
+      },
+      {
+        "kind": "copy",
+        "from": "artifacts/instructions/langfuse-observability.instructions.md",
+        "to": ".github/instructions/langfuse-observability.instructions.md"
+      },
+      {
+        "kind": "copy",
+        "from": "artifacts/hooks/langfuse-trace-export.json",
+        "to": ".github/hooks/langfuse-trace-export.json"
+      },
+      {
+        "kind": "copy",
+        "from": "artifacts/hooks/langfuse-trace-export.sh",
+        "to": ".github/hooks/scripts/langfuse-trace-export.sh"
+      },
+      {
+        "kind": "script",
+        "path": "scripts/register-hooks.sh",
+        "args": ["--mode", "shadow"]
+      }
+    ],
+    "verify": "scripts/verify-install.sh"
+  },
+  "uninstall": {
+    "steps": [
+      { "kind": "script", "path": "scripts/unregister-hooks.sh" }
+    ]
+  }
+}

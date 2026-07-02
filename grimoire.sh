@@ -289,6 +289,26 @@ cmd_quickupdate() {
     bash "${SCRIPT_DIR}/grimoire-init.sh" quick-update "$@"
 }
 
+cmd_ext() {
+    local py="${SCRIPT_DIR}/.venv/bin/python3"
+    if [[ -x "$py" ]]; then
+        "$py" -m grimoire.tools.ext_manager --project-root "${PROJECT_ROOT}" "$@"
+    else
+        PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+            python3 -m grimoire.tools.ext_manager --project-root "${PROJECT_ROOT}" "$@"
+    fi
+}
+
+cmd_serve() {
+    local py="${SCRIPT_DIR}/.venv/bin/python3"
+    if [[ -x "$py" ]]; then
+        "$py" -m grimoire.tools.forge_server --project-root "${PROJECT_ROOT}" --kit-root "${SCRIPT_DIR}" "$@"
+    else
+        PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+            python3 -m grimoire.tools.forge_server --project-root "${PROJECT_ROOT}" --kit-root "${SCRIPT_DIR}" "$@"
+    fi
+}
+
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 main() {
@@ -307,6 +327,8 @@ main() {
         reset)      cmd_reset "$@" ;;
         uninstall)  cmd_uninstall "$@" ;;
         quick-update) cmd_quickupdate "$@" ;;
+        ext)        cmd_ext "$@" ;;
+        serve)      cmd_serve "$@" ;;
         version|-v|--version)  cmd_version ;;
         help|-h|--help)        cmd_help ;;
         *)
