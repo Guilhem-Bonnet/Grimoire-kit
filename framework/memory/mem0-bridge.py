@@ -26,6 +26,7 @@ Exemples:
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -150,7 +151,7 @@ AGENT_PROFILES = _load_agent_profiles()
 # ─── Activity Log ─────────────────────────────────────────────────────────────
 
 def log_activity(cmd: str, agent: str = "", query: str = "", hits: int = 0,
-                 top_score: float = 0.0, mode: str = "", extra: dict = None):
+                 top_score: float = 0.0, mode: str = "", extra: dict | None = None):
     """Logge un event d'activité en JSONL pour observabilité."""
     event = {
         "ts": datetime.now().isoformat(),
@@ -382,7 +383,7 @@ class StructuredMemory:
         import uuid
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{APP_ID}:{agent}:{text[:150]}"))
 
-    def remember(self, type_: str, agent: str, text: str, tags: list = None) -> dict:
+    def remember(self, type_: str, agent: str, text: str, tags: list | None = None) -> dict:
         """Upsert une mémoire dans sa collection de type."""
         if type_ not in self.TYPES:
             raise ValueError(f"Type invalide: {type_!r}. Valides: {self.TYPES}")
@@ -403,7 +404,7 @@ class StructuredMemory:
         )
         return {"id": point_id, "type": type_, "agent": agent, "text": text}
 
-    def recall(self, query: str, type_: str = None, agent: str = None, limit: int = 5) -> list:
+    def recall(self, query: str, type_: str | None = None, agent: str | None = None, limit: int = 5) -> list:
         """Recherche sémantique — une ou toutes les collections."""
         from qdrant_client.models import FieldCondition, Filter, MatchValue
         vector = self.model.encode(query).tolist()
@@ -520,14 +521,13 @@ def get_semantic_client():
     # Essai 2 : chargement direct via importlib.util (mode script)
     try:
         import importlib.util
-        import os
         import sys
-        backends_dir = os.path.join(os.path.dirname(__file__), "backends")
-        backends_init = os.path.join(backends_dir, "__init__.py")
-        if os.path.exists(backends_init):
+        backends_dir = Path(__file__).parent / "backends"
+        backends_init = backends_dir / "__init__.py"
+        if backends_init.exists():
             spec = importlib.util.spec_from_file_location(
-                "backends", backends_init,
-                submodule_search_locations=[backends_dir]
+                "backends", str(backends_init),
+                submodule_search_locations=[str(backends_dir)]
             )
             mod = importlib.util.module_from_spec(spec)
             sys.modules["backends"] = mod  # enregistrer AVANT exec pour les imports relatifs
@@ -570,15 +570,13 @@ def _auto_detect_contradictions(client, agent: str, new_text: str):
             if mem_agent == agent and score > 0.8 and mem_id:
                 print(f"   ⚠️  Mnemo: contradiction détectée (score={score:.2f}) "
                       f"avec mémoire {mem_id}… — marquée superseded")
-                try:
+                with contextlib.suppress(Exception):
                     client.update(mem_id, data=None, metadata={
                         **meta,
                         "superseded": True,
                         "superseded_by": "auto-mnemo",
                         "superseded_at": datetime.now().isoformat(),
                     })
-                except Exception:
-                    pass
     except Exception:
         pass
 
@@ -782,10 +780,8 @@ def cmd_stats(args):
         for line in f:
             line = line.strip()
             if line:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
 
     if not events:
         print("📊 Log vide.")
@@ -919,7 +915,7 @@ def cmd_remember(args):
         client.add(text, metadata={"agent": agent, "type": type_, "tags": tags})
         print(f"✅ Mémorisé (local) [{type_}] @{agent}: {text[:80]}")
         return
-    result = sm.remember(type_, agent, text, tags)
+    sm.remember(type_, agent, text, tags)
     display = text[:80] + ("..." if len(text) > 80 else "")
     print(f"✅ Mémorisé [{type_}] @{agent}: {display}")
     if tags:

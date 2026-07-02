@@ -17,12 +17,13 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from typing import ClassVar
 
 
 class QdrantServerBackend:
     """Qdrant serveur distant + sentence-transformers embeddings. Circuit breaker intégré."""
 
-    VECTOR_SIZE = {
+    VECTOR_SIZE: ClassVar[dict[str, int]] = {
         "all-MiniLM-L6-v2": 384,
         "all-mpnet-base-v2": 768,
         "nomic-embed-text": 768,

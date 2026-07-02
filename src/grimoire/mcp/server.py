@@ -285,6 +285,159 @@ def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
         return json.dumps({"error": str(exc)})
 
 
+# ── Agentic standard ──────────────────────────────────────────────────────────
+
+def _standard_checks_json(checks: tuple[Any, ...] | list[Any]) -> list[dict[str, str | None]]:
+    """Serialize StandardCheck entries for JSON output."""
+    return [
+        {
+            "id": check.id,
+            "severity": check.severity,
+            "message": check.message,
+            "path": str(check.path) if check.path else None,
+        }
+        for check in checks
+    ]
+
+
+@mcp.tool()
+def grimoire_standard_verify(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
+    """Verify the project's governed agentic-standard artifacts (fail-closed).
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        profile: Expected profile (starter/controlled/orchestrated/governed/production).
+            Empty string uses the generated manifest.
+        task_id: Evidence task id to verify (default: "bootstrap").
+    """
+    from grimoire.core.agentic_standard import verify_standard_profile
+
+    target = Path(project_path).resolve()
+    try:
+        result = verify_standard_profile(target, profile_id=profile or None, task_id=task_id)
+        return json.dumps({
+            "ok": result.ok,
+            "profile": result.profile,
+            "project_root": str(result.project_root),
+            "present": [str(p) for p in result.present],
+            "missing": [str(p) for p in result.missing],
+            "invalid_yaml": [str(p) for p in result.invalid_yaml],
+            "warnings": result.warnings,
+            "checks": _standard_checks_json(result.checks),
+            "error_count": result.error_count,
+            "warning_count": result.warning_count,
+        }, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def grimoire_standard_audit(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
+    """Audit governed standard artifacts and propose remediation actions.
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        profile: Expected profile. Empty string uses the generated manifest.
+        task_id: Evidence task id to audit (default: "bootstrap").
+    """
+    from grimoire.core.agentic_standard import (
+        propose_remediation_actions,
+        verify_standard_profile,
+    )
+
+    target = Path(project_path).resolve()
+    try:
+        result = verify_standard_profile(target, profile_id=profile or None, task_id=task_id)
+        actions = propose_remediation_actions(target, task_id=task_id, profile_id=profile or None)
+        return json.dumps({
+            "ok": result.ok,
+            "profile": result.profile,
+            "project_root": str(result.project_root),
+            "error_count": result.error_count,
+            "warning_count": result.warning_count,
+            "missing": [str(p) for p in result.missing],
+            "invalid_yaml": [str(p) for p in result.invalid_yaml],
+            "checks": _standard_checks_json(result.checks),
+            "remediation_actions": [
+                {
+                    "check_id": action.check_id,
+                    "severity": action.severity,
+                    "action": action.action,
+                    "path": str(action.path) if action.path else None,
+                    "message": action.message,
+                }
+                for action in actions
+            ],
+        }, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
+    """Calculate and persist the standard compliance score (0-100 vs threshold).
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        profile: Expected profile. Empty string uses the generated manifest.
+        task_id: Task id to score (default: "bootstrap").
+    """
+    from grimoire.core.agentic_standard import calculate_compliance_score
+
+    target = Path(project_path).resolve()
+    try:
+        result = calculate_compliance_score(target, task_id=task_id, profile_id=profile or None)
+        return json.dumps({
+            "ok": result.ok,
+            "profile": result.profile,
+            "score": result.score,
+            "threshold": result.threshold,
+            "warnings": result.warnings,
+            "errors": result.errors,
+            "dimensions": result.dimensions,
+            "output_path": str(result.output_path),
+        }, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def grimoire_standard_gate(
+    project_path: str = ".",
+    task_id: str = "bootstrap",
+    target_state: str = "",
+    profile: str = "",
+) -> str:
+    """Check standard evidence gates for a task (blocks transitions without proof).
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        task_id: Task id to evaluate (default: "bootstrap").
+        target_state: Optional target lifecycle state. Empty string uses the board state.
+        profile: Expected profile. Empty string uses the generated manifest.
+    """
+    from grimoire.core.agentic_standard import check_evidence_gates
+
+    target = Path(project_path).resolve()
+    try:
+        result = check_evidence_gates(
+            target,
+            task_id=task_id,
+            target_state=target_state or None,
+            profile_id=profile or None,
+        )
+        return json.dumps({
+            "ok": result.ok,
+            "task_id": result.task_id,
+            "profile": result.profile,
+            "state": result.state,
+            "missing": list(result.missing),
+            "checks": _standard_checks_json(result.checks),
+        }, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _find_kit_root(start: Path) -> Path | None:

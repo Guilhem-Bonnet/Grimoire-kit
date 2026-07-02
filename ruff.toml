@@ -52,4 +52,9 @@ ignore = [
     "SIM112", # uncapitalized-env-vars — os.environ.get patterns are idiomatic
     "ERA001", # commented-out-code — section comments mistaken for dead code
 ]
+"framework/memory/**" = [
+    "S310",   # urllib — probing de backends locaux (qdrant/ollama), tolérant par design
+    "S110",   # try-except-pass — probing défensif de backends optionnels
+    "SIM112", # env vars legacy `Grimoire_*` conservées en fallback rétro-compat (v3.11.2)
+]
 "src/grimoire/tools/**" = ["ERA001"]  # Section comments trigger false positives

@@ -16,6 +16,10 @@ from grimoire.mcp.server import (
     grimoire_memory_search,
     grimoire_memory_store,
     grimoire_project_context,
+    grimoire_standard_audit,
+    grimoire_standard_gate,
+    grimoire_standard_score,
+    grimoire_standard_verify,
     grimoire_status,
     mcp,
 )
@@ -242,6 +246,99 @@ class TestAddAgent:
         grimoire_add_agent("persisted-agent", project_path=str(project))
         content = (project / "project-context.yaml").read_text()
         assert "persisted-agent" in content
+
+
+# ── grimoire_standard_* ───────────────────────────────────────────────────────
+
+@pytest.fixture()
+def standard_project(tmp_path: Path) -> Path:
+    """Project scaffolded with the starter agentic-standard profile."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="test-mcp-standard")
+    return tmp_path
+
+
+class TestStandardVerify:
+    def test_scaffolded_project_is_ok(self, standard_project: Path) -> None:
+        result = grimoire_standard_verify(str(standard_project))
+        data = json.loads(result)
+        assert data["ok"]
+        assert data["profile"] == "starter"
+        assert data["error_count"] == 0
+        assert data["missing"] == []
+
+    def test_empty_project_fails_closed(self, tmp_path: Path) -> None:
+        result = grimoire_standard_verify(str(tmp_path))
+        data = json.loads(result)
+        assert not data["ok"]
+        assert data["missing"]
+
+    def test_explicit_profile(self, standard_project: Path) -> None:
+        result = grimoire_standard_verify(str(standard_project), profile="starter")
+        data = json.loads(result)
+        assert data["profile"] == "starter"
+
+    def test_unknown_profile_returns_error(self, standard_project: Path) -> None:
+        result = grimoire_standard_verify(str(standard_project), profile="nonexistent-profile")
+        data = json.loads(result)
+        assert "error" in data
+
+
+class TestStandardAudit:
+    def test_scaffolded_project(self, standard_project: Path) -> None:
+        result = grimoire_standard_audit(str(standard_project))
+        data = json.loads(result)
+        assert data["ok"]
+        # Fresh scaffold may propose warning-level completions, never errors.
+        assert all(a["severity"] != "error" for a in data["remediation_actions"])
+
+    def test_empty_project_proposes_remediation(self, tmp_path: Path) -> None:
+        result = grimoire_standard_audit(str(tmp_path))
+        data = json.loads(result)
+        assert not data["ok"]
+        assert data["remediation_actions"]
+        action = data["remediation_actions"][0]
+        assert {"check_id", "severity", "action", "path", "message"} <= set(action)
+
+
+class TestStandardScore:
+    def test_scaffolded_project_scores(self, standard_project: Path) -> None:
+        result = grimoire_standard_score(str(standard_project))
+        data = json.loads(result)
+        assert 0 <= data["score"] <= 100
+        assert data["threshold"] > 0
+        output_path = Path(data["output_path"])
+        if not output_path.is_absolute():
+            output_path = standard_project / output_path
+        assert output_path.is_file()
+
+    def test_empty_project_returns_result_or_error(self, tmp_path: Path) -> None:
+        result = grimoire_standard_score(str(tmp_path))
+        data = json.loads(result)
+        assert "error" in data or not data["ok"]
+
+
+class TestStandardGate:
+    def test_bootstrap_task(self, standard_project: Path) -> None:
+        result = grimoire_standard_gate(str(standard_project))
+        data = json.loads(result)
+        assert data["task_id"] == "bootstrap"
+        assert data["profile"] == "starter"
+        assert "missing" in data
+
+    def test_unknown_target_state_returns_error(self, standard_project: Path) -> None:
+        result = grimoire_standard_gate(str(standard_project), target_state="warp-speed")
+        data = json.loads(result)
+        assert "error" in data
+        assert "warp-speed" in data["error"]
+
+    def test_empty_project_has_no_state(self, tmp_path: Path) -> None:
+        # Without a task board there is no state, hence no gate requirement.
+        result = grimoire_standard_gate(str(tmp_path))
+        data = json.loads(result)
+        assert data["state"] is None
+        assert data["missing"] == []
 
 
 # ── _find_kit_root ────────────────────────────────────────────────────────────

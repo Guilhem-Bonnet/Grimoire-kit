@@ -1,6 +1,7 @@
 # Architecture — Grimoire Kit
 
-> Version 3.0.0 — Composable AI agent platform.
+> Composable AI agent platform. La version courante vit dans
+> `src/grimoire/__version__.py` (source unique, synchronisée avec `version.txt`).
 
 ## Vue d'ensemble
 
