@@ -1,0 +1,77 @@
+$schema: "grimoire-evals-task-suite/v1"
+witness: terraform-houseserver
+description: >-
+  Homelab Proxmox VE — 6 LXC + cluster K3s, Terraform, Ansible, Docker
+  Compose, FluxCD. Témoin « infra » du protocole docs/evals-protocol.md.
+stack: [terraform, ansible, k3s, fluxcd, proxmox]
+pinned:
+  kit_version: "3.18.0"
+  registered_at: "2026-07-02"
+  amendments: []
+arms: [governed, baseline]
+repetitions_min: 5
+tasks:
+  - id: feat-new-lxc-service
+    kind: feature
+    prompt: >-
+      Ajouter un nouveau conteneur LXC (service de monitoring) : ressource
+      Terraform, inventaire Ansible, playbook de provisionnement.
+    acceptance:
+      - terraform plan propre (aucune destruction non voulue)
+      - playbook idempotent (2e run sans changement)
+  - id: feat-backup-schedule
+    kind: feature
+    prompt: >-
+      Planifier des sauvegardes vzdump hebdomadaires pour tous les LXC via
+      Terraform (ou Ansible si non exposable), avec rétention configurée.
+    acceptance:
+      - rétention et fenêtre documentées et testées
+      - aucun secret en clair dans le code
+  - id: fix-drift-dns
+    kind: bugfix
+    prompt: >-
+      L'enregistrement DNS interne d'un LXC a dérivé de l'état Terraform.
+      Réconcilier sans recréer le conteneur.
+    acceptance:
+      - plan final vide (état réconcilié)
+      - zéro downtime du service concerné
+  - id: fix-ansible-deprecations
+    kind: bugfix
+    prompt: >-
+      Corriger les warnings de dépréciation Ansible (modules renommés,
+      syntaxe loop) sans changer le résultat des playbooks.
+    acceptance:
+      - ansible-lint vert
+      - diff d'exécution vide sur environnement de test
+  - id: refactor-tf-modules
+    kind: refactor
+    prompt: >-
+      Extraire la définition répétée des LXC en module Terraform réutilisable
+      (for_each sur une map de services).
+    acceptance:
+      - terraform plan strictement vide après refactor (state moves inclus)
+      - variables du module documentées
+  - id: migrate-k3s-minor
+    kind: migration
+    prompt: >-
+      Monter K3s d'une version mineure sur le cluster, nœud par nœud,
+      avec vérification des workloads FluxCD après chaque nœud.
+    acceptance:
+      - procédure rollback documentée avant exécution
+      - tous les workloads Ready en fin de migration
+  - id: sec-firewall-rules
+    kind: security
+    prompt: >-
+      Restreindre l'accès SSH des LXC au réseau d'administration uniquement
+      (règles firewall Proxmox en Terraform).
+    acceptance:
+      - accès admin vérifié, accès externe refusé (test)
+      - règles commentées et regroupées par service
+  - id: obs-node-alerts
+    kind: observability
+    prompt: >-
+      Ajouter des alertes de base (CPU, RAM, disque) sur les nœuds via la
+      stack de monitoring existante, seuils configurables.
+    acceptance:
+      - alerte de test déclenchée et reçue
+      - seuils externalisés (pas de valeurs en dur)

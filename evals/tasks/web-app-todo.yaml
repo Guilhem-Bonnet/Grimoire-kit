@@ -1,0 +1,78 @@
+$schema: "grimoire-evals-task-suite/v1"
+witness: web-app-todo
+description: >-
+  Application de gestion de tâches — frontend React (SPA), API Go, PostgreSQL.
+  Témoin « web » du protocole docs/evals-protocol.md.
+stack: [react, go, postgresql]
+pinned:
+  kit_version: "3.18.0"
+  registered_at: "2026-07-02"
+  amendments: []   # tout changement post-enregistrement est journalisé ici
+arms: [governed, baseline]
+repetitions_min: 5
+tasks:
+  - id: feat-due-dates
+    kind: feature
+    prompt: >-
+      Ajouter une date d'échéance optionnelle aux tâches : colonne SQL,
+      endpoint API (création + mise à jour), affichage et tri côté SPA.
+    acceptance:
+      - migration SQL réversible fournie
+      - tests API pour création/mise à jour avec et sans échéance
+      - tri par échéance couvert par un test frontend
+  - id: feat-bulk-complete
+    kind: feature
+    prompt: >-
+      Permettre de marquer plusieurs tâches comme terminées en une seule
+      requête (endpoint batch + sélection multiple dans la SPA).
+    acceptance:
+      - endpoint idempotent, borné (max 100 ids), testé
+      - état UI cohérent après échec partiel
+  - id: fix-timezone-display
+    kind: bugfix
+    prompt: >-
+      Les horodatages s'affichent en UTC au lieu du fuseau du navigateur.
+      Corriger l'affichage sans changer le stockage (UTC en base).
+    acceptance:
+      - stockage inchangé (test de non-régression)
+      - test d'affichage couvrant au moins deux fuseaux
+  - id: fix-n-plus-one
+    kind: bugfix
+    prompt: >-
+      La liste des tâches déclenche une requête SQL par tag (N+1).
+      Corriger via jointure ou chargement groupé.
+    acceptance:
+      - nombre de requêtes constant vérifié par test
+      - résultat identique à l'existant (snapshot)
+  - id: refactor-handlers
+    kind: refactor
+    prompt: >-
+      Extraire la validation des payloads des handlers HTTP Go vers un
+      package dédié, sans changement de comportement.
+    acceptance:
+      - aucun changement de contrat API (tests existants verts sans modification)
+      - couverture de la validation conservée ou accrue
+  - id: refactor-api-client
+    kind: refactor
+    prompt: >-
+      Centraliser les appels fetch de la SPA dans un client API unique avec
+      gestion d'erreurs uniforme.
+    acceptance:
+      - zéro fetch direct restant hors du client
+      - comportement d'erreur testé (401, 500, réseau)
+  - id: migrate-go-version
+    kind: migration
+    prompt: >-
+      Monter la version de Go d'une mineure (ex. 1.22 → 1.23) : toolchain,
+      CI, lint, et correction des dépréciations rencontrées.
+    acceptance:
+      - build + tests verts sur la nouvelle version
+      - changelog des dépréciations traitées
+  - id: sec-rate-limit
+    kind: security
+    prompt: >-
+      Ajouter un rate-limit par IP sur les endpoints d'écriture de l'API
+      (configurable, désactivable en test).
+    acceptance:
+      - limite testée (dépassement → 429)
+      - configuration documentée

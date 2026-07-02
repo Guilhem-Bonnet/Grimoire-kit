@@ -112,3 +112,4 @@ nav:
   - ADR:
       - "001 — No Multi-LLM": adr-001-no-multi-llm.md
       - "002 — SemVer Policy": adr-002-semver-policy.md
+      - "003 — Dualité mémoire": adr-003-memory-duality.md
