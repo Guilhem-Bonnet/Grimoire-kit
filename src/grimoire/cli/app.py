@@ -291,6 +291,7 @@ def init(
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
     backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
@@ -328,6 +329,12 @@ def init(
         raise typer.Exit(1)
 
     from grimoire.cli.cmd_init import run_init
+
+    if yes:
+        # The global --yes lives on the app callback (grimoire -y init …); this
+        # local flag honors the documented `grimoire init . -y` form (issue #33).
+        ctx.obj = ctx.obj or {}
+        ctx.obj["yes"] = True
 
     run_init(
         ctx,

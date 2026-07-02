@@ -118,6 +118,13 @@ class TestInit:
         content = (tmp_path / "project-context.yaml").read_text()
         assert "my-project" in content
 
+    def test_init_local_yes_flag(self, tmp_path: Path) -> None:
+        # issue #33 : `grimoire init . -y` est documenté — l'option doit exister
+        # en local sur init (pas seulement en global `grimoire -y init`).
+        result = runner.invoke(app, ["init", str(tmp_path), "-y"])
+        assert result.exit_code == 0
+        assert (tmp_path / "project-context.yaml").is_file()
+
     def test_init_refuses_overwrite(self, tmp_path: Path) -> None:
         # First init
         runner.invoke(app, ["init", str(tmp_path)])

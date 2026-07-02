@@ -43,7 +43,6 @@ Stdlib only — aucune dépendance externe.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import sys
@@ -52,6 +51,33 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import pow as mpow
 from pathlib import Path
+
+# ── Verrou fichier portable (issue #33 : fcntl est POSIX-only) ────────────────
+
+try:
+    import fcntl
+
+    def _lock_exclusive(fh) -> None:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+
+    def _unlock(fh) -> None:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+except ImportError:  # Windows
+    try:
+        import msvcrt
+
+        def _lock_exclusive(fh) -> None:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+
+        def _unlock(fh) -> None:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    except ImportError:  # plateforme sans verrou — best-effort assumé
+        def _lock_exclusive(fh) -> None:
+            pass
+
+        def _unlock(fh) -> None:
+            pass
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -378,7 +404,7 @@ def deposit_pheromone(
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         with open(lock_path, "w") as _lock_fh:
-            fcntl.flock(_lock_fh, fcntl.LOCK_EX)
+            _lock_exclusive(_lock_fh)
             try:
                 board = load_board(root)
                 # Déduplication : chercher un signal actif identique
@@ -418,7 +444,7 @@ def deposit_pheromone(
                 save_board(root, board)
                 return p
             finally:
-                fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+                _unlock(_lock_fh)
     except Exception:
         return None
 
@@ -443,11 +469,11 @@ def bulk_deposit(
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         with open(lock_path, "w") as _lock_fh:
-            fcntl.flock(_lock_fh, fcntl.LOCK_EX)
+            _lock_exclusive(_lock_fh)
             try:
                 return _bulk_deposit_locked(root, signals)
             finally:
-                fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+                _unlock(_lock_fh)
     except Exception:
         return 0
 

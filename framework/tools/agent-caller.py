@@ -141,7 +141,7 @@ class AgentCallResponse:
     call_id: str = ""
     from_agent: str = ""
     to_agent: str = ""
-    status: str = "pending"  # pending | success | error | timeout | retry
+    status: str = "pending"  # pending | success | simulated | error | timeout | retry
     response: str = ""
     model_used: str = ""
     tokens_used: int = 0
@@ -269,6 +269,7 @@ class CallHistoryManager:
 
         total = len(entries)
         success = sum(1 for e in entries if e.get("status") == "success")
+        simulated = sum(1 for e in entries if e.get("status") == "simulated")
         errors = sum(1 for e in entries if e.get("status") == "error")
         total_tokens = sum(e.get("tokens_used", 0) for e in entries)
         avg_duration = sum(e.get("duration_ms", 0) for e in entries) // max(1, total)
@@ -282,6 +283,7 @@ class CallHistoryManager:
         return {
             "total_calls": total,
             "success": success,
+            "simulated": simulated,
             "errors": errors,
             "success_rate": round(success / total, 3) if total > 0 else 0.0,
             "total_tokens": total_tokens,
@@ -444,7 +446,9 @@ class AgentCaller:
 
         # In standalone mode, we can't actually call an LLM.
         # We produce the formatted request as the "response" for now.
-        response.status = "success"
+        # status="simulated" (issue #33) : ne pas polluer les métriques aval
+        # (fitness, success_rate, dashboard) avec des exécutions sans LLM.
+        response.status = "simulated"
         response.response = prompt
         response.tokens_used = len(prompt) // 4
         response.duration_ms = int((time.time() - start_time) * 1000)
@@ -535,7 +539,7 @@ def load_caller_config(project_root: Path) -> dict:
 
 def _print_agent_list(agents: list[AgentToolSpec]) -> None:
     print(f"\n  Agents appelables — {len(agents)}")
-    print(f"  {'─' * 65}")
+    print(f"  {'-' * 65}")
 
     for a in agents:
         caps = ", ".join(a.capabilities[:3]) if a.capabilities else "—"
@@ -546,14 +550,14 @@ def _print_agent_list(agents: list[AgentToolSpec]) -> None:
 
 def _print_history(entries: list[dict]) -> None:
     print(f"\n  Historique des appels — {len(entries)} derniers")
-    print(f"  {'─' * 70}")
+    print(f"  {'-' * 70}")
 
     if not entries:
         print("  Aucun appel enregistré.\n")
         return
 
     for e in entries:
-        status_icon = {"success": "[OK]", "error": "[x]", "timeout": ""}.get(e.get("status", ""), "")
+        status_icon = {"success": "[OK]", "simulated": "[~]", "error": "[x]", "timeout": ""}.get(e.get("status", ""), "")
         dur = e.get("duration_ms", 0)
         tokens = e.get("tokens_used", 0)
         print(f"  {status_icon} [{e.get('call_id', '?')[:8]}] "
@@ -567,7 +571,7 @@ def _print_history(entries: list[dict]) -> None:
 
 def _print_schema(spec: AgentToolSpec) -> None:
     print(f"\n  Agent Schema — {spec.agent_id}")
-    print(f"  {'─' * 55}")
+    print(f"  {'-' * 55}")
     print(f"  Title        : {spec.title}")
     print(f"  Description  : {spec.description}")
     print(f"  Capabilities : {', '.join(spec.capabilities)}")
@@ -637,9 +641,9 @@ def main() -> None:
         if getattr(args, "json", False):
             print(json.dumps(asdict(response), ensure_ascii=False, indent=2))
         else:
-            icon = {"success": "[OK]", "error": "[x]", "timeout": ""}.get(response.status, "")
+            icon = {"success": "[OK]", "simulated": "[~]", "error": "[x]", "timeout": ""}.get(response.status, "")
             print(f"\n  {icon} Agent Call — {response.status}")
-            print(f"  {'─' * 55}")
+            print(f"  {'-' * 55}")
             print(f"  From     : {response.from_agent}")
             print(f"  To       : {response.to_agent}")
             print(f"  Model    : {response.model_used}")
@@ -657,7 +661,7 @@ def main() -> None:
         if getattr(args, "stats", False):
             stats = caller.get_stats()
             print("\n  Statistiques d'appels inter-agents")
-            print(f"  {'─' * 50}")
+            print(f"  {'-' * 50}")
             print(f"  Total appels  : {stats.get('total_calls', 0)}")
             print(f"  Succès        : {stats.get('success', 0)}")
             print(f"  Erreurs       : {stats.get('errors', 0)}")
