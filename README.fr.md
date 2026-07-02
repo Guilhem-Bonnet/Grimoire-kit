@@ -96,6 +96,8 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 
 ## <img src="docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Quick Start
 
+<img src="docs/assets/demo-quickstart.svg" width="100%" alt="Démo animée : grimoire init, standard init --needs, verify OK, score de conformité 81/70, gate check OK">
+
 ```bash
 # Installation via pipx (recommandé)
 pipx install grimoire-kit
@@ -548,11 +550,12 @@ Auto-détection stack
 </table>
 
 ```bash
-# Déployer un archétype
-bash grimoire-init.sh --archetype infra-ops
+# Chemin recommandé (SDK)
+grimoire init . --archetype infra-ops
 
-# Mode auto : détecte le stack → choisit les bons agents
-bash grimoire-init.sh --auto
+# Chemin shell legacy (mode maintenance — fonctionnel, plus de nouvelle feature)
+bash grimoire-init.sh --archetype infra-ops
+bash grimoire-init.sh --auto   # détecte le stack → choisit les bons agents
 ```
 
 <br>
