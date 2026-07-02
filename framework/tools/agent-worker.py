@@ -301,15 +301,18 @@ class AgentWorkerManager:
 
         if self._router_mod:
             try:
-                classifier_cls = getattr(self._router_mod, "TaskClassifier", None)
-                if classifier_cls:
-                    classifier = classifier_cls()
-                    # Use tier as complexity proxy
-                    model = classifier.classify(f"Agent {agent_id} task — tier {tier}")
-                    return model
+                router_cls = getattr(self._router_mod, "LLMRouter", None)
+                if router_cls:
+                    # Use tier as complexity proxy; route() returns a RoutingDecision
+                    # whose selected_model is a concrete model id (str).
+                    decision = router_cls().route(f"Agent {agent_id} task — tier {tier}", agent_id)
+                    return decision.selected_model
             except Exception as _exc:
-                _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
+                _log.warning(
+                    "LLM routing failed for agent '%s', using tier fallback: %s",
+                    agent_id,
+                    _exc,
+                )
 
         # Fallback
         tier_defaults = {
