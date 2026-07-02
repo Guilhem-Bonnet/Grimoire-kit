@@ -695,19 +695,18 @@ Voir [framework/tools/README.md](framework/tools/README.md) pour la référence 
 Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcontextprotocol.io/) :
 
 ```jsonc
-// Claude Desktop / Cursor / Cline
+// Claude Desktop / Cursor / Cline — serveur Python (pip install grimoire-kit[mcp])
 {
   "mcpServers": {
     "grimoire": {
-      "command": "node",
-      "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
-      "env": { "Grimoire_PROJECT_ROOT": "/votre-projet" }
+      "command": "grimoire-mcp",
+      "cwd": "/votre-projet"
     }
   }
 }
 ```
 
-**Tools exposés** : `get_project_context` · `get_agent_memory` · `run_completion_contract` · `get_workflow_status` · `list_sessions` · `get_failure_museum` · `spawn_subagent_task`
+**Tools exposés** (12) : `project_context` · `status` · `agent_list` · `config` · `harmony_check` · `memory_store` · `memory_search` · `add_agent` · `standard_verify` · `standard_audit` · `standard_score` · `standard_gate`
 
 <br>
 
@@ -717,7 +716,7 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 <tr>
 <td>
 
-**3 957+ tests** couvrant l'intégralité du framework :
+**5 990+ tests** couvrant l'intégralité du framework :
 
 ```bash
 # Tous les tests

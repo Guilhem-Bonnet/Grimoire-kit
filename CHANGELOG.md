@@ -7,6 +7,35 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé (issue #33 — merci @zavrocKk)
+
+- **Windows : agents découvrables** — la détection des fichiers agents utilisait
+  un test de sous-chaîne `"/agents/"` qui ne matche jamais avec des backslashes ;
+  `.github/agents/` restait vide sous Windows. Remplacé par un test sur
+  `path.parts` (helper `_is_agent_markdown`, 4 sites, tests PureWindowsPath).
+- **Template `custom-agent.tpl.md` réparé** — 12 ouvertures de commentaires HTML
+  avaient été écrasées par un search/replace débordant ; chaque `grimoire init`
+  propageait le bruit. Les deux copies (archetypes + _grimoire/_config) sont
+  restaurées (13 `<!--` = 13 `-->`).
+- **`grimoire init . -y` fonctionne** — l'option `--yes/-y` documentée n'existait
+  qu'au niveau global (`grimoire -y init`) ; elle est maintenant aussi locale à
+  `init`, ce qui rétablit le mode express non-interactif (CI/scripts).
+- **Portabilité Windows** — `stigmergy.py` : verrou fichier portable
+  (fcntl POSIX / msvcrt Windows / no-op sinon) au lieu d'un `import fcntl`
+  top-level fatal ; `agent-caller.py` : séparateurs box-drawing → ASCII
+  (UnicodeEncodeError sur console cp1252) ; wizard `init` : indicateurs de
+  progression `[■□□□]` → `[#---]`.
+- **README.fr : config MCP réelle** — la section pointait vers un
+  `framework/mcp/server.js` inexistant avec 7 outils fictifs ; remplacée par le
+  vrai serveur (`grimoire-mcp`, Python) et la liste réelle des 12 outils.
+
+### Modifié
+
+- **`agent-caller.py` : statut `simulated`** — en mode standalone (sans backend
+  LLM), `call` renvoyait `status="success"` et polluait les métriques aval
+  (success_rate, fitness, dashboard) avec des exécutions n'ayant jamais eu
+  lieu. Nouveau statut `simulated`, compté séparément dans `get_stats`.
+
 ## [3.18.0] - 2026-07-01
 
 ### Ajouté
