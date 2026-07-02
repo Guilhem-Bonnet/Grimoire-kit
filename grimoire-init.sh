@@ -16,6 +16,17 @@ set -euo pipefail
 # ─── Version ──────────────────────────────────────────────────────────────────
 GRIMOIRE_KIT_VERSION="$(cat "$(cd "$(dirname "$0")" && pwd)/version.txt" 2>/dev/null || echo "dev")"
 
+# ─── Avis de transition (non bloquant) ───────────────────────────────────────
+# Le SDK Python est le chemin d'installation recommandé ; ce script shell reste
+# fonctionnel mais n'accueille plus de nouvelle feature.
+# Supprimer cet avis : GRIMOIRE_SUPPRESS_INIT_NOTICE=1
+if [[ -z "${GRIMOIRE_SUPPRESS_INIT_NOTICE:-}" ]]; then
+    printf '%s\n' \
+        "[i] grimoire-init.sh est en mode maintenance — le chemin recommandé est le SDK :" \
+        "    pipx install grimoire-kit && grimoire init . " \
+        "    (avis supprimable : GRIMOIRE_SUPPRESS_INIT_NOTICE=1)" >&2
+fi
+
 # ─── Variables ────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_DIR="$(pwd)"
