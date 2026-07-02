@@ -115,27 +115,32 @@ def make_node(node_id: str, ref: str, out_contract: str = "task-envelope") -> di
     }
 
 
-class TestLint:
-    @pytest.fixture
-    def api_with_catalogue(
-        self, project_root: Path, kit_root: Path, tmp_path: Path
-    ) -> ForgeAPI:
-        ui = tmp_path / "ui"
-        (ui / "data").mkdir(parents=True)
-        catalogue = {
-            "patterns": [
-                {"id": "ORC-01", "name": "Orchestrateur"},
-                {"id": "GOV-01", "name": "Policy engine"},
-                {"id": "QUA-04", "name": "Evidence pack"},
-            ],
-            "contracts": [{"id": "task-envelope"}, {"id": "handoff-packet"}],
-            "relations": [{"from": "ORC-01", "to": "GOV-01", "kind": "depends"}],
-        }
-        (ui / "data" / "catalogue-export.json").write_text(
-            json.dumps(catalogue), encoding="utf-8"
-        )
-        return ForgeAPI(project_root, kit_root, ui_dir=ui)
+@pytest.fixture
+def api_with_catalogue(
+    project_root: Path, kit_root: Path, tmp_path: Path
+) -> ForgeAPI:
+    ui = tmp_path / "ui"
+    (ui / "data").mkdir(parents=True)
+    catalogue = {
+        "patterns": [
+            {"id": "ORC-01", "name": "Orchestrateur"},
+            {"id": "GOV-01", "name": "Policy engine"},
+            {"id": "QUA-04", "name": "Evidence pack"},
+        ],
+        "contracts": [{"id": "task-envelope"}, {"id": "handoff-packet"}],
+        "relations": [{"from": "ORC-01", "to": "GOV-01", "kind": "depends"}],
+        "useCases": [
+            {"id": "revue-gouvernee", "name": "Revue gouvernée",
+             "patterns": ["GOV-01", "QUA-04"]}
+        ],
+    }
+    (ui / "data" / "catalogue-export.json").write_text(
+        json.dumps(catalogue), encoding="utf-8"
+    )
+    return ForgeAPI(project_root, kit_root, ui_dir=ui)
 
+
+class TestLint:
     def test_typed_pin_mismatch_is_blocking(self, api: ForgeAPI) -> None:
         blueprint = {
             "nodes": [
@@ -308,3 +313,44 @@ class TestStatic:
         with pytest.raises(urllib.error.HTTPError) as exc:
             urllib.request.urlopen(req, timeout=5)  # noqa: S310
         assert exc.value.code == 422
+
+
+class TestComposites:
+    def composite(self, ref: str) -> dict:
+        return {
+            "id": "uc",
+            "kind": "composite",
+            "ref": ref,
+            "label": "UC",
+            "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
+        }
+
+    def test_unknown_use_case_is_blocking(self, api_with_catalogue: ForgeAPI) -> None:
+        bp = {"nodes": [self.composite("use-case:ghost")], "edges": []}
+        errors = api_with_catalogue.blueprint_validate(bp)
+        assert any("use-case inconnu" in e for e in errors)
+
+    def test_invalid_composite_ref_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {"nodes": [self.composite("nimporte-quoi")], "edges": []}
+        errors = api.blueprint_validate(bp)
+        assert any("ref composite invalide" in e for e in errors)
+
+    def test_missing_sub_blueprint_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {"nodes": [self.composite("flows/absent.blueprint.json")], "edges": []}
+        errors = api.blueprint_validate(bp)
+        assert any("sous-blueprint absent" in e for e in errors)
+
+    def test_use_case_patterns_feed_lint(self, api_with_catalogue: ForgeAPI) -> None:
+        bp = {
+            "nodes": [
+                make_node("a", "ORC-01"),
+                {**self.composite("use-case:revue-gouvernee"),
+                 "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}]},
+            ],
+            "edges": [{"from": "a.out", "to": "uc.in", "contract": "task-envelope"}],
+        }
+        lint = api_with_catalogue.blueprint_lint(bp)
+        assert lint["errors"] == []
+        # Le use-case apporte GOV-01 et QUA-04 : ni dépendance manquante, ni Faux Done
+        assert not any("dépend de GOV-01" in w for w in lint["warnings"])
+        assert not any("Faux Done" in w for w in lint["warnings"])

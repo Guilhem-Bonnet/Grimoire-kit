@@ -276,6 +276,21 @@ class ForgeAPI:
                 target = self.project_root / str(n.get("ref", ""))
                 if not target.exists():
                     errors.append(f"artefact absent du projet : {n.get('ref')}")
+            elif n.get("kind") == "composite":
+                ref = str(n.get("ref", ""))
+                if ref.startswith("use-case:"):
+                    if catalogue is not None:
+                        known_uc = {u["id"] for u in catalogue.get("useCases", [])}
+                        if ref.removeprefix("use-case:") not in known_uc:
+                            errors.append(f"use-case inconnu du catalogue : {ref}")
+                elif ref.endswith(".blueprint.json"):
+                    if not (self.project_root / ref).is_file():
+                        errors.append(f"sous-blueprint absent du projet : {ref}")
+                else:
+                    errors.append(
+                        f"ref composite invalide (use-case:<id> ou "
+                        f"chemin .blueprint.json) : {ref}"
+                    )
         return errors
 
     def blueprint_lint(self, blueprint: dict[str, Any]) -> dict[str, Any]:
@@ -289,11 +304,20 @@ class ForgeAPI:
         warnings: list[str] = []
         nodes = blueprint.get("nodes", [])
         flow_patterns = {n.get("ref") for n in nodes if n.get("kind") == "pattern"}
+        catalogue = self._catalogue()
+        use_case_patterns = {
+            u["id"]: u.get("patterns", [])
+            for u in (catalogue or {}).get("useCases", [])
+        }
         for n in nodes:
             if n.get("kind") == "extension-node":
                 flow_patterns.update(self._extension_node_patterns(n.get("ref", "")))
-
-        catalogue = self._catalogue()
+            elif n.get("kind") == "composite":
+                ref = str(n.get("ref", ""))
+                if ref.startswith("use-case:"):
+                    flow_patterns.update(
+                        use_case_patterns.get(ref.removeprefix("use-case:"), [])
+                    )
         if catalogue and flow_patterns:
             names = {p["id"]: p["name"] for p in catalogue.get("patterns", [])}
             for rel in catalogue.get("relations", []):
