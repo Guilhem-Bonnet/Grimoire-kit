@@ -6,8 +6,19 @@
 
 Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA de comportements et de templates adapté à un type de projet spécifique. Chaque archétype déclare ses **traits** (règles comportementales), ses **constraints** (bloquants), ses **tools_required** et ses **acceptance_criteria** machine-lisibles.
 
+> **Chemin recommandé (SDK)** : `pipx install grimoire-kit` puis
+> `grimoire init . -a <archetype>`. Les commandes `grimoire-init.sh` ci-dessous
+> restent valides (chemin shell en mode maintenance) et couvrent quelques
+> opérations sans équivalent SDK (`install --inspect`, `validate --all`).
+
 ```bash
-# Installer un archétype dans un projet existant
+# Chemin recommandé (SDK)
+grimoire init . -a web-app            # installe un archétype
+grimoire init . -a web-app,infra-ops  # plusieurs archétypes
+grimoire registry list                # voir tous les disponibles
+grimoire doctor                       # diagnostiquer l'installation
+
+# Chemin shell (mode maintenance)
 bash grimoire-init.sh install --archetype web-app
 bash grimoire-init.sh install --archetype stack/go
 bash grimoire-init.sh install --list          # voir tous les disponibles
@@ -15,9 +26,6 @@ bash grimoire-init.sh install --inspect infra-ops  # détails avant install
 
 # Valider les fichiers DNA
 bash grimoire-init.sh validate --all
-
-# Diagnostiquer l'installation
-bash grimoire-init.sh doctor
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
