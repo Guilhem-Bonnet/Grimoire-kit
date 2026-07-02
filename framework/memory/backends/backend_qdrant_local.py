@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 import uuid
 from pathlib import Path
+from typing import ClassVar
 
 _MEMORY_DIR = Path(__file__).resolve().parent.parent.parent / "memory"
 _QDRANT_PATH = str(_MEMORY_DIR / "qdrant_data")
@@ -21,7 +22,7 @@ _QDRANT_PATH = str(_MEMORY_DIR / "qdrant_data")
 class QdrantLocalBackend:
     """Qdrant fichier local + sentence-transformers embeddings."""
 
-    VECTOR_SIZE = {
+    VECTOR_SIZE: ClassVar[dict[str, int]] = {
         "all-MiniLM-L6-v2": 384,
         "all-mpnet-base-v2": 768,
         "nomic-embed-text": 768,

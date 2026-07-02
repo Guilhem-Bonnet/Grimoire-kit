@@ -18,6 +18,7 @@ Usage:
     python maintenance.py context-drift               # Détecter drift shared-context (Mnemo)
 """
 
+import contextlib
 import json
 import re
 import sys
@@ -114,10 +115,8 @@ def status():
         for m in memories:
             ts = m.get("timestamp") or m.get("created_at", "")
             if ts:
-                try:
-                    dates.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
-                except (ValueError, AttributeError):
-                    pass
+                with contextlib.suppress(ValueError, TypeError):
+                    dates.append(datetime.fromisoformat(ts))
         if dates:
             oldest = min(dates)
             newest = max(dates)
@@ -145,11 +144,11 @@ def archive(days: int = 30):
         ts = m.get("timestamp") or m.get("created_at", "")
         if ts:
             try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(ts)
                 if dt < cutoff:
                     to_archive.append(m)
                     continue
-            except (ValueError, AttributeError):
+            except (ValueError, TypeError):
                 pass
         keep.append(m)
 
@@ -350,10 +349,8 @@ def prune_activity(days: int = 90):
         for line in f:
             line = line.strip()
             if line:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
 
     if not events:
         print("Activity log vide.")
@@ -681,7 +678,7 @@ def _detect_memory_contradictions(memories: list[dict]) -> int:
 
 # ─── Mnemo: Consolidation auto des learnings ─────────────────────────────────
 
-def consolidate_learnings(target_file: str = None):
+def consolidate_learnings(target_file: str | None = None):
     """Auto-merge des doublons dans les fichiers agent-learnings.
 
     Si target_file est spécifié, ne traite que ce fichier.

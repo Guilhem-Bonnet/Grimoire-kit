@@ -27,11 +27,11 @@ install: ## Install package in editable mode with dev deps
 ## ─── Quality ───────────────────────────────────────────────────
 .PHONY: lint
 lint: ## Run ruff linter
-	$(PYTHON) -m ruff check src/ tests/ framework/tools/
+	$(PYTHON) -m ruff check src/ tests/ framework/tools/ framework/memory/
 
 .PHONY: lint-fix
 lint-fix: ## Run ruff linter with auto-fix
-	$(PYTHON) -m ruff check src/ tests/ framework/tools/ --fix
+	$(PYTHON) -m ruff check src/ tests/ framework/tools/ framework/memory/ --fix
 
 .PHONY: format
 format: ## Run ruff formatter
