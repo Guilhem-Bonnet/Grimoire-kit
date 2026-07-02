@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from grimoire.tools.ext_manager import (
+    MANIFEST_NAME,
     ExtensionError,
     install_extension,
     list_installed,
@@ -154,6 +155,7 @@ class ForgeAPI:
                         "version": m["version"],
                         "description": m["description"],
                         "patterns": m["patterns"].get("implements", []),
+                        "nodes": m.get("provides", {}).get("nodes", []),
                         "source": str(manifest_path.parent),
                     }
                 )
@@ -202,13 +204,13 @@ class ForgeAPI:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def blueprint_put(self, bp_id: str, blueprint: dict) -> dict:
-        errors = self.blueprint_validate(blueprint)
+        lint = self.blueprint_lint(blueprint)
         path = self._blueprint_path(bp_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(blueprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        return {"saved": bp_id, "warnings": errors}
+        return {"saved": bp_id, **lint}
 
     def _catalogue(self) -> dict | None:
         if self.ui_dir:
@@ -218,21 +220,41 @@ class ForgeAPI:
         return None
 
     def blueprint_validate(self, blueprint: dict) -> list[str]:
-        """Validation structurelle v1 (connexions non typées, cf. roadmap H2)."""
+        """Erreurs bloquantes : structure + pins typés (H4).
+
+        Une connexion dont les contrats de pins ne correspondent pas ne
+        compile pas.
+        """
         errors: list[str] = []
         nodes = blueprint.get("nodes", [])
         node_ids = [n.get("id") for n in nodes]
         if len(node_ids) != len(set(node_ids)):
             errors.append("ids de nodes non uniques")
-        pins = {
-            f"{n.get('id')}.{p.get('id')}"
+        pin_contracts = {
+            f"{n.get('id')}.{p.get('id')}": p.get("contract")
             for n in nodes
             for p in n.get("pins", [])
         }
         for edge in blueprint.get("edges", []):
+            missing = False
             for end in ("from", "to"):
-                if edge.get(end) not in pins:
+                if edge.get(end) not in pin_contracts:
                     errors.append(f"edge {end} inconnu : {edge.get(end)}")
+                    missing = True
+            if missing:
+                continue
+            c_from = pin_contracts[edge["from"]]
+            c_to = pin_contracts[edge["to"]]
+            if c_from != c_to:
+                errors.append(
+                    f"connexion invalide {edge['from']} -> {edge['to']} : "
+                    f"contrats incompatibles ({c_from} != {c_to})"
+                )
+            elif edge.get("contract") and edge["contract"] != c_from:
+                errors.append(
+                    f"edge {edge['from']} -> {edge['to']} : contrat déclaré "
+                    f"({edge['contract']}) != contrat des pins ({c_from})"
+                )
 
         catalogue = self._catalogue()
         if catalogue:
@@ -253,6 +275,62 @@ class ForgeAPI:
                     errors.append(f"artefact absent du projet : {n.get('ref')}")
         return errors
 
+    def blueprint_lint(self, blueprint: dict) -> dict:
+        """Lint normatif (H4) : erreurs bloquantes + avertissements catalogue.
+
+        Avertissements dérivés du catalogue : dépendances de patterns
+        absentes du flow, exigences des extensions, heuristiques
+        anti-patterns (flow sans preuve, node isolé).
+        """
+        errors = self.blueprint_validate(blueprint)
+        warnings: list[str] = []
+        nodes = blueprint.get("nodes", [])
+        flow_patterns = {n.get("ref") for n in nodes if n.get("kind") == "pattern"}
+        for n in nodes:
+            if n.get("kind") == "extension-node":
+                flow_patterns.update(self._extension_node_patterns(n.get("ref", "")))
+
+        catalogue = self._catalogue()
+        if catalogue and flow_patterns:
+            names = {p["id"]: p["name"] for p in catalogue.get("patterns", [])}
+            for rel in catalogue.get("relations", []):
+                if (
+                    rel.get("kind") == "depends"
+                    and rel.get("from") in flow_patterns
+                    and rel.get("to") not in flow_patterns
+                ):
+                    warnings.append(
+                        f"{rel['from']} dépend de {rel['to']} "
+                        f"({names.get(rel['to'], '?')}), absent du flow"
+                    )
+            # Anti-pattern « Faux Done » : un flow multi-nodes sans preuve QUA
+            if len(nodes) >= 2 and not any(
+                str(p).startswith("QUA-") for p in flow_patterns
+            ):
+                warnings.append(
+                    "aucun pattern de preuve (QUA-*) dans le flow — "
+                    "risque d'anti-pattern Faux Done"
+                )
+
+        # Node isolé : présent mais connecté à rien
+        connected: set[str] = set()
+        for edge in blueprint.get("edges", []):
+            for end in ("from", "to"):
+                connected.add(str(edge.get(end, "")).split(".")[0])
+        for n in nodes:
+            if len(nodes) >= 2 and n.get("id") not in connected:
+                warnings.append(f"node isolé : {n.get('id')} ({n.get('label')})")
+
+        return {"errors": errors, "warnings": warnings}
+
+    def _extension_node_patterns(self, ref: str) -> list[str]:
+        ext_id = str(ref).split("/")[0]
+        manifest_path = self.kit_root / "extensions" / ext_id / MANIFEST_NAME
+        if not manifest_path.is_file():
+            return []
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return manifest.get("patterns", {}).get("implements", [])
+
     # ── télémétrie ────────────────────────────────────────────────────────
 
     def event_files(self) -> list[tuple[str, Path]]:
@@ -261,6 +339,23 @@ class ForgeAPI:
             for name, rel in EVENT_SOURCES
             if (self.project_root / rel).is_file()
         ]
+
+    def events_log(self, limit: int = 200) -> dict:
+        """Dernières lignes des flux events.jsonl, pour le replay blueprint."""
+        log: dict[str, list] = {}
+        for name, path in self.event_files():
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            entries = []
+            for line in lines[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    entries.append({"raw": line})
+            log[name] = entries
+        return log
 
 
 def make_handler(api: ForgeAPI):
@@ -302,6 +397,8 @@ def make_handler(api: ForgeAPI):
                     self._json(api.extensions_view())
                 elif path == "/api/blueprints":
                     self._json(api.blueprints_list())
+                elif path == "/api/events/log":
+                    self._json(api.events_log())
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":
@@ -337,7 +434,7 @@ def make_handler(api: ForgeAPI):
                 elif path.startswith("/api/blueprints/") and path.endswith("/validate"):
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
-                    self._json({"errors": api.blueprint_validate(blueprint)})
+                    self._json(api.blueprint_lint(blueprint))
                 else:
                     self._error("route inconnue", 404)
             except ExtensionError as exc:
