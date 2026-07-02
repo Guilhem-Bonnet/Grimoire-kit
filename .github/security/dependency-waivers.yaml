@@ -1,0 +1,21 @@
+$schema: "grimoire-agentic-standard-waivers/v1"
+metadata:
+  project: "grimoire-kit"
+  scope: "ci-sdk dependency audit (pip-audit)"
+  policy: >-
+    Chaque waiver est borne dans le temps (expires_at). Un waiver expire =
+    scripts/depaudit-waivers.py cesse de l'emettre = le job dep-audit redevient
+    strict et repasse rouge tant que le risque n'est pas re-evalue.
+waivers:
+  - waiver_id: "DEPAUDIT-2026-001"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2025-3000"
+    package: "torch"
+    reason: >-
+      Dependance transitive (sentence-transformers, extras qdrant/weaviate),
+      aucune version corrigee publiee en amont, et grimoire-kit n'exerce pas
+      torch.jit.script (surface vulnerable). Risque accepte en attendant un fix.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-09-30"
+    evidence_refs:
+      - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"

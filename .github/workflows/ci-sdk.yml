@@ -40,7 +40,7 @@ jobs:
         run: pip install ruff
 
       - name: Lint
-        run: ruff check src/ tests/unit/ --output-format=github
+        run: ruff check src/ tests/unit/ framework/memory/ --output-format=github
 
   typecheck:
     name: "mypy --strict"
@@ -79,7 +79,11 @@ jobs:
         shell: bash
         run: |
           pip freeze --exclude-editable | grep -v '^grimoire-kit==' > audit-requirements.txt
-          pip-audit --strict --desc -r audit-requirements.txt
+          # Waivers gouvernés (issue #20) : les entrées actives de
+          # .github/security/dependency-waivers.yaml deviennent des --ignore-vuln ;
+          # un waiver expiré disparaît et l'audit redevient strict.
+          IGNORE_FLAGS="$(python scripts/depaudit-waivers.py)"
+          pip-audit --strict --desc $IGNORE_FLAGS -r audit-requirements.txt
 
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
