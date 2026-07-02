@@ -167,7 +167,7 @@ def _run_wizard(
 
     # ── Step 1/4 · Identity ───────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[■□□□] 1/4 · Identity[/dim]")
+    console.print("  [dim]\\[#---] 1/4 · Identity[/dim]")
 
     # Show detected stacks
     if scan and scan.stacks:
@@ -192,7 +192,7 @@ def _run_wizard(
 
     # ── Step 2/4 · Preferences ────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[■■□□] 2/4 · Preferences[/dim]")
+    console.print("  [dim]\\[##--] 2/4 · Preferences[/dim]")
 
     _lang_choices = {"1": "Français", "2": "English"}
     console.print("  [bold]Language:[/bold]  1) Français  2) English")
@@ -225,7 +225,7 @@ def _run_wizard(
 
     # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
     console.print()
-    console.print("  [dim]\\[■■■□] 3/4 · Archetypes[/dim]")
+    console.print("  [dim]\\[###-] 3/4 · Archetypes[/dim]")
     console.print()
     console.print("  [bold]minimal[/bold] is always included — it's the base.")
     console.print("  Choose specializations to add:\n")
@@ -267,7 +267,7 @@ def _run_wizard(
 
     # ── Step 4/4 · Confirm ────────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[■■■■] 4/4 · Confirmation[/dim]")
+    console.print("  [dim]\\[####] 4/4 · Confirmation[/dim]")
     arch_display = ", ".join(selected_archetypes) if selected_archetypes else "minimal"
     console.print()
     console.print("  [bold]Summary:[/bold]")
