@@ -10,8 +10,10 @@ import pytest
 from grimoire.tools.ext_manager import (
     ExtensionError,
     install_extension,
+    install_from_registry,
     list_installed,
     load_manifest,
+    publish_extension,
     remove_extension,
     validate_manifest,
 )
@@ -175,6 +177,59 @@ class TestInstall:
         (ext_dir / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(ExtensionError, match="a échoué"):
             install_extension(ext_dir, project_root)
+
+
+class TestRegistry:
+    def test_publish_creates_archive_and_index(
+        self, ext_dir: Path, tmp_path: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        release = publish_extension(ext_dir, registry)
+        assert release["version"] == "0.1.0"
+        assert (registry / "dist" / "demo-ext-0.1.0.tar.gz").is_file()
+        index = json.loads((registry / "registry.json").read_text(encoding="utf-8"))
+        assert index["extensions"]["demo-ext"]["latest"] == "0.1.0"
+        assert release["checksum"].startswith("sha256:")
+
+    def test_publish_is_deterministic(self, ext_dir: Path, tmp_path: Path) -> None:
+        registry = tmp_path / "registry"
+        first = publish_extension(ext_dir, registry)
+        second = publish_extension(ext_dir, registry)
+        assert first["checksum"] == second["checksum"]
+        index = json.loads((registry / "registry.json").read_text(encoding="utf-8"))
+        assert len(index["extensions"]["demo-ext"]["versions"]) == 1
+
+    def test_install_from_registry(
+        self, ext_dir: Path, project_root: Path, tmp_path: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        publish_extension(ext_dir, registry)
+        result = install_from_registry("demo-ext", registry, project_root)
+        assert result.extension_id == "demo-ext"
+        assert (project_root / ".github" / "agents" / "demo.agent.md").is_file()
+        state = list_installed(project_root)
+        assert state["demo-ext"]["source"].startswith("registry:")
+        assert state["demo-ext"]["checksum"].startswith("sha256:")
+        remove_extension("demo-ext", project_root)
+        assert list_installed(project_root) == {}
+
+    def test_tampered_archive_rejected(
+        self, ext_dir: Path, project_root: Path, tmp_path: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        publish_extension(ext_dir, registry)
+        archive = registry / "dist" / "demo-ext-0.1.0.tar.gz"
+        archive.write_bytes(archive.read_bytes() + b"tamper")
+        with pytest.raises(ExtensionError, match="checksum invalide"):
+            install_from_registry("demo-ext", registry, project_root)
+
+    def test_unknown_extension_in_registry(
+        self, ext_dir: Path, project_root: Path, tmp_path: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        publish_extension(ext_dir, registry)
+        with pytest.raises(ExtensionError, match="absente du registry"):
+            install_from_registry("ghost", registry, project_root)
 
 
 class TestRemove:

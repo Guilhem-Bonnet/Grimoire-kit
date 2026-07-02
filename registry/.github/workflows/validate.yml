@@ -1,0 +1,22 @@
+# CI du futur repo dédié grimoire-extensions-registry.
+# Inopérant tant que le dossier vit dans grimoire-kit (chemin workflows non
+# racine) — prêt pour l'extraction.
+name: validate-registry
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install grimoire-kit jsonschema
+      - name: Validate registry
+        run: python3 scripts/validate-registry.py --registry .
