@@ -49,7 +49,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
 
       - name: Install PyYAML
@@ -115,7 +115,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install deps
         run: pip install pyyaml
@@ -149,7 +149,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Run context-guard (seuil alerte 40%, bloquant 70%)
         run: |
@@ -190,7 +190,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install deps
         run: pip install pyyaml
@@ -233,7 +233,6 @@ jobs:
       - name: Run framework tests
         run: |
           python3 -m pytest tests/test_*.py -q --tb=short -x \
-            --ignore=tests/test_background_tasks.py \
             2>&1 | tee framework-test-output.txt || true
           # Report pass/fail
           LAST_LINE=$(tail -1 framework-test-output.txt)
@@ -244,11 +243,39 @@ jobs:
             exit 1
           fi
 
+  # ── 7c. Observatory API Tests (pytest) ────────────────────────────────────
+  observatory-api-tests:
+    name: "Observatory API Tests (pytest)"
+    runs-on: ubuntu-latest
+    needs: bash-syntax
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install test deps
+        run: pip install pytest pyyaml
+
+      - name: Run Observatory API tests
+        run: |
+          python3 -m pytest tests/test_observatory.py -q --tb=short \
+            2>&1 | tee observatory-api-test-output.txt || true
+          LAST_LINE=$(tail -1 observatory-api-test-output.txt)
+          echo "### 🔭 Observatory API Tests" >> $GITHUB_STEP_SUMMARY
+          echo "$LAST_LINE" >> $GITHUB_STEP_SUMMARY
+          if echo "$LAST_LINE" | grep -qE "failed|error"; then
+            exit 1
+          fi
+
   # ── 8. Résumé ─────────────────────────────────────────────────────────────
   summary:
     name: "CI Summary"
     runs-on: ubuntu-latest
-    needs: [bash-syntax, dna-validate, shellcheck, yaml-lint, doctor, context-guard, python-tests, framework-tests]
+    needs: [bash-syntax, dna-validate, shellcheck, yaml-lint, doctor, context-guard, python-tests, framework-tests, observatory-api-tests]
     if: always()
     steps:
       - name: Print summary
@@ -265,3 +292,4 @@ jobs:
           echo "| Context Guard | ${{ needs.context-guard.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Framework Tests | ${{ needs.framework-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Observatory API Tests | ${{ needs.observatory-api-tests.result }} |" >> $GITHUB_STEP_SUMMARY

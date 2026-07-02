@@ -1,15 +1,15 @@
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
+# <img src="../assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
 
 > **J1** → Première session en 10 minutes 
 > **S1** → Première semaine productive 
 > **M1** → Premier mois, maîtrise complète
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
 
 ### 1. Installation
 
@@ -35,7 +35,7 @@ bash grimoire-kit/grimoire.sh setup --user "Votre Nom" --lang "Français"
 grimoire setup --user "Votre Nom" --lang "Français"
 ```
 
-Cette commande synchronise `project-context.yaml` vers les configs BMAD et les instructions Copilot.
+Cette commande synchronise `project-context.yaml` vers les configs runtime Grimoire et les instructions Copilot.
 
 ### 3. Vérifier l'installation
 
@@ -54,7 +54,7 @@ Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
 /grimoire-master
 ```
 
-L'agent BMad Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
+L'agent Grimoire Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
 
 ### 5. Structure à connaître
 
@@ -72,9 +72,9 @@ votre-projet/
 
 **C'est tout pour J1.** Vous avez un projet Grimoire fonctionnel.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> S1 — Première Semaine
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> S1 — Première Semaine
 
 ### Jour 2-3 : Comprendre les agents
 
@@ -82,7 +82,7 @@ Les agents sont des personas spécialisées. Chacun a un domaine d'expertise :
 
 | Agent | Spécialité | Quand l'utiliser |
 |-------|-----------|-----------------|
-| BMad Master | Orchestration | Commencer ici, il route vers les autres |
+| Grimoire Master | Orchestration | Commencer ici, il route vers les autres |
 | Analyst (Mary) | Business | Étude de marché, exigences métier |
 | PM (John) | Produit | PRD, user stories, priorisation |
 | Architect (Winston) | Technique | Architecture, choix technologiques |
@@ -114,9 +114,9 @@ Avant chaque "fait" :
 
 Si CC FAIL → l'agent corrige automatiquement avant de rendre la main.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/bolt.svg" width="28" height="28" alt=""> M1 — Premier Mois
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> M1 — Premier Mois
 
 ### Semaine 2 : Mémoire et contexte
 
@@ -177,20 +177,33 @@ bash grimoire-init.sh install --archetype web-app
 bash grimoire-init.sh install --list
 ```
 
-### Semaine 4 : NSO et Intelligence Layer
+### Semaine 4 : SOG, UDF et protocoles d'autonomie
 
-Le Nervous System Orchestrator (NSO) est le méta-outil qui orchestre tout le système :
+Le **SOG (Smart Orchestrator Gateway)** est le cœur de Grimoire depuis v3 — il remplace l'ancien NSO.
 
-```bash
-# Run complet du système nerveux
-python3 framework/tools/nso.py --project-root . run
+**Ce que le SOG fait pour vous :**
+- Il analyse votre intention et route vers le bon agent automatiquement
+- Il valide tous les outputs (HUP) avant de vous les présenter
+- Il regroupe les questions (QEC) — jamais une interruption pour une question isolée
+- Il continue sur la suite logique (AORA) sans vous demander "je continue ?"
 
-# Mode rapide
-python3 framework/tools/nso.py --project-root . run --quick
-
-# Rétrospective automatique
-python3 framework/tools/nso.py --project-root . retro
 ```
+Vous → Grimoire Master (SOG)
+  ├── Analyse intention
+  ├── Dispatch invisible vers sub-agents
+  ├── Validation HUP des résultats
+  └── Présentation agrégée
+```
+
+**L'UDF (Unified Dynamic Factory)** crée des agents/workflows à la volée quand aucun existant ne couvre le besoin — décrivez simplement ce dont vous avez besoin.
+
+**Protocoles d'autonomie à connaître :**
+
+| Protocole | Effet |
+|---|---|
+| **ALS L1/L2** | Actions locales et réversibles → exécutées sans confirmation |
+| **AORA** | Suite logique évidente → exécutée dans le même tour |
+| **PIP** | Gaps évidents → initiative proactive de l'agent |
 
 ### Workflow typique M1
 
@@ -200,12 +213,12 @@ python3 framework/tools/nso.py --project-root . retro
 3. [ACT]  Le SM découpe en stories
 4. [ACT]  Le Dev implémente (TDD + CC)
 5. [ACT]  Le QA valide la couverture
-6.        Le NSO fait une rétrospective
+6.        Le SOG fait une rétrospective + identifie les gaps
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
+## <img src="../assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
 
 | Besoin | Commande |
 |--------|---------|

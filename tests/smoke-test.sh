@@ -121,7 +121,7 @@ scenario_minimal() {
     assert_dir_exists  "_bmad/_config/custom/workflows"    "Dossier workflows"
     assert_dir_exists  "_bmad/_memory"                     "Dossier memory"
     assert_dir_exists  "_bmad/_memory/agent-learnings"     "Dossier agent-learnings"
-    assert_dir_exists  "_bmad-output/.runs/main"           "Session main"
+    assert_dir_exists  "_grimoire-output/.runs/main"       "Session main"
 
     # Framework files
     assert_file_exists "_bmad/_config/custom/agent-base.md"    "agent-base.md"
@@ -154,7 +154,7 @@ scenario_minimal() {
     assert_file_contains "project-context.yaml" "bmad_kit_version"        "project-context contient la version du kit"
 
     # Session branching
-    assert_file_exists "_bmad-output/.runs/main/branch.json"  "branch.json main"
+    assert_file_exists "_grimoire-output/.runs/main/branch.json"  "branch.json main"
 
     # Manifest
     assert_file_contains "_bmad/_config/agent-manifest.csv" "project-navigator"  "manifest contient atlas"

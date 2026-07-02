@@ -23,6 +23,8 @@ PROJECT_NAME=""
 USER_NAME=""
 LANGUAGE="Français"
 ARCHETYPE="minimal"
+ARCHETYPE_EXPLICIT=false
+GAME_GENRE=""
 AUTO_DETECT=false
 FORCE=false
 MEMORY_BACKEND="auto"
@@ -55,6 +57,21 @@ ok()    { echo -e "${GREEN}✅ $*${NC}"; }
 warn()  { echo -e "${YELLOW}⚠️  $*${NC}"; }
 error() { echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
 
+run_vscode_stability_guard() {
+    local project_root="${1:-$TARGET_DIR}"
+    local mode="${2:-apply}"
+    local guard_script="$SCRIPT_DIR/framework/tools/vscode-stability-guard.py"
+
+    [[ -f "$guard_script" ]] || return 0
+    command -v python3 &>/dev/null || return 0
+
+    if [[ "$mode" == "check" ]]; then
+        python3 "$guard_script" --project-root "$project_root" --check --skip-runtime --quiet || true
+    else
+        python3 "$guard_script" --project-root "$project_root" --apply --skip-runtime --quiet || true
+    fi
+}
+
 usage() {
     cat <<EOF
 ${CYAN}Grimoire Custom Kit v${GRIMOIRE_KIT_VERSION} — Initialisation${NC}
@@ -71,7 +88,10 @@ Options init:
   --name NAME         Nom du projet (requis)
   --user USER         Votre nom (requis)
   --lang LANGUAGE     Langue de communication (défaut: Français)
-  --archetype TYPE    Archétype à utiliser: minimal, infra-ops, fix-loop (défaut: minimal)
+  --archetype TYPE    Archétype à utiliser (défaut: minimal). Sans cette option en mode
+                      interactif, un sélecteur d'archétype est proposé. Voir 'install --list'.
+  --genre GENRE       (archétype game-dev) Lentille de genre injectée dans le contexte
+                      (ex: action-rpg, battle-royale, roguelike…). Sinon proposée en interactif.
   --target DIR        Répertoire cible (défaut: répertoire courant)
   --auto              Détecter automatiquement le stack et choisir l'archétype optimal
   --memory BACKEND    Backend mémoire: auto, local, qdrant-local, qdrant-server, ollama,
@@ -97,16 +117,21 @@ Options install:
   install --inspect TYPE    Inspecter un archétype (agents, traits, contraintes) sans installer
   install --force           Forcer la réinstallation (overwrite fichiers existants)
 
-Archétypes:
-  minimal     Meta-agents (Atlas, Sentinel, Mnemo) + 1 agent vierge
-  infra-ops   Agents Infrastructure & DevOps complets (10 agents)
-  web-app     Agents Full-Stack (Stack, Pixel) + agents stack auto
-  fix-loop    Orchestrateur boucle de correction certifiée + workflow 9 phases
+Archétypes (voir 'install --list' pour le détail) :
+  minimal               Meta-agents (Atlas, Sentinel, Mnemo) + 1 agent vierge
+  infra-ops             Agents Infrastructure & DevOps complets (10 agents)
+  web-app               Agents Full-Stack (Stack, Pixel) + agents stack auto
+  platform-engineering  Ingénierie de plateforme end-to-end
+  creative-studio       Projets créatifs (design, branding, contenu)
+  agentic-standard      Pont vers un corpus normatif agentique externe
+  game-dev              Création de jeux vidéo gouvernée — 8 disciplines (GDD, déterminisme, cert)
+  fix-loop              Orchestrateur boucle de correction certifiée + workflow 9 phases
 
 Exemples:
   $(basename "$0") --name "Mon API" --user "Alice" --archetype minimal
   $(basename "$0") --name "Infra Prod" --user "Bob" --archetype infra-ops --lang "English"
   $(basename "$0") --name "Mon App" --user "Guilhem" --auto --memory ollama
+  $(basename "$0") --name "Arcanum Royale" --user "Guilhem" --archetype game-dev --genre battle-royale
   $(basename "$0") session-branch --name "explore-graphql"
   $(basename "$0") session-branch --list
   $(basename "$0") session-branch --diff main explore-graphql
@@ -777,6 +802,13 @@ cmd_hooks() {
                 cp "$(git rev-parse --show-toplevel 2>/dev/null)/framework/hooks/.pre-commit-config.tpl.yaml" "$precommit_cfg"
                 echo -e "  ${GREEN}✓${NC}  .pre-commit-config.yaml généré"
             fi
+
+            local commit_template
+            commit_template="$(git rev-parse --show-toplevel 2>/dev/null)/.github/git-commit-template.txt"
+            if [[ -f "$commit_template" ]]; then
+                git config --local commit.template "$commit_template"
+                echo -e "  ${GREEN}✓${NC}  commit.template configure vers .github/git-commit-template.txt"
+            fi
             ;;
     esac
     exit 0
@@ -917,6 +949,10 @@ cmd_forge() {
     echo ""
 
     python3 "${py_args[@]}"
+
+    if [[ "$mode" != "list" ]]; then
+        run_vscode_stability_guard "$TARGET_DIR" "apply"
+    fi
 
     if [[ "$mode" == "from" ]] || [[ "$mode" == "from-gap" ]] || [[ "$mode" == "from-trace" ]]; then
         echo ""
@@ -2626,7 +2662,8 @@ while [[ $# -gt 0 ]]; do
         --name)     PROJECT_NAME="$2"; shift 2 ;;
         --user)     USER_NAME="$2"; shift 2 ;;
         --lang)     LANGUAGE="$2"; shift 2 ;;
-        --archetype) ARCHETYPE="$2"; shift 2 ;;
+        --archetype) ARCHETYPE="$2"; ARCHETYPE_EXPLICIT=true; shift 2 ;;
+        --genre)    GAME_GENRE="$2"; shift 2 ;;
         --target)   TARGET_DIR="$2"; shift 2 ;;
         --auto)     AUTO_DETECT=true; shift ;;
         --memory)   MEMORY_BACKEND="$2"; shift 2 ;;
@@ -2698,13 +2735,26 @@ detect_stack() {
         detected+=("docker")
     fi
 
+    # Moteurs de jeu (Godot / Unity / Unreal)
+    if [[ -f "$dir/project.godot" ]] || \
+       { [[ -d "$dir/Assets" ]] && [[ -d "$dir/ProjectSettings" ]]; } || \
+       find "$dir" -maxdepth 3 -name '*.uproject' -print -quit 2>/dev/null | grep -q . || \
+       find "$dir" -maxdepth 3 -name '*.gd' \
+         -not -path '*/node_modules/*' \
+         -print -quit 2>/dev/null | grep -q .; then
+        detected+=("game")
+    fi
+
     echo "${detected[*]:-unknown}"
 }
 
 auto_select_archetype() {
     local stacks="$1"
+    # game-dev si moteur de jeu détecté
+    if echo "$stacks" | grep -qE '(^| )game( |$)'; then
+        echo "game-dev"
     # infra-ops si terraform ou k8s ou ansible
-    if echo "$stacks" | grep -qE '(terraform|k8s|ansible)'; then
+    elif echo "$stacks" | grep -qE '(terraform|k8s|ansible)'; then
         echo "infra-ops"
     # web-app si frontend + (go|node|python)
     elif echo "$stacks" | grep -qE 'frontend' && echo "$stacks" | grep -qE '(go|node|python)'; then
@@ -2712,6 +2762,131 @@ auto_select_archetype() {
     else
         echo "minimal"
     fi
+}
+
+# ─── Sélecteur interactif d'archétype ───────────────────────────────────────
+# Proposé quand --archetype est absent, hors --auto, en terminal interactif.
+setup_archetype_wizard() {
+    $ARCHETYPE_EXPLICIT && return 0
+    $AUTO_DETECT && return 0
+    [[ ! -t 0 ]] && return 0
+
+    local arch_base="$SCRIPT_DIR/archetypes"
+    local ids=() descs=() dna id desc
+    for dna in "$arch_base"/*/archetype.dna.yaml; do
+        [[ -f "$dna" ]] || continue
+        id="$(basename "$(dirname "$dna")")"
+        [[ "$id" == "meta" ]] && continue
+        desc="$(grep -m1 '^description:' "$dna" | sed -E 's/^description:[[:space:]]*"?//; s/"[[:space:]]*$//')"
+        ids+=("$id"); descs+=("$desc")
+    done
+    [[ ${#ids[@]} -eq 0 ]] && return 0
+
+    echo ""
+    echo -e "${CYAN}┌─── 🧬 Choix de l'archétype ─────────────────────────────────────────────┐${NC}"
+    echo ""
+    local i n
+    for i in "${!ids[@]}"; do
+        n=$((i + 1))
+        printf "  ${GREEN}%2d${NC}) ${CYAN}%-20s${NC} %s\n" "$n" "${ids[$i]}" "${descs[$i]}"
+    done
+    echo ""
+    echo -e "  Entrée = défaut (${CYAN}minimal${NC})"
+    local choice
+    read -p "$(echo -e "  Votre choix [${CYAN}1-${#ids[@]}${NC}] : ")" -r choice
+    echo ""
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ids[@]} )); then
+        ARCHETYPE="${ids[$((choice - 1))]}"
+    else
+        ARCHETYPE="minimal"
+    fi
+    ok "Archétype sélectionné : $ARCHETYPE"
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+}
+
+# ─── Sélecteur de lentille de genre (archétype game-dev) ─────────────────────
+# Lit les genres depuis framework/game-dev/domain-map.yaml#genre_lenses.
+setup_genre_wizard() {
+    [[ "$ARCHETYPE" != "game-dev" ]] && return 0
+    [[ -n "$GAME_GENRE" ]] && return 0
+    [[ ! -t 0 ]] && return 0
+
+    local dmap="$SCRIPT_DIR/framework/game-dev/domain-map.yaml"
+    [[ -f "$dmap" ]] || return 0
+
+    local keys=() labels=() key label
+    while IFS=$'\t' read -r key label; do
+        keys+=("$key"); labels+=("$label")
+    done < <(awk '
+        /^genre_lenses:/ { inblock = 1; next }
+        inblock && /^[a-zA-Z_]+:/ { inblock = 0 }
+        inblock && /^  [a-z0-9_-]+:[ \t]*$/ { cur = $1; sub(/:$/, "", cur); next }
+        inblock && /^    label:/ {
+            line = $0
+            sub(/^    label:[ \t]*"?/, "", line); sub(/"[ \t]*$/, "", line)
+            print cur "\t" line
+        }
+    ' "$dmap")
+    [[ ${#keys[@]} -eq 0 ]] && return 0
+
+    echo ""
+    echo -e "${CYAN}┌─── 🎯 Lentille de genre (game-dev) ─────────────────────────────────────┐${NC}"
+    echo ""
+    local i n
+    for i in "${!keys[@]}"; do
+        n=$((i + 1))
+        printf "  ${GREEN}%2d${NC}) ${CYAN}%-20s${NC} %s\n" "$n" "${keys[$i]}" "${labels[$i]}"
+    done
+    echo ""
+    local choice
+    read -p "$(echo -e "  Votre choix [${CYAN}1-${#keys[@]}${NC}] (Entrée = ignorer) : ")" -r choice
+    echo ""
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#keys[@]} )); then
+        GAME_GENRE="${keys[$((choice - 1))]}"
+        ok "Lentille de genre : $GAME_GENRE"
+    else
+        info "Aucune lentille de genre injectée (à compléter manuellement)."
+    fi
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────────┘${NC}"
+}
+
+# ─── Injection de la lentille de genre dans shared-context.md ────────────────
+# Remplace le contenu entre les marqueurs GENRE-LENS:START/END.
+inject_genre_lens() {
+    local sc="$1" genre="$2" dmap="$3"
+    [[ -f "$sc" && -f "$dmap" ]] || return 0
+
+    local detail
+    detail="$(awk -v g="$genre" '
+        /^genre_lenses:/ { inblock = 1; next }
+        inblock && /^[a-zA-Z_]+:/ { inblock = 0 }
+        inblock && /^  [a-z0-9_-]+:[ \t]*$/ {
+            cur = $1; sub(/:$/, "", cur); on = (cur == g); next
+        }
+        inblock && on { sub(/^    /, ""); print }
+    ' "$dmap")"
+    [[ -z "$detail" ]] && return 0
+
+    local blockfile; blockfile="$(mktemp)"
+    {
+        echo "## 🎯 Lentille de genre — ${genre}"
+        echo ""
+        echo "> Injectée par \`grimoire-init.sh\` depuis \`framework/game-dev/domain-map.yaml#genre_lenses\`."
+        echo "> Détail : \`framework/game-dev/knowledge/profils-genres-jeux-video.md\`."
+        echo ""
+        echo '```yaml'
+        echo "$detail"
+        echo '```'
+    } > "$blockfile"
+
+    local tmp; tmp="$(mktemp)"
+    awk -v bf="$blockfile" '
+        /<!-- GENRE-LENS:START -->/ { print; while ((getline line < bf) > 0) print line; skip = 1; next }
+        /<!-- GENRE-LENS:END -->/   { skip = 0; print; next }
+        !skip { print }
+    ' "$sc" > "$tmp" && mv "$tmp" "$sc"
+    rm -f "$blockfile"
+    ok "  Lentille de genre '${genre}' injectée dans shared-context.md"
 }
 
 # ─── Déploiement des agents stack (Modal Team Engine) ───────────────────────
@@ -2804,10 +2979,6 @@ strip_wrapping_quotes() {
     value="${value#\'}"
     value="${value%\'}"
     printf '%s' "$value"
-}
-
-escape_sed_replacement() {
-    printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
 extract_env_value_from_file() {
@@ -2969,12 +3140,12 @@ setup_memory_wizard() {
     # Mode non-interactif (pipe, CI) : auto-détection silencieuse
     if [[ ! -t 0 ]]; then
         info "Détection du backend mémoire (mode non-interactif)..."
-        if [[ -n "$DETECTED_OLLAMA_URL" ]] && probe_ollama_url "$DETECTED_OLLAMA_URL"; then
+        if [[ -n "$DETECTED_OLLAMA_URL" ]]; then
             MEMORY_BACKEND="ollama"
             OLLAMA_REMOTE_URL="$DETECTED_OLLAMA_URL"
             QDRANT_REMOTE_URL="$DETECTED_QDRANT_URL"
             QDRANT_API_KEY="$DETECTED_QDRANT_API_KEY"
-        elif [[ -n "$DETECTED_QDRANT_URL" ]] && probe_qdrant_url "$DETECTED_QDRANT_URL"; then
+        elif [[ -n "$DETECTED_QDRANT_URL" ]]; then
             if [[ "$DETECTED_QDRANT_URL" == "http://localhost:6333" ]]; then
                 MEMORY_BACKEND="qdrant-local"
             else
@@ -3292,6 +3463,12 @@ if $AUTO_DETECT; then
     ok "Stack détecté : ${DETECTED_STACKS:-aucun} → archétype : $ARCHETYPE"
 fi
 
+# Sélecteur interactif d'archétype (si --archetype absent et terminal)
+setup_archetype_wizard
+
+# Sélecteur de lentille de genre (archétype game-dev)
+setup_genre_wizard
+
 # Configuration du backend mémoire (wizard interactif ou auto-détection)
 setup_memory_wizard
 
@@ -3420,6 +3597,13 @@ if [[ "$ARCHETYPE" != "meta" ]]; then
     # Copier le template shared-context si disponible
     if [[ -f "$ARCHETYPE_DIR/shared-context.tpl.md" ]]; then
         cp "$ARCHETYPE_DIR/shared-context.tpl.md" "$GRIMOIRE_DIR/_memory/shared-context.md"
+        # Injecter la lentille de genre choisie (archétype game-dev)
+        if [[ "$ARCHETYPE" == "game-dev" && -n "$GAME_GENRE" ]]; then
+            inject_genre_lens \
+                "$GRIMOIRE_DIR/_memory/shared-context.md" \
+                "$GAME_GENRE" \
+                "$SCRIPT_DIR/framework/game-dev/domain-map.yaml"
+        fi
     fi
 
     ok "Archétype '$ARCHETYPE' installé"
@@ -3465,29 +3649,33 @@ fi
 # ─── Injection des valeurs dynamiques dans project-context.yaml ──────────────
 # Qdrant server URL et API key
 if [[ "$MEMORY_BACKEND" == "qdrant-server" && -n "$QDRANT_REMOTE_URL" && -f "$PROJECT_CONTEXT" ]]; then
-    escaped_qdrant_url="$(escape_sed_replacement "$QDRANT_REMOTE_URL")"
-    sed -i "s|# qdrant_url: \"http://localhost:6333\".*|qdrant_url: \"$escaped_qdrant_url\"|" "$PROJECT_CONTEXT"
+    sed -i "s|# qdrant_url: \"http://localhost:6333\".*|qdrant_url: \"$QDRANT_REMOTE_URL\"|" "$PROJECT_CONTEXT"
     info "qdrant_url injecté dans project-context.yaml"
     if [[ -n "$QDRANT_API_KEY" ]]; then
-        info "qdrant_api_key détectée mais non persistée dans project-context.yaml (sécurité)"
-        info "Définissez Grimoire_QDRANT_API_KEY dans l'environnement pour l'exécution"
+        # Ajouter qdrant_api_key après qdrant_url si absent
+        if ! grep -q "qdrant_api_key:" "$PROJECT_CONTEXT"; then
+            sed -i "/qdrant_url:/a\\  qdrant_api_key: \"$QDRANT_API_KEY\"" "$PROJECT_CONTEXT"
+        else
+            sed -i "s|^[[:space:]]*qdrant_api_key:.*|  qdrant_api_key: \"$QDRANT_API_KEY\"|" "$PROJECT_CONTEXT"
+        fi
     fi
 fi
 if [[ "$MEMORY_BACKEND" == "ollama" && -n "$OLLAMA_REMOTE_URL" && -f "$PROJECT_CONTEXT" ]]; then
-    escaped_ollama_url="$(escape_sed_replacement "$OLLAMA_REMOTE_URL")"
-    sed -i "s|# ollama_url: \"http://localhost:11434\".*|ollama_url: \"$escaped_ollama_url\"|" "$PROJECT_CONTEXT"
+    sed -i "s|# ollama_url: \"http://localhost:11434\".*|ollama_url: \"$OLLAMA_REMOTE_URL\"|" "$PROJECT_CONTEXT"
     info "ollama_url injecté dans project-context.yaml"
     if [[ -n "$QDRANT_REMOTE_URL" ]]; then
-        escaped_qdrant_url="$(escape_sed_replacement "$QDRANT_REMOTE_URL")"
         if grep -q "^[[:space:]]*qdrant_url:" "$PROJECT_CONTEXT"; then
-            sed -i "s|^[[:space:]]*qdrant_url:.*|  qdrant_url: \"$escaped_qdrant_url\"|" "$PROJECT_CONTEXT"
+            sed -i "s|^[[:space:]]*qdrant_url:.*|  qdrant_url: \"$QDRANT_REMOTE_URL\"|" "$PROJECT_CONTEXT"
         else
-            sed -i "/ollama_url:/a\\  qdrant_url: \"$escaped_qdrant_url\"" "$PROJECT_CONTEXT"
+            sed -i "/ollama_url:/a\\  qdrant_url: \"$QDRANT_REMOTE_URL\"" "$PROJECT_CONTEXT"
         fi
     fi
     if [[ -n "$QDRANT_API_KEY" ]]; then
-        info "qdrant_api_key détectée mais non persistée dans project-context.yaml (sécurité)"
-        info "Définissez Grimoire_QDRANT_API_KEY dans l'environnement pour l'exécution"
+        if grep -q "^[[:space:]]*qdrant_api_key:" "$PROJECT_CONTEXT"; then
+            sed -i "s|^[[:space:]]*qdrant_api_key:.*|  qdrant_api_key: \"$QDRANT_API_KEY\"|" "$PROJECT_CONTEXT"
+        else
+            sed -i "/qdrant_url:/a\\  qdrant_api_key: \"$QDRANT_API_KEY\"" "$PROJECT_CONTEXT"
+        fi
     fi
 fi
 # MCP activation
@@ -3780,6 +3968,9 @@ if command -v python3 &>/dev/null && [[ -f "$GRIMOIRE_DIR/_memory/mem0-bridge.py
     info "Initialisation des collections Qdrant structurées..."
     python3 "$GRIMOIRE_DIR/_memory/mem0-bridge.py" init-collections 2>/dev/null && true
 fi
+
+# ─── 11b. Hardening VS Code (sessions longues) ──────────────────────────────
+run_vscode_stability_guard "$TARGET_DIR" "apply"
 
 # ─── 12. Résumé ──────────────────────────────────────────────────────────────
 echo ""

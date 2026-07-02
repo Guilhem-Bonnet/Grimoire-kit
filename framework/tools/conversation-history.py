@@ -36,6 +36,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -125,16 +126,18 @@ class HistoryStats:
 class EmbeddingProvider:
     """Gère les embeddings pour la vectorisation."""
 
-    def __init__(self):
+    def __init__(self, mode: str | None = None):
         self._model = None
-        self._available = False
-        try:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(EMBEDDING_MODEL)
-            self._available = True
-        except ImportError as _exc:
-            _log.debug("ImportError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
+        self._available = True
+        self._mode = (mode or os.environ.get("GRIMOIRE_HISTORY_EMBEDDINGS") or "hash").strip().lower()
+        if self._mode in {"sentence-transformers", "semantic", "model"}:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._model = SentenceTransformer(EMBEDDING_MODEL)
+            except ImportError as _exc:
+                _log.debug("ImportError suppressed: %s", _exc)
+            except Exception as _exc:
+                _log.debug("Embedding model unavailable, falling back to hash: %s", _exc)
 
     @property
     def available(self) -> bool:
@@ -148,8 +151,13 @@ class EmbeddingProvider:
 
     def _hash_embed(self, text: str) -> list[float]:
         """Pseudo-embedding basé sur hash pour le fallback."""
-        h = hashlib.sha256(text.encode()).hexdigest()
-        return [int(h[i:i + 2], 16) / 255.0 for i in range(0, min(EMBEDDING_DIM * 2, len(h)), 2)]
+        values: list[float] = []
+        counter = 0
+        while len(values) < EMBEDDING_DIM:
+            digest = hashlib.sha256(f"{counter}:{text}".encode()).digest()
+            values.extend(byte / 255.0 for byte in digest)
+            counter += 1
+        return values[:EMBEDDING_DIM]
 
 
 # ── Qdrant Backend ──────────────────────────────────────────────────────────

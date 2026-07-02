@@ -11,6 +11,7 @@ import contextlib
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,6 +23,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from grimoire.__version__ import __version__
+from grimoire.cli.rtk_setup import RtkSetupResult, setup_rtk
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
@@ -31,49 +33,121 @@ console = Console(stderr=True)
 # Valid values — keep in sync with config.py
 KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-    "agentic-standard",
+    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
+    "game-dev",
 })
 
-KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
-# Archetype human descriptions for the wizard (order = display order)
+# Display metadata for every archetype (label, agent-count hint, traits).
+# Used for previews and reports — NOT all are offered in the wizard menu.
 _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
     "web-app": ("🌐 Web App", "2 agents", "TDD, type-safety, API-first"),
-    "infra-ops": ("⚙️  Infra & DevOps", "7 agents", "IaC, security-first, observability"),
-    "platform-engineering": ("🏗️  Platform Eng.", "4 agents", "architecture-first, contract-driven"),
-    "agentic-standard": ("⚖️  Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
+    "platform-engineering": ("🏗️  Platform & Infra", "4+ agents", "architecture, IaC, deploy, observability"),
     "creative-studio": ("🎨 Creative Studio", "5 agents", "visual-consistency, brand-voice"),
+    "game-dev": ("🎮 Game Dev", "8 agents", "GDD, determinism, balance, certification"),
     "fix-loop": ("🔁 Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
+    # Auto-detected / overlay — kept for display, not listed in the menu:
+    "infra-ops": ("⚙️  Infra Ops", "7 agents", "IaC, security-first, observability"),
+    "agentic-standard": ("⚖️  Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
 }
-# Minimal is always base — not shown in multi-select
-_ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())
+
+# Specializations offered in the wizard menu (order = display order).
+# minimal is always the base. infra-ops is auto-detected from infra stacks and
+# folds onto the "Platform & Infra" line; agentic-standard is an overlay — both
+# stay reachable via --archetype and auto-detection.
+_ARCHETYPE_KEYS = ["web-app", "platform-engineering", "creative-studio", "game-dev", "fix-loop"]
+_MENU_ALIASES = {"infra-ops": "platform-engineering"}
+_INFRA_STACKS = frozenset({"terraform", "kubernetes", "ansible"})
+
+
+def _has_infra_stack(scan: ScanResult | None) -> bool:
+    """True when the scan detected an infrastructure stack."""
+    if not scan or not scan.stacks:
+        return False
+    return bool({d.name for d in scan.stacks} & _INFRA_STACKS)
+
+_QDRANT_DEFAULT_URL = "http://localhost:6333"
+_WEAVIATE_DEFAULT_URL = "http://localhost:8080"
+_QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 
 
 # ── Memory backend detection ─────────────────────────────────────────────────
 
 
+def _http_ok(url: str, *, timeout: float = 2.0) -> bool:
+    """Return True when a local HTTP probe responds successfully."""
+    try:
+        req = urllib.request.Request(url, method="GET")  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return 200 <= resp.status < 300
+    except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError):
+        return False
+
+
+def _is_qdrant_reachable(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
+    """Probe Qdrant's local HTTP API."""
+    base = qdrant_url.rstrip("/")
+    return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/readyz", "/collections"))
+
+
+def _is_weaviate_reachable(weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
+    """Probe Weaviate's local HTTP API."""
+    base = weaviate_url.rstrip("/")
+    return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/v1/.well-known/ready", "/v1/meta"))
+
+
 def detect_memory_backend() -> str:
     """Probe localhost for Qdrant or Ollama, return best backend."""
-    # Qdrant
-    try:
-        req = urllib.request.Request("http://localhost:6333/healthz", method="GET")
-        with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
-            if resp.status == 200:
-                return "qdrant-local"
-    except (OSError, urllib.error.URLError):
-        pass
+    if _is_weaviate_reachable():
+        return "weaviate-server"
+
+    if _is_qdrant_reachable():
+        return "qdrant-server"
 
     # Ollama
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
-            if resp.status == 200:
-                return "ollama"
-    except (OSError, urllib.error.URLError):
-        pass
+    if _http_ok("http://localhost:11434/api/tags"):
+        return "ollama"
 
     return "local"
+
+
+def _wait_for_qdrant(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
+    """Wait briefly for a freshly started Qdrant service to answer."""
+    for _ in range(10):
+        if _is_qdrant_reachable(qdrant_url):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _start_qdrant_docker(target: Path) -> tuple[bool, str]:
+    """Start the generated Qdrant Docker Compose service."""
+    compose_file = target / _QDRANT_COMPOSE_FILE
+    if not compose_file.is_file():
+        return False, f"{_QDRANT_COMPOSE_FILE} introuvable dans le projet généré."
+
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "-f", compose_file.name, "up", "-d"],
+            cwd=target,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except FileNotFoundError:
+        return False, "Docker CLI introuvable. Lance `docker compose -f docker-compose.memory.yml up -d` après installation."
+    except subprocess.TimeoutExpired:
+        return False, "Docker Compose n'a pas répondu. Relance `docker compose -f docker-compose.memory.yml up -d`."
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "erreur inconnue"
+        return False, f"Docker Compose a échoué: {detail}"
+
+    if _wait_for_qdrant():
+        return True, "Qdrant est démarré sur http://localhost:6333."
+
+    return False, "Docker Compose est lancé, mais Qdrant ne répond pas encore sur http://localhost:6333."
 
 
 def _git_user_name() -> str:
@@ -98,6 +172,8 @@ def _run_wizard(
     scan: ScanResult | None,
     resolved: ResolvedArchetype,
     backend: str,
+    *,
+    offer_qdrant_docker: bool = False,
 ) -> dict[str, Any]:
     """Interactive wizard — multi-select archetypes, returns config dict."""
     console.print()
@@ -153,25 +229,45 @@ def _run_wizard(
     )
     skill_level = _skill_choices[skill_input]
 
+    console.print()
+    setup_rtk_choice = Confirm.ask(
+        "  [bold]Installer RTK[/bold] (Rust Token Killer — compresse les sorties shell, -60 a -90% de tokens) ?",
+        default=True,
+    )
+
+    qdrant_docker = False
+    if offer_qdrant_docker:
+        console.print()
+        console.print("  [bold]Memory:[/bold] Qdrant n'est pas encore disponible sur localhost:6333.")
+        qdrant_docker = Confirm.ask(
+            "  [bold]Initialiser Qdrant via Docker pour la mémoire sémantique ?[/bold]",
+            default=True,
+        )
+        if qdrant_docker:
+            backend = "qdrant-server"
+
     # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
     console.print()
     console.print("  [dim]\\[■■■□] 3/4 · Archetypes[/dim]")
     console.print()
-    console.print("  [bold]minimal[/bold] is always included — it's the base.")
-    console.print("  Choose specializations to add:\n")
+    console.print("  [bold cyan]Base[/bold cyan]   minimal · 3 meta-agents [dim](always included)[/dim]")
+    console.print("  [dim]Add specializations — combine freely (e.g. 1,3) or type 'all':[/dim]")
+    console.print()
 
-    # Compute auto-detected defaults from resolver
+    # Auto-detected defaults — fold infra-ops onto the Platform & Infra line
     auto_suggested = list(resolved.archetypes) if resolved.archetypes else [resolved.archetype]
+    auto_suggested = [_MENU_ALIASES.get(a, a) for a in auto_suggested]
     auto_indices: list[str] = []
     for idx, key in enumerate(_ARCHETYPE_KEYS, 1):
         label, agent_count, traits = _ARCHETYPE_INFO[key]
-        marker = " [cyan]← detected[/cyan]" if key in auto_suggested and key != "minimal" else ""
-        console.print(f"    [bold]{idx}[/bold]) {label:<22} {agent_count:<10} {traits}{marker}")
-        if key in auto_suggested and key != "minimal":
+        detected = key in auto_suggested
+        marker = "   [cyan]← detected[/cyan]" if detected else ""
+        console.print(f"    [bold]{idx}[/bold])  {label:<24} [dim]{agent_count:<9}[/dim] {traits}{marker}")
+        if detected:
             auto_indices.append(str(idx))
 
     console.print()
-    console.print("    [bold]0[/bold]) 🤷 Not sure — help me choose")
+    console.print("    [bold]0[/bold])  🤷 [bold]Not sure[/bold] — guide me through it")
     console.print()
 
     default_input = ",".join(auto_indices) if auto_indices else ""
@@ -207,6 +303,8 @@ def _run_wizard(
     console.print(f"    Skill level: {skill_level}")
     console.print(f"    Archetypes:  {arch_display}")
     console.print(f"    Backend:     {backend}")
+    if qdrant_docker:
+        console.print("    Qdrant:      Docker local auto-start")
     console.print()
 
     if not Confirm.ask("  [bold]Proceed with installation?[/bold]", default=True):
@@ -220,6 +318,8 @@ def _run_wizard(
         "archetypes": selected_archetypes,
         "archetype": selected_archetypes[0] if selected_archetypes else "minimal",
         "backend": backend,
+        "qdrant_docker": qdrant_docker,
+        "rtk": setup_rtk_choice,
     }
 
 
@@ -257,6 +357,11 @@ def _parse_archetype_selection(
             key = _ARCHETYPE_KEYS[idx - 1]
             if key not in selected:
                 selected.append(key)
+
+    # The single "Platform & Infra" menu entry routes to the infra-ops
+    # specialist when an infra stack is detected, else platform-engineering.
+    if "platform-engineering" in selected and _has_infra_stack(scan):
+        selected = ["infra-ops" if s == "platform-engineering" else s for s in selected]
 
     return selected or ["minimal"]
 
@@ -334,6 +439,10 @@ def _display_report(
     scan: ScanResult | None,
     backend: str,
     project_name: str,
+    *,
+    qdrant_docker_started: bool = False,
+    qdrant_docker_message: str = "",
+    rtk_result: RtkSetupResult | None = None,
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -360,11 +469,18 @@ def _display_report(
         "local": "Mémoire fichier locale — aucune dépendance requise",
         "qdrant-local": "Qdrant détecté sur localhost:6333 — recherche sémantique activée",
         "qdrant-server": "Qdrant distant configuré — vérifier avec grimoire doctor",
+        "weaviate-server": "Weaviate + Neo4j configurés — vérifier avec grimoire memory status et memory migrate verify",
         "ollama": "Ollama détecté — embeddings locaux activés",
     }
     _tip = _backend_tips.get(backend)
     if _tip:
         console.print(f"           [dim]{_tip}[/dim]")
+    if qdrant_docker_message:
+        status = "[green]OK[/green]" if qdrant_docker_started else "[yellow]WARN[/yellow]"
+        console.print(f"           {status} [dim]{qdrant_docker_message}[/dim]")
+    if rtk_result is not None:
+        rtk_status = "[green]OK[/green]" if rtk_result.hook_activated else "[yellow]WARN[/yellow]"
+        console.print(f"  [cyan]RTK:[/cyan] {rtk_status} [dim]{rtk_result.message}[/dim]")
     console.print()
 
     # Agents deployed (categorized)
@@ -488,6 +604,9 @@ def _display_json(
     scan: ScanResult | None,
     backend: str,
     project_name: str,
+    *,
+    qdrant_docker: dict[str, Any] | None = None,
+    rtk: dict[str, Any] | None = None,
 ) -> None:
     """Output JSON result for scripting."""
     data = {
@@ -507,6 +626,10 @@ def _display_json(
         "files_copied": len(result.copied_files),
         "configs_generated": len(result.rendered_files),
     }
+    if qdrant_docker is not None:
+        data["qdrant_docker"] = qdrant_docker
+    if rtk is not None:
+        data["rtk"] = rtk
     for label in result.copied_files:
         if "/" in label:
             cat = label.split("/")[0]
@@ -526,6 +649,8 @@ def run_init(
     backend: str = "auto",
     force: bool = False,
     dry_run: bool = False,
+    qdrant_docker: bool = False,
+    rtk: bool | None = None,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
@@ -549,7 +674,11 @@ def run_init(
     scan = scanner.scan()
 
     # Phase 2: Resolve backend
-    if backend == "auto":
+    requested_backend = backend
+    qdrant_docker_requested = qdrant_docker
+    if qdrant_docker_requested:
+        backend = "qdrant-server"
+    elif backend == "auto":
         backend = detect_memory_backend()
 
     # Phase 3: Resolve archetype
@@ -569,15 +698,25 @@ def run_init(
     user_name = _git_user_name() or "Developer"
     language = "Français"
     skill_level = "intermediate"
+    rtk_wizard_choice: bool | None = None
 
     is_interactive = sys.stdin.isatty() and not yes and fmt != "json"
 
+    offer_qdrant_docker = requested_backend == "auto" and backend == "local"
+
     if is_interactive and not dry_run:
-        wizard_result = _run_wizard(target, scan, resolved, backend)
+        wizard_result = _run_wizard(
+            target,
+            scan,
+            resolved,
+            backend,
+            offer_qdrant_docker=offer_qdrant_docker,
+        )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
+        qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
         # Re-resolve if user changed archetypes or backend
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
         new_backend = wizard_result["backend"]
@@ -589,6 +728,7 @@ def run_init(
                 archetypes_override=new_archetypes,
             )
         backend = new_backend
+        rtk_wizard_choice = bool(wizard_result.get("rtk", False))
 
     # Phase 5: Plan
     scaffolder = ProjectScaffolder(
@@ -617,6 +757,7 @@ def run_init(
                 "stacks": [d.name for d in scan.stacks],
                 "stack_agents": list(resolved.stack_agents),
                 "feature_agents": list(resolved.feature_agents),
+                "qdrant_docker": qdrant_docker_requested,
             }, indent=2))
         else:
             _display_dry_run(plan, target, project_name, resolved.archetype, resolved)
@@ -625,8 +766,50 @@ def run_init(
     # Phase 6: Execute
     result = scaffolder.execute(plan)
 
+    qdrant_docker_started = False
+    qdrant_docker_message = ""
+    if qdrant_docker_requested:
+        if _is_qdrant_reachable():
+            qdrant_docker_started = True
+            qdrant_docker_message = "Qdrant est déjà disponible sur http://localhost:6333."
+        else:
+            qdrant_docker_started, qdrant_docker_message = _start_qdrant_docker(target)
+
+    # Phase 6.5: RTK (Rust Token Killer) — token-efficiency tooling
+    rtk_result: RtkSetupResult | None = None
+    if rtk is True or (rtk is None and bool(rtk_wizard_choice)):
+        console.print()
+        console.print("  [dim]Installation de RTK (peut compiler depuis les sources)...[/dim]")
+        rtk_result = setup_rtk(allow_install=True)
+
     # Phase 7: Report
     if fmt == "json":
-        _display_json(target, result, resolved, scan, backend, project_name)
+        docker_status = None
+        if qdrant_docker_requested:
+            docker_status = {
+                "requested": True,
+                "started": qdrant_docker_started,
+                "message": qdrant_docker_message,
+            }
+        _display_json(
+            target,
+            result,
+            resolved,
+            scan,
+            backend,
+            project_name,
+            qdrant_docker=docker_status,
+            rtk=rtk_result.to_dict() if rtk_result is not None else None,
+        )
     else:
-        _display_report(target, result, resolved, scan, backend, project_name)
+        _display_report(
+            target,
+            result,
+            resolved,
+            scan,
+            backend,
+            project_name,
+            qdrant_docker_started=qdrant_docker_started,
+            qdrant_docker_message=qdrant_docker_message,
+            rtk_result=rtk_result,
+        )

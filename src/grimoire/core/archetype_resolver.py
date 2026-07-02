@@ -39,8 +39,8 @@ STACK_AGENT_MAP: dict[str, str] = {
 # Known archetype IDs — keep in sync with cli/app.py _KNOWN_ARCHETYPES
 _VALID_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-    "agentic-standard",
+    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
+    "game-dev",
 })
 
 # Archetype selection rules — evaluated top to bottom, first match wins.
@@ -63,8 +63,10 @@ _ARCHETYPE_RULES: list[tuple[frozenset[str], str, str]] = [
 class ArchetypeResolver:
     """Resolve a ScanResult into archetype + agent selections."""
 
-    # Archetypes exposed for wizard display (exclude internal dirs)
-    _USER_ARCHETYPES = ("minimal", "web-app", "infra-ops", "platform-engineering", "agentic-standard", "creative-studio", "fix-loop")
+    # Archetypes exposed for wizard display (exclude internal dirs, auto-detected
+    # specialists, and overlays — infra-ops & agentic-standard stay valid but
+    # are not offered as standalone menu choices).
+    _USER_ARCHETYPES = ("minimal", "web-app", "platform-engineering", "creative-studio", "game-dev", "fix-loop")
 
     def resolve(
         self,
@@ -114,7 +116,7 @@ class ArchetypeResolver:
 
         # Feature agents
         feature_agents: list[str] = []
-        if backend in ("qdrant-local", "qdrant-server", "ollama"):
+        if backend in ("qdrant-local", "qdrant-server", "weaviate-server", "ollama"):
             feature_agents.append("vectus")
 
         return ResolvedArchetype(

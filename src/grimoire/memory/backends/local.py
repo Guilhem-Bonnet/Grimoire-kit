@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
 
 class LocalMemoryBackend(MemoryBackend):
@@ -108,11 +109,55 @@ class LocalMemoryBackend(MemoryBackend):
             scored.sort(key=lambda x: x[0], reverse=True)
             return [self._to_entry(rec, score=sc) for sc, rec in scored[:limit]]
 
+    def search_filtered(
+        self,
+        query: str,
+        *,
+        user_id: str = "",
+        limit: int = 5,
+        filters: dict[str, str] | None = None,
+    ) -> list[MemoryEntry]:
+        candidates = self.search(query, user_id=user_id, limit=max(limit * 10, limit))
+        if not filters:
+            return candidates[:limit]
+        return [
+            entry
+            for entry in candidates
+            if entry_matches_filters(
+                entry,
+                wing=filters.get("wing", ""),
+                hall=filters.get("hall", ""),
+                room=filters.get("room", ""),
+            )
+        ][:limit]
+
     def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
         with self._lock:
             filtered = [r for r in self._data if r.get("user_id") == user_id] if user_id else list(self._data)
         sliced = filtered[offset:] if limit is None else filtered[offset:offset + limit]
         return [self._to_entry(r) for r in sliced]
+
+    def get_all_filtered(
+        self,
+        *,
+        user_id: str = "",
+        offset: int = 0,
+        limit: int | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> list[MemoryEntry]:
+        entries = self.get_all(user_id=user_id, offset=0, limit=None)
+        if filters:
+            entries = [
+                entry
+                for entry in entries
+                if entry_matches_filters(
+                    entry,
+                    wing=filters.get("wing", ""),
+                    hall=filters.get("hall", ""),
+                    room=filters.get("room", ""),
+                )
+            ]
+        return entries[offset:] if limit is None else entries[offset:offset + limit]
 
     def count(self) -> int:
         with self._lock:
@@ -146,6 +191,9 @@ class LocalMemoryBackend(MemoryBackend):
                 self._save()
         return removed
 
+    def taxonomy(self, *, user_id: str = "", filters: dict[str, str] | None = None) -> dict[str, Any]:
+        return build_taxonomy(self.get_all_filtered(user_id=user_id, filters=filters))
+
     # ── CRUD extensions ───────────────────────────────────────────────────
 
     def delete(self, entry_id: str) -> bool:
@@ -172,6 +220,44 @@ class LocalMemoryBackend(MemoryBackend):
                     self._save()
                     return self._to_entry(rec)
         return None
+
+    def upsert(
+        self,
+        entry_id: str,
+        text: str,
+        *,
+        user_id: str = "",
+        tags: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryEntry:
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        uid = user_id or "global"
+        with self._lock:
+            for rec in self._data:
+                if rec.get("id") == entry_id:
+                    rec.update({
+                        "text": text,
+                        "user_id": uid,
+                        "tags": list(tags),
+                        "metadata": metadata or {},
+                        "updated_at": ts,
+                    })
+                    if not rec.get("created_at"):
+                        rec["created_at"] = ts
+                    self._save()
+                    return self._to_entry(rec)
+            record: dict[str, Any] = {
+                "id": entry_id,
+                "text": text,
+                "user_id": uid,
+                "tags": list(tags),
+                "metadata": metadata or {},
+                "created_at": ts,
+                "updated_at": "",
+            }
+            self._data.append(record)
+            self._save()
+            return self._to_entry(record)
 
     # ── Helpers ────────────────────────────────────────────────────────────
 

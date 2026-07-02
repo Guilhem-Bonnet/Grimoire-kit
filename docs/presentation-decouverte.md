@@ -1,19 +1,24 @@
+---
+description: Découvrez comment Grimoire permet de cadrer, exécuter, vérifier et reprendre un travail IA sans repartir de zéro.
+---
+
 # Grimoire Kit {: .gp-hero-brand }
 
 ## L'agentic OS qui empêche les projets IA de retomber à zéro {: .gp-hero-title }
 
-Une session cadre. La suivante exécute. La troisième vérifie. Rien ne retombe à zéro entre les trois.
+Le système de travail qui permet à une équipe de cadrer, exécuter, vérifier et reprendre sans repartir de zéro.
 {: .gp-hero-lead }
 
-Pour les builders, leads et équipes qui veulent une continuité réelle, pas juste une bonne session.
+Pour les équipes produit et ingénierie qui veulent reprendre un travail IA avec son contexte, ses décisions et ses preuves.
 {: .gp-hero-audience }
 
-[Voir un workflow vivant](workflow-design-patterns.md)
-[Entrer dans le Quick Start](getting-started.md)
-[Explorer l'architecture](concepts.md)
+[Voir un exemple complet](workflow-design-patterns.md)
+[Commencer rapidement](getting-started.md)
 {: .gp-hero-actions }
 
 <!-- markdownlint-disable MD033 -->
+
+<div class="gp-page-marker" data-gp-page="presentation" hidden></div>
 
 <div class="gp-hero-stage" aria-hidden="true">
     <div class="gp-hero-stage__orbit">
@@ -38,24 +43,16 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     </div>
 </div>
 
-[Orchestration et intent routing](concepts.md)
-[Evidence-first et Completion Contract](workflow-design-patterns.md)
-[Mémoire projet et session](memory-system.md)
-[Workflows et artefacts](workflow-taxonomy.md)
-{: .gp-hero-signals }
-
 <div class="gp-site-rail" aria-label="Navigation de la présentation">
-    <span class="gp-site-rail__label">Parcours</span>
+    <span class="gp-site-rail__label">Documentation</span>
     <div class="gp-site-rail__items">
         <a href="../">Accueil</a>
         <a href="../signaux/">Signaux</a>
         <a href="../workflow-design-patterns/">Workflows</a>
-        <a href="../getting-started/">Quick Start</a>
+        <a href="../getting-started/">Démarrage</a>
         <a href="../concepts/">Concepts</a>
     </div>
 </div>
-
-{{ grimoire_signals_presentation }}
 
 !!! onepager "Mouvement I — Le coût caché"
     **Le problème n'est pas que l'IA réponde mal. Le problème, c'est que le projet oublie.**
@@ -91,6 +88,8 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
         </section>
     </div>
 
+{{ grimoire_signals_presentation }}
+
 !!! onepager "Mouvement III — La machine"
     **Grimoire montre le moteur au lieu de le cacher.**
 
@@ -102,7 +101,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
         </article>
         <article class="gp-pillar">
             <p class="gp-pillar-kicker">Rôles</p>
-            <h3>Le fixeur n'est pas son challenger</h3>
+            <h3>L'implémentation et la validation sont séparées</h3>
             <p>Chaque rôle porte une responsabilité lisible au lieu d'une compétence floue.</p>
         </article>
         <article class="gp-pillar">
@@ -160,8 +159,8 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
             <em>Sortie: contrat de validation</em>
         </li>
         <li>
-            <strong>Dispatch</strong>
-            <span>Le bon rôle prend la main: analyst, dev, qa, challenger ou orchestrateur.</span>
+            <strong>Routage</strong>
+            <span>Le bon rôle prend la main pour le cadrage, l'implémentation, la QA ou l'orchestration.</span>
             <em>Sortie: délégation explicite</em>
         </li>
         <li>
@@ -246,7 +245,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 !!! onepager "Mouvement VII — Salle de contrôle"
     **Grimoire n'ajoute pas un chatbot de plus dans l'IDE. Il installe une salle de contrôle.**
 
-    War room pour orchestrer. Rooms pour spécialiser. Timeline pour rejouer. Mémoire pour tenir l'état. Le Game UI sert à voir le travail, pas à le décorer.
+    Une salle d'orchestration pour piloter. Des espaces spécialisés pour exécuter. Une timeline pour rejouer. Une mémoire pour tenir l'état. Le Game UI sert à rendre le travail lisible, pas à le décorer.
 
     <div class="gp-agentic-map">
     <span>Intention</span>
@@ -264,13 +263,13 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     </article>
     <article>
     <p class="gp-diagram-label">Équipe d'équipes</p>
-    <h3>Les rôles prennent place dans des rooms</h3>
-    <p>War room, build room, qa room et design room rendent visibles délégation et charge.</p>
+    <h3>Les rôles prennent place dans des espaces dédiés</h3>
+    <p>Salle d'orchestration, build room, QA room et design room rendent visibles délégation et charge.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Lisibilité</p>
     <h3>Les preuves deviennent un écran de contrôle</h3>
-    <p>Appels d'outils, étapes de workflow et décisions deviennent lisibles sans lecture forensique.</p>
+    <p>Appels d'outils, étapes de workflow et décisions deviennent lisibles sans reconstituer l'historique à la main.</p>
     </article>
     </div>
 
@@ -278,8 +277,8 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     <figure class="gp-observatory-frame">
     <div class="gp-observatory-screen">
     <div class="gp-observatory-hud">
-    <span>war room</span>
-    <span>build room</span>
+    <span>orchestration</span>
+    <span>build</span>
     <span>mode spectateur</span>
     </div>
     <img src="../assets/presentation/pixel-office-reference.jpg" alt="Prototype pixel art d'un observatoire agentique avec open space, salle de réunion et postes de travail." loading="lazy" decoding="async">
@@ -313,7 +312,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     <article>
     <p class="gp-diagram-label">Rejeu</p>
     <h3>Timeline et reconnexion</h3>
-    <p>Handshake et curseur de séquence reconstruisent l'état depuis les événements.</p>
+    <p>Reconnexion et curseur de séquence reconstruisent l'état depuis les événements.</p>
     </article>
     <article>
     <p class="gp-diagram-label">Contrats</p>
@@ -327,10 +326,9 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
     <p class="gp-final-kicker">Entre par un besoin. Ressors avec un système qui tient.</p>
 
     <div class="gp-final-actions">
-    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../workflow-design-patterns/">Lancer un premier workflow</a>
-    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Démarrer sans configuration lourde</a>
+    <a class="gp-final-actions__link gp-final-actions__link--primary" href="../getting-started/">Commencer rapidement</a>
+    <a class="gp-final-actions__link" href="../workflow-design-patterns/">Voir un workflow complet</a>
     <a class="gp-final-actions__link" href="../concepts/">Explorer la carte des concepts</a>
-    <a class="gp-final-actions__link" href="../memory-system/">Ouvrir la mémoire projet</a>
     </div>
 
 <!-- markdownlint-enable MD033 -->

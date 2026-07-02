@@ -2,11 +2,20 @@
 
 Usage::
 
-    from grimoire.memory import MemoryBackend, LocalMemoryBackend, MemoryManager
+    from grimoire.memory import MemoryBackend, LocalMemoryBackend, MemoryManager, MemorySidecar
 """
 
+from grimoire.memory.architecture import MemoryArchitectureStatus, MemoryLayerStatus
 from grimoire.memory.backends.base import MemoryBackend
 from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
+from grimoire.memory.sidecar import MemorySidecar
 
-__all__ = ["LocalMemoryBackend", "MemoryBackend", "MemoryManager"]
+__all__ = [
+    "LocalMemoryBackend",
+    "MemoryArchitectureStatus",
+    "MemoryBackend",
+    "MemoryLayerStatus",
+    "MemoryManager",
+    "MemorySidecar",
+]

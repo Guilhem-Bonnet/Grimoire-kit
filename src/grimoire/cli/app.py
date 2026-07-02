@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import difflib
-import hashlib
 import json
 import os
 import platform
-import shutil
 import signal
 import sys
 import time
@@ -21,16 +19,34 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli._cli_helpers import (
+    _AUDIT_FILENAME,  # noqa: F401 - compatibility export
+    _AUDIT_MAX_ENTRIES,  # noqa: F401 - compatibility export
+    _EXIT_CONFIG,
+    _EXIT_OK,  # noqa: F401 - compatibility export
+    _EXIT_USER,  # noqa: F401 - compatibility export
+    _find_config,
+    _get_fmt,
+    _load_yaml_rw,
+    _log_operation,
+    _save_yaml_rw,
+)
+from grimoire.cli.cmd_config import _flatten, config_app
 from grimoire.cli.cmd_debugger import debugger_app
+from grimoire.cli.cmd_ext import ext_app
+from grimoire.cli.cmd_history import history_cmd, repair
 from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_missions import cockpit_app, evidence_app, intake_app, missions_app, tasks_app
+from grimoire.cli.cmd_self import completion_app, is_online, plugins_app, self_app, self_update
 from grimoire.cli.cmd_standard import standard_app
+from grimoire.cli.cmd_workflows import registry_app, workflows_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
 from grimoire.core.log import configure_logging
-from grimoire.data import framework_path
+from grimoire.core.project_layout import detect_project_layout
+from grimoire.data import framework_path  # noqa: F401 - compatibility export for workflows tests/extensions
 
 # ── Command Aliases ───────────────────────────────────────────────────────────
-# Short aliases for frequently used commands (à la git/gh/kubectl).
 
 _ALIASES: dict[str, str] = {
     "i": "init",
@@ -55,8 +71,6 @@ def _expand_aliases() -> None:
         sys.argv[1] = _ALIASES[sys.argv[1]]
 
 
-# Known top-level commands — auto-populated once at import time (after all
-# @app.command decorators have run).  Populated lazily by _suggest_command().
 _KNOWN_COMMANDS: set[str] = set()
 
 
@@ -67,7 +81,6 @@ def _suggest_command() -> None:
     arg = sys.argv[1]
     if arg.startswith("-"):
         return
-    # Lazy-populate the command set on first call
     if not _KNOWN_COMMANDS:
         for cmd_info in app.registered_commands:
             name = cmd_info.name or (cmd_info.callback.__name__ if cmd_info.callback else None)
@@ -86,6 +99,7 @@ def _suggest_command() -> None:
         console.print(f"Did you mean: {suggestions}?")
         console.print("[dim]Run 'grimoire --help' for all commands.[/dim]")
         raise SystemExit(2)
+
 
 app = typer.Typer(
     name="grimoire",
@@ -113,16 +127,33 @@ app = typer.Typer(
 
 console = Console(stderr=True)
 
-# ── Semantic exit codes ────────────────────────────────────────────────────────
-_EXIT_OK = 0
-_EXIT_USER = 1      # user/input error (missing file, bad arg, validation fail)
-_EXIT_CONFIG = 2    # configuration error (parse error, missing key)
+# ── Sub-app registrations ─────────────────────────────────────────────────────
+
+app.add_typer(memory_app, name="memory", rich_help_panel="Data")
+app.add_typer(debugger_app, name="debugger", rich_help_panel="Data")
+app.add_typer(debugger_app, name="dbg", hidden=True)
+app.add_typer(registry_app, name="registry", rich_help_panel="Agents")
+app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
+app.add_typer(workflows_app, name="wf", hidden=True)
+app.add_typer(config_app, name="config", rich_help_panel="Configuration")
+app.add_typer(completion_app, name="completion", rich_help_panel="Utilities")
+app.add_typer(self_app, name="self", rich_help_panel="Info")
+app.add_typer(plugins_app, name="plugins", rich_help_panel="Utilities")
+app.add_typer(missions_app, name="missions", rich_help_panel="Agent OS")
+app.add_typer(tasks_app, name="tasks", rich_help_panel="Agent OS")
+app.add_typer(evidence_app, name="evidence", rich_help_panel="Agent OS")
+app.add_typer(intake_app, name="intake", rich_help_panel="Agent OS")
+app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Agent OS")
+app.add_typer(standard_app, name="standard", rich_help_panel="Project")
+app.add_typer(ext_app, name="ext", rich_help_panel="Project")
+
+# ── Registered top-level commands from extracted modules ──────────────────────
+
+app.command("history", rich_help_panel="Info")(history_cmd)
+app.command("repair", rich_help_panel="Utilities")(repair)
 
 
-def _get_fmt(ctx: typer.Context) -> str:
-    """Return the output format from context — 'text' or 'json'."""
-    return (ctx.obj or {}).get("output", "text")
-
+# ── grimoire callback ─────────────────────────────────────────────────────────
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -149,18 +180,13 @@ def main(
     """Grimoire Kit — Composable AI agent platform."""
     ctx.ensure_object(dict)
 
-    # Env var overrides (priority: CLI flag > env var > default)
-    # output=None means no CLI flag was given — fall back to env var or "text"
     if output is None:
         env_fmt = os.environ.get("GRIMOIRE_OUTPUT", "").lower()
         output = env_fmt if env_fmt in ("text", "json") else "text"
-    # GRIMOIRE_QUIET: suppress non-error output
     if not quiet and os.environ.get("GRIMOIRE_QUIET", "").lower() in ("1", "true"):
         quiet = True
-    # NO_COLOR: standard (https://no-color.org/)
     if not no_color and os.environ.get("NO_COLOR", ""):
         no_color = True
-    # GRIMOIRE_DEBUG: debug mode
     if not debug and os.environ.get("GRIMOIRE_DEBUG", "").lower() in ("1", "true"):
         debug = True
 
@@ -183,8 +209,7 @@ def main(
         configure_logging(level, fmt=log_format)
 
 
-# ── grimoire version ──────────────────────────────────────────────────────────────
-
+# ── grimoire version ──────────────────────────────────────────────────────────
 
 @app.command("version", rich_help_panel="Info")
 def version_cmd(ctx: typer.Context) -> None:
@@ -219,15 +244,16 @@ def version_cmd(ctx: typer.Context) -> None:
         console.print(f"  Project    {project_name}")
 
 
-# ── grimoire init ─────────────────────────────────────────────────────────────────
+# ── grimoire init ─────────────────────────────────────────────────────────────
 
 _KNOWN_ARCHETYPES = frozenset({
     "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-    "agentic-standard",
+    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
+    "game-dev",
 })
 
-_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "ollama"})
+_KNOWN_BACKENDS = frozenset({"auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
+_REDIS_SHORT_TERM_ARCHETYPES = frozenset({"infra-ops", "platform-engineering"})
 
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
@@ -250,6 +276,14 @@ user:
 
 memory:
   backend: "{backend}"
+  layer_profile: "standard"
+  short_term_backend: "{short_term_backend}"
+  redis_url: "{redis_url}"
+  knowledge_graph: "sqlite-sidecar"
+  memory_graph: "sqlite-sidecar"
+  code_graph: "planned"
+  task_memory: "planned"
+  visualization: "runtime-dashboard"
 
 agents:
   archetype: "{archetype}"
@@ -258,8 +292,12 @@ agents:
 installed_archetypes: []
 """
 
-_REQUIRED_DIRS = ("_grimoire", "_grimoire-output")
-_MEMORY_DIR = "_grimoire/_memory"
+
+def _default_short_term_memory(archetype_name: str) -> tuple[str, str]:
+    archetypes = {a.strip() for a in archetype_name.split(",") if a.strip()}
+    if archetypes & _REDIS_SHORT_TERM_ARCHETYPES:
+        return "redis", "redis://localhost:6379/0"
+    return "sqlite", ""
 
 _init_path_arg = typer.Argument(Path(), help="Project directory to initialise.")
 
@@ -271,8 +309,10 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, ollama)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
+    qdrant_docker: bool = typer.Option(False, "--qdrant-docker", help="Configure qdrant-server and start the generated Docker Compose service."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
+    rtk: bool | None = typer.Option(None, "--rtk/--no-rtk", help="Installer RTK (Rust Token Killer) + activer le hook Claude. Auto en interactif."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
@@ -282,11 +322,11 @@ def init(
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
       [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
-      [cyan]grimoire init . -a infra-ops -b qdrant-local[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
+      [cyan]grimoire init . --qdrant-docker[/cyan]               Configure and start Qdrant Docker
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """
-    # Validate archetype(s) if explicitly provided
     if archetype:
         parts = [a.strip() for a in archetype.split(",") if a.strip()]
         invalid = [a for a in parts if a not in _KNOWN_ARCHETYPES]
@@ -299,7 +339,6 @@ def init(
             console.print(f"Available: {', '.join(sorted(_KNOWN_ARCHETYPES))}")
             raise typer.Exit(1)
 
-    # Validate backend
     if backend not in _KNOWN_BACKENDS:
         console.print(f"[red]Unknown backend:[/red] {backend}")
         matches = difflib.get_close_matches(backend, sorted(_KNOWN_BACKENDS), n=2, cutoff=0.5)
@@ -319,10 +358,12 @@ def init(
         backend=backend,
         force=force,
         dry_run=dry_run,
+        qdrant_docker=qdrant_docker,
+        rtk=rtk,
     )
 
 
-# ── grimoire doctor ───────────────────────────────────────────────────────────────
+# ── grimoire doctor ───────────────────────────────────────────────────────────
 
 _doctor_path_arg = typer.Argument(Path(), help="Project root to diagnose.")
 _doctor_fix_opt = typer.Option(False, "--fix", help="Auto-fix recoverable issues (missing directories).")
@@ -342,6 +383,7 @@ def doctor(
       [cyan]grimoire doctor -o json .[/cyan]    Machine-readable output
     """
     target = path.resolve()
+    layout = detect_project_layout(target)
     results: list[dict[str, Any]] = []
     fmt = _get_fmt(ctx)
 
@@ -355,7 +397,6 @@ def doctor(
         console.print(f"[bold]Grimoire Doctor[/bold] — grimoire-kit {__version__}")
         console.print(f"Project: {target}\n")
 
-    # 1. Config file
     config_path = target / "project-context.yaml"
     with _timed_phase("config_check"):
         if config_path.is_file():
@@ -368,7 +409,6 @@ def doctor(
                 console.print("\n[bold]0 OK, 1 FAIL[/bold]")
             raise typer.Exit(1)
 
-    # 2. Parse config
     cfg: GrimoireConfig | None = None
     with _timed_phase("config_parse"):
         try:
@@ -377,10 +417,9 @@ def doctor(
         except GrimoireConfigError as exc:
             _record("config_valid", passed=False, detail=f"Config parse error: {exc}")
 
-    # 3. Structure checks
     fixed: list[str] = []
     with _timed_phase("structure_check"):
-        for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
+        for d in layout.required_dirs:
             dp = target / d
             present = dp.is_dir()
             if not present and fix:
@@ -390,17 +429,14 @@ def doctor(
             else:
                 _record(f"dir_{d}", passed=present, detail=f"{d}/ {'present' if present else 'missing'}")
 
-    # 4. Archetype check
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
-    # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
         for w in warnings:
             _record("semantic", passed=False, detail=w)
 
-    # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
         from importlib.metadata import PackageNotFoundError
         from importlib.metadata import version as pkg_version
@@ -414,15 +450,19 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [dim]○[/dim]  Optional: {pkg_name} not installed")
 
-    # 7. Python version
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
-    # 8. Summary
     ok_count = sum(1 for r in results if r["passed"])
     fail_count = sum(1 for r in results if not r["passed"])
 
     if fmt == "json":
-        data: dict[str, Any] = {"project": str(target), "checks": results, "passed": ok_count, "failed": fail_count}
+        data: dict[str, Any] = {
+            "project": str(target),
+            "layout": layout.name,
+            "checks": results,
+            "passed": ok_count,
+            "failed": fail_count,
+        }
         if fixed:
             data["fixed"] = fixed
         typer.echo(json.dumps(data, indent=2))
@@ -438,7 +478,7 @@ def doctor(
         raise typer.Exit(1)
 
 
-# ── grimoire status ───────────────────────────────────────────────────────────────
+# ── grimoire status ───────────────────────────────────────────────────────────
 
 _status_path_arg = typer.Argument(Path(), help="Project root.")
 
@@ -467,7 +507,8 @@ def status(
         console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(_EXIT_CONFIG) from None
 
-    dirs = [*_REQUIRED_DIRS, _MEMORY_DIR]
+    layout = detect_project_layout(target)
+    dirs = [*layout.required_dirs]
     dir_status = {d: (target / d).is_dir() for d in dirs}
 
     if _get_fmt(ctx) == "json":
@@ -476,17 +517,16 @@ def status(
             "user": {"name": cfg.user.name, "language": cfg.user.language, "skill_level": cfg.user.skill_level},
             "agents": {"archetype": cfg.agents.archetype, "custom_agents": list(cfg.agents.custom_agents)},
             "memory": {"backend": cfg.memory.backend},
+            "layout": layout.name,
             "structure": dir_status,
             "version": __version__,
         }
         typer.echo(json.dumps(data, indent=2))
         return
 
-    # Header
     console.print(f"\n[bold]Grimoire Project:[/bold] {cfg.project.name}")
     console.print(f"grimoire-kit {__version__}\n")
 
-    # Project table
     tbl = Table(title="Project", show_header=False, padding=(0, 2))
     tbl.add_column("Key", style="bold")
     tbl.add_column("Value")
@@ -499,19 +539,17 @@ def status(
     tbl.add_row("User", cfg.user.name or "(not set)")
     tbl.add_row("Language", cfg.user.language)
     tbl.add_row("Skill level", cfg.user.skill_level)
+    tbl.add_row("Layout", layout.name)
     console.print(tbl)
 
-    # Agents
     console.print("\n[bold]Agents[/bold]")
     console.print(f"  Archetype: {cfg.agents.archetype}")
     if cfg.agents.custom_agents:
         console.print(f"  Custom: {', '.join(cfg.agents.custom_agents)}")
 
-    # Memory
     console.print("\n[bold]Memory[/bold]")
     console.print(f"  Backend: {cfg.memory.backend}")
 
-    # Structure health
     console.print("\n[bold]Structure[/bold]")
     for d, ok in dir_status.items():
         icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
@@ -529,41 +567,7 @@ def _status_spinner(msg: str, *, show: bool = True) -> Any:
     return nullcontext()
 
 
-# ── grimoire add / remove ─────────────────────────────────────────────────────────
-
-def _load_yaml_rw(config_path: Path) -> tuple[Any, Any]:
-    """Load YAML preserving formatting (for round-trip editing)."""
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with open(config_path, encoding="utf-8") as fh:
-        data = yaml.load(fh)
-    return yaml, data
-
-
-def _save_yaml_rw(yaml: Any, data: Any, config_path: Path) -> None:
-    """Write YAML back preserving formatting."""
-    with open(config_path, "w", encoding="utf-8") as fh:
-        yaml.dump(data, fh)
-
-
-def _find_config(path: Path) -> Path:
-    """Resolve project-context.yaml — walk up directories if needed."""
-    from grimoire.tools._common import find_project_root
-
-    target = path.resolve()
-    config_path = target / "project-context.yaml"
-    if config_path.is_file():
-        return config_path
-    # Walk up from target to find project root
-    try:
-        root = find_project_root(target)
-        return root / "project-context.yaml"
-    except (FileNotFoundError, PermissionError, OSError):
-        console.print("[red]Not a Grimoire project[/red] — run [bold]grimoire init[/bold] first.")
-        raise typer.Exit(_EXIT_USER) from None
-
+# ── grimoire add / remove ─────────────────────────────────────────────────────
 
 _add_agent_id = typer.Argument(..., help="Agent identifier to add.")
 _add_path_arg = typer.Argument(Path(), help="Project root.")
@@ -672,7 +676,7 @@ def remove_agent(
         console.print(f"[green]Removed agent:[/green] {agent_id}")
 
 
-# ── grimoire validate ─────────────────────────────────────────────────────────────
+# ── grimoire validate ─────────────────────────────────────────────────────────
 
 _validate_path_arg = typer.Argument(Path(), help="Project root to validate.")
 
@@ -720,7 +724,7 @@ def validate(
     raise typer.Exit(1)
 
 
-# ── grimoire lint ─────────────────────────────────────────────────────────────────
+# ── grimoire lint ─────────────────────────────────────────────────────────────
 
 _lint_path_arg = typer.Argument(Path(), help="Path to YAML config file or project directory.")
 
@@ -764,8 +768,7 @@ def lint(
     raise typer.Exit(1)
 
 
-# ── grimoire update ────────────────────────────────────────────────────────────────
-
+# ── grimoire update ───────────────────────────────────────────────────────────
 
 @app.command("update", rich_help_panel="Info")
 def update_cmd() -> None:
@@ -773,7 +776,7 @@ def update_cmd() -> None:
     self_update()
 
 
-# ── grimoire up ───────────────────────────────────────────────────────────────────
+# ── grimoire up ───────────────────────────────────────────────────────────────
 
 _up_path_arg = typer.Argument(Path(), help="Project root.")
 _up_dry_run_opt = typer.Option(False, "--dry-run", help="Show plan without applying.")
@@ -796,7 +799,8 @@ def up(
         raise typer.Exit(1) from None
 
     cfg = project.config
-    status = project.status()
+    status_obj = project.status()
+    layout = project.layout
     fmt = _get_fmt(ctx)
 
     if fmt != "json":
@@ -807,22 +811,20 @@ def up(
 
     actions: list[str] = []
 
-    # Ensure standard directories exist
-    for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
+    for d in layout.required_dirs:
         dp = target / d
         if not dp.is_dir():
             actions.append(f"Create directory: {d}/")
             if not dry_run:
                 dp.mkdir(parents=True, exist_ok=True)
 
-    # Ensure agents dir exists
-    agents_dir = target / "_grimoire" / "agents"
-    if not agents_dir.is_dir():
-        actions.append("Create directory: _grimoire/agents/")
-        if not dry_run:
-            agents_dir.mkdir(parents=True, exist_ok=True)
+    if layout.name == "legacy":
+        agents_dir = target / layout.grimoire_dir / "agents"
+        if not agents_dir.is_dir():
+            actions.append(f"Create directory: {layout.grimoire_dir}/agents/")
+            if not dry_run:
+                agents_dir.mkdir(parents=True, exist_ok=True)
 
-    # Summary
     if fmt != "json":
         if actions:
             for a in actions:
@@ -831,652 +833,27 @@ def up(
         else:
             console.print("  [green]Everything up to date.[/green]")
 
-    # Output
     if fmt == "json":
         typer.echo(json.dumps({
             "ok": True, "project": cfg.project.name,
+            "layout": layout.name,
             "actions": actions, "dry_run": dry_run,
-            "agents_count": status.agents_count,
-            "directories_missing": list(status.directories_missing),
+            "agents_count": status_obj.agents_count,
+            "directories_missing": list(status_obj.directories_missing),
         }, indent=2))
     else:
-        # Health summary
         console.print(f"\n[bold]Project:[/bold] {cfg.project.name}")
+        console.print(f"  Layout: {layout.name}")
         console.print(f"  Archetype: {cfg.agents.archetype}")
         console.print(f"  Memory: {cfg.memory.backend}")
-        console.print(f"  Agents: {status.agents_count}")
+        console.print(f"  Agents: {status_obj.agents_count}")
 
-        if status.directories_missing:
-            missing = ", ".join(status.directories_missing)
+        if status_obj.directories_missing:
+            missing = ", ".join(status_obj.directories_missing)
             console.print(f"\n[yellow]Missing dirs (after up):[/yellow] {missing}")
 
 
-# ── grimoire memory ───────────────────────────────────────────────────────────────
-
-app.add_typer(memory_app, name="memory", rich_help_panel="Data")
-
-
-# ── grimoire debugger ─────────────────────────────────────────────────────────────
-
-app.add_typer(debugger_app, name="debugger", rich_help_panel="Data")
-app.add_typer(debugger_app, name="dbg", hidden=True)
-
-
-# ── grimoire registry ─────────────────────────────────────────────────────────────
-
-registry_app = typer.Typer(help="Browse the agent registry.")
-app.add_typer(registry_app, name="registry", rich_help_panel="Agents")
-
-
-# ── grimoire workflows ───────────────────────────────────────────────────────────
-
-workflows_app = typer.Typer(help="Inspect available Copilot workflows.")
-app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
-app.add_typer(workflows_app, name="wf", hidden=True)
-app.add_typer(standard_app, name="standard", rich_help_panel="Project")
-
-
-_WF_DESCRIPTIONS: dict[str, str] = {
-    "grimoire-session-bootstrap": "Reprendre le travail avec contexte complet",
-    "grimoire-health-check": "Diagnostic global de santé projet",
-    "grimoire-dream": "Consolider les apprentissages inter-sessions",
-    "grimoire-pre-push": "Valider avant push (tests/lint/checks)",
-    "grimoire-changelog": "Générer un changelog depuis l'historique",
-    "grimoire-status": "Obtenir un snapshot rapide du projet",
-    "grimoire-self-heal": "Diagnostiquer et réparer les pannes courantes",
-}
-
-
-def _workflow_source_dirs(project_root: Path) -> list[tuple[str, Path]]:
-    """Return ordered workflow sources (project first, then framework fallback)."""
-    sources: list[tuple[str, Path]] = []
-    project_dir = project_root / ".github" / "prompts"
-    if project_dir.is_dir():
-        sources.append(("project", project_dir))
-
-    fw_dir = framework_path() / "copilot" / "prompts"
-    if fw_dir.is_dir():
-        sources.append(("framework", fw_dir))
-
-    return sources
-
-
-def _extract_workflow_slug(filename: str) -> str:
-    """Map '*.prompt.md' filename to command slug."""
-    if filename.endswith(".prompt.md"):
-        return filename.removesuffix(".prompt.md")
-    return Path(filename).stem
-
-
-def _sha256_file(path: Path) -> str:
-    """Return hex SHA256 for a text file."""
-    data = path.read_bytes()
-    return hashlib.sha256(data).hexdigest()
-
-
-def _workflow_inventory(project_root: Path) -> tuple[dict[str, Path], dict[str, Path], list[str], list[str], list[str]]:
-    """Return framework/project workflow maps and drift lists."""
-    project_dir = project_root / ".github" / "prompts"
-    framework_dir = framework_path() / "copilot" / "prompts"
-
-    expected = {p.name: p for p in sorted(framework_dir.glob("*.prompt.md"))} if framework_dir.is_dir() else {}
-    actual = {p.name: p for p in sorted(project_dir.glob("*.prompt.md"))} if project_dir.is_dir() else {}
-    missing = sorted(name for name in expected if name not in actual)
-    modified = sorted(
-        name for name in expected if name in actual and _sha256_file(expected[name]) != _sha256_file(actual[name])
-    )
-    extra = sorted(name for name in actual if name not in expected)
-    return expected, actual, missing, modified, extra
-
-
-def _workflow_unified_diff(expected: Path, actual: Path) -> list[str]:
-    """Return unified diff lines between framework and project workflow files."""
-    return list(
-        difflib.unified_diff(
-            expected.read_text(encoding="utf-8").splitlines(),
-            actual.read_text(encoding="utf-8").splitlines(),
-            fromfile=f"framework/{expected.name}",
-            tofile=f"project/{actual.name}",
-            lineterm="",
-        )
-    )
-
-
-def _resolve_workflow_file(project_root: Path, workflow: str) -> tuple[str, Path] | None:
-    """Resolve a workflow by slug or filename, preferring project over framework."""
-    filename = workflow if workflow.endswith(".prompt.md") else f"{workflow}.prompt.md"
-    for source, src_dir in _workflow_source_dirs(project_root):
-        candidate = src_dir / filename
-        if candidate.is_file():
-            return source, candidate
-    return None
-
-
-def _workflow_filename(workflow: str) -> str:
-    """Normalize workflow slug or filename to '*.prompt.md'."""
-    return workflow if workflow.endswith(".prompt.md") else f"{workflow}.prompt.md"
-
-
-def _collect_workflow_rows(project_root: Path) -> list[dict[str, str]]:
-    """Collect de-duplicated workflow metadata rows (project first)."""
-    seen: set[str] = set()
-    rows: list[dict[str, str]] = []
-    for source, src_dir in _workflow_source_dirs(project_root):
-        for prompt_file in sorted(src_dir.glob("*.prompt.md")):
-            slug = _extract_workflow_slug(prompt_file.name)
-            if slug in seen:
-                continue
-            seen.add(slug)
-            rows.append({
-                "command": f"/{slug}",
-                "slug": slug,
-                "file": prompt_file.name,
-                "source": source,
-                "description": _WF_DESCRIPTIONS.get(slug, "Workflow Copilot"),
-                "path": str(prompt_file),
-            })
-    return rows
-
-
-@workflows_app.command("list")
-def workflows_list(
-    ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-) -> None:
-    """List available Copilot workflows from project and/or framework."""
-    root = path.resolve()
-    rows = _collect_workflow_rows(root)
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"count": len(rows), "workflows": rows}, indent=2))
-        return
-
-    if not rows:
-        console.print("[yellow]No workflows found.[/yellow]")
-        return
-
-    table = Table(title="Copilot Workflows")
-    table.add_column("Command", style="bold")
-    table.add_column("Description")
-    table.add_column("Source")
-    for row in rows:
-        table.add_row(row["command"], row["description"], row["source"])
-
-    console.print(table)
-    console.print(f"\n[dim]{len(rows)} workflow(s) available.[/dim]")
-
-
-@workflows_app.command("search")
-def workflows_search(
-    ctx: typer.Context,
-    query: str = typer.Argument(..., help="Keyword to search in workflows."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    include_content: bool = typer.Option(True, "--content/--no-content", help="Also search inside prompt content."),
-) -> None:
-    """Search workflows by slug, description, and optionally file content."""
-    root = path.resolve()
-    q = query.strip().lower()
-    rows = _collect_workflow_rows(root)
-    matches: list[dict[str, str]] = []
-
-    for row in rows:
-        haystacks = [row["slug"].lower(), row["description"].lower(), row["file"].lower()]
-        if include_content:
-            content = Path(row["path"]).read_text(encoding="utf-8").lower()
-            haystacks.append(content)
-        if any(q in h for h in haystacks):
-            matches.append(row)
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"count": len(matches), "query": query, "results": matches}, indent=2))
-        return
-
-    if not matches:
-        console.print(f"[yellow]No workflows matching '{query}'.[/yellow]")
-        return
-
-    table = Table(title=f"Workflow Search: {query}")
-    table.add_column("Command", style="bold")
-    table.add_column("Description")
-    table.add_column("Source")
-    for row in matches:
-        table.add_row(row["command"], row["description"], row["source"])
-
-    console.print(table)
-    console.print(f"\n[dim]{len(matches)} match(es).[/dim]")
-
-
-@workflows_app.command("show")
-def workflows_show(
-    ctx: typer.Context,
-    workflow: str = typer.Argument(..., help="Workflow slug or prompt filename."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-) -> None:
-    """Show the content and source of a workflow prompt."""
-    root = path.resolve()
-    resolved = _resolve_workflow_file(root, workflow)
-    if resolved is None:
-        console.print(f"[red]Workflow not found:[/red] {workflow}")
-        raise typer.Exit(1)
-
-    source, file_path = resolved
-    slug = _extract_workflow_slug(file_path.name)
-    content = file_path.read_text(encoding="utf-8")
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({
-            "slug": slug,
-            "command": f"/{slug}",
-            "source": source,
-            "file": file_path.name,
-            "path": str(file_path),
-            "description": _WF_DESCRIPTIONS.get(slug, "Workflow Copilot"),
-            "content": content,
-        }, indent=2))
-        return
-
-    console.print(f"[bold]{file_path.name}[/bold]")
-    console.print(f"Source: {source}")
-    console.print(f"Command: /{slug}")
-    console.print(f"Description: {_WF_DESCRIPTIONS.get(slug, 'Workflow Copilot')}\n")
-    console.print(content)
-
-
-@workflows_app.command("install")
-def workflows_install(
-    ctx: typer.Context,
-    workflow: str = typer.Argument(..., help="Workflow slug or prompt filename."),
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite project version if it already exists."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview the installation without writing files."),
-) -> None:
-    """Install a single framework workflow into the project prompts directory."""
-    root = path.resolve()
-    filename = _workflow_filename(workflow)
-    framework_file = framework_path() / "copilot" / "prompts" / filename
-    project_dir = root / ".github" / "prompts"
-    project_file = project_dir / filename
-
-    if not framework_file.is_file():
-        console.print(f"[red]Unknown framework workflow:[/red] {filename}")
-        raise typer.Exit(1)
-
-    if project_file.exists() and not overwrite:
-        action = "skip-existing"
-    else:
-        action = "overwrite" if project_file.exists() else "install"
-
-    if not dry_run and action in {"install", "overwrite"}:
-        project_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(framework_file, project_file)
-
-    payload = {
-        "ok": True,
-        "workflow": _extract_workflow_slug(filename),
-        "file": filename,
-        "action": action,
-        "dry_run": dry_run,
-        "overwrite": overwrite,
-        "source": str(framework_file),
-        "destination": str(project_file),
-    }
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(payload, indent=2))
-        return
-
-    console.print("[bold]Workflow Install[/bold]")
-    if action == "skip-existing":
-        console.print(f"  [dim]skip existing[/dim] {filename}")
-        return
-    tag = "plan" if dry_run else "done"
-    color = "yellow" if action == "overwrite" else "green"
-    console.print(f"  [{color}]{tag}[/{color}] {action} {filename}")
-
-
-@workflows_app.command("prune")
-def workflows_prune(
-    ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview deletions without removing files."),
-) -> None:
-    """Remove project-only workflows not found in framework defaults."""
-    root = path.resolve()
-    project_dir = root / ".github" / "prompts"
-    framework_dir = framework_path() / "copilot" / "prompts"
-
-    if not framework_dir.is_dir():
-        console.print("[red]Framework workflows directory not found.[/red]")
-        raise typer.Exit(1)
-
-    _expected, actual, _missing, _modified, extra = _workflow_inventory(root)
-    actions: list[dict[str, str]] = [{"action": "delete", "file": name} for name in extra]
-
-    if not dry_run:
-        for name in extra:
-            target = actual[name]
-            if target.is_file():
-                target.unlink()
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({
-            "ok": True,
-            "dry_run": dry_run,
-            "project_root": str(root),
-            "count": len(actions),
-            "actions": actions,
-        }, indent=2))
-        return
-
-    if not project_dir.is_dir():
-        console.print("[yellow]Project workflows directory missing:[/yellow] .github/prompts")
-        return
-
-    console.print("[bold]Workflows Prune[/bold]")
-    if not actions:
-        console.print("[green]No extra workflows to prune.[/green]")
-        return
-
-    tag = "plan" if dry_run else "done"
-    for action in actions:
-        console.print(f"  [yellow]{tag}[/yellow] delete {action['file']}")
-
-
-@workflows_app.command("doctor")
-def workflows_doctor(
-    ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    strict: bool = typer.Option(False, "--strict", help="Treat extra project workflows as failures."),
-) -> None:
-    """Audit project workflows against framework defaults."""
-    root = path.resolve()
-    project_dir = root / ".github" / "prompts"
-    framework_dir = framework_path() / "copilot" / "prompts"
-
-    if not framework_dir.is_dir():
-        console.print("[red]Framework workflows directory not found.[/red]")
-        raise typer.Exit(1)
-
-    expected, actual, missing, modified, extra = _workflow_inventory(root)
-
-    failing = bool(missing or modified or (strict and extra))
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({
-            "ok": not failing,
-            "strict": strict,
-            "project_root": str(root),
-            "counts": {
-                "expected": len(expected),
-                "project": len(actual),
-                "missing": len(missing),
-                "modified": len(modified),
-                "extra": len(extra),
-            },
-            "missing": missing,
-            "modified": modified,
-            "extra": extra,
-        }, indent=2))
-        if failing:
-            raise typer.Exit(1)
-        return
-
-    if not project_dir.is_dir():
-        console.print("[yellow]Project workflows directory missing:[/yellow] .github/prompts")
-    console.print("[bold]Workflows Doctor[/bold]")
-    console.print(f"  Expected (framework): {len(expected)}")
-    console.print(f"  Present (project):    {len(actual)}")
-
-    if missing:
-        console.print("\n[red]Missing workflows[/red]")
-        for name in missing:
-            console.print(f"  - {name}")
-
-    if modified:
-        console.print("\n[red]Modified workflows[/red]")
-        for name in modified:
-            console.print(f"  - {name}")
-
-    if extra:
-        tag = "[red]Extra workflows[/red]" if strict else "[yellow]Extra workflows[/yellow]"
-        console.print(f"\n{tag}")
-        for name in extra:
-            console.print(f"  - {name}")
-
-    if failing:
-        console.print("\n[red]Workflow audit failed.[/red]")
-        raise typer.Exit(1)
-
-    console.print("\n[green]Workflow audit passed.[/green]")
-
-
-@workflows_app.command("sync")
-def workflows_sync(
-    ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite modified project workflows."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing files."),
-) -> None:
-    """Sync framework workflows into the project prompts directory."""
-    root = path.resolve()
-    project_dir = root / ".github" / "prompts"
-    framework_dir = framework_path() / "copilot" / "prompts"
-
-    if not framework_dir.is_dir():
-        console.print("[red]Framework workflows directory not found.[/red]")
-        raise typer.Exit(1)
-
-    expected, _actual, missing, modified, _extra = _workflow_inventory(root)
-    actions: list[dict[str, str]] = []
-
-    for name in missing:
-        actions.append({"action": "copy", "file": name})
-    if overwrite:
-        for name in modified:
-            actions.append({"action": "overwrite", "file": name})
-    else:
-        for name in modified:
-            actions.append({"action": "skip-modified", "file": name})
-
-    if not dry_run:
-        project_dir.mkdir(parents=True, exist_ok=True)
-        for item in actions:
-            if item["action"] not in {"copy", "overwrite"}:
-                continue
-            src = expected[item["file"]]
-            dst = project_dir / item["file"]
-            shutil.copy2(src, dst)
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({
-            "ok": True,
-            "dry_run": dry_run,
-            "overwrite": overwrite,
-            "project_root": str(root),
-            "actions": actions,
-            "applied": [item for item in actions if item["action"] in {"copy", "overwrite"}],
-        }, indent=2))
-        return
-
-    console.print("[bold]Workflows Sync[/bold]")
-    if not actions:
-        console.print("[green]Everything up to date.[/green]")
-        return
-
-    for item in actions:
-        if item["action"] == "copy":
-            tag = "plan" if dry_run else "done"
-            console.print(f"  [green]{tag}[/green] copy {item['file']}")
-        elif item["action"] == "overwrite":
-            tag = "plan" if dry_run else "done"
-            console.print(f"  [yellow]{tag}[/yellow] overwrite {item['file']}")
-        else:
-            console.print(f"  [dim]skip modified[/dim] {item['file']}")
-
-
-@workflows_app.command("diff")
-def workflows_diff(
-    ctx: typer.Context,
-    path: Path = typer.Argument(Path(), help="Project root (optional)."),
-    workflow: str | None = typer.Argument(None, help="Workflow slug or prompt filename."),
-) -> None:
-    """Show diffs between framework workflows and project workflows."""
-    root = path.resolve()
-    expected, actual, _missing, modified, _extra = _workflow_inventory(root)
-
-    targets: list[str]
-    if workflow:
-        filename = workflow if workflow.endswith(".prompt.md") else f"{workflow}.prompt.md"
-        if filename not in expected:
-            console.print(f"[red]Unknown framework workflow:[/red] {filename}")
-            raise typer.Exit(1)
-        if filename not in actual:
-            console.print(f"[red]Workflow missing in project:[/red] {filename}")
-            raise typer.Exit(1)
-        targets = [filename]
-    else:
-        targets = modified
-
-    payload: list[dict[str, object]] = []
-    for name in targets:
-        diff_lines = _workflow_unified_diff(expected[name], actual[name])
-        if not diff_lines:
-            continue
-        payload.append({
-            "file": name,
-            "slug": _extract_workflow_slug(name),
-            "diff": diff_lines,
-        })
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"count": len(payload), "diffs": payload}, indent=2))
-        return
-
-    if not payload:
-        console.print("[green]No workflow differences found.[/green]")
-        return
-
-    console.print("[bold]Workflows Diff[/bold]")
-    for item in payload:
-        console.print(f"\n[bold]{item['file']}[/bold]")
-        for line in item["diff"]:
-            if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
-                console.print(line, style="cyan")
-            elif line.startswith("+"):
-                console.print(line, style="green")
-            elif line.startswith("-"):
-                console.print(line, style="red")
-            else:
-                console.print(line)
-
-_reg_query_arg = typer.Argument(None, help="Search query.")
-
-
-@registry_app.command("list")
-def registry_list(ctx: typer.Context) -> None:
-    """List all available archetypes and agents."""
-    from grimoire.registry.local import LocalRegistry
-    from grimoire.tools._common import find_project_root
-
-    try:
-        root = find_project_root()
-    except FileNotFoundError:
-        console.print("[red]Not in a Grimoire project — cannot locate kit root.[/red]")
-        raise typer.Exit(1) from None
-
-    reg = LocalRegistry(root)
-    archs = reg.list_archetypes()
-    if not archs:
-        console.print("[yellow]No archetypes found.[/yellow]")
-        return
-
-    if _get_fmt(ctx) == "json":
-        items = []
-        for arch_id in archs:
-            try:
-                dna = reg.inspect_archetype(arch_id)
-                items.append({"archetype": arch_id, "agents": len(dna.agents)})
-            except Exception:
-                items.append({"archetype": arch_id, "agents": None})
-        typer.echo(json.dumps(items, indent=2))
-        return
-
-    tbl = Table(title="Available Archetypes")
-    tbl.add_column("Archetype", style="bold")
-    tbl.add_column("Agents", justify="right")
-
-    for arch_id in archs:
-        try:
-            dna = reg.inspect_archetype(arch_id)
-            tbl.add_row(arch_id, str(len(dna.agents)))
-        except Exception:
-            tbl.add_row(arch_id, "?")
-
-    console.print(tbl)
-
-
-@registry_app.command("search")
-def registry_search(
-    ctx: typer.Context,
-    query: str = _reg_query_arg,
-) -> None:
-    """Search agents by keyword."""
-    from grimoire.registry.local import LocalRegistry
-    from grimoire.tools._common import find_project_root
-
-    if not query:
-        console.print("[red]Please provide a search query.[/red]")
-        raise typer.Exit(1)
-
-    try:
-        root = find_project_root()
-    except FileNotFoundError:
-        console.print("[red]Not in a Grimoire project.[/red]")
-        raise typer.Exit(1) from None
-
-    reg = LocalRegistry(root)
-    results = reg.search(query)
-
-    if not results:
-        console.print(f"[yellow]No agents matching '{query}'.[/yellow]")
-        return
-
-    if _get_fmt(ctx) == "json":
-        items = [{"id": r.id, "archetype": r.archetype, "description": r.description or ""} for r in results]
-        typer.echo(json.dumps(items, indent=2))
-        return
-
-    tbl = Table(title=f"Search: {query}")
-    tbl.add_column("Agent", style="bold")
-    tbl.add_column("Archetype")
-    tbl.add_column("Description")
-
-    for item in results:
-        tbl.add_row(item.id, item.archetype, item.description or "—")
-
-    console.print(tbl)
-
-
-# ── grimoire diff ─────────────────────────────────────────────────────────────────
-
-
-def _flatten(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    """Flatten nested dict to dot-notation keys."""
-    out: dict[str, Any] = {}
-    for k, v in data.items():
-        full = f"{prefix}.{k}" if prefix else k
-        if isinstance(v, dict):
-            out.update(_flatten(v, full))
-        elif isinstance(v, list) and v and isinstance(v[0], dict):
-            for i, item in enumerate(v):
-                if isinstance(item, dict):
-                    out.update(_flatten(item, f"{full}.{i}"))
-                else:
-                    out[f"{full}.{i}"] = item
-        else:
-            out[full] = v
-    return out
-
+# ── grimoire diff ─────────────────────────────────────────────────────────────
 
 _diff_path_arg = typer.Argument(Path(), help="Project root.")
 
@@ -1500,9 +877,14 @@ def diff_config(
         current = yaml.load(fh)
 
     archetype_name = (current.get("agents") or {}).get("archetype", "minimal")
-
-    # Compare to the _TEMPLATE_YAML defaults
-    defaults = yaml.load(_TEMPLATE_YAML.format(name="__DEFAULT__", archetype=archetype_name, backend="auto"))
+    short_term_backend, redis_url = _default_short_term_memory(str(archetype_name))
+    defaults = yaml.load(_TEMPLATE_YAML.format(
+        name="__DEFAULT__",
+        archetype=archetype_name,
+        backend="auto",
+        short_term_backend=short_term_backend,
+        redis_url=redis_url,
+    ))
 
     flat_current = _flatten(dict(current))
     flat_defaults = _flatten(dict(defaults))
@@ -1537,8 +919,7 @@ def diff_config(
     console.print(f"\n[dim]{len(diffs)} difference(s) found.[/dim]")
 
 
-# ── grimoire schema ───────────────────────────────────────────────────────────────
-
+# ── grimoire schema ───────────────────────────────────────────────────────────
 
 @app.command("schema", rich_help_panel="Validation")
 def schema_cmd() -> None:
@@ -1548,7 +929,7 @@ def schema_cmd() -> None:
     typer.echo(json.dumps(generate_schema(), indent=2))
 
 
-# ── grimoire check ────────────────────────────────────────────────────────────────
+# ── grimoire check ────────────────────────────────────────────────────────────
 
 _check_path_arg = typer.Argument(Path(), help="Project directory to check.")
 
@@ -1578,7 +959,6 @@ def check(
         if fmt != "json" and not quiet:
             console.print(f"[bold]{label}[/bold]")
 
-    # ── Phase 1: lint ─────────
     _phase_header("1/3 Lint")
     with _timed_phase("check/lint"):
         if not config_path.is_file():
@@ -1602,7 +982,6 @@ def check(
             else:
                 console.print("  [green]✓[/green] No lint issues")
 
-    # ── Phase 2: validate ─────
     _phase_header("2/3 Validate")
     validate_errors: list[str] = []
     with _timed_phase("check/validate"):
@@ -1623,10 +1002,10 @@ def check(
         else:
             console.print("  [green]✓[/green] Config valid")
 
-    # ── Phase 3: structure ────
     _phase_header("3/3 Structure")
     with _timed_phase("check/structure"):
-        missing = [d for d in (*_REQUIRED_DIRS, _MEMORY_DIR) if not (target / d).is_dir()]
+        layout = detect_project_layout(target)
+        missing = [d for d in layout.required_dirs if not (target / d).is_dir()]
     if missing:
         all_ok = False
     phases.append({"phase": "structure", "ok": not missing, "missing": missing})
@@ -1648,538 +1027,7 @@ def check(
         raise typer.Exit(1)
 
 
-# ── grimoire config ───────────────────────────────────────────────────────────────
-
-config_app = typer.Typer(help="Manage project configuration.")
-app.add_typer(config_app, name="config", rich_help_panel="Configuration")
-
-
-def _resolve_config_key(data: Any, key: str) -> Any:
-    """Walk YAML data by dot-notation key — raise typer.Exit(_EXIT_CONFIG) if not found."""
-    value = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        else:
-            console.print(f"[red]Key not found:[/red] {key}")
-            raise typer.Exit(_EXIT_CONFIG)
-    return value
-
-
-@config_app.command("show")
-def config_show(
-    ctx: typer.Context,
-    key: str = typer.Argument("", help="Dot-notation key to extract (e.g. project.name). Omit for full config."),
-) -> None:
-    """Display current project configuration (read-only)."""
-    from ruamel.yaml import YAML
-
-    cfg_path = _find_config(Path())
-
-    yaml = YAML()
-    with cfg_path.open(encoding="utf-8") as fh:
-        data = yaml.load(fh)
-
-    fmt = _get_fmt(ctx)
-
-    if key:
-        value = _resolve_config_key(data, key)
-        if fmt == "json":
-            typer.echo(json.dumps({key: value}, indent=2, default=str))
-        else:
-            typer.echo(value)
-        return
-
-    if fmt == "json":
-        typer.echo(json.dumps(dict(data), indent=2, default=str))
-    else:
-        from io import StringIO
-        buf = StringIO()
-        yaml.dump(data, buf)
-        typer.echo(buf.getvalue())
-
-
-@config_app.command("get")
-def config_get(
-    ctx: typer.Context,
-    key: str = typer.Argument(..., help="Dot-notation key (e.g. project.name)."),
-) -> None:
-    """Get a single config value by dot-notation key."""
-    from ruamel.yaml import YAML
-
-    cfg_path = _find_config(Path())
-
-    yaml = YAML()
-    with cfg_path.open(encoding="utf-8") as fh:
-        data = yaml.load(fh)
-
-    value = _resolve_config_key(data, key)
-    fmt = _get_fmt(ctx)
-    if fmt == "json":
-        typer.echo(json.dumps({key: value}, indent=2, default=str))
-    else:
-        typer.echo(value)
-
-
-@config_app.command("path")
-def config_path() -> None:
-    """Show the resolved path to project-context.yaml."""
-    cfg_path = _find_config(Path())
-    typer.echo(str(cfg_path.resolve()))
-
-
-@config_app.command("set")
-def config_set(
-    ctx: typer.Context,
-    key: str = typer.Argument(..., help="Dot-notation key (e.g. project.name)."),
-    value: str = typer.Argument(..., help="New value to set."),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show plan without modifying config."),
-) -> None:
-    """Set a single config value by dot-notation key."""
-    from ruamel.yaml import YAML
-
-    cfg_path = _find_config(Path())
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with cfg_path.open(encoding="utf-8") as fh:
-        data = yaml.load(fh)
-
-    parts = key.split(".")
-    target = data
-    for part in parts[:-1]:
-        if isinstance(target, dict) and part in target:
-            target = target[part]
-        else:
-            console.print(f"[red]Key not found:[/red] {key}")
-            raise typer.Exit(_EXIT_CONFIG)
-
-    last = parts[-1]
-    if not isinstance(target, dict) or last not in target:
-        console.print(f"[red]Key not found:[/red] {key}")
-        raise typer.Exit(_EXIT_CONFIG)
-
-    old_value = target[last]
-
-    # Coerce value to match existing type
-    coerced: Any = value
-    if isinstance(old_value, bool):
-        coerced = value.lower() in ("true", "1", "yes")
-    elif isinstance(old_value, int):
-        try:
-            coerced = int(value)
-        except ValueError:
-            console.print(f"[red]Expected integer for key '{key}', got:[/red] {value}")
-            raise typer.Exit(1) from None
-    elif isinstance(old_value, float):
-        try:
-            coerced = float(value)
-        except ValueError:
-            console.print(f"[red]Expected number for key '{key}', got:[/red] {value}")
-            raise typer.Exit(1) from None
-    elif isinstance(old_value, list):
-        console.print("[red]Cannot set list values via CLI.[/red] Use [bold]grimoire config edit[/bold] instead.")
-        raise typer.Exit(1)
-
-    fmt = _get_fmt(ctx)
-
-    if dry_run:
-        if fmt == "json":
-            typer.echo(json.dumps({"key": key, "old": old_value, "new": coerced, "dry_run": True}, indent=2, default=str))
-        else:
-            console.print("[bold]config set --dry-run[/bold]")
-            console.print(f"  [cyan]{key}[/cyan]: {old_value!r} → {coerced!r}")
-        return
-
-    target[last] = coerced
-    with cfg_path.open("w", encoding="utf-8") as fh:
-        yaml.dump(data, fh)
-
-    _log_operation("config_set", {"key": key, "old": str(old_value), "new": str(coerced)})
-
-    if fmt == "json":
-        typer.echo(json.dumps({"key": key, "old": old_value, "new": coerced}, indent=2, default=str))
-    else:
-        console.print(f"[green]Updated:[/green] {key} = {coerced!r}")
-
-
-@config_app.command("list")
-def config_list(ctx: typer.Context) -> None:
-    """List all config keys with their current values."""
-    from ruamel.yaml import YAML
-
-    cfg_path = _find_config(Path())
-
-    yaml = YAML()
-    with cfg_path.open(encoding="utf-8") as fh:
-        data = yaml.load(fh)
-
-    flat = list(_flatten(dict(data)).items())
-    fmt = _get_fmt(ctx)
-
-    if fmt == "json":
-        typer.echo(json.dumps(dict(flat), indent=2, default=str))
-        return
-
-    table = Table(title="Configuration", show_lines=False)
-    table.add_column("Key", style="cyan")
-    table.add_column("Value")
-    for k, v in flat:
-        table.add_row(k, str(v))
-    console.print(table)
-
-
-@config_app.command("edit")
-def config_edit() -> None:
-    """Open project-context.yaml in $EDITOR."""
-    import shutil
-
-    cfg_path = _find_config(Path())
-    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
-    if not shutil.which(editor):
-        console.print(f"[red]Editor not found:[/red] {editor}")
-        console.print("[dim]Set $VISUAL or $EDITOR to a valid editor.[/dim]")
-        raise typer.Exit(2)
-    console.print(f"[dim]Opening {cfg_path} in {editor}…[/dim]")
-    os.execvp(editor, [editor, str(cfg_path)])  # noqa: S606
-
-
-@config_app.command("validate")
-def config_validate(ctx: typer.Context) -> None:
-    """Validate project-context.yaml against the Grimoire schema."""
-    cfg_path = _find_config(Path())
-    fmt = _get_fmt(ctx)
-
-    try:
-        cfg = GrimoireConfig.from_yaml(cfg_path)
-    except GrimoireConfigError as exc:
-        if fmt == "json":
-            typer.echo(json.dumps({"valid": False, "error": str(exc)}, indent=2))
-        else:
-            console.print(f"[red]Invalid config:[/red] {exc}")
-        raise typer.Exit(1) from None
-
-    warnings = cfg.validate()
-
-    if fmt == "json":
-        typer.echo(json.dumps({"valid": True, "warnings": warnings}, indent=2))
-        return
-
-    if warnings:
-        console.print("[yellow]Config valid with warnings:[/yellow]")
-        for w in warnings:
-            console.print(f"  [yellow]⚠[/yellow] {w}")
-    else:
-        console.print("[green]✓[/green] Config valid — no issues found.")
-
-
-# ── grimoire completion ───────────────────────────────────────────────────────────
-
-completion_app = typer.Typer(help="Shell completion utilities.")
-app.add_typer(completion_app, name="completion", rich_help_panel="Utilities")
-
-_SUPPORTED_SHELLS = frozenset({"bash", "zsh", "fish"})
-
-
-def _generate_completion_script(shell: str) -> str:
-    """Generate a shell completion script via subprocess — raise typer.Exit(1) on failure."""
-    import subprocess
-
-    if shell not in _SUPPORTED_SHELLS:
-        console.print(f"[red]Unsupported shell:[/red] {shell} (supported: {', '.join(sorted(_SUPPORTED_SHELLS))})")
-        raise typer.Exit(1)
-
-    env = {**os.environ, "_GRIMOIRE_COMPLETE": f"{shell}_source"}
-    result = subprocess.run(
-        [sys.executable, "-m", "grimoire"],
-        capture_output=True, text=True, env=env, timeout=10,
-    )
-
-    if result.returncode != 0 or not result.stdout.strip():
-        console.print("[yellow]Completion script could not be generated.[/yellow]")
-        raise typer.Exit(1)
-
-    return result.stdout.strip()
-
-
-@completion_app.command("install")
-def completion_install(
-    shell: str = typer.Option(
-        ...,
-        "--shell", "-s",
-        help="Shell to install completion for: bash, zsh, fish.",
-    ),
-) -> None:
-    """Install shell auto-completion for grimoire CLI."""
-    script = _generate_completion_script(shell)
-
-    shell_rc = {"bash": "~/.bashrc", "zsh": "~/.zshrc", "fish": "~/.config/fish/completions/grimoire.fish"}
-    target = Path(shell_rc[shell]).expanduser()
-
-    if shell == "fish":
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(script + "\n", encoding="utf-8")
-        console.print(f"[green]✓[/green] Completion installed to {target}")
-    else:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        marker = "# grimoire shell completion"
-        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-        if marker in existing:
-            console.print(f"[dim]Completion already installed in {target}[/dim]")
-            return
-        with target.open("a", encoding="utf-8") as fh:
-            fh.write(f"\n{marker}\n{script}\n")
-        console.print(f"[green]✓[/green] Completion appended to {target}")
-        console.print(f"[dim]Reload with: source {target}[/dim]")
-
-    _log_operation("completion_install", {"shell": shell})
-
-
-@completion_app.command("export")
-def completion_export(
-    shell: str = typer.Option(
-        ...,
-        "--shell", "-s",
-        help="Shell to export completion for: bash, zsh, fish.",
-    ),
-) -> None:
-    """Export shell completion script to stdout (for piping/redirection)."""
-    typer.echo(_generate_completion_script(shell))
-
-
-# ── grimoire self ─────────────────────────────────────────────────────────────────
-
-self_app = typer.Typer(help="Grimoire self-management utilities.")
-app.add_typer(self_app, name="self", rich_help_panel="Info")
-
-
-@self_app.command("version")
-def self_version(ctx: typer.Context) -> None:
-    """Show installed grimoire-kit version and check for updates on PyPI."""
-    fmt = _get_fmt(ctx)
-    installed = __version__
-
-    # Detect editable install
-    install_path = Path(__file__).resolve().parent.parent
-    editable = (install_path / "__pycache__").parent.parent.name != "site-packages"
-
-    # Check PyPI for latest version (skip when offline)
-    latest: str | None = None
-    if is_online():
-        try:
-            from urllib.request import urlopen
-
-            url = "https://pypi.org/pypi/grimoire-kit/json"
-            with urlopen(url, timeout=5) as resp:  # noqa: S310
-                pypi_data = json.loads(resp.read())
-                latest = pypi_data.get("info", {}).get("version")
-        except Exception:
-            latest = None
-
-    update_available = bool(latest and latest != installed)
-
-    if fmt == "json":
-        data: dict[str, Any] = {
-            "installed": installed,
-            "latest": latest,
-            "update_available": update_available,
-            "editable_install": editable,
-            "install_path": str(install_path),
-        }
-        typer.echo(json.dumps(data, indent=2))
-        return
-
-    console.print(f"[bold]grimoire-kit[/bold]  {installed}")
-    if editable:
-        console.print("  [dim]Editable install (development mode)[/dim]")
-    if latest and update_available:
-        console.print(f"  [yellow]Update available:[/yellow] {latest}")
-        console.print("  [dim]Run: grimoire self update[/dim]")
-    elif latest:
-        console.print("  [green]Up to date[/green]")
-    else:
-        console.print("  [dim]Could not check for updates[/dim]")
-
-
-@self_app.command("update")
-def self_update() -> None:
-    """Update grimoire-kit to the latest version from PyPI."""
-    import shutil
-    import subprocess
-
-    installed = __version__
-    console.print(f"[bold]grimoire-kit[/bold]  {installed}\n")
-
-    # Check connectivity
-    if not is_online():
-        console.print("[red]No internet connection — cannot check for updates.[/red]")
-        raise typer.Exit(1)
-
-    # Check PyPI for latest version
-    latest: str | None = None
-    try:
-        from urllib.request import urlopen
-
-        url = "https://pypi.org/pypi/grimoire-kit/json"
-        with urlopen(url, timeout=5) as resp:  # noqa: S310
-            pypi_data = json.loads(resp.read())
-            latest = pypi_data.get("info", {}).get("version")
-    except Exception:
-        console.print("[red]Could not reach PyPI.[/red]")
-        raise typer.Exit(1) from None
-
-    if latest == installed:
-        console.print(f"  [green]Already up to date ({installed})[/green]")
-        raise typer.Exit(0)
-
-    console.print(f"  [yellow]Updating:[/yellow] {installed} → {latest}\n")
-
-    # Detect install method: pipx vs pip
-    use_pipx = False
-    pipx_bin = shutil.which("pipx")
-    if pipx_bin:
-        try:
-            result = subprocess.run(
-                [pipx_bin, "list", "--short"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if "grimoire-kit" in result.stdout:
-                use_pipx = True
-        except Exception:  # noqa: S110
-            pass  # pipx detection is best-effort
-
-    if use_pipx:
-        cmd = [pipx_bin, "upgrade", "grimoire-kit"]
-        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
-    else:
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "grimoire-kit"]
-        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
-
-    result = subprocess.run(cmd, timeout=120)
-    if result.returncode != 0:
-        console.print("\n[red]Update failed.[/red] Try manually:")
-        hint = "pipx upgrade grimoire-kit" if use_pipx else "pip install --upgrade grimoire-kit"
-        console.print(f"  [dim]{hint}[/dim]")
-        raise typer.Exit(1)
-
-    console.print(f"\n[green]✓ Updated to {latest}[/green]")
-    console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
-
-
-@self_app.command("diagnose")
-def self_diagnose(ctx: typer.Context) -> None:
-    """Run a self-diagnostic on the grimoire-kit installation."""
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as pkg_version
-
-    fmt = _get_fmt(ctx)
-
-    checks: list[dict[str, Any]] = []
-
-    # Check core dependencies
-    required_deps = ("ruamel.yaml", "typer", "rich")
-    optional_deps = ("mcp",)
-
-    for dep in required_deps:
-        try:
-            ver = pkg_version(dep)
-            checks.append({"name": dep, "status": "ok", "version": ver, "required": True})
-        except PackageNotFoundError:
-            checks.append({"name": dep, "status": "missing", "version": None, "required": True})
-
-    for dep in optional_deps:
-        try:
-            ver = pkg_version(dep)
-            checks.append({"name": dep, "status": "ok", "version": ver, "required": False})
-        except PackageNotFoundError:
-            checks.append({"name": dep, "status": "missing", "version": None, "required": False})
-
-    # Check Python version
-    py_ver = sys.version_info
-    py_ok = py_ver >= (3, 12)
-    checks.append({
-        "name": "python",
-        "status": "ok" if py_ok else "warn",
-        "version": f"{py_ver.major}.{py_ver.minor}.{py_ver.micro}",
-        "required": True,
-        "detail": None if py_ok else "Python 3.12+ recommended",
-    })
-
-    # Check entry point
-    import shutil
-    grimoire_bin = shutil.which("grimoire")
-    checks.append({
-        "name": "grimoire-cli",
-        "status": "ok" if grimoire_bin else "warn",
-        "version": None,
-        "required": True,
-        "detail": grimoire_bin or "Not found in PATH",
-    })
-
-    all_ok = all(c["status"] == "ok" for c in checks if c["required"])
-
-    if fmt == "json":
-        typer.echo(json.dumps({"all_ok": all_ok, "checks": checks}, indent=2))
-        return
-
-    console.print("[bold]grimoire self diagnose[/bold]\n")
-    for c in checks:
-        icon = "[green]✓[/green]" if c["status"] == "ok" else (
-            "[yellow]![/yellow]" if c["status"] == "warn" else "[red]✗[/red]"
-        )
-        ver = f" {c['version']}" if c.get("version") else ""
-        opt = " [dim](optional)[/dim]" if not c["required"] else ""
-        console.print(f"  {icon} {c['name']}{ver}{opt}")
-        if c.get("detail"):
-            console.print(f"    [dim]{c['detail']}[/dim]")
-
-    console.print()
-    if all_ok:
-        console.print("[bold green]All checks passed.[/bold green]")
-    else:
-        console.print("[bold yellow]Some issues found — see above.[/bold yellow]")
-
-
-# ── grimoire plugins ──────────────────────────────────────────────────────────────
-
-plugins_app = typer.Typer(help="Discover installed plugins.")
-app.add_typer(plugins_app, name="plugins", rich_help_panel="Utilities")
-
-
-@plugins_app.command("list")
-def plugins_list(ctx: typer.Context) -> None:
-    """List discovered tools and backend plugins."""
-    from grimoire.registry.discovery import discover_backends, discover_tools
-
-    fmt = _get_fmt(ctx)
-    tools = discover_tools()
-    backends = discover_backends()
-
-    if fmt == "json":
-        data: dict[str, Any] = {
-            "tools": sorted(tools),
-            "backends": sorted(backends),
-        }
-        typer.echo(json.dumps(data, indent=2))
-        return
-
-    if tools:
-        console.print("\n[bold]Tools[/bold]")
-        for tid in sorted(tools):
-            console.print(f"  [green]•[/green] {tid}")
-
-    if backends:
-        console.print("\n[bold]Backends[/bold]")
-        for bid in sorted(backends):
-            console.print(f"  [green]•[/green] {bid}")
-
-    if not tools and not backends:
-        console.print("[dim]No plugins discovered.[/dim]")
-
-    console.print()
-
-
-# ── grimoire upgrade ──────────────────────────────────────────────────────────────
+# ── grimoire upgrade ──────────────────────────────────────────────────────────
 
 _upgrade_path_arg = typer.Argument(Path(), help="Path to the v2 project.")
 _upgrade_dry_run_opt = typer.Option(False, "--dry-run", "-n", help="Show plan without applying.")
@@ -2258,7 +1106,7 @@ def upgrade(
     console.print(f"\n[bold]Migration {'planned' if dry_run else 'complete'}.[/bold]")
 
 
-# ── grimoire merge ────────────────────────────────────────────────────────────────
+# ── grimoire merge ────────────────────────────────────────────────────────────
 
 _merge_from_arg = typer.Argument(..., help="Source directory to merge from.")
 _merge_target_opt = typer.Option(Path(), "--target", "-t", help="Target project directory.")
@@ -2302,9 +1150,7 @@ def merge(
 
     try:
         with _status_spinner("Merging…", show=(not dry_run)):
-            plan, result = run_merge(
-                resolved_source, resolved_target, dry_run=dry_run, force=force,
-            )
+            plan, result = run_merge(resolved_source, resolved_target, dry_run=dry_run, force=force)
     except GrimoireMergeError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
@@ -2333,7 +1179,7 @@ def merge(
     console.print(f"\n[bold]{total} file(s) processed.[/bold]")
 
 
-# ── grimoire setup ──────────────────────────────────────────────────────────────
+# ── grimoire setup ────────────────────────────────────────────────────────────
 
 _setup_path_arg = typer.Argument(Path(), help="Project root.")
 _setup_check_opt = typer.Option(False, "--check", help="Audit only — no changes.")
@@ -2357,10 +1203,9 @@ def setup(
     doc_lang: str | None = _setup_doc_lang_opt,
     skill_level: str | None = _setup_skill_opt,
 ) -> None:
-    """Sync user config (name, language, skill) across all BMAD config files."""
+    """Sync user config (name, language, skill) across all runtime config files."""
     from grimoire.cli.cmd_setup import SetupResult, apply, check, load_user_values
 
-    # Respect both --json flag and global -o json
     use_json = json_out or _get_fmt(ctx) == "json"
     target = path.resolve()
     pcy = target / "project-context.yaml"
@@ -2371,7 +1216,6 @@ def setup(
 
     current = load_user_values(pcy)
 
-    # Apply CLI overrides if any
     has_override = any([user, lang, doc_lang, skill_level])
     if has_override:
         current.user_name = user or current.user_name
@@ -2417,7 +1261,6 @@ def setup(
             _log_operation("setup", {"updated": str(len(result.updated_files))})
         raise typer.Exit(0 if not result.errors else 1)
 
-    # Default: sync (same as --sync)
     result = apply(target, current)
     _print_result(result)
     if result.updated_files:
@@ -2426,7 +1269,6 @@ def setup(
 
 
 # ── grimoire env ──────────────────────────────────────────────────────────────
-
 
 @app.command("env", rich_help_panel="Info")
 def env_cmd(ctx: typer.Context) -> None:
@@ -2451,14 +1293,9 @@ def env_cmd(ctx: typer.Context) -> None:
     env_vars = {var: os.environ.get(var) for var in _env_var_names}
     online = is_online()
 
-    # Detect conflicting env vars
     conflicts: list[str] = []
     if env_vars.get("GRIMOIRE_DEBUG") and env_vars.get("GRIMOIRE_QUIET"):
         conflicts.append("GRIMOIRE_DEBUG and GRIMOIRE_QUIET are both set — debug output may be suppressed")
-    if env_vars.get("GRIMOIRE_OFFLINE") and not env_vars.get("NO_COLOR"):
-        pass  # not a conflict
-    if env_vars.get("NO_COLOR") and env_vars.get("GRIMOIRE_OUTPUT") == "json":
-        pass  # not a conflict — json ignores colour anyway
 
     project_info: dict[str, str] | None = None
     try:
@@ -2521,246 +1358,9 @@ def env_cmd(ctx: typer.Context) -> None:
     console.print()
 
 
-# ── Audit log ─────────────────────────────────────────────────────────────────
+# ── Deprecation warnings ──────────────────────────────────────────────────────
 
-_AUDIT_FILENAME = ".grimoire-audit.jsonl"
-_AUDIT_MAX_ENTRIES = 5000
-
-
-def _log_operation(command: str, args: dict[str, Any] | None = None, *, ok: bool = True) -> None:
-    """Append an entry to the project audit log (best-effort, silent on failure)."""
-    import datetime as _dt
-
-    try:
-        from grimoire.tools._common import find_project_root
-
-        root = find_project_root()
-    except FileNotFoundError:
-        return
-    log_dir = root / "_grimoire" / "_memory"
-    if not log_dir.is_dir():
-        return
-    log_file = log_dir / _AUDIT_FILENAME
-    record = {
-        "ts": _dt.datetime.now(tz=_dt.UTC).isoformat(),
-        "v": __version__,
-        "cmd": command,
-        "ok": ok,
-    }
-    if args:
-        record["args"] = {k: str(v) for k, v in args.items()}
-    try:
-        with open(log_file, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-        # Truncate if too large — single handle avoids race between read and write
-        with open(log_file, "r+", encoding="utf-8") as fh:
-            lines = fh.readlines()
-            if len(lines) > _AUDIT_MAX_ENTRIES:
-                keep = lines[-_AUDIT_MAX_ENTRIES:]
-                fh.seek(0)
-                fh.writelines(keep)
-                fh.truncate()
-    except OSError as exc:
-        if os.environ.get("GRIMOIRE_DEBUG"):
-            console.print(f"[dim]Audit log write failed: {exc}[/dim]")
-
-
-@app.command("history", rich_help_panel="Info")
-def history_cmd(
-    ctx: typer.Context,
-    limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show."),
-    filter_cmd: str = typer.Option(None, "--filter", "-f", help="Filter by command name."),
-    clear: bool = typer.Option(False, "--clear", help="Clear the audit log (requires --yes or confirmation)."),
-) -> None:
-    """Show audit trail of recent CLI operations.
-
-    [dim]Examples:[/dim]
-      [cyan]grimoire history[/cyan]                 Last 20 operations
-      [cyan]grimoire history -n 50 -f init[/cyan]   Last 50 'init' operations
-      [cyan]grimoire history -o json[/cyan]         Machine-readable audit log
-      [cyan]grimoire history --clear[/cyan]         Clear audit log
-    """
-    from grimoire.tools._common import find_project_root
-
-    fmt = _get_fmt(ctx)
-
-    try:
-        root = find_project_root()
-    except FileNotFoundError:
-        console.print("[red]Not a Grimoire project.[/red]")
-        raise typer.Exit(1) from None
-
-    log_file = root / "_grimoire" / "_memory" / _AUDIT_FILENAME
-
-    if clear:
-        if not log_file.is_file():
-            console.print("[dim]No audit history to clear.[/dim]")
-            return
-        yes = (ctx.obj or {}).get("yes", False)
-        if not yes:
-            confirm = typer.confirm("Clear the entire audit log?")
-            if not confirm:
-                raise typer.Abort
-        log_file.write_text("", encoding="utf-8")
-        _log_operation("history_clear", {})
-        if fmt == "json":
-            typer.echo(json.dumps({"cleared": True}))
-        else:
-            console.print("[green]✓[/green] Audit log cleared.")
-        return
-
-    if not log_file.is_file():
-        if fmt == "json":
-            typer.echo(json.dumps({"entries": [], "total": 0}))
-        else:
-            console.print("[dim]No audit history yet.[/dim]")
-        return
-
-    all_entries: list[dict[str, Any]] = []
-    entries: list[dict[str, Any]] = []
-    skipped = 0
-    with log_file.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                all_entries.append(entry)
-                if filter_cmd and entry.get("cmd") != filter_cmd:
-                    continue
-                entries.append(entry)
-            except json.JSONDecodeError:
-                skipped += 1
-
-    total_entries = len(all_entries)
-    # Most recent first, limited
-    entries = entries[-limit:][::-1]
-
-    if fmt == "json":
-        typer.echo(json.dumps({"entries": entries, "total": len(entries), "total_entries": total_entries, "skipped": skipped}, indent=2))
-        return
-
-    if not entries:
-        console.print("[dim]No matching entries.[/dim]")
-        return
-
-    if skipped > 0:
-        console.print(f"[yellow]⚠ {skipped} corrupted entries skipped[/yellow]")
-
-    tbl = Table(title=f"Audit History (last {limit})")
-    tbl.add_column("Timestamp", style="dim")
-    tbl.add_column("Version", style="dim")
-    tbl.add_column("Command", style="bold")
-    tbl.add_column("Status")
-    tbl.add_column("Args", style="dim")
-    for e in entries:
-        ts = e.get("ts", "?")[:19].replace("T", " ")
-        ver = e.get("v", "—")
-        cmd = e.get("cmd", "?")
-        status_icon = "[green]✓[/green]" if e.get("ok") else "[red]✗[/red]"
-        args_str = ", ".join(f"{k}={v}" for k, v in (e.get("args") or {}).items())
-        tbl.add_row(ts, ver, cmd, status_icon, args_str)
-    console.print(tbl)
-
-
-# ── grimoire repair ──────────────────────────────────────────────────────────────
-
-_repair_path_arg = typer.Argument(Path(), help="Project root to repair.")
-
-
-@app.command("repair", rich_help_panel="Utilities")
-def repair(
-    ctx: typer.Context,
-    path: Path = _repair_path_arg,
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be repaired without making changes."),
-) -> None:
-    """Auto-repair common project issues detected by ``grimoire doctor``.
-
-    [dim]Examples:[/dim]
-      [cyan]grimoire repair .[/cyan]            Repair current project
-      [cyan]grimoire repair . --dry-run[/cyan]  Preview repairs
-      [cyan]grimoire repair . -o json[/cyan]    Machine-readable output
-    """
-    target = path.resolve()
-    fmt = _get_fmt(ctx)
-    actions: list[dict[str, str]] = []
-
-    config_path = target / "project-context.yaml"
-    if not config_path.is_file():
-        if fmt == "json":
-            typer.echo(json.dumps({"repaired": False, "error": "No project-context.yaml found"}, indent=2))
-        else:
-            console.print("[red]No project-context.yaml found — cannot repair.[/red]")
-        raise typer.Exit(1)
-
-    if fmt != "json":
-        mode_label = "[yellow]DRY RUN[/yellow] — " if dry_run else ""
-        console.print(f"{mode_label}[bold]Grimoire Repair[/bold] — {target}\n")
-
-    # 1. Create missing directories
-    for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
-        dp = target / d
-        if not dp.is_dir():
-            actions.append({"action": "create_dir", "path": d})
-            if not dry_run:
-                dp.mkdir(parents=True, exist_ok=True)
-            if fmt != "json":
-                tag = "[dim]would create[/dim]" if dry_run else "[green]created[/green]"
-                console.print(f"  {tag}  {d}/")
-
-    # 2. Remove stale audit log entries (>90 days)
-    audit_log = target / "_grimoire" / "_memory" / _AUDIT_FILENAME
-    if audit_log.is_file():
-        import datetime as _dt
-
-        cutoff = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=90)
-        trimmed = 0
-        kept: list[str] = []
-        with open(audit_log, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    ts = _dt.datetime.fromisoformat(entry.get("ts", ""))
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=_dt.UTC)
-                    if ts >= cutoff:
-                        kept.append(line + "\n")
-                    else:
-                        trimmed += 1
-                except (json.JSONDecodeError, ValueError):
-                    kept.append(line + "\n")
-        if trimmed > 0:
-            actions.append({"action": "trim_audit_log", "removed": str(trimmed)})
-            if not dry_run:
-                with open(audit_log, "w", encoding="utf-8") as fh:
-                    fh.writelines(kept)
-            if fmt != "json":
-                tag = "[dim]would trim[/dim]" if dry_run else "[green]trimmed[/green]"
-                console.print(f"  {tag}  audit.jsonl — {trimmed} old entries")
-
-    # 3. Log + Summary
-    if not dry_run and actions:
-        _log_operation("repair", {"count": str(len(actions))})
-
-    if fmt == "json":
-        typer.echo(json.dumps({"ok": True, "project": str(target), "dry_run": dry_run, "actions": actions, "count": len(actions)}, indent=2))
-    elif not actions:
-        console.print("  [green]No issues found — project is healthy.[/green]")
-    else:
-        verb = "would be applied" if dry_run else "applied"
-        console.print(f"\n[bold]{len(actions)} repair(s) {verb}.[/bold]")
-
-
-# ── Deprecation warnings ─────────────────────────────────────────────────────
-
-# Map old flag → (new flag, removal version)
-_DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
-    # Example: "--old-flag": ("--new-flag", "4.0"),
-}
+_DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {}
 
 
 def _warn_deprecated() -> None:
@@ -2771,46 +1371,6 @@ def _warn_deprecated() -> None:
                 f"[yellow]⚠ '{old_flag}' is deprecated and will be removed in v{version}. "
                 f"Use '{new_flag}' instead.[/yellow]"
             )
-
-
-# ── Offline mode detection ────────────────────────────────────────────────────
-
-
-def _is_online(*, timeout: float = 1.0) -> bool:
-    """Quick connectivity test — returns *False* if unreachable.
-
-    Uses DNS resolution (works behind corporate proxies) and falls back to a
-    direct socket connection. Respects ``GRIMOIRE_OFFLINE=1`` env override.
-    Result is cached for the process lifetime.
-    """
-    if os.environ.get("GRIMOIRE_OFFLINE", "").lower() in ("1", "true"):
-        return False
-    import socket
-
-    # Prefer DNS — works behind proxies and firewalls
-    try:
-        socket.getaddrinfo("dns.google", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        return True
-    except OSError:
-        pass
-    # Fallback — direct TCP to a public DNS resolver
-    try:
-        socket.create_connection(("1.1.1.1", 53), timeout=timeout).close()
-    except OSError:
-        return False
-    return True
-
-
-# Lazy wrapper — avoids network probe until first use
-_online_cache: bool | None = None
-
-
-def is_online() -> bool:
-    """Cached online check — probes network at most once per process."""
-    global _online_cache
-    if _online_cache is None:
-        _online_cache = _is_online(timeout=0.5)
-    return _online_cache
 
 
 # ── Signal handling ───────────────────────────────────────────────────────────
@@ -2884,7 +1444,7 @@ def _format_error(exc: GrimoireError) -> None:
 def cli() -> None:
     """Typer entry point for ``grimoire`` console script."""
     _install_signal_handlers()
-    _phase_timings.clear()  # clear before any early-exit path
+    _phase_timings.clear()
     _expand_aliases()
     _warn_deprecated()
     _suggest_command()
@@ -2912,4 +1472,3 @@ def cli() -> None:
             _display_profile(total)
         elif _show_time:
             console.print(f"\n[dim]⏱  {total * 1000:.0f}ms[/dim]")
-

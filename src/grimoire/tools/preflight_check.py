@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from grimoire.core.project_layout import detect_project_layout
 from grimoire.tools._common import GrimoireTool
 
 # ── Data Models ───────────────────────────────────────────────────────────────
@@ -84,6 +85,9 @@ class PreflightReport:
 class PreflightCheck(GrimoireTool):
     """Pre-flight environment validator."""
 
+    def _layout(self):
+        return detect_project_layout(self._project_root)
+
     def run(self, **kwargs: Any) -> PreflightReport:
         report = PreflightReport()
         report.checks.extend(self._check_structure())
@@ -94,11 +98,11 @@ class PreflightCheck(GrimoireTool):
 
     def _check_structure(self) -> list[CheckItem]:
         checks: list[CheckItem] = []
-        required_dirs = [
-            ("_grimoire", "Grimoire directory"),
-            ("_grimoire/_memory", "Memory directory"),
-        ]
-        for rel, label in required_dirs:
+        layout = self._layout()
+        for rel, label in (
+            (layout.grimoire_dir, "Grimoire directory"),
+            (layout.memory_dir, "Memory directory"),
+        ):
             if not (self._project_root / rel).is_dir():
                 checks.append(CheckItem(
                     name="structure",
@@ -153,7 +157,7 @@ class PreflightCheck(GrimoireTool):
                 ))
 
             result = subprocess.run(
-                ["git", "status", "--porcelain", "--", "_grimoire/"],
+                ["git", "status", "--porcelain", "--", f"{self._layout().grimoire_dir}/"],
                 capture_output=True,
                 text=True,
                 cwd=self._project_root,
@@ -164,7 +168,7 @@ class PreflightCheck(GrimoireTool):
                 checks.append(CheckItem(
                     name="uncommitted",
                     severity="warning",
-                    message=f"{n} uncommitted change(s) in _grimoire/",
+                    message=f"{n} uncommitted change(s) in {self._layout().grimoire_dir}/",
                 ))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             checks.append(CheckItem(name="git-error", severity="info", message="Could not run git commands"))
@@ -172,7 +176,7 @@ class PreflightCheck(GrimoireTool):
 
     def _check_memory(self) -> list[CheckItem]:
         checks: list[CheckItem] = []
-        mem_dir = self._project_root / "_grimoire" / "_memory"
+        mem_dir = self._layout().memory_path(self._project_root)
         if not mem_dir.is_dir():
             return checks
 

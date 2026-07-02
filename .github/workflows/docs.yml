@@ -1,10 +1,14 @@
 name: Deploy docs
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
+      - "web/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -31,8 +35,18 @@ jobs:
       - name: Install docs dependencies
         run: pip install ".[docs]"
 
-      - name: Build site
+      - name: Build MkDocs site (→ site/docs/)
         run: mkdocs build --clean
+
+      - name: Copy landing page to site root
+        run: |
+          # site_dir is site/docs/ per mkdocs.yml; copy web/ assets to site/ root
+          cp -r web/. site/
+          # guarantee landing is the root index
+          test -f site/index.html
+          test -d site/docs
+          echo "── site/ tree ──"
+          ls -la site/ | head -20
 
       - uses: actions/upload-pages-artifact@v4
         with:

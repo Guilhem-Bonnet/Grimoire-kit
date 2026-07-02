@@ -104,7 +104,11 @@ class UserConfig:
 
 
 _VALID_BACKENDS = frozenset({
-    "auto", "local", "qdrant-local", "qdrant-server", "ollama",
+    "auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
+})
+_VALID_SHORT_TERM_BACKENDS = frozenset({"sqlite", "redis", "none"})
+_VALID_LAYER_MODES = frozenset({
+    "disabled", "planned", "sqlite-sidecar", "qdrant", "weaviate", "neo4j", "runtime-dashboard",
 })
 
 
@@ -116,7 +120,26 @@ class MemoryConfig:
     collection_prefix: str = "grimoire"
     embedding_model: str = ""
     qdrant_url: str = ""
+    weaviate_url: str = ""
+    weaviate_api_key_env: str = "GRIMOIRE_WEAVIATE_API_KEY"
+    weaviate_collection: str = ""
+    neo4j_uri: str = ""
+    neo4j_user: str = "neo4j"
+    neo4j_password_env: str = "GRIMOIRE_NEO4J_PASSWORD"  # noqa: S105 - environment variable name, not a secret.
+    neo4j_database: str = "neo4j"
+    migration_source_backend: str = ""
+    migration_target_backend: str = ""
+    migration_bundle_path: str = ""
+    mempalace_path: str = ""
     ollama_url: str = ""
+    layer_profile: str = "standard"
+    short_term_backend: str = "sqlite"
+    redis_url: str = ""
+    knowledge_graph: str = "sqlite-sidecar"
+    memory_graph: str = "sqlite-sidecar"
+    code_graph: str = "planned"
+    task_memory: str = "planned"
+    visualization: str = "runtime-dashboard"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MemoryConfig:
@@ -126,12 +149,37 @@ class MemoryConfig:
                 f"Invalid memory backend '{backend}', expected one of: {sorted(_VALID_BACKENDS)}",
                 error_code=CONFIG_PARSE_ERROR.code,
             )
+        short_term_backend = str(data.get("short_term_backend", "sqlite"))
+        if short_term_backend not in _VALID_SHORT_TERM_BACKENDS:
+            raise GrimoireConfigError(
+                f"Invalid short_term_backend '{short_term_backend}', expected one of: {sorted(_VALID_SHORT_TERM_BACKENDS)}",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
         return cls(
             backend=backend,
             collection_prefix=str(data.get("collection_prefix", "grimoire")),
             embedding_model=str(data.get("embedding_model", "")),
             qdrant_url=str(data.get("qdrant_url", "")),
+            weaviate_url=str(data.get("weaviate_url", "")),
+            weaviate_api_key_env=str(data.get("weaviate_api_key_env", "GRIMOIRE_WEAVIATE_API_KEY")),
+            weaviate_collection=str(data.get("weaviate_collection", "")),
+            neo4j_uri=str(data.get("neo4j_uri", "")),
+            neo4j_user=str(data.get("neo4j_user", "neo4j")),
+            neo4j_password_env=str(data.get("neo4j_password_env", "GRIMOIRE_NEO4J_PASSWORD")),
+            neo4j_database=str(data.get("neo4j_database", "neo4j")),
+            migration_source_backend=str(data.get("migration_source_backend", "")),
+            migration_target_backend=str(data.get("migration_target_backend", "")),
+            migration_bundle_path=str(data.get("migration_bundle_path", "")),
+            mempalace_path=str(data.get("mempalace_path", "")),
             ollama_url=str(data.get("ollama_url", "")),
+            layer_profile=str(data.get("layer_profile", "standard")),
+            short_term_backend=short_term_backend,
+            redis_url=str(data.get("redis_url", "")),
+            knowledge_graph=str(data.get("knowledge_graph", "sqlite-sidecar")),
+            memory_graph=str(data.get("memory_graph", "sqlite-sidecar")),
+            code_graph=str(data.get("code_graph", "planned")),
+            task_memory=str(data.get("task_memory", "planned")),
+            visualization=str(data.get("visualization", "runtime-dashboard")),
         )
 
 
@@ -184,8 +232,19 @@ class GrimoireConfig:
 
         if self.memory.backend == "qdrant-server" and not self.memory.qdrant_url:
             issues.append("Memory backend is 'qdrant-server' but qdrant_url is empty")
+        if self.memory.backend == "weaviate-server" and not self.memory.weaviate_url:
+            issues.append("Memory backend is 'weaviate-server' but weaviate_url is empty")
         if self.memory.backend == "ollama" and not self.memory.ollama_url:
             issues.append("Memory backend is 'ollama' but ollama_url is empty")
+        if self.memory.short_term_backend == "redis" and not self.memory.redis_url:
+            issues.append("Memory short_term_backend is 'redis' but redis_url is empty")
+        if any(layer == "neo4j" for layer in (
+            self.memory.knowledge_graph,
+            self.memory.memory_graph,
+            self.memory.code_graph,
+            self.memory.task_memory,
+        )) and not self.memory.neo4j_uri:
+            issues.append("A Neo4j memory layer is enabled but neo4j_uri is empty")
         if not self.project.name.strip():
             issues.append("Project name is blank")
 

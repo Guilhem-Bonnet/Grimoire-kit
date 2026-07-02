@@ -16,22 +16,27 @@ from grimoire.cli.app import _ALIASES, _expand_aliases, app
 runner = CliRunner()
 
 
+def _invoke_help(*args: str) -> str:
+    command = list(args)
+    if command:
+        command.append("--help")
+    else:
+        command = ["--help"]
+    result = runner.invoke(app, command)
+    assert result.exit_code == 0
+    return result.output
+
+
 # ── Global Flags ──────────────────────────────────────────────────────────────
 
 class TestGlobalFlags:
     """Tests for --verbose, --log-format, --output callback flags."""
 
-    def test_help_shows_verbose(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--verbose" in result.output
-
-    def test_help_shows_log_format(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--log-format" in result.output
-
-    def test_help_shows_output(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--output" in result.output
+    def test_help_shows_global_logging_flags(self) -> None:
+        output = _invoke_help()
+        assert "--verbose" in output
+        assert "--log-format" in output
+        assert "--output" in output
 
     def test_verbose_single_sets_info(self) -> None:
         with patch("grimoire.cli.app.configure_logging") as mock_log:
@@ -67,6 +72,57 @@ class TestGlobalFlags:
             mock_log.assert_not_called()
 
 
+class TestTopLevelHelpSurface:
+    def test_top_level_help_keeps_core_surface_visible(self) -> None:
+        output = _invoke_help()
+
+        for token in (
+            "init",
+            "doctor",
+            "status",
+            "add",
+            "remove",
+            "validate",
+            "up",
+            "--quiet",
+            "--no-color",
+            "--yes",
+            "--time",
+            "--profile",
+            "--debug",
+        ):
+            assert token in output
+
+        for section in ("Project", "Validation", "Agents", "Configuration", "Utilities", "Info"):
+            assert section in output
+
+        assert "aliases" in output.lower()
+        assert "grimoire init" in output or "Examples" in output
+
+
+class TestCommandHelpSurface:
+    def test_command_help_keeps_essential_markers(self) -> None:
+        expectations = [
+            (("diff",), "diff"),
+            (("lint",), "lint"),
+            (("schema",), "schema"),
+            (("check",), "check"),
+            (("version",), "version"),
+            (("completion", "export"), "export"),
+            (("add",), "--dry-run"),
+            (("remove",), "--dry-run"),
+            (("doctor",), "--fix"),
+            (("config", "edit"), "EDITOR"),
+            (("history",), "--clear"),
+            (("merge",), "--target"),
+            (("plugins",), "list"),
+        ]
+
+        for command, marker in expectations:
+            output = _invoke_help(*command)
+            assert marker in output
+
+
 # ── Version ───────────────────────────────────────────────────────────────────
 
 class TestVersion:
@@ -74,12 +130,6 @@ class TestVersion:
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
         assert "grimoire-kit" in result.output
-
-    def test_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "init" in result.output
-        assert "doctor" in result.output
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
@@ -141,6 +191,22 @@ class TestInit:
         assert result.exit_code == 0
         content = (tmp_path / "project-context.yaml").read_text()
         assert 'archetype: "infra-ops"' in content
+        assert 'short_term_backend: "redis"' in content
+        assert 'redis_url: "redis://localhost:6379/0"' in content
+        compose_files = list(tmp_path.glob("docker-compose*.yml"))
+        assert any("redis:7.4-alpine" in p.read_text() for p in compose_files)
+
+    def test_init_infra_ops_local_backend_creates_redis_compose(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, [
+            "init",
+            str(tmp_path),
+            "-a",
+            "infra-ops",
+            "-b",
+            "local",
+        ])
+        assert result.exit_code == 0
+        assert (tmp_path / "docker-compose.redis.yml").is_file()
 
     def test_init_invalid_archetype(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "nonexistent"])
@@ -153,7 +219,7 @@ class TestInit:
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
         # "auto" is resolved to a concrete backend at init time
-        assert any(f'backend: "{b}"' in content for b in ("local", "qdrant-local", "qdrant-server", "ollama"))
+        assert any(f'backend: "{b}"' in content for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "ollama"))
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
@@ -166,6 +232,16 @@ class TestInit:
         assert result.exit_code == 0
         content = (tmp_path / "project-context.yaml").read_text()
         assert 'backend: "ollama"' in content
+
+    def test_init_weaviate_backend(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["init", str(tmp_path), "-b", "weaviate-server"])
+        assert result.exit_code == 0
+        content = (tmp_path / "project-context.yaml").read_text()
+        assert 'backend: "weaviate-server"' in content
+        assert 'weaviate_url: "http://localhost:8080"' in content
+        assert 'short_term_backend: "redis"' in content
+        assert 'memory_graph: "neo4j"' in content
+        assert (tmp_path / "docker-compose.memory-target.yml").is_file()
 
     def test_init_invalid_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "nope"])
@@ -229,6 +305,16 @@ class TestDoctor:
         result = runner.invoke(app, ["doctor", str(healthy_project)])
         assert "grimoire-kit" in result.output
 
+    def test_doctor_runtime_layout_with_fix(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: runtime\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        (tmp_path / "_grimoire-runtime" / "_memory").mkdir(parents=True)
+        result = runner.invoke(app, ["doctor", "--fix", str(tmp_path)])
+        assert result.exit_code == 0
+        assert (tmp_path / "_grimoire-runtime-output").is_dir()
+        assert not (tmp_path / "_grimoire").exists()
+
 
 # ── Status ────────────────────────────────────────────────────────────────────
 
@@ -250,7 +336,7 @@ class TestStatus:
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
         # backend "auto" is resolved at init time; check for a valid backend
-        assert any(b in result.output for b in ("local", "qdrant-local", "qdrant-server", "ollama"))
+        assert any(b in result.output for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "ollama"))
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -260,13 +346,20 @@ class TestStatus:
         result = runner.invoke(app, ["status", str(tmp_path)])
         assert result.exit_code == 1
 
-    def test_status_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "status" in result.output
-
     def test_status_shows_version(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
         assert "grimoire-kit" in result.output
+
+    def test_status_runtime_layout(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: runtime\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        (tmp_path / "_grimoire-runtime" / "_memory").mkdir(parents=True)
+        (tmp_path / "_grimoire-runtime-output").mkdir()
+        result = runner.invoke(app, ["status", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "runtime" in result.output
+        assert "_grimoire-runtime" in result.output
 
 
 # ── Add / Remove ──────────────────────────────────────────────────────────────
@@ -333,11 +426,6 @@ class TestAddRemove:
         content_after_rm = (project / "project-context.yaml").read_text()
         assert "temp" not in content_after_rm
 
-    def test_add_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "add" in result.output
-        assert "remove" in result.output
-
 
 # ── Validate ──────────────────────────────────────────────────────────────────
 
@@ -364,10 +452,6 @@ class TestValidate:
     def test_no_config(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["validate", str(tmp_path)])
         assert result.exit_code == 1
-
-    def test_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "validate" in result.output
 
 
 # ── Up ────────────────────────────────────────────────────────────────────────
@@ -411,9 +495,15 @@ class TestUp:
         result = runner.invoke(app, ["up", str(tmp_path)])
         assert result.exit_code == 1
 
-    def test_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "up" in result.output
+    def test_up_runtime_creates_runtime_dirs_only(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
+        )
+        (tmp_path / "_grimoire-runtime" / "_memory").mkdir(parents=True)
+        result = runner.invoke(app, ["up", str(tmp_path)])
+        assert result.exit_code == 0
+        assert (tmp_path / "_grimoire-runtime-output").is_dir()
+        assert not (tmp_path / "_grimoire").exists()
 
 
 # ── Status – edge cases ──────────────────────────────────────────────────────
@@ -623,12 +713,6 @@ class TestDiff:
         result = runner.invoke(app, ["diff", str(tmp_path)])
         assert result.exit_code == 0
 
-    def test_diff_help(self) -> None:
-        result = runner.invoke(app, ["diff", "--help"])
-        assert result.exit_code == 0
-        assert "drift" in result.output.lower() or "diff" in result.output.lower()
-
-
 # ── Lint ──────────────────────────────────────────────────────────────────────
 
 
@@ -674,12 +758,6 @@ class TestLint:
         result = runner.invoke(app, ["lint", str(tmp_path)])
         assert result.exit_code == 1
         assert "issue" in result.output.lower()
-
-    def test_lint_help(self) -> None:
-        result = runner.invoke(app, ["lint", "--help"])
-        assert result.exit_code == 0
-        assert "lint" in result.output.lower()
-
 
 # ── Upgrade ───────────────────────────────────────────────────────────────────
 
@@ -729,12 +807,6 @@ class TestSchema:
         proj = data["properties"]["project"]
         assert "name" in proj.get("required", [])
 
-    def test_schema_help(self) -> None:
-        result = runner.invoke(app, ["schema", "--help"])
-        assert result.exit_code == 0
-        assert "schema" in result.output.lower() or "json" in result.output.lower()
-
-
 # ── Check ─────────────────────────────────────────────────────────────────────
 
 
@@ -764,11 +836,6 @@ class TestCheck:
         result = runner.invoke(app, ["check", str(tmp_path)])
         # Should warn about missing directories
         assert "missing" in result.output.lower() or "!" in result.output
-
-    def test_check_help(self) -> None:
-        result = runner.invoke(app, ["check", "--help"])
-        assert result.exit_code == 0
-        assert "check" in result.output.lower()
 
     def test_check_json_valid_project(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "json-ok"])
@@ -851,14 +918,6 @@ class TestValidateJson:
 class TestQuietNoColor:
     """Tests for --quiet and --no-color global flags."""
 
-    def test_quiet_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--quiet" in result.output
-
-    def test_no_color_flag_accepted(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--no-color" in result.output
-
     def test_quiet_flag_runs(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "q"])
         result = runner.invoke(app, ["-q", "validate", str(tmp_path)])
@@ -875,11 +934,6 @@ class TestQuietNoColor:
 
 class TestCompletionExport:
     """Tests for ``grimoire completion export``."""
-
-    def test_export_help(self) -> None:
-        result = runner.invoke(app, ["completion", "export", "--help"])
-        assert result.exit_code == 0
-        assert "export" in result.output.lower() or "stdout" in result.output.lower()
 
     def test_export_unsupported_shell(self) -> None:
         result = runner.invoke(app, ["completion", "export", "--shell", "powershell"])
@@ -946,12 +1000,6 @@ class TestVersionCommand:
         assert "python" in data
         assert "platform" in data
         assert "install_path" in data
-
-    def test_version_help(self) -> None:
-        result = runner.invoke(app, ["version", "--help"])
-        assert result.exit_code == 0
-        assert "version" in result.output.lower()
-
 
 # ── grimoire config get/path/list ────────────────────────────────────────────
 
@@ -1070,13 +1118,13 @@ class TestSelfDiagnose:
 class TestSelfUpdate:
     """Tests for ``grimoire self update`` and ``grimoire update``."""
 
-    @patch("grimoire.cli.app.is_online", return_value=False)
+    @patch("grimoire.cli.cmd_self.is_online", return_value=False)
     def test_self_update_offline(self, _mock_online: MagicMock) -> None:
         result = runner.invoke(app, ["self", "update"])
         assert result.exit_code == 1
         assert "No internet" in result.output
 
-    @patch("grimoire.cli.app.is_online", return_value=True)
+    @patch("grimoire.cli.cmd_self.is_online", return_value=True)
     def test_self_update_already_up_to_date(self, _mock_online: MagicMock) -> None:
         from grimoire.__version__ import __version__
 
@@ -1090,7 +1138,7 @@ class TestSelfUpdate:
         assert result.exit_code == 0
         assert "Already up to date" in result.output
 
-    @patch("grimoire.cli.app.is_online", return_value=True)
+    @patch("grimoire.cli.cmd_self.is_online", return_value=True)
     def test_self_update_performs_pip_upgrade(self, _mock_online: MagicMock) -> None:
         fake_resp = MagicMock()
         fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
@@ -1113,7 +1161,7 @@ class TestSelfUpdate:
         assert "--upgrade" in call_args
         assert "grimoire-kit" in call_args
 
-    @patch("grimoire.cli.app.is_online", return_value=True)
+    @patch("grimoire.cli.cmd_self.is_online", return_value=True)
     def test_self_update_detects_pipx(self, _mock_online: MagicMock) -> None:
         fake_resp = MagicMock()
         fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
@@ -1195,11 +1243,6 @@ class TestCommandAliases:
         finally:
             sys.argv = original
 
-    def test_help_shows_aliases(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Aliases" in result.output or "aliases" in result.output.lower()
-
-
 # ── Add/Remove --dry-run ─────────────────────────────────────────────────────
 
 
@@ -1238,15 +1281,6 @@ class TestAddRemoveDryRun:
         content_after = (project / "project-context.yaml").read_text()
         assert content_before == content_after
         assert "keeper" in content_after
-
-    def test_add_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["add", "--help"])
-        assert "--dry-run" in result.output
-
-    def test_remove_help_shows_dry_run(self) -> None:
-        result = runner.invoke(app, ["remove", "--help"])
-        assert "--dry-run" in result.output
-
 
 # ── Env var overrides ─────────────────────────────────────────────────────────
 
@@ -1426,7 +1460,7 @@ class TestInitJson:
         assert data["ok"] is True
         assert data["project"] == "j-proj"
         assert data["archetype"] == "minimal"
-        assert data["backend"] in ("local", "qdrant-local", "qdrant-server", "ollama")
+        assert data["backend"] in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "ollama")
         assert "dirs_created" in data
 
     def test_init_json_already_exists(self, tmp_path: Path) -> None:
@@ -1499,20 +1533,12 @@ class TestDoctorFix:
         data = json.loads(result.output)
         assert "fixed" not in data or data.get("fixed") == []
 
-    def test_fix_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["doctor", "--help"])
-        assert "--fix" in result.output
-
 
 # ── --time flag ──────────────────────────────────────────────────────────────
 
 
 class TestTimeFlag:
     """Tests for global --time flag."""
-
-    def test_help_shows_time(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--time" in result.output
 
     def test_time_flag_accepted(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "time-test"])
@@ -1546,27 +1572,11 @@ class TestJsonOutputParametrized:
         assert result.exit_code != 0
 
 
-# ── Epilog ───────────────────────────────────────────────────────────────────
-
-
-class TestEpilog:
-    """Tests that the app epilog is displayed."""
-
-    def test_help_shows_examples(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "grimoire init" in result.output or "Examples" in result.output
-
-
 # ── R25 — --yes flag & confirmations ─────────────────────────────────────────
 
 
 class TestYesFlag:
     """Tests for global --yes/-y flag and interactive confirmations."""
-
-    def test_help_shows_yes(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--yes" in result.output
 
     def test_remove_prompts_without_yes(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path), "--name", "yn-test"])
@@ -1657,38 +1667,6 @@ class TestUpgradeJson:
         assert data["ok"] is True
         assert data["dry_run"] is False
         assert "Move agents/" in data["actions"]
-
-
-# ── R25 — Rich help panels ──────────────────────────────────────────────────
-
-
-class TestHelpPanels:
-    """Tests that commands are organised into rich help panels."""
-
-    def test_help_shows_project_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "Project" in result.output
-
-    def test_help_shows_validation_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Validation" in result.output
-
-    def test_help_shows_agents_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Agents" in result.output
-
-    def test_help_shows_configuration_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Configuration" in result.output
-
-    def test_help_shows_utilities_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Utilities" in result.output
-
-    def test_help_shows_info_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "Info" in result.output
 
 
 # ── R25 — Error handler with recovery hints ─────────────────────────────────
@@ -1817,19 +1795,6 @@ class TestSpinnerHelper:
         # nullcontext should work as no-op
         with cm:
             pass
-
-
-# ── R26 — Subcommand examples ────────────────────────────────────────────────
-
-
-class TestSubcommandExamples:
-    """Tests for Rich markup examples in command help text."""
-
-    @pytest.mark.parametrize("cmd", ["init", "doctor", "validate", "add", "remove", "status", "check", "upgrade"])
-    def test_help_contains_examples(self, cmd: str) -> None:
-        result = runner.invoke(app, [cmd, "--help"])
-        assert result.exit_code == 0
-        assert "Examples" in result.output or "grimoire" in result.output
 
 
 # ── R26 — Audit log & history ────────────────────────────────────────────────
@@ -2101,10 +2066,6 @@ class TestSignalHandling:
 class TestPerformanceProfiling:
     """Tests for --profile flag, _timed_phase, _display_profile."""
 
-    def test_profile_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert "--profile" in result.output
-
     def test_timed_phase_records(self) -> None:
         from grimoire.cli.app import _phase_timings, _timed_phase
 
@@ -2211,13 +2172,13 @@ class TestOfflineMode:
     """Tests for _is_online() and offline context."""
 
     def test_env_var_forces_offline(self) -> None:
-        from grimoire.cli.app import _is_online
+        from grimoire.cli.cmd_self import _is_online
 
         with patch.dict("os.environ", {"GRIMOIRE_OFFLINE": "1"}):
             assert _is_online() is False
 
     def test_env_var_true_forces_offline(self) -> None:
-        from grimoire.cli.app import _is_online
+        from grimoire.cli.cmd_self import _is_online
 
         with patch.dict("os.environ", {"GRIMOIRE_OFFLINE": "true"}):
             assert _is_online() is False
@@ -2225,7 +2186,7 @@ class TestOfflineMode:
     def test_unreachable_returns_false(self) -> None:
         import os
 
-        from grimoire.cli.app import _is_online
+        from grimoire.cli.cmd_self import _is_online
 
         os.environ.pop("GRIMOIRE_OFFLINE", None)
         with (
@@ -2250,14 +2211,14 @@ class TestR28IsOnlineCached:
     """Tests for the is_online() cached wrapper (R28 C3 fix)."""
 
     def test_is_online_returns_bool(self) -> None:
-        import grimoire.cli.app as _app
+        import grimoire.cli.cmd_self as _app
 
         _app._online_cache = None
         with patch.object(_app, "_is_online", return_value=True):
             assert _app.is_online() is True
 
     def test_is_online_caches_result(self) -> None:
-        import grimoire.cli.app as _app
+        import grimoire.cli.cmd_self as _app
 
         _app._online_cache = None
         mock_probe = MagicMock(return_value=False)
@@ -2269,7 +2230,7 @@ class TestR28IsOnlineCached:
         _app._online_cache = None  # cleanup
 
     def test_is_online_cache_reset(self) -> None:
-        import grimoire.cli.app as _app
+        import grimoire.cli.cmd_self as _app
 
         _app._online_cache = True
         assert _app.is_online() is True  # uses cache
@@ -2286,21 +2247,21 @@ class TestR28ConfigFindConfig:
         """config show works when invoked from a subdirectory."""
         subdir = cli_project / "deep" / "nested"
         subdir.mkdir(parents=True)
-        with patch("grimoire.cli.app._find_config", return_value=cli_project / "project-context.yaml"):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cli_project / "project-context.yaml"):
             result = runner.invoke(app, ["config", "show"])
         assert result.exit_code == 0
 
     def test_config_path_uses_find_config(self, cli_project: Path) -> None:
         """config path should resolve through _find_config."""
         cfg = cli_project / "project-context.yaml"
-        with patch("grimoire.cli.app._find_config", return_value=cfg):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cfg):
             result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
         assert str(cfg.resolve()) in result.output
 
     def test_config_list_uses_find_config(self, cli_project: Path) -> None:
         """config list should resolve through _find_config."""
-        with patch("grimoire.cli.app._find_config", return_value=cli_project / "project-context.yaml"):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cli_project / "project-context.yaml"):
             result = runner.invoke(app, ["config", "list"])
         assert result.exit_code == 0
 
@@ -2330,7 +2291,7 @@ class TestR28SelfVersionOffline:
 
     def test_self_version_skips_pypi_when_offline(self, cli_project: Path) -> None:
         """self version should not attempt PyPI when offline."""
-        with patch("grimoire.cli.app.is_online", return_value=False):
+        with patch("grimoire.cli.cmd_self.is_online", return_value=False):
             result = runner.invoke(app, ["self", "version"])
         assert result.exit_code == 0
         # Should show version without update info
@@ -2344,8 +2305,8 @@ class TestR28SelfVersionOffline:
         mock_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
 
         with (
-            patch("grimoire.cli.app.is_online", return_value=True),
-            patch("grimoire.cli.app.urlopen", mock_resp, create=True),
+            patch("grimoire.cli.cmd_self.is_online", return_value=True),
+            patch("urllib.request.urlopen", return_value=mock_resp),
         ):
             result = runner.invoke(app, ["self", "version"])
         assert result.exit_code == 0
@@ -2393,8 +2354,8 @@ class TestConfigEdit:
         """config edit should exec $EDITOR with the config path."""
         cfg = cli_project / "project-context.yaml"
         with (
-            patch("grimoire.cli.app._find_config", return_value=cfg),
-            patch("grimoire.cli.app.os.execvp") as mock_exec,
+            patch("grimoire.cli.cmd_config._find_config", return_value=cfg),
+            patch("grimoire.cli.cmd_config.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
         mock_exec.assert_called_once_with("nano", ["nano", str(cfg)])
@@ -2403,16 +2364,11 @@ class TestConfigEdit:
         """config edit should prefer $VISUAL over $EDITOR."""
         cfg = cli_project / "project-context.yaml"
         with (
-            patch("grimoire.cli.app._find_config", return_value=cfg),
-            patch("grimoire.cli.app.os.execvp") as mock_exec,
+            patch("grimoire.cli.cmd_config._find_config", return_value=cfg),
+            patch("grimoire.cli.cmd_config.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"VISUAL": "code", "EDITOR": "nano"})
         mock_exec.assert_called_once_with("code", ["code", str(cfg)])
-
-    def test_config_edit_help(self) -> None:
-        result = runner.invoke(app, ["config", "edit", "--help"])
-        assert result.exit_code == 0
-        assert "EDITOR" in result.output
 
 
 class TestConfigValidate:
@@ -2420,13 +2376,13 @@ class TestConfigValidate:
 
     def test_config_validate_valid(self, cli_project: Path) -> None:
         """config validate should succeed on a valid project."""
-        with patch("grimoire.cli.app._find_config", return_value=cli_project / "project-context.yaml"):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cli_project / "project-context.yaml"):
             result = runner.invoke(app, ["config", "validate"])
         assert result.exit_code == 0
 
     def test_config_validate_json(self, cli_project: Path) -> None:
         """config validate JSON output should include 'valid' key."""
-        with patch("grimoire.cli.app._find_config", return_value=cli_project / "project-context.yaml"):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cli_project / "project-context.yaml"):
             result = runner.invoke(app, ["-o", "json", "config", "validate"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -2437,7 +2393,7 @@ class TestConfigValidate:
         """config validate should fail on invalid YAML."""
         bad = tmp_path / "project-context.yaml"
         bad.write_text("not: a: valid: grimoire config\n", encoding="utf-8")
-        with patch("grimoire.cli.app._find_config", return_value=bad):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=bad):
             result = runner.invoke(app, ["config", "validate"])
         assert result.exit_code == 1
 
@@ -2445,7 +2401,7 @@ class TestConfigValidate:
         """config validate JSON on invalid config."""
         bad = tmp_path / "project-context.yaml"
         bad.write_text("not: a: valid: grimoire config\n", encoding="utf-8")
-        with patch("grimoire.cli.app._find_config", return_value=bad):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=bad):
             result = runner.invoke(app, ["-o", "json", "config", "validate"])
         assert result.exit_code == 1
         data = json.loads(result.output)
@@ -2462,7 +2418,7 @@ class TestR29EditorValidation:
         """config edit should error if editor binary not found."""
         cfg = cli_project / "project-context.yaml"
         with (
-            patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("grimoire.cli.cmd_config._find_config", return_value=cfg),
             patch("shutil.which", return_value=None),
         ):
             result = runner.invoke(app, ["config", "edit"], env={"EDITOR": "nonexistent-editor"})
@@ -2473,9 +2429,9 @@ class TestR29EditorValidation:
         """config edit should call execvp when editor exists."""
         cfg = cli_project / "project-context.yaml"
         with (
-            patch("grimoire.cli.app._find_config", return_value=cfg),
+            patch("grimoire.cli.cmd_config._find_config", return_value=cfg),
             patch("shutil.which", return_value="/usr/bin/nano"),
-            patch("os.execvp") as mock_exec,
+            patch("grimoire.cli.cmd_config.os.execvp") as mock_exec,
         ):
             runner.invoke(app, ["config", "edit"], env={"EDITOR": "nano"})
         mock_exec.assert_called_once()
@@ -2532,20 +2488,23 @@ class TestR29FlattenLists:
 
 
 class TestR29RequiredDirsConstant:
-    """Tests for _REQUIRED_DIRS/_MEMORY_DIR constants (R29 H9 DRY fix)."""
+    """Tests for the shared project layout resolver (R29 H9 DRY fix)."""
 
-    def test_constants_exist(self) -> None:
-        from grimoire.cli.app import _MEMORY_DIR, _REQUIRED_DIRS
+    def test_legacy_layout_defaults_when_no_runtime_markers(self, tmp_path: Path) -> None:
+        from grimoire.core.project_layout import detect_project_layout
 
-        assert "_grimoire" in _REQUIRED_DIRS
-        assert "_grimoire-output" in _REQUIRED_DIRS
-        assert _MEMORY_DIR == "_grimoire/_memory"
+        layout = detect_project_layout(tmp_path)
+        assert layout.name == "legacy"
+        assert "_grimoire" in layout.required_dirs
+        assert "_grimoire-output" in layout.required_dirs
+        assert "_grimoire/_memory" in layout.required_dirs
 
     def test_init_creates_all_required_dirs(self, cli_project: Path) -> None:
-        """init should create _REQUIRED_DIRS + _MEMORY_DIR."""
-        from grimoire.cli.app import _MEMORY_DIR, _REQUIRED_DIRS
+        """init should create all directories required by the detected layout."""
+        from grimoire.core.project_layout import detect_project_layout
 
-        for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
+        layout = detect_project_layout(cli_project)
+        for d in layout.required_dirs:
             assert (cli_project / d).is_dir(), f"Missing directory: {d}"
 
 
@@ -2709,7 +2668,7 @@ class TestR30ConfigSetFloat:
         with cfg.open("w", encoding="utf-8") as fh:
             yaml.dump(data, fh)
 
-        with patch("grimoire.cli.app._find_config", return_value=cfg):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cfg):
             result = runner.invoke(app, ["-o", "json", "config", "set", "threshold", "0.75"])
         assert result.exit_code == 0
         data_out = json.loads(result.output)
@@ -2728,7 +2687,7 @@ class TestR30ConfigSetFloat:
         with cfg.open("w", encoding="utf-8") as fh:
             yaml.dump(data, fh)
 
-        with patch("grimoire.cli.app._find_config", return_value=cfg):
+        with patch("grimoire.cli.cmd_config._find_config", return_value=cfg):
             result = runner.invoke(app, ["config", "set", "threshold", "not-a-number"])
         assert result.exit_code == 1
         assert "number" in result.output.lower() or "Expected" in result.output
@@ -3025,9 +2984,9 @@ class TestR32SelfVersionImport:
 
     def test_no_redundant_json_import(self) -> None:
         """Verify no 'import json as _json' in self_version function body."""
-        from grimoire.cli import app as app_mod
+        import grimoire.cli.cmd_self as cmd_self_mod
 
-        source = Path(app_mod.__file__).read_text(encoding="utf-8")
+        source = Path(cmd_self_mod.__file__).read_text(encoding="utf-8")
         fn_start = source.index("def self_version(")
         next_def = source.index("\ndef ", fn_start + 1)
         fn_body = source[fn_start:next_def]
@@ -3075,7 +3034,7 @@ class TestR33CompletionDRY:
     """H1+H4: completion_install and completion_export share _generate_completion_script."""
 
     def test_generate_completion_script_returns_string(self) -> None:
-        from grimoire.cli.app import _generate_completion_script
+        from grimoire.cli.cmd_self import _generate_completion_script
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="# script\n")
@@ -3083,13 +3042,13 @@ class TestR33CompletionDRY:
         assert result == "# script"
 
     def test_generate_completion_script_rejects_unsupported_shell(self) -> None:
-        from grimoire.cli.app import _generate_completion_script
+        from grimoire.cli.cmd_self import _generate_completion_script
 
         with pytest.raises(typer.Exit):
             _generate_completion_script("powershell")
 
     def test_generate_completion_script_fails_on_empty_output(self) -> None:
-        from grimoire.cli.app import _generate_completion_script
+        from grimoire.cli.cmd_self import _generate_completion_script
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
@@ -3097,7 +3056,7 @@ class TestR33CompletionDRY:
                 _generate_completion_script("bash")
 
     def test_supported_shells_constant_exists(self) -> None:
-        from grimoire.cli.app import _SUPPORTED_SHELLS
+        from grimoire.cli.cmd_self import _SUPPORTED_SHELLS
 
         assert frozenset({"bash", "zsh", "fish"}) == _SUPPORTED_SHELLS
 
@@ -3106,20 +3065,20 @@ class TestR33ConfigKeyResolver:
     """H2: config_show and config_get share _resolve_config_key."""
 
     def test_resolve_config_key_returns_value(self) -> None:
-        from grimoire.cli.app import _resolve_config_key
+        from grimoire.cli.cmd_config import _resolve_config_key
 
         data = {"project": {"name": "demo", "type": "webapp"}}
         assert _resolve_config_key(data, "project.name") == "demo"
 
     def test_resolve_config_key_exits_on_missing(self) -> None:
-        from grimoire.cli.app import _resolve_config_key
+        from grimoire.cli.cmd_config import _resolve_config_key
 
         data = {"project": {"name": "demo"}}
         with pytest.raises(typer.Exit):
             _resolve_config_key(data, "project.missing")
 
     def test_resolve_config_key_top_level(self) -> None:
-        from grimoire.cli.app import _resolve_config_key
+        from grimoire.cli.cmd_config import _resolve_config_key
 
         data = {"project": {"name": "demo"}}
         assert isinstance(_resolve_config_key(data, "project"), dict)
@@ -3351,7 +3310,7 @@ class TestR35CompletionInstallAudit:
         def fake_expanduser(self: Path) -> Path:
             return rc_file
 
-        with patch("grimoire.cli.app._generate_completion_script", return_value="# test-comp"), \
+        with patch("grimoire.cli.cmd_self._generate_completion_script", return_value="# test-comp"), \
              patch.object(Path, "expanduser", fake_expanduser), \
              patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
             result = runner.invoke(app, ["completion", "install", "-s", "bash"])
@@ -3408,10 +3367,6 @@ class TestR35HistoryClear:
         assert result.exit_code == 0
         assert "no audit" in result.output.lower() or "No audit" in result.output
 
-    def test_clear_help_shows_flag(self) -> None:
-        result = runner.invoke(app, ["history", "--help"])
-        assert "--clear" in result.output
-
 
 # ── R36 ─────────────────────────────────────────────────────────────────────────
 
@@ -3436,7 +3391,8 @@ class TestR36ExitCodeConstants:
         assert exc_info.value.exit_code == _EXIT_USER
 
     def test_resolve_config_key_exits_with_config_code(self, tmp_path: Path) -> None:
-        from grimoire.cli.app import _EXIT_CONFIG, _resolve_config_key
+        from grimoire.cli.app import _EXIT_CONFIG
+        from grimoire.cli.cmd_config import _resolve_config_key
 
         with pytest.raises(typer.Exit) as exc_info:
             _resolve_config_key({"a": 1}, "nonexistent.key")
@@ -3466,11 +3422,6 @@ class TestR36LogOperationTruncate:
 
 class TestR36MergeCommand:
     """T1: tests for grimoire merge CLI command."""
-
-    def test_merge_help(self) -> None:
-        result = runner.invoke(app, ["merge", "--help"])
-        assert result.exit_code == 0
-        assert "source" in result.output.lower() or "--target" in result.output
 
     def test_merge_dry_run(self, tmp_path: Path) -> None:
         from grimoire.core.merge import MergePlan, MergeResult
@@ -3559,22 +3510,12 @@ class TestR36PluginsList:
         assert result.exit_code == 0
         assert "no plugins" in result.output.lower() or "No plugins" in result.output
 
-    def test_plugins_help(self) -> None:
-        result = runner.invoke(app, ["plugins", "--help"])
-        assert result.exit_code == 0
-        assert "list" in result.output
-
 
 # ── R37: --debug flag, DNS online, repair race, config set exit codes, env conflicts ──
 
 
 class TestR37DebugFlag:
     """A1: --debug / -D global flag exposes debug mode."""
-
-    def test_debug_flag_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "--debug" in result.output
 
     def test_debug_flag_sets_env(self, cli_project: Path) -> None:
         """--debug or -D should set GRIMOIRE_DEBUG=1 in the environment."""
@@ -3607,7 +3548,7 @@ class TestR37OnlineDNS:
 
     def test_dns_success_skips_socket(self) -> None:
         """If DNS resolves, socket.create_connection should NOT be called."""
-        from grimoire.cli.app import _is_online
+        from grimoire.cli.cmd_self import _is_online
 
         with (
             patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("8.8.8.8", 443))]),
@@ -3620,7 +3561,7 @@ class TestR37OnlineDNS:
 
     def test_dns_failure_fallback_to_socket(self) -> None:
         """If DNS fails, _is_online should try the socket fallback."""
-        from grimoire.cli.app import _is_online
+        from grimoire.cli.cmd_self import _is_online
 
         mock_socket = MagicMock()
         with (

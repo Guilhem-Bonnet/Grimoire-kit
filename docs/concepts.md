@@ -1,389 +1,382 @@
-<p align="right"><a href="../README.md">README</a></p>
+# :material-book-open-variant: Concepts — Architecture Grimoire Kit
 
-# <img src="assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre Grimoire Custom Kit
+> Ce guide explique l'architecture complète du kit.
+> Lisez-le en premier — tout le reste devient lisible après.
 
-> Ce guide explique **tous les concepts** du kit avec des analogies simples.
-> Lisez-le avant de plonger dans le code — tout deviendra limpide.
+---
 
-<img src="assets/divider.svg" width="100%" alt="">
+## :material-lightning-bolt: Vue d'ensemble
 
-
-## <img src="assets/icons/grimoire.svg" width="28" height="28" alt=""> Vue d'ensemble en 30 secondes
-
-Grimoire Custom Kit transforme votre IDE en **entreprise virtuelle** peuplée d'agents IA spécialisés.
+Grimoire Kit transforme votre IDE en **espace de travail agentique orchestré**.
 
 ```
-Votre projet
-    └── _grimoire/                  ← "Les bureaux" de votre entreprise virtuelle
-         ├── agents/            ← Les employés (chacun son rôle)
-         ├── workflows/         ← Les processus métier
-         ├── _memory/           ← La mémoire collective
-         └── _config/           ← Le règlement intérieur
+Vous (utilisateur)
+    │
+    ▼
+┌──────────────────────────────────┐
+│   Grimoire Master (SOG)          │  ← Point d'entrée unique
+│   Smart Orchestrator Gateway     │
+└──────────────┬───────────────────┘
+               │ dispatch invisible
+    ┌──────────┼──────────┐
+    ▼          ▼          ▼
+  analyst    dev        qa        …sub-agents invisibles
+  (Mary)    (Amelia)  (Quinn)
 ```
 
-Chaque agent a une **persona** (nom, style, expertise), suit des **règles communes** (le protocole), et communique via une **mémoire partagée**. C'est comme une équipe réelle — sauf qu'elle vit dans votre éditeur de code.
+Un seul agent est visible : **Grimoire Master**. Il orchestre tous les autres en coulisse — vous ne voyez jamais les transitions, jamais les noms des agents internes.
 
-<img src="assets/divider.svg" width="100%" alt="">
+---
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les 3 piliers
+## :material-cube-outline: Les 3 piliers
 
-### 1. Les Agents — "Qui fait quoi"
+### 1. Les agents — "Qui fait quoi"
 
-Un agent = un rôle spécialisé avec des compétences précises.
+Un agent = un rôle spécialisé avec expertise, règles et mémoire.
 
-| Analogie | Dans le kit |
-|----------|-------------|
-| Le chef de projet | **Atlas** — navigue, coordonne, a la vision globale |
-| Le contrôleur qualité | **Sentinel** — surveille, améliore le framework |
-| L'archiviste | **Mnemo** — consolide la mémoire, détecte les contradictions |
-| L'expert Go | **Gopher** — ne parle que Go, connaît les idiomes |
-| Le DevOps | **Forge** — infrastructure, pipelines, monitoring |
+| Agent | Persona | Spécialité |
+|---|---|---|
+| **grimoire-master** | Grimoire Master | Orchestration SOG — point d'entrée unique |
+| **analyst** | Mary | Business analysis, exigences |
+| **pm** | John | PRD, product management |
+| **architect** | Winston | Architecture, infrastructure |
+| **dev** | Amelia | Implémentation, TDD |
+| **qa** | Quinn | Tests, couverture |
+| **sm** | Bob | Scrum, backlog, stories |
+| **tech-writer** | Paige | Documentation |
+| **ux-designer** | Sally | UX/UI design |
+| **rodin** | Rodin | Débats socratiques, anti-chambre d'écho |
+| **art-director** | Iris | Direction artistique, hero FX, room kits |
+| **brainstorming-coach** | Carson | Idéation, brainstorming |
+| **agent-builder** | Bond | Création d'agents Grimoire |
 
-**Archétypes** = des packs d'agents pré-configurés selon le type de projet :
-- `minimal` → Atlas + Sentinel + Mnemo (le minimum viable)
-- `infra-ops` → + 7 agents infra (Kubernetes, sécurité, monitoring...)
-- `web-app` → + agents frontend/backend auto-détectés
-- `stack/*` → agents technos (Go, Python, TypeScript, Terraform...)
+**Archétypes** = packs pré-configurés selon le type de projet. Le wizard `grimoire init` en propose 6 :
+- `minimal` → base universelle (toujours incluse)
+- `web-app` → stack full-stack
+- `platform-engineering` → plateforme & infra (architecture, IaC, déploiement ; `infra-ops` auto-détecté pour Terraform/K8s)
+- `creative-studio` → création de contenu et design
+- `game-dev` → jeux vidéo gouvernés
+- `fix-loop` → boucle de correction certifiée
 
-### 2. Le Protocole — "Les règles du jeu"
+### 2. Le protocole — "Les règles du jeu"
 
-Tous les agents héritent d'un **protocole commun** (`agent-base.md`) qui garantit un comportement cohérent :
-
-```
-┌─────────────────────────────────────────┐
-│          PROTOCOLE AGENT-BASE           │
-├─────────────────────────────────────────┤
-│ Completion Contract   → jamais "fini"   │
-│                         sans preuve     │
-│ Plan/Act Mode         → planifier OU    │
-│                         exécuter        │
-│ Extended Thinking     → réflexion       │
-│                         profonde [THINK]│
-│ Maximes de Grice      → communication  │
-│                         optimale        │
-│ Chunking 7±2          → sorties        │
-│                         structurées     │
-│ Camouflage adaptatif  → s'adapte au    │
-│                         niveau user     │
-└─────────────────────────────────────────┘
-```
-
-### 3. La Mémoire — "Le cerveau collectif"
-
-Les agents partagent une mémoire persistante entre les sessions :
+Tous les agents héritent d'un protocole commun (`agent-base.md`) :
 
 ```
-_memory/
-├── shared-context.md        ← Ce que tout le monde sait
-├── decisions-log.md         ← Les décisions prises et pourquoi
-├── failure-museum.md        ← Les erreurs passées (pour ne pas les répéter)
-├── agent-learnings/         ← Ce que chaque agent a appris
-├── contradiction-log.md     ← Quand 2 infos se contredisent
-└── session-state.md         ← Où on en était (reprise automatique)
+┌──────────────────────────────────────────┐
+│           PROTOCOLE AGENT-BASE           │
+├──────────────────────────────────────────┤
+│ Completion Contract  → jamais "fini"     │
+│                        sans preuve       │
+│ Plan/Act Mode        → planifier OU      │
+│                        exécuter          │
+│ Autonomy Level       → ALS, AORA, PIP   │
+│ Anti-hallucination   → HUP, QEC, CVTL   │
+│ Maximes de Grice     → communication    │
+│                        optimale          │
+│ Chunking 7±2         → sorties          │
+│                        structurées       │
+└──────────────────────────────────────────┘
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+### 3. La mémoire — "Le cerveau collectif"
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les concepts clés expliqués
+Mémoire persistante partagée entre sessions :
+
+```
+_grimoire-runtime/_memory/
+├── shared-context.md        ← Vérité partagée (stack, décisions)
+├── decisions-log.md         ← ADRs et décisions prises
+├── failure-museum.md        ← Erreurs passées (pour ne pas répéter)
+├── agent-learnings/         ← Leçons par agent
+├── session-state.md         ← Reprise automatique de session
+└── udf-usage-tracker.json   ← Suivi des artefacts dynamiques
+```
+
+---
+
+## :material-router: SOG — Smart Orchestrator Gateway
+
+> **BM-53** — Architecture clé de Grimoire depuis la v3.
+
+Le SOG est le protocole d'orchestration qui fait de Grimoire Master l'**unique point de contact utilisateur**. Tous les autres agents sont des sub-agents invisibles, dispatchés automatiquement.
+
+### Principes fondateurs
+
+| Principe | Description |
+|---|---|
+| **Single entrypoint** | L'utilisateur ne parle qu'à Grimoire Master. Jamais aux sub-agents directement |
+| **Dispatch intelligent** | Le SOG analyse l'intention, détecte les zones d'ombre, choisit le(s) meilleur(s) agent(s) |
+| **ARG routing** | Agent Relationship Graph — graphe de dépendances inter-agents pour le routing optimal |
+| **Résultats agrégés** | Le SOG consolide les sorties avant de présenter à l'utilisateur |
+| **Invisibilité** | Noms d'agents, handoffs et routing internes jamais exposés |
+
+### Protocoles intégrés
+
+```
+HUP  (BM-50) — Anti-hallucination : aucun output de sub-agent ne passe sans validation
+QEC  (BM-51) — Questions par batch : jamais d'interruption avec une question unique
+CVTL (BM-52) — Cross-validation des outputs critiques via second agent
+PCE  (BM-54) — Party mode : débats multi-agents orchestrés
+```
+
+### Flux d'une requête
+
+```
+Utilisateur → Grimoire Master (SOG)
+  │
+  ├── 1. Analyse intention + détection zones d'ombre
+  ├── 2. Clarification proactive si besoin (batch via QEC)
+  ├── 3. Enrichissement du prompt avec contexte complet
+  ├── 4. Dispatch vers sub-agent(s) optimal(aux) via ARG
+  ├── 5. Validation HUP sur les outputs
+  ├── 6. Agrégation et présentation utilisateur
+  └── 7. Follow-through L1/L2 si suite logique évidente
+```
+
+!!! tip "Activation SOG"
+    Si votre premier message contient déjà une demande actionable, Grimoire Master traite directement. Le menu n'apparaît qu'en activation sans tâche explicite.
+
+---
+
+## :material-factory: UDF — Unified Dynamic Factory
+
+> Quand aucun artefact existant ne couvre un besoin, le SOG en crée un dynamiquement.
+
+### Les 4 types d'artefacts
+
+| Type | Builder | Éphémère | Permanent |
+|---|---|---|---|
+| **Agent** | agent-builder | `_dyn-{slug}.agent.md` | `{slug}.agent.md` |
+| **Workflow** | workflow-builder | `_dyn-{slug}.prompt.md` | `{slug}.prompt.md` |
+| **Skill** | workflow-builder + dev | `_dyn-{slug}/SKILL.md` | `{slug}/SKILL.md` |
+| **Instruction** | tech-writer | `_dyn-{slug}.instructions.md` | `{slug}.instructions.md` |
+
+### Triage de durabilité
+
+Avant de créer, le SOG calcule un score pour décider : éphémère ou permanent ?
+
+| Signal | Score |
+|---|---|
+| Domaine lié au stack technique du projet | +2 |
+| Besoin déjà exprimé dans une session précédente | +2 |
+| Domaine transversal (sécurité, perf, accessibilité) | +2 |
+| Besoin récurrent dans le cycle de vie produit | +1 |
+| Besoin ponctuel/exploratoire | -2 |
+| Domaine très niche | -1 |
+
+- **Score ≥ 3** → Création permanente (template `permanent-*.tpl.md`)
+- **Score < 3** → Création éphémère (expire dans 7 jours)
+
+!!! note "Promotion automatique"
+    Un artefact éphémère réutilisé 3+ fois est promu automatiquement en artefact permanent. Le suivi est dans `_grimoire-runtime/_memory/udf-usage-tracker.json`.
+
+---
+
+## :material-cog-sync: Modèle de routing (task-aware)
+
+Le SOG adapte le modèle LLM à la nature de la tâche :
+
+| Profil | Cas d'usage | Agents par défaut |
+|---|---|---|
+| `deep_reasoning` | Architecture, debug multi-fichiers, ADR, décisions nuancées | grimoire-master, rodin, architect |
+| `general_code` | Implémentation, tests, refactoring | dev, quick-flow-solo-dev, qa |
+| `writing_structured` | Docs, PRD, stories, prompts, YAML | pm, tech-writer, agent-builder |
+| `fast_iter` | Brainstorming, checks rapides | brainstorming-coach, design-thinking-coach |
+| `local_coder` | Usage offline/privé via Ollama | override manuel `/set-model dev qwen3-coder` |
+
+Override de session : `/set-model <agent|all|reset> <model-id|auto>`
+
+---
+
+## :material-shield-check-outline: Protocoles d'autonomie
+
+### ALS — Autonomy Level System
+
+Niveaux de risque pour chaque décision :
+
+| Niveau | Description | Action |
+|---|---|---|
+| L1 | Local, réversible (edit, test) | Exécuter sans confirmation |
+| L2 | Indirect, faible rayon d'impact | Exécuter, signaler |
+| L3 | Partagé ou à fort impact | Confirmer avant d'agir |
+
+### AORA — Autonomous Iteration Loop
+
+Boucle d'itération autonome : si une tâche révèle une suite logique L1/L2 alignée avec l'objectif courant, l'agent l'exécute dans le même tour — sans demander "tu veux que je continue ?".
+
+### PIP + DCF
+
+- **PIP** (Proactive Initiative Protocol) — l'agent prend l'initiative sur les gaps évidents
+- **DCF** (Dynamic Confidence Framework) — confiance contextuelle ; l'agent calibre son assertivité selon la certitude
+
+---
+
+## :material-handshake: Contrats et modes
 
 ### Completion Contract (CC)
 
-> **Analogie** : Un chirurgien ne dit pas "opération terminée" sans vérifier que le patient va bien.
+> Un chirurgien ne dit pas "opération terminée" sans vérifier que le patient va bien.
 
-Un agent ne peut JAMAIS dire "fait" sans avoir lancé les vérifications automatiques du stack (tests, lint, build). Si ça échoue → il corrige et relance. Pas de "je pense que c'est bon".
+Un agent ne peut dire "fait" sans avoir lancé les vérifications automatiques du stack :
 
 ```
-Agent dit "terminé" → cc-verify.sh détecte Python → lance pytest + ruff
-   → ✅ CC PASS → OK, c'est vraiment fini
-   → 🔴 CC FAIL → corrige, relance, boucle jusqu'à PASS
+Agent dit "terminé"
+  → cc-verify.sh détecte le stack (Python/Go/TS/...)
+  → Lance tests + lint + build
+  → ✓ CC PASS → Livraison
+  → ✗ CC FAIL → Corrige → Relance → Boucle
 ```
 
 ### Plan/Act Mode
 
-> **Analogie** : En cuisine — `[PLAN]` = écrire la recette, `[ACT]` = cuisiner directement.
+- **[PLAN]** — structure, planifie, liste les risques. Ne touche à rien sans votre accord.
+- **[ACT]** — exécute directement. Mode par défaut.
 
-- **[PLAN]** : l'agent structure la solution, liste les fichiers, les risques — mais ne touche à rien. Vous validez, puis il passe en [ACT].
-- **[ACT]** (défaut) : l'agent exécute directement, sans demander "tu veux que je continue ?" à chaque étape.
+Bascule : tapez `[PLAN]` ou `[ACT]` dans le chat.
 
-### Extended Thinking [THINK]
+---
 
-> **Analogie** : Demander à quelqu'un de s'asseoir, réfléchir 10 minutes, puis donner sa réponse — au lieu de répondre du tac au tac.
+## :material-brain: Système cognitif
 
-Pour les décisions critiques (architecture, sécurité, stack), l'agent explore 3+ options, simule les échecs, documente sa décision dans un ADR.
+### Maximes de Grice
 
-### Team of Teams
+| Maxime | Règle |
+|---|---|
+| **Quantité** | Dire exactement ce qu'il faut, ni plus ni moins |
+| **Qualité** | Ne rien affirmer sans preuve (`Port 8080 (vérifié via docker ps)`) |
+| **Pertinence** | Répondre à la question posée, pas à une autre |
+| **Manière** | Être clair, ordonné, étapes numérotées |
 
-> **Analogie** : Une entreprise avec des départements qui collaborent via des contrats.
-
-```
-Team Vision (stratégie)  ──Delivery Contract──→  Team Build (construction)
-         ↑                                              │
-         └───────────Delivery Contract──────────────────┘
-                                                        │
-                                              Team Ops (opérations)
-```
-
-Aucune team ne passe le relais sans un **Delivery Contract** signé — un artefact qui garantit que tout le contexte est transmis.
-
-### Boomerang Orchestration
-
-> **Analogie** : Le chef d'orchestre envoie la partition au violoniste, qui joue et renvoie le résultat.
-
-Le Scrum Master (SM) délègue une tâche à un agent spécialiste, attend le résultat, et enchaîne — comme un boomerang.
-
-```
-SM → "Dev, implémente cette story" → Dev travaille → résultat revient au SM
-SM → "QA, teste ce code" → QA teste → résultat revient au SM
-```
-
-<img src="assets/divider.svg" width="100%" alt="">
-
-## <img src="assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
-
-Ces principes sont intégrés dans le protocole que TOUS les agents suivent :
-
-### Maximes de Grice — Comment l'agent communique
-
-| Maxime | Règle | Exemple |
-|--------|-------|---------|
-| **Quantité** | Dire exactement ce qu'il faut | "3 fichiers modifiés : a.py, b.py, c.py" |
-| **Qualité** | Ne rien affirmer sans preuve | "Port 8080 (vérifié via `docker ps`)" |
-| **Pertinence** | Répondre à la question posée | "Quel port ?" → "3000" (pas l'histoire de Grafana) |
-| **Manière** | Être clair et ordonné | Étapes numérotées, termes précis |
-
-### Chunking 7±2 — Structure des sorties
-
-> **Analogie** : Un numéro de téléphone est découpé en groupes de 2-3 chiffres, pas 10 chiffres d'affilée.
+### Chunking 7±2
 
 Toute liste = max 7 items. Au-delà → sous-groupes avec titres.
-Tout menu = max 7 options visibles. Au-delà → "Plus d'options...".
+Tout menu = max 7 options visibles.
 
-### Camouflage Adaptatif
+### Camouflage adaptatif
 
-L'agent ajuste sa communication selon votre niveau (`skill_level` dans project-context.yaml) :
-
-| Niveau | Comportement |
-|--------|-------------|
+| Niveau (`skill_level`) | Comportement |
+|---|---|
 | `beginner` | Explique le POURQUOI, ajoute des commentaires, confirme chaque étape |
-| `intermediate` | Équilibre explication/exécution |
-| `expert` | Exécute directement, pas de commentaires superflus, terminologie technique |
+| `intermediate` | Équilibre explication et exécution |
+| `expert` | Exécute directement, terminologie technique, pas de redondance |
 
-### Priming Cognitif
+### Priming cognitif
 
-> **Analogie** : Avant de demander "quel nom pour le nouveau service ?", d'abord montrer les noms existants.
+L'agent charge toujours le contexte pertinent **avant** de poser une question ou de proposer une solution.
 
-L'agent charge toujours le contexte pertinent AVANT de poser une question.
+---
 
-### Wabi-sabi — Accepter l'imperfection
-
-> **Analogie** : Mieux vaut livrer un pont qui fonctionne avec des finitions à peaufiner, qu'un pont parfait jamais construit.
-
-Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfections cosmétiques sont documentées en `Known Limitations`, pas bloquantes.
-
-<img src="assets/divider.svg" width="100%" alt="">
-
-## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> Les 41 outils — Carte de navigation
-
-### Outils fondamentaux (pré-existants)
-
-| Outil | Pour quoi faire | Analogie |
-|-------|----------------|----------|
-| `context-guard` | Mesurer le budget LLM d'un agent | Le compteur kilométrique |
-| `agent-forge` | Générer un nouvel agent | L'imprimante 3D à agents |
-| `agent-bench` | Mesurer la performance | Le tableau de scores |
-| `dna-evolve` | Faire évoluer la config | L'ADN qui mute et s'adapte |
-| `dream` | Insights émergents hors-session | Le sommeil qui consolide |
-| `adversarial-consensus` | Décision collective critique | Le tribunal avec avocat du diable |
-| `antifragile-score` | Résilience du système | Le check-up médical |
-| `reasoning-stream` | Tracer le raisonnement | Le journal de bord du capitaine |
-| `cross-migrate` | Migrer des artefacts entre projets | Le déménageur |
-| `agent-darwinism` | Sélection naturelle des agents | La sélection de Darwin |
-| `stigmergy` | Coordination par signaux | Les phéromones des fourmis |
-| `memory-lint` | Valider la cohérence mémoire | Le correcteur orthographique |
-| `nso` | Orchestrateur nerveux central | Le système nerveux |
-| `auto-doc` | Synchroniser README et code | Le traducteur automatique |
-| `schema-validator` | Valider les fichiers YAML | Le contrôleur qualité |
-| `gen-tests` | Scaffolder des tests | Le générateur de filets de sécurité |
-
-### Intelligence contextuelle (Vague 2)
-
-| Outil | Pour quoi faire | Analogie |
-|-------|----------------|----------|
-| `context-router` | Router le contexte vers le bon agent | Le standard téléphonique |
-| `preflight-check` | Vérifier avant d'exécuter une story | Le checklist du pilote avant décollage |
-| `nudge-engine` | Suggestions non-intrusives | Le GPS qui propose des détours |
-| `desire-paths` | Détecter les usages réels vs conçus | Les chemins de traverse dans l'herbe |
-| `early-warning` | Alertes précoces (dette, complexité) | Le détecteur de fumée |
-
-### Intégrité & résilience (Vague 3)
-
-| Outil | Pour quoi faire | Analogie |
-|-------|----------------|----------|
-| `semantic-chain` | Tracer la chaîne sémantique | La chaîne du froid alimentaire |
-| `rosetta` | Glossaire unifié cross-domaine | La pierre de Rosette |
-| `immune-system` | Détecter les anomalies | Le système immunitaire |
-| `self-healing` | Auto-diagnostic et réparation | Le médecin de garde |
-| `dark-matter` | Révéler les connaissances implicites | Le télescope à matière noire |
-| `oracle` | CTO virtuel introspectif | L'oracle de Delphes |
-
-### Évolution & adaptation (Vague 4)
-
-| Outil | Pour quoi faire | Analogie |
-|-------|----------------|----------|
-| `workflow-adapt` | Adapter les workflows à l'usage | La route qui s'élargit au trafic |
-| `bias-toolkit` | Détecter et gérer les biais cognitifs | Les lunettes anti-illusion |
-| `crescendo` | Progression beginner → expert | L'escalier pédagogique |
-| `new-game-plus` | Héritage intelligent cross-projets | Le New Game+ jeu vidéo |
-| `swarm-consensus` | Estimation multi-agent | Le vote de l'essaim |
-| `incubator` | Faire mûrir des idées | La couveuse à idées |
-
-### Écosystème & visualisation (Vague 5)
-
-| Outil | Pour quoi faire | Analogie |
-|-------|----------------|----------|
-| `project-graph` | Graphe de dépendances du projet | La carte satellite |
-| `dashboard` | Tableau de bord santé complet | Le cockpit d'avion |
-| `mycelium` | Partager des patterns entre projets | Le réseau de champignons |
-| `distill` | Condenser un document (5 niveaux) | L'alambic à idées |
-| `harmony-check` | Score d'harmonie architecturale | L'accordeur de piano |
-| `digital-twin` | Simulation d'impact de changements | Le simulateur de vol |
-| `quantum-branch` | Timelines parallèles de configuration | Les mondes parallèles |
-| `time-travel` | Checkpoints et archéologie temporelle | La machine à remonter le temps |
-| `crispr` | Édition chirurgicale de workflows | Le scalpel génétique |
-| `decision-log` | Blockchain légère de décisions | Le registre notarié |
-| `mirror-agent` | Apprentissage inter-agents par mimétisme | Les neurones miroirs |
-| `sensory-buffer` | Mémoire court terme à décroissance | La mémoire de travail |
-| `r-and-d` | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes | Le laboratoire de R&D autonome |
-
-<img src="assets/divider.svg" width="100%" alt="">
-
-## <img src="assets/icons/temple.svg" width="28" height="28" alt=""> Architecture du projet
+## :material-sitemap: Architecture du projet
 
 ```
 grimoire-kit/
 │
-├── grimoire-init.sh                 ← Point d'entrée : installe et configure tout
-├── project-context.tpl.yaml     ← Template : identité du projet
+├── src/grimoire/              # SDK Python
+│   ├── core/                  # Config, Project, Scanner, Validator
+│   ├── cli/                   # CLI Typer (grimoire <cmd>)
+│   ├── tools/                 # HarmonyCheck, Preflight, MemoryLint
+│   ├── memory/                # Backends (JSON · Qdrant · Ollama)
+│   ├── mcp/                   # Serveur MCP
+│   └── registry/              # AgentRegistry, LocalRegistry
 │
-├── framework/                   ← Le "système d'exploitation" (jamais modifié par projet)
-│   ├── agent-base.md            ← Protocole commun à tous les agents
-│   ├── cc-verify.sh             ← Completion Contract vérifieur
-│   ├── tools/                   ← 49 outils Python (stdlib only)
-│   ├── teams/                   ← Définitions des 3 teams
-│   ├── workflows/               ← Workflows de base (boomerang, subagent, etc.)
-│   ├── memory/                  ← Scripts mémoire (mem0-bridge, maintenance)
-│   └── mcp/                     ← Serveur MCP pour cross-IDE
+├── _grimoire-runtime/         # Runtime agentique (dans votre projet)
+│   ├── bmm/agents/            # Sub-agents BMM (analyst, dev, qa…)
+│   ├── core/agents/           # Grimoire Master (SOG)
+│   ├── _memory/               # Mémoire persistante
+│   └── _config/               # Manifestes, routing, UDF registry
 │
-├── archetypes/                  ← Packs d'agents pré-configurés
-│   ├── minimal/                 ← 3 agents de base
-│   ├── infra-ops/               ← 7 agents infrastructure
-│   ├── web-app/                 ← Agents front/back
-│   └── stack/                   ← Agents par techno (Go, Python, TS...)
-│
-├── docs/                        ← Documentation
-└── tests/                       ← Tests (122 smoke + tests unitaires)
+├── archetypes/                # Templates de projets
+├── framework/tools/           # Outils CLI standalone
+└── docs/                      # Cette documentation
 ```
 
-### Comment ça s'installe dans un projet
+### Installation dans un projet
 
 ```
 votre-projet/
 ├── votre-code/
-├── _grimoire/                       ← Créé par grimoire-init.sh
-│   ├── _config/
-│   │   └── custom/
-│   │       ├── agents/          ← Vos agents (copiés depuis les archétypes)
-│   │       ├── cc-verify.sh     ← Completion Contract
-│   │       └── agent-manifest.csv
-│   ├── _memory/
-│   │   ├── shared-context.md
-│   │   ├── decisions-log.md
-│   │   ├── failure-museum.md
-│   │   └── agent-learnings/
-│   └── project-context.yaml     ← L'identité de votre projet
-└── .github/
-    └── copilot-instructions.md  ← Instructions pour GitHub Copilot
+├── _grimoire-runtime/         # Installé par grimoire init
+│   ├── _config/               # Manifestes agents/workflows
+│   ├── _memory/               # Mémoire persistante
+│   └── bmm/                   # Module méthodologie
+├── _grimoire-runtime-output/  # Artefacts produits
+│   ├── planning-artifacts/    # PRD, épics, brainstorms
+│   └── implementation-artifacts/
+└── project-context.yaml       # Identité du projet
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+---
 
-## <img src="assets/icons/moon.svg" width="28" height="28" alt=""> Flux typique d'une session
+## :material-play-circle: Flux d'une session
 
 ```
 1. Ouvrir l'IDE
    │
-2. Activer un agent (ex: @dev)
+2. Parler au Grimoire Master (SOG)
    │
-   ├── L'agent charge le protocole (agent-base.md)
-   ├── Health-check automatique
-   ├── Vérifie les tâches en cours (Zeigarnik)
-   ├── Vérifie la boîte de réception inter-agents
-   └── Affiche le menu + greeting personnalisé
+   ├── Chargement protocole + mémoire session
+   ├── Activation SOG : analyse l'intention
+   ├── Si demande actionable → traitement direct (pas de menu)
+   └── Sinon → menu numéroté
    │
-3. Demander une tâche ("implémente le cache Redis")
+3. Demander une tâche
    │
-   ├── [ACT par défaut] L'agent exécute directement
-   ├── Modifie les fichiers
-   ├── Lance cc-verify.sh → tests + lint
-   ├── ✅ CC PASS → "Fait"
-   │   ou
-   ├── 🔴 CC FAIL → corrige → relance → boucle
+   ├── SOG analyse + enrichit le contexte
+   ├── Dispatch vers sub-agent optimal (invisible)
+   ├── Sub-agent exécute → CC vérifié
+   ├── HUP : validation output avant retour
+   └── SOG agrège et présente le résultat
    │
-4. Fin de session
+4. Follow-through AORA
    │
-   ├── Exit Summary (Peak-End Rule)
+   └── Si suite logique L1/L2 → exécution dans le même tour
+   │
+5. Fin de session
+   │
+   ├── Exit Summary
    ├── Sauvegarde session-state.md
-   └── Consolidation mémoire
+   └── Mise à jour mémoire
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+---
 
-## <img src="assets/icons/plug.svg" width="28" height="28" alt=""> Glossaire rapide
+## :material-book-alphabet: Glossaire
 
-| Terme | Signification |
-|-------|--------------|
+| Terme | Définition |
+|---|---|
+| **SOG** | Smart Orchestrator Gateway — point d'entrée unique, dispatche invisiblement |
+| **UDF** | Unified Dynamic Factory — crée agents/workflows/skills/instructions à la volée |
+| **ARG** | Agent Relationship Graph — graphe de routage inter-agents |
+| **HUP** | Anti-hallucination protocol — validation de tous les outputs sub-agents |
+| **QEC** | Question batch protocol — jamais d'interruption avec une question isolée |
+| **CVTL** | Cross-validation trigger — second agent pour les outputs critiques |
+| **PCE** | Party mode — débats multi-agents orchestrés |
+| **ALS** | Autonomy Level System — niveaux de risque L1/L2/L3 |
+| **AORA** | Autonomous iteration loop — exécution de la suite logique sans friction |
+| **PIP** | Proactive initiative — prise d'initiative sur les gaps évidents |
+| **DCF** | Dynamic confidence — calibration de l'assertivité |
 | **CC** | Completion Contract — vérification automatique avant tout "terminé" |
-| **DNA** | `archetype.dna.yaml` — configuration génétique d'un archétype |
-| **SIL** | Self-Improvement Loop — boucle d'auto-amélioration |
-| **NSO** | Nervous System Orchestrator — cycle complet de maintenance |
 | **MCP** | Model Context Protocol — standard d'interop IDE |
 | **ADR** | Architecture Decision Record — décision documentée |
-| **Grimoire_TRACE** | Variable d'environnement pour tracer l'exécution |
+| **BMM** | Méthode Grimoire — module méthodologie (analyst, pm, dev, qa…) |
 | **Archétype** | Pack d'agents pré-configuré pour un type de projet |
-| **Persona** | Identité et style de communication d'un agent |
-| **Delivery Contract** | Artefact contractuel entre 2 teams |
-| **Failure Museum** | Collection d'erreurs passées pour apprentissage |
-| **Chunking** | Découper l'info en groupes de 7±2 (loi de Miller) |
-| **Camouflage** | Adapter la communication au niveau de l'utilisateur |
-| **Priming** | Charger le contexte avant une question |
-| **Wabi-sabi** | Accepter l'imperfection pragmatiquement |
-| **Stigmergy** | Coordination indirecte par signaux persistants |
-| **Digital Twin** | Jumeau numérique — simule l'impact de changements |
-| **Quantum Branch** | Fork de configurations pour explorer des alternatives |
-| **CRISPR** | Édition chirurgicale précise de workflows |
-| **Decision Chain** | Chaîne immuable de décisions (blockchain légère) |
-| **Sensory Buffer** | Mémoire court terme qui décroît exponentiellement |
-| **R&D Engine** | Moteur d'innovation autonome avec reinforcement learning (v2.1) |
-| **Reinforcement Learning** | Ajustement automatique des poids par récompense/pénalité |
-| **Epoch** | Un cycle complet d'innovation (harvest → select → converge) |
-| **Policy** | Poids adaptatifs qui guident les choix du moteur R&D |
-| **Convergence** | Point où l'innovation n'apporte plus de gain significatif |
-| **Closed-loop** | Reward modulé par la santé réelle du projet (mesure before/after) |
-| **Health snapshot** | Capture des métriques projet (outils, tests, harmony, antifragile) |
-| **Mutation** | Transformation d'une idée gagnante (transposition, escalade, inverse) |
-| **Mutation depth** | Profondeur de chaîne — mutations de mutations pénalisées progressivement |
-| **Multi-projet** | Comparer ou croiser les données entre plusieurs projets Grimoire |
-| **Gap-analysis** | Détection automatique des manques réels (tests, docs, dépendances) |
-| **GO threshold** | Seuil de score minimum (0.60) pour qu'une idée passe le challenge |
-| **Prototype** | Squelette Python auto-généré pour implémenter une idée gagnante |
+| **Persona** | Identité, nom et style de communication d'un agent |
+| **Session Momentum** | Maintien de la dynamique entre requêtes (AORA + CC) |
+| **Friction Budget** | Limite de sollicitations non nécessaires par session |
+| **NSO** | *Ancienne appellation* — Nervous System Orchestrator, remplacé par SOG en v3 |
 
-<img src="assets/divider.svg" width="100%" alt="">
+---
 
-## <img src="assets/icons/rocket.svg" width="28" height="28" alt=""> Pour aller plus loin
+## :material-arrow-right-circle: Pour aller plus loin
 
-- [getting-started.md](getting-started.md) — Guide d'installation pas à pas
-- [creating-agents.md](creating-agents.md) — Créer un agent custom
-- [archetype-guide.md](archetype-guide.md) — Comprendre les archétypes
-- [memory-system.md](memory-system.md) — Le système de mémoire en détail
-- [workflow-design-patterns.md](workflow-design-patterns.md) — Patterns de workflows
-- [troubleshooting.md](troubleshooting.md) — Résoudre les problèmes courants
+<div class="grid cards" markdown>
+
+- :material-rocket-launch-outline: [Guide de démarrage](getting-started.md)
+- :material-account-hard-hat-outline: [Créer un agent](creating-agents.md)
+- :material-cube-outline: [Guide des archétypes](archetype-guide.md)
+- :material-brain: [Système de mémoire](memory-system.md)
+- :material-sitemap: [Patterns de workflows](workflow-design-patterns.md)
+- :material-wrench: [Dépannage](troubleshooting.md)
+
+</div>

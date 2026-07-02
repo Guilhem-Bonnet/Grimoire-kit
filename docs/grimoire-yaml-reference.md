@@ -41,7 +41,7 @@ agents:
 ## Section `project`
 
 | Clé | Type | Défaut | Description |
-|-----|------|--------|-------------|
+| ----- | ------ | -------- | ------------- |
 | `name` | string | **requis** | Nom du projet |
 | `description` | string | `""` | Description courte |
 | `type` | string | `"webapp"` | Type de projet (`webapp`, `api`, `library`, `infra`, etc.) |
@@ -52,7 +52,7 @@ agents:
 ### Entrée `repos`
 
 | Clé | Type | Défaut | Description |
-|-----|------|--------|-------------|
+| ----- | ------ | -------- | ------------- |
 | `name` | string | **requis** | Nom du dépôt |
 | `path` | string | `"."` | Chemin relatif |
 | `default_branch` | string | `"main"` | Branche par défaut |
@@ -60,7 +60,7 @@ agents:
 ## Section `user`
 
 | Clé | Type | Défaut | Description |
-|-----|------|--------|-------------|
+| ----- | ------ | -------- | ------------- |
 | `name` | string | `""` | Nom de l'utilisateur |
 | `language` | string | `"Français"` | Langue de communication des agents |
 | `document_language` | string | `"Français"` | Langue des documents générés |
@@ -71,34 +71,44 @@ agents:
 ## Section `memory`
 
 | Clé | Type | Défaut | Description |
-|-----|------|--------|-------------|
+| ----- | ------ | -------- | ------------- |
 | `backend` | enum | `"auto"` | Backend mémoire |
 | `collection_prefix` | string | `"grimoire"` | Préfixe des collections |
 | `embedding_model` | string | `""` | Modèle d'embedding (optionnel) |
 | `qdrant_url` | string | `""` | URL Qdrant (mode `qdrant-server`) |
+| `weaviate_url` | string | `""` | URL Weaviate (mode `weaviate-server`) |
+| `weaviate_collection` | string | `""` | Collection Weaviate, ou `collection_prefix` si vide |
 | `ollama_url` | string | `""` | URL Ollama (mode `ollama`) |
+| `neo4j_uri` | string | `""` | URI Bolt Neo4j pour les couches graphe |
+| `neo4j_user` | string | `"neo4j"` | Utilisateur Neo4j |
+| `neo4j_password_env` | string | `"GRIMOIRE_NEO4J_PASSWORD"` | Variable d'environnement du mot de passe Neo4j |
+| `knowledge_graph` | enum | `"sqlite-sidecar"` | Graphe de faits structurés |
+| `memory_graph` | enum | `"sqlite-sidecar"` | Projection graphe des souvenirs |
+| `code_graph` | enum | `"planned"` | Graphe de code prévu |
+| `task_memory` | enum | `"planned"` | Mémoire de tâches prévue |
 
 ### Backends disponibles
 
 | Backend | Description |
-|---------|-------------|
+| --------- | ------------- |
 | `auto` | Détection automatique du meilleur backend disponible |
 | `local` | Stockage fichier local (pas de dépendance externe) |
 | `qdrant-local` | Qdrant en mode local (in-memory) |
 | `qdrant-server` | Qdrant serveur distant |
+| `weaviate-server` | Weaviate serveur distant |
 | `ollama` | Ollama pour les embeddings |
 
 ## Section `agents`
 
 | Clé | Type | Défaut | Description |
-|-----|------|--------|-------------|
+| ----- | ------ | -------- | ------------- |
 | `archetype` | string | `"minimal"` | Archétype de base |
 | `custom_agents` | list[string] | `[]` | Agents personnalisés à charger |
 
 ### Archétypes
 
 | Archétype | Description |
-|-----------|-------------|
+| ----------- | ------------- |
 | `minimal` | Agents de base (orchestrateur, sentinelle, mémoire) |
 | `web-app` | Stack web avec agents frontend/backend |
 | `infra-ops` | Infrastructure et DevOps |
@@ -140,10 +150,10 @@ Les valeurs de la section `user` (et `project.name`) servent de source de vérit
 La commande `grimoire setup` propage ces valeurs dans tous les fichiers de configuration du projet :
 
 | Fichier cible | Champs synchronisés |
-|---------------|--------------------|
-| `_bmad/bmm/config.yaml` | `project_name`, `user_name`, `communication_language`, `document_output_language`, `user_skill_level` |
-| `_bmad/{core,cis,tea,bmb}/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
-| `_bmad/_memory/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
+| --------------- | -------------------- |
+| `_grimoire-runtime/bmm/config.yaml` | `project_name`, `user_name`, `communication_language`, `document_output_language`, `user_skill_level` |
+| `_grimoire-runtime/{core,cis,tea,bmb}/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
+| `_grimoire-runtime/_memory/config.yaml` | `user_name`, `communication_language`, `document_output_language` |
 | `.github/copilot-instructions.md` | Project, User, Communication Language, Document Output Language, User Skill Level |
 
 ```bash
@@ -164,5 +174,5 @@ grimoire setup --check --json
 
 ## Voir aussi
 
-- [Getting Started](getting-started.md)
+- [Guide de démarrage](getting-started.md)
 - [Guide SDK](sdk-guide.md)

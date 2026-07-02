@@ -15,6 +15,7 @@ import uuid
 from typing import Any
 
 from grimoire.memory.backends.base import MemoryEntry
+from grimoire.memory.taxonomy import build_taxonomy
 
 # Keys stored *inside* the Qdrant payload that are NOT user metadata.
 _RESERVED_KEYS: frozenset[str] = frozenset({"memory", "user_id", "tags", "created_at", "updated_at"})
@@ -48,6 +49,17 @@ class QdrantStorageMixin:
 
     def _embed(self, text: str) -> list[float]:
         raise NotImplementedError
+
+    def _build_filter(self, *, user_id: str = "", filters: dict[str, str] | None = None) -> Any:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        must: list[Any] = []
+        if user_id:
+            must.append(FieldCondition(key="user_id", match=MatchValue(value=user_id)))
+        for key, value in (filters or {}).items():
+            if value:
+                must.append(FieldCondition(key=key, match=MatchValue(value=value)))
+        return Filter(must=must) if must else None
 
     # ── core ──────────────────────────────────────────────────────────────
 
@@ -83,27 +95,36 @@ class QdrantStorageMixin:
         return _payload_to_entry(results[0])
 
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        return self.search_filtered(query, user_id=user_id, limit=limit, filters=None)
 
+    def search_filtered(
+        self,
+        query: str,
+        *,
+        user_id: str = "",
+        limit: int = 5,
+        filters: dict[str, str] | None = None,
+    ) -> list[MemoryEntry]:
         vector = self._embed(query)
-        flt = None
-        if user_id:
-            flt = Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))])
         response = self._client.query_points(
             collection_name=self._collection,
             query=vector,
             limit=limit,
-            query_filter=flt,
+            query_filter=self._build_filter(user_id=user_id, filters=filters),
         )
         return [_payload_to_entry(r, score=float(r.score)) for r in response.points]
 
     def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        return self.get_all_filtered(user_id=user_id, offset=offset, limit=limit, filters=None)
 
-        flt = None
-        if user_id:
-            flt = Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))])
-
+    def get_all_filtered(
+        self,
+        *,
+        user_id: str = "",
+        offset: int = 0,
+        limit: int | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> list[MemoryEntry]:
         # Scroll all pages to avoid silent truncation
         all_points: list[Any] = []
         next_offset = None
@@ -113,7 +134,7 @@ class QdrantStorageMixin:
             first = False
             kwargs: dict[str, Any] = {
                 "collection_name": self._collection,
-                "scroll_filter": flt,
+                "scroll_filter": self._build_filter(user_id=user_id, filters=filters),
                 "limit": batch_size,
                 "with_payload": True,
             }
@@ -132,6 +153,9 @@ class QdrantStorageMixin:
     def consolidate(self) -> int:
         """Qdrant has no built-in dedup — returns 0."""
         return 0
+
+    def taxonomy(self, *, user_id: str = "", filters: dict[str, str] | None = None) -> dict[str, Any]:
+        return build_taxonomy(self.get_all_filtered(user_id=user_id, filters=filters))
 
     # ── CRUD extensions ───────────────────────────────────────────────────
 

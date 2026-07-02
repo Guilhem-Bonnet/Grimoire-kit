@@ -1583,7 +1583,7 @@ body.gp-onepager .md-typeset .admonition.onepager {
   position: relative;
   display: grid;
   align-content: center;
-  min-height: 100vh;
+  min-height: min(100vh, 54rem);
   scroll-margin-top: 8rem;
   margin: 0;
   padding: clamp(2rem, 5vw, 4rem);
@@ -1595,6 +1595,11 @@ body.gp-onepager .md-typeset .admonition.onepager {
   opacity: 0;
   transform: translate3d(0, 18px, 0);
   transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-03,
+body.gp-onepager .md-typeset .admonition.onepager.gp-scene-07 {
+  min-height: min(100vh, 60rem);
 }
 
 body.gp-onepager .md-typeset .admonition.onepager:not(.gp-scene-01)::before {
@@ -2202,7 +2207,10 @@ body.gp-onepager .gp-contrast-card li::before {
   body.gp-onepager .md-typeset .admonition.onepager {
     min-height: auto;
     padding: 5.5rem 0 3rem;
-  body.gp-onepager .gp-site-rail__items a,
+  }
+
+  body.gp-onepager .gp-site-rail__items a {
+    flex: 0 0 auto;
   }
 
   body.gp-onepager .gp-news-strip__card {

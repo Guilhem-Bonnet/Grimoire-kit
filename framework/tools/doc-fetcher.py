@@ -3,6 +3,12 @@
 doc-fetcher.py — Indexation de documentation externe pour RAG Grimoire.
 =====================================================================
 
+.. deprecated::
+   Ce module est remplacé par ``docs-fetcher.py`` qui offre chunking
+   adaptatif, protection SSRF, rate limiting, intégration Qdrant et
+   crawl par sitemap. Utilisez ``docs-fetcher.py`` pour tout nouveau
+   projet.
+
 Comparable au `@docs` de Cursor : indexe des sites de documentation
 externes (React, Django, Terraform, etc.) dans le RAG local pour
 enrichir les réponses des agents avec des références à jour.
@@ -46,6 +52,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from dataclasses import asdict, dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
@@ -625,6 +632,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    warnings.warn(
+        "doc-fetcher.py est déprécié — utilisez docs-fetcher.py à la place "
+        "(chunking adaptatif, SSRF protection, Qdrant, sitemap crawl).",
+        DeprecationWarning,
+        stacklevel=1,
+    )
     parser = build_parser()
     args = parser.parse_args()
 

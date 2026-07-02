@@ -130,6 +130,18 @@ class TestProjectScaffolder:
         tpl_labels = [t.label for t in plan.templates]
         assert "_grimoire/_memory/config.yaml" in tpl_labels
 
+    def test_plan_qdrant_server_includes_docker_compose(self, tmp_path: Path) -> None:
+        s = _scaffolder(tmp_path, backend="qdrant-server")
+        plan = s.plan()
+        labels = [fc.label for fc in plan.copies]
+        assert "memory/docker-compose.memory.yml" in labels
+
+    def test_plan_weaviate_server_includes_target_compose(self, tmp_path: Path) -> None:
+        s = _scaffolder(tmp_path, backend="weaviate-server")
+        plan = s.plan()
+        labels = [fc.label for fc in plan.copies]
+        assert "memory/docker-compose.memory-target.yml" in labels
+
     def test_plan_includes_agent_manifest(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
         plan = s.plan()
@@ -180,6 +192,26 @@ class TestProjectScaffolder:
         assert "test-project" in content
         assert "Test User" in content
         assert "minimal" in content
+        assert 'short_term_backend: "sqlite"' in content
+        assert 'code_graph: "planned"' in content
+
+    def test_infra_ops_scaffold_uses_redis_short_term_memory(self, tmp_path: Path) -> None:
+        s = _scaffolder(tmp_path, archetype="infra-ops", backend="ollama")
+        plan = s.plan()
+        s.execute(plan)
+
+        ctx = (tmp_path / "project-context.yaml").read_text()
+        assert 'layer_profile: "infra-ops"' in ctx
+        assert 'short_term_backend: "redis"' in ctx
+        assert 'redis_url: "redis://localhost:6379/0"' in ctx
+
+        requirements = (tmp_path / "_grimoire" / "_memory" / "requirements.txt").read_text()
+        assert "redis>=5.0.0" in requirements
+        assert "qdrant-client>=1.7.0,<1.13" in requirements
+
+        compose = tmp_path / "docker-compose.redis.yml"
+        assert compose.is_file()
+        assert "redis:7.4-alpine" in compose.read_text()
 
     def test_execute_writes_memory_config(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
@@ -189,6 +221,32 @@ class TestProjectScaffolder:
         assert cfg.is_file()
         content = cfg.read_text()
         assert "Test User" in content
+
+    def test_execute_qdrant_server_writes_docker_compose(self, tmp_path: Path) -> None:
+        s = _scaffolder(tmp_path, backend="qdrant-server")
+        plan = s.plan()
+        s.execute(plan)
+        compose = tmp_path / "docker-compose.memory.yml"
+        assert compose.is_file()
+        content = compose.read_text()
+        assert "qdrant/qdrant" in content
+        assert "GRIMOIRE_QDRANT_PORT" in content
+
+    def test_execute_weaviate_server_writes_target_stack(self, tmp_path: Path) -> None:
+        s = _scaffolder(tmp_path, backend="weaviate-server")
+        plan = s.plan()
+        s.execute(plan)
+        compose = tmp_path / "docker-compose.memory-target.yml"
+        assert compose.is_file()
+        content = compose.read_text()
+        assert "semitechnologies/weaviate:1.35.19" in content
+        assert "neo4j:5.26.25" in content
+        assert "redis:7.4-alpine" in content
+        ctx = (tmp_path / "project-context.yaml").read_text()
+        assert 'backend: "weaviate-server"' in ctx
+        assert 'weaviate_url: "http://localhost:8080"' in ctx
+        assert 'short_term_backend: "redis"' in ctx
+        assert 'memory_graph: "neo4j"' in ctx
 
     def test_execute_writes_manifest(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
@@ -244,6 +302,7 @@ class TestProjectScaffolder:
         ctx = (tmp_path / "project-context.yaml").read_text()
         assert "infra-ops" in ctx
         assert "qdrant-local" in ctx
+        assert 'short_term_backend: "redis"' in ctx
 
     def test_idempotent_execute(self, tmp_path: Path) -> None:
         """Running execute twice should not fail."""

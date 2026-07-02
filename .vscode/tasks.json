@@ -6,6 +6,101 @@
   "version": "2.0.0",
   "tasks": [
 
+    // ── Groupe : Quick Validation (stable labels) ────────────────────────
+    {
+      "label": "grimoire: lint",
+      "type": "shell",
+      "command": "bash -c 'TARGETS=\"\"; for d in framework/tools tests; do [ -e \"$d\" ] && TARGETS=\"$TARGETS $d\"; done; if [ -z \"$TARGETS\" ]; then echo \"Aucune cible lint trouvee - skip\"; exit 0; fi; ${workspaceFolder}/.venv/bin/python -m ruff check $TARGETS --statistics'",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "grimoire: lintfix",
+      "type": "shell",
+      "command": "bash -c 'TARGETS=\"\"; for d in framework/tools tests; do [ -e \"$d\" ] && TARGETS=\"$TARGETS $d\"; done; if [ -z \"$TARGETS\" ]; then echo \"Aucune cible lint trouvee - skip\"; exit 0; fi; ${workspaceFolder}/.venv/bin/python -m ruff check $TARGETS --fix --statistics'",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "grimoire: lint-fix",
+      "dependsOn": "grimoire: lintfix",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "grimoire: quickcheck",
+      "type": "shell",
+      "command": "bash -c 'cd \"${workspaceFolder}\" && framework/tools/quick-check.sh'",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "grimoire: quick-check",
+      "dependsOn": "grimoire: quickcheck",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "grimoire: preflight",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python framework/tools/preflight-check.py --project-root .",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "bmad: lint",
+      "dependsOn": "grimoire: lint",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "bmad: lintfix",
+      "dependsOn": "grimoire: lintfix",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "bmad: lint-fix",
+      "dependsOn": "grimoire: lintfix",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "bmad: quickcheck",
+      "dependsOn": "grimoire: quickcheck",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "bmad: quick-check",
+      "dependsOn": "grimoire: quickcheck",
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "bmad: preflight",
+      "dependsOn": "grimoire: preflight",
+      "dependsOrder": "sequence"
+    },
+
     // ── Groupe : Grimoire Diagnostics ─────────────────────────────────────
     {
       "label": "Grimoire: Doctor",

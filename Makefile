@@ -11,18 +11,45 @@ venv: ## Create virtual environment ($(VENV)/)
 	@echo "✓ venv ready — activate with: source $(VENV)/bin/activate"
 
 .PHONY: dev
-dev: ## Full dev setup: create venv + install all dev deps + pre-commit
-	@test -d $(VENV) || python3 -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip --quiet
-	$(VENV)/bin/pip install -e ".[dev]"
-	$(VENV)/bin/pre-commit install
+dev: ## Full dev setup: prefer uv.lock, fallback to unlocked pip install
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --locked --extra dev; \
+		uv run pre-commit install; \
+	else \
+		echo "uv not found — fallback to unlocked pip install -e \".[dev]\""; \
+		test -d $(VENV) || python3 -m venv $(VENV); \
+		$(VENV)/bin/pip install --upgrade pip --quiet; \
+		$(VENV)/bin/pip install -e ".[dev]"; \
+		$(VENV)/bin/pre-commit install; \
+	fi
 	@echo "\n✓ Dev environment ready. Run: source $(VENV)/bin/activate"
 
 ## ─── Installation ──────────────────────────────────────────────
 .PHONY: install
 install: ## Install package in editable mode with dev deps
-	@test -d $(VENV) || python3 -m venv $(VENV)
-	$(VENV)/bin/pip install -e ".[dev]"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --locked --extra dev; \
+	else \
+		echo "uv not found — fallback to unlocked pip install -e \".[dev]\""; \
+		test -d $(VENV) || python3 -m venv $(VENV); \
+		$(VENV)/bin/pip install -e ".[dev]"; \
+	fi
+
+.PHONY: sync
+sync: ## Sync locked dev environment from uv.lock
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "uv is required to sync from uv.lock"; \
+		exit 1; \
+	fi
+	uv sync --locked --extra dev
+
+.PHONY: lock
+lock: ## Refresh uv.lock from pyproject.toml
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "uv is required to refresh uv.lock"; \
+		exit 1; \
+	fi
+	uv lock
 
 ## ─── Quality ───────────────────────────────────────────────────
 .PHONY: lint

@@ -1,8 +1,29 @@
-# Getting Started — Grimoire Kit v3
+# Guide de démarrage — Grimoire Kit
 
 > Ce guide vous accompagne de l'installation à votre premier projet Grimoire.
 
-## Prérequis
+## Navigation rapide
+
+- [Prerequis](#prerequis)
+- [Installation](#installation)
+- [Creer un projet](#creer-un-projet)
+- [Commandes CLI](#commandes-cli)
+- [Configurer votre identite](#configurer-votre-identite)
+- [Prochaines etapes](#prochaines-etapes)
+
+## Chemin express
+
+Si vous voulez un premier resultat rapidement:
+
+```bash
+pipx install grimoire-kit
+grimoire init mon-projet --archetype web-app
+grimoire doctor
+```
+
+Ensuite continuez avec [Configurer votre identite](#configurer-votre-identite).
+
+## Prérequis { #prerequis }
 
 - **Python 3.12+**
 - **pip**, **pipx** (recommandé) ou **uv**
@@ -34,7 +55,7 @@ Vérifiez l'installation :
 grimoire --version
 ```
 
-## Créer un projet
+## Créer un projet { #creer-un-projet }
 
 ### Nouveau projet
 
@@ -43,7 +64,9 @@ grimoire init mon-projet --archetype web-app
 cd mon-projet
 ```
 
-Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `creative-studio`, `fix-loop`.
+Archétypes proposés par le wizard : `minimal` (base), `web-app`, `platform-engineering` (Platform & Infra), `creative-studio`, `game-dev`, `fix-loop`. `infra-ops` est auto-détecté pour les stacks Terraform/K8s/Ansible ; `agentic-standard` est disponible via `--archetype`.
+
+> Pour un premier essai, commencez avec `web-app` ou `minimal`.
 
 ### Projet existant
 
@@ -54,7 +77,7 @@ grimoire init . --name "Mon Projet"
 
 ## Structure générée
 
-```
+```text
 mon-projet/
 ├── project-context.yaml          # Configuration centralisée
 ├── _grimoire/
@@ -76,7 +99,7 @@ mon-projet/
 ## Commandes CLI
 
 | Commande | Description |
-|----------|-------------|
+| ---------- | ------------- |
 | `grimoire init <path>` | Initialiser un projet |
 | `grimoire setup` | Synchroniser la config utilisateur |
 | `grimoire setup --check` | Auditer la synchronisation (CI-friendly) |
@@ -92,9 +115,9 @@ mon-projet/
 | `grimoire registry list` | Lister les agents disponibles |
 | `grimoire registry search <q>` | Chercher un agent |
 
-## Configurer votre identité
+## Configurer votre identité { #configurer-votre-identite }
 
-Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration du projet (configs BMAD, instructions Copilot).
+Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration runtime du projet et dans les instructions Copilot.
 
 ```bash
 # Synchroniser depuis project-context.yaml
@@ -109,7 +132,7 @@ grimoire setup --check
 
 **Source de vérité** : `project-context.yaml` (section `user`). La commande `setup` propage les valeurs vers :
 
-- `_bmad/*/config.yaml` — configuration des modules BMAD
+- `_grimoire-runtime/*/config.yaml` — configuration runtime des modules Grimoire
 - `.github/copilot-instructions.md` — instructions injectées dans Copilot Chat
 
 ## Vérifier votre projet
@@ -120,7 +143,7 @@ grimoire doctor
 
 Sortie attendue :
 
-```
+```text
 ✔ project-context.yaml found
 ✔ YAML valid
 ✔ _grimoire directory exists
@@ -176,7 +199,7 @@ grimoire --show-completion
 
 Après installation, redémarrez votre terminal. Tapez `grimoire <TAB>` pour voir les commandes disponibles.
 
-## Prochaines étapes
+## Prochaines étapes { #prochaines-etapes }
 
 - [Référence YAML](grimoire-yaml-reference.md) — schéma complet de `project-context.yaml`
 - [Guide SDK](sdk-guide.md) — utilisation du SDK Python

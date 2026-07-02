@@ -185,6 +185,7 @@ class TestStatus:
         assert s.agents_count >= 2
         assert s.memory_backend == "local"
         assert s.archetype == "minimal"
+        assert s.layout == "legacy"
         assert "_grimoire" in s.directories_ok
 
     def test_missing_dirs(self, tmp_path: Path) -> None:
@@ -225,3 +226,42 @@ class TestContext:
         p = GrimoireProject(tmp_path, strict=False)
         with pytest.raises(GrimoireProjectError):
             p.context()
+
+
+@pytest.fixture()
+def runtime_project_dir(tmp_path: Path) -> Path:
+    """Create a project using the runtime layout."""
+    (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML)
+    (tmp_path / "_grimoire-runtime" / "_memory").mkdir(parents=True)
+    (tmp_path / "_grimoire-runtime-output").mkdir()
+    core_agents_dir = tmp_path / "_grimoire-runtime" / "core" / "agents"
+    bmm_agents_dir = tmp_path / "_grimoire-runtime" / "bmm" / "agents"
+    core_agents_dir.mkdir(parents=True)
+    bmm_agents_dir.mkdir(parents=True)
+    (core_agents_dir / "grimoire-master.md").write_text("# Grimoire Master\n")
+    (bmm_agents_dir / "dev.md").write_text("# Dev\n")
+    return tmp_path
+
+
+class TestRuntimeLayout:
+    def test_runtime_grimoire_dir(self, runtime_project_dir: Path) -> None:
+        project = GrimoireProject(runtime_project_dir)
+        assert project.grimoire_dir == runtime_project_dir / "_grimoire-runtime"
+
+    def test_runtime_is_initialized(self, runtime_project_dir: Path) -> None:
+        project = GrimoireProject(runtime_project_dir)
+        assert project.is_initialized()
+
+    def test_runtime_agents_are_discovered(self, runtime_project_dir: Path) -> None:
+        project = GrimoireProject(runtime_project_dir)
+        ids = [agent.id for agent in project.agents()]
+        assert "grimoire-master" in ids
+        assert "dev" in ids
+
+    def test_runtime_status_uses_runtime_dirs(self, runtime_project_dir: Path) -> None:
+        project = GrimoireProject(runtime_project_dir)
+        status = project.status()
+        assert status.layout == "runtime"
+        assert "_grimoire-runtime" in status.directories_ok
+        assert "_grimoire-runtime-output" in status.directories_ok
+        assert "_grimoire-runtime/_memory" in status.directories_ok

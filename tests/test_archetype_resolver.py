@@ -143,6 +143,10 @@ class TestArchetypeResolver:
         result = self.resolver.resolve(_scan(), backend="qdrant-server")
         assert "vectus" in result.feature_agents
 
+    def test_weaviate_server_produces_vectus(self) -> None:
+        result = self.resolver.resolve(_scan(), backend="weaviate-server")
+        assert "vectus" in result.feature_agents
+
     def test_ollama_produces_vectus(self) -> None:
         result = self.resolver.resolve(_scan(), backend="ollama")
         assert "vectus" in result.feature_agents

@@ -121,10 +121,7 @@ def _instantiate(backend_name: str, mem_cfg: dict, env_ollama: str, env_qdrant: 
     """Instancie le backend avec fallback sur local en cas d'erreur."""
     ollama_url = env_ollama or mem_cfg.get("ollama_url", "http://localhost:11434")
     qdrant_url = env_qdrant or mem_cfg.get("qdrant_url", "")
-    qdrant_api_key = os.environ.get(
-        "Grimoire_QDRANT_API_KEY",
-        os.environ.get("GRIMOIRE_QDRANT_API_KEY", mem_cfg.get("qdrant_api_key", "")),
-    )
+    qdrant_api_key = os.environ.get("Grimoire_QDRANT_API_KEY", mem_cfg.get("qdrant_api_key", ""))
     embedding_model = mem_cfg.get("embedding_model", "nomic-embed-text")
     collection = mem_cfg.get("collection_prefix", "grimoire")
 

@@ -48,6 +48,14 @@ Distributed as `grimoire-kit` on PyPI. CLI entrypoint: `grimoire`.
 - All subcommands in `src/grimoire/cli/`
 - `grimoire --version` must always work
 
+## Execution Discipline
+
+- Si une tâche révèle une suite logique alignée avec l'objectif courant et restant en risque faible, l'agent doit l'exécuter dans le même tour
+- Avant de conclure, exécuter le sweep pertinent quand il est raisonnable: tests ciblés, lint, mises à jour de docs associées, petits correctifs adjacents de cohérence
+- Réserver les "next steps" aux cas bloqués, optionnels, exploratoires, ou à plus haut risque
+- Ne pas s'arrêter après un premier fix local si d'autres ajustements évidents et sûrs sont requis pour terminer correctement le même objectif
+- Ne pas demander "tu veux que je continue ?" pour du travail local et réversible; continuer jusqu'à terminaison ou blocage réel
+
 ## Testing
 
 - Framework: `pytest` with `pytest-xdist` (`-n auto`)
@@ -73,3 +81,4 @@ Scopes: `cli`, `core`, `memory`, `mcp`, `registry`, `tools`, `ci`, `docs`, `deps
 - ❌ Never add a framework tool without a corresponding test
 - ❌ Never use `os.path` — use `pathlib.Path`
 - ❌ Never hardcode `/home/user/` — use `Path.home()` or env vars
+- ❌ Never stop at suggested next steps when an obvious same-goal low-risk follow-through can still be executed safely now

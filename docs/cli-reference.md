@@ -22,7 +22,7 @@ grimoire init [PATH] [OPTIONS]
 |--------|-------------|--------|
 | `--name TEXT` | Nom du projet | Nom du répertoire |
 | `--archetype, -a` | Archétype d'agents | `minimal` |
-| `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `ollama`) | `auto` |
+| `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `ollama`) | `auto` |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |
@@ -207,7 +207,7 @@ Exemples :
 
 ```bash
 grimoire config set project.name "mon-projet"
-grimoire config set memory.backend qdrant-local --dry-run
+grimoire config set memory.backend weaviate-server --dry-run
 grimoire -o json config set project.description "My app"
 ```
 

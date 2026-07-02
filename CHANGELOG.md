@@ -7,6 +7,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Archétype `game-dev`** — intégration complète du cluster jeu vidéo du corpus normatif agentique : 9 règles normatives (GR-01→GR-09), 8 agents-disciplines (game-designer, narrative-designer, level-designer, gameplay-programmer, systems-economist, tech-artist, game-qa, liveops-analyst), `shared-context` avec lentille de genre injectable.
+- **Pont domaine `framework/game-dev/`** — `domain-map.yaml` (use-cases UC-08→UC-50, 29 rayons de compétences, 15 lentilles de genre, matrice MOD-03, disciplines, cibles de génération), `knowledge/` (bundle self-contained des docs amont avec provenance), 9 templates de preuve (GDD, Content Validation Record, Balance Regression Evidence, Playtest Evidence Pack, Determinism/Replay Record, Certification Record, Telemetry Decision Record, Capability Routing Record, Asset Budget Report).
+- **Init: sélecteur interactif d'archétype** — quand `--archetype` est absent en mode terminal, la liste des archétypes (lue depuis les DNA) est proposée au choix.
+- **Init: sélecteur de lentille de genre** — pour l'archétype `game-dev`, choix interactif du genre (ou option `--genre`) injecté dans `shared-context.md` (marqueur `GENRE-LENS`).
+- **Init: auto-détection des projets jeu** — `--auto` reconnaît Godot (`project.godot`, `*.gd`), Unity (`Assets/` + `ProjectSettings/`) et Unreal (`*.uproject`) → archétype `game-dev`.
+- **Doc `docs/game-dev-integration.md`** — positionnement du pont domaine, règles, disciplines, lentilles, modalités et installation.
+
 ## [3.4.2] - 2026-03-30
 
 ### Corrigé

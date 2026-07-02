@@ -656,7 +656,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
     # Find agent files
     agent_paths: list[Path] = []
     for name in agent_names:
-        # Search in archetypes and _bmad
+        # Search in archetypes and _grimoire-runtime
         candidates = list(root.rglob(f"**/{name}.md"))
         agent_dirs = [c for c in candidates if "agents" in str(c) and ".proposed" not in str(c)]
         if agent_dirs:

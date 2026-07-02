@@ -7,7 +7,6 @@ on:
       - "v*.*.*-*"
 
 permissions:
-  contents: write
   id-token: write
 
 jobs:
@@ -20,6 +19,21 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Verify version matches tag
+        run: |
+          PKG_VERSION=$(python3 -c "
+          import re, pathlib
+          content = pathlib.Path('src/grimoire/__version__.py').read_text()
+          m = re.search(r'__version__ = \"(.+)\"', content)
+          print(m.group(1))
+          ")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: __version__.py ($PKG_VERSION) != tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version OK: $PKG_VERSION"
 
       - name: Install build tools
         run: pip install build
@@ -66,7 +80,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Download dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
@@ -86,13 +100,13 @@ jobs:
     continue-on-error: true
     steps:
       - name: Download dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
 
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1 @ 2026-02-18
         with:
           repository-url: https://test.pypi.org/legacy/
 
@@ -103,64 +117,10 @@ jobs:
     environment: pypi
     steps:
       - name: Download dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
-  github-release:
-    name: "GitHub Release"
-    runs-on: ubuntu-latest
-    needs: publish-pypi
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download dist
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-
-      - name: Download SBOM
-        uses: actions/download-artifact@v8
-        with:
-          name: sbom
-          path: sbom/
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "$TAG" | head -1 || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log --oneline --no-merges "${PREV_TAG}..${TAG}")
-          else
-            NOTES=$(git log --oneline --no-merges -20)
-          fi
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body: |
-            ## Changes
-
-            ${{ steps.notes.outputs.notes }}
-
-            ## Installation
-
-            ```bash
-            pip install grimoire-kit==${GITHUB_REF_NAME#v}
-            ```
-          files: |
-            dist/*.whl
-            dist/*.tar.gz
-            sbom/sbom.cdx.json
-          generate_release_notes: true
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1 @ 2026-02-18

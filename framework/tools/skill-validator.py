@@ -4,7 +4,7 @@ skill-validator.py — Validateur déterministe de skills Grimoire.
 ================================================================
 
 Vérifie la conformité des SKILL.md et fichiers associés dans .github/skills/.
-14 règles déterministes inspirées du BMAD upstream skill-validator.
+14 règles déterministes inspirées du validateur upstream du framework.
 
 Usage :
   python3 skill-validator.py --project-root .

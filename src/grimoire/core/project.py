@@ -18,6 +18,7 @@ from typing import Any
 
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireProjectError
+from grimoire.core.project_layout import ProjectLayout, detect_project_layout
 from grimoire.core.resolver import PathResolver
 
 __all__ = ["AgentInfo", "GrimoireProject", "ProjectContext", "ProjectStatus"]
@@ -45,6 +46,7 @@ class ProjectStatus:
     custom_agents_count: int
     memory_backend: str
     archetype: str
+    layout: str
     directories_ok: tuple[str, ...]
     directories_missing: tuple[str, ...]
 
@@ -62,11 +64,6 @@ class ProjectContext:
     file_count: int
     directory_count: int
     extra: dict[str, Any] = field(default_factory=dict)
-
-
-# ── Required directories ──────────────────────────────────────────────────────
-
-_EXPECTED_DIRS = ("_grimoire", "_grimoire-output", "_grimoire/_memory")
 
 
 # ── Project class ─────────────────────────────────────────────────────────────
@@ -88,6 +85,7 @@ class GrimoireProject:
     def __init__(self, root: Path, *, strict: bool = True) -> None:
         self._root = root.resolve()
         self._config_path = self._root / "project-context.yaml"
+        self._layout = detect_project_layout(self._root)
 
         if not self._config_path.is_file():
             if strict:
@@ -116,9 +114,14 @@ class GrimoireProject:
         return self._root
 
     @property
+    def layout(self) -> ProjectLayout:
+        """Resolved layout for this project root."""
+        return self._layout
+
+    @property
     def grimoire_dir(self) -> Path:
-        """Path to ``_grimoire/``."""
-        return self._root / "_grimoire"
+        """Path to the active Grimoire runtime directory."""
+        return self._layout.grimoire_path(self._root)
 
     @property
     def config_path(self) -> Path:
@@ -153,19 +156,18 @@ class GrimoireProject:
     def agents(self) -> list[AgentInfo]:
         """List agents deployed in this project."""
         agents: list[AgentInfo] = []
+        seen_ids: set[str] = set()
 
-        # Scan _grimoire/agents/, legacy _grimoire/_config/agents/, and _grimoire/_config/custom/agents/
-        for agents_dir_name in ("agents", "_config/agents", "_config/custom/agents"):
-            agents_dir = self.grimoire_dir / agents_dir_name
-            if agents_dir.is_dir():
-                for f in sorted(agents_dir.iterdir()):
-                    if f.suffix == ".md" and f.is_file():
-                        agents.append(AgentInfo(
-                            id=f.stem,
-                            name=f.stem.replace("-", " ").title(),
-                            path=f,
-                            source="local",
-                        ))
+        for agent_file in self._layout.agent_files(self._root):
+            if agent_file.stem in seen_ids:
+                continue
+            seen_ids.add(agent_file.stem)
+            agents.append(AgentInfo(
+                id=agent_file.stem,
+                name=agent_file.stem.replace("-", " ").title(),
+                path=agent_file,
+                source="local",
+            ))
 
         # Custom agents from config
         if self._config is not None:
@@ -184,7 +186,7 @@ class GrimoireProject:
         """Return a full status snapshot of this project."""
         ok_dirs: list[str] = []
         missing_dirs: list[str] = []
-        for d in _EXPECTED_DIRS:
+        for d in self._layout.required_dirs:
             if (self._root / d).is_dir():
                 ok_dirs.append(d)
             else:
@@ -200,6 +202,7 @@ class GrimoireProject:
             custom_agents_count=custom_count,
             memory_backend=self._config.memory.backend if self._config else "unknown",
             archetype=self._config.agents.archetype if self._config else "unknown",
+            layout=self._layout.name,
             directories_ok=tuple(ok_dirs),
             directories_missing=tuple(missing_dirs),
         )
@@ -208,7 +211,7 @@ class GrimoireProject:
         """Build a context payload for agent consumption."""
         cfg = self.config  # raises if not loaded
 
-        # Count files and directories (shallow, skip hidden/bmad dirs)
+        # Count files and directories (shallow, skip hidden/runtime dirs)
         file_count = 0
         dir_count = 0
         for item in self._root.iterdir():

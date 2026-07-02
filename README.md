@@ -8,11 +8,11 @@
   <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/workflows/ci-sdk.yml"><img src="https://img.shields.io/github/actions/workflow/status/Guilhem-Bonnet/Grimoire-kit/ci-sdk.yml?branch=main&style=for-the-badge&logo=github-actions&logoColor=white&label=CI" alt="CI"></a>
   <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
   <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
-  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.1.0-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
+  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/releases"><img src="https://img.shields.io/badge/version-3.4.2-a371f7?style=for-the-badge&logo=github&logoColor=white" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-4430+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
+  <a href="#-tests"><img src="https://img.shields.io/badge/tests-4606+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-106-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-121-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
   <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
   <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
   <a href="https://codecov.io/gh/Guilhem-Bonnet/Grimoire-kit"><img src="https://img.shields.io/codecov/c/github/Guilhem-Bonnet/Grimoire-kit?style=for-the-badge&logo=codecov&logoColor=white" alt="Codecov"></a>
@@ -37,6 +37,13 @@
   <a href="docs/concepts.md">Concepts</a> •
   <a href="docs/getting-started.md">Guide complet</a> •
   <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+<p align="center">
+  <b>Nouveau sur Grimoire Kit ?</b><br>
+  <a href="docs/getting-started.md"><b>Commencer ici (guide pas-a-pas)</b></a> •
+  <a href="https://guilhem-bonnet.github.io/Grimoire-kit/getting-started/">Version web</a> •
+  <a href="docs/concepts.md">Comprendre les concepts</a>
 </p>
 
 <br>
@@ -77,7 +84,7 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
     │ agents/ │  ← Les employés spécialisés
     │ memory/ │  ← La mémoire collective
     │ config/ │  ← Le règlement intérieur
-    │ tools/  │  ← La boîte à outils (93+)
+    │ tools/  │  ← La boîte à outils (108+)
     └─────────┘
          │
     ┌────┴────────────┐
@@ -122,11 +129,36 @@ grimoire upgrade             # exécuter
 ```bash
 git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
 cd Grimoire-kit/
+uv sync --locked --extra dev
+uv run pre-commit install
+```
+
+Pour lancer toute la validation workspace locale (tests incluant les hooks MkDocs), ajoutez aussi l'extra docs :
+
+```bash
+uv sync --locked --extra dev --extra docs
+```
+
+Sans `uv`, le fallback reste possible mais n'est pas verrouille :
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+pre-commit install
+```
+
+Pour reproduire les tasks VS Code du workspace, utilisez plutot :
+
+```bash
+pip install -e ".[dev,docs]"
 ```
 </details>
 
+> Le dépôt versionne un `uv.lock` pour rendre l'environnement contributeur et la CI reproductibles.
+
 > **Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
+
+> **Vous voulez aller vite ?** Suivez d'abord [docs/getting-started.md](docs/getting-started.md), puis revenez sur [docs/concepts.md](docs/concepts.md).
 
 <br>
 
@@ -159,7 +191,7 @@ flowchart TB
 
   subgraph ENGINE[GRIMOIRE ENGINE]
     MEM[Semantic Memory]
-    TOOLS[93+ Tools]
+    TOOLS[108+ Tools]
     PROTO[Protocols]
     HEAL[Self-Healing]
   end
@@ -427,11 +459,11 @@ Design & Contenu
 <td align="center">
 <br>
 
-**platform-engineering**
+**Platform & Infra**
 
-<sub>Agents plateforme</sub>
+<sub>+ infra-ops auto-détecté</sub>
 
-Developer Experience
+Architecture · IaC · deploy
 
 </td>
 <td align="center">
@@ -455,7 +487,31 @@ Auto-détection stack
 
 </td>
 </tr>
+<tr>
+<td align="center">
+<br>
+
+**game-dev**
+
+<sub>8 disciplines · GDD · cert</sub>
+
+Jeux vidéo gouvernés
+
+</td>
+<td align="center">
+<br>
+
+**agentic-standard**
+
+<sub>Pont normatif</sub>
+
+Corpus agentique externe
+
+</td>
+</tr>
 </table>
+
+> **Menu `grimoire init`** — le wizard propose **6 points de départ** : `minimal` (base) + `web-app`, **Platform & Infra**, `creative-studio`, `game-dev`, `fix-loop`. `infra-ops` est auto-détecté pour les stacks Terraform/K8s/Ansible et se replie sous « Platform & Infra ». `agentic-standard` est un overlay (`--archetype`) ; `meta`/`stack`/`features` sont internes.
 
 ```bash
 # Déployer un archétype
@@ -473,7 +529,7 @@ bash grimoire-init.sh --auto
 
 ## <img src="docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Outils CLI
 
-**93 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
+**121 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
 
 <details>
 <summary><b><img src="docs/assets/icons/brain.svg" width="18" height="18" alt=""> Cognition & Mémoire</b> — 12 outils</summary>
@@ -570,7 +626,7 @@ bash grimoire-init.sh --auto
 </details>
 
 <details>
-<summary><b><img src="docs/assets/icons/plug.svg" width="18" height="18" alt=""> Intégrations & DevTools</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/plug.svg" width="18" height="18" alt=""> Intégrations & DevTools</b> — 12 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -578,18 +634,81 @@ bash grimoire-init.sh --auto
 | `mcp-proxy.py` | Proxy MCP multi-server |
 | `cross-migrate.py` | Migration cross-projet |
 | `auto-doc.py` | Synchronisation README ↔ code |
+| `compiled-flow.py` | Registre, matching et rendu de recettes de flows compilés |
 | `gen-tests.py` | Générateur de tests automatique |
 | `llm-router.py` | Routage intelligent LLM |
 | `token-budget.py` | Gestion budget tokens |
 | `tool-registry.py` | Registre des outils disponibles |
 | `tool-advisor.py` | Conseiller d'outils contextuel |
+| `visual-evidence-governance.py` | Validation, rétention et purge des preuves visuelles |
 | `observatory.py` | Observatoire de métriques |
+
+</details>
+
+<details>
+<summary><b><img src="docs/assets/icons/list.svg" width="18" height="18" alt=""> Index complémentaire</b> — 55 outils</summary>
+
+- `agent-build`
+- `agent-caller`
+- `agent-integrity`
+- `agent-lint`
+- `agent-task-system`
+- `agent-test`
+- `agent-watch`
+- `agent-worker`
+- `auto-index`
+- `background-tasks`
+- `cc-feedback`
+- `code-review`
+- `concierge`
+- `conversation-branch`
+- `conversation-history`
+- `crescendo`
+- `delivery-contracts`
+- `dep-check`
+- `distill`
+- `doc-fetcher` _(déprécié → préférer `docs-fetcher`)_
+- `docs-fetcher`
+- `evaluator`
+- `expert-tool-chain`
+- `grimoire-daemon`
+- `grimoire-log`
+- `grimoire-setup`
+- `guardrail-policy`
+- `guardrail-policy-follow-through`
+- `guardrail-policy-rules`
+- `hpe-executors`
+- `hpe-monitor`
+- `hpe-runner`
+- `hook-safety-gate`
+- `image-prompt`
+- `learnings`
+- `mcp-web-search`
+- `rag-auto-inject`
+- `rag-indexer`
+- `rag-retriever`
+- `ref-validator`
+- `rnd_core`
+- `rnd_engine`
+- `rnd_harvest`
+- `session-lifecycle`
+- `skill-dispatcher`
+- `skill-validator`
+- `synapse-config`
+- `synapse-dashboard`
+- `synapse-trace`
+- `tool-resolver`
+- `vision-judge`
+- `vscode-stability-guard`
+- `vscode-terminal-prune`
+- `web-browser`
+- `workflow-analyzer`
 
 </details>
 
 <br>
 
-Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète des 93 outils.
+Voir [framework/tools/README.md](framework/tools/README.md) pour un aperçu détaillé des outils du framework.
 
 <br>
 
@@ -606,8 +725,8 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 {
   "mcpServers": {
     "grimoire": {
-      "command": "node",
-      "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
+      "command": "python3",
+      "args": ["-m", "grimoire.mcp.server"],
       "env": { "Grimoire_PROJECT_ROOT": "/votre-projet" }
     }
   }
@@ -624,7 +743,7 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 <tr>
 <td>
 
-**3 957+ tests** couvrant l'intégralité du framework :
+**4 606+ tests** couvrant l'intégralité du framework :
 
 ```bash
 # Tous les tests
@@ -649,7 +768,7 @@ bash tests/smoke-test.sh
 | Coordination | 200+ |
 | Intégrations | 180+ |
 | Robustesse (fuzzing) | 38 |
-| **Total** | **3 957+** |
+| **Total** | **4 606+** |
 
 </td>
 </tr>
@@ -705,14 +824,14 @@ grimoire-kit/
 │   ├── cc-verify.sh                    # Completion Contract verifier (multi-stack)
 │   ├── sil-collect.sh                  # Self-Improvement Loop collector
 │   ├── teams/                          # Team manifests (Vision, Build, Ops)
-│   ├── tools/                          # 93 outils Python CLI
+│   ├── tools/                          # 121 outils Python CLI
 │   ├── memory/                         # Système de mémoire à 4 niveaux
 │   ├── mcp/                            # MCP Server spec
 │   ├── sessions/                       # Session Branching
 │   ├── workflows/                      # Boomerang, orchestration, state checkpoint
 │   └── hooks/                          # Git hooks & lifecycle
 │
-├── archetypes/                      # 9 starter kits thématiques
+├── archetypes/                      # starter kits thématiques
 │   ├── minimal/                        # Point de départ universel
 │   ├── web-app/                        # Applications web
 │   ├── infra-ops/                      # Infrastructure & DevOps
@@ -721,10 +840,12 @@ grimoire-kit/
 │   ├── creative-studio/                # Design & contenu
 │   ├── platform-engineering/           # Developer Experience
 │   ├── fix-loop/                       # Bug fixing rapide
+│   ├── game-dev/                       # Jeux vidéo gouvernés (8 disciplines)
+│   ├── agentic-standard/               # Pont vers un corpus normatif agentique
 │   └── features/                       # Feature-driven development
 │
 ├── docs/                            # Documentation complète
-├── tests/                           # 3 957+ tests Python + smoke tests Bash
+├── tests/                           # 4 606+ tests Python + smoke tests Bash
 └── src/                             # Package Python installable
 ```
 
@@ -888,4 +1009,3 @@ Les contributions sont les bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md) 
     <img src="https://img.shields.io/github/stars/Guilhem-Bonnet/Grimoire-kit?style=social" alt="Stars">
   </a>
 </p>
-

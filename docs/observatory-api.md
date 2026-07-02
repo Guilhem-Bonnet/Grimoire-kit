@@ -1,4 +1,4 @@
-# Guide Observatory API
+# Guide de l'API Observatory
 
 Le mode `serve` de l'Observatory expose une API HTTP locale pour consulter, comparer et modifier la configuration des agents en direct.
 

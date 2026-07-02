@@ -67,7 +67,7 @@ class TestPreSession(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = sl.run_pre_session(Path(tmp))
             self.assertIn(result.status, ("completed", "partial"))
-            self.assertEqual(len(result.hooks), 3)
+            self.assertEqual(len(result.hooks), 5)
             # health-check hook
             self.assertEqual(result.hooks[0].name, "health-check")
             # memory-integrity hook
@@ -75,6 +75,10 @@ class TestPreSession(unittest.TestCase):
             self.assertEqual(result.hooks[1].status, "skipped")
             # stigmergy-progress hook
             self.assertEqual(result.hooks[2].name, "stigmergy-progress")
+            # learnings-inject hook
+            self.assertEqual(result.hooks[3].name, "learnings-inject")
+            # sdk-session_start hook
+            self.assertEqual(result.hooks[4].name, "sdk-session_start")
 
     def test_pre_session_with_memory(self):
         """Pre-session avec dossier _memory/."""
@@ -115,12 +119,16 @@ class TestPostSession(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = sl.run_post_session(Path(tmp))
             self.assertIn(result.status, ("completed", "partial"))
-            self.assertEqual(len(result.hooks), 5)
+            self.assertEqual(len(result.hooks), 7)
             self.assertEqual(result.hooks[0].name, "dream-quick")
             self.assertEqual(result.hooks[1].name, "stigmergy-evaporate")
             self.assertEqual(result.hooks[2].name, "session-save")
-            self.assertEqual(result.hooks[3].name, "session-chain")
-            self.assertEqual(result.hooks[4].name, "stigmergy-complete")
+            # session-reflection hook
+            self.assertEqual(result.hooks[3].name, "session-reflection")
+            self.assertEqual(result.hooks[4].name, "session-chain")
+            # sdk-session_end hook
+            self.assertEqual(result.hooks[5].name, "sdk-session_end")
+            self.assertEqual(result.hooks[6].name, "stigmergy-complete")
 
     def test_stigmergy_hook_writes_board_with_correct_argument_order(self):
         with tempfile.TemporaryDirectory() as tmp:

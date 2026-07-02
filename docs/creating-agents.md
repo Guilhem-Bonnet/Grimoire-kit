@@ -1,126 +1,148 @@
-<p align="right"><a href="../README.md">README</a></p>
+# :material-account-hard-hat-outline: Créer un agent — Guide complet
 
-# <img src="assets/icons/team.svg" width="32" height="32" alt=""> Créer un agent — Guide
+---
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Voie rapide — Agent Forge (BM-52)
+## :material-speedometer: Voie rapide — UDF Dynamic Factory
 
-`agent-forge.py` génère un scaffold rempli intelligemment depuis un besoin textuel ou des gaps détectés automatiquement.
+> **Recommandé en premier.** Avant de créer un agent manuellement, vérifiez si le SOG peut le générer dynamiquement via l'UDF.
+
+Décrivez simplement ce dont vous avez besoin au Grimoire Master :
+
+```
+"J'ai besoin d'un agent expert en migrations de base de données"
+```
+
+Le SOG évalue automatiquement :
+
+1. **Gap detection** — aucun agent existant ne couvre ce besoin
+2. **Triage de durabilité** — calcule le score éphémère/permanent
+3. **Dispatch vers agent-builder** — création automatique en mode Rapid ou Full
+4. **Déploiement immédiat** — l'agent est disponible dès la sauvegarde
+
+### Modes de création UDF
+
+| Mode | Score durabilité | Sortie | Durée |
+|---|---|---|---|
+| **Rapid (éphémère)** | < 3 | `_dyn-{slug}.agent.md` (expire 7j) | Immédiat |
+| **Full (permanent)** | ≥ 3 | `{slug}.agent.md` + prompt dédié | Court terme |
+
+### Promotion automatique
+
+Un agent éphémère réutilisé **3 fois ou plus** est automatiquement promu en agent permanent. Le SOG vous notifie au prochain tour.
+
+!!! tip "Quand préférer la création manuelle ?"
+    Utilisez la voie manuelle quand vous avez besoin d'un contrôle fin sur les prompts métier, les exemples spécifiques au projet, ou l'intégration dans un workflow existant.
+
+---
+
+## :material-cog: Agent Forge — Scaffold assisté
+
+`agent-forge` génère un scaffold depuis un besoin textuel ou des gaps détectés automatiquement.
 
 ```bash
 # Depuis une description textuelle
-bash grimoire-init.sh forge --from "je veux un agent pour les migrations de base de données"
+grimoire forge --from "agent pour les migrations de base de données"
 
-# Depuis les requêtes inter-agents non résolues (shared-context.md)
-bash grimoire-init.sh forge --from-gap
-
-# Depuis les failures Grimoire_TRACE sans agent propriétaire
-bash grimoire-init.sh forge --from-trace
+# Depuis les gaps détectés (shared-context.md)
+grimoire forge --from-gap
 
 # Lister les proposals en attente de review
-bash grimoire-init.sh forge --list
+grimoire forge --list
 
-# Installer après review du [TODO]
-bash grimoire-init.sh forge --install db-migrator
+# Installer après review
+grimoire forge --install db-migrator
 ```
 
-**Pipeline :**
+Pipeline de génération :
+
 ```
 forge --from "..."
   → _grimoire-output/forge-proposals/agent-[tag].proposed.md
-  → [ Réviser les [TODO] : identité, prompts métier ]
+  → Réviser les [TODO] : identité, prompts métier
   → forge --install [tag]
-  → Sentinel [AA] audit qualité
+  → Validation qualité automatique
 ```
 
-> **Note :** Le scaffold couvre la structure, les outils, l'icône et les protocoles inter-agents. 
-> Les prompts métier (sections `[TODO]`) nécessitent votre connaissance du domaine.
+!!! warning "Les prompts métier sont à vous"
+    Le scaffold couvre la structure, les outils, les protocoles inter-agents. Les sections `[TODO]` (prompts spécifiques au domaine) nécessitent votre connaissance du projet.
 
-> **Conseil budget :** Après avoir installé un nouvel agent, vérifiez qu'il ne sature pas la fenêtre de contexte :
-> ```bash
-> bash grimoire-init.sh guard --agent [id-de-votre-agent] --detail --suggest
-> ```
-> Seuil recommandé : < 40% de la fenêtre du modèle cible.
+---
 
-<img src="assets/divider.svg" width="100%" alt="">
+## :material-file-document-outline: Anatomie d'un agent
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Anatomie d'un agent Grimoire Custom
-
-Un agent est un fichier Markdown structuré avec des balises XML qui définissent sa personnalité, ses capacités et ses actions.
+Un agent Grimoire est un fichier Markdown structuré :
 
 ```
 mon-agent.md
-├── Persona (identité, principes, règles)
-├── Activation (comment démarrer)
-├── Menu (actions numérotées)
-└── Prompts (instructions détaillées par action)
+├── Frontmatter YAML         (name, description, model routing)
+├── Persona / Identity       (nom, expertise, règles)
+├── Activation               (comment démarrer la session)
+├── Menu                     (actions numérotées)
+└── Prompts                  (instructions détaillées par action)
 ```
 
-<img src="assets/divider.svg" width="100%" alt="">
+---
 
-## <img src="assets/icons/team.svg" width="28" height="28" alt=""> Créer un agent de zéro
+## :material-hammer-wrench: Créer un agent de zéro
 
 ### 1. Copier le template
 
 ```bash
-cp _grimoire/_config/custom/agents/custom-agent.tpl.md \
-   _grimoire/_config/custom/agents/mon-nouvel-agent.md
+cp .github/agents/_templates/permanent-agent.tpl.md \
+   .github/agents/mon-agent.agent.md
 ```
 
 ### 2. Remplir les variables
 
 | Variable | Description | Exemple |
-|----------|-------------|---------|
-| `{{agent_name}}` | Nom affiché | "Gardien" |
-| `{{agent_icon}}` | Emoji | "" |
-| `{{agent_tag}}` | Tag court (minuscule) | "gardien" |
-| `{{agent_role}}` | Rôle en une phrase | "Sécurité applicative" |
-| `{{domain}}` | Domaine d'expertise | "sécurité, authentification, RBAC" |
-| `{{learnings_file}}` | Nom du fichier learnings | "security-app" |
-| `{{domain_word}}` | Mot-clé pour decisions-log | "sécurité" |
+|---|---|---|
+| `{{agent_name}}` | Nom affiché | `Gardien` |
+| `{{agent_tag}}` | Tag court (minuscule, kebab) | `gardien` |
+| `{{agent_role}}` | Rôle en une phrase | `Sécurité applicative` |
+| `{{domain}}` | Domaine d'expertise | `sécurité, authentification, RBAC` |
+| `{{persona}}` | Persona courte | `Expert sécurité pragmatique` |
 
-### 2b. Configurer model_affinity (optionnel)
+### 3. Configurer le routing modèle
 
-Déclarez les besoins LLM de votre agent dans le frontmatter YAML :
+Déclarez le profil de routing dans le frontmatter :
 
 ```yaml
 ---
-name: "mon-agent"
-description: "Mon Agent — Alias"
-model_affinity:
-  reasoning: high       # low | medium | high | extreme
-  context_window: medium  # small (≤32K) | medium (≤128K) | large (≤200K) | massive (>1M)
-  speed: fast           # fast | medium | slow-ok
-  cost: medium          # cheap | medium | any
+name: gardien
+description: Gardien — Sécurité applicative
+routing_profile: deep_reasoning
 ---
 ```
 
-| Axe | Quand utiliser `extreme`/`massive` | Quand utiliser `low`/`small`/`cheap` |
-|---|---|---|
-| **reasoning** | Debug deep, audit sécurité, architecture | CRUD, mémoire, monitoring |
-| **context_window** | Scan codebase entier, refactoring large | Tâches ciblées, corrections ponctuelles |
-| **speed** | Boucles rapides fix→test, CI | Décisions stratégiques, audits |
-| **cost** | Tâches critiques, sécurité | Tâches répétitives, consolidation |
+Profils disponibles :
 
-Vérifiez la recommandation : `bash grimoire-init.sh guard --recommend-models`
+| Profil | Adapté pour |
+|---|---|
+| `deep_reasoning` | Audit, architecture, décisions critiques |
+| `general_code` | Implémentation, tests, debug |
+| `writing_structured` | Docs, PRD, YAML, prompts |
+| `fast_iter` | Checks rapides, brainstorming |
 
-### 3. Écrire l'identité
+### 4. Écrire l'identité
 
-La section `<identity>` est la plus importante. Elle doit :
-- Décrire l'expertise spécifique au projet
-- Mentionner les outils/technologies maîtrisés
-- Référencer `shared-context.md` pour le contexte d'infra
+La section `<identity>` est la plus importante — elle définit le comportement de l'agent :
 
 ```markdown
 <identity>
 Tu es Gardien, expert en sécurité applicative pour le projet {{project_name}}.
-Tu maîtrises OAuth2/OIDC, RBAC, rate-limiting, WAF, et les headers de sécurité.
-Consulte shared-context.md pour l'architecture complète.
+Tu maîtrises OAuth2/OIDC, RBAC, rate-limiting, WAF et les headers de sécurité.
+Consulte shared-context.md pour l'architecture complète avant toute intervention.
+
+Règles :
+- Jamais de secret hardcodé dans un rapport
+- Chaque vulnérabilité → CVE ou OWASP ref associée
+- CC obligatoire sur tout fix sécurité
 </identity>
 ```
 
-### 4. Définir les prompts
+### 5. Définir les prompts
 
-Chaque action du menu pointe vers un `<prompt>`. Structure recommandée :
+Chaque action du menu pointe vers un `<prompt>` :
 
 ```markdown
 <prompt id="audit-auth" title="Audit Authentification">
@@ -137,7 +159,7 @@ Chaque action du menu pointe vers un `<prompt>`. Structure recommandée :
 - Actions correctives si trouvées
 
 <example>
-Vérifier que le endpoint /api/auth/login :
+Vérifier que /api/auth/login :
 - Accepte uniquement POST
 - Rate-limité à 5 tentatives/min
 - Retourne 401 avec body générique (pas de leak d'info)
@@ -145,87 +167,82 @@ Vérifier que le endpoint /api/auth/login :
 </prompt>
 ```
 
-### 5. Enregistrer l'agent
+### 6. Clause "Use when"
 
-Ajouter dans `_grimoire/_config/agent-manifest.csv` :
+Ajoutez une clause `USE WHEN` en en-tête — elle guide le dispatch SOG :
+
+```markdown
+<!--
+USE WHEN:
+- Audit de sécurité applicative ou infrastructure
+- Review de code avant merge (endpoints sensibles)
+- Incident de sécurité en cours
+
+DON'T USE WHEN:
+- Questions de design ou d'architecture (voir architect)
+- Exploration exploratoire sans risque identifié
+-->
+```
+
+### 7. Enregistrer l'agent
+
+Ajoutez dans `_grimoire-runtime/_config/agent-manifest.csv` :
 
 ```csv
-"mon-nouvel-agent","Gardien","Sécurité Applicative","🛡️","security-app","custom","_grimoire/_config/custom/agents/mon-nouvel-agent.md"
+"gardien","Gardien","Sécurité Applicative","security","_dyn","gardien.agent.md"
 ```
 
-Ajouter dans `_grimoire/_memory/shared-context.md` (table équipe) :
-
-```markdown
-| mon-nouvel-agent | Gardien | 🛡️ | Sécurité applicative |
-```
-
-Créer le fichier learnings :
-
-```bash
-echo "# Learnings — Gardien" > _grimoire/_memory/agent-learnings/security-app.md
-```
-
-<img src="assets/divider.svg" width="100%" alt="">
-
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Clause "Use when"
-
-Chaque agent devrait inclure en en-tête une clause commentée `USE WHEN` qui guide le dispatch et aide l'utilisateur à choisir l'agent approprié.
-
-```markdown
-<!--
-USE WHEN:
-- [Situation ou besoin 1]
-- [Situation ou besoin 2]
-- [Situation ou besoin 3]
-DON'T USE WHEN:
-- [Cas hors-périmètre]
--->
-```
-
-**Exemples :**
-
-```markdown
-<!--
-USE WHEN:
-- Besoin de diagnostiquer un problème technique récurrent
-- Besoin de preuves d'exécution avant de claimer "done"
-- Fix qui a échoué plusieurs fois sans explication claire
-DON'T USE WHEN:
-- Exploration exploratoire (pas de bug précis à corriger)
-- Questions de design ou d'architecture (voir Atlas ou Sentinel)
--->
-```
-
-Cette clause est extraite automatiquement par `mem0-bridge.py dispatch` pour le routage contextuel.
-
-<img src="assets/divider.svg" width="100%" alt="">
-
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Bonnes pratiques
-
-### Scope strict
-Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'est un signe qu'il faut fusionner ou clarifier les frontières.
-
-### Exemples concrets
-Les `<example>` dans les prompts sont essentiels. Un agent sans exemples produit des résultats génériques. Incluez des commandes, chemins et valeurs spécifiques à votre projet.
-
-### Keywords pour le dispatch
-Si vous utilisez `mem0-bridge.py dispatch`, ajoutez votre agent dans `project-context.yaml` :
+Ajoutez dans `project-context.yaml` pour le dispatch contextuel :
 
 ```yaml
 agents:
   custom_agents:
-    - name: "gardien"
-      icon: "🛡️"
+    - name: gardien
       domain: "Sécurité applicative"
       keywords: "oauth jwt rbac auth login permission security headers csp cors"
 ```
 
-### Test de l'agent
+---
 
-```bash
-# Vérifier la cohérence
-python _grimoire/_memory/maintenance.py context-drift
+## :material-lightbulb-on-outline: Bonnes pratiques
 
-# Tester le dispatch
-python _grimoire/_memory/mem0-bridge.py dispatch "vérifier la sécurité des endpoints API"
-```
+=== "Scope strict"
+
+    Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent → fusionner ou clarifier les frontières. Un agent qui fait tout ne fait rien bien.
+
+=== "Exemples concrets"
+
+    Les `<example>` dans les prompts sont essentiels. Un agent sans exemples produit des résultats génériques. Incluez des commandes, chemins et valeurs spécifiques à **votre** projet.
+
+=== "Mémoire dédiée"
+
+    Créez un fichier learnings dédié :
+    ```bash
+    echo "# Learnings — Gardien" > \
+      _grimoire-runtime/_memory/agent-learnings/security-app.md
+    ```
+
+=== "Test du dispatch"
+
+    Vérifiez que le SOG route correctement vers votre agent :
+    ```bash
+    # Le SOG doit détecter "gardien" pour cette requête
+    grimoire dispatch "vérifier la sécurité des endpoints API"
+    ```
+
+=== "Budget contexte"
+
+    Après installation, vérifiez le budget fenêtre :
+    ```bash
+    grimoire guard --agent gardien --detail --suggest
+    # Seuil recommandé : < 40% de la fenêtre du modèle cible
+    ```
+
+---
+
+## :material-link: Voir aussi
+
+- [Concepts — SOG et dispatch](concepts.md#sog-smart-orchestrator-gateway)
+- [Concepts — UDF Dynamic Factory](concepts.md#udf-unified-dynamic-factory)
+- [Référence YAML](grimoire-yaml-reference.md)
+- [Taxonomie des workflows](workflow-taxonomy.md)

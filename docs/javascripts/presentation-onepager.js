@@ -16,7 +16,7 @@
       cleanupPresentationPage = null;
     }
 
-    const isPresentationPage = window.location.pathname.includes("/presentation-decouverte/");
+    const isPresentationPage = Boolean(document.querySelector('[data-gp-page="presentation"]'));
     if (!isPresentationPage) {
       document.body.classList.remove("gp-onepager");
       document.body.removeAttribute("data-gp-scheme");
@@ -216,12 +216,8 @@
       navLinks.push(link);
     });
 
-    const heroSignals = document.querySelector(".gp-hero-signals");
-    const newsStrip = document.querySelector(".gp-news-strip");
-    if (newsStrip) {
-      newsStrip.insertAdjacentElement("afterend", sectionNav);
-    } else if (heroSignals) {
-      heroSignals.insertAdjacentElement("afterend", sectionNav);
+    if (panels.length > 1) {
+      panels[0].insertAdjacentElement("afterend", sectionNav);
     } else {
       panels[0].insertAdjacentElement("beforebegin", sectionNav);
     }

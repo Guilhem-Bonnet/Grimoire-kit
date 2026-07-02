@@ -6,3 +6,6 @@
 #       (EnumTypeWrapper | None syntax) — pin à <1.13 jusqu'à correction upstream
 pyyaml>=6.0
 qdrant-client>=1.7.0,<1.13
+
+# Optionnel mais auto-activé par les archétypes infra/platform
+redis>=5.0.0

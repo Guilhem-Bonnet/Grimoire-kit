@@ -8,18 +8,29 @@ Tu veux améliorer Grimoire Kit ? Voici comment contribuer.
 
 - Python 3.12+
 - Git
+- uv (recommandé pour respecter `uv.lock`)
 
 ```bash
 git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
 cd Grimoire-kit
+uv sync --locked --extra dev
+uv run pre-commit install
+```
+
+Les backends runtime optionnels restent opt-in. Ajoute les extras nécessaires seulement si tu travailles sur cette surface.
+
+Fallback si `uv` n'est pas disponible :
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+pre-commit install
 ```
 
 ## Structure du projet
 
-```
+```text
 grimoire-kit/
 ├── src/grimoire/
 │   ├── core/           # Config, Project, Scanner, Merge, Validator
@@ -37,13 +48,18 @@ grimoire-kit/
 ## Workflow de développement
 
 ```bash
-# Setup complet (une seule fois) — crée le venv et installe tout
+# Setup complet (une seule fois) — utilise `uv.lock` si `uv` est disponible
 make dev
 
+# Synchroniser explicitement l'environnement verrouillé
+make sync
+
+# Régénérer uv.lock après un changement de dépendances
+make lock
+
 # Ou manuellement (venv déjà créé, voir Prérequis ci-dessus)
-source .venv/bin/activate
-pip install -e ".[dev]"
-pre-commit install
+uv sync --locked --extra dev
+uv run pre-commit install
 
 # Raccourcis Makefile
 make check      # lint + typecheck + tests
@@ -76,7 +92,7 @@ make format      # ruff format
 
 ### Commits
 
-```
+```text
 type(scope): description courte
 
 Exemples:

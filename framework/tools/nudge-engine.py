@@ -39,10 +39,10 @@ from pathlib import Path
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-NUDGE_VERSION = "1.0.0"
+NUDGE_VERSION = "1.1.0"
 
 # Sources de données
-MEMORY_DIRS = ["_grimoire/_memory"]
+MEMORY_DIRS = ["_grimoire/_memory", "_grimoire-runtime/_memory"]
 LEARNINGS_GLOB = "**/learnings*.md"
 DECISIONS_GLOB = "**/decisions*.md"
 FAILURE_GLOB = "**/failure-museum*.md"
