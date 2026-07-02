@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-07-02
+
 ### Ajouté
 
 - **`grimoire doctor` : check « agents découvrables »** (suivi issue #33) — si des
