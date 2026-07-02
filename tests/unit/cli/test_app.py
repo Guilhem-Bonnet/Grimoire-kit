@@ -241,6 +241,22 @@ class TestDoctor:
         assert result.exit_code == 1
         assert "FAIL" in result.output
 
+    def test_doctor_agents_discoverable_pass(self, healthy_project: Path) -> None:
+        # init scaffolds agents AND their .github/agents wrappers — check green.
+        result = runner.invoke(app, ["doctor", str(healthy_project)])
+        assert result.exit_code == 0
+        assert "agent wrapper" in result.output
+
+    def test_doctor_agents_discoverable_fail(self, healthy_project: Path) -> None:
+        # Agents deployed but wrappers wiped (issue #33 §2 symptom on Windows):
+        # doctor must fail instead of reporting a healthy project.
+        import shutil
+
+        shutil.rmtree(healthy_project / ".github" / "agents")
+        result = runner.invoke(app, ["doctor", str(healthy_project)])
+        assert result.exit_code == 1
+        assert "cannot discover" in result.output
+
     def test_doctor_shows_project_name(self, healthy_project: Path) -> None:
         result = runner.invoke(app, ["doctor", str(healthy_project)])
         assert healthy_project.name in result.output
