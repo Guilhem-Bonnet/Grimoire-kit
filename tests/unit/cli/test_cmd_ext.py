@@ -90,3 +90,38 @@ def test_ext_remove_unknown_fails(tmp_path: Path) -> None:
         app, ["ext", "remove", "ghost", "--project-root", str(tmp_path)]
     )
     assert result.exit_code == 1
+
+
+def test_ext_publish_then_add_from_registry(tmp_path: Path) -> None:
+    ext = make_extension(tmp_path)
+    registry = tmp_path / "registry"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = runner.invoke(app, ["ext", "publish", str(ext), "--registry", str(registry)])
+    assert result.exit_code == 0, result.output
+    assert "Publié : Demo Extension 0.1.0" in result.output
+
+    result = runner.invoke(
+        app,
+        ["ext", "add", "demo-ext", "--registry", str(registry), "--project-root", str(project)],
+    )
+    assert result.exit_code == 0, result.output
+    assert (project / ".github" / "agents" / "demo.agent.md").is_file()
+
+    result = runner.invoke(app, ["ext", "verify", "demo-ext", "--project-root", str(project)])
+    assert result.exit_code == 0, result.output
+
+
+def test_ext_publish_invalid_manifest_fails(tmp_path: Path) -> None:
+    ext = make_extension(tmp_path)
+    manifest = json.loads((ext / "extension.json").read_text(encoding="utf-8"))
+    manifest["version"] = "pas-semver"
+    (ext / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = runner.invoke(app, ["ext", "publish", str(ext), "--registry", str(tmp_path / "r")])
+    assert result.exit_code == 1
+
+
+def test_ext_verify_unknown_fails(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["ext", "verify", "ghost", "--project-root", str(tmp_path)])
+    assert result.exit_code == 1

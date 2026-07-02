@@ -33,6 +33,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 __all__ = [
     "ExtensionError",
@@ -94,7 +95,7 @@ def _is_safe_relpath(value: str) -> bool:
     return ".." not in Path(value).parts
 
 
-def load_manifest(ext_dir: Path) -> dict:
+def load_manifest(ext_dir: Path) -> dict[str, Any]:
     manifest_path = ext_dir / MANIFEST_NAME
     if not manifest_path.is_file():
         raise ExtensionError(f"{MANIFEST_NAME} introuvable dans {ext_dir}")
@@ -107,7 +108,7 @@ def load_manifest(ext_dir: Path) -> dict:
     return manifest
 
 
-def validate_manifest(manifest: dict, ext_dir: Path) -> list[str]:
+def validate_manifest(manifest: dict[str, Any], ext_dir: Path) -> list[str]:
     """Validation structurelle du manifeste. Retourne la liste des erreurs."""
     errors: list[str] = []
 
@@ -182,14 +183,14 @@ def validate_manifest(manifest: dict, ext_dir: Path) -> list[str]:
     return errors
 
 
-def _load_state(project_root: Path) -> dict:
+def _load_state(project_root: Path) -> dict[str, Any]:
     state_path = project_root / STATE_RELPATH
     if state_path.is_file():
-        return json.loads(state_path.read_text(encoding="utf-8"))
+        return cast(dict[str, Any], json.loads(state_path.read_text(encoding="utf-8")))
     return {}
 
 
-def _save_state(project_root: Path, state: dict) -> None:
+def _save_state(project_root: Path, state: dict[str, Any]) -> None:
     state_path = project_root / STATE_RELPATH
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
@@ -305,7 +306,7 @@ def install_extension(
     )
 
 
-def list_installed(project_root: Path) -> dict:
+def list_installed(project_root: Path) -> dict[str, Any]:
     return _load_state(project_root.resolve())
 
 
@@ -357,7 +358,7 @@ def _deterministic_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
     return info
 
 
-def publish_extension(ext_dir: Path, registry_dir: Path) -> dict:
+def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
     """Publie une extension dans un registry local (archive + entrée d'index).
 
     L'archive est déterministe (mtime/uid normalisés) : republier une
@@ -380,7 +381,7 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict:
     checksum = _sha256(dist_path)
 
     index_path = registry_dir / REGISTRY_INDEX
-    index = (
+    index: dict[str, Any] = (
         json.loads(index_path.read_text(encoding="utf-8"))
         if index_path.is_file()
         else {"registryVersion": 1, "extensions": {}}
@@ -467,7 +468,7 @@ def install_from_registry(
     return result
 
 
-def _registry_source_dir(source: str) -> tempfile.TemporaryDirectory | None:
+def _registry_source_dir(source: str) -> tempfile.TemporaryDirectory[str] | None:
     """Re-extrait l'archive d'une provenance ``registry:<dir>#<id>@<version>``."""
     if not source.startswith("registry:"):
         return None

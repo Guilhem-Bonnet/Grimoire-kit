@@ -13,6 +13,7 @@ from grimoire.tools.ext_manager import (
     install_from_registry,
     list_installed,
     load_manifest,
+    main,
     publish_extension,
     remove_extension,
     validate_manifest,
@@ -242,3 +243,36 @@ class TestRemove:
     def test_unknown_extension(self, project_root: Path) -> None:
         with pytest.raises(ExtensionError, match="non installée"):
             remove_extension("ghost", project_root)
+
+
+class TestMainCLI:
+    def test_add_list_verify_remove_cycle(
+        self, ext_dir: Path, project_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = ["--project-root", str(project_root)]
+        assert main([*root, "add", str(ext_dir)]) == 0
+        assert "Installé : demo-ext v0.1.0" in capsys.readouterr().out
+        assert main([*root, "list"]) == 0
+        assert "demo-ext v0.1.0" in capsys.readouterr().out
+        assert main([*root, "verify", "demo-ext"]) == 0
+        assert "pas de script de vérification" in capsys.readouterr().out
+        assert main([*root, "remove", "demo-ext"]) == 0
+        assert main([*root, "list"]) == 0
+        assert "Aucune extension installée." in capsys.readouterr().out
+
+    def test_publish_then_add_from_registry(
+        self, ext_dir: Path, project_root: Path, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        registry = tmp_path / "registry"
+        root = ["--project-root", str(project_root)]
+        assert main([*root, "publish", str(ext_dir), "--registry", str(registry)]) == 0
+        assert "Publié : Demo Extension 0.1.0" in capsys.readouterr().out
+        assert main([*root, "add", "demo-ext", "--registry", str(registry)]) == 0
+        assert (project_root / ".github" / "agents" / "demo.agent.md").is_file()
+
+    def test_error_returns_1(
+        self, project_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["--project-root", str(project_root), "remove", "ghost"]) == 1
+        assert "Erreur" in capsys.readouterr().err

@@ -24,10 +24,12 @@ import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, cast
 
 from grimoire.tools.ext_manager import (
     MANIFEST_NAME,
     ExtensionError,
+    InstallResult,
     install_extension,
     list_installed,
     load_manifest,
@@ -61,7 +63,7 @@ class ForgeAPI:
 
     # ── état ──────────────────────────────────────────────────────────────
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, Any]:
         version_file = self.kit_root / "version.txt"
         return {
             "projectRoot": str(self.project_root),
@@ -72,7 +74,7 @@ class ForgeAPI:
             "ui": str(self.ui_dir) if self.ui_dir else None,
         }
 
-    def setup_view(self) -> dict:
+    def setup_view(self) -> dict[str, Any]:
         artifacts: dict[str, list[str]] = {}
         for kind, (rel, pattern) in ARTIFACT_SURFACES.items():
             base = self.project_root / rel
@@ -87,11 +89,11 @@ class ForgeAPI:
 
     # ── wizard ────────────────────────────────────────────────────────────
 
-    def archetypes(self) -> list[dict]:
+    def archetypes(self) -> list[dict[str, Any]]:
         from ruamel.yaml import YAML
 
         yaml = YAML(typ="safe")
-        result = []
+        result: list[dict[str, Any]] = []
         base = self.kit_root / "archetypes"
         if not base.is_dir():
             return result
@@ -107,7 +109,7 @@ class ForgeAPI:
             )
         return result
 
-    def setup_plan(self, payload: dict) -> dict:
+    def setup_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         archetype = payload.get("archetype", "minimal")
         extensions = payload.get("extensions", [])
         installed, errors = [], []
@@ -139,7 +141,7 @@ class ForgeAPI:
 
     # ── extensions ────────────────────────────────────────────────────────
 
-    def extensions_view(self) -> dict:
+    def extensions_view(self) -> dict[str, Any]:
         available = []
         base = self.kit_root / "extensions"
         if base.is_dir():
@@ -161,7 +163,7 @@ class ForgeAPI:
                 )
         return {"installed": list_installed(self.project_root), "available": available}
 
-    def extension_add(self, source: str):
+    def extension_add(self, source: str) -> InstallResult:
         ext_dir = (
             self.kit_root / "extensions" / source
             if SLUG_RE.match(source)
@@ -179,7 +181,7 @@ class ForgeAPI:
             raise ValueError(f"id de blueprint invalide : {bp_id}")
         return self.project_root / BLUEPRINTS_RELPATH / f"{bp_id}.blueprint.json"
 
-    def blueprints_list(self) -> list[dict]:
+    def blueprints_list(self) -> list[dict[str, Any]]:
         base = self.project_root / BLUEPRINTS_RELPATH
         result = []
         if base.is_dir():
@@ -198,13 +200,13 @@ class ForgeAPI:
                 )
         return result
 
-    def blueprint_get(self, bp_id: str) -> dict:
+    def blueprint_get(self, bp_id: str) -> dict[str, Any]:
         path = self._blueprint_path(bp_id)
         if not path.is_file():
             raise FileNotFoundError(bp_id)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
-    def blueprint_put(self, bp_id: str, blueprint: dict) -> dict:
+    def blueprint_put(self, bp_id: str, blueprint: dict[str, Any]) -> dict[str, Any]:
         lint = self.blueprint_lint(blueprint)
         path = self._blueprint_path(bp_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,14 +215,14 @@ class ForgeAPI:
         )
         return {"saved": bp_id, **lint}
 
-    def _catalogue(self) -> dict | None:
+    def _catalogue(self) -> dict[str, Any] | None:
         if self.ui_dir:
             candidate = self.ui_dir / "data" / "catalogue-export.json"
             if candidate.is_file():
-                return json.loads(candidate.read_text(encoding="utf-8"))
+                return cast(dict[str, Any], json.loads(candidate.read_text(encoding="utf-8")))
         return None
 
-    def blueprint_validate(self, blueprint: dict) -> list[str]:
+    def blueprint_validate(self, blueprint: dict[str, Any]) -> list[str]:
         """Erreurs bloquantes : structure + pins typés (H4).
 
         Une connexion dont les contrats de pins ne correspondent pas ne
@@ -276,7 +278,7 @@ class ForgeAPI:
                     errors.append(f"artefact absent du projet : {n.get('ref')}")
         return errors
 
-    def blueprint_lint(self, blueprint: dict) -> dict:
+    def blueprint_lint(self, blueprint: dict[str, Any]) -> dict[str, Any]:
         """Lint normatif (H4) : erreurs bloquantes + avertissements catalogue.
 
         Avertissements dérivés du catalogue : dépendances de patterns
@@ -330,7 +332,7 @@ class ForgeAPI:
         if not manifest_path.is_file():
             return []
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        return manifest.get("patterns", {}).get("implements", [])
+        return cast(list[str], manifest.get("patterns", {}).get("implements", []))
 
     # ── télémétrie ────────────────────────────────────────────────────────
 
@@ -341,9 +343,9 @@ class ForgeAPI:
             if (self.project_root / rel).is_file()
         ]
 
-    def events_log(self, limit: int = 200) -> dict:
+    def events_log(self, limit: int = 200) -> dict[str, Any]:
         """Dernières lignes des flux events.jsonl, pour le replay blueprint."""
-        log: dict[str, list] = {}
+        log: dict[str, list[Any]] = {}
         for name, path in self.event_files():
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             entries = []
@@ -359,14 +361,14 @@ class ForgeAPI:
         return log
 
 
-def make_handler(api: ForgeAPI):
+def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, fmt: str, *args) -> None:  # silencieux par défaut
+        def log_message(self, fmt: str, *args: Any) -> None:  # silencieux par défaut
             pass
 
-        def _json(self, payload, code: int = 200) -> None:
+        def _json(self, payload: Any, code: int = 200) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -377,11 +379,11 @@ def make_handler(api: ForgeAPI):
         def _error(self, message: str, code: int = 400) -> None:
             self._json({"error": message}, code)
 
-        def _body(self) -> dict:
+        def _body(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", 0))
             if not length:
                 return {}
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            return cast(dict[str, Any], json.loads(self.rfile.read(length).decode("utf-8")))
 
         # ── GET ───────────────────────────────────────────────────────────
 

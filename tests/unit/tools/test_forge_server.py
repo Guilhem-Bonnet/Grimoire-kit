@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -224,3 +225,86 @@ class TestHTTP:
 
     def test_static_without_ui_returns_hint(self, base_url: str) -> None:
         assert self._get(base_url + "/")["grimoire"] == "serve"
+
+
+@pytest.fixture
+def kit_with_extension(kit_root: Path) -> Path:
+    ext = kit_root / "extensions" / "demo-ext"
+    (ext / "artifacts").mkdir(parents=True)
+    (ext / "artifacts" / "demo.agent.md").write_text("# Demo\n", encoding="utf-8")
+    manifest = {
+        "manifestVersion": 1, "id": "demo-ext", "name": "Demo", "version": "0.1.0",
+        "description": "Extension de test.", "license": "MIT",
+        "authors": [{"name": "T"}], "compat": {"kit": ">=3.11", "manifest": 1},
+        "provides": {"agents": ["artifacts/demo.agent.md"]},
+        "patterns": {"implements": ["ORC-01"]},
+        "permissions": {"filesystem": "artifacts", "network": False, "hooks": [], "memory": "none"},
+        "install": {"steps": [{"kind": "copy", "from": "artifacts/demo.agent.md",
+                               "to": ".github/agents/demo.agent.md"}]},
+    }
+    (ext / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return kit_root
+
+
+class TestExtensionsAndPlan:
+    def test_extensions_view_lists_available(
+        self, project_root: Path, kit_with_extension: Path
+    ) -> None:
+        api = ForgeAPI(project_root, kit_with_extension, ui_dir=None)
+        view = api.extensions_view()
+        assert view["available"][0]["id"] == "demo-ext"
+        assert view["installed"] == {}
+
+    def test_setup_plan_installs_and_writes_plan(
+        self, project_root: Path, kit_with_extension: Path
+    ) -> None:
+        api = ForgeAPI(project_root, kit_with_extension, ui_dir=None)
+        plan = api.setup_plan(
+            {"name": "p", "user": "u", "archetype": "minimal", "extensions": ["demo-ext"]}
+        )
+        assert plan["extensionsInstalled"] == ["demo-ext v0.1.0"]
+        assert plan["extensionErrors"] == []
+        assert "grimoire-init.sh" in plan["initCommand"]
+        assert (project_root / "_grimoire" / "setup-plan.json").is_file()
+        api.extension_remove("demo-ext")
+        assert api.extensions_view()["installed"] == {}
+
+    def test_setup_plan_reports_extension_errors(
+        self, project_root: Path, kit_root: Path
+    ) -> None:
+        api = ForgeAPI(project_root, kit_root, ui_dir=None)
+        plan = api.setup_plan({"extensions": ["ghost"]})
+        assert plan["extensionsInstalled"] == []
+        assert len(plan["extensionErrors"]) == 1
+
+
+class TestStatic:
+    @pytest.fixture
+    def static_url(self, project_root: Path, kit_root: Path, tmp_path: Path):
+        ui = tmp_path / "ui"
+        ui.mkdir()
+        (ui / "index.html").write_text("<html>forge</html>", encoding="utf-8")
+        server = serve(project_root, kit_root, ui_dir=ui, port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+        server.shutdown()
+
+    def test_serves_index(self, static_url: str) -> None:
+        with urllib.request.urlopen(static_url + "/", timeout=5) as resp:  # noqa: S310
+            assert b"forge" in resp.read()
+
+    def test_missing_file_404(self, static_url: str) -> None:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(static_url + "/absent.css", timeout=5)  # noqa: S310
+        assert exc.value.code == 404
+
+    def test_post_route_extension_add_error(self, static_url: str) -> None:
+        req = urllib.request.Request(  # noqa: S310
+            static_url + "/api/extensions/add",
+            data=json.dumps({"source": "ghost"}).encode(),
+            method="POST", headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)  # noqa: S310
+        assert exc.value.code == 422
