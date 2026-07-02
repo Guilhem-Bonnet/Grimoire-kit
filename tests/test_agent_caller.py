@@ -292,7 +292,9 @@ class TestAgentCaller(unittest.TestCase):
         spec = caller.get_agent_schema("nonexistent-agent")
         self.assertIsNone(spec)
 
-    def test_call_success(self):
+    def test_call_standalone_is_simulated(self):
+        # Sans backend LLM, call() formate le prompt et doit le dire :
+        # status="simulated", pas "success" (issue #33 — métriques honnêtes).
         caller = self.mod.AgentCaller(self.tmpdir)
         req = self.mod.AgentCallRequest(
             from_agent="dev",
@@ -301,7 +303,7 @@ class TestAgentCaller(unittest.TestCase):
             context="src/auth/",
         )
         resp = caller.call(req)
-        self.assertEqual(resp.status, "success")
+        self.assertEqual(resp.status, "simulated")
         self.assertGreater(len(resp.response), 0)
         self.assertGreater(resp.tokens_used, 0)
 
@@ -370,7 +372,7 @@ class TestAgentCaller(unittest.TestCase):
                 from_agent="dev", to_agent="architect", task=f"Task {i}"
             )
             resp = caller.call(req)
-            self.assertEqual(resp.status, "success")
+            self.assertEqual(resp.status, "simulated")
         history = caller.get_history()
         self.assertEqual(len(history), 3)
 
@@ -457,7 +459,7 @@ class TestCLIIntegration(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 0)
             data = json.loads(r.stdout)
-            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["status"], "simulated")
 
     def test_no_command_shows_help(self):
         r = self._run()
