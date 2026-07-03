@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.21.1] - 2026-07-03
+
 ### Corrigé (issue #39 — suite)
 
 - **Sanitisation MCP durcie** (C8) : les entrées sont normalisées avant scan
