@@ -1,0 +1,289 @@
+{
+  "generatedAt": "2026-07-03T16:11:48.389Z",
+  "source": "registry",
+  "registry": "https://github.com/Guilhem-Bonnet/grimoire-extensions-registry",
+  "available": [
+    {
+      "id": "autogen",
+      "kind": "flow-adapter",
+      "name": "AutoGen Bridge",
+      "version": "0.1.1",
+      "description": "Pont AutoGen (Microsoft) : conversations multi-agents exposées comme orchestrations Grimoire gouvernées — rôles bornés, tours de parole tracés, sortie en handoff packet.",
+      "license": "MIT",
+      "upstream": "https://github.com/microsoft/autogen",
+      "upstreamKind": "framework",
+      "patterns": [
+        "ORC-01",
+        "ORC-03"
+      ],
+      "requires": [
+        "GOV-01"
+      ],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [],
+        "memory": "none"
+      },
+      "provides": {
+        "agents": 1,
+        "skills": 1,
+        "nodes": 1
+      },
+      "nodes": [
+        "AutoGen Conversation"
+      ],
+      "status": "available"
+    },
+    {
+      "id": "browser-use",
+      "kind": "capability",
+      "name": "Browser Use",
+      "version": "0.1.1",
+      "description": "Agents de navigation web gouvernés : chaque action UI produit une preuve (screenshot, DOM, URL), périmètre de navigation borné par allowlist, actions irréversibles simulées avant exécution.",
+      "license": "MIT",
+      "upstream": "https://github.com/browser-use/browser-use",
+      "upstreamKind": "tooling",
+      "patterns": [
+        "QUA-11",
+        "GOV-07"
+      ],
+      "requires": [
+        "GOV-02"
+      ],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [],
+        "memory": "none"
+      },
+      "provides": {
+        "agents": 1,
+        "instructions": 1,
+        "nodes": 1
+      },
+      "nodes": [
+        "Browser Task"
+      ],
+      "status": "available"
+    },
+    {
+      "id": "crewai",
+      "kind": "flow-adapter",
+      "name": "CrewAI Bridge",
+      "version": "0.1.1",
+      "description": "Expose les crews CrewAI comme artefacts Grimoire gouvernés via l'adaptateur grimoire.runtime.crewai_adapter : import de flows en Recipes, exécution bornée, traces normalisées.",
+      "license": "MIT",
+      "upstream": "https://github.com/crewAIInc/crewAI",
+      "upstreamKind": "framework",
+      "patterns": [
+        "ORC-01",
+        "ORC-02",
+        "ORC-03"
+      ],
+      "requires": [
+        "GOV-01"
+      ],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [
+          "PostToolUse"
+        ],
+        "memory": "none"
+      },
+      "provides": {
+        "agents": 1,
+        "skills": 1,
+        "hooks": 1,
+        "workflows": 1,
+        "nodes": 1
+      },
+      "nodes": [
+        "CrewAI Crew"
+      ],
+      "status": "available"
+    },
+    {
+      "id": "fennara-godot",
+      "kind": "mcp-toolbox",
+      "name": "Fennara Godot Feedback",
+      "version": "0.1.0",
+      "description": "Boucle de feedback Godot réelle pour les agents via le serveur MCP Fennara : diagnostics, contexte scène/nœuds, screenshots, logs runtime et état éditeur — des preuves branchables sur les gates evidence-gated de l'archétype game-dev.",
+      "license": "MIT",
+      "upstream": "https://github.com/fennaraOfficial/fennara-godot-ai",
+      "upstreamKind": null,
+      "patterns": [
+        "QUA-12",
+        "QUA-04",
+        "RUN-08"
+      ],
+      "requires": [],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [],
+        "memory": "none"
+      },
+      "provides": {},
+      "nodes": [],
+      "status": "available"
+    },
+    {
+      "id": "grimoire-mcp",
+      "kind": "mcp-toolbox",
+      "name": "Grimoire MCP Server",
+      "version": "0.1.0",
+      "description": "Le serveur MCP du kit comme toolbox gouvernée : accès outillé aux missions, preuves et mémoire du projet depuis tout client MCP, qualifié par le MCP Trust Gate (GOV-09) — permissions déclarées, surfaces bornées.",
+      "license": "MIT",
+      "upstream": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+      "upstreamKind": null,
+      "patterns": [
+        "GOV-09",
+        "GOV-07"
+      ],
+      "requires": [],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": false,
+        "hooks": [],
+        "memory": "read"
+      },
+      "provides": {},
+      "nodes": [],
+      "status": "available"
+    },
+    {
+      "id": "haystack",
+      "kind": "capability",
+      "name": "Haystack RAG",
+      "version": "0.1.1",
+      "description": "Pipelines RAG Haystack gouvernés : indexation documentaire déclarée (sources, fraîcheur, propriétaire), rappel avec provenance obligatoire — contre le RAG aveugle.",
+      "license": "Apache-2.0",
+      "upstream": "https://github.com/deepset-ai/haystack",
+      "upstreamKind": "framework",
+      "patterns": [
+        "KNO-06",
+        "KNO-02"
+      ],
+      "requires": [
+        "ORC-06"
+      ],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [],
+        "memory": "read"
+      },
+      "provides": {
+        "skills": 1,
+        "instructions": 1,
+        "nodes": 1
+      },
+      "nodes": [
+        "Haystack Retrieval"
+      ],
+      "status": "available"
+    },
+    {
+      "id": "langfuse",
+      "kind": "observability",
+      "name": "Langfuse Observability",
+      "version": "0.1.1",
+      "description": "Pont d'observabilité Langfuse : exporte la télémétrie agentique locale (events.jsonl) vers Langfuse en mode best-effort, avec conventions de traces et guide d'installation. Hooks en shadow, jamais bloquants.",
+      "license": "MIT",
+      "upstream": "https://github.com/langfuse/langfuse",
+      "upstreamKind": "observability",
+      "patterns": [
+        "QUA-02",
+        "QUA-08",
+        "QUA-10"
+      ],
+      "requires": [],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [
+          "PostToolUse"
+        ],
+        "memory": "none"
+      },
+      "provides": {
+        "skills": 1,
+        "hooks": 1,
+        "instructions": 1
+      },
+      "nodes": [],
+      "status": "available"
+    },
+    {
+      "id": "langgraph",
+      "kind": "flow-adapter",
+      "name": "LangGraph Bridge",
+      "version": "0.1.1",
+      "description": "Pont LangGraph : graphes d'agents à état persistant exposés comme workflows Grimoire gouvernés — état explicite, reprises auditées, checkpoints tracés. Matérialise ORC-09 (Workflow State Engine) et ORC-10 (Flow DSL minimal).",
+      "license": "MIT",
+      "upstream": "https://github.com/langchain-ai/langgraph",
+      "upstreamKind": "framework",
+      "patterns": [
+        "ORC-09",
+        "ORC-10"
+      ],
+      "requires": [
+        "GOV-01"
+      ],
+      "permissions": {
+        "filesystem": "artifacts",
+        "network": true,
+        "hooks": [],
+        "memory": "none"
+      },
+      "provides": {
+        "agents": 1,
+        "skills": 1,
+        "workflows": 1,
+        "nodes": 1
+      },
+      "nodes": [
+        "LangGraph StateGraph"
+      ],
+      "status": "available"
+    }
+  ],
+  "blueprints": [
+    {
+      "id": "onboarding-crew",
+      "name": "Onboarding d'un crew CrewAI gouverné",
+      "description": "Flow d'exemple : un crew CrewAI encapsulé derrière l'orchestrateur, avec policy engine en amont et evidence pack en aval.",
+      "nodes": 4,
+      "edges": 4,
+      "extensions": [
+        "crewai"
+      ],
+      "catalogVersion": "1.0.0"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "dify",
+      "name": "Dify",
+      "description": "Plateforme LLM apps — workflows visuels, RAG, agents.",
+      "upstream": "https://github.com/langgenius/dify",
+      "status": "candidate"
+    },
+    {
+      "id": "openhands",
+      "name": "OpenHands",
+      "description": "Agents développeurs autonomes en sandbox.",
+      "upstream": "https://github.com/All-Hands-AI/OpenHands",
+      "status": "candidate"
+    },
+    {
+      "id": "mem0",
+      "name": "Mem0",
+      "description": "Couche mémoire persistante pour agents.",
+      "upstream": "https://github.com/mem0ai/mem0",
+      "status": "candidate"
+    }
+  ]
+}

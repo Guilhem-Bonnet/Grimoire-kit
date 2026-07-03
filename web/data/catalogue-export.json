@@ -1,0 +1,4744 @@
+{
+  "catalogVersion": "1.0.0",
+  "generatedAt": "2026-07-02T01:45:12.997666+00:00",
+  "source": {
+    "repository": "https://github.com/Guilhem-Bonnet/processus-developpement-agentique.git",
+    "commit": "53b2c34258580bd965631bcc186b21947b44c71e"
+  },
+  "families": [
+    {
+      "id": "ORG",
+      "slug": "01-organisation",
+      "name": "Organisation",
+      "description": "Les patterns organisationnels définissent la séparation des responsabilités entre l'utilisateur-client, l'entreprise-agent, les rôles spécialisés et les autorités de validation."
+    },
+    {
+      "id": "ORC",
+      "slug": "02-orchestration-contexte",
+      "name": "Orchestration et contexte",
+      "description": "Ces patterns structurent le passage d'une intention client vers des lots exécutables par des agents spécialisés, sans perte de contrôle ni saturation de contexte."
+    },
+    {
+      "id": "GOV",
+      "slug": "03-gouvernance-controles",
+      "name": "Gouvernance et contrôles",
+      "description": "Ces patterns empêchent les actions non autorisées, les choix implicites de modèle et les changements risqués sans simulation ni validation."
+    },
+    {
+      "id": "MOD",
+      "slug": "03-gouvernance-controles",
+      "name": "Modèles",
+      "description": "Patterns de gouvernance des modèles : routage, retrait et sélection par compétence et modalité. Hébergés dans le dossier gouvernance."
+    },
+    {
+      "id": "QUA",
+      "slug": "04-preuves-qualite",
+      "name": "Preuves et qualité",
+      "description": "Ces patterns transforment les affirmations, transitions et états Done en éléments vérifiables."
+    },
+    {
+      "id": "KNO",
+      "slug": "05-memoire-connaissances",
+      "name": "Mémoire et connaissances",
+      "description": "Ces patterns empêchent la mémoire agentique de devenir un vrac sémantique. Ils organisent rappel, vérité, rétention, désindexation et correction."
+    },
+    {
+      "id": "RUN",
+      "slug": "06-runtime-evolution",
+      "name": "Runtime et évolution",
+      "description": "Ces patterns gouvernent les capacités et sorties produites par le runtime agentique afin d'éviter la prolifération invisible."
+    },
+    {
+      "id": "COG",
+      "slug": "08-cognition",
+      "name": "Cognition",
+      "description": "Ces patterns forment le cœur cognitif du noyau agentique : ils augmentent l'usage du modèle avant qu'il agisse. Là où les autres familles gouvernent, prouvent ou exécutent, ceux-ci structurent la façon dont l'agent **décompose, raisonne, se révise et choisit ses compétences**."
+    }
+  ],
+  "patterns": [
+    {
+      "id": "ORG-01",
+      "family": "ORG",
+      "name": "Entreprise-agent",
+      "intent": "Traiter l'agent comme une organisation opératrice plutôt que comme un simple assistant.",
+      "problem": "Un agent conversationnel mélange besoin, exécution, validation et mémoire.",
+      "solution": "Séparer rôles, responsabilités, validations, preuves et mémoire comme dans une entreprise.",
+      "docPath": "docs/patterns/01-organisation/README.md#org-01--entreprise-agent",
+      "controls": [
+        "RACI",
+        "Kanban",
+        "validateur final",
+        "contrats entre rôles",
+        "dossier d'acceptation"
+      ],
+      "antiPattern": "Agent unique qui décide, exécute et valide seul.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "ORG-02",
+      "family": "ORG",
+      "name": "Validation authority",
+      "intent": "Savoir qui peut accepter, bloquer ou demander correction.",
+      "problem": "L'agent confond complétion technique et acceptation métier.",
+      "solution": "Définir les autorités par domaine : client, QA, sécurité, ops, design, architecture.",
+      "docPath": "docs/patterns/01-organisation/README.md#org-02--validation-authority",
+      "controls": [
+        "RACI",
+        "matrice de validation",
+        "dossier d'acceptation",
+        "verdict de vérification"
+      ],
+      "antiPattern": "L'agent ferme une carte sensible sans validateur identifié.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "ORC-01",
+      "family": "ORC",
+      "name": "Orchestrateur et subagents spécialisés",
+      "intent": "Déléguer sans perdre le contrôle.",
+      "problem": "Un agent généraliste sature en contexte et oublie les contraintes.",
+      "solution": "L'orchestrateur découpe le travail et transmet des task envelopes à des subagents spécialisés.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-01--orchestrateur-et-subagents-spécialisés",
+      "controls": [
+        "WIP limité",
+        "outils par rôle",
+        "handoff packet",
+        "revue croisée"
+      ],
+      "antiPattern": "Subagents autonomes qui explorent librement sans contrat de sortie.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "ORC-02",
+      "family": "ORC",
+      "name": "Task envelope",
+      "intent": "Donner à un agent exactement ce qu'il doit faire.",
+      "problem": "Les prompts longs et flous produisent dérive, coûts et faux Done.",
+      "solution": "Encapsuler mission, rôle, contexte minimal, outils, contraintes, critères et format de sortie.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-02--task-envelope",
+      "controls": [
+        "Pre-delegation",
+        "budget de contexte",
+        "policy engine",
+        "modèle autorisé"
+      ],
+      "antiPattern": "Coller tout l'historique de conversation à chaque agent.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "ORC-03",
+      "family": "ORC",
+      "name": "Handoff packet",
+      "intent": "Passer le relais sans recharger toute la mission.",
+      "problem": "Les étapes suivantes perdent les décisions ou héritent de bruit inutile.",
+      "solution": "Résumer résultat, preuves, hypothèses, risques, changements et prochain déclencheur.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-03--handoff-packet",
+      "controls": [
+        "Post-subagent",
+        "claim ledger",
+        "journal de preuves",
+        "transition d'étape"
+      ],
+      "antiPattern": "Rapport narratif long sans action suivante ni preuve.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "ORC-04",
+      "family": "ORC",
+      "name": "Context router",
+      "intent": "Fournir un contexte utile, frais et proportionné.",
+      "problem": "Trop peu de contexte crée hallucination ; trop de contexte crée confusion.",
+      "solution": "Sélectionner sources par rôle, étape, risque, budget, fraîcheur et statut de connaissance.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-04--context-router",
+      "controls": [
+        "Pre-context-load",
+        "Post-context-load",
+        "Pre-context-reuse",
+        "source registry"
+      ],
+      "antiPattern": "RAG large sans filtres ni métadonnées.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "ORC-05",
+      "family": "ORC",
+      "name": "Orchestrateur de contexte avancé",
+      "intent": "Piloter le contexte comme un plan de contrôle au-dessus des mémoires, modèles, outils et transitions.",
+      "problem": "Des couches mémoire séparées restent utiles mais insuffisantes : elles rappellent, stockent ou relient, sans décider quoi exposer, à qui, quand, ni avec quel niveau de preuve.",
+      "solution": "Ajouter un orchestrateur de contexte qui classe la tâche, choisit un profil, arbitre les sources, calcule un budget, critique les contradictions, produit un context pack, puis décide persistance, invalidation ou escalade.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-05--orchestrateur-de-contexte-avancé",
+      "controls": [
+        "Context scorecard",
+        "provenance obligatoire",
+        "budget tokens/coût",
+        "policy engine",
+        "memory gate",
+        "pre-stage-transition",
+        "ledger des décisions de contexte"
+      ],
+      "antiPattern": "Laisser chaque subagent récupérer son propre contexte sans coordination globale.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "ORC-06",
+      "family": "ORC",
+      "name": "Context constitution",
+      "intent": "Définir l'ordre d'autorité des informations utilisées par l'agent.",
+      "problem": "L'agent peut traiter une mémoire, une similarité ou une hypothèse comme équivalente à une source de vérité.",
+      "solution": "Établir une constitution du contexte : source active > preuve vérifiée > décision validée > mémoire durable > handoff récent > hypothèse > similarité vectorielle.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-06--context-constitution",
+      "controls": [
+        "Source registry",
+        "claim ledger",
+        "memory gate",
+        "vérification de provenance",
+        "marquage des hypothèses"
+      ],
+      "antiPattern": "RAG aveugle ou mémoire autoritaire.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "ORC-07",
+      "family": "ORC",
+      "name": "Context conflict resolver",
+      "intent": "Résoudre ou exposer les contradictions de contexte avant action.",
+      "problem": "Code, documentation, tickets, mémoire, ADR et demande client peuvent se contredire.",
+      "solution": "Détecter les conflits, classer leur gravité, appliquer l'ordre d'autorité, puis décider : source gagnante, hypothèse, question client, tâche d'analyse ou blocage.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-07--context-conflict-resolver",
+      "controls": [
+        "Context scorecard",
+        "claim ledger",
+        "validation authority",
+        "incident si mémoire contaminée"
+      ],
+      "antiPattern": "Choisir la source la plus récente ou la plus similaire sans justification.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "ORC-08",
+      "family": "ORC",
+      "name": "Context budget escalation",
+      "intent": "Augmenter le contexte seulement quand une preuve montre que le budget courant est insuffisant.",
+      "problem": "Le contexte grossit par confort, ou reste trop petit par économie, ce qui crée hallucinations et coûts inutiles.",
+      "solution": "Définir des déclencheurs d'escalade de tiny vers small, medium ou deep, avec justification, durée et retour au budget inférieur après synthèse.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-08--context-budget-escalation",
+      "controls": [
+        "Logs tokens/coût",
+        "context scorecard",
+        "pre-context-load",
+        "validation si dépassement de seuil"
+      ],
+      "antiPattern": "Prompt-cargo : ajouter toujours plus de contexte sans diagnostic.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "ORC-09",
+      "family": "ORC",
+      "name": "Workflow State Engine",
+      "intent": "Rendre les workflows agentiques explicites, reprenables et auditables.",
+      "problem": "Les agents enchaînent souvent étapes, interruptions et reprises dans une logique cachée au prompt ou au runtime.",
+      "solution": "Déclarer un manifeste d'états, transitions, guards, retries, interruptions, compensations et preuves minimales.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-09--workflow-state-engine",
+      "controls": [
+        "Workflow state manifest",
+        "mission ledger append-only",
+        "evidence-driven transition",
+        "telemetry events"
+      ],
+      "antiPattern": "Décrire un process dans un prompt sans état machine ni preuve de transition.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "ORC-10",
+      "family": "ORC",
+      "name": "Flow DSL minimal",
+      "intent": "Décrire des flows réutilisables sans créer un langage complexe prématuré.",
+      "problem": "Les workflows restent dispersés entre prompts, scripts et documentation, ou deviennent un DSL trop riche et fragile.",
+      "solution": "Définir un DSL minimal : états, transitions, guards, preuves et export Mermaid/manifest.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-10--flow-dsl-minimal",
+      "controls": [
+        "Flow DSL minimal",
+        "workflow state manifest",
+        "validation syntaxique",
+        "dry-run de flow"
+      ],
+      "antiPattern": "Encoder la logique métier dangereuse directement dans le DSL au lieu de la garder dans les policies/outils.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "ORC-11",
+      "family": "ORC",
+      "name": "Planner-executor-critic",
+      "intent": "Séparer planification, exécution et critique pour les tâches complexes ou risquées.",
+      "problem": "Un agent unique peut confondre intention, action et validation, puis défendre son propre résultat.",
+      "solution": "Organiser trois responsabilités : un planner produit plan et critères, un executor agit sous task envelope, un critic vérifie hypothèses, preuves, erreurs et risques résiduels.",
+      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-11--planner-executor-critic",
+      "controls": [
+        "Task envelope",
+        "validation authority",
+        "independent reviewer",
+        "evidence pack",
+        "budget de critique proportionné au risque"
+      ],
+      "antiPattern": "Demander au même agent de planifier, exécuter et valider une décision critique sans séparation de rôle.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "GOV-01",
+      "family": "GOV",
+      "name": "Policy engine et hooks",
+      "intent": "Prévenir les actions non autorisées avant qu'elles se produisent.",
+      "problem": "Les agents peuvent appeler outils, écrire, pousser ou supprimer au mauvais moment.",
+      "solution": "Intercepter les moments critiques avec règles allow, block ou escalate.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-01--policy-engine-et-hooks",
+      "controls": [
+        "Pre-tool",
+        "Pre-write",
+        "Pre-release",
+        "Pre-dry-run",
+        "Incident-detected"
+      ],
+      "antiPattern": "Revue seulement après exécution.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "GOV-02",
+      "family": "GOV",
+      "name": "Dry-run avant action risquée",
+      "intent": "Simuler avant d'agir sur un système externe, coûteux ou irréversible.",
+      "problem": "Un agent peut produire un changement correct localement mais dangereux en contexte réel.",
+      "solution": "Décrire impact, permissions, coût, rollback, validation et critères de go/no-go.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-02--dry-run-avant-action-risquée",
+      "controls": [
+        "Pre-dry-run",
+        "validation humaine",
+        "rollback",
+        "evidence pack"
+      ],
+      "antiPattern": "Déploiement, suppression ou appel externe sans simulation.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "GOV-03",
+      "family": "GOV",
+      "name": "Hook lifecycle progressif",
+      "intent": "Déployer les garde-fous sans casser le flux de travail.",
+      "problem": "Un hook nouveau peut bloquer trop large ou manquer des cas critiques.",
+      "solution": "Promouvoir les hooks par modes `shadow`, `canary`, puis `enforced`.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-03--hook-lifecycle-progressif",
+      "controls": [
+        "Registre des hooks",
+        "digest de validation",
+        "faux positifs",
+        "procédure de retrait"
+      ],
+      "antiPattern": "Activer un blocage global sans période d'observation.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "MOD-01",
+      "family": "MOD",
+      "name": "Model router",
+      "intent": "Utiliser le bon modèle pour la bonne tâche.",
+      "problem": "Le modèle par défaut peut être trop faible, trop cher ou non autorisé.",
+      "solution": "Router selon tâche, rôle, risque, confidentialité, coût, modalité et evals.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-01--model-router",
+      "controls": [
+        "Pre-model-route",
+        "fallback",
+        "evals",
+        "logs coût/latence",
+        "statut modèle"
+      ],
+      "antiPattern": "Choix implicite du modèle pour toutes les tâches.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "GOV-04",
+      "family": "GOV",
+      "name": "Autonomie gouvernée",
+      "intent": "Adapter le niveau d'autonomie de l'agent au risque, aux preuves et aux autorités de validation.",
+      "problem": "Une autonomie uniforme donne trop de pouvoir aux tâches risquées ou bloque inutilement les tâches simples.",
+      "solution": "Définir des niveaux d'autonomie par tâche : proposer, préparer, exécuter sous contrôle, exécuter automatiquement, ou bloquer.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-04--autonomie-gouvernée",
+      "controls": [
+        "Policy engine",
+        "validation authority",
+        "evidence pack",
+        "dry-run",
+        "incident stop"
+      ],
+      "antiPattern": "Autonomie maximale par défaut.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "MOD-02",
+      "family": "MOD",
+      "name": "Model retirement guard",
+      "intent": "Retirer ou restreindre un modèle sans casser l'orchestration.",
+      "problem": "Un modèle obsolète peut rester utilisé par habitude ou fallback implicite.",
+      "solution": "Maintenir statuts active, restricted, deprecated, disallowed et local_only avec fallback explicite.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-02--model-retirement-guard",
+      "controls": [
+        "Politique de routage",
+        "pre-model-route",
+        "eval de remplacement",
+        "journal d'appel"
+      ],
+      "antiPattern": "Laisser un modèle interdit accessible parce qu'il fonctionne encore.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "MOD-03",
+      "family": "MOD",
+      "name": "Routage par compétence et modalité (limites assumées)",
+      "intent": "Router chaque tâche vers la cible réellement compétente pour la modalité requise, et assumer ses limites au lieu de simuler une maîtrise absente.",
+      "problem": "Un LLM généraliste accepte toute demande et produit un résultat médiocre hors de son cœur de compétence (illustration, audio, 3D, vidéo), ce qui dégrade le projet dès les fondations.",
+      "solution": "Déclarer pour chaque tâche la modalité et le niveau de maîtrise requis ; mapper vers la cible capable (modèle spécialisé, outil dédié ou humain) ; sous un seuil de confiance, refuser et émettre des options vers GOV-15 (humain) ou RUN-15 (outil).",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-03--routage-par-compétence-et-modalité-limites-assumées",
+      "controls": [
+        "Capability/modality matrix",
+        "capability routing record",
+        "seuil de confiance",
+        "fallback déclaré",
+        "refus explicite hors maîtrise"
+      ],
+      "antiPattern": "Faire produire une illustration finale par un LLM texte « parce qu'il est là ».",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "GOV-05",
+      "family": "GOV",
+      "name": "Agent privilege boundary",
+      "intent": "Empêcher qu'un agent hérite des permissions d'infrastructure du controller.",
+      "problem": "Un agent lancé avec les mêmes variables d'environnement que l'orchestrateur peut écrire des clés réservées, modifier l'état de convergence ou escalader ses droits.",
+      "solution": "Séparer les clés controller et agent, protéger les champs d'infrastructure et scrubber les tokens avant spawn de toute session agent.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-05--agent-privilege-boundary",
+      "controls": [
+        "Pre-spawn env scrub",
+        "liste de clés protégées",
+        "audit des écritures `convergence.*`/`var.*`",
+        "rotation de token controller"
+      ],
+      "antiPattern": "Donner au worker le même token que le scheduler parce qu'ils tournent sur la même machine.",
+      "maturity": "Production"
+    },
+    {
+      "id": "GOV-06",
+      "family": "GOV",
+      "name": "Merge lane fault classifier",
+      "intent": "Relancer seulement les échecs réellement transitoires et escalader les échecs durables.",
+      "problem": "Les workflows de review/merge peuvent rester bloqués par des retries infinis ou échouer trop tôt sur un timeout provider.",
+      "solution": "Classifier chaque échec en transient ou hard avant retry : rate limit, timeout et indisponibilité provider sont retryables ; violation durable, conflit logique ou verdict critique escaladent.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-06--merge-lane-fault-classifier",
+      "controls": [
+        "Budget de retry",
+        "raison normalisée",
+        "journal de classification",
+        "escalade si seuil dépassé"
+      ],
+      "antiPattern": "Retry automatique sans type d'erreur ni limite.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "GOV-07",
+      "family": "GOV",
+      "name": "Tool blast-radius limiter",
+      "intent": "Limiter l'impact maximal d'un appel outil avant exécution.",
+      "problem": "Un outil autorisé peut quand même toucher trop de fichiers, domaines, environnements, coûts ou données sensibles.",
+      "solution": "Déclarer pour chaque tool call un périmètre fichiers/réseau/shell/browser/MCP/coût/environnement, puis appliquer allow, dry-run, escalate ou block.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-07--tool-blast-radius-limiter",
+      "controls": [
+        "Pre-tool policy",
+        "allowlist",
+        "dry-run",
+        "budget",
+        "workspace isolation",
+        "evidence pack"
+      ],
+      "antiPattern": "Autoriser un outil globalement parce que son usage précédent était sûr.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "GOV-08",
+      "family": "GOV",
+      "name": "Guardrail contract",
+      "intent": "Rendre les garde-fous explicites, testables et versionnés.",
+      "problem": "Les règles de sécurité, qualité ou conformité restent souvent implicites dans prompts, hooks ou habitudes.",
+      "solution": "Décrire chaque guardrail par type, scope, mode, point de déclenchement, décisions possibles, preuves et métriques.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-08--guardrail-contract",
+      "controls": [
+        "Guardrail contract",
+        "hook lifecycle",
+        "faux positifs",
+        "incident si bypass ou dérive"
+      ],
+      "antiPattern": "Ajouter une règle bloquante sans owner, mode shadow/canary ni mesure d'impact.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "GOV-09",
+      "family": "GOV",
+      "name": "MCP Trust Gate",
+      "intent": "Autoriser les serveurs MCP comme capacités externes seulement après qualification.",
+      "problem": "Un MCP peut exposer réseau, fichiers, secrets ou actions métier sans frontière claire.",
+      "solution": "Enregistrer serveur, outils, variables, scopes, données accessibles, owner et mode de confiance avant usage.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-09--mcp-trust-gate",
+      "controls": [
+        "Registre MCP",
+        "secret minimization",
+        "allowlist tool",
+        "sandbox",
+        "telemetry",
+        "blast-radius"
+      ],
+      "antiPattern": "Brancher un MCP parce qu'il fonctionne localement sans examiner ses permissions.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "GOV-10",
+      "family": "GOV",
+      "name": "Policy by environment",
+      "intent": "Adapter l'autonomie et les outils au niveau de risque de l'environnement.",
+      "problem": "Les règles local, staging, prod et client peuvent être confondues ou appliquées uniformément.",
+      "solution": "Déclarer des profils d'environnement avec actions permises, dry-run requis, validation authority et secrets accessibles.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-10--policy-by-environment",
+      "controls": [
+        "Environment policy",
+        "runtime provider",
+        "blast-radius",
+        "audit prod",
+        "emergency stop"
+      ],
+      "antiPattern": "Tester une action en staging puis l'exécuter en production avec le même niveau d'autonomie.",
+      "maturity": "Production"
+    },
+    {
+      "id": "GOV-11",
+      "family": "GOV",
+      "name": "Cluster action dry-run",
+      "intent": "Simuler toute action cluster ou infra avant effet réel.",
+      "problem": "Une commande Kubernetes ou cloud peut dégrader plusieurs workloads même si elle est syntaxiquement correcte.",
+      "solution": "Produire plan d'impact, ressources touchées, RBAC utilisé, diff attendu, rollback et preuve de policy avant apply.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-11--cluster-action-dry-run",
+      "controls": [
+        "Server-side dry-run",
+        "diff",
+        "admission policy",
+        "quota",
+        "service account minimal",
+        "rollback plan"
+      ],
+      "antiPattern": "Laisser un agent appliquer directement sur cluster parce que la CI est verte.",
+      "maturity": "Production"
+    },
+    {
+      "id": "GOV-12",
+      "family": "GOV",
+      "name": "Prompt Injection Firewall",
+      "intent": "Empêcher qu'un contenu externe devienne une instruction de contrôle.",
+      "problem": "Pages web, tickets, logs, docs ou sorties outil peuvent contenir des instructions adverses ou hors périmètre.",
+      "solution": "Séparer instructions de contrôle et contenu lu, marquer les sources non fiables, refuser toute instruction provenant d'un corpus externe.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-12--prompt-injection-firewall",
+      "controls": [
+        "Source trust label",
+        "pre-context-load",
+        "pre-tool",
+        "redaction",
+        "incident si tentative critique"
+      ],
+      "antiPattern": "Coller du contenu web ou ticket dans le prompt comme s'il était une instruction système.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "GOV-13",
+      "family": "GOV",
+      "name": "Remote Hygiene Guard",
+      "intent": "Vérifier la fraîcheur et la sûreté d'une source distante avant audit ou indexation.",
+      "problem": "Une analyse peut s'appuyer sur une branche obsolète, un remote inaccessible, des tags massifs ou un worktree sale.",
+      "solution": "Contrôler remote, branche, ref, tags, dirty state, pull/fetch safe et statut de fraîcheur avant de conclure.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-13--remote-hygiene-guard",
+      "controls": [
+        "Remote audit",
+        "dirty-skip-pull",
+        "source freshness",
+        "quarantine si remote incohérent"
+      ],
+      "antiPattern": "Auditer ou indexer un dépôt sans savoir si la ref locale représente encore la source active.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "GOV-14",
+      "family": "GOV",
+      "name": "Decision Council Gate",
+      "intent": "Escalader les décisions critiques vers un quorum contrôlé.",
+      "problem": "Une seule réponse modèle peut être insuffisante pour architecture, sécurité, production ou arbitrage irréversible.",
+      "solution": "Définir conseil, quorum, veto, budget, modèles/providers autorisés, synthèse des désaccords et verdict final.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-14--decision-council-gate",
+      "controls": [
+        "Council record",
+        "validation authority",
+        "cost cap",
+        "dissent log",
+        "evidence pack"
+      ],
+      "antiPattern": "Multiplier les modèles pour toute décision ou accepter un consensus non sourcé.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "GOV-15",
+      "family": "GOV",
+      "name": "Human escalation gate",
+      "intent": "Escalader vers un humain quand le risque, l'ambiguïté ou l'impact dépassent l'autonomie autorisée.",
+      "problem": "Un agent peut trancher seul une situation sensible, irréversible ou hors de son mandat.",
+      "solution": "Définir des déclencheurs d'escalade (risque élevé, ambiguïté critique, impact sensible, faible confiance) et un canal de décision humaine traçable.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-15--human-escalation-gate",
+      "controls": [
+        "Policy engine",
+        "validation authority",
+        "autonomie gouvernée",
+        "evidence pack",
+        "escalation record"
+      ],
+      "antiPattern": "Continuer en autonomie maximale faute de règle d'escalade explicite.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "GOV-16",
+      "family": "GOV",
+      "name": "LLM error classifier",
+      "intent": "Classer les erreurs LLM avant toute reprise.",
+      "problem": "Un échec non qualifié déclenche des retries aveugles ou masque un défaut durable.",
+      "solution": "Distinguer erreur transitoire provider, sortie invalide, risque factuel, omission, conflit d'instruction et échec d'outil.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-16--llm-error-classifier",
+      "controls": [
+        "Failure classification contract",
+        "telemetry events",
+        "claim ledger",
+        "cost registry"
+      ],
+      "antiPattern": "Traiter toute erreur comme un simple « réessayer ».",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "GOV-17",
+      "family": "GOV",
+      "name": "Recovery policy",
+      "intent": "Associer chaque classe d'erreur à une stratégie de reprise explicite.",
+      "problem": "Sans politique, la reprise est improvisée, coûteuse ou dangereuse.",
+      "solution": "Mapper erreur vers retry borné, fallback modèle, correction ciblée, rollback, escalade ou blocage, avec budget et preuves.",
+      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-17--recovery-policy",
+      "controls": [
+        "LLM error classifier",
+        "model router",
+        "idempotent tool action",
+        "compensation action",
+        "evidence pack"
+      ],
+      "antiPattern": "Réessayer indéfiniment sans changer de stratégie ni borne.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "QUA-01",
+      "family": "QUA",
+      "name": "Claim ledger",
+      "intent": "Transformer les affirmations en éléments vérifiables.",
+      "problem": "L'agent peut produire des conclusions plausibles mais non prouvées.",
+      "solution": "Relier chaque affirmation critique à une source, un résultat d'outil ou une hypothèse.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-01--claim-ledger",
+      "controls": [
+        "QA",
+        "critique",
+        "dossier d'acceptation",
+        "evidence pack"
+      ],
+      "antiPattern": "Documentation assertive sans provenance.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "QUA-02",
+      "family": "QUA",
+      "name": "Observabilité agentique",
+      "intent": "Comprendre et améliorer les décisions agentiques.",
+      "problem": "Sans traces, on ne sait pas pourquoi un agent a agi ni comment corriger.",
+      "solution": "Capturer prompts, contexte, outils, coûts, latence, erreurs, validations et incidents.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-02--observabilité-agentique",
+      "controls": [
+        "Traces",
+        "métriques",
+        "evals",
+        "SLO",
+        "post-mortem"
+      ],
+      "antiPattern": "Système agentique opaque impossible à auditer.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-03",
+      "family": "QUA",
+      "name": "Mission ledger append-only",
+      "intent": "Rendre les missions et transitions auditables.",
+      "problem": "Un état courant écrasé ne permet pas de comprendre pourquoi une décision a changé.",
+      "solution": "Journaliser missions, tâches, transitions, incidents et preuves comme événements append-only.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-03--mission-ledger-append-only",
+      "controls": [
+        "Machine d'état",
+        "actor_id",
+        "timestamp",
+        "payload",
+        "lien evidence/verdict"
+      ],
+      "antiPattern": "Modifier silencieusement le statut d'une tâche sans événement.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "QUA-04",
+      "family": "QUA",
+      "name": "Evidence pack et verification verdict",
+      "intent": "Transformer le Done en décision vérifiable.",
+      "problem": "Les preuves existent mais restent dispersées entre logs, tests, captures et rapports.",
+      "solution": "Regrouper les preuves dans un evidence pack, puis produire un verdict de vérification.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-04--evidence-pack-et-verification-verdict",
+      "controls": [
+        "Digest",
+        "couverture des critères",
+        "profil de preuve",
+        "décision close/reopen/incident"
+      ],
+      "antiPattern": "Fermer une tâche parce qu'un test a été lancé sans relier le résultat aux critères.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "QUA-05",
+      "family": "QUA",
+      "name": "Evidence-driven transition",
+      "intent": "Autoriser les transitions d'étape seulement par preuves proportionnées au risque.",
+      "problem": "Une mission peut passer de discovery à cadrage, de dev à QA ou de QA à livraison sans preuve suffisante.",
+      "solution": "Associer chaque transition à un gate de preuves : critères couverts, risques traités, verdict, prochaine autorité.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-05--evidence-driven-transition",
+      "controls": [
+        "Pre-stage-transition",
+        "evidence pack",
+        "verification verdict",
+        "DoD d'étape"
+      ],
+      "antiPattern": "Passer à l'étape suivante parce que le subagent a fini de répondre.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "QUA-06",
+      "family": "QUA",
+      "name": "LLM cost registry",
+      "intent": "Rendre le coût LLM observable, comparable et gouvernable.",
+      "problem": "Les coûts tokens sont souvent visibles trop tard dans la facturation provider et difficiles à relier à une mission, un modèle ou un rig.",
+      "solution": "Maintenir un registre de prix par modèle/provider avec précédence explicite (défauts, pack, projet), puis rattacher tokens, coût estimé et budget à chaque trace.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-06--llm-cost-registry",
+      "controls": [
+        "Source de prix",
+        "version de pricing",
+        "coût par mission",
+        "alerte budget",
+        "fallback modèle si dépassement"
+      ],
+      "antiPattern": "Optimiser ou limiter les coûts à partir de factures agrégées sans lien avec les décisions agentiques.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-07",
+      "family": "QUA",
+      "name": "Session reliability SLO reporter",
+      "intent": "Mesurer la santé réelle des sessions agentiques par runtime, modèle et version de prompt.",
+      "problem": "Un agent peut sembler fonctionnel globalement alors qu'un modèle, rig ou prompt version provoque crashs, quarantaines ou idle kills.",
+      "solution": "Agréger sessions, crashes, quarantaines, idle kills et drain events par Model/PromptVersion/Rig, puis calculer CrashRate% et UnhealthyRate%.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-07--session-reliability-slo-reporter",
+      "controls": [
+        "SLO de fiabilité",
+        "seuil de quarantaine",
+        "retrait capacité",
+        "incident si dérive persistante"
+      ],
+      "antiPattern": "Surveiller seulement le succès final sans métriques de santé session.",
+      "maturity": "Production"
+    },
+    {
+      "id": "QUA-08",
+      "family": "QUA",
+      "name": "Agent telemetry plane",
+      "intent": "Unifier traces, métriques et événements des agents, modèles, outils, workflows et connaissances.",
+      "problem": "Les preuves existent mais restent fragmentées entre logs shell, traces provider, prompts, coûts et résultats de test.",
+      "solution": "Définir un plan télémétrique avec trace_id, mission_id, actor_id, model/provider, tool, state, coût, latence, verdict et incident.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-08--agent-telemetry-plane",
+      "controls": [
+        "OpenTelemetry ou équivalent",
+        "corrélation evidence pack",
+        "politique de rétention",
+        "masquage secrets"
+      ],
+      "antiPattern": "Collecter des logs bruts impossibles à relier à une décision ou mission.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-09",
+      "family": "QUA",
+      "name": "Prompt/version observability",
+      "intent": "Comprendre l'effet des versions de prompts, instructions, skills et modèles.",
+      "problem": "Un changement de prompt peut dégrader qualité, coût ou sécurité sans être attribuable.",
+      "solution": "Versionner prompt, instruction, skill, capability pack, provider/model et dataset d'eval dans chaque trace.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-09--promptversion-observability",
+      "controls": [
+        "Prompt registry",
+        "eval dataset record",
+        "canary",
+        "rollback",
+        "SLO par version"
+      ],
+      "antiPattern": "Modifier des instructions partagées sans mesurer impact ni historiser la version.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-10",
+      "family": "QUA",
+      "name": "Trajectory logging",
+      "intent": "Rejouer le raisonnement opérationnel observable d'une mission sans exposer de données sensibles inutiles.",
+      "problem": "Le résultat final ne montre pas quelles sources, outils, validations ou hésitations ont structuré l'action.",
+      "solution": "Journaliser la trajectoire en événements : intention, contexte chargé, décision, tool call, observation, correction, verdict.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-10--trajectory-logging",
+      "controls": [
+        "Mission ledger",
+        "telemetry plane",
+        "redaction",
+        "evidence pack",
+        "retention"
+      ],
+      "antiPattern": "Garder seulement le transcript brut ou seulement le statut final.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-11",
+      "family": "QUA",
+      "name": "Browser evidence contract",
+      "intent": "Rendre les actions UI/browser vérifiables et sûres.",
+      "problem": "Une validation visuelle ou E2E peut être non reproductible sans DOM, screenshot, console et réseau.",
+      "solution": "Encadrer URLs, actions autorisées, preuves visuelles, logs et dry-run pour toute interaction navigateur.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-11--browser-evidence-contract",
+      "controls": [
+        "Browser tool contract",
+        "screenshot final",
+        "DOM snapshot",
+        "console/network logs",
+        "blast-radius"
+      ],
+      "antiPattern": "Cliquer dans une UI de production sans capture, scope ni validation humaine.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "QUA-12",
+      "family": "QUA",
+      "name": "Visual Evidence Pack",
+      "intent": "Capturer les preuves visuelles nécessaires aux livrables UI, design ou navigateur.",
+      "problem": "Un test ou une réponse textuelle ne prouve pas toujours l'état réel de l'interface.",
+      "solution": "Grouper DOM snapshot, screenshots, console, réseau, viewport, parcours et critères UX dans un pack de preuve.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-12--visual-evidence-pack",
+      "controls": [
+        "Browser tool contract",
+        "design validation authority",
+        "evidence pack",
+        "retention courte"
+      ],
+      "antiPattern": "Déclarer une interface validée sans capture ni état reproductible.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "QUA-13",
+      "family": "QUA",
+      "name": "Eval lifecycle",
+      "intent": "Faire évoluer les evals comme un actif de qualité versionné.",
+      "problem": "Les evals deviennent vite obsolètes si elles ne suivent pas prompts, modèles, skills et incidents.",
+      "solution": "Versionner datasets, juges, seuils, historique de runs, cas ajoutés depuis incidents et règles de blocage.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-13--eval-lifecycle",
+      "controls": [
+        "Eval dataset record",
+        "prompt/version observability",
+        "canary",
+        "rollback"
+      ],
+      "antiPattern": "Rejouer toujours les mêmes cas sans vérifier qu'ils couvrent les risques actuels.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "QUA-14",
+      "family": "QUA",
+      "name": "Output contract validator",
+      "intent": "Garantir que la sortie respecte un contrat exploitable avant utilisation.",
+      "problem": "Une réponse plausible peut violer schéma, types, invariants ou format attendu.",
+      "solution": "Définir un contrat (schéma, champs requis, types, invariants métier) et valider la sortie avant de la consommer.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-14--output-contract-validator",
+      "controls": [
+        "Output contract",
+        "validation automatique",
+        "claim ledger",
+        "eval lifecycle"
+      ],
+      "antiPattern": "Accepter une sortie parce qu'elle « parse » sans vérifier les invariants.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "QUA-15",
+      "family": "QUA",
+      "name": "Independent reviewer",
+      "intent": "Séparer producteur et vérificateur pour les sorties critiques.",
+      "problem": "Un agent qui valide son propre travail défend ses erreurs.",
+      "solution": "Confier la vérification à un rôle, agent ou modèle distinct, avec critères explicites et verdict tracé.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-15--independent-reviewer",
+      "controls": [
+        "Validation authority",
+        "evidence pack",
+        "verification verdict",
+        "decision council pour cas critiques"
+      ],
+      "antiPattern": "Auto-validation d'une décision critique par le même agent.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "QUA-16",
+      "family": "QUA",
+      "name": "Assumption ledger",
+      "intent": "Distinguer explicitement hypothèses et faits prouvés.",
+      "problem": "Les hypothèses implicites sont traitées comme des certitudes et propagées sans contrôle.",
+      "solution": "Enregistrer chaque hypothèse, son statut (à confirmer, confirmée, invalidée) et son impact si elle est fausse.",
+      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-16--assumption-ledger",
+      "controls": [
+        "Claim ledger",
+        "context conflict resolver",
+        "evidence pack"
+      ],
+      "antiPattern": "Présenter une hypothèse non vérifiée comme un résultat acquis.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "KNO-01",
+      "family": "KNO",
+      "name": "Knowledge janitor",
+      "intent": "Empêcher la mémoire et les documents de devenir toxiques ou ingouvernables.",
+      "problem": "Les vieux rapports, traces et décisions remplacées polluent le contexte futur.",
+      "solution": "Classer artefacts en durable, archive, TTL, désindexation ou purge.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-01--knowledge-janitor",
+      "controls": [
+        "Pre-index",
+        "Scheduled-cleanup",
+        "registre de rétention",
+        "source registry"
+      ],
+      "antiPattern": "Tout indexer parce que tout pourrait servir un jour.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "KNO-02",
+      "family": "KNO",
+      "name": "Mémoire hybride",
+      "intent": "Combiner rappel sémantique, relations et faits temporels.",
+      "problem": "Une vector DB seule rappelle des textes similaires sans comprendre validité ni dépendances.",
+      "solution": "Associer vectoriel, graphe, sidecar structuré, journal et sources de vérité.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-02--mémoire-hybride",
+      "controls": [
+        "Source registry",
+        "memory gate",
+        "valid_from/valid_to",
+        "désindexation"
+      ],
+      "antiPattern": "Traiter le résultat vectoriel comme une vérité.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "KNO-03",
+      "family": "KNO",
+      "name": "Doc drift detector",
+      "intent": "Empêcher la divergence entre documentation, manifests, hooks, workflows et mémoire.",
+      "problem": "Le runtime évolue plus vite que le standard documentaire, ou inversement.",
+      "solution": "Comparer surfaces déclarées, fichiers réels, registres, sources actives et preuves de workflow.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-03--doc-drift-detector",
+      "controls": [
+        "Hook doc-drift-check",
+        "release gate",
+        "rapport de drift",
+        "owner de correction"
+      ],
+      "antiPattern": "Considérer la documentation comme vraie sans vérifier le runtime.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "KNO-04",
+      "family": "KNO",
+      "name": "Knowledge promotion",
+      "intent": "Transformer une sortie temporaire en connaissance durable seulement si elle le mérite.",
+      "problem": "Les handoffs, rapports et notes temporaires sont souvent indexés trop tôt ou jamais capitalisés correctement.",
+      "solution": "Évaluer chaque candidat selon stabilité, source, réutilité, sensibilité, propriétaire et expiration, puis promouvoir, archiver ou purger.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-04--knowledge-promotion",
+      "controls": [
+        "Pre-memory-write",
+        "registre de rétention",
+        "evidence pack",
+        "source registry"
+      ],
+      "antiPattern": "Tout indexer ou ne rien capitaliser.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "KNO-05",
+      "family": "KNO",
+      "name": "Memory contamination response",
+      "intent": "Réparer une mémoire fausse, sensible ou obsolète déjà utilisée par le système.",
+      "problem": "Une mémoire contaminée peut influencer plusieurs tâches avant d'être détectée.",
+      "solution": "Déclarer incident, identifier portée, purger ou corriger la mémoire, invalider caches, réviser décisions impactées et ajouter une prévention.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-05--memory-contamination-response",
+      "controls": [
+        "Incident report",
+        "memory audit",
+        "désindexation",
+        "eval de prévention",
+        "doc drift detector"
+      ],
+      "antiPattern": "Corriger seulement la réponse visible sans nettoyer la source contaminée.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "KNO-06",
+      "family": "KNO",
+      "name": "Knowledge Base Indexer",
+      "intent": "Greffer une base documentaire externe au système agentique pour spécialiser un flow sur un domaine, produit, client ou entreprise.",
+      "problem": "Un agent générique ne connaît pas les spécifications internes, procédures, APIs, contraintes métier ou historiques de décision d'une organisation. Tout mettre en prompt ou en mémoire agentique mélange les responsabilités et devient ingouvernable.",
+      "solution": "Déclarer des sources de connaissance externes via connecteurs (repo, URL, API, MCP, base de données, dossier), les indexer avec métadonnées, ACL, fraîcheur et stratégie de réindexation, puis exposer la recherche à l'orchestrateur de contexte.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-06--knowledge-base-indexer",
+      "controls": [
+        "Pre-index",
+        "source owner",
+        "ACL",
+        "sensibilité",
+        "freshness check",
+        "réindexation",
+        "désindexation",
+        "source quarantine"
+      ],
+      "antiPattern": "Appeler cette base “mémoire” ou injecter toute la documentation dans chaque prompt.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "KNO-07",
+      "family": "KNO",
+      "name": "Memory integrity validator",
+      "intent": "Vérifier que les mémoires utilisées restent sourcées, fraîches et non contaminées.",
+      "problem": "Une mémoire durable peut devenir fausse, obsolète, sensible ou contradictoire avec une source active.",
+      "solution": "Auditer périodiquement les mémoires par provenance, validité, TTL, contradictions, usage récent et sensibilité.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-07--memory-integrity-validator",
+      "controls": [
+        "Memory routing policy",
+        "source registry",
+        "contamination response",
+        "doc drift detector"
+      ],
+      "antiPattern": "Réutiliser une mémoire ancienne parce qu'elle est souvent similaire aux demandes courantes.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "KNO-08",
+      "family": "KNO",
+      "name": "Doc-to-graph pipeline",
+      "intent": "Transformer un corpus documentaire en graphe de relations exploitable et vérifiable.",
+      "problem": "L'indexation vectorielle retrouve des passages mais ne représente pas dépendances, contradictions, supersessions ou preuves.",
+      "solution": "Extraire nœuds et relations depuis docs/code/ADR/tickets/API, avec provenance, confiance et statut de fraîcheur.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-08--doc-to-graph-pipeline",
+      "controls": [
+        "Source graph record",
+        "relation provenance",
+        "conflict resolver",
+        "freshness check"
+      ],
+      "antiPattern": "Construire un graphe d'hypothèses non sourcées ou non révisables.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "KNO-09",
+      "family": "KNO",
+      "name": "Knowledge narrative packaging",
+      "intent": "Présenter une connaissance complexe sous une forme narrative exploitable par humains et agents.",
+      "problem": "Un graphe ou un index peut être correct mais trop fragmenté pour onboarding, audit ou décision.",
+      "solution": "Générer des packages narratifs sourcés : résumé, décisions, concepts, dépendances, risques, exemples et preuves.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-09--knowledge-narrative-packaging",
+      "controls": [
+        "Claim ledger",
+        "source graph",
+        "doc drift",
+        "owner",
+        "date de validité"
+      ],
+      "antiPattern": "Produire une synthèse persuasive sans liens vers sources actives.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "KNO-10",
+      "family": "KNO",
+      "name": "Source Graph Resolver",
+      "intent": "Résoudre les relations entre sources pour éviter qu'une similarité soit prise pour une preuve.",
+      "problem": "Code, documentation, ADR, tickets, API et mémoire peuvent dépendre, se contredire ou se remplacer sans que le RAG le voie.",
+      "solution": "Interroger le graphe source pour retrouver dépendances, supersessions, contradictions, preuves et source active avant décision.",
+      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-10--source-graph-resolver",
+      "controls": [
+        "Source graph record",
+        "context conflict resolver",
+        "claim ledger",
+        "freshness check"
+      ],
+      "antiPattern": "Utiliser seulement top-k vectoriel pour arbitrer une contradiction documentaire.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "RUN-01",
+      "family": "RUN",
+      "name": "Dynamic factory contrôlée",
+      "intent": "Créer de nouvelles capacités sans prolifération incontrôlée.",
+      "problem": "Agents, skills et workflows dynamiques peuvent devenir une dette invisible.",
+      "solution": "Détecter le gap, classer l'artefact, décider éphémère/permanent, valider puis promouvoir ou purger.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-01--dynamic-factory-contrôlée",
+      "controls": [
+        "Usage tracking",
+        "expiration",
+        "score de durabilité",
+        "review",
+        "registre"
+      ],
+      "antiPattern": "Créer un agent permanent pour chaque demande ponctuelle.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "RUN-02",
+      "family": "RUN",
+      "name": "Runtime output governance",
+      "intent": "Gouverner les artefacts produits par le runtime agentique.",
+      "problem": "Plans, traces, rapports, captures et sorties temporaires s'accumulent sans statut.",
+      "solution": "Déclarer type, propriétaire, sensibilité, rétention, indexation et statut.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-02--runtime-output-governance",
+      "controls": [
+        "Registre de surfaces runtime",
+        "cleanup",
+        "doc drift",
+        "audit périodique"
+      ],
+      "antiPattern": "Laisser les sorties runtime devenir une documentation parallèle non fiable.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "RUN-03",
+      "family": "RUN",
+      "name": "Kubernetes agent control plane",
+      "intent": "Exécuter agents et sandboxes en production comme ressources réconciliées, isolées et observables.",
+      "problem": "Un worker local ne suffit pas pour quotas, scheduling, multi-tenant, service accounts et tolérance de panne.",
+      "solution": "Fournir un provider K8s natif : pods gérés directement, requests/limits, node selectors, tolerations, affinity, service accounts, images prebaked et télémétrie OTel.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-03--kubernetes-agent-control-plane",
+      "controls": [
+        "Admission policy",
+        "network allowlist",
+        "quotas",
+        "image provenance",
+        "service account minimal",
+        "SLO runtime"
+      ],
+      "antiPattern": "Lancer des agents en cluster via scripts ad hoc sans contrat de ressources ni observabilité.",
+      "maturity": "Production"
+    },
+    {
+      "id": "RUN-04",
+      "family": "RUN",
+      "name": "Orders exec/formula dispatcher",
+      "intent": "Choisir le coût et le niveau d'orchestration appropriés pour un ordre.",
+      "problem": "Toutes les commandes ne nécessitent pas une session agent ; inversement certains workflows shell cachent une orchestration complexe.",
+      "solution": "Distinguer `exec` (shell-only, sans session agent) et `formula` (workflow agentique instancié), avec budget, preuve et blast-radius différents.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-04--orders-execformula-dispatcher",
+      "controls": [
+        "Type d'ordre",
+        "budget token",
+        "policy tool",
+        "evidence attendu",
+        "classification risque"
+      ],
+      "antiPattern": "Lancer un agent complet pour une commande déterministe ou exécuter un workflow risqué comme simple shell.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "RUN-05",
+      "family": "RUN",
+      "name": "Primitive-first capability model",
+      "intent": "Éviter que les rôles et capacités deviennent des types SDK rigides.",
+      "problem": "Un framework role-centric pousse à forker le core dès qu'un rôle ou workflow change.",
+      "solution": "Définir rôles, prompts, formules et permissions dans des packs/configs ; le SDK ne fournit que les primitives d'exécution et de composition.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-05--primitive-first-capability-model",
+      "controls": [
+        "Registry de packs",
+        "résolution de conflits",
+        "tests de compétence",
+        "versioning et promotion"
+      ],
+      "antiPattern": "Encoder Mayor/Reviewer/Builder comme classes SDK non composables.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "RUN-06",
+      "family": "RUN",
+      "name": "Capability marketplace",
+      "intent": "Rendre les capacités agentiques découvrables, gouvernées et réutilisables.",
+      "problem": "Agents, prompts, skills, outils et workflows se multiplient sans catalogue ni statut.",
+      "solution": "Publier des capability packs avec owner, version, runtime compatible, permissions, tests et lifecycle.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-06--capability-marketplace",
+      "controls": [
+        "Capability pack manifest",
+        "skill record",
+        "tests de compétence",
+        "usage telemetry",
+        "retirement"
+      ],
+      "antiPattern": "Copier-coller des prompts et scripts d'équipe en équipe sans source d'autorité.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "RUN-07",
+      "family": "RUN",
+      "name": "Skill/capability lifecycle",
+      "intent": "Promouvoir ou retirer les skills selon preuve d'utilité et de sécurité.",
+      "problem": "Une skill expérimentale peut devenir critique sans review, ou une skill obsolète rester active.",
+      "solution": "Utiliser les statuts draft, experimental, canary, enforced, deprecated, retired avec gates et owner.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-07--skillcapability-lifecycle",
+      "controls": [
+        "Skill record",
+        "eval",
+        "telemetry usage",
+        "false positive review",
+        "changelog"
+      ],
+      "antiPattern": "Installer une skill comme permanente parce qu'elle a aidé une fois.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "RUN-08",
+      "family": "RUN",
+      "name": "Runtime provider contract",
+      "intent": "Séparer l'orchestration logique du backend d'exécution réel.",
+      "problem": "Le même workflow doit pouvoir tourner localement, dans un IDE, sur worker distant ou cluster sans changer ses garanties.",
+      "solution": "Normaliser lifecycle, ressources, logs, health, secrets, cleanup et policies via un runtime provider contract.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-08--runtime-provider-contract",
+      "controls": [
+        "Runtime provider contract",
+        "provider health",
+        "env scrub",
+        "quotas",
+        "workspace isolation"
+      ],
+      "antiPattern": "Écrire des workflows dépendants d'un shell local non déclaré.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "RUN-09",
+      "family": "RUN",
+      "name": "Agent backend boundary",
+      "intent": "Isoler le backend agent des modèles, outils et environnements spécifiques.",
+      "problem": "Un agent couplé à un fournisseur ou runtime ne peut pas migrer entre Copilot, Codex, Claude, local ou cluster.",
+      "solution": "Définir des ports : model provider, tool provider, memory provider, runtime provider et telemetry provider.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-09--agent-backend-boundary",
+      "controls": [
+        "Provider registry",
+        "adapter contract",
+        "fallback explicite",
+        "eval de compatibilité"
+      ],
+      "antiPattern": "Appeler directement un SDK provider dans la logique métier du workflow.",
+      "maturity": "Orchestré"
+    },
+    {
+      "id": "RUN-10",
+      "family": "RUN",
+      "name": "Local agent worker pool",
+      "intent": "Exécuter plusieurs tâches locales sans bloquer l'orchestrateur.",
+      "problem": "Les missions longues, tests ou explorations concurrentes saturent une seule session et masquent les pannes.",
+      "solution": "Gérer un pool de workers locaux avec capacité, queue, timeout, health, logs et cleanup.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-10--local-agent-worker-pool",
+      "controls": [
+        "WIP limit",
+        "runtime provider contract",
+        "telemetry",
+        "workspace isolation",
+        "cancellation"
+      ],
+      "antiPattern": "Lancer des agents locaux en arrière-plan sans registre ni arrêt fiable.",
+      "maturity": "Production"
+    },
+    {
+      "id": "RUN-11",
+      "family": "RUN",
+      "name": "Workspace isolation",
+      "intent": "Empêcher les agents de modifier ou lire hors du périmètre autorisé.",
+      "problem": "Un agent outillé peut toucher fichiers, secrets, caches ou repos voisins par accident.",
+      "solution": "Déclarer workspace root, mounts, write zones, secrets visibles, network policy et cleanup.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-11--workspace-isolation",
+      "controls": [
+        "Path allowlist",
+        "sandbox",
+        "secret scan",
+        "runtime provider",
+        "blast-radius"
+      ],
+      "antiPattern": "Laisser l'agent opérer depuis un répertoire parent contenant plusieurs projets.",
+      "maturity": "Production"
+    },
+    {
+      "id": "RUN-12",
+      "family": "RUN",
+      "name": "Secure local coordinator",
+      "intent": "Coordonner plusieurs agents locaux sans proxy de credentials ni canal opaque.",
+      "problem": "Un coordinateur local peut devenir un relais de tokens, un bus non audité ou un contournement des policies.",
+      "solution": "Utiliser inbox signée, terminal bridge officiel, sessions bornées, env scrub et gates avant action.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-12--secure-local-coordinator",
+      "controls": [
+        "Agent privilege boundary",
+        "runtime provider contract",
+        "trajectory logging",
+        "policy engine"
+      ],
+      "antiPattern": "Faire transiter les tokens Copilot/Claude/Codex d'un outil vers un autre via un proxy maison.",
+      "maturity": "Production"
+    },
+    {
+      "id": "RUN-13",
+      "family": "RUN",
+      "name": "Idempotent tool action",
+      "intent": "Rendre les actions à effet externe rejouables sans doublon.",
+      "problem": "Un retry après timeout peut recréer, repayer ou renvoyer deux fois le même effet.",
+      "solution": "Utiliser clés d'idempotence, vérification d'état avant action et déduplication des effets.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-13--idempotent-tool-action",
+      "controls": [
+        "Idempotency key",
+        "dry-run",
+        "trajectory logging",
+        "recovery policy"
+      ],
+      "antiPattern": "Rejouer une action externe sans clé ni vérification d'état.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "RUN-14",
+      "family": "RUN",
+      "name": "Compensation / rollback action",
+      "intent": "Corriger ou compenser les effets partiels d'une séquence interrompue.",
+      "problem": "Un échec en milieu de séquence laisse le système dans un état incohérent.",
+      "solution": "Définir pour chaque effet une action de compensation ou de rollback, déclenchée par la recovery policy.",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-14--compensation--rollback-action",
+      "controls": [
+        "Recovery policy",
+        "idempotent tool action",
+        "evidence pack",
+        "incident record"
+      ],
+      "antiPattern": "Ignorer les effets déjà produits après un échec partiel.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "RUN-15",
+      "family": "RUN",
+      "name": "Acquisition d'outils et provisioning",
+      "intent": "Combler un manque de capacité par la bonne option d'outillage, choisie par l'utilisateur, sans réinventer la roue.",
+      "problem": "Face à un manque d'outil, l'agent réinvente un outil mûr (gaspillage), adopte un outil non gouverné ou payant sans accord, ou abandonne la tâche.",
+      "solution": "Produire un dossier d'options — adopter (gratuit, open-source, payant), commander un build aux agents de dev, ou faire soi-même si trivial — avec coût, risque et maintenance ; faire choisir l'utilisateur (GOV-15) ; gouverner l'adoption externe (GOV-09, GOV-05, GOV-07).",
+      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-15--acquisition-doutils-et-provisioning",
+      "controls": [
+        "Tool sourcing decision record",
+        "make-or-buy analysis",
+        "trust gate",
+        "budget et accord",
+        "lifecycle RUN-07"
+      ],
+      "antiPattern": "Réinventer un outil mûr existant, ou installer un outil tiers sans trust gate ni accord.",
+      "maturity": "Gouverné"
+    },
+    {
+      "id": "COG-01",
+      "family": "COG",
+      "name": "Décomposition d'objectif",
+      "intent": "Transformer un objectif vague en sous-buts vérifiables et ordonnés avant d'agir ou de déléguer.",
+      "problem": "Un modèle tente souvent de répondre à un objectif large en un seul jet, ce qui masque dépendances, angles morts et critères de succès.",
+      "solution": "Découper l'objectif en sous-buts explicites, chacun avec critère de complétion, dépendances et preuve attendue, puis exécuter ou encapsuler chaque sous-but dans une task envelope.",
+      "docPath": "docs/patterns/08-cognition/README.md#cog-01--décomposition-dobjectif",
+      "controls": [
+        "Critère de complétion par sous-but",
+        "dépendances déclarées",
+        "task envelope",
+        "revue de plan",
+        "budget proportionné au risque"
+      ],
+      "antiPattern": "Attaquer un objectif complexe en une seule requête sans sous-buts ni critères.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "COG-02",
+      "family": "COG",
+      "name": "Espace de raisonnement gouverné",
+      "intent": "Donner au modèle un espace de raisonnement intermédiaire, distinct de la sortie livrable et non persisté par défaut.",
+      "problem": "Le raisonnement intermédiaire est soit absent (réponse précipitée), soit mélangé à la sortie, soit persisté ou fuité alors qu'il contient hypothèses fausses ou données sensibles.",
+      "solution": "Isoler un scratchpad éphémère pour hypothèses, étapes et calculs, borné en taille, séparé du livrable, non indexé sauf décision explicite via memory gate.",
+      "docPath": "docs/patterns/08-cognition/README.md#cog-02--espace-de-raisonnement-gouverné",
+      "controls": [
+        "Séparation raisonnement/sortie",
+        "rétention courte",
+        "redaction",
+        "claim ledger pour ce qui devient affirmation",
+        "memory gate avant toute persistance"
+      ],
+      "antiPattern": "Exposer ou indexer le raisonnement brut comme s'il s'agissait d'une preuve ou d'une vérité.",
+      "maturity": "Minimal"
+    },
+    {
+      "id": "COG-03",
+      "family": "COG",
+      "name": "Auto-révision bornée",
+      "intent": "Améliorer une sortie par une passe de critique puis correction par le modèle lui-même, dans une boucle bornée.",
+      "problem": "La première sortie d'un modèle est souvent améliorable ; sans révision, des erreurs évidentes passent ; avec révision non bornée, le coût explose et le modèle tourne en rond.",
+      "solution": "Ajouter une passe d'auto-critique guidée par critères explicites, puis une correction ciblée, avec un nombre maximal d'itérations et un critère d'arrêt sur convergence.",
+      "docPath": "docs/patterns/08-cognition/README.md#cog-03--auto-révision-bornée",
+      "controls": [
+        "Critères de révision explicites",
+        "budget d'itérations",
+        "arrêt sur convergence",
+        "escalade vers revue indépendante si enjeu critique"
+      ],
+      "antiPattern": "Boucle d'auto-amélioration infinie, ou auto-révision présentée comme une vérification indépendante.",
+      "maturity": "Contrôlé"
+    },
+    {
+      "id": "COG-04",
+      "family": "COG",
+      "name": "Sélecteur de compétence",
+      "intent": "Choisir et invoquer la compétence, l'outil ou le skill adapté à un sous-but, comme MOD-01 le fait pour les modèles.",
+      "problem": "Un agent peut ignorer une compétence disponible, en choisir une inadaptée, ou tout faire en raisonnement libre alors qu'un outil fiable existe.",
+      "solution": "Décrire les compétences disponibles (intention, entrées, coût, risque, preuves), puis sélectionner la plus adaptée au sous-but selon capacité, risque, coût et autorisations, avec fallback explicite.",
+      "docPath": "docs/patterns/08-cognition/README.md#cog-04--sélecteur-de-compétence",
+      "controls": [
+        "Capability description",
+        "policy engine",
+        "tool blast-radius limiter",
+        "eval de compétence",
+        "fallback déclaré",
+        "telemetry d'usage"
+      ],
+      "antiPattern": "Choix de compétence implicite, ou usage d'un outil puissant sans vérifier périmètre et autorisation.",
+      "maturity": "Contrôlé"
+    }
+  ],
+  "relations": [
+    {
+      "from": "ORG-01",
+      "to": "ORC-01",
+      "kind": "founds",
+      "label": "Fonde"
+    },
+    {
+      "from": "ORG-01",
+      "to": "ORG-02",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "ORG-01",
+      "to": "ORC-01",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORG-02",
+      "to": "QUA-04",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-14",
+      "to": "ORG-02",
+      "kind": "reinforces",
+      "label": "Renforcée par"
+    },
+    {
+      "from": "ORG-02",
+      "to": "QUA-15",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-01",
+      "to": "ORG-01",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "ORC-01",
+      "to": "ORC-02",
+      "kind": "produces",
+      "label": "Produit"
+    },
+    {
+      "from": "ORC-01",
+      "to": "ORC-05",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-01",
+      "to": "ORC-02",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "ORC-02",
+      "to": "ORC-03",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-02",
+      "to": "ORC-03",
+      "kind": "produces",
+      "label": "Produit par"
+    },
+    {
+      "from": "ORC-03",
+      "to": "QUA-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-06",
+      "to": "ORC-04",
+      "kind": "feeds",
+      "label": "Alimenté par"
+    },
+    {
+      "from": "ORC-04",
+      "to": "ORC-05",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-05",
+      "to": "ORC-04",
+      "kind": "governs",
+      "label": "Gouverne"
+    },
+    {
+      "from": "ORC-05",
+      "to": "ORC-02",
+      "kind": "produces",
+      "label": "Produit"
+    },
+    {
+      "from": "ORC-06",
+      "to": "ORC-05",
+      "kind": "founds",
+      "label": "Fonde"
+    },
+    {
+      "from": "ORC-06",
+      "to": "ORC-04",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-07",
+      "to": "ORC-06",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "KNO-10",
+      "to": "ORC-07",
+      "kind": "feeds",
+      "label": "Alimenté par"
+    },
+    {
+      "from": "ORC-07",
+      "to": "ORC-08",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-08",
+      "to": "ORC-05",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "ORC-08",
+      "to": "QUA-06",
+      "kind": "related",
+      "label": "Mesuré par"
+    },
+    {
+      "from": "ORC-08",
+      "to": "ORC-04",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "ORC-09",
+      "to": "ORC-10",
+      "kind": "related",
+      "label": "Décrit par"
+    },
+    {
+      "from": "ORC-09",
+      "to": "QUA-05",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "ORC-10",
+      "to": "ORC-09",
+      "kind": "related",
+      "label": "Décrit"
+    },
+    {
+      "from": "ORC-10",
+      "to": "GOV-02",
+      "kind": "related",
+      "label": "Validé par"
+    },
+    {
+      "from": "ORC-11",
+      "to": "ORC-02",
+      "kind": "produces",
+      "label": "Produit"
+    },
+    {
+      "from": "ORC-11",
+      "to": "QUA-15",
+      "kind": "triggers",
+      "label": "Escalade vers"
+    },
+    {
+      "from": "ORC-11",
+      "to": "COG-03",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-04",
+      "to": "GOV-01",
+      "kind": "feeds",
+      "label": "Alimenté par"
+    },
+    {
+      "from": "GOV-11",
+      "to": "GOV-02",
+      "kind": "extends",
+      "label": "Spécialisé par"
+    },
+    {
+      "from": "GOV-03",
+      "to": "GOV-08",
+      "kind": "related",
+      "label": "Déploie"
+    },
+    {
+      "from": "MOD-01",
+      "to": "ORC-02",
+      "kind": "produces",
+      "label": "Produit"
+    },
+    {
+      "from": "MOD-01",
+      "to": "COG-04",
+      "kind": "related",
+      "label": "Analogue de"
+    },
+    {
+      "from": "MOD-01",
+      "to": "MOD-02",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-04",
+      "to": "ORG-02",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "GOV-04",
+      "to": "GOV-10",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "MOD-02",
+      "to": "MOD-01",
+      "kind": "reinforces",
+      "label": "Complète"
+    },
+    {
+      "from": "MOD-02",
+      "to": "MOD-01",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "MOD-03",
+      "to": "MOD-01",
+      "kind": "extends",
+      "label": "Étend"
+    },
+    {
+      "from": "MOD-03",
+      "to": "GOV-15",
+      "kind": "triggers",
+      "label": "Déclenche"
+    },
+    {
+      "from": "MOD-03",
+      "to": "MOD-02",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-05",
+      "to": "GOV-07",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "GOV-05",
+      "to": "GOV-10",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-06",
+      "to": "GOV-16",
+      "kind": "related",
+      "label": "Cousin de"
+    },
+    {
+      "from": "GOV-07",
+      "to": "GOV-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-07",
+      "to": "COG-04",
+      "kind": "related",
+      "label": "Utilisé par"
+    },
+    {
+      "from": "GOV-08",
+      "to": "GOV-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-09",
+      "to": "GOV-07",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "GOV-10",
+      "to": "GOV-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-10",
+      "to": "GOV-11",
+      "kind": "reinforces",
+      "label": "Complète"
+    },
+    {
+      "from": "GOV-10",
+      "to": "GOV-04",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-10",
+      "to": "GOV-11",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "GOV-12",
+      "to": "GOV-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-13",
+      "to": "KNO-06",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-13",
+      "to": "KNO-10",
+      "kind": "related",
+      "label": "Précède"
+    },
+    {
+      "from": "GOV-13",
+      "to": "ORC-07",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-14",
+      "to": "ORG-02",
+      "kind": "triggers",
+      "label": "Escalade vers"
+    },
+    {
+      "from": "GOV-14",
+      "to": "QUA-15",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "GOV-15",
+      "to": "ORG-02",
+      "kind": "triggers",
+      "label": "Escalade vers"
+    },
+    {
+      "from": "GOV-15",
+      "to": "GOV-14",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "GOV-16",
+      "to": "GOV-17",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-16",
+      "to": "GOV-06",
+      "kind": "related",
+      "label": "Cousin de"
+    },
+    {
+      "from": "GOV-17",
+      "to": "GOV-16",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "GOV-17",
+      "to": "RUN-13",
+      "kind": "triggers",
+      "label": "Déclenche"
+    },
+    {
+      "from": "QUA-01",
+      "to": "QUA-16",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "QUA-02",
+      "to": "QUA-08",
+      "kind": "founds",
+      "label": "Socle de"
+    },
+    {
+      "from": "QUA-02",
+      "to": "QUA-10",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "QUA-03",
+      "to": "QUA-04",
+      "kind": "related",
+      "label": "Support de"
+    },
+    {
+      "from": "QUA-01",
+      "to": "QUA-04",
+      "kind": "feeds",
+      "label": "Alimenté par"
+    },
+    {
+      "from": "QUA-04",
+      "to": "QUA-05",
+      "kind": "triggers",
+      "label": "Déclenche"
+    },
+    {
+      "from": "QUA-05",
+      "to": "QUA-04",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "QUA-05",
+      "to": "QUA-03",
+      "kind": "related",
+      "label": "Tracée par"
+    },
+    {
+      "from": "QUA-06",
+      "to": "ORC-08",
+      "kind": "related",
+      "label": "Mesure"
+    },
+    {
+      "from": "QUA-07",
+      "to": "QUA-08",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "QUA-09",
+      "to": "QUA-08",
+      "kind": "feeds",
+      "label": "Alimenté par"
+    },
+    {
+      "from": "QUA-08",
+      "to": "QUA-02",
+      "kind": "extends",
+      "label": "Étend"
+    },
+    {
+      "from": "QUA-10",
+      "to": "QUA-08",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "QUA-11",
+      "to": "QUA-04",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "GOV-07",
+      "to": "QUA-11",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "QUA-12",
+      "to": "QUA-11",
+      "kind": "extends",
+      "label": "Spécialise"
+    },
+    {
+      "from": "QUA-13",
+      "to": "QUA-09",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "QUA-14",
+      "to": "QUA-04",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "QUA-14",
+      "to": "QUA-13",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "QUA-15",
+      "to": "QUA-04",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "QUA-15",
+      "to": "COG-03",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "QUA-16",
+      "to": "QUA-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "QUA-16",
+      "to": "ORC-07",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "QUA-16",
+      "to": "QUA-01",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "KNO-01",
+      "to": "KNO-02",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-02",
+      "to": "ORC-05",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-03",
+      "to": "RUN-02",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-03",
+      "to": "KNO-05",
+      "kind": "feeds",
+      "label": "Sert"
+    },
+    {
+      "from": "ORC-03",
+      "to": "KNO-04",
+      "kind": "feeds",
+      "label": "Alimentée par"
+    },
+    {
+      "from": "KNO-05",
+      "to": "KNO-01",
+      "kind": "triggers",
+      "label": "Déclenche"
+    },
+    {
+      "from": "KNO-06",
+      "to": "GOV-13",
+      "kind": "related",
+      "label": "Protégé par"
+    },
+    {
+      "from": "KNO-07",
+      "to": "KNO-02",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-07",
+      "to": "KNO-05",
+      "kind": "triggers",
+      "label": "Déclenche"
+    },
+    {
+      "from": "KNO-08",
+      "to": "KNO-02",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-08",
+      "to": "KNO-10",
+      "kind": "feeds",
+      "label": "Nourrit"
+    },
+    {
+      "from": "KNO-09",
+      "to": "QUA-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "KNO-09",
+      "to": "KNO-03",
+      "kind": "related",
+      "label": "Vérifié par"
+    },
+    {
+      "from": "KNO-10",
+      "to": "KNO-08",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "RUN-01",
+      "to": "KNO-04",
+      "kind": "related",
+      "label": "À rapprocher de"
+    },
+    {
+      "from": "RUN-03",
+      "to": "RUN-08",
+      "kind": "extends",
+      "label": "Spécialise"
+    },
+    {
+      "from": "GOV-11",
+      "to": "RUN-03",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "RUN-04",
+      "to": "ORC-08",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "RUN-04",
+      "to": "GOV-02",
+      "kind": "related",
+      "label": "Aligné avec"
+    },
+    {
+      "from": "RUN-05",
+      "to": "RUN-06",
+      "kind": "founds",
+      "label": "Socle de"
+    },
+    {
+      "from": "RUN-05",
+      "to": "ORG-01",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "RUN-06",
+      "to": "RUN-07",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "RUN-08",
+      "to": "RUN-09",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "RUN-08",
+      "to": "QUA-07",
+      "kind": "related",
+      "label": "Mesuré par"
+    },
+    {
+      "from": "RUN-09",
+      "to": "RUN-08",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "RUN-09",
+      "to": "MOD-01",
+      "kind": "feeds",
+      "label": "Sert"
+    },
+    {
+      "from": "RUN-10",
+      "to": "RUN-08",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "RUN-10",
+      "to": "QUA-08",
+      "kind": "related",
+      "label": "Tracé par"
+    },
+    {
+      "from": "RUN-11",
+      "to": "RUN-08",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "RUN-11",
+      "to": "RUN-10",
+      "kind": "related",
+      "label": "Utilisée par"
+    },
+    {
+      "from": "RUN-12",
+      "to": "RUN-08",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "RUN-12",
+      "to": "GOV-07",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "RUN-13",
+      "to": "QUA-10",
+      "kind": "related",
+      "label": "Tracé par"
+    },
+    {
+      "from": "GOV-17",
+      "to": "RUN-14",
+      "kind": "triggers",
+      "label": "Déclenché par"
+    },
+    {
+      "from": "MOD-03",
+      "to": "RUN-15",
+      "kind": "triggers",
+      "label": "Déclenché par"
+    },
+    {
+      "from": "GOV-09",
+      "to": "RUN-15",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "RUN-15",
+      "to": "RUN-06",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "COG-01",
+      "to": "ORC-02",
+      "kind": "depends",
+      "label": "Dépend de"
+    },
+    {
+      "from": "COG-01",
+      "to": "ORC-11",
+      "kind": "reinforces",
+      "label": "Renforce"
+    },
+    {
+      "from": "COG-01",
+      "to": "ORC-11",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "COG-02",
+      "to": "QUA-01",
+      "kind": "feeds",
+      "label": "Alimente"
+    },
+    {
+      "from": "COG-02",
+      "to": "QUA-10",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "COG-03",
+      "to": "QUA-15",
+      "kind": "reinforces",
+      "label": "Complète"
+    },
+    {
+      "from": "COG-03",
+      "to": "QUA-15",
+      "kind": "triggers",
+      "label": "Escalade vers"
+    },
+    {
+      "from": "COG-03",
+      "to": "QUA-15",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    },
+    {
+      "from": "COG-04",
+      "to": "MOD-01",
+      "kind": "related",
+      "label": "Analogue de"
+    },
+    {
+      "from": "COG-04",
+      "to": "RUN-06",
+      "kind": "depends",
+      "label": "S'appuie sur"
+    },
+    {
+      "from": "GOV-07",
+      "to": "COG-04",
+      "kind": "governs",
+      "label": "Gouverné par"
+    },
+    {
+      "from": "COG-04",
+      "to": "RUN-06",
+      "kind": "related",
+      "label": "À ne pas confondre avec"
+    }
+  ],
+  "contracts": [
+    {
+      "id": "task-envelope",
+      "name": "Task envelope",
+      "fields": [
+        {
+          "name": "mission_id",
+          "obligation": "required",
+          "role": "Relier la tâche à la mission."
+        },
+        {
+          "name": "task_id",
+          "obligation": "required",
+          "role": "Identifier le lot délégué."
+        },
+        {
+          "name": "stage",
+          "obligation": "required",
+          "role": "Situer l'étape du processus."
+        },
+        {
+          "name": "role",
+          "obligation": "required",
+          "role": "Définir le subagent ou rôle attendu."
+        },
+        {
+          "name": "objective",
+          "obligation": "required",
+          "role": "Décrire le résultat attendu."
+        },
+        {
+          "name": "scope",
+          "obligation": "required",
+          "role": "Délimiter fichiers, domaines ou actions incluses."
+        },
+        {
+          "name": "out_of_scope",
+          "obligation": "recommended",
+          "role": "Bloquer les dérives connues."
+        },
+        {
+          "name": "context_pack_ref",
+          "obligation": "conditional",
+          "role": "Relier la tâche au contexte vérifié."
+        },
+        {
+          "name": "allowed_tools",
+          "obligation": "required",
+          "role": "Limiter les outils."
+        },
+        {
+          "name": "denied_tools",
+          "obligation": "recommended",
+          "role": "Rendre explicites les interdictions."
+        },
+        {
+          "name": "model_policy",
+          "obligation": "conditional",
+          "role": "Définir modèle, fallback et contraintes."
+        },
+        {
+          "name": "success_criteria",
+          "obligation": "required",
+          "role": "Rendre le Done testable."
+        },
+        {
+          "name": "expected_handoff",
+          "obligation": "required",
+          "role": "Imposer la sortie structurée."
+        },
+        {
+          "name": "validation_authority",
+          "obligation": "conditional",
+          "role": "Identifier qui peut accepter ou bloquer."
+        }
+      ]
+    },
+    {
+      "id": "context-pack",
+      "name": "Context pack",
+      "fields": [
+        {
+          "name": "mission_id",
+          "obligation": "required",
+          "role": "Relier le contexte à la mission."
+        },
+        {
+          "name": "context_profile",
+          "obligation": "required",
+          "role": "Intake, discovery, architecture, QA, sécurité, etc."
+        },
+        {
+          "name": "budget",
+          "obligation": "required",
+          "role": "tiny, small, medium ou deep."
+        },
+        {
+          "name": "objective",
+          "obligation": "required",
+          "role": "Expliquer pourquoi ce contexte est composé."
+        },
+        {
+          "name": "included_sources",
+          "obligation": "required",
+          "role": "Sources transmises avec statut, raison et confiance."
+        },
+        {
+          "name": "excluded_sources",
+          "obligation": "recommended",
+          "role": "Sources volontairement rejetées et raison."
+        },
+        {
+          "name": "constraints",
+          "obligation": "required",
+          "role": "Contraintes de vérité, sécurité, confidentialité."
+        },
+        {
+          "name": "scorecard",
+          "obligation": "conditional",
+          "role": "Suffisance, provenance, fraîcheur, sensibilité, cohérence."
+        },
+        {
+          "name": "open_questions",
+          "obligation": "recommended",
+          "role": "Ambiguïtés non résolues."
+        },
+        {
+          "name": "expiry",
+          "obligation": "recommended",
+          "role": "TTL ou déclencheur d'invalidation."
+        }
+      ]
+    },
+    {
+      "id": "handoff-packet",
+      "name": "Handoff packet",
+      "fields": [
+        {
+          "name": "task_id",
+          "obligation": "required",
+          "role": "Relier la sortie à la tâche."
+        },
+        {
+          "name": "summary",
+          "obligation": "required",
+          "role": "Résumer ce qui a été produit."
+        },
+        {
+          "name": "changes",
+          "obligation": "recommended",
+          "role": "Décrire artefacts ou décisions modifiés."
+        },
+        {
+          "name": "evidence",
+          "obligation": "required",
+          "role": "Relier aux preuves disponibles ou manquantes."
+        },
+        {
+          "name": "assumptions",
+          "obligation": "required",
+          "role": "Séparer hypothèses et faits."
+        },
+        {
+          "name": "risks",
+          "obligation": "required",
+          "role": "Lister risques nouveaux ou résiduels."
+        },
+        {
+          "name": "claims",
+          "obligation": "conditional",
+          "role": "Alimenter le claim ledger si affirmation critique."
+        },
+        {
+          "name": "memory_candidates",
+          "obligation": "recommended",
+          "role": "Proposer ce qui peut être promu, archivé ou purgé."
+        },
+        {
+          "name": "next_trigger",
+          "obligation": "required",
+          "role": "Indiquer étape suivante, correction ou escalade."
+        }
+      ]
+    },
+    {
+      "id": "evidence-pack",
+      "name": "Evidence pack",
+      "fields": [
+        {
+          "name": "evidence_pack_id",
+          "obligation": "required",
+          "role": "Identifier le paquet de preuves."
+        },
+        {
+          "name": "task_id",
+          "obligation": "required",
+          "role": "Relier à la carte ou tâche."
+        },
+        {
+          "name": "profile",
+          "obligation": "required",
+          "role": "light, standard, strict, security_critical ou release."
+        },
+        {
+          "name": "criteria_coverage",
+          "obligation": "required",
+          "role": "Mapper critères et preuves."
+        },
+        {
+          "name": "evidence_items",
+          "obligation": "required",
+          "role": "Tests, logs, traces, captures, diff, rapports."
+        },
+        {
+          "name": "digests",
+          "obligation": "conditional",
+          "role": "Vérifier intégrité des preuves critiques."
+        },
+        {
+          "name": "limitations",
+          "obligation": "required",
+          "role": "Rendre visibles les limites de validation."
+        },
+        {
+          "name": "proposed_decision",
+          "obligation": "required",
+          "role": "passed, failed, skipped ou error."
+        }
+      ]
+    },
+    {
+      "id": "verification-verdict",
+      "name": "Verification verdict",
+      "fields": [
+        {
+          "name": "verdict_id",
+          "obligation": "required",
+          "role": "Identifier le verdict."
+        },
+        {
+          "name": "evidence_pack_id",
+          "obligation": "required",
+          "role": "Relier au paquet de preuves."
+        },
+        {
+          "name": "validator",
+          "obligation": "required",
+          "role": "Identifier l'autorité de validation."
+        },
+        {
+          "name": "checks",
+          "obligation": "required",
+          "role": "Contrôles effectués et résultats."
+        },
+        {
+          "name": "global_result",
+          "obligation": "required",
+          "role": "passed, failed, skipped ou error."
+        },
+        {
+          "name": "decision",
+          "obligation": "required",
+          "role": "close_task, reopen_task, create_incident ou escalate."
+        },
+        {
+          "name": "residual_risks",
+          "obligation": "required",
+          "role": "Risques acceptés ou non."
+        },
+        {
+          "name": "closure_conditions",
+          "obligation": "conditional",
+          "role": "Conditions si fermeture différée."
+        }
+      ]
+    },
+    {
+      "id": "memory-record",
+      "name": "Memory record",
+      "fields": [
+        {
+          "name": "memory_id",
+          "obligation": "required",
+          "role": "Identifier la mémoire."
+        },
+        {
+          "name": "source_id",
+          "obligation": "required",
+          "role": "Relier à une source vérifiable."
+        },
+        {
+          "name": "type",
+          "obligation": "required",
+          "role": "fait, décision, préférence, incident, apprentissage."
+        },
+        {
+          "name": "scope",
+          "obligation": "required",
+          "role": "mission, projet, produit, organisation, utilisateur."
+        },
+        {
+          "name": "subject",
+          "obligation": "required",
+          "role": "Sujet filtrable."
+        },
+        {
+          "name": "content",
+          "obligation": "required",
+          "role": "Contenu minimal."
+        },
+        {
+          "name": "status",
+          "obligation": "required",
+          "role": "candidate, active, durable_memory, archived, superseded, obsolete, sensitive."
+        },
+        {
+          "name": "confidence",
+          "obligation": "required",
+          "role": "Niveau de confiance."
+        },
+        {
+          "name": "sensitivity",
+          "obligation": "required",
+          "role": "Classification de sensibilité."
+        },
+        {
+          "name": "valid_from",
+          "obligation": "recommended",
+          "role": "Début de validité."
+        },
+        {
+          "name": "valid_until",
+          "obligation": "recommended",
+          "role": "Fin ou revue prévue."
+        },
+        {
+          "name": "retention_class",
+          "obligation": "required",
+          "role": "durable, projet, mission, court terme, purge."
+        },
+        {
+          "name": "indexable",
+          "obligation": "required",
+          "role": "oui/non et raison."
+        }
+      ]
+    },
+    {
+      "id": "incident-record",
+      "name": "Incident record",
+      "fields": [
+        {
+          "name": "incident_id",
+          "obligation": "required",
+          "role": "Identifier l'incident."
+        },
+        {
+          "name": "trigger",
+          "obligation": "required",
+          "role": "Décrire le signal de détection."
+        },
+        {
+          "name": "impact",
+          "obligation": "required",
+          "role": "Décrire périmètre touché."
+        },
+        {
+          "name": "severity",
+          "obligation": "required",
+          "role": "Classer gravité."
+        },
+        {
+          "name": "contaminated_memory",
+          "obligation": "conditional",
+          "role": "Identifier mémoires à purger ou corriger."
+        },
+        {
+          "name": "containment",
+          "obligation": "required",
+          "role": "Décrire réduction d'autonomie ou blocage."
+        },
+        {
+          "name": "correction",
+          "obligation": "required",
+          "role": "Décrire correction."
+        },
+        {
+          "name": "prevention",
+          "obligation": "required",
+          "role": "Hook, eval, règle ou documentation à ajouter."
+        }
+      ]
+    },
+    {
+      "id": "pattern-record",
+      "name": "Pattern record",
+      "fields": [
+        {
+          "name": "pattern_id",
+          "obligation": "required",
+          "role": "Identifier le pattern."
+        },
+        {
+          "name": "family",
+          "obligation": "required",
+          "role": "Classer la responsabilité principale."
+        },
+        {
+          "name": "status",
+          "obligation": "required",
+          "role": "proposed, experimental, stable, normative, deprecated ou retired."
+        },
+        {
+          "name": "maturity",
+          "obligation": "required",
+          "role": "M0 à M5."
+        },
+        {
+          "name": "definition",
+          "obligation": "required",
+          "role": "Intention, problème, solution, contrôles, anti-pattern."
+        },
+        {
+          "name": "related_requirements",
+          "obligation": "required",
+          "role": "Exigences AG-* couvertes."
+        },
+        {
+          "name": "expected_evidence",
+          "obligation": "required",
+          "role": "Preuves attendues."
+        },
+        {
+          "name": "relations",
+          "obligation": "recommended",
+          "role": "Dépendances, contrôles, corrections."
+        },
+        {
+          "name": "owner",
+          "obligation": "recommended",
+          "role": "Rôle responsable."
+        },
+        {
+          "name": "review_trigger",
+          "obligation": "recommended",
+          "role": "Événement de revue."
+        }
+      ]
+    },
+    {
+      "id": "control-record",
+      "name": "Control record",
+      "fields": [
+        {
+          "name": "control_id",
+          "obligation": "required",
+          "role": "Identifier le contrôle."
+        },
+        {
+          "name": "objective",
+          "obligation": "required",
+          "role": "Décrire le risque réduit."
+        },
+        {
+          "name": "trigger",
+          "obligation": "required",
+          "role": "Définir le moment d'application."
+        },
+        {
+          "name": "owner",
+          "obligation": "required",
+          "role": "Identifier le responsable."
+        },
+        {
+          "name": "decision",
+          "obligation": "required",
+          "role": "allow, block, escalate, observe, pass ou fail."
+        },
+        {
+          "name": "evidence",
+          "obligation": "required",
+          "role": "Décrire la preuve produite."
+        },
+        {
+          "name": "telemetry",
+          "obligation": "conditional",
+          "role": "Définir trace, métrique, log ou event attendu."
+        },
+        {
+          "name": "failure_response",
+          "obligation": "required",
+          "role": "Décrire la réponse si le contrôle échoue."
+        }
+      ]
+    },
+    {
+      "id": "compliance-exception",
+      "name": "Compliance exception",
+      "fields": [
+        {
+          "name": "exception_id",
+          "obligation": "required",
+          "role": "Identifier l'exception."
+        },
+        {
+          "name": "requirement_id",
+          "obligation": "required",
+          "role": "Relier l'écart à une exigence."
+        },
+        {
+          "name": "justification",
+          "obligation": "required",
+          "role": "Expliquer pourquoi l'écart est accepté temporairement."
+        },
+        {
+          "name": "residual_risk",
+          "obligation": "required",
+          "role": "Décrire le risque restant."
+        },
+        {
+          "name": "compensating_controls",
+          "obligation": "required",
+          "role": "Réduire le risque pendant l'exception."
+        },
+        {
+          "name": "owner",
+          "obligation": "required",
+          "role": "Responsable de résolution."
+        },
+        {
+          "name": "approver",
+          "obligation": "required",
+          "role": "Autorité qui accepte le risque."
+        },
+        {
+          "name": "expiry",
+          "obligation": "required",
+          "role": "Date, release ou trigger de fin."
+        }
+      ]
+    },
+    {
+      "id": "telemetry-event",
+      "name": "Telemetry event",
+      "fields": [
+        {
+          "name": "event_id",
+          "obligation": "required",
+          "role": "Identifier l'événement."
+        },
+        {
+          "name": "trace_id",
+          "obligation": "required",
+          "role": "Corréler le run."
+        },
+        {
+          "name": "mission_id",
+          "obligation": "required",
+          "role": "Relier à la mission."
+        },
+        {
+          "name": "task_id",
+          "obligation": "conditional",
+          "role": "Relier à la tâche si applicable."
+        },
+        {
+          "name": "event_name",
+          "obligation": "required",
+          "role": "Nom stable de l'événement."
+        },
+        {
+          "name": "severity",
+          "obligation": "required",
+          "role": "debug, info, warning, error ou critical."
+        },
+        {
+          "name": "sensitivity",
+          "obligation": "required",
+          "role": "Classification de sensibilité."
+        },
+        {
+          "name": "payload_summary",
+          "obligation": "required",
+          "role": "Résumé minimisé."
+        },
+        {
+          "name": "related_refs",
+          "obligation": "recommended",
+          "role": "Control, evidence, verdict, incident ou exception."
+        }
+      ]
+    },
+    {
+      "id": "decomposition-record",
+      "name": "Decomposition record",
+      "fields": [
+        {
+          "name": "decomposition_id",
+          "obligation": "required",
+          "role": "Identifier la décomposition."
+        },
+        {
+          "name": "objective",
+          "obligation": "required",
+          "role": "Objectif global décomposé."
+        },
+        {
+          "name": "subgoals",
+          "obligation": "required",
+          "role": "Sous-buts ordonnés et nommés."
+        },
+        {
+          "name": "dependencies",
+          "obligation": "required",
+          "role": "Dépendances entre sous-buts."
+        },
+        {
+          "name": "completion_criteria",
+          "obligation": "required",
+          "role": "Critère observable de complétion par sous-but."
+        },
+        {
+          "name": "expected_evidence",
+          "obligation": "recommended",
+          "role": "Preuve attendue par sous-but."
+        },
+        {
+          "name": "revision_trigger",
+          "obligation": "conditional",
+          "role": "Condition de re-décomposition si un sous-but échoue."
+        }
+      ]
+    },
+    {
+      "id": "reasoning-scratchpad",
+      "name": "Reasoning scratchpad",
+      "fields": [
+        {
+          "name": "scratchpad_id",
+          "obligation": "required",
+          "role": "Identifier l'espace de raisonnement."
+        },
+        {
+          "name": "task_id",
+          "obligation": "required",
+          "role": "Relier au sous-but ou à la tâche."
+        },
+        {
+          "name": "content",
+          "obligation": "required",
+          "role": "Étapes, hypothèses et calculs intermédiaires."
+        },
+        {
+          "name": "retention",
+          "obligation": "required",
+          "role": "Durée courte ; éphémère par défaut."
+        },
+        {
+          "name": "persisted",
+          "obligation": "required",
+          "role": "oui/non ; non par défaut."
+        },
+        {
+          "name": "memory_gate_ref",
+          "obligation": "conditional",
+          "role": "Référence du memory gate si persistance demandée."
+        },
+        {
+          "name": "redaction",
+          "obligation": "required",
+          "role": "Masquage des données sensibles avant toute trace."
+        },
+        {
+          "name": "promoted_claims",
+          "obligation": "recommended",
+          "role": "Affirmations promues au claim ledger."
+        }
+      ]
+    },
+    {
+      "id": "revision-record",
+      "name": "Revision record",
+      "fields": [
+        {
+          "name": "revision_id",
+          "obligation": "required",
+          "role": "Identifier la révision."
+        },
+        {
+          "name": "target_ref",
+          "obligation": "required",
+          "role": "Sortie soumise à révision."
+        },
+        {
+          "name": "criteria",
+          "obligation": "required",
+          "role": "Critères de révision explicites."
+        },
+        {
+          "name": "iterations",
+          "obligation": "required",
+          "role": "Nombre d'itérations effectuées."
+        },
+        {
+          "name": "max_iterations",
+          "obligation": "required",
+          "role": "Borne d'itérations autorisée."
+        },
+        {
+          "name": "stop_reason",
+          "obligation": "required",
+          "role": "convergence, borne atteinte ou escalade."
+        },
+        {
+          "name": "changes",
+          "obligation": "recommended",
+          "role": "Corrections appliquées."
+        },
+        {
+          "name": "escalation_ref",
+          "obligation": "conditional",
+          "role": "Référence vers revue indépendante si enjeu critique."
+        }
+      ]
+    },
+    {
+      "id": "capability-selection-record",
+      "name": "Capability selection record",
+      "fields": [
+        {
+          "name": "selection_id",
+          "obligation": "required",
+          "role": "Identifier la sélection de compétence."
+        },
+        {
+          "name": "subgoal_ref",
+          "obligation": "required",
+          "role": "Sous-but servi par la compétence."
+        },
+        {
+          "name": "candidates",
+          "obligation": "recommended",
+          "role": "Compétences envisagées."
+        },
+        {
+          "name": "selected_capability",
+          "obligation": "required",
+          "role": "Compétence retenue."
+        },
+        {
+          "name": "rationale",
+          "obligation": "required",
+          "role": "Justification par capacité, coût et risque."
+        },
+        {
+          "name": "authorizations",
+          "obligation": "required",
+          "role": "Permissions et périmètre vérifiés avant invocation."
+        },
+        {
+          "name": "fallback",
+          "obligation": "required",
+          "role": "Compétence ou stratégie de repli."
+        },
+        {
+          "name": "telemetry_ref",
+          "obligation": "conditional",
+          "role": "Trace d'usage de la compétence."
+        }
+      ]
+    },
+    {
+      "id": "gdd-record",
+      "name": "GDD record",
+      "fields": [
+        {
+          "name": "gdd_id",
+          "obligation": "required",
+          "role": "Identifier l'entrée canonique de design."
+        },
+        {
+          "name": "version",
+          "obligation": "required",
+          "role": "Version et statut de l'entrée."
+        },
+        {
+          "name": "owner",
+          "obligation": "required",
+          "role": "Responsable de l'entrée."
+        },
+        {
+          "name": "canonical_ref",
+          "obligation": "required",
+          "role": "Source canonique faisant foi."
+        },
+        {
+          "name": "linked_content",
+          "obligation": "recommended",
+          "role": "Contenu et décisions rattachés à l'entrée."
+        },
+        {
+          "name": "drift_status",
+          "obligation": "required",
+          "role": "Écart détecté vis-à-vis du build."
+        },
+        {
+          "name": "assumptions",
+          "obligation": "conditional",
+          "role": "Hypothèses non confirmées isolées des faits."
+        }
+      ]
+    },
+    {
+      "id": "content-validation-record",
+      "name": "Content validation record",
+      "fields": [
+        {
+          "name": "content_id",
+          "obligation": "required",
+          "role": "Identifier le contenu validé."
+        },
+        {
+          "name": "content_type",
+          "obligation": "required",
+          "role": "Niveau, quête, item, dialogue ou asset."
+        },
+        {
+          "name": "schema_ref",
+          "obligation": "required",
+          "role": "Contrat de sortie appliqué."
+        },
+        {
+          "name": "design_refs",
+          "obligation": "required",
+          "role": "Entrées de GDD respectées."
+        },
+        {
+          "name": "lore_check",
+          "obligation": "required",
+          "role": "Verdict de cohérence avec le canon."
+        },
+        {
+          "name": "broken_refs",
+          "obligation": "required",
+          "role": "Références cassées détectées."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "pass, fail ou escalate."
+        }
+      ]
+    },
+    {
+      "id": "replay-record",
+      "name": "Replay record",
+      "fields": [
+        {
+          "name": "replay_id",
+          "obligation": "required",
+          "role": "Identifier le rejeu."
+        },
+        {
+          "name": "seed",
+          "obligation": "required",
+          "role": "Graine de la simulation."
+        },
+        {
+          "name": "tick_rate",
+          "obligation": "required",
+          "role": "Pas de temps fixe."
+        },
+        {
+          "name": "input_log_ref",
+          "obligation": "required",
+          "role": "Journal des entrées rejouées."
+        },
+        {
+          "name": "state_hashes",
+          "obligation": "required",
+          "role": "Hashes d'état comparés entre exécutions."
+        },
+        {
+          "name": "divergence",
+          "obligation": "required",
+          "role": "Point de divergence éventuel."
+        },
+        {
+          "name": "build_ref",
+          "obligation": "required",
+          "role": "Build sur lequel le rejeu s'exécute."
+        }
+      ]
+    },
+    {
+      "id": "playtest-evidence-pack",
+      "name": "Playtest evidence pack",
+      "fields": [
+        {
+          "name": "playtest_id",
+          "obligation": "required",
+          "role": "Identifier la session de playtest."
+        },
+        {
+          "name": "scenario",
+          "obligation": "required",
+          "role": "Parcours ou objectif testé."
+        },
+        {
+          "name": "reachability",
+          "obligation": "required",
+          "role": "Objectifs et zones effectivement atteints."
+        },
+        {
+          "name": "soft_locks",
+          "obligation": "required",
+          "role": "Blocages détectés."
+        },
+        {
+          "name": "difficulty_curve",
+          "obligation": "recommended",
+          "role": "Mesure de difficulté comparée à l'intention."
+        },
+        {
+          "name": "trajectory_ref",
+          "obligation": "required",
+          "role": "Trajectoire journalisée et rejouable."
+        },
+        {
+          "name": "captures",
+          "obligation": "recommended",
+          "role": "Preuves visuelles."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Jouabilité prouvée ou escaladée."
+        }
+      ]
+    },
+    {
+      "id": "certification-record",
+      "name": "Certification record",
+      "fields": [
+        {
+          "name": "cert_id",
+          "obligation": "required",
+          "role": "Identifier la certification."
+        },
+        {
+          "name": "platform",
+          "obligation": "required",
+          "role": "Plateforme ou organisme visé."
+        },
+        {
+          "name": "checklist_ref",
+          "obligation": "required",
+          "role": "Checklist plateforme déroulée."
+        },
+        {
+          "name": "rating",
+          "obligation": "required",
+          "role": "Classification d'âge déclarée."
+        },
+        {
+          "name": "content_scan_ref",
+          "obligation": "required",
+          "role": "Scan de contenu contre le rating."
+        },
+        {
+          "name": "build_ref",
+          "obligation": "required",
+          "role": "Build reproductible soumis."
+        },
+        {
+          "name": "dry_run_result",
+          "obligation": "required",
+          "role": "Résultat du cert dry-run."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "pass ou fail avant soumission."
+        }
+      ]
+    },
+    {
+      "id": "telemetry-decision-record",
+      "name": "Telemetry decision record",
+      "fields": [
+        {
+          "name": "decision_id",
+          "obligation": "required",
+          "role": "Identifier la décision live."
+        },
+        {
+          "name": "metrics_ref",
+          "obligation": "required",
+          "role": "Métriques fondant la décision."
+        },
+        {
+          "name": "hypothesis",
+          "obligation": "required",
+          "role": "Effet attendu du changement."
+        },
+        {
+          "name": "rollout",
+          "obligation": "required",
+          "role": "canary, staged ou global."
+        },
+        {
+          "name": "rollback_ref",
+          "obligation": "required",
+          "role": "Plan de rollback ou de compensation."
+        },
+        {
+          "name": "outcome",
+          "obligation": "recommended",
+          "role": "Effet observé après déploiement."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Généralisé, annulé ou en observation."
+        }
+      ]
+    },
+    {
+      "id": "asset-spec-record",
+      "name": "Asset spec record",
+      "fields": [
+        {
+          "name": "asset_id",
+          "obligation": "required",
+          "role": "Identifier l'asset."
+        },
+        {
+          "name": "type",
+          "obligation": "required",
+          "role": "mesh, texture, matériau, rig ou vfx."
+        },
+        {
+          "name": "budget",
+          "obligation": "required",
+          "role": "Polycount, taille mémoire, taille de texture."
+        },
+        {
+          "name": "naming_convention",
+          "obligation": "required",
+          "role": "Convention de nommage respectée."
+        },
+        {
+          "name": "refs_resolved",
+          "obligation": "required",
+          "role": "Toutes les références résolues (aucun orphelin)."
+        },
+        {
+          "name": "validation_ref",
+          "obligation": "required",
+          "role": "Rapport de validation (UC-12 / UC-17)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Accepté, à corriger ou rejeté."
+        }
+      ]
+    },
+    {
+      "id": "shader-and-performance-budget-record",
+      "name": "Shader and performance budget record",
+      "fields": [
+        {
+          "name": "target_id",
+          "obligation": "required",
+          "role": "Identifier le shader ou la cible de performance."
+        },
+        {
+          "name": "platforms",
+          "obligation": "required",
+          "role": "Plateformes profilées."
+        },
+        {
+          "name": "measured_cost",
+          "obligation": "required",
+          "role": "Coût mesuré (instructions, ms, overdraw)."
+        },
+        {
+          "name": "frame_budget",
+          "obligation": "required",
+          "role": "Budget de frame visé (ms par poste)."
+        },
+        {
+          "name": "before_after",
+          "obligation": "required",
+          "role": "Mesure avant/après pour une optimisation."
+        },
+        {
+          "name": "gain",
+          "obligation": "recommended",
+          "role": "Gain prouvé."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Dans le budget ou hors budget."
+        }
+      ]
+    },
+    {
+      "id": "animation-record",
+      "name": "Animation record",
+      "fields": [
+        {
+          "name": "clip_id",
+          "obligation": "required",
+          "role": "Identifier le clip ou le set d'animation."
+        },
+        {
+          "name": "skeleton_ref",
+          "obligation": "required",
+          "role": "Squelette/rig cible et conventions."
+        },
+        {
+          "name": "retarget_source",
+          "obligation": "conditional",
+          "role": "Source si retargeting."
+        },
+        {
+          "name": "determinism",
+          "obligation": "conditional",
+          "role": "Requis si l'animation pilote une logique testée."
+        },
+        {
+          "name": "review_ref",
+          "obligation": "required",
+          "role": "Revue qualité (QUA-12 / QUA-14)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Validé ou à corriger."
+        }
+      ]
+    },
+    {
+      "id": "audio-record",
+      "name": "Audio record",
+      "fields": [
+        {
+          "name": "asset_id",
+          "obligation": "required",
+          "role": "Identifier le son ou la bank."
+        },
+        {
+          "name": "category",
+          "obligation": "required",
+          "role": "SFX, musique, voix ou ambiance."
+        },
+        {
+          "name": "loudness",
+          "obligation": "required",
+          "role": "Niveau normalisé (LUFS) mesuré."
+        },
+        {
+          "name": "memory_budget",
+          "obligation": "required",
+          "role": "Budget mémoire/streaming."
+        },
+        {
+          "name": "adaptive_rules",
+          "obligation": "conditional",
+          "role": "Règles adaptatives si audio dynamique."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Conforme ou à corriger."
+        }
+      ]
+    },
+    {
+      "id": "cinematic-record",
+      "name": "Cinematic record",
+      "fields": [
+        {
+          "name": "scene_id",
+          "obligation": "required",
+          "role": "Identifier la scène ou la cinématique."
+        },
+        {
+          "name": "script_ref",
+          "obligation": "required",
+          "role": "Scénario/storyboard source (canon)."
+        },
+        {
+          "name": "timeline_ref",
+          "obligation": "required",
+          "role": "Timeline (caméra, événements)."
+        },
+        {
+          "name": "canon_check",
+          "obligation": "required",
+          "role": "Cohérence lore/canon vérifiée (KNO-10)."
+        },
+        {
+          "name": "review_ref",
+          "obligation": "required",
+          "role": "Revue de mise en scène."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Validé ou à reprendre."
+        }
+      ]
+    },
+    {
+      "id": "accessibility-record",
+      "name": "Accessibility record",
+      "fields": [
+        {
+          "name": "feature_id",
+          "obligation": "required",
+          "role": "Identifier la fonctionnalité d'accessibilité."
+        },
+        {
+          "name": "guidelines",
+          "obligation": "required",
+          "role": "Référentiel visé (sous-titres, remap, daltonisme, échelle d'UI)."
+        },
+        {
+          "name": "checks",
+          "obligation": "required",
+          "role": "Vérifications opposables effectuées."
+        },
+        {
+          "name": "evidence_ref",
+          "obligation": "required",
+          "role": "Preuve (revue ou test) (QUA-12 / QUA-15)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Conforme ou non conforme."
+        }
+      ]
+    },
+    {
+      "id": "project-layout-record",
+      "name": "Project layout record",
+      "fields": [
+        {
+          "name": "layout_id",
+          "obligation": "required",
+          "role": "Identifier la convention de structure."
+        },
+        {
+          "name": "tree",
+          "obligation": "required",
+          "role": "Arborescence et emplacement par type d'asset."
+        },
+        {
+          "name": "naming",
+          "obligation": "required",
+          "role": "Conventions de nommage."
+        },
+        {
+          "name": "formats",
+          "obligation": "required",
+          "role": "Formats par usage (source vs runtime)."
+        },
+        {
+          "name": "vcs_policy",
+          "obligation": "required",
+          "role": "Politique de version control (LFS, binaires)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Conforme ou à corriger."
+        }
+      ]
+    },
+    {
+      "id": "capability-routing-record",
+      "name": "Capability routing record",
+      "fields": [
+        {
+          "name": "routing_id",
+          "obligation": "required",
+          "role": "Identifier la décision de routage."
+        },
+        {
+          "name": "task",
+          "obligation": "required",
+          "role": "Tâche et modalité requise (texte, image, audio, 3D, vidéo)."
+        },
+        {
+          "name": "required_mastery",
+          "obligation": "required",
+          "role": "Niveau de maîtrise attendu."
+        },
+        {
+          "name": "target",
+          "obligation": "required",
+          "role": "Cible choisie (modèle, outil ou humain)."
+        },
+        {
+          "name": "confidence",
+          "obligation": "required",
+          "role": "Confiance estimée et seuil appliqué."
+        },
+        {
+          "name": "fallback",
+          "obligation": "required",
+          "role": "Action si la cible est indisponible (escalade GOV-15 ou RUN-15)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Routé, refusé ou escaladé."
+        }
+      ]
+    },
+    {
+      "id": "tool-sourcing-decision-record",
+      "name": "Tool sourcing decision record",
+      "fields": [
+        {
+          "name": "sourcing_id",
+          "obligation": "required",
+          "role": "Identifier la décision d'outillage."
+        },
+        {
+          "name": "need",
+          "obligation": "required",
+          "role": "Capacité manquante et contexte."
+        },
+        {
+          "name": "existing_check",
+          "obligation": "required",
+          "role": "Recherche de l'existant pour ne pas réinventer la roue."
+        },
+        {
+          "name": "options",
+          "obligation": "required",
+          "role": "Options make/buy/adopt/commission avec coût, risque et maintenance."
+        },
+        {
+          "name": "user_choice",
+          "obligation": "required",
+          "role": "Option retenue par l'utilisateur (GOV-15)."
+        },
+        {
+          "name": "trust_gate",
+          "obligation": "required",
+          "role": "Trust gate appliqué pour toute adoption externe (GOV-09)."
+        },
+        {
+          "name": "verdict",
+          "obligation": "required",
+          "role": "Adopté, commandé, fait maison ou abandonné."
+        }
+      ]
+    }
+  ],
+  "useCases": [
+    {
+      "id": "uc-01",
+      "name": "Traduction multilingue orchestrée",
+      "patterns": [
+        "MOD-01",
+        "ORC-02",
+        "ORC-05",
+        "ORC-08",
+        "QUA-01",
+        "QUA-04",
+        "QUA-06",
+        "QUA-13"
+      ]
+    },
+    {
+      "id": "uc-02",
+      "name": "Résumé documentaire gouverné"
+    },
+    {
+      "id": "uc-03",
+      "name": "Extraction structurée vérifiée"
+    },
+    {
+      "id": "uc-04",
+      "name": "RAG gouverné"
+    },
+    {
+      "id": "uc-05",
+      "name": "Investigation gouvernée",
+      "patterns": [
+        "COG-01",
+        "COG-02",
+        "KNO-10",
+        "ORC-11",
+        "QUA-01",
+        "QUA-04",
+        "QUA-16"
+      ]
+    },
+    {
+      "id": "uc-06",
+      "name": "Développement d'application gouverné",
+      "patterns": [
+        "COG-01",
+        "ORC-09",
+        "ORC-11",
+        "QUA-04",
+        "QUA-05",
+        "QUA-15",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "uc-07",
+      "name": "Audit documentaire gouverné",
+      "patterns": [
+        "GOV-13",
+        "KNO-08",
+        "KNO-09",
+        "KNO-10",
+        "ORC-07",
+        "QUA-01"
+      ]
+    },
+    {
+      "id": "uc-08",
+      "name": "Game Design Document gouverné, source de vérité",
+      "description": "Le GDD \"Project Vortex\" (847 pages, 23 systèmes) est indexé via KNO-06 en 3h18min. KNO-03 détecte 14 dérives (règles de damage contradictoires entre sections 4.2 et 11.7). QUA-01 enregistre 412 claims de mécanique. QUA-16 trace 89 hypothèses d'équilibrage. ORG-02 valide le GDD comme source de vérité en 22min, avec coût total de $47,35 (modèle Standard).",
+      "patterns": [
+        "KNO-03",
+        "KNO-06",
+        "ORC-06",
+        "ORG-02",
+        "QUA-01",
+        "QUA-16"
+      ]
+    },
+    {
+      "id": "uc-09",
+      "name": "Génération de contenu de jeu gouvernée",
+      "description": "Génération de 140 descriptions d'armes pour \"Wasteland Raiders\". COG-01 décompose en 7 archétypes. KNO-10 résout le style narratif du GDD (gritty, post-apocalyptique). GOV-02 détecte 3 armes avec stats incohérentes (DPS > plafond). QUA-14 valide 137/140 (97,8%). QUA-04 produit evidence pack avec traces de rejet. Durée : 41min, coût $18,22.",
+      "patterns": [
+        "COG-01",
+        "GOV-02",
+        "KNO-10",
+        "QUA-04",
+        "QUA-14",
+        "RUN-01"
+      ]
+    },
+    {
+      "id": "uc-10",
+      "name": "Équilibrage et économie gouvernés",
+      "description": "Rééquilibrage économie \"Galactic Trade\" : 12 ressources, 47 recettes. COG-03 propose 8 ajustements en 3 itérations. QUA-08 trace 2 147 simulations. GOV-14 bloque 2 ajustements risqués (inflation > 15%). QUA-05 valide transition avec 94% confidence. QUA-16 documente 18 hypothèses d'impact PvP. Coût total $63,40, durée 2h12min.",
+      "patterns": [
+        "COG-03",
+        "GOV-14",
+        "QUA-05",
+        "QUA-06",
+        "QUA-08",
+        "QUA-16"
+      ]
+    },
+    {
+      "id": "uc-11",
+      "name": "Playtest agentique gouverné",
+      "description": "Playtest agentique du tutoriel \"Fortress Defense\" (12min de gameplay). QUA-11 capture 847 interactions UI. QUA-12 produit 23 screenshots annotés (dont 4 bugs visuels). QUA-10 enregistre 1 203 décisions d'agent. GOV-07 limite actions à la sandbox de test. QUA-04 génère rapport final 8 pages, 6 bugs critiques détectés. Durée : 38min, coût $14,60.",
+      "patterns": [
+        "GOV-07",
+        "QUA-04",
+        "QUA-10",
+        "QUA-11",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "uc-12",
+      "name": "Pipeline d'assets gouverné",
+      "description": "Pipeline pour 64 props d'environnement \"Cyberpunk Alley\". GOV-02 simule génération, détecte 7 violations (tri count > 5K). QUA-14 valide formats glTF et textures 2K. GOV-08 applique contraintes de nomenclature. RUN-02 vérifie intégration Unity. QUA-04 certifie 57/64 assets (89%). Rejet automatique de 7 models. Durée totale : 1h47min, coût $31,20.",
+      "patterns": [
+        "GOV-02",
+        "GOV-08",
+        "QUA-04",
+        "QUA-14",
+        "RUN-02"
+      ]
+    },
+    {
+      "id": "uc-13",
+      "name": "Harnais de simulation déterministe",
+      "description": "Harnais de simulation \"Combat AI\" : 230 scénarios déterministes. RUN-13 garantit idempotence (seed fixe, même input = même output). QUA-10 capture 12 407 décisions d'IA. QUA-04 produit evidence packs pour chaque scénario. QUA-05 valide 227/230 (98,7%). 3 échecs reproductibles identifiés. Durée : 4h22min, coût $8,15 (modèle Économique).",
+      "patterns": [
+        "QUA-04",
+        "QUA-05",
+        "QUA-10",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-14",
+      "name": "Authoring de comportements de jeu gouverné",
+      "description": "Authoring de 18 comportements d'ennemis \"Dungeon Crawler\". COG-01 décompose par archétype (melee, ranged, caster). COG-04 sélectionne compétences adaptées (pathfinding, combat, fuite). QUA-14 valide structure de behaviour tree. GOV-08 vérifie contraintes de performance (max 50 nodes). QUA-04 certifie 17/18. 1 comportement trop complexe rejeté. Durée : 1h33min, coût $22,80.",
+      "patterns": [
+        "COG-01",
+        "COG-04",
+        "GOV-08",
+        "QUA-04",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "uc-15",
+      "name": "Build et certification gouvernés",
+      "description": "Certification build \"v2.4.1 Console\" : 12,4 GB, 47 238 fichiers. QUA-05 valide transitions de version (breaking changes détectés). GOV-10 applique policy console (ESRB, TCR Sony). GOV-02 simule déploiement. RUN-14 teste rollback en 3min12s. GOV-13 vérifie hygiene (0 secrets exposés). Build certifié en 47min, coût $5,60.",
+      "patterns": [
+        "GOV-02",
+        "GOV-10",
+        "GOV-13",
+        "QUA-04",
+        "QUA-05",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "uc-16",
+      "name": "Live ops et télémétrie gouvernés",
+      "description": "Event \"Double XP Weekend\" : 47 000 joueurs actifs, télémétrie temps réel. QUA-08 détecte spike de progression (+340%). GOV-10 applique policy production (rollback < 5min). QUA-05 valide impact économique acceptable. À 18h32, bug détecté (XP x8 au lieu de x2). RUN-14 rollback en 2min41s. GOV-17 applique recovery (compensation 500 gems). QUA-06 enregistre coût incident : $127,50. Incident résolu en 11min.",
+      "patterns": [
+        "GOV-10",
+        "GOV-17",
+        "QUA-05",
+        "QUA-06",
+        "QUA-08",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "uc-17",
+      "name": "Production d'art 3D gouvernée",
+      "description": "Set « Marché médiéval » : 38 props commandés. COG-01 découpe en 6 lots. RUN-01 produit les meshes au budget 3 000 tris/prop. QUA-14 rejette 5 props (UV chevauchantes ou échelle x100). GOV-08 corrige 11 noms hors convention (`SM_Market_*`). QUA-12 capture 38 rendus, 2 refusés (hors palette). GOV-02 détecte 1 texture manquante. Lot final : 35/38 acceptés, budget moyen 2 740 tris. Durée 2h05, palier Standard.",
+      "patterns": [
+        "COG-01",
+        "GOV-02",
+        "GOV-08",
+        "QUA-04",
+        "QUA-12",
+        "QUA-14",
+        "RUN-01"
+      ]
+    },
+    {
+      "id": "uc-18",
+      "name": "Matériaux et shaders gouvernés",
+      "description": "Shader d'eau maître pour mobile et console. Budget mobile : 180 instructions, 16 variantes. QUA-14 valide le contrat (entrées normalisées). QUA-08 mesure 214 instructions sur mobile : GOV-08 bloque le dépassement. Après simplification : 172 instructions, 11 variantes. GOV-10 active les reflets planaires seulement sur console. QUA-12 compare 6 captures à la référence : 6/6 validées. Coût GPU mobile −22 %. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "GOV-10",
+        "QUA-04",
+        "QUA-08",
+        "QUA-12",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "uc-19",
+      "name": "VFX temps réel gouvernés",
+      "description": "Effet d'explosion gameplay (signale une zone de dégâts). Budget : 400 particules, overdraw x3. Version initiale : 1 200 particules, overdraw x7 → GOV-08 bloque. QUA-14 impose un pooling de 32 instances. RUN-13 fixe la graine : la forme de l'explosion est identique à chaque replay. QUA-08 mesure le fillrate : −38 % après réduction. QUA-12 valide 4 captures. Effet accepté à 392 particules. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "QUA-04",
+        "QUA-08",
+        "QUA-12",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-20",
+      "name": "Animation et rigging gouvernés",
+      "description": "Set de locomotion partagé par 9 ennemis humanoïdes. GOV-08 impose le squelette `SK_Humanoid` (54 bones). QUA-14 rejette 2 clips (bones hors hiérarchie). RUN-13 vérifie que le root motion d'une esquive avance toujours de 2,00 m. GOV-02 simule le retargeting vers 9 maillages : 1 échec (proportions extrêmes) corrigé. QUA-12 valide 14 captures. Budget mémoire : 6,8 Mo (plafond 8 Mo). Palier Standard.",
+      "patterns": [
+        "GOV-02",
+        "GOV-08",
+        "QUA-04",
+        "QUA-12",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-21",
+      "name": "Audio et sound design gouvernés",
+      "description": "Système audio d'un niveau de combat : 3 bus (SFX, musique, voix). COG-01 isole 47 événements. QUA-14 rejette 9 SFX hors cible (crête > 0 dBFS). GOV-08 impose 24 Mo de banques (initial 31 Mo) → streaming activé. QUA-08 mesure -22,6 LUFS intégré (cible -23). La musique adaptative passe en couche « intense » au-dessus de 3 ennemis. Voix FR/EN/ES déléguées à UC-01. Mix accepté. Palier Standard.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "QUA-04",
+        "QUA-08",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "uc-22",
+      "name": "Cinématiques et mise en scène gouvernées",
+      "description": "Cinématique d'introduction (2 min 40, 22 plans). COG-01 découpe en 5 beats. KNO-10 détecte 2 incohérences lore (un personnage déjà mort apparaît). QUA-14 rejette 3 plans (durée > budget de 8 s). QUA-15 signale un montage trop lent au beat 3 : −6 s. QUA-12 produit la capture vidéo annotée. Séquence validée à 20 plans, 2 min 18. Palier Frontier pour la mise en scène, Standard pour l'assemblage.",
+      "patterns": [
+        "COG-01",
+        "KNO-10",
+        "QUA-04",
+        "QUA-12",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-23",
+      "name": "Systèmes de combat gouvernés",
+      "description": "Personnage « Lame » : 14 mouvements. QUA-14 rejette 2 attaques (recovery négatif). UC-13 rejoue 5 000 échanges à graine fixe. QUA-08 mesure un DPS de 1,8x au-dessus du roster. COG-03 propose +3 frames de recovery sur l'attaque lourde (2 itérations, arrêt sur cible atteinte). Un combo infini coin-à-coin est détecté et corrigé (reset de hitstun). QUA-04 prouve la non-régression sur 11 autres personnages. Palier Standard.",
+      "patterns": [
+        "COG-03",
+        "QUA-04",
+        "QUA-08",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-24",
+      "name": "IA de PNJ et navigation gouvernées",
+      "description": "Garde de patrouille : objectif « surveiller, détecter, engager ». COG-04 choisit un behavior tree. QUA-14 valide 12 nœuds et 3 requêtes navmesh (rayon d'agent 0,35 m). GOV-08 borne la perception à 18 m / 110°. UC-13 rejoue 800 spawns à graine fixe : 2 cas de PNJ coincé à un angle de mur sont corrigés (lien navmesh ajouté). QUA-04 prouve 0 blocage résiduel. Palier Standard.",
+      "patterns": [
+        "COG-01",
+        "COG-04",
+        "GOV-08",
+        "QUA-04",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-25",
+      "name": "Physique et collisions gouvernées",
+      "description": "Scène de destruction : 240 corps dynamiques, pas fixe 1/60 s. QUA-14 valide 8 couches (matrice 8x8). Un carreau d'arbalète à 90 m/s traversait un mur : GOV-08 active la CCD → tunneling résolu. QUA-08 mesure 4,1 ms/frame en pire-cas (budget 5 ms). UC-13 rejoue 1 000 effondrements à graine fixe : empilements identiques. QUA-04 prouve 0 traversée résiduelle. Palier Économique.",
+      "patterns": [
+        "GOV-08",
+        "QUA-04",
+        "QUA-08",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-26",
+      "name": "UI/UX et accessibilité gouvernées",
+      "description": "Menu d'options et HUD d'un jeu console. QUA-14 valide 9 écrans et 24 transitions. GOV-08 impose 4 critères a11y : palette daltonien, sous-titres redimensionnables, remap complet, échelle d'UI 80–150 %. QUA-15 signale un focus clavier perdu sur 2 écrans. QUA-12 capture en 1080p/4K, FR/EN/JP : 3 débordements de texte JP corrigés. QUA-04 atteste les 4 critères a11y. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "QUA-04",
+        "QUA-12",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-27",
+      "name": "Optimisation et budgets de performance gouvernés",
+      "description": "Niveau urbain visant 60 fps PC milieu de gamme (budget 16,6 ms). QUA-08 mesure 23,4 ms, GPU-bound. Occlusion culling + 3 niveaux de LOD + bake des ombres statiques. QUA-08 re-mesure 15,1 ms. QUA-05 valide le gain (−35 %) sans pop-in visible (comparaison de captures). GOV-10 décline un preset « bas » à 30 fps pour machines d'entrée de gamme. QUA-04 atteste le budget tenu sur 3 configs. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "GOV-10",
+        "QUA-04",
+        "QUA-05",
+        "QUA-08"
+      ]
+    },
+    {
+      "id": "uc-28",
+      "name": "Expérience VR/XR gouvernée",
+      "description": "Portage VR d'un jeu d'aventure, cible 90 fps. GOV-08 fixe le plancher 90 fps et la latence < 20 ms. UC-27 réduit le coût GPU de 27 % (LOD, occlusion). QUA-08 mesure 92 fps soutenus, latence 17 ms. Comfort testing sur 8 sessions : 2 signalent une nausée en déplacement continu → vignettage + téléportation activés, QUA-05 revalide. QUA-12 capture le rendu par œil. Expérience validée. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "QUA-04",
+        "QUA-05",
+        "QUA-08",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "uc-29",
+      "name": "Structure de projet et conventions d'assets gouvernées",
+      "description": "Reprise d'un dépôt de 32 Go : 1 400 assets, 210 orphelins, formats mêlés. GOV-08 impose `Content/<Domaine>/<Feature>` et préfixes (`SM_`, `T_`, `SFX_`). QUA-14 rejette 87 ajouts hors zone. RUN-02 sort les fichiers cuisinés hors du dépôt source. KNO-06 indexe 1 313 assets restants. LFS configuré pour `.png/.fbx/.wav`. QUA-04 atteste 0 orphelin et 100 % de noms conformes. Palier Économique.",
+      "patterns": [
+        "GOV-08",
+        "KNO-06",
+        "QUA-04",
+        "QUA-14",
+        "RUN-02"
+      ]
+    },
+    {
+      "id": "uc-30",
+      "name": "Direction artistique et identité visuelle gouvernée",
+      "description": "Jeu « Aurora » : direction artistique d'un RPG stylisé. COG-01 fixe 3 piliers (palette pastel, silhouettes lisibles, contraste doux). KNO-06 indexe 120 références ; KNO-10 résout 4 contradictions de canon. MOD-03 route 18 demandes de concepts vers un modèle image (le LLM texte n'illustre pas), 2 escaladées à l'illustrateur humain faute de cible (GOV-15). QUA-12 valide 16 planches, 3 hors palette refusées. GOV-08 publie la charte v1 opposable. Durée 1j30, palier Frontier pour les piliers.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "KNO-06",
+        "KNO-10",
+        "MOD-03",
+        "QUA-04",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "uc-31",
+      "name": "Idéation et méthodologie UI/UX gouvernée",
+      "description": "Écran d'inventaire pour « Aurora ». COG-01 cadre 3 critères (trouver un objet en moins de 3s, drag-drop clair, lisible en VR). Idéation : 12 concepts (crazy-8s) réduits à 3. Wireframes des 3 ; QUA-14 en rejette 1 (hors grille). Test guérilla sur 5 joueurs : l'option B gagne (taux de réussite 92 % contre 70 %). QUA-15 valide ; 1 friction corrigée (icône ambiguë). QUA-04 scelle l'evidence pack. Durée 1j, palier Standard.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "QUA-04",
+        "QUA-12",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-32",
+      "name": "Architecture réseau et synchronisation gouvernées",
+      "description": "Arène 4v4 pour « Nova ». L'architecte choisit client-serveur autoritaire : le serveur simule, les clients prédisent le déplacement local et réconcilient sur correction. Interest management : un client ne reçoit que les entités visibles. Le harnais (UC-13) rejoue un match à 120 ms de latence et 2 % de perte ; la divergence de position tombe à zéro après réconciliation. QUA-08 montre un taux de correction de 1,3 %/s, sous le budget. QUA-04 scelle l'evidence pack. Palier Frontier pour l'architecture, Standard pour l'implémentation.",
+      "patterns": [
+        "GOV-08",
+        "QUA-04",
+        "QUA-05",
+        "QUA-08",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-33",
+      "name": "Services en ligne et backend de jeu gouvernés",
+      "description": "« Nova » ajoute une boutique et des sauvegardes cloud. L'inventaire et la monnaie deviennent autoritaires côté serveur ; l'achat porte une clé d'idempotence (RUN-13) et un chemin de compensation (RUN-14) si le paiement échoue après le débit. Le BaaS est adopté via RUN-15 et passe le trust gate (GOV-09). QUA-08 suit un SLO de 99,9 % et la latence p95 ; un test rejoue 1000 achats concurrents sans double crédit. QUA-04 scelle l'evidence pack. Palier Standard, Frontier sur la résolution de conflits de sauvegarde.",
+      "patterns": [
+        "GOV-08",
+        "GOV-09",
+        "GOV-10",
+        "QUA-04",
+        "QUA-08",
+        "RUN-13",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "uc-34",
+      "name": "Anti-triche et sécurité du jeu gouvernées",
+      "description": "« Nova » détecte des scores impossibles au classement. Le modèle de menaces identifie une requête de score non validée. Correctif : le serveur recalcule le score à partir des entrées (GOV-08), GOV-07 réduit le périmètre de l'API exposée, et QUA-08 ajoute un signal d'anomalie (score hors borne physique). Un exploit de duplication antérieur est traité par le runbook (GOV-17) : RUN-14 annule les objets dupliqués. QUA-04 scelle l'evidence pack sécurité. Palier Frontier pour la modélisation, Standard pour les règles.",
+      "patterns": [
+        "GOV-07",
+        "GOV-08",
+        "GOV-17",
+        "QUA-04",
+        "QUA-08",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "uc-35",
+      "name": "Éclairage et image finale gouvernés",
+      "description": "Niveau « caverne cristal » de « Nova ». COG-01 fixe l'ambiance (mystère froid, cristaux comme seules sources). Éclairage : key bleu rasant, rim cyan sur les cristaux, GI faible. Look-dev calibré sur 3 références ; étalonnage via une LUT froide. QUA-12 compare avant/après et confirme la lisibilité du chemin (contraste joueur/décor). QUA-08 montre +1,8 ms GPU, sous le budget de 3 ms du post-process. QUA-15 valide ; KNO-10 confirme la cohérence avec la charte. QUA-04 scelle l'evidence pack. Frontier pour l'intention, Standard pour le réglage.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "KNO-10",
+        "MOD-03",
+        "QUA-04",
+        "QUA-08",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "uc-36",
+      "name": "Architecture des systèmes de jeu gouvernée",
+      "description": "« Nova » passe d'un prototype objet à une architecture ECS pour gérer 5000 entités. COG-01 isole 6 systèmes (mouvement, combat, IA, rendu, audio, sauvegarde). Le sens des dépendances interdit au rendu de connaître l'IA. Le comportement des ennemis devient data-driven (tables validées par QUA-14). Un ADR justifie ECS vs objet. QUA-15 révèle un cycle audio→gameplay corrigé. KNO-03 aligne l'ADR sur le code. QUA-04 scelle l'evidence pack. Palier Frontier pour le choix, Standard pour les contrats.",
+      "patterns": [
+        "COG-01",
+        "COG-02",
+        "GOV-08",
+        "KNO-03",
+        "QUA-04",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-37",
+      "name": "Tests automatisés et fiabilité du code de jeu gouvernés",
+      "description": "« Nova » sécurise son système d'inventaire. Stratégie : 80 % unitaire (règles de stack, monnaie), 15 % intégration (sauvegarde+chargement), 5 % fumée (démarrage de partie). Les tests économie sont seedés (RUN-13). La CI bloque toute PR à suite rouge (GOV-08). Un test instable de timing est isolé puis corrigé. Un ancien bug de duplication reçoit son test de non-régression. QUA-01 trace la preuve par règle ; QUA-08 montre 92 % de couverture du module. QUA-04 scelle l'evidence pack. Palier Standard.",
+      "patterns": [
+        "GOV-08",
+        "QUA-01",
+        "QUA-04",
+        "QUA-05",
+        "QUA-08",
+        "QUA-14",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "uc-38",
+      "name": "Localisation et internationalisation du jeu gouvernées",
+      "description": "« Nova » sort en huit langues dont l'arabe (RTL) et le japonais. Les chaînes sont externalisées à identifiants stables ; un glossaire verrouille les noms d'objets (KNO-10). MOD-01 route l'allemand et l'espagnol vers un petit modèle, le japonais vers un modèle fort. L'output contract (QUA-14) rejette deux écrans où la chaîne allemande déborde et un pluriel russe incorrect. La passe RTL valide le miroir d'interface et la couverture de police arabe. La LQA (QUA-15) relève un symbole inadapté à un marché : arbitrage humain (GOV-15) et adaptation. Le doublage est routé hors LLM vers un studio (MOD-03). QUA-01 trace la preuve par langue ; l'evidence pack scelle huit verdicts. Paliers Économique et Frontier mêlés.",
+      "patterns": [
+        "GOV-08",
+        "GOV-15",
+        "KNO-03",
+        "KNO-10",
+        "MOD-01",
+        "MOD-03",
+        "ORC-05",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-39",
+      "name": "Ambiance et atmosphère gouvernées",
+      "description": "« Nova » conçoit l'ambiance d'un manoir abandonné. COG-01 décompose le mood « inquiétude feutrée » en leviers : clé lumineuse basse et froide, brouillard volumétrique léger, lit sonore de vent et craquements, props de décrépitude racontant une fuite précipitée. KNO-10 ancre le tout dans les piliers d'horreur. L'éclairage et l'étalonnage composent UC-35 ; le soundscape est routé vers un modèle audio (MOD-03), le LLM ne produisant pas le son final. GOV-08 impose que la sortie de couloir reste lisible malgré l'obscurité : un test en mouvement révèle une zone trop sombre, le brouillard est réduit de 15 %. QUA-12 capture trois parcours en mouvement ; QUA-15 valide le ressenti et la lisibilité. Budget GPU tenu (atmosphère < 1,2 ms). Ambiance validée, palier Frontier pour l'intention.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "KNO-10",
+        "MOD-03",
+        "QUA-12",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-40",
+      "name": "Narration interactive et systèmes de dialogue gouvernés",
+      "description": "« Nova » ajoute un arc d'enquête à embranchements. COG-01 décompose l'arc en nœuds de dialogue, conditions et trois fins. Le gestionnaire d'état (ORC-05) tient les drapeaux « témoin convaincu », « preuve trouvée » qui conditionnent des scènes ultérieures. KNO-10 ancre chaque réplique dans le lore et la voix des personnages. Un harnais parcourt automatiquement toutes les branches : il détecte une fin inatteignable (un drapeau jamais posé) et une réplique contredisant le canon ; GOV-08 bloque la promotion tant que l'impasse persiste. Après correctif, QUA-04 scelle 12 parcours testés et QUA-15 valide la cohérence. Palier Frontier pour l'écriture, Standard pour les barks contextuels.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "KNO-10",
+        "ORC-05",
+        "QUA-04",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-41",
+      "name": "Monétisation, commerce et économie live gouvernés",
+      "description": "« Nova » ajoute une boutique cosmétique et un passe saisonnier. COG-01 décompose le modèle ; l'économiste aligne les sources de monnaie sur l'équilibrage (UC-10) pour éviter l'inflation. GOV-08 interdit les compteurs de fausse urgence ; la conformité (UC-47) confirme l'absence de loot box aléatoire payante et la classification d'âge. GOV-10 ajuste les prix par région. Chaque achat porte une clé d'idempotence (RUN-13) et un chemin de compensation (RUN-14). Un cas de ciblage d'offres sur joueurs vulnérables est escaladé (GOV-15) et refusé. QUA-04 scelle l'evidence pack économique ; QUA-15 valide l'éthique. Palier Frontier pour l'arbitrage.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "GOV-10",
+        "GOV-15",
+        "QUA-04",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-42",
+      "name": "Analytics produit et expérimentation gouvernés",
+      "description": "« Nova » veut améliorer la rétention J7. L'ingénieur analytics trace l'hypothèse (QUA-16) : « un tutoriel plus court augmente la rétention ». Il définit le schéma d'événements et les funnels (QUA-08), avec consentement et anonymisation (GOV-08, UC-47). Un A/B est dimensionné (QUA-13) ; GOV-10 isole les cohortes. Le test atteint son seuil : +3,1 points de rétention, intervalle robuste. QUA-15 vérifie l'absence de biais de sélection ; QUA-04 scelle le rapport de décision. La variante est généralisée par feature flag progressif. Palier Standard pour l'instrumentation, Frontier pour l'analyse.",
+      "patterns": [
+        "GOV-08",
+        "GOV-10",
+        "QUA-08",
+        "QUA-13",
+        "QUA-15",
+        "QUA-16"
+      ]
+    },
+    {
+      "id": "uc-43",
+      "name": "Génération procédurale (PCG) gouvernée",
+      "description": "« Nova » génère des donjons rogue-like. COG-01 décompose les contraintes (connexité, densité d'ennemis, clé avant porte) ; QUA-14 définit le schéma de salle. La génération part d'une seed journalisée (QUA-04). Le harnais (UC-13) valide chaque donjon : il détecte 2 % de seeds plaçant la clé derrière la porte qu'elle ouvre — un soft-lock — bloqué par GOV-08 jusqu'au correctif de la grammaire. Le rejeu d'une seed reproduit exactement le donjon et le bug, facilitant la correction. QUA-15 juge la diversité (pas de motif répété sur 1000 seeds). Evidence pack scellé. Palier Standard, Frontier pour la grammaire.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "KNO-10",
+        "QUA-04",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-44",
+      "name": "Streaming de monde ouvert gouverné",
+      "description": "« Nova » ouvre une région explorable sans couture. COG-01 partitionne la région en cellules avec dépendances ; l'architecte définit distances et préchargement selon la direction de course. GOV-08 fixe un budget mémoire de 4 Go et un seuil de hitch de 2 ms. QUA-08 instrumente un parcours : un hitch de 9 ms apparaît à un pont reliant deux biomes denses. Le préchargement directionnel est ajusté et les LOD lointains allégés (compose UC-27). Nouveau parcours : hitch sous 2 ms, pop-in imperceptible, mémoire à 3,7 Go. QUA-12 capture trois trajets ; QUA-15 valide la fluidité. Palier Standard, Frontier sur l'architecture de partition.",
+      "patterns": [
+        "COG-01",
+        "GOV-08",
+        "QUA-08",
+        "QUA-12",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-45",
+      "name": "Systèmes sociaux et communication en jeu gouvernés",
+      "description": "« Nova » ajoute amis, groupes et chat vocal de groupe. Le graphe social et les salons sont sous contrat (GOV-08). Tout pseudo et message est traité comme non fiable (GOV-09), neutralisant une tentative d'injection via un nom d'utilisateur piégé. La modération texte est routée vers un classifieur, la voix vers un modèle audio (MOD-03). Un message ambigu signalé est escaladé à un modérateur humain (GOV-15) qui tranche. Le joueur ciblé dispose de blocage et de silence. QUA-04 scelle les décisions de modération ; QUA-15 valide la conformité (mineurs protégés, UC-47). Palier Standard, Frontier sur les cas ambigus.",
+      "patterns": [
+        "GOV-08",
+        "GOV-09",
+        "GOV-15",
+        "MOD-03",
+        "QUA-04",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-46",
+      "name": "Modding et contenu joueur (UGC) gouvernés",
+      "description": "« Nova » ouvre un atelier de mods. Le concepteur publie une API versionnée ancrée dans le contrat moteur (KNO-10). Les scripts de mod tournent dans un bac à sable à rayon limité (GOV-07) : un mod tentant d'accéder au système de fichiers est bloqué. Tout mod est traité comme non fiable (GOV-09), scanné et modéré à l'ingestion. Une mise à jour mineure du jeu est testée contre 50 mods de référence pour garantir la compatibilité ascendante (GOV-08). Un mod au contenu non conforme est retiré et tracé (compose UC-45/UC-47). QUA-04 scelle la preuve d'isolation ; QUA-15 valide. Palier Standard, Frontier pour l'isolation.",
+      "patterns": [
+        "GOV-07",
+        "GOV-08",
+        "GOV-09",
+        "KNO-10",
+        "QUA-04",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-47",
+      "name": "Conformité légale, classification et certification gouvernées",
+      "description": "« Nova » vise une sortie PC et console multi-régions. Dès la préproduction, le conseiller cartographie les exigences (KNO-10) : PEGI/ESRB, règles de loot box en Belgique et aux Pays-Bas, RGPD pour la télémétrie, exigences TRC/TCR console. Chaque exigence devient un contrat vérifiable (QUA-14) testé en continu (GOV-08). La boutique (UC-41) est ajustée pour les régions interdisant les loot box payantes ; la télémétrie (UC-42) reçoit consentement et minimisation. Un arbitrage sur la classification d'une scène est escaladé (GOV-15). Avant soumission console (UC-15), QUA-15 valide les evidence packs ; aucun rejet de certification. Palier Frontier pour l'interprétation, Standard pour les check-lists.",
+      "patterns": [
+        "GOV-08",
+        "GOV-15",
+        "KNO-10",
+        "QUA-04",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-48",
+      "name": "Édition, go-to-market et assets marketing gouvernés",
+      "description": "« Nova » prépare sa page boutique et son trailer de lancement. Le directeur key art cadre l'intention visuelle puis route la production vers un modèle d'image et un illustrateur (MOD-03) — jamais via un LLM texte. Le monteur écrit la beat sheet et le storyboard ; le montage part dans un outil vidéo. Chaque allégation (« monde ouvert sans temps de chargement ») est vérifiée contre le build réel (KNO-10). La page respecte le contrat de format de la plateforme (QUA-14). Un visuel sensible est escaladé (GOV-15) ; QUA-15 valide la cohérence et la factualité, puis QUA-04 archive le dossier. Palier Frontier pour le message, production finale routée hors LLM.",
+      "patterns": [
+        "GOV-15",
+        "KNO-10",
+        "MOD-03",
+        "QUA-04",
+        "QUA-14",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-49",
+      "name": "Opérations communautaires et support joueur gouvernés",
+      "description": "Après le lancement, « Nova » opère sa communauté. Le community manager tient un calendrier de comms et surveille le sentiment ; lorsqu'un bug de progression enflamme les forums, la comms de crise est escaladée (GOV-15) et validée (QUA-15). Le support classe les tickets par taxonomie, s'appuie sur une base de connaissances ancrée (KNO-10) et escalade les cas sensibles. Les données joueurs (e-mails de support, identifiants) sont minimisées et protégées (GOV-09). Un event de week-end est coordonné avec le live ops (compose UC-16), et le sentiment mesuré alimente l'analytics (GOV-10, compose UC-42). Palier Standard pour les workflows, Frontier pour la crise.",
+      "patterns": [
+        "GOV-08",
+        "GOV-09",
+        "GOV-10",
+        "GOV-15",
+        "KNO-10",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "uc-50",
+      "name": "Mode spectateur, esports et partage de replay gouvernés",
+      "description": "« Nova » ajoute un mode esports. L'architecte de replay capture les parties par seed et entrées (RUN-13) : chaque replay se rejoue à l'identique. L'ingénieur spectateur conçoit une caméra réalisateur avec un délai de diffusion et une information bornée — un observateur ne voit pas le brouillard de guerre adverse (GOV-17). La diffusion est testée en charge (QUA-08, compose UC-32). Les brackets et l'anti-triche compétitif sont outillés. Avant livraison, GOV-08 borne les permissions, QUA-15 valide déterminisme et intégrité, et QUA-04 archive les preuves. Palier Standard pour la logique, Frontier pour la réalisation.",
+      "patterns": [
+        "GOV-08",
+        "GOV-17",
+        "QUA-04",
+        "QUA-08",
+        "QUA-15",
+        "RUN-13"
+      ]
+    }
+  ],
+  "antiPatterns": [
+    {
+      "id": "agent-omniscient",
+      "name": "Agent omniscient",
+      "description": "Un seul agent reçoit tout, décide tout et valide tout.",
+      "patterns": [
+        "ORC-01",
+        "ORG-01",
+        "ORG-02"
+      ]
+    },
+    {
+      "id": "rag-aveugle",
+      "name": "RAG aveugle",
+      "description": "La similarité vectorielle est traitée comme vérité.",
+      "patterns": [
+        "KNO-02",
+        "ORC-06",
+        "ORC-07"
+      ]
+    },
+    {
+      "id": "memoire-autoritaire",
+      "name": "Mémoire autoritaire",
+      "description": "Une mémoire ancienne contredit la source active mais reste utilisée.",
+      "patterns": [
+        "KNO-01",
+        "KNO-05",
+        "ORC-06"
+      ]
+    },
+    {
+      "id": "subagent-sans-contrat",
+      "name": "Subagent sans contrat",
+      "description": "Un subagent explore librement sans sortie imposée.",
+      "patterns": [
+        "GOV-01",
+        "ORC-02",
+        "ORC-03"
+      ]
+    },
+    {
+      "id": "prompt-cargo",
+      "name": "Prompt-cargo",
+      "description": "Le système compense l'incertitude par un prompt de plus en plus long.",
+      "patterns": [
+        "ORC-05",
+        "ORC-08"
+      ]
+    },
+    {
+      "id": "faux-done",
+      "name": "Faux Done",
+      "description": "Une tâche est fermée parce que l'agent affirme qu'elle est terminée.",
+      "patterns": [
+        "QUA-01",
+        "QUA-04",
+        "QUA-05"
+      ]
+    },
+    {
+      "id": "validation-circulaire",
+      "name": "Validation circulaire",
+      "description": "L'agent qui produit valide sa propre sortie critique.",
+      "patterns": [
+        "GOV-04",
+        "ORG-02"
+      ]
+    },
+    {
+      "id": "hook-marteau",
+      "name": "Hook marteau",
+      "description": "Un hook bloque tout sans phase d'observation.",
+      "patterns": [
+        "GOV-03"
+      ]
+    },
+    {
+      "id": "fallback-fantome",
+      "name": "Fallback fantôme",
+      "description": "Un modèle interdit reste accessible par alias ou fallback implicite.",
+      "patterns": [
+        "GOV-01",
+        "MOD-02"
+      ]
+    },
+    {
+      "id": "tout-indexer",
+      "name": "Tout indexer",
+      "description": "Chaque trace, brouillon ou handoff devient mémoire durable.",
+      "patterns": [
+        "KNO-01",
+        "KNO-04",
+        "RUN-02"
+      ]
+    },
+    {
+      "id": "drift-documentaire",
+      "name": "Drift documentaire",
+      "description": "La documentation affirme une gouvernance que le runtime n'applique plus.",
+      "patterns": [
+        "KNO-03",
+        "RUN-02"
+      ]
+    },
+    {
+      "id": "autonomie-maximale-par-defaut",
+      "name": "Autonomie maximale par défaut",
+      "description": "L'agent agit avec le niveau d'autonomie le plus élevé sauf blocage.",
+      "patterns": [
+        "GOV-01",
+        "GOV-02",
+        "GOV-04"
+      ]
+    },
+    {
+      "id": "use-case-autonome",
+      "name": "Use-case autonome",
+      "description": "Une capacité métier séduisante est documentée sans patterns socle, preuves ni limites de coût.",
+      "patterns": [
+        "ORC-02",
+        "QUA-04",
+        "QUA-13"
+      ]
+    },
+    {
+      "id": "retry-aveugle",
+      "name": "Retry aveugle",
+      "description": "Toute erreur LLM ou outil déclenche un nouvel essai identique sans diagnostic.",
+      "patterns": [
+        "GOV-16",
+        "GOV-17",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "json-plausible",
+      "name": "JSON plausible",
+      "description": "Une sortie structurée est acceptée parce qu'elle parse, sans validation d'invariants.",
+      "patterns": [
+        "QUA-01",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "effet-partiel-oublie",
+      "name": "Effet partiel oublié",
+      "description": "Une séquence échoue en cours sans compenser les effets déjà produits.",
+      "patterns": [
+        "GOV-17",
+        "RUN-13",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "raisonnement-implicite",
+      "name": "Raisonnement implicite",
+      "description": "L'agent conclut sans décomposer ni exposer d'étapes vérifiables.",
+      "patterns": [
+        "COG-01",
+        "COG-02"
+      ]
+    },
+    {
+      "id": "auto-validation-complaisante",
+      "name": "Auto-validation complaisante",
+      "description": "L'agent boucle sur sa propre révision ou se déclare correct sans critères ni revue indépendante.",
+      "patterns": [
+        "COG-03",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "competence-implicite",
+      "name": "Compétence implicite",
+      "description": "L'agent fait tout en raisonnement libre ou choisit un outil sans vérifier périmètre et autorisation.",
+      "patterns": [
+        "COG-04",
+        "GOV-07"
+      ]
+    },
+    {
+      "id": "gdd-fantome",
+      "name": "GDD fantôme",
+      "description": "Le contenu évolue mais le GDD ou la bible n'est plus la source de vérité partagée.",
+      "patterns": [
+        "KNO-03",
+        "QUA-01"
+      ]
+    },
+    {
+      "id": "contenu-hors-rating",
+      "name": "Contenu hors-rating",
+      "description": "Du contenu est intégré sans vérifier la classification d'âge déclarée.",
+      "patterns": [
+        "GOV-08"
+      ]
+    },
+    {
+      "id": "simulation-non-deterministe",
+      "name": "Simulation non déterministe",
+      "description": "Les tests de gameplay tournent en temps réel sans seed ni rejeu.",
+      "patterns": [
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "certification-de-derniere-minute",
+      "name": "Certification de dernière minute",
+      "description": "La certification plateforme ou le rating est tenté sans dry-run préalable.",
+      "patterns": [
+        "GOV-02"
+      ]
+    },
+    {
+      "id": "patch-live-a-l-aveugle",
+      "name": "Patch live à l'aveugle",
+      "description": "Un patch est poussé à tous les joueurs sans télémétrie ni déploiement progressif.",
+      "patterns": [
+        "QUA-08",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "asset-non-budgete",
+      "name": "Asset non budgété",
+      "description": "Un asset (mesh, texture, animation) est intégré sans budget de polygones, de mémoire ni convention.",
+      "patterns": [
+        "GOV-08",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "shader-non-profile",
+      "name": "Shader non profilé",
+      "description": "Un shader est validé « parce qu'il rend bien » sans mesurer le coût GPU ni tester les plateformes.",
+      "patterns": [
+        "GOV-08",
+        "QUA-08"
+      ]
+    },
+    {
+      "id": "perf-sans-budget",
+      "name": "Perf sans budget",
+      "description": "L'optimisation est faite au ressenti, sans budget de frame ni preuve de gain.",
+      "patterns": [
+        "GOV-08",
+        "QUA-05"
+      ]
+    },
+    {
+      "id": "vr-sans-comfort-test",
+      "name": "VR sans comfort test",
+      "description": "Une expérience VR est livrée sans plancher de framerate ni test de confort.",
+      "patterns": [
+        "QUA-05",
+        "QUA-08"
+      ]
+    },
+    {
+      "id": "accessibilite-oubliee",
+      "name": "Accessibilité oubliée",
+      "description": "L'accessibilité est repoussée en fin de cycle au lieu d'être un critère opposable.",
+      "patterns": [
+        "GOV-08",
+        "QUA-15"
+      ]
+    },
+    {
+      "id": "maitrise-simulee",
+      "name": "Maîtrise simulée",
+      "description": "Un LLM produit un livrable hors de son cœur de compétence (illustration, audio, 3D) « parce qu'il est là ».",
+      "patterns": [
+        "COG-04",
+        "GOV-15",
+        "MOD-03"
+      ]
+    },
+    {
+      "id": "reinvention-de-la-roue",
+      "name": "Réinvention de la roue",
+      "description": "Un outil mûr existant est réécrit from scratch au lieu d'être évalué puis adopté.",
+      "patterns": [
+        "GOV-04",
+        "RUN-15"
+      ]
+    },
+    {
+      "id": "outil-adopte-sans-accord",
+      "name": "Outil adopté sans accord",
+      "description": "Un outil tiers (payant ou non) est installé sans trust gate ni accord utilisateur.",
+      "patterns": [
+        "GOV-09",
+        "GOV-15",
+        "RUN-15"
+      ]
+    },
+    {
+      "id": "confiance-au-client",
+      "name": "Confiance au client",
+      "description": "L'état envoyé par le client (position, score, monnaie) est cru sans validation serveur.",
+      "patterns": [
+        "GOV-07",
+        "GOV-08"
+      ]
+    },
+    {
+      "id": "netcode-sans-reconciliation",
+      "name": "Netcode sans réconciliation",
+      "description": "La prédiction client n'est jamais corrigée par l'autorité serveur.",
+      "patterns": [
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "backend-permissif",
+      "name": "Backend permissif",
+      "description": "Les opérations serveur ne sont ni idempotentes, ni observées, ni limitées en débit.",
+      "patterns": [
+        "QUA-08",
+        "RUN-13"
+      ]
+    },
+    {
+      "id": "save-non-versionnee",
+      "name": "Save non versionnée",
+      "description": "Les sauvegardes n'ont ni schéma versionné ni migration entre patchs.",
+      "patterns": [
+        "QUA-14",
+        "RUN-14"
+      ]
+    },
+    {
+      "id": "eclairage-au-ressenti",
+      "name": "Éclairage au ressenti",
+      "description": "L'éclairage et le post-traitement sont réglés sans référence, sans lisibilité mesurée ni budget GPU.",
+      "patterns": [
+        "GOV-08",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "architecture-emergente-subie",
+      "name": "Architecture émergente subie",
+      "description": "Les systèmes sont codés au fil de l'eau sans frontières ni sens de dépendance.",
+      "patterns": [
+        "GOV-08",
+        "KNO-03"
+      ]
+    },
+    {
+      "id": "code-teste-a-la-compilation",
+      "name": "Code « testé » à la compilation",
+      "description": "Le code est jugé fiable parce qu'il compile ou qu'un playtest a semblé bon, sans suite automatisée.",
+      "patterns": [
+        "GOV-08",
+        "QUA-05"
+      ]
+    },
+    {
+      "id": "localisation-tardive",
+      "name": "Localisation tardive",
+      "description": "Les chaînes sont codées en dur et traduites tard, langue par langue, sans glossaire, contexte d'affichage ni LQA.",
+      "patterns": [
+        "MOD-01",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "ambiance-empilee-sans-intention",
+      "name": "Ambiance empilée sans intention",
+      "description": "Brouillard, bloom, musique et props sont empilés « pour faire atmosphérique », sans intention, sans convergence ni lisibilité mesurée.",
+      "patterns": [
+        "GOV-08",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "narration-sans-etat",
+      "name": "Narration sans état",
+      "description": "Les embranchements de dialogue et les conséquences sont écrits sans modèle d'état narratif unique ; les variables d'histoire divergent.",
+      "patterns": [
+        "COG-01",
+        "KNO-10"
+      ]
+    },
+    {
+      "id": "monetisation-predatrice",
+      "name": "Monétisation prédatrice",
+      "description": "La monétisation exploite des dark patterns (pression, opacité des taux, ciblage des dépensiers) au lieu d'une valeur claire et équitable.",
+      "patterns": [
+        "GOV-10",
+        "GOV-15"
+      ]
+    },
+    {
+      "id": "mesure-sans-hypothese",
+      "name": "Mesure sans hypothèse",
+      "description": "On collecte des métriques et lance des tests A/B sans hypothèse, sans groupe témoin propre ni signification statistique.",
+      "patterns": [
+        "QUA-13",
+        "QUA-16"
+      ]
+    },
+    {
+      "id": "generation-procedurale-non-validee",
+      "name": "Génération procédurale non validée",
+      "description": "Le contenu PCG est expédié sans porte de validation (jouabilité, cohérence, budgets, reproductibilité du seed).",
+      "patterns": [
+        "QUA-04",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "streaming-au-juge",
+      "name": "Streaming au jugé",
+      "description": "Le monde ouvert est découpé et streamé sans budget mémoire ou IO ni mesure, en se fiant au ressenti.",
+      "patterns": [
+        "QUA-08",
+        "QUA-12"
+      ]
+    },
+    {
+      "id": "communication-sans-moderation",
+      "name": "Communication sans modération",
+      "description": "Le chat, la voix et les fonctions sociales sont activés sans modération, filtrage ni signalement.",
+      "patterns": [
+        "GOV-08",
+        "GOV-15"
+      ]
+    },
+    {
+      "id": "contenu-tiers-non-confine",
+      "name": "Contenu tiers non confiné",
+      "description": "Le modding et l'UGC s'exécutent ou se publient sans bac à sable, revue de sécurité ni modération.",
+      "patterns": [
+        "GOV-07",
+        "GOV-09"
+      ]
+    },
+    {
+      "id": "conformite-releguee-a-la-soumission",
+      "name": "Conformité reléguée à la soumission",
+      "description": "La classification d'âge, les obligations légales (loot box, RGPD, accessibilité) et la certification sont traitées à la fin.",
+      "patterns": [
+        "GOV-15",
+        "QUA-14"
+      ]
+    },
+    {
+      "id": "marketing-trompeur-en-fin-de-course",
+      "name": "Marketing trompeur en fin de course",
+      "description": "Le key art, le trailer ou la page boutique sont produits hors maîtrise ou promettent un gameplay non livré.",
+      "patterns": [
+        "KNO-10",
+        "MOD-03"
+      ]
+    },
+    {
+      "id": "communaute-et-support-improvises",
+      "name": "Communauté et support improvisés",
+      "description": "L'animation, le support et les comms de crise se font sans taxonomie, base de connaissances ni protection des données.",
+      "patterns": [
+        "GOV-09",
+        "KNO-10"
+      ]
+    },
+    {
+      "id": "replay-non-deterministe-et-observateur-fuyant",
+      "name": "Replay non déterministe et observateur fuyant",
+      "description": "Le replay n'est pas rejouable à l'identique et le mode observateur expose l'information cachée.",
+      "patterns": [
+        "GOV-17",
+        "RUN-13"
+      ]
+    }
+  ]
+}

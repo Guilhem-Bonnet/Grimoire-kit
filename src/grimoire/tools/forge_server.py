@@ -760,7 +760,14 @@ def main(argv: list[str] | None = None) -> int:
     ui_dir = args.ui_dir
     if ui_dir is None:
         candidate = args.kit_root.parent / "web" / "public"
-        ui_dir = candidate if candidate.is_dir() else None
+        if candidate.is_dir():
+            ui_dir = candidate
+        else:
+            # UI embarquée dans le paquet (wheel ou editable)
+            from grimoire.data import web_path
+
+            packaged = web_path()
+            ui_dir = packaged if packaged.is_dir() else None
 
     server = serve(args.project_root, args.kit_root, ui_dir, args.port)
     print(f"grimoire serve — http://127.0.0.1:{args.port}/ (UI : {ui_dir or 'API seule'})")
