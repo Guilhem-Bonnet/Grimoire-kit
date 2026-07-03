@@ -36,13 +36,13 @@ Stdlib only — aucune dépendance externe.
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import hashlib
+import ipaddress
 import json
 import logging
 import re
-import socket
 import shutil
+import socket
 import sys
 import time
 import urllib.error

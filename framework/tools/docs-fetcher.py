@@ -40,9 +40,9 @@ Stdlib only — aucune dépendance externe (urllib uniquement).
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import hashlib
 import html
+import ipaddress
 import json
 import logging
 import re
