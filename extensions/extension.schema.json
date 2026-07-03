@@ -27,6 +27,16 @@
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "flow-adapter",
+        "mcp-toolbox",
+        "observability",
+        "capability"
+      ],
+      "description": "Nature de la prise : comment l'extension se branche au kit. flow-adapter = encapsule un framework agentique dans le flow ; mcp-toolbox = serveur MCP externe fournissant du grounding d'environnement ; observability = backend d'observation ; capability = capacité outillée. Orthogonal aux familles de patterns (qui disent ce que l'extension fait dans le flow)."
+    },
     "name": {
       "type": "string",
       "minLength": 1
@@ -50,79 +60,135 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "url": { "type": "string", "format": "uri" }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       }
     },
     "upstream": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "kind"],
+      "required": [
+        "repository",
+        "kind"
+      ],
       "properties": {
-        "repository": { "type": "string", "format": "uri" },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
         "kind": {
           "type": "string",
-          "enum": ["framework", "observability", "memory", "tooling"]
+          "enum": [
+            "framework",
+            "observability",
+            "memory",
+            "tooling"
+          ]
         },
-        "pinnedVersion": { "type": "string" }
+        "pinnedVersion": {
+          "type": "string"
+        }
       }
     },
     "compat": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kit", "manifest"],
+      "required": [
+        "kit",
+        "manifest"
+      ],
       "properties": {
         "kit": {
           "type": "string",
           "description": "Contrainte semver sur grimoire-kit, ex. >=3.11"
         },
-        "manifest": { "type": "integer", "minimum": 1 }
+        "manifest": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "provides": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agents": { "$ref": "#/$defs/relativePathList" },
-        "skills": { "$ref": "#/$defs/relativePathList" },
-        "hooks": { "$ref": "#/$defs/relativePathList" },
-        "workflows": { "$ref": "#/$defs/relativePathList" },
-        "instructions": { "$ref": "#/$defs/relativePathList" },
+        "agents": {
+          "$ref": "#/$defs/relativePathList"
+        },
+        "skills": {
+          "$ref": "#/$defs/relativePathList"
+        },
+        "hooks": {
+          "$ref": "#/$defs/relativePathList"
+        },
+        "workflows": {
+          "$ref": "#/$defs/relativePathList"
+        },
+        "instructions": {
+          "$ref": "#/$defs/relativePathList"
+        },
         "nodes": {
           "type": "array",
-          "items": { "$ref": "#/$defs/nodeContribution" }
+          "items": {
+            "$ref": "#/$defs/nodeContribution"
+          }
         }
       }
     },
     "patterns": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["implements"],
+      "required": [
+        "implements"
+      ],
       "properties": {
         "implements": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/patternId" }
+          "items": {
+            "$ref": "#/$defs/patternId"
+          }
         },
         "requires": {
           "type": "array",
-          "items": { "$ref": "#/$defs/patternId" }
+          "items": {
+            "$ref": "#/$defs/patternId"
+          }
         }
       }
     },
     "permissions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["filesystem", "network", "hooks", "memory"],
+      "required": [
+        "filesystem",
+        "network",
+        "hooks",
+        "memory"
+      ],
       "properties": {
         "filesystem": {
           "type": "string",
-          "enum": ["none", "artifacts", "workspace"]
+          "enum": [
+            "none",
+            "artifacts",
+            "workspace"
+          ]
         },
-        "network": { "type": "boolean" },
+        "network": {
+          "type": "boolean"
+        },
         "hooks": {
           "type": "array",
           "items": {
@@ -141,21 +207,31 @@
         },
         "memory": {
           "type": "string",
-          "enum": ["none", "read", "readwrite"]
+          "enum": [
+            "none",
+            "read",
+            "readwrite"
+          ]
         }
       }
     },
     "install": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["steps"],
+      "required": [
+        "steps"
+      ],
       "properties": {
         "steps": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/installStep" }
+          "items": {
+            "$ref": "#/$defs/installStep"
+          }
         },
-        "verify": { "$ref": "#/$defs/relativePath" }
+        "verify": {
+          "$ref": "#/$defs/relativePath"
+        }
       }
     },
     "uninstall": {
@@ -164,7 +240,9 @@
       "properties": {
         "steps": {
           "type": "array",
-          "items": { "$ref": "#/$defs/installStep" }
+          "items": {
+            "$ref": "#/$defs/installStep"
+          }
         }
       }
     }
@@ -181,33 +259,61 @@
     },
     "relativePathList": {
       "type": "array",
-      "items": { "$ref": "#/$defs/relativePath" }
+      "items": {
+        "$ref": "#/$defs/relativePath"
+      }
     },
     "nodeContribution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "label", "patterns", "pins", "compilesTo"],
+      "required": [
+        "id",
+        "label",
+        "patterns",
+        "pins",
+        "compilesTo"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
         },
-        "label": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
         "patterns": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/patternId" }
+          "items": {
+            "$ref": "#/$defs/patternId"
+          }
         },
         "pins": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "direction", "contract"],
+            "required": [
+              "id",
+              "direction",
+              "contract"
+            ],
             "properties": {
-              "id": { "type": "string", "minLength": 1 },
-              "direction": { "type": "string", "enum": ["in", "out"] },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "in",
+                  "out"
+                ]
+              },
               "contract": {
                 "type": "string",
                 "description": "ID de contrat de l'export catalogue, ex. task-envelope"
@@ -219,70 +325,131 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["agent", "skill", "hook", "workflow", "instruction"]
+            "enum": [
+              "agent",
+              "skill",
+              "hook",
+              "workflow",
+              "instruction"
+            ]
           }
         }
       }
     },
     "installStep": {
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["copy", "script", "pip", "npm"]
+          "enum": [
+            "copy",
+            "script",
+            "pip",
+            "npm"
+          ]
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "kind": { "const": "copy" } } },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "copy"
+              }
+            }
+          },
           "then": {
-            "required": ["from", "to"],
+            "required": [
+              "from",
+              "to"
+            ],
             "properties": {
               "kind": true,
-              "from": { "$ref": "#/$defs/relativePath" },
-              "to": { "type": "string" }
-            },
-            "additionalProperties": false
-          }
-        },
-        {
-          "if": { "properties": { "kind": { "const": "script" } } },
-          "then": {
-            "required": ["path"],
-            "properties": {
-              "kind": true,
-              "path": { "$ref": "#/$defs/relativePath" },
-              "args": { "type": "array", "items": { "type": "string" } }
-            },
-            "additionalProperties": false
-          }
-        },
-        {
-          "if": { "properties": { "kind": { "const": "pip" } } },
-          "then": {
-            "required": ["packages"],
-            "properties": {
-              "kind": true,
-              "packages": {
-                "type": "array",
-                "minItems": 1,
-                "items": { "type": "string" }
+              "from": {
+                "$ref": "#/$defs/relativePath"
+              },
+              "to": {
+                "type": "string"
               }
             },
             "additionalProperties": false
           }
         },
         {
-          "if": { "properties": { "kind": { "const": "npm" } } },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "script"
+              }
+            }
+          },
           "then": {
-            "required": ["packages"],
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "kind": true,
+              "path": {
+                "$ref": "#/$defs/relativePath"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "pip"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "packages"
+            ],
             "properties": {
               "kind": true,
               "packages": {
                 "type": "array",
                 "minItems": 1,
-                "items": { "type": "string" }
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "npm"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "packages"
+            ],
+            "properties": {
+              "kind": true,
+              "packages": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "additionalProperties": false
