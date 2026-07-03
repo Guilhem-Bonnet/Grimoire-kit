@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "id": "grimoire-mcp",
+  "kind": "mcp-toolbox",
+  "name": "Grimoire MCP Server",
+  "version": "0.1.0",
+  "description": "Le serveur MCP du kit comme toolbox gouvernée : accès outillé aux missions, preuves et mémoire du projet depuis tout client MCP, qualifié par le MCP Trust Gate (GOV-09) — permissions déclarées, surfaces bornées.",
+  "license": "MIT",
+  "authors": [
+    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+  ],
+  "upstream": {
+    "repository": "https://github.com/Guilhem-Bonnet/Grimoire-kit",
+    "kind": "tooling",
+    "pinnedVersion": "3.x"
+  },
+  "compat": { "kit": ">=3.11", "manifest": 1 },
+  "provides": {
+    "agents": [],
+    "skills": ["artifacts/skills/grimoire-mcp-setup/SKILL.md"],
+    "hooks": [],
+    "workflows": [],
+    "instructions": ["artifacts/instructions/mcp-trust-gate.instructions.md"],
+    "nodes": []
+  },
+  "patterns": {
+    "implements": ["GOV-09", "GOV-07"],
+    "requires": ["GOV-01"]
+  },
+  "permissions": {
+    "filesystem": "artifacts",
+    "network": false,
+    "hooks": [],
+    "memory": "read"
+  },
+  "install": {
+    "steps": [
+      { "kind": "pip", "packages": ["grimoire-kit[mcp]"] },
+      {
+        "kind": "copy",
+        "from": "artifacts/skills/grimoire-mcp-setup",
+        "to": ".github/skills/grimoire-mcp-setup"
+      },
+      {
+        "kind": "copy",
+        "from": "artifacts/instructions/mcp-trust-gate.instructions.md",
+        "to": ".github/instructions/mcp-trust-gate.instructions.md"
+      }
+    ],
+    "verify": "scripts/verify-install.sh"
+  }
+}
