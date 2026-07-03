@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
 from datetime import date
 from html import escape
 from pathlib import Path
-import posixpath
 from typing import Any
 
 from mkdocs.config.defaults import MkDocsConfig
@@ -28,7 +28,7 @@ _MONTHS_FR = {
     12: "décembre",
 }
 _REGISTRY_FILE = Path("mkdocs_data/signals.yml")
-_SIGNALS: tuple["SignalEntry", ...] = ()
+_SIGNALS: tuple[SignalEntry, ...] = ()
 _FILES_BY_SRC_URI: dict[str, File] = {}
 
 
