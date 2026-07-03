@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-07-03
+
 ### Ajouté
 
 - **Extensions** : `grimoire ext add|list|remove|verify|publish` — bundles
@@ -30,6 +32,23 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   déduplication UUID5 identique à mem0-bridge
   (`uuid5(DNS, "grimoire-{proj}:{agent}:{text[:150]}")`), upsert idempotent
   avec fallback anti-doublon pour les backends sans `upsert`. 23 tests.
+
+- **Simulation pré-exécution des blueprints** et **publication de blueprints
+  au marketplace** (workflow extensions).
+
+### Corrigé (issue #39 — merci @zavrocKk)
+
+- **Routage LLM réparé** (C1/C2) : l'agent-caller appelait le routeur avec un
+  kwarg inexistant (`TypeError` avalé silencieusement → toujours le modèle par
+  défaut) et `_resolve_model` de l'agent-worker retournait un objet
+  `TaskClassification` au lieu d'un id de modèle.
+- **SSRF avec résolution DNS** (C4) : les 4 outils fetch (web-browser,
+  docs-fetcher, doc-fetcher, rag-indexer) filtraient par préfixe de chaîne
+  sans résoudre le hostname — DNS rebinding et IP décimales/octales/hex
+  passaient. La validation résout désormais via `getaddrinfo` et rejette
+  loopback/privé/link-local/réservé ; `rag-indexer` conserve sa sémantique
+  `allow_localhost` (LAN autorisé, metadata toujours bloqué). Le risque
+  résiduel TOCTOU (pas de pinning d'IP) est documenté. 18 tests offline.
 
 ### Modifié
 
