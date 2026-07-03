@@ -76,13 +76,13 @@ class TestProjectConfig:
         pc = ProjectConfig.from_dict({
             "name": "my-app",
             "description": "Cool app",
-            "type": "infrastructure",
+            "type": "framework",
             "metaphor": "forteresse",
             "stack": ["terraform", "docker"],
             "repos": [{"name": "infra", "path": "./infra"}],
         })
         assert pc.name == "my-app"
-        assert pc.type == "infrastructure"
+        assert pc.type == "framework"
         assert pc.stack == ("terraform", "docker")
         assert len(pc.repos) == 1
         assert pc.repos[0].name == "infra"
@@ -127,23 +127,41 @@ class TestUserConfig:
 class TestMemoryConfig:
     def test_from_dict_full(self) -> None:
         mc = MemoryConfig.from_dict({
-            "backend": "qdrant-local",
+            "backend": "weaviate-server",
             "collection_prefix": "myproj",
             "embedding_model": "all-MiniLM-L6-v2",
+            "weaviate_url": "http://localhost:8080",
+            "weaviate_collection": "MyProjMemory",
+            "neo4j_uri": "bolt://localhost:7687",
+            "short_term_backend": "redis",
+            "redis_url": "redis://localhost:6379/0",
+            "code_graph": "neo4j",
         })
-        assert mc.backend == "qdrant-local"
+        assert mc.backend == "weaviate-server"
         assert mc.collection_prefix == "myproj"
+        assert mc.weaviate_url == "http://localhost:8080"
+        assert mc.weaviate_collection == "MyProjMemory"
+        assert mc.neo4j_uri == "bolt://localhost:7687"
+        assert mc.short_term_backend == "redis"
+        assert mc.redis_url == "redis://localhost:6379/0"
 
     def test_defaults(self) -> None:
         mc = MemoryConfig.from_dict({})
         assert mc.backend == "auto"
         assert mc.collection_prefix == "grimoire"
+        assert mc.short_term_backend == "sqlite"
+        assert mc.knowledge_graph == "sqlite-sidecar"
+        assert mc.task_memory == "planned"
 
     def test_invalid_backend(self) -> None:
         with pytest.raises(GrimoireConfigError, match="Invalid memory backend"):
             MemoryConfig.from_dict({"backend": "redis"})
 
-    @pytest.mark.parametrize("backend", ["auto", "local", "qdrant-local", "qdrant-server", "ollama"])
+    def test_invalid_short_term_backend(self) -> None:
+        with pytest.raises(GrimoireConfigError, match="Invalid short_term_backend"):
+            MemoryConfig.from_dict({"short_term_backend": "memcached"})
+
+    @pytest.mark.parametrize("backend", ["auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"])
     def test_all_valid_backends(self, backend: str) -> None:
         mc = MemoryConfig.from_dict({"backend": backend})
         assert mc.backend == backend
@@ -179,17 +197,31 @@ class TestGrimoireConfigFromDict:
         cfg = GrimoireConfig.from_dict({
             "project": {"name": "full", "type": "game", "stack": ["unity"]},
             "user": {"name": "Charlie", "skill_level": "beginner"},
-            "memory": {"backend": "qdrant-server", "qdrant_url": "http://localhost:6333"},
+            "memory": {"backend": "weaviate-server", "weaviate_url": "http://localhost:8080"},
             "agents": {"archetype": "creative-studio", "custom_agents": ["narrator"]},
             "installed_archetypes": ["creative-studio"],
             "llm_router": {"enabled": True},
         })
         assert cfg.project.name == "full"
         assert cfg.user.name == "Charlie"
-        assert cfg.memory.qdrant_url == "http://localhost:6333"
+        assert cfg.memory.weaviate_url == "http://localhost:8080"
         assert cfg.agents.custom_agents == ("narrator",)
         assert cfg.installed_archetypes == ("creative-studio",)
         assert "llm_router" in cfg.extra
+
+    def test_weaviate_backend_requires_url_warning(self) -> None:
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "x"},
+            "memory": {"backend": "weaviate-server"},
+        })
+        assert "weaviate_url is empty" in "\n".join(cfg.validate())
+
+    def test_neo4j_layers_require_uri_warning(self) -> None:
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "x"},
+            "memory": {"backend": "local", "memory_graph": "neo4j"},
+        })
+        assert "neo4j_uri is empty" in "\n".join(cfg.validate())
 
     def test_extra_fields_preserved(self) -> None:
         cfg = GrimoireConfig.from_dict({
@@ -295,6 +327,13 @@ class TestConfigValidation:
         cfg = GrimoireConfig.from_dict(d)
         warnings = cfg.validate()
         assert any("ollama" in w.lower() for w in warnings)
+
+    def test_warns_redis_without_url(self) -> None:
+        d = _minimal_dict()
+        d["memory"] = {"short_term_backend": "redis", "redis_url": ""}
+        cfg = GrimoireConfig.from_dict(d)
+        warnings = cfg.validate()
+        assert any("redis" in w.lower() for w in warnings)
 
     def test_warns_blank_project_name(self) -> None:
         d = _minimal_dict()

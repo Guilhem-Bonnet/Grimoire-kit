@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-grimoire-setup.py — Configuration utilisateur BMAD.
+grimoire-setup.py — Configuration utilisateur Grimoire.
 ====================================================
 
 Synchronise les valeurs utilisateur (nom, langue, niveau) dans tous
-les fichiers de configuration du projet BMAD.
+les fichiers de configuration du runtime Grimoire.
 
 Source de vérité : project-context.yaml
 
 Fichiers mis à jour :
   - project-context.yaml            (si changement — mode interactif/CLI)
-  - _bmad/{bmm,core,cis,tea,bmb}/config.yaml
-  - _bmad/_memory/config.yaml
+  - _grimoire-runtime/{bmm,core,cis,tea,bmb}/config.yaml
+  - _grimoire-runtime/_memory/config.yaml
   - .github/copilot-instructions.md
 
 Usage :
@@ -328,13 +328,13 @@ def apply_project_context(path: Path, config: UserConfig) -> bool:
 def run_check(project_root: Path, config: UserConfig) -> SetupReport:
     """Audit all config files against *config* — no changes."""
     report = SetupReport()
-    bmad_dir = project_root / "_bmad"
+    runtime_dir = project_root / "_grimoire-runtime"
 
     for module in MODULE_CONFIGS:
-        cfg_path = bmad_dir / module / "config.yaml"
+        cfg_path = runtime_dir / module / "config.yaml"
         report.diffs.extend(check_config_file(cfg_path, config, module))
 
-    mem_cfg = bmad_dir / MEMORY_CONFIG / "config.yaml"
+    mem_cfg = runtime_dir / MEMORY_CONFIG / "config.yaml"
     report.diffs.extend(check_config_file(mem_cfg, config, MEMORY_CONFIG))
 
     ci_path = project_root / ".github" / "copilot-instructions.md"
@@ -346,7 +346,7 @@ def run_check(project_root: Path, config: UserConfig) -> SetupReport:
 def run_apply(project_root: Path, config: UserConfig) -> SetupReport:
     """Apply *config* values to every target file and return a report."""
     report = SetupReport()
-    bmad_dir = project_root / "_bmad"
+    runtime_dir = project_root / "_grimoire-runtime"
 
     # project-context.yaml
     pcy = project_root / "project-context.yaml"
@@ -355,20 +355,20 @@ def run_apply(project_root: Path, config: UserConfig) -> SetupReport:
 
     # Module configs
     for module in MODULE_CONFIGS:
-        cfg_path = bmad_dir / module / "config.yaml"
+        cfg_path = runtime_dir / module / "config.yaml"
         if not cfg_path.exists():
-            report.skipped_files.append(f"_bmad/{module}/config.yaml")
+            report.skipped_files.append(f"_grimoire-runtime/{module}/config.yaml")
             continue
         if apply_config_file(cfg_path, config, module):
-            report.updated_files.append(f"_bmad/{module}/config.yaml")
+            report.updated_files.append(f"_grimoire-runtime/{module}/config.yaml")
 
     # Memory config
-    mem_cfg = bmad_dir / MEMORY_CONFIG / "config.yaml"
+    mem_cfg = runtime_dir / MEMORY_CONFIG / "config.yaml"
     if mem_cfg.exists():
         if apply_config_file(mem_cfg, config, MEMORY_CONFIG):
-            report.updated_files.append(f"_bmad/{MEMORY_CONFIG}/config.yaml")
+            report.updated_files.append(f"_grimoire-runtime/{MEMORY_CONFIG}/config.yaml")
     else:
-        report.skipped_files.append(f"_bmad/{MEMORY_CONFIG}/config.yaml")
+        report.skipped_files.append(f"_grimoire-runtime/{MEMORY_CONFIG}/config.yaml")
 
     # Copilot instructions
     ci_path = project_root / ".github" / "copilot-instructions.md"
@@ -476,11 +476,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="grimoire setup",
         description=(
-            "Configuration utilisateur BMAD — synchronise les valeurs "
+            "Configuration utilisateur Grimoire — synchronise les valeurs "
             "dans tous les fichiers config."
         ),
     )
-    p.add_argument("--project-root", type=Path, required=True, help="Racine du projet BMAD")
+    p.add_argument("--project-root", type=Path, required=True, help="Racine du projet Grimoire")
     p.add_argument("--check", action="store_true", help="Audit seulement — aucune modification")
     p.add_argument("--sync", action="store_true", help="Sync auto depuis project-context.yaml")
     p.add_argument("--json", action="store_true", help="Sortie JSON")

@@ -1,4 +1,4 @@
-# Guide SDK Python — Grimoire Kit v3
+# Guide SDK Python — Grimoire Kit
 
 > Utiliser Grimoire Kit comme bibliothèque Python dans vos scripts et outils.
 
@@ -221,4 +221,4 @@ from grimoire.core.exceptions import (
 
 - [Référence YAML](grimoire-yaml-reference.md)
 - [Intégration MCP](mcp-integration.md)
-- [Getting Started](getting-started.md)
+- [Guide de démarrage](getting-started.md)

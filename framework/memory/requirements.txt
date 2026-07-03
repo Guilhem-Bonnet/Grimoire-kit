@@ -1,4 +1,4 @@
-# BMAD Memory System — Dépendances Python
+# Grimoire Memory System — Dépendances Python
 #
 # Mode minimal (JSON only) : aucune dépendance requise
 # Mode sémantique (recommandé) : décommenter les lignes ci-dessous
@@ -9,3 +9,6 @@ qdrant-client>=1.7.0
 
 # --- Utilitaire YAML (pour project-context.yaml) ---
 pyyaml>=6.0
+
+# --- Mémoire chaude temporaire Redis (short_term_backend: redis) ---
+redis>=5.0.0

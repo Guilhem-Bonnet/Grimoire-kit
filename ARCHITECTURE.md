@@ -71,17 +71,19 @@ Le point d'entrée shell est `grimoire.sh` qui route vers les sous-commandes (`d
 
 Blueprints pré-configurés pour démarrer un projet. Chaque archétype contient un `archetype.dna.yaml`, des agents, et éventuellement un `shared-context.tpl.md` :
 
-| Archétype | Cas d'usage |
-|---|---|
-| `minimal` | Démarrage rapide, 1 agent personnalisable |
-| `web-app` | Application web full-stack |
-| `creative-studio` | Création de contenu, branding |
-| `fix-loop` | Boucle de correction automatisée |
-| `infra-ops` | Infrastructure, DevOps, SRE |
-| `meta` | Méta-agents (optimiseur, concierge, mémoire) |
-| `platform-engineering` | Ingénierie plate-forme |
-| `stack` | Multi-stack générique |
-| `features` | Fonctionnalités additionnelles (ex: vector-memory) |
+Le wizard `grimoire init` propose **6 points de départ** : `minimal` (base) plus 5 spécialisations. Les autres archétypes restent valides mais ne sont pas des choix de menu.
+
+| Archétype | Cas d'usage | Exposition |
+|---|---|---|
+| `minimal` | Base universelle, 1 agent personnalisable | Base (toujours incluse) |
+| `web-app` | Application web full-stack | Menu |
+| `platform-engineering` | Plateforme & infra — architecture, IaC, déploiement, observabilité | Menu (« Platform & Infra ») |
+| `creative-studio` | Création de contenu, branding | Menu |
+| `game-dev` | Jeux vidéo gouvernés (8 disciplines) | Menu |
+| `fix-loop` | Boucle de correction certifiée | Menu |
+| `infra-ops` | Infrastructure, DevOps, SRE | Auto-détecté (Terraform/K8s/Ansible), replié sous « Platform & Infra » |
+| `agentic-standard` | Pont vers un corpus normatif externe | Overlay (`--archetype`) |
+| `meta` · `stack` · `features` | Méta-agents partagés · agents stack auto-détectés · packs d'add-on | Interne (hors menu) |
 
 Les archétypes sont **bundlés dans le wheel** Python et accessibles via `grimoire.archetypes.bundled_path()`. En développement local, le dossier `archetypes/` du repo est utilisé en priorité.
 

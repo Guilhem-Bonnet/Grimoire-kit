@@ -280,6 +280,8 @@ class TestLLMRouter(unittest.TestCase):
         self.assertIn("model", entry)
         self.assertIn("agent", entry)
         self.assertIn("timestamp", entry)
+        self.assertIn("fallback_model", entry)
+        self.assertIn("rule_matched", entry)
 
     def test_get_stats_empty(self):
         router = self.mod.LLMRouter()
@@ -293,6 +295,34 @@ class TestLLMRouter(unittest.TestCase):
         self.assertGreater(len(stats), 0)
         total = sum(s.request_count for s in stats)
         self.assertEqual(total, 2)
+
+    def test_get_recent_decisions(self):
+        self.router.route("First request", agent_id="dev")
+        self.router.route("Second request", agent_id="architect")
+
+        decisions = self.router.get_recent_decisions(limit=1)
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["agent"], "architect")
+        self.assertIn("rule_matched", decisions[0])
+
+    def test_get_telemetry_summary(self):
+        self.router.route("Implement login endpoint", agent_id="dev")
+        self.router.route("Run a cross-validation review", agent_id="architect")
+
+        summary = self.router.get_telemetry_summary()
+
+        self.assertEqual(summary["total_requests"], 2)
+        self.assertGreaterEqual(summary["total_prompt_tokens"], 0)
+        self.assertIn("top_agents", summary)
+        self.assertIn("rule_distribution", summary)
+
+    def test_get_policy_snapshot(self):
+        policy = self.router.get_policy_snapshot()
+
+        self.assertEqual(policy["default_model"], self.router.default_model)
+        self.assertEqual(policy["model_count"], len(self.router.models))
+        self.assertEqual(policy["rule_count"], len(self.router.rules))
 
     def test_get_recommendations_empty(self):
         recs = self.router.get_recommendations()
@@ -364,6 +394,56 @@ class TestConfigLoading(unittest.TestCase):
         self.assertEqual(router.default_model, "gpt-4o")
         self.assertIn("test-model", router.models)
         self.assertEqual(len(router.rules), 1)
+
+    def test_build_router_from_profile_config(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML not available")
+
+        config = {
+            "llm_router": {
+                "profiles": {
+                    "deep_reasoning": {
+                        "primary": "auto",
+                        "preferred_models": ["gpt-5.4", "gpt-5.3-codex", "claude-opus-4.6"],
+                    },
+                    "general_code": {
+                        "primary": "auto",
+                        "preferred_models": ["gpt-5.3-codex", "gpt-5-mini", "claude-sonnet-4.6"],
+                    },
+                    "fast_iter": {
+                        "primary": "auto",
+                        "preferred_models": ["gpt-5.4-mini", "gpt-5-mini", "claude-haiku-4.5"],
+                    },
+                },
+                "routing_defaults": {
+                    "dev": "general_code",
+                    "architect": "deep_reasoning",
+                },
+                "task_overrides": [
+                    {"tasks": ["cross-validation", "second-opinion"], "profile": "deep_reasoning"},
+                ],
+            },
+        }
+        (self.tmpdir / "project-context.yaml").write_text(
+            yaml.dump(config), encoding="utf-8",
+        )
+
+        router = self.mod.build_router_from_config(self.tmpdir)
+        self.assertEqual(router.default_model, "gpt-5.3-codex")
+        self.assertIn("gpt-5.4", router.models)
+
+        agent_decision = router.route("Implement login endpoint", agent_id="dev")
+        self.assertEqual(agent_decision.selected_model, "gpt-5.3-codex")
+        self.assertEqual(agent_decision.fallback_model, "gpt-5-mini")
+
+        override_decision = router.route(
+            "Run a cross-validation on this architecture decision",
+            agent_id="dev",
+        )
+        self.assertEqual(override_decision.selected_model, "gpt-5.4")
+        self.assertEqual(override_decision.rule_matched, "keywords:cross-validation")
 
 
 # ── CLI Integration ──────────────────────────────────────────────────────────

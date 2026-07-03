@@ -1,0 +1,22 @@
+{
+  "name": "@grimoire/mcp",
+  "version": "0.1.0",
+  "description": "Grimoire MCP server — prise universelle du coeur grimoire (contrat d'adaptateur v1). Verbes: list_skills, run_skill, route, validate.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "grimoire-mcp": "src/server.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "smoke": "node --experimental-strip-types src/smoke.ts",
+    "itest": "node --experimental-strip-types src/itest.ts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.80.2",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

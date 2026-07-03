@@ -27,6 +27,7 @@ Stdlib only — aucune dépendance externe.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import logging
 import os
@@ -42,13 +43,77 @@ _log = logging.getLogger("grimoire.preflight_check")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-PREFLIGHT_VERSION = "1.0.0"
+PREFLIGHT_VERSION = "1.3.1"
 
 # Sévérité
 class Severity:
     BLOCKER = "🔴 BLOCKER"
     WARNING = "🟡 WARNING"
     INFO = "🟢 INFO"
+
+
+DURABLE_CODE_SUFFIXES = frozenset({
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sh",
+})
+
+ROOT_WORKSPACE_MARKERS = frozenset({
+    "package.json",
+    "pnpm-workspace.yaml",
+    "tsconfig.json",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "pyproject.toml",
+})
+
+ALLOWED_DURABLE_CODE_PREFIXES = (
+    "grimoire-kit/",
+    "grimoire-game-assets/tools/",
+    ".github/hooks/scripts/",
+)
+
+KIT_PACKAGE_DURABLE_CODE_PREFIXES = (
+    "framework/",
+    "src/",
+    "tests/",
+    "apps/",
+)
+
+ALLOWED_DURABLE_CODE_FILES = frozenset({"grimoire.sh"})
+
+KIT_PACKAGE_DURABLE_CODE_FILES = frozenset({
+    "pyproject.toml",
+    "grimoire-init.sh",
+})
+
+CANONICAL_EXEMPT_PREFIXES = (
+    "_grimoire/",
+    "_grimoire-runtime/",
+    "_grimoire-output/",
+    "_grimoire-runtime-output/",
+    "docs/",
+    ".github/",
+    "contracts/",
+    "team-build/",
+    "team-ops/",
+    "team-vision/",
+    "site/",
+    "icon/",
+)
+
+ARCHIVED_AGENT_PREFIX = ".github/agents/_archived/"
+SURFACE_INDEX_RELATIVE_PATH = "_grimoire-runtime/_config/agent-surface-index.csv"
+WRAPPER_SPEC_RELATIVE_PATH = "_grimoire-runtime/_config/agent-wrapper-spec.json"
+
+KIT_AGENT_BRIDGE_REQUIREMENTS = {
+    "AGENTS.md": (
+        "../.github/agents/grimoire-master.agent.md",
+        "../_grimoire-runtime/core/agents/grimoire-master.md",
+    ),
+    "CLAUDE.md": (
+        "../.github/copilot-instructions.md",
+        "../.github/agents/grimoire-master.agent.md",
+    ),
+}
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -241,6 +306,471 @@ def check_git_state(project_root: Path) -> list[Check]:
             message="Impossible d'exécuter les commandes git",
         ))
 
+    return checks
+
+
+def _parse_porcelain_paths(output: str) -> list[str]:
+    """Extrait les chemins depuis `git status --porcelain`."""
+    paths: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if len(line) < 4:
+            continue
+        payload = line[3:].strip()
+        if " -> " in payload:
+            _old, new_path = payload.split(" -> ", 1)
+            payload = new_path.strip()
+        if payload:
+            paths.append(payload)
+    return paths
+
+
+def _looks_like_durable_code_path(path_str: str) -> bool:
+    """Retourne True si le chemin ressemble à de la logique durable."""
+    path = Path(path_str)
+    return path.name in ROOT_WORKSPACE_MARKERS or path.suffix.lower() in DURABLE_CODE_SUFFIXES
+
+
+def _is_kit_package_root(project_root: Path) -> bool:
+    """Retourne True si le preflight s'exécute depuis la racine package de grimoire-kit."""
+    return (
+        (project_root / "pyproject.toml").is_file()
+        and (project_root / "framework" / "tools").is_dir()
+        and (project_root / "src" / "grimoire").is_dir()
+    )
+
+
+def _durable_code_prefixes_for_root(project_root: Path) -> tuple[str, ...]:
+    """Résout les prefixes de landing zone autorisés selon le contexte racine."""
+    if _is_kit_package_root(project_root):
+        return ALLOWED_DURABLE_CODE_PREFIXES + KIT_PACKAGE_DURABLE_CODE_PREFIXES
+    return ALLOWED_DURABLE_CODE_PREFIXES
+
+
+def _durable_code_files_for_root(project_root: Path) -> frozenset[str]:
+    """Résout les fichiers canoniques autorisés selon le contexte racine."""
+    if _is_kit_package_root(project_root):
+        return ALLOWED_DURABLE_CODE_FILES | KIT_PACKAGE_DURABLE_CODE_FILES
+    return ALLOWED_DURABLE_CODE_FILES
+
+
+def _check_kit_agent_bridge(project_root: Path) -> list[Check]:
+    """Vérifie que grimoire-kit pointe bien vers l'orchestrateur parent."""
+    checks: list[Check] = []
+
+    for bridge_name, required_refs in KIT_AGENT_BRIDGE_REQUIREMENTS.items():
+        bridge_path = project_root / bridge_name
+        if not bridge_path.is_file():
+            checks.append(Check(
+                name="kit-agent-bridge",
+                severity=Severity.WARNING,
+                message=f"Bridge agentique manquant dans grimoire-kit : {bridge_name}",
+                fix_hint="Ajouter le bridge vers ../.github/agents/grimoire-master.agent.md et le runtime parent pour conserver le même comportement qu'à la racine.",
+            ))
+            continue
+
+        try:
+            content = bridge_path.read_text(encoding="utf-8")
+        except OSError:
+            checks.append(Check(
+                name="kit-agent-bridge",
+                severity=Severity.WARNING,
+                message=f"Impossible de lire le bridge agentique {bridge_name}",
+                fix_hint="Vérifier les permissions et le contenu du fichier de bridge.",
+            ))
+            continue
+
+        missing_refs = [ref for ref in required_refs if ref not in content]
+        if missing_refs:
+            preview = ", ".join(missing_refs)
+            checks.append(Check(
+                name="kit-agent-bridge",
+                severity=Severity.WARNING,
+                message=f"Bridge agentique incomplet dans {bridge_name} : référence(s) absente(s) {preview}",
+                fix_hint="Aligner le bridge sur l'orchestrateur parent pour garantir le même comportement dans grimoire-kit.",
+            ))
+
+    if not checks:
+        checks.append(Check(
+            name="kit-agent-bridge",
+            severity=Severity.INFO,
+            message="Bridges AGENTS.md / CLAUDE.md de grimoire-kit alignés avec l'orchestrateur parent",
+        ))
+
+    return checks
+
+
+def check_structure_governance(project_root: Path) -> list[Check]:
+    """Vérifie les écarts de landing zone et l'usage des surfaces archivées."""
+    checks: list[Check] = []
+    is_kit_root = _is_kit_package_root(project_root)
+    allowed_prefixes = _durable_code_prefixes_for_root(project_root)
+    allowed_files = _durable_code_files_for_root(project_root)
+
+    if is_kit_root:
+        checks.extend(_check_kit_agent_bridge(project_root))
+
+    root_markers = [marker for marker in sorted(ROOT_WORKSPACE_MARKERS) if (project_root / marker).exists()]
+    if root_markers and not is_kit_root:
+        preview = ", ".join(root_markers[:3])
+        suffix = "" if len(root_markers) <= 3 else " ..."
+        checks.append(Check(
+            name="root-workspace-marker",
+            severity=Severity.WARNING,
+            message=f"Toolchain durable détectée à la racine : {preview}{suffix}",
+            fix_hint="Déplacer la toolchain produit vers grimoire-kit/ sauf justification explicite de wrapper local.",
+        ))
+
+    if not (project_root / ".git").exists():
+        return checks
+
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return checks
+
+    changed_paths = _parse_porcelain_paths(result.stdout)
+    if not changed_paths:
+        return checks
+
+    archived_changes = sorted(path for path in changed_paths if path.startswith(ARCHIVED_AGENT_PREFIX))
+    if archived_changes:
+        preview = ", ".join(archived_changes[:3])
+        suffix = "" if len(archived_changes) <= 3 else " ..."
+        checks.append(Check(
+            name="archived-agent-change",
+            severity=Severity.WARNING,
+            message=f"Modification(s) dans la zone archivée : {preview}{suffix}",
+            fix_hint="Vérifier si le changement doit viser l'artefact actif sous .github/agents/ plutôt que _archived/.",
+        ))
+
+    offzone_paths: list[str] = []
+    for path_str in changed_paths:
+        if path_str in allowed_files:
+            continue
+        if any(path_str.startswith(prefix) for prefix in allowed_prefixes):
+            continue
+        if any(path_str.startswith(prefix) for prefix in CANONICAL_EXEMPT_PREFIXES):
+            continue
+        if _looks_like_durable_code_path(path_str):
+            offzone_paths.append(path_str)
+
+    if offzone_paths:
+        preview = ", ".join(offzone_paths[:3])
+        suffix = "" if len(offzone_paths) <= 3 else " ..."
+        checks.append(Check(
+            name="landing-zone-drift",
+            severity=Severity.WARNING,
+            message=f"Logique durable hors landing zone canonique : {preview}{suffix}",
+            fix_hint="Déplacer la logique durable vers grimoire-kit/ ou limiter le fichier à un wrapper local explicitement justifié.",
+        ))
+
+    return checks
+
+
+def _load_agent_lint_module():
+    """Charge agent-lint.py comme module compagnon pour les checks de synchro."""
+    module_key = "_grimoire_agent_lint_preflight"
+    if module_key in sys.modules:
+        return sys.modules[module_key]
+
+    tool_path = Path(__file__).parent / "agent-lint.py"
+    if not tool_path.is_file():
+        return None
+
+    spec = importlib.util.spec_from_file_location(module_key, tool_path)
+    if spec is None or spec.loader is None:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_key] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_hook_safety_gate_module():
+    """Charge hook-safety-gate.py comme module compagnon pour les checks hooks."""
+    module_key = "_grimoire_hook_safety_gate_preflight"
+    if module_key in sys.modules:
+        return sys.modules[module_key]
+
+    tool_path = Path(__file__).parent / "hook-safety-gate.py"
+    if not tool_path.is_file():
+        return None
+
+    spec = importlib.util.spec_from_file_location(module_key, tool_path)
+    if spec is None or spec.loader is None:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_key] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_guardrail_rules_module():
+    """Charge guardrail-policy-rules.py pour exposer l'état réel des règles."""
+    module_key = "_grimoire_guardrail_rules_preflight"
+    if module_key in sys.modules:
+        return sys.modules[module_key]
+
+    tool_path = Path(__file__).parent / "guardrail-policy-rules.py"
+    if not tool_path.is_file():
+        return None
+
+    spec = importlib.util.spec_from_file_location(module_key, tool_path)
+    if spec is None or spec.loader is None:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_key] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_agent_runtime_root(project_root: Path, agent_lint) -> Path:
+    """Résout la racine agentique effective sans perdre le contexte du package courant."""
+    resolver = getattr(agent_lint, "resolve_agent_project_root", None)
+    if callable(resolver):
+        resolved = resolver(project_root)
+        if isinstance(resolved, Path):
+            return resolved
+    return project_root
+
+
+def check_surface_index_health(project_root: Path) -> list[Check]:
+    """Vérifie la présence et la synchro de l'index de surface agentique."""
+    checks: list[Check] = []
+
+    agent_lint = _load_agent_lint_module()
+    if agent_lint is None:
+        checks.append(Check(
+            name="surface-index-loader",
+            severity=Severity.WARNING,
+            message="Impossible de charger agent-lint.py pour vérifier agent-surface-index.csv",
+            fix_hint="Vérifier la présence de grimoire-kit/framework/tools/agent-lint.py",
+        ))
+        return checks
+
+    runtime_root = _resolve_agent_runtime_root(project_root, agent_lint)
+    runtime_dir = runtime_root / "_grimoire-runtime"
+    if not runtime_dir.is_dir():
+        return checks
+
+    try:
+        manifest = agent_lint.load_manifest(runtime_root)
+        records = agent_lint.build_surface_index(runtime_root, manifest)
+        findings = agent_lint.lint_surface_index_sync(runtime_root, records)
+    except Exception as exc:  # pragma: no cover - defensive, should not happen in nominal flow
+        checks.append(Check(
+            name="surface-index-sync",
+            severity=Severity.WARNING,
+            message=f"Vérification agent-surface-index.csv échouée : {exc}",
+            fix_hint="Relancer agent-lint.py --project-root . --write-surface-index pour régénérer l'index.",
+        ))
+        return checks
+
+    for finding in findings:
+        checks.append(Check(
+            name=finding.rule,
+            severity=Severity.WARNING,
+            message=finding.message,
+            fix_hint=finding.fix_hint,
+        ))
+
+    surface_index_path = runtime_root / SURFACE_INDEX_RELATIVE_PATH
+    if surface_index_path.is_file() and not findings:
+        checks.append(Check(
+            name="surface-index-sync",
+            severity=Severity.INFO,
+            message="agent-surface-index.csv présent et synchronisé",
+        ))
+
+    return checks
+
+
+def check_wrapper_health(project_root: Path) -> list[Check]:
+    """Vérifie la présence et la synchro des wrappers workspace gérés."""
+    checks: list[Check] = []
+
+    agent_lint = _load_agent_lint_module()
+    if agent_lint is None:
+        checks.append(Check(
+            name="wrapper-sync",
+            severity=Severity.WARNING,
+            message="Impossible de charger agent-lint.py pour vérifier les wrappers workspace",
+            fix_hint="Vérifier la présence de grimoire-kit/framework/tools/agent-lint.py",
+        ))
+        return checks
+
+    runtime_root = _resolve_agent_runtime_root(project_root, agent_lint)
+    runtime_dir = runtime_root / "_grimoire-runtime"
+    if not runtime_dir.is_dir():
+        return checks
+
+    try:
+        manifest = agent_lint.load_manifest(runtime_root)
+        findings = agent_lint.lint_wrapper_sync(runtime_root, manifest)
+    except Exception as exc:  # pragma: no cover - defensive, should not happen in nominal flow
+        checks.append(Check(
+            name="wrapper-sync",
+            severity=Severity.WARNING,
+            message=f"Vérification des wrappers workspace échouée : {exc}",
+            fix_hint="Relancer agent-lint.py --project-root . --write-wrappers pour régénérer les wrappers gérés.",
+        ))
+        return checks
+
+    for finding in findings:
+        checks.append(Check(
+            name=finding.rule,
+            severity=Severity.WARNING,
+            message=finding.message,
+            fix_hint=finding.fix_hint,
+        ))
+
+    wrapper_spec_path = runtime_root / WRAPPER_SPEC_RELATIVE_PATH
+    if wrapper_spec_path.is_file() and not findings:
+        checks.append(Check(
+            name="wrapper-sync",
+            severity=Severity.INFO,
+            message="Wrappers workspace présents et synchronisés avec agent-wrapper-spec.json",
+        ))
+
+    return checks
+
+
+def check_hook_safety_state(project_root: Path) -> list[Check]:
+    """Vérifie l'état réel de la safety gate des hooks."""
+    checks: list[Check] = []
+
+    hook_safety_gate = _load_hook_safety_gate_module()
+    if hook_safety_gate is None:
+        checks.append(Check(
+            name="hook-safety-loader",
+            severity=Severity.WARNING,
+            message="Impossible de charger hook-safety-gate.py pour vérifier les hooks.",
+            fix_hint="Vérifier la présence de grimoire-kit/framework/tools/hook-safety-gate.py",
+        ))
+        return checks
+
+    try:
+        registry = hook_safety_gate.load_registry(hook_safety_gate.registry_path(project_root))
+        statuses = hook_safety_gate.collect_statuses(project_root, registry)
+        issues = hook_safety_gate.audit_manifest_bindings(project_root, registry)
+    except Exception as exc:  # pragma: no cover - defensive
+        checks.append(Check(
+            name="hook-safety-state",
+            severity=Severity.WARNING,
+            message=f"Vérification hook safety échouée : {exc}",
+            fix_hint="Relancer grimoire-kit/framework/tools/hook-safety-gate.py status --strict pour diagnostiquer.",
+        ))
+        return checks
+
+    for issue in issues:
+        checks.append(Check(
+            name="hook-safety-manifest",
+            severity=Severity.BLOCKER,
+            message=(
+                f"Manifest hook incohérent : {issue.manifest_path} ({issue.event}[{issue.entry_index}]) — "
+                f"{issue.reason}"
+            ),
+            fix_hint="Synchroniser le registre hooks et les manifests avant d'exécuter une tâche critique.",
+        ))
+
+    degraded_states = {"pending", "modified", "shadow", "canary", "disabled"}
+    invalid_statuses = [status for status in statuses if status.state == "invalid"]
+    degraded_statuses = [status for status in statuses if status.state in degraded_states]
+
+    for status in invalid_statuses:
+        checks.append(Check(
+            name="hook-safety-invalid",
+            severity=Severity.BLOCKER,
+            message=f"Hook {status.hook_id} invalide : {status.reason}",
+            fix_hint="Corriger les chemins hook manquants ou le registre avant exécution.",
+        ))
+
+    for status in degraded_statuses:
+        checks.append(Check(
+            name="hook-safety-degraded",
+            severity=Severity.WARNING,
+            message=(
+                f"Hook {status.hook_id} en état {status.state} "
+                f"(mode configuré: {status.configured_mode}) — {status.reason}"
+            ),
+            fix_hint="Promouvoir ou resynchroniser les hooks avant une exécution à risque élevé.",
+        ))
+
+    if not issues and not invalid_statuses and not degraded_statuses:
+        enforced_count = sum(1 for status in statuses if status.state == "enforced")
+        checks.append(Check(
+            name="hook-safety-state",
+            severity=Severity.INFO,
+            message=f"Hook safety OK : {enforced_count}/{len(statuses)} hooks enforced, aucun drift manifest.",
+        ))
+
+    return checks
+
+
+def check_guardrail_rules_state(project_root: Path) -> list[Check]:
+    """Expose clairement si les règles guardrail tournent en fallback silencieux."""
+    checks: list[Check] = []
+
+    guardrail_rules = _load_guardrail_rules_module()
+    if guardrail_rules is None:
+        checks.append(Check(
+            name="guardrail-rules-loader",
+            severity=Severity.WARNING,
+            message="Impossible de charger guardrail-policy-rules.py pour vérifier les règles guardrail.",
+            fix_hint="Vérifier la présence de grimoire-kit/framework/tools/guardrail-policy-rules.py",
+        ))
+        return checks
+
+    status_getter = getattr(guardrail_rules, "guardrail_rules_status", None)
+    if not callable(status_getter):
+        checks.append(Check(
+            name="guardrail-rules-status",
+            severity=Severity.WARNING,
+            message="guardrail-policy-rules.py ne publie pas l'état de chargement des règles.",
+            fix_hint="Mettre à jour guardrail-policy-rules.py pour exposer le statut de fallback.",
+        ))
+        return checks
+
+    try:
+        status = status_getter(project_root)
+    except Exception as exc:  # pragma: no cover - defensive
+        checks.append(Check(
+            name="guardrail-rules-status",
+            severity=Severity.WARNING,
+            message=f"Impossible d'inspecter les règles guardrail : {exc}",
+            fix_hint="Vérifier guardrail-policy-rules.yaml et la disponibilité de PyYAML.",
+        ))
+        return checks
+
+    source = str(status.get("source") or "unknown")
+    rules_file = str(status.get("rulesFile") or "guardrail-policy-rules.yaml")
+    warning = str(status.get("warning") or "").strip()
+
+    if source == "merged":
+        checks.append(Check(
+            name="guardrail-rules-status",
+            severity=Severity.INFO,
+            message=f"Règles guardrail chargées depuis {rules_file}.",
+        ))
+        return checks
+
+    checks.append(Check(
+        name="guardrail-rules-fallback",
+        severity=Severity.WARNING,
+        message=warning or f"Règles guardrail en fallback par défaut ({rules_file}).",
+        fix_hint="Vérifier PyYAML, le YAML des règles et sa validité avant exécution.",
+    ))
     return checks
 
 
@@ -607,6 +1137,11 @@ def run_all_checks(
     report.checks.extend(check_tools_available(project_root))
     report.checks.extend(check_vscode_getting_started_readiness(project_root))
     report.checks.extend(check_git_state(project_root))
+    report.checks.extend(check_structure_governance(project_root))
+    report.checks.extend(check_surface_index_health(project_root))
+    report.checks.extend(check_wrapper_health(project_root))
+    report.checks.extend(check_hook_safety_state(project_root))
+    report.checks.extend(check_guardrail_rules_state(project_root))
     report.checks.extend(check_memory_state(project_root))
 
     if story:

@@ -37,6 +37,15 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(ch.EMBEDDING_DIM, 384)
 
 
+class TestEmbeddingProvider(unittest.TestCase):
+    def test_hash_embedding_matches_configured_dimension(self):
+        provider = ch.EmbeddingProvider(mode="hash")
+
+        vector = provider.embed("fast deterministic fallback")
+
+        self.assertEqual(len(vector), ch.EMBEDDING_DIM)
+
+
 class TestConversationEntry(unittest.TestCase):
     def test_create(self):
         e = ch.ConversationEntry(summary="Test session", agents=["dev", "qa"])

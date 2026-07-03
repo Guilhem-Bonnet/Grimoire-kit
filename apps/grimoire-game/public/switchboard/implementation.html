@@ -1,0 +1,3881 @@
+<!-- Cache bust: 2026-02-19-industrial-ui -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Switchboard</title>
+    <style>
+        :root {
+            --bg-color: #0d0d0d;
+            --panel-bg: #000000;
+            --panel-bg2: #050505;
+            --border-color: #222222;
+            --border-bright: #444444;
+            --border-dim: #252525;
+            --bg-dim: #111111;
+            --text-primary: #e0e0e0;
+            --text-secondary: #777777;
+
+            --accent-cyan: #3ddbd9;
+            --accent-teal: #3ddbd9;
+            --accent-teal-dim: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+            --glow-teal: 0 0 10px color-mix(in srgb, var(--accent-teal) 50%, transparent);
+            --accent-green: #4ec9b0;
+            --accent-green-dim: #2d7a6a;
+            --accent-red: #f85149;
+            --accent-orange: #d18616;
+            --accent-purple: #ab7df8;
+
+            --glow-green: 0 0 10px rgba(78, 201, 176, 0.6), 0 0 20px rgba(78, 201, 176, 0.25);
+            --glow-red: 0 0 10px rgba(248, 81, 73, 0.6), 0 0 20px rgba(248, 81, 73, 0.25);
+            --glow-green-btn: 0 0 6px rgba(78, 201, 176, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            --glow-cyan: 0 0 8px rgba(55, 148, 255, 0.3);
+
+            --font-family: var(--vscode-font-family, 'Segoe UI', 'Roboto', sans-serif);
+            --font-mono: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-family);
+            padding: 0;
+            margin: 0;
+            color: var(--text-primary);
+            background: var(--bg-color);
+            font-size: 13px;
+            overflow-x: hidden;
+        }
+
+        /* Utility Classes */
+        .hidden {
+            display: none !important;
+        }
+
+        .flex {
+            display: flex;
+        }
+
+        .flex-col {
+            flex-direction: column;
+        }
+
+        .items-center {
+            align-items: center;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .gap-2 {
+            gap: 8px;
+        }
+
+        .w-full {
+            width: 100%;
+        }
+
+        /* Container */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Header / Plan Select Section */
+        .header-section {
+            padding: 12px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .section-label {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--accent-green);
+            margin-bottom: 8px;
+            font-weight: 600;
+            opacity: 0.7;
+        }
+
+        .tooltip-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 5px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            opacity: 0.5;
+            cursor: default;
+            vertical-align: middle;
+            font-style: normal;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .section-header .section-label {
+            margin-bottom: 0;
+        }
+
+        .icon-btn {
+            min-width: 20px;
+            height: 20px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            line-height: 1;
+            transition: all 0.2s ease;
+            padding: 0 4px;
+        }
+
+        .icon-btn:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--border-bright) 15%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .icon-btn.recover:hover:not(:disabled) {
+            color: var(--accent-green);
+            border-color: color-mix(in srgb, var(--accent-green) 50%, transparent);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 20%, transparent);
+        }
+
+        .icon-btn.delete:hover:not(:disabled) {
+            color: var(--accent-red);
+            border-color: color-mix(in srgb, var(--accent-red) 50%, transparent);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-red) 20%, transparent);
+        }
+
+        .icon-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .icon-btn.success {
+            color: var(--accent-green);
+            border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
+            box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 20%, transparent);
+        }
+
+        .icon-btn.error {
+            color: var(--accent-red) !important;
+            border-color: color-mix(in srgb, var(--accent-red) 60%, transparent) !important;
+            box-shadow: 0 0 10px color-mix(in srgb, var(--accent-red) 30%, transparent) !important;
+        }
+
+        .dropdown-container {
+            position: relative;
+        }
+
+        .plan-select {
+            width: 100%;
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 7px 10px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            letter-spacing: 0.5px;
+        }
+
+        .plan-select:hover,
+        .plan-select:focus {
+            border-color: var(--border-bright);
+            outline: none;
+        }
+
+        .select-arrow {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* Agent List Section */
+        .tab-bar {
+            display: flex;
+            gap: 6px;
+            padding: 8px 10px 0 10px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 6px 8px;
+            cursor: pointer;
+            border-radius: 2px 2px 0 0;
+        }
+
+        .tab-btn:hover {
+            background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .tab-btn.is-active {
+            color: var(--accent-green);
+            border-color: color-mix(in srgb, var(--accent-green) 35%, transparent);
+            box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent-green) 20%, transparent);
+        }
+
+        .sub-tab-bar {
+            display: flex;
+            gap: 4px;
+            padding: 6px 10px 4px 10px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sub-tab-btn {
+            flex: 1;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 4px 6px;
+            cursor: pointer;
+            border-radius: 2px 2px 0 0;
+        }
+
+        .sub-tab-btn:hover {
+            background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .sub-tab-btn.is-active {
+            color: var(--accent-green);
+            border-color: color-mix(in srgb, var(--accent-green) 35%, transparent);
+            box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent-green) 20%, transparent);
+        }
+
+        .tab-panel {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #panel-agents {
+            flex: 2;
+            min-height: 0;
+        }
+
+        #panel-activity {
+            flex: 1;
+            min-height: 140px;
+        }
+
+        .agent-list {
+            flex: 1;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+        }
+
+        .activity-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .activity-row {
+            border: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            padding: 8px;
+            border-radius: 2px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .activity-time {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--accent-green);
+            letter-spacing: 0.7px;
+        }
+
+        .activity-type {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .activity-type.summary {
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+
+        .activity-payload {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .activity-row.summary {
+            border-color: color-mix(in srgb, var(--accent-green) 30%, transparent);
+            background: color-mix(in srgb, var(--accent-green) 5%, var(--panel-bg));
+            box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 8%, transparent);
+        }
+
+        .activity-summary-message {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.4;
+            letter-spacing: 0.2px;
+        }
+
+        .activity-summary-plan {
+            color: var(--accent-green);
+            font-weight: 800;
+        }
+
+        .activity-load-more {
+            margin: 0 10px 10px 10px;
+        }
+
+        /* Agent Row */
+        .agent-row {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            background: var(--panel-bg);
+            border: 1px solid var(--vscode-contrastBorder, var(--border-color));
+            padding: 8px 10px;
+            border-radius: 2px;
+            transition: border-color 0.3s ease;
+        }
+
+        .agent-row:has(.status-dot.green) {
+            box-shadow: -2px 0 6px color-mix(in srgb, var(--accent-green) 10%, transparent);
+            background: color-mix(in srgb, var(--accent-green) 2%, var(--panel-bg));
+        }
+
+        .agent-row:has(.status-dot.green-pulse) {
+            box-shadow: -2px 0 8px color-mix(in srgb, var(--accent-green) 16%, transparent);
+            background: color-mix(in srgb, var(--accent-green) 3%, var(--panel-bg));
+        }
+
+        .agent-row:has(.status-dot.red) {
+            box-shadow: -2px 0 6px color-mix(in srgb, var(--accent-red) 10%, transparent);
+            background: color-mix(in srgb, var(--accent-red) 2%, var(--panel-bg));
+        }
+
+        .row-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .agent-identity {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Status Dot */
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--border-color);
+            border: 1px solid var(--border-bright);
+            box-shadow: none;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .status-dot.green {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            box-shadow: var(--glow-green);
+        }
+
+        .status-dot.green-pulse {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            box-shadow: var(--glow-green);
+            animation: pulse-green 2s infinite ease-in-out;
+        }
+
+        .status-dot.red {
+            background: var(--accent-red);
+            border-color: var(--accent-red);
+            box-shadow: var(--glow-red);
+        }
+
+        .status-dot.orange {
+            background: var(--accent-orange);
+            border-color: var(--accent-orange);
+        }
+
+        @keyframes pulse-green {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 40%, transparent), 0 0 12px color-mix(in srgb, var(--accent-green) 20%, transparent);
+            }
+
+            50% {
+                opacity: 0.6;
+                transform: scale(0.95);
+                box-shadow: 0 0 2px color-mix(in srgb, var(--accent-green) 15%, transparent);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 40%, transparent), 0 0 12px color-mix(in srgb, var(--accent-green) 20%, transparent);
+            }
+        }
+
+        .agent-name {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+        }
+
+        .agent-row:has(.status-dot.green) .agent-name,
+        .agent-row:has(.status-dot.green-pulse) .agent-name {
+            color: var(--text-primary);
+        }
+
+        .locate-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            text-decoration: none;
+            letter-spacing: 0.5px;
+            padding: 0;
+            opacity: 0.7;
+            transition: all 0.2s;
+        }
+
+        .locate-btn:hover {
+            opacity: 1;
+            color: var(--accent-cyan);
+            text-shadow: 0 0 5px color-mix(in srgb, var(--accent-cyan) 50%, transparent);
+        }
+
+        .locate-btn:disabled {
+            color: var(--text-secondary);
+            cursor: default;
+            opacity: 0.25;
+        }
+
+        /* Action Buttons */
+        .action-btn {
+            width: 100%;
+            background: color-mix(in srgb, var(--accent-teal) 10%, transparent);
+            border: 1px solid color-mix(in srgb, var(--accent-teal) 30%, transparent);
+            color: color-mix(in srgb, var(--accent-teal) 80%, var(--text-secondary));
+            text-shadow: none;
+            padding: 9px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            border-radius: 2px;
+        }
+
+        .action-btn:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--accent-teal) 15%, transparent);
+            color: var(--accent-teal);
+            border-color: color-mix(in srgb, var(--accent-teal) 50%, transparent);
+            box-shadow: 0 0 10px color-mix(in srgb, var(--accent-teal) 20%, transparent);
+        }
+
+        .action-btn:active:not(:disabled) {
+            transform: translateY(1px);
+        }
+
+        .action-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            color: var(--vscode-disabledForeground, var(--text-secondary));
+            border-color: var(--border-color);
+        }
+
+        .jules-history {
+            margin-top: 6px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 6px;
+        }
+
+        .jules-history-item {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            letter-spacing: 0.4px;
+            padding: 2px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .jules-history-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .jules-history-status {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+
+        .mini-action-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            padding: 3px 6px;
+            cursor: pointer;
+            border-radius: 2px;
+            letter-spacing: 0.6px;
+        }
+
+        .mini-action-btn:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .mini-action-btn.is-active {
+            color: var(--accent-cyan);
+            border-color: color-mix(in srgb, var(--accent-cyan) 55%, transparent);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-cyan) 25%, transparent);
+        }
+
+        .mini-action-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Standby Input Area */
+        .agent-input {
+            width: 100%;
+            background: var(--panel-bg2);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            padding: 8px 10px;
+            resize: none;
+            height: 48px;
+            margin-bottom: 4px;
+            border-radius: 2px;
+            line-height: 1.4;
+        }
+
+        .agent-input:focus,
+        .agent-input:hover {
+            border-color: var(--accent-green-dim);
+            outline: none;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--vscode-scrollbarSlider-background, var(--border-color));
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--vscode-scrollbarSlider-hoverBackground, var(--border-bright));
+        }
+
+        /* Status Bar (Bottom) */
+        .status-footer {
+            padding: 6px 12px;
+            background: var(--vscode-statusBar-background, var(--bg-color));
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            letter-spacing: 0.5px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tiny-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .tiny-dot.green {
+            background: var(--accent-green);
+            box-shadow: 0 0 4px color-mix(in srgb, var(--accent-green) 35%, transparent);
+        }
+
+        .tiny-dot.orange {
+            background: var(--accent-orange);
+        }
+
+        .tiny-dot.red {
+            background: var(--accent-red);
+        }
+
+        /* Setup / System Section */
+        .system-section {
+            padding: 10px;
+            background: var(--panel-bg);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .panel-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .panel-toggle .chevron {
+            font-size: 10px;
+            color: var(--text-secondary);
+            transition: transform 0.15s;
+        }
+
+        .panel-toggle .chevron.open {
+            transform: rotate(90deg);
+        }
+
+        .panel-fields {
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .panel-fields.open {
+            display: flex;
+        }
+
+        .secondary-btn {
+            background: var(--panel-bg2);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 8px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: none;
+            border-radius: 2px;
+        }
+
+        .secondary-btn:hover {
+            background: color-mix(in srgb, var(--border-bright) 10%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .secondary-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            color: var(--vscode-disabledForeground, var(--text-secondary));
+            border-color: var(--border-color);
+            box-shadow: none;
+        }
+
+        .secondary-btn.dispatching {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .secondary-btn.is-cyan {
+            color: var(--accent-cyan);
+            border-color: color-mix(in srgb, var(--accent-cyan) 40%, transparent);
+        }
+
+        .secondary-btn.is-cyan:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 10px color-mix(in srgb, var(--accent-cyan) 20%, transparent);
+        }
+
+        .secondary-btn.is-teal {
+            color: var(--accent-teal);
+            border-color: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+            background: color-mix(in srgb, var(--accent-teal) 5%, var(--panel-bg2));
+        }
+
+        .secondary-btn.is-teal:hover {
+            border-color: var(--accent-teal);
+            background: color-mix(in srgb, var(--accent-teal) 10%, var(--panel-bg2));
+            box-shadow: 0 0 12px color-mix(in srgb, var(--accent-teal) 25%, transparent);
+        }
+
+        .secondary-btn.success {
+            color: var(--accent-green);
+            border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
+        }
+
+        .secondary-btn.success.feedback {
+            animation: pulse-green 1.2s ease-out, sweep 1s ease-out;
+            background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--accent-green) 60%, transparent) 50%, transparent 100%);
+            background-size: 200% 100%;
+        }
+
+        .secondary-btn.error {
+            color: var(--accent-red);
+            border-color: color-mix(in srgb, var(--accent-red) 45%, transparent);
+        }
+
+        .secondary-btn.error.feedback {
+            animation: error-shake 0.4s ease-out;
+        }
+
+        .secondary-btn.is-denied,
+        .secondary-btn.is-denied:hover,
+        .secondary-btn.is-denied:disabled {
+            background: var(--accent-red);
+            color: #ffffff;
+            border-color: color-mix(in srgb, var(--accent-red) 85%, #ffffff 15%);
+            box-shadow: var(--glow-red);
+        }
+
+        .secondary-btn.is-denied:disabled {
+            opacity: 1;
+            cursor: not-allowed;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 10px;
+        }
+
+        .modal-card {
+            width: 100%;
+            max-width: 800px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-bright);
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .modal-title {
+            font-family: var(--font-mono);
+            letter-spacing: 1px;
+            font-size: 12px;
+            color: var(--accent-green);
+            margin-bottom: 10px;
+        }
+
+        .modal-label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: var(--font-mono);
+        }
+
+        .modal-input,
+        .modal-textarea {
+            width: 100%;
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 7px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+
+        .modal-input:hover,
+        .modal-input:focus,
+        .modal-textarea:hover,
+        .modal-textarea:focus {
+            border-color: var(--border-bright);
+            outline: none;
+        }
+
+        .modal-textarea {
+            min-height: 200px;
+            resize: vertical;
+        }
+
+        .recover-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .recover-item-info {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .recover-item-topic {
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .recover-item-meta {
+            font-size: 9px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .recover-status-chip {
+            display: inline-block;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-family: var(--font-mono);
+        }
+
+        .recover-status-chip.archived {
+            background: color-mix(in srgb, var(--accent-purple) 20%, transparent);
+            color: #cccccc;
+        }
+
+        .recover-status-chip.orphan {
+            background: color-mix(in srgb, var(--accent-orange) 20%, transparent);
+            color: #aaaaaa;
+        }
+
+        .recover-restore-btn {
+            flex-shrink: 0;
+            margin-left: 8px;
+            padding: 3px 10px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            background: transparent;
+            color: var(--accent-green);
+            border: 1px solid color-mix(in srgb, var(--accent-green) 40%, transparent);
+            border-radius: 2px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .recover-restore-btn:hover {
+            background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+        }
+
+        /* Action Button Feedback Animations */
+        @keyframes pulse-green {
+            0% {
+                box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-green) 30%, transparent);
+            }
+
+            70% {
+                box-shadow: 0 0 8px 3px color-mix(in srgb, var(--accent-green) 20%, transparent);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 transparent;
+            }
+        }
+
+        @keyframes sweep {
+            0% {
+                background-position: -200% 0;
+            }
+
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        @keyframes error-shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            20%,
+            60% {
+                transform: translateX(-3px);
+            }
+
+            40%,
+            80% {
+                transform: translateX(3px);
+            }
+        }
+
+        .action-btn.dispatching {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .action-btn.success {
+            border-color: var(--accent-green) !important;
+            color: var(--accent-green) !important;
+            animation: success-glow 1.2s ease-out;
+            background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--accent-green) 60%, transparent) 50%, transparent 100%);
+            background-size: 200% 100%;
+            animation: success-glow 1.2s ease-out, sweep 1s ease-out;
+        }
+
+        .action-btn.error {
+            border-color: var(--accent-red) !important;
+            color: var(--accent-red) !important;
+            animation: error-shake 0.4s ease-out;
+        }
+
+        /* Orchestrator Card */
+        .orchestrator-card {
+            background: var(--panel-bg2);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            padding: 10px 12px;
+            margin: 0 8px 8px 8px;
+        }
+
+        .orchestrator-card.hidden {
+            display: none !important;
+        }
+
+        .orchestrator-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .orchestrator-label {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            color: var(--accent-green);
+            text-transform: uppercase;
+        }
+
+        .orchestrator-timer {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent-green);
+            text-align: center;
+            padding: 6px 0;
+            letter-spacing: 2px;
+            text-shadow: var(--glow-green);
+        }
+
+        .orchestrator-timer.idle {
+            color: var(--text-secondary);
+            text-shadow: none;
+            font-size: 11px;
+        }
+
+        .orchestrator-next-stage {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-align: center;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .orchestrator-controls {
+            display: flex;
+            gap: 6px;
+        }
+
+        .orchestrator-controls .action-btn {
+            flex: 1;
+        }
+
+        .orchestrator-controls .action-btn.stop-btn {
+            color: var(--accent-red);
+            border-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
+            flex: 0 0 auto;
+            width: 70px;
+        }
+
+        .orchestrator-controls .action-btn.stop-btn:hover:not(:disabled) {
+            border-color: var(--accent-red);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-red) 30%, transparent);
+        }
+
+        .orchestrator-interval {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .orchestrator-interval label {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .orchestrator-interval input {
+            width: 60px;
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            padding: 3px 6px;
+            text-align: center;
+        }
+
+        .orchestrator-interval input:hover,
+        .orchestrator-interval input:focus {
+            border-color: var(--border-bright);
+            outline: none;
+        }
+
+        .onboard-step .startup-row {
+            margin-bottom: 6px;
+        }
+
+        .startup-row input[type="text"] {
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 6px 8px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .startup-row input[type="text"]:focus,
+        .startup-row input[type="text"]:hover {
+            border-color: var(--border-bright);
+            outline: none;
+        }
+
+
+        .db-action-icon {
+            font-size: 16px;
+            margin-bottom: 2px;
+        }
+
+        .db-secondary-btn {
+            padding: 4px 12px;
+            font-size: 10px;
+            background: var(--bg-dim);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-dim);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .db-secondary-btn:hover {
+            border-color: var(--border-bright);
+            background: var(--border-dim);
+            color: var(--text-primary);
+        }
+
+        .db-primary-btn {
+            width: 100%;
+            padding: 6px;
+            font-size: 11px;
+            margin-top: 8px;
+            background: var(--bg-dim);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-dim);
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            letter-spacing: 1px;
+            transition: all 0.2s ease;
+        }
+
+        .db-primary-btn:hover:not(:disabled) {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            background: color-mix(in srgb, var(--accent-green) 5%, transparent);
+        }
+
+        .db-primary-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- ONBOARDING CONTAINER (shown when needsSetup is true) -->
+    <div id="onboarding-container" class="container hidden">
+        <!-- Step 1: Welcome -->
+        <div id="onboard-step-welcome" class="onboard-step">
+            <div style="text-align:center; padding: 30px 16px 10px;">
+                <div style="font-size: 28px; margin-bottom: 12px;">⚡</div>
+                <div
+                    style="font-family: var(--font-mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-green); text-shadow: var(--glow-green); margin-bottom: 8px;">
+                    Welcome to Switchboard</div>
+                <div
+                    style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; max-width: 280px; margin: 0 auto;">
+                    Cross-IDE agent orchestration — workflow routing, terminal targeting, and multi-agent coordination.
+                </div>
+            </div>
+            <div style="padding: 20px 16px;">
+                <button id="btn-onboard-init" class="secondary-btn w-full"
+                    style="padding: 10px; font-size: 11px; color: var(--accent-green); border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);">INITIALIZE
+                    SWITCHBOARD</button>
+                <div id="onboard-init-status"
+                    style="text-align: center; margin-top: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);">
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: CLI Config -->
+        <div id="onboard-step-cli" class="onboard-step hidden">
+            <div style="padding: 16px;">
+                <div class="section-label" style="margin-bottom: 12px;">CONFIGURE CLI AGENTS</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.4;">
+                    Set commands for each agent role. Uncheck to hide an agent from the sidebar. Leave command empty to
+                    skip.
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="planner" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Planner</label><input type="text" id="onboard-cli-planner"
+                        placeholder="e.g. gemini --approval-mode auto_edit" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="lead" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Lead Coder</label><input type="text" id="onboard-cli-lead"
+                        placeholder="e.g. copilot --allow-all-tools" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="coder" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Coder</label><input type="text" id="onboard-cli-coder"
+                        placeholder="e.g. gemini --approval-mode auto_edit" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="intern" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Intern</label><input type="text" id="onboard-cli-intern"
+                        placeholder="e.g. copilot --allow-all-tools" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="reviewer" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Reviewer</label><input type="text" id="onboard-cli-reviewer"
+                        placeholder="e.g. gemini --approval-mode auto_edit" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="tester"
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Acceptance Tester</label><input type="text" id="onboard-cli-tester"
+                        placeholder="e.g. copilot --allow-all-tools" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="analyst" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Analyst</label><input type="text" id="onboard-cli-analyst"
+                        placeholder="e.g. qwen" style="flex:1;">
+                </div>
+                <div class="startup-row" style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" class="onboard-agent-toggle" data-role="jules" checked
+                        style="width:auto; margin:0; flex-shrink:0;">
+                    <label style="min-width:70px;">Jules</label>
+                    <span style="flex:1; font-size: 10px; color: var(--text-secondary);">Cloud coder visibility
+                        only</span>
+                </div>
+                <label class="startup-row" style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                    <input id="onboard-jules-auto-sync" type="checkbox" style="width:auto; margin:0;">
+                    <span style="font-size:10px; color:var(--text-secondary);">Auto-sync repo before sending to Jules
+                        (default OFF)</span>
+                </label>
+                <div style="margin-top: 12px; display: flex; gap: 8px;">
+                    <button id="btn-onboard-save" class="secondary-btn w-full"
+                        style="padding: 10px; font-size: 11px; color: var(--accent-green); border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);">SAVE
+                        &amp; FINISH</button>
+                    <button id="btn-onboard-skip" class="secondary-btn w-full"
+                        style="padding: 10px; font-size: 11px;">SKIP</button>
+                </div>
+                <div id="onboard-cli-status"
+                    style="text-align: center; margin-top: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTAINER (normal sidebar) -->
+    <div id="main-container" class="container">
+        <!-- HEADER: PLAN SELECTION -->
+        <div class="header-section">
+            <div class="section-header">
+                <div class="section-label">PLAN SELECT <span class="tooltip-icon"
+                        title="If the plan select dropdown does not appear correct, use the Recover menu or ask an agent to run the Fix Plans Dropdown skill.">ⓘ</span>
+                </div>
+                <div class="flex gap-2" style="align-items: center;">
+                    <button id="btn-recover-plans" class="icon-btn recover" title="Recover archived or orphaned plans"
+                        aria-label="Recover plans">RECOVER</button>
+                    <button id="btn-delete-plan" class="icon-btn delete" title="Delete active plan"
+                        aria-label="Delete plan">DELETE</button>
+                </div>
+            </div>
+            <div class="dropdown-container">
+                <select id="run-sheet-select" class="plan-select">
+                    <option value="">Loading plans...</option>
+                </select>
+                <div class="select-arrow">▼</div>
+            </div>
+            <div class="flex gap-2" style="margin-top: 6px;">
+                <button id="btn-complete-plan" class="secondary-btn w-full">COMPLETE</button>
+                <button id="btn-copy-plan-link" class="secondary-btn w-full" title="Copy Markdown link for active plan"
+                    aria-label="Copy plan link">COPY</button>
+                <button id="btn-create-plan" class="secondary-btn w-full">CREATE</button>
+            </div>
+            <div style="margin-top: 6px;">
+                <button id="btn-open-kanban" class="secondary-btn is-teal w-full">OPEN AUTOBAN</button>
+            </div>
+        </div>
+
+        <!-- PINNED DASHBOARD: AGENT LIST (includes Auto-agent) -->
+        <div id="panel-agents" class="tab-panel">
+            <div class="sub-tab-bar">
+                <button class="sub-tab-btn is-active" data-tab="agents">Agents</button>
+                <button class="sub-tab-btn" data-tab="webai">Planning</button>
+                <button class="sub-tab-btn" data-tab="autoban">Autoban</button>
+            </div>
+            <div id="agent-list-standard" class="agent-list">
+                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                    Initializing...
+                </div>
+            </div>
+            <div id="agent-list-autoban" class="agent-list hidden"></div>
+            <div id="agent-list-webai" class="agent-list hidden"></div>
+        </div>
+
+        <!-- LIVE ACTIVITY FEED -->
+        <div class="panel-toggle" id="live-feed-toggle" style="padding: 8px 10px 4px 10px;">
+            <div class="section-label" style="margin:0; font-size: 9px; letter-spacing: 1.5px;">LIVE FEED</div>
+            <span class="chevron" id="live-feed-chevron">▶</span>
+        </div>
+        <div id="panel-activity" class="tab-panel panel-fields" aria-hidden="true" data-accordion="true">
+            <div id="activity-list" class="activity-list">
+                <div
+                    style="text-align: center; padding: 20px; color: var(--text-secondary); font-family: var(--font-mono);">
+                    No activity loaded yet.
+                </div>
+            </div>
+            <button id="btn-activity-load-more" class="secondary-btn w-full activity-load-more hidden">LOAD
+                MORE</button>
+        </div>
+
+        <!-- TERMINAL OPERATIONS -->
+        <div class="system-section">
+            <div class="panel-toggle" id="terminal-operations-toggle">
+                <div class="section-label" style="margin:0">TERMINAL OPERATIONS</div>
+                <span class="chevron open" id="terminal-operations-chevron">▶</span>
+            </div>
+            <div class="panel-fields open" id="terminal-operations-fields" data-accordion="true">
+                <button id="createAgentGrid" class="secondary-btn is-teal w-full">OPEN AGENT TERMINALS</button>
+                <button id="btn-deregister-all" class="secondary-btn error w-full">RESET ALL AGENTS</button>
+                <button id="btn-open-central-setup" class="secondary-btn is-teal w-full">OPEN SETUP</button>
+                <button id="btn-easter-egg" class="secondary-btn w-full" style="margin-top: 6px;">Access main program</button>
+            </div>
+        </div>
+
+        <!-- STATUS FOOTER -->
+        <div class="status-footer">
+            <div class="status-indicator" id="system-status">
+                <div class="tiny-dot green"></div>
+                <span>SYSTEM ONLINE</span>
+            </div>
+            <div class="status-indicator" id="mcp-status-footer">
+                <div class="tiny-dot" id="mcp-dot"></div>
+                <span id="mcp-text">MCP: CHECKING</span>
+                <span id="mcp-recheck-btn" title="Recheck MCP connection"
+                    style="cursor:pointer; margin-left:4px; opacity:0.6; font-size:11px;">&#x21bb;</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="recover-plans-modal" class="modal-overlay hidden">
+        <div class="modal-card" style="max-width: 480px;">
+            <div class="modal-title">RECOVER PLANS</div>
+            <input id="recover-search" class="modal-input" type="text" placeholder="Filter plans..."
+                style="margin-bottom: 8px;">
+            <div id="recover-plan-list" style="max-height: 260px; overflow-y: auto; margin-bottom: 10px;"></div>
+            <div id="recover-empty-msg" class="hidden"
+                style="text-align: center; padding: 16px; color: var(--text-secondary); font-size: 11px;">No recoverable
+                plans found.</div>
+            <button id="btn-close-recover" class="secondary-btn w-full">CLOSE</button>
+        </div>
+    </div>
+
+    <script src="./grimoire-shim.js"></script>
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        // DOM Elements
+        const runSheetSelect = document.getElementById('run-sheet-select');
+        const agentListStandard = document.getElementById('agent-list-standard');
+        const agentListAutoban = document.getElementById('agent-list-autoban');
+        const agentListWebai = document.getElementById('agent-list-webai');
+        const agentList = agentListStandard; // backward compat alias
+        const activityList = document.getElementById('activity-list');
+        const activityLoadMoreBtn = document.getElementById('btn-activity-load-more');
+        const tabAgentsBtn = document.getElementById('tab-agents');
+        const tabActivityBtn = document.getElementById('tab-activity');
+        const panelAgents = document.getElementById('panel-agents');
+        const panelActivity = document.getElementById('panel-activity');
+        const liveFeedToggle = document.getElementById('live-feed-toggle');
+        const liveFeedChevron = document.getElementById('live-feed-chevron');
+        const liveFeedFields = panelActivity;
+        const mcpDot = document.getElementById('mcp-dot');
+        const mcpText = document.getElementById('mcp-text');
+        const copyPlanLinkBtn = document.getElementById('btn-copy-plan-link');
+
+        const recoverPlansModal = document.getElementById('recover-plans-modal');
+        const recoverPlanList = document.getElementById('recover-plan-list');
+        const recoverEmptyMsg = document.getElementById('recover-empty-msg');
+        const recoverSearchInput = document.getElementById('recover-search');
+        let recoverablePlansCache = [];
+        let copyPlanLinkTimer = null;
+        let analystButtonFeedback = null; // { text, className, expiresAt }
+        let analystButtonFeedbackTimer = null;
+        let lastDesignDocLink = '';
+
+        // Global helper — no class scope (underscore prefix is convention only, not enforced)
+        function _relativeTime(date) {
+            const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+            if (diff < 60) { return 'just now'; }
+            if (diff < 3600) { return `${Math.floor(diff / 60)}m ago`; }
+            if (diff < 86400) { return `${Math.floor(diff / 3600)}h ago`; }
+            return `${Math.floor(diff / 86400)}d ago`;
+        }
+
+        function isPlanSelected() {
+            return Boolean(runSheetSelect && runSheetSelect.value);
+        }
+
+        function updatePlanActionStates() {
+            const hasPlan = isPlanSelected();
+            if (copyPlanLinkBtn) {
+                copyPlanLinkBtn.disabled = !hasPlan;
+            }
+        }
+
+        function showCopyPlanLinkFeedback(success) {
+            if (!copyPlanLinkBtn) return;
+            if (copyPlanLinkTimer) {
+                clearTimeout(copyPlanLinkTimer);
+                copyPlanLinkTimer = null;
+            }
+
+            copyPlanLinkBtn.classList.toggle('success', success);
+            copyPlanLinkBtn.classList.toggle('error', !success);
+
+            copyPlanLinkTimer = setTimeout(() => {
+                copyPlanLinkBtn.classList.remove('success', 'error');
+                copyPlanLinkTimer = null;
+            }, 1500);
+        }
+
+        document.getElementById('btn-create-plan').addEventListener('click', () => {
+            vscode.postMessage({ type: 'createDraftPlanTicket' });
+        });
+
+        // Recovery Modal
+        function openRecoverPlansModal() {
+            recoverPlansModal.classList.remove('hidden');
+            recoverSearchInput.value = '';
+            recoverPlanList.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px;">Loading...</div>';
+            recoverEmptyMsg.classList.add('hidden');
+            vscode.postMessage({ type: 'getRecoverablePlans' });
+        }
+        function closeRecoverPlansModal() {
+            recoverPlansModal.classList.add('hidden');
+        }
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        function inferTopicFromPath(filePath) {
+            if (!filePath) return '(untitled)';
+            var name = filePath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
+            name = name.replace(/^(brain_|feature_plan_|plan_)/, '');
+            name = name.replace(/^[0-9a-f]{32,}$/i, '').replace(/^[0-9a-f]{32,}_/i, '');
+            if (!name) return '(untitled)';
+            return name.replace(/[_-]+/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }).trim() || '(untitled)';
+        }
+        function renderRecoverablePlans(plans, filter) {
+            recoverablePlansCache = plans || [];
+            const q = (filter || '').toLowerCase();
+            const filtered = q ? recoverablePlansCache.filter(p => (p.topic || '').toLowerCase().includes(q)) : recoverablePlansCache;
+            recoverPlanList.innerHTML = '';
+            if (filtered.length === 0) {
+                recoverEmptyMsg.classList.remove('hidden');
+                return;
+            }
+            recoverEmptyMsg.classList.add('hidden');
+            for (const plan of filtered) {
+                const item = document.createElement('div');
+                item.className = 'recover-item';
+                const dateStr = plan.updatedAt ? new Date(plan.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase() : '';
+                const btnLabel = plan.status === 'orphan' ? 'CLAIM' : 'RESTORE';
+                var displayTopic = plan.topic;
+                if (!displayTopic || displayTopic === '(untitled)') {
+                    displayTopic = inferTopicFromPath(plan.brainSourcePath || plan.localPlanPath);
+                }
+                item.innerHTML = '<div class="recover-item-info">'
+                    + '<div class="recover-item-topic">' + escapeHtml(displayTopic) + '</div>'
+                    + '<div class="recover-item-meta"><span class="recover-status-chip ' + escapeHtml(plan.status) + '">' + escapeHtml(plan.status) + '</span> · ' + escapeHtml(plan.sourceType) + ' · ' + escapeHtml(dateStr) + '</div>'
+                    + '</div>'
+                    + '<button class="recover-restore-btn" data-plan-id="' + escapeHtml(plan.planId) + '">' + escapeHtml(btnLabel) + '</button>';
+                recoverPlanList.appendChild(item);
+            }
+            recoverPlanList.querySelectorAll('.recover-restore-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const planId = btn.getAttribute('data-plan-id');
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                    vscode.postMessage({ type: 'restorePlan', planId });
+                });
+            });
+        }
+
+        document.getElementById('btn-recover-plans').addEventListener('click', openRecoverPlansModal);
+        document.getElementById('btn-close-recover').addEventListener('click', closeRecoverPlansModal);
+        document.getElementById('mcp-recheck-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ type: 'recheckMcpConnection' });
+        });
+        recoverPlansModal.addEventListener('click', (event) => {
+            if (event.target === recoverPlansModal) closeRecoverPlansModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeRecoverPlansModal(); }
+        });
+        recoverSearchInput.addEventListener('input', () => {
+            renderRecoverablePlans(recoverablePlansCache, recoverSearchInput.value);
+        });
+
+        const btnGrid = document.getElementById('createAgentGrid');
+        if (btnGrid) {
+            btnGrid.addEventListener('click', () => {
+                btnGrid.innerText = 'SAVING & OPENING...';
+                btnGrid.classList.add('dispatching');
+                btnGrid.classList.remove('is-teal');
+                btnGrid.disabled = true;
+
+                // Auto-collapse Terminal Operations accordion so the user can see the agent list
+                const _toFieldsOnLaunch = document.getElementById('terminal-operations-fields');
+                const _toChevronOnLaunch = document.getElementById('terminal-operations-chevron');
+                if (_toFieldsOnLaunch && _toFieldsOnLaunch.classList.contains('open')) {
+                    _toFieldsOnLaunch.classList.remove('open');
+                    if (_toChevronOnLaunch) _toChevronOnLaunch.classList.remove('open');
+                    // hasManuallyCollapsedThisSession is intentionally NOT set here —
+                    // this is programmatic closure, not user intent. The onboarding guard
+                    // may re-open if agents fail to register, which is correct behaviour.
+                }
+
+                // Collect current CLI commands and custom agent state
+                const commands = {
+                    ...lastStartupCommands,
+                    'team-lead': lastStartupCommands['team-lead'] || ''
+                };
+                const visibleAgents = {
+                    ...lastVisibleAgents,
+                    'team-lead': lastVisibleAgents['team-lead'] === true
+                };
+                // Save config first, then launch on acknowledgement
+                btnGrid._pendingLaunch = true;
+                const payload = { type: 'saveStartupCommands', commands, visibleAgents };
+                if (typeof lastJulesAutoSyncEnabled === 'boolean') {
+                    payload.julesAutoSyncEnabled = lastJulesAutoSyncEnabled;
+                }
+                vscode.postMessage(payload);
+                // Safety fallback: launch anyway if save ack doesn't arrive
+                btnGrid._saveTimeout = setTimeout(() => {
+                    if (btnGrid._pendingLaunch) {
+                        btnGrid._pendingLaunch = false;
+                        vscode.postMessage({ type: 'createAgentGrid' });
+                    }
+                }, 3000);
+                if (btnGrid._gridResultTimeout) clearTimeout(btnGrid._gridResultTimeout);
+                btnGrid._gridResultTimeout = setTimeout(() => {
+                    // Safety reset if backend never responds
+                    btnGrid.innerText = 'OPEN AGENT TERMINALS';
+                    btnGrid.classList.remove('dispatching', 'success', 'error', 'feedback');
+                    btnGrid.classList.add('is-teal');
+                    btnGrid.disabled = false;
+                    btnGrid._gridResultTimeout = null;
+                }, 30000);
+            });
+        }
+        const btnDeregister = document.getElementById('btn-deregister-all');
+        if (btnDeregister) btnDeregister.addEventListener('click', () => vscode.postMessage({ type: 'deregisterAllTerminals' }));
+        const btnKanban = document.getElementById('btn-open-kanban');
+        if (btnKanban) btnKanban.addEventListener('click', () => vscode.postMessage({ type: 'openKanban' }));
+        const btnOpenCentralSetup = document.getElementById('btn-open-central-setup');
+        if (btnOpenCentralSetup) {
+            btnOpenCentralSetup.addEventListener('click', () => {
+                vscode.postMessage({ type: 'openSetupPanel' });
+            });
+        }
+
+        // Easter egg button - Jurassic Park reference
+        const btnEasterEgg = document.getElementById('btn-easter-egg');
+        if (btnEasterEgg) {
+            const labels = ['Access main program', 'Access main security', 'Access main program grid'];
+            let currentIndex = 0;
+            let isDenied = false;
+
+            btnEasterEgg.addEventListener('click', () => {
+                if (isDenied) return;
+
+                isDenied = true;
+                btnEasterEgg.textContent = 'DENIED';
+                btnEasterEgg.classList.add('is-denied');
+                btnEasterEgg.disabled = true;
+
+                setTimeout(() => {
+                    btnEasterEgg.classList.remove('is-denied');
+                    currentIndex = (currentIndex + 1) % labels.length;
+                    btnEasterEgg.textContent = labels[currentIndex];
+                    btnEasterEgg.disabled = false;
+                    isDenied = false;
+                }, 1000);
+            });
+        }
+
+        /**
+         * Collapses all accordion panels that carry data-accordion="true",
+         * except the one whose id matches `exceptFieldsId`.
+         * Also removes 'open' from the sibling chevron element.
+         *
+         * The chevron element is located by walking to the parent toggle div
+         * (previousElementSibling of the fields div) and finding its .chevron child.
+         *
+         * @param {string|null} exceptFieldsId - ID of the fields div to leave untouched.
+         */
+        function collapseAllAccordions(exceptFieldsId) {
+            document.querySelectorAll('[data-accordion="true"]').forEach(fieldsEl => {
+                if (fieldsEl.id === exceptFieldsId) return; // skip the target panel
+                if (!fieldsEl.classList.contains('open')) return; // already closed
+                fieldsEl.classList.remove('open');
+                // Find the chevron in the sibling toggle div (always the immediately preceding sibling)
+                const toggleEl = fieldsEl.previousElementSibling;
+                if (toggleEl) {
+                    const chevron = toggleEl.querySelector('.chevron');
+                    if (chevron) chevron.classList.remove('open');
+                }
+                // For panel-fields that expose aria-hidden, update it
+                if (fieldsEl.hasAttribute('aria-hidden')) {
+                    fieldsEl.setAttribute('aria-hidden', 'true');
+                }
+            });
+        }
+
+        const termOpsToggle = document.getElementById('terminal-operations-toggle');
+        if (termOpsToggle) {
+            termOpsToggle.addEventListener('click', () => {
+                const fields = document.getElementById('terminal-operations-fields');
+                const chevron = document.getElementById('terminal-operations-chevron');
+                if (fields && chevron) {
+                    const willOpen = !fields.classList.contains('open');
+                    if (willOpen) {
+                        // Collapse all other accordions before opening this one
+                        collapseAllAccordions('terminal-operations-fields');
+                    }
+                    const isOpen = fields.classList.toggle('open');
+                    chevron.classList.toggle('open', isOpen);
+                    if (isOpen) {
+                        vscode.postMessage({ type: 'getStartupCommands' });
+                        vscode.postMessage({ type: 'getVisibleAgents' });
+                        vscode.postMessage({ type: 'getCustomAgents' });
+                        vscode.postMessage({ type: 'getJulesAutoSyncSetting' });
+                    } else {
+                        // User explicitly collapsed: remember for the rest of this session
+                        hasManuallyCollapsedThisSession = true;
+                    }
+                }
+            });
+        }
+
+        if (liveFeedToggle && liveFeedFields && liveFeedChevron) {
+            liveFeedToggle.addEventListener('click', () => {
+                const willOpen = !liveFeedFields.classList.contains('open');
+                if (willOpen) {
+                    // Collapse all other accordions before opening Live Feed
+                    collapseAllAccordions('panel-activity');
+                }
+                const isOpen = liveFeedFields.classList.toggle('open');
+                liveFeedChevron.classList.toggle('open', isOpen);
+                liveFeedFields.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+            });
+        }
+
+        const btnComplete = document.getElementById('btn-complete-plan');
+        if (btnComplete) {
+            btnComplete.addEventListener('click', () => {
+                const sessionId = runSheetSelect ? runSheetSelect.value : null;
+                if (!sessionId) return;
+                vscode.postMessage({ type: 'completePlan', sessionId });
+            });
+        }
+
+        const btnDelete = document.getElementById('btn-delete-plan');
+        if (btnDelete) {
+            btnDelete.addEventListener('click', () => {
+                const sessionId = runSheetSelect ? runSheetSelect.value : null;
+                if (!sessionId) return;
+                vscode.postMessage({ type: 'deletePlan', sessionId });
+            });
+        }
+
+        if (copyPlanLinkBtn) {
+            copyPlanLinkBtn.addEventListener('click', () => {
+                const sessionId = runSheetSelect ? runSheetSelect.value : null;
+                if (!sessionId) return;
+                vscode.postMessage({ type: 'copyPlanLink', sessionId });
+            });
+        }
+
+        // State
+        let currentRunSheets = [];
+        let lastTerminals = {};
+        let lastAllOpenTerminals = [];
+        let lastTeamReady = false;
+        let lastDispatchReadiness = {};
+        let lastJulesActivePlans = [];
+        let lastJulesSessions = [];
+        let lastStartupCommands = {};
+        let lastVisibleAgents = { planner: true, lead: true, coder: true, intern: true, reviewer: true, tester: false, analyst: true, 'team-lead': false, jules: true };
+        let lastCustomAgents = [];
+        let lastJulesAutoSyncEnabled = undefined;
+        // Autoban engine state (received from backend)
+        let autobanState = {
+            enabled: false,
+            batchSize: 3,
+            complexityFilter: 'all',
+            routingMode: 'dynamic',
+            maxSendsPerTerminal: 10,
+            globalSessionCap: 200,
+            sessionSendCount: 0,
+            sendCounts: {},
+            terminalPools: {},
+            managedTerminalPools: {},
+            poolCursor: {},
+            rules: {
+                CREATED: { enabled: true, intervalMinutes: 10 },
+                'PLAN REVIEWED': { enabled: true, intervalMinutes: 20 },
+                'LEAD CODED': { enabled: true, intervalMinutes: 15 },
+                'CODER CODED': { enabled: true, intervalMinutes: 15 }
+            }
+        };
+        let userInitiatedChange = false;
+        let activeTab = 'agents';
+        let recentActivityEvents = [];
+        let recentActivityCursor = undefined;
+        let recentActivityHasMore = false;
+        const pendingDispatches = new Set();
+
+        // --- Onboarding Guard State ---
+        let noAgentsDetectionTime = null;        // timestamp of first 0-green detection
+        let hasManuallyCollapsedThisSession = false; // true if user collapsed Terminal Ops this session
+        const RECOVERY_THRESHOLD_MS = 5000;      // ms before onboarding activates
+        let _setupComplete = false;               // true once needsSetup === false
+
+        function getDispatchKey(role) {
+            const sessionId = runSheetSelect.value || '';
+            return `${sessionId}::${role}`;
+        }
+
+        function markDispatchPending(role) {
+            pendingDispatches.add(getDispatchKey(role));
+        }
+
+        function clearDispatchPending(role) {
+            const suffix = `::${role}`;
+            for (const key of Array.from(pendingDispatches)) {
+                if (key.endsWith(suffix)) {
+                    pendingDispatches.delete(key);
+                }
+            }
+        }
+
+        function isDispatchPending(role) {
+            return pendingDispatches.has(getDispatchKey(role));
+        }
+
+        function getDispatchButtons(role) {
+            return Array.from(document.querySelectorAll(`[data-dispatch-role="${role}"]`));
+        }
+
+        function setActiveTab(tab, persist = true) {
+            // Tabs removed — both panels are always visible.
+            // Still request activity data when switching context.
+            if (persist) {
+                vscode.postMessage({ type: 'setActiveTab', tab: 'agents' });
+            }
+            requestRecentActivity(false);
+        }
+
+        function requestRecentActivity(loadMore) {
+            const payload = {
+                type: 'getRecentActivity',
+                limit: 50
+            };
+            if (loadMore && recentActivityCursor) {
+                payload.before = recentActivityCursor;
+            }
+            vscode.postMessage(payload);
+        }
+
+        function roleLabel(role) {
+            const roleMap = {
+                lead: 'Lead coder',
+                'team-lead': 'Team Lead',
+                coder: 'Coder',
+                reviewer: 'Reviewer',
+                tester: 'Acceptance Tester',
+                planner: 'Planner',
+                team: 'Team',
+                analyst: 'Analyst',
+                jules: 'Jules'
+            };
+            if (roleMap[role]) return roleMap[role];
+            const customAgent = lastCustomAgents.find(agent => agent.role === role);
+            return customAgent ? customAgent.name : 'Agent';
+        }
+
+        function formatActivitySummary(event) {
+            const payload = event && event.payload ? event.payload : {};
+            if (event.type === 'autoban_dispatch') {
+                const count = Number(payload.batchSize || (Array.isArray(payload.sessionIds) ? payload.sessionIds.length : 0) || 0);
+                const sourceColumn = (payload.sourceColumn || 'Unknown').toString();
+                const targetRole = roleLabel((payload.targetRole || '').toString());
+                let topicsStr = '';
+                if (Array.isArray(payload.sessionIds) && payload.sessionIds.length > 0) {
+                    const topics = payload.sessionIds.map(function (id) {
+                        const sheet = currentRunSheets.find(function (s) { return s.sessionId === id; });
+                        return sheet && sheet.topic ? sheet.topic : id;
+                    });
+                    topicsStr = ' (' + topics.join(', ') + ')';
+                }
+                return `⚡ Autoban: moved ${count} plan(s)${topicsStr} from ${sourceColumn} -> ${targetRole}`;
+            }
+            if (payload.message && payload.message.toString().trim().length > 0) {
+                return payload.message.toString();
+            }
+            const role = roleLabel(payload.role);
+            const dispatchEvent = (payload.event || '').toString().toLowerCase();
+            const verb = dispatchEvent.includes('failed') ? 'failed for' : 'started for';
+            const planTitle = (payload.planTitle || payload.sessionId || 'Unknown plan').toString();
+            return `${role} ${verb}: ${planTitle}`;
+        }
+
+        function formatActivityDetail(event) {
+            const payload = event && event.payload ? event.payload : {};
+            if (event.type === 'dispatch') {
+                const kind = (payload.event || 'dispatch').toString().replace(/_/g, ' ');
+                const role = payload.role ? ` (${roleLabel(payload.role)})` : '';
+                return `${kind}${role}`;
+            }
+            if (event.type === 'ui_action') {
+                const action = (payload.action || 'ui action').toString().replace(/_/g, ' ');
+                const role = payload.role ? ` (${roleLabel(payload.role)})` : '';
+                return `${action}${role}`;
+            }
+            if (event.type === 'plan_management') {
+                const operation = (payload.operation || 'plan update').toString().replace(/_/g, ' ');
+                const target = payload.topic || payload.planFile || '';
+                return target ? `${operation}: ${target}` : operation;
+            }
+            if (event.type === 'autoban_dispatch') {
+                const targetRole = payload.targetRole ? ` (${roleLabel(payload.targetRole)})` : '';
+                return `autoban dispatch${targetRole}`;
+            }
+            return (event.type || 'event').toString();
+        }
+
+        function renderRecentActivity() {
+            if (!activityList) return;
+            activityList.innerHTML = '';
+            const summaryEvents = (recentActivityEvents || []).filter(e => {
+                const type = (e.type || '').toString().toLowerCase();
+                return type === 'summary' || type === 'autoban_dispatch';
+            });
+            if (summaryEvents.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.textAlign = 'center';
+                empty.style.padding = '20px';
+                empty.style.color = 'var(--text-secondary)';
+                empty.style.fontFamily = 'var(--font-mono)';
+                empty.innerText = 'No activity events yet.';
+                activityList.appendChild(empty);
+            } else {
+                for (const event of summaryEvents) {
+                    const row = document.createElement('div');
+                    row.className = 'activity-row summary';
+
+                    const time = document.createElement('div');
+                    time.className = 'activity-time';
+                    time.innerText = new Date(event.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    const payload = document.createElement('div');
+                    payload.className = 'activity-payload';
+                    const text = formatActivitySummary(event);
+                    const summaryMessage = document.createElement('div');
+                    summaryMessage.className = 'activity-summary-message';
+                    summaryMessage.innerText = text;
+                    payload.appendChild(summaryMessage);
+
+                    row.appendChild(time);
+                    row.appendChild(payload);
+                    activityList.appendChild(row);
+                }
+            }
+
+            activityLoadMoreBtn.classList.toggle('hidden', !recentActivityHasMore);
+        }
+
+
+        // --- Event Listeners ---
+
+        if (tabAgentsBtn) tabAgentsBtn.addEventListener('click', () => setActiveTab('agents'));
+        if (tabActivityBtn) tabActivityBtn.addEventListener('click', () => setActiveTab('activity'));
+        if (activityLoadMoreBtn) activityLoadMoreBtn.addEventListener('click', () => requestRecentActivity(true));
+
+        if (runSheetSelect) {
+            runSheetSelect.addEventListener('change', () => {
+                renderAgentList();
+                updatePlanActionStates();
+                const sessionId = runSheetSelect.value;
+                vscode.postMessage({ type: 'orchestratorSessionChange', sessionId: sessionId || null });
+                if (userInitiatedChange && sessionId) {
+                    vscode.postMessage({ type: 'viewPlan', sessionId });
+                }
+                userInitiatedChange = false;
+            });
+            runSheetSelect.addEventListener('mousedown', () => {
+                userInitiatedChange = true;
+            });
+            runSheetSelect.addEventListener('keydown', () => {
+                userInitiatedChange = true;
+            });
+            runSheetSelect.addEventListener('blur', () => {
+                userInitiatedChange = false;
+            });
+        }
+
+        // --- Message Handling ---
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.type) {
+                case 'initialState':
+                case 'mcpStatus':
+                    updateMcpStatus(message);
+                    setActiveTab(message.activeTab || 'agents', false);
+                    if (message.type === 'initialState') {
+                        toggleOnboarding(message.needsSetup === true);
+                    }
+                    break;
+                case 'setupStatus':
+                    toggleOnboarding(message.needsSetup === true);
+                    break;
+                case 'onboardingProgress':
+                    handleOnboardingProgress(message);
+                    break;
+                case 'terminalStatuses':
+                    lastTerminals = message.terminals || {};
+                    lastAllOpenTerminals = message.allOpenTerminals || [];
+                    if (message.teamReady !== undefined) { lastTeamReady = message.teamReady; }
+                    if (message.dispatchReadiness !== undefined) { lastDispatchReadiness = message.dispatchReadiness || {}; }
+                    renderAgentList();
+                    break;
+                case 'saveStartupCommandsResult': {
+                    const gridBtn = document.getElementById('createAgentGrid');
+                    if (gridBtn && gridBtn._pendingLaunch) {
+                        gridBtn._pendingLaunch = false;
+                        if (gridBtn._saveTimeout) {
+                            clearTimeout(gridBtn._saveTimeout);
+                            gridBtn._saveTimeout = null;
+                        }
+                        vscode.postMessage({ type: 'createAgentGrid' });
+                    }
+                    break;
+                }
+                case 'createAgentGridResult': {
+                    const gridBtn = document.getElementById('createAgentGrid');
+                    if (gridBtn) {
+                        if (gridBtn._gridResultTimeout) {
+                            clearTimeout(gridBtn._gridResultTimeout);
+                            gridBtn._gridResultTimeout = null;
+                        }
+                        gridBtn.classList.remove('dispatching');
+                        if (message.success) {
+                            gridBtn.classList.add('success', 'feedback');
+                            gridBtn.innerText = 'TERMINALS OPENED';
+                        } else {
+                            gridBtn.classList.add('error', 'feedback');
+                            gridBtn.innerText = 'FAILED';
+                        }
+                        setTimeout(() => {
+                            gridBtn.innerText = 'OPEN AGENT TERMINALS';
+                            gridBtn.classList.remove('success', 'error', 'feedback');
+                            gridBtn.classList.add('is-teal');
+                            gridBtn.disabled = false;
+                        }, 2000);
+                    }
+                    break;
+                }
+                case 'julesStatus':
+                    lastJulesActivePlans = message.activePlans || [];
+                    lastJulesSessions = message.sessions || [];
+                    renderAgentList();
+                    break;
+                case 'runSheets':
+                    currentRunSheets = message.sheets || [];
+                    renderRunSheetDropdown(currentRunSheets);
+                    break;
+                case 'selectSession':
+                    if (message.sessionId && runSheetSelect) {
+                        runSheetSelect.value = message.sessionId;
+                        updatePlanActionStates();
+                        vscode.postMessage({ type: 'orchestratorSessionChange', sessionId: runSheetSelect.value || null });
+                    }
+                    break;
+                case 'copyPlanLinkResult':
+                    showCopyPlanLinkFeedback(message.success === true);
+                    break;
+                case 'recoverablePlans':
+                    renderRecoverablePlans(message.plans || [], recoverSearchInput.value);
+                    break;
+                case 'restorePlanResult':
+                    if (message.success) {
+                        closeRecoverPlansModal();
+                    } else {
+                        recoverPlanList.querySelectorAll('.recover-restore-btn').forEach(btn => {
+                            if (btn.getAttribute('data-plan-id') === message.planId) {
+                                btn.disabled = false;
+                                btn.textContent = btn.closest('.recover-item')?.querySelector('.recover-status-chip.orphan') ? 'CLAIM' : 'RESTORE';
+                            }
+                        });
+                    }
+                    break;
+                case 'startupCommands':
+                    if (message.commands) {
+                        lastStartupCommands = message.commands;
+                        const onboardingFields = {
+                            lead: document.getElementById('onboard-cli-lead'),
+                            coder: document.getElementById('onboard-cli-coder'),
+                            intern: document.getElementById('onboard-cli-intern'),
+                            reviewer: document.getElementById('onboard-cli-reviewer'),
+                            tester: document.getElementById('onboard-cli-tester'),
+                            planner: document.getElementById('onboard-cli-planner'),
+                            analyst: document.getElementById('onboard-cli-analyst')
+                        };
+                        Object.entries(onboardingFields).forEach(([role, input]) => {
+                            if (input) input.value = message.commands[role] || '';
+                        });
+                    }
+                    break;
+                case 'visibleAgents':
+                    if (message.agents) {
+                        lastVisibleAgents = { ...lastVisibleAgents, ...message.agents };
+                        document.querySelectorAll('.onboard-agent-toggle').forEach(cb => {
+                            const role = cb.dataset.role;
+                            if (role && role in lastVisibleAgents) cb.checked = lastVisibleAgents[role];
+                        });
+                        renderAgentList();
+                    }
+                    break;
+                case 'customAgents':
+                    if (Array.isArray(message.customAgents)) {
+                        lastCustomAgents = message.customAgents;
+                        renderAgentList();
+                    }
+                    break;
+                case 'julesAutoSyncSetting': {
+                    lastJulesAutoSyncEnabled = message.enabled === true;
+                    break;
+                }
+                case 'designDocSetting': {
+                    lastDesignDocLink = message.link || '';
+
+                    const notionUrlInput = document.getElementById('notion-url-input');
+                    if (notionUrlInput) { notionUrlInput.value = lastDesignDocLink; }
+
+                    const statusLine = document.getElementById('design-doc-status-line');
+                    if (statusLine) {
+                        statusLine.textContent = lastDesignDocLink
+                            ? `Source: ${lastDesignDocLink.length > 60 ? lastDesignDocLink.slice(0, 57) + '...' : lastDesignDocLink}`
+                            : 'Not configured — configure in Planning tab';
+                    }
+                    break;
+                }
+                case 'recentActivity': {
+                    const incoming = Array.isArray(message.events) ? message.events : [];
+                    if (message.append) {
+                        recentActivityEvents = [...recentActivityEvents, ...incoming];
+                    } else {
+                        recentActivityEvents = incoming;
+                    }
+                    recentActivityHasMore = message.hasMore === true;
+                    recentActivityCursor = message.nextCursor;
+                    renderRecentActivity();
+                    break;
+                }
+                case 'actionTriggered': {
+                    const role = message.role;
+                    const success = message.success;
+                    clearDispatchPending(role);
+                    if (role === 'analyst') {
+                        analystButtonFeedback = {
+                            text: success ? 'DISPATCHED' : 'FAILED',
+                            className: success ? 'success' : 'error',
+                            expiresAt: Date.now() + 2000
+                        };
+                        if (analystButtonFeedbackTimer) {
+                            clearTimeout(analystButtonFeedbackTimer);
+                            analystButtonFeedbackTimer = null;
+                        }
+                        analystButtonFeedbackTimer = setTimeout(() => {
+                            analystButtonFeedback = null;
+                            analystButtonFeedbackTimer = null;
+                            renderAgentList();
+                        }, 2000);
+                        renderAgentList();
+                        break;
+                    }
+                    const buttons = getDispatchButtons(role);
+                    buttons.forEach((btn) => {
+                        if (!document.body.contains(btn)) return;
+                        btn.classList.remove('dispatching');
+                        if (success) {
+                            btn.classList.add('success');
+                            btn.innerText = 'DISPATCHED';
+                        } else {
+                            btn.classList.add('error');
+                            btn.innerText = 'FAILED';
+                        }
+                    });
+                    setTimeout(() => {
+                        renderAgentList();
+                    }, 2000);
+                    break;
+                }
+                case 'autobanStateSync':
+                    if (message.state) {
+                        autobanState = { ...autobanState, ...message.state };
+                        renderAgentList();
+                    }
+                    break;
+                case 'airlock_exportComplete': {
+                    const expBtn = document.getElementById('webai-export-btn');
+                    const wStatus = document.getElementById('webai-status');
+                    if (expBtn) { expBtn.disabled = false; expBtn.innerText = 'BUNDLE CODE'; expBtn.classList.remove('dispatching'); }
+                    if (wStatus) wStatus.innerText = '✓ Bundled — ' + new Date().toLocaleTimeString();
+                    break;
+                }
+                case 'airlock_exportError': {
+                    const expBtn2 = document.getElementById('webai-export-btn');
+                    const wStatus2 = document.getElementById('webai-status');
+                    if (expBtn2) { expBtn2.disabled = false; expBtn2.innerText = 'BUNDLE CODE'; expBtn2.classList.remove('dispatching'); }
+                    if (wStatus2) wStatus2.innerText = '⚠ ' + (message.message || 'Bundle failed');
+                    break;
+                }
+                case 'airlock_syncStart': {
+                    const sBtn = document.getElementById('jules-sync-btn');
+                    if (sBtn) {
+                        sBtn.disabled = true;
+                        sBtn.innerText = 'SYNCING...';
+                        sBtn.classList.add('dispatching');
+                    }
+                    const statusEl = document.getElementById('jules-sync-status');
+                    if (statusEl) statusEl.innerText = 'Auto-syncing before Jules send...';
+                    break;
+                }
+                case 'airlock_syncComplete': {
+                    const sBtn = document.getElementById('jules-sync-btn');
+                    const wStatus = document.getElementById('jules-sync-status');
+                    if (sBtn) { sBtn.disabled = false; sBtn.innerText = 'SYNC REPO'; sBtn.classList.remove('dispatching'); }
+                    if (wStatus) wStatus.innerText = '✓ Synced to cloud — ' + new Date().toLocaleTimeString();
+                    break;
+                }
+                case 'airlock_syncError': {
+                    const sBtn2 = document.getElementById('jules-sync-btn');
+                    const wStatus2 = document.getElementById('jules-sync-status');
+                    if (sBtn2) { sBtn2.disabled = false; sBtn2.innerText = 'SYNC REPO'; sBtn2.classList.remove('dispatching'); }
+                    if (wStatus2) wStatus2.innerText = '⚠ ' + (message.message || 'Sync failed');
+                    break;
+                }
+                case 'airlock_coderSent': {
+                    const cStatus = document.getElementById('webai-status');
+                    if (cStatus) cStatus.innerText = '✓ Sent to coder — ' + new Date().toLocaleTimeString();
+                    break;
+                }
+                case 'airlock_coderError': {
+                    const cStatus2 = document.getElementById('webai-status');
+                    if (cStatus2) cStatus2.innerText = '⚠ ' + (message.message || 'Send to coder failed');
+                    break;
+                }
+                case 'notionFetchState': {
+                    const notionPanel = document.querySelector('[data-panel="notion"]');
+                    if (notionPanel && notionPanel._handleNotionFetchState) {
+                        notionPanel._handleNotionFetchState(message);
+                    }
+                    break;
+                }
+                case 'clipboardSeparatorPattern': {
+                    const dd = document.getElementById('airlock-separator-preset');
+                    const ci = document.getElementById('airlock-separator-input');
+                    const cr = document.getElementById('airlock-separator-custom-row');
+                    const ce = document.getElementById('airlock-separator-error');
+                    if (dd && message.presets) {
+                        dd.innerHTML = '';
+                        message.presets.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p.key;
+                            opt.textContent = p.label;
+                            opt.dataset.pattern = p.literalPattern;
+                            dd.appendChild(opt);
+                        });
+                        // Add Custom option
+                        const customOpt = document.createElement('option');
+                        customOpt.value = 'custom';
+                        customOpt.textContent = 'Custom...';
+                        dd.appendChild(customOpt);
+                        // Add Legacy option if applicable
+                        if (message.isLegacy) {
+                            const legacyOpt = document.createElement('option');
+                            legacyOpt.value = 'legacy';
+                            legacyOpt.textContent = 'Legacy regex: ' + message.pattern;
+                            legacyOpt.dataset.pattern = '';
+                            dd.appendChild(legacyOpt);
+                        }
+                        dd.value = message.isLegacy ? 'legacy' : (message.preset || 'classic');
+                    }
+                    if (ci) ci.value = (message.preset === 'custom' ? message.pattern : '') || '';
+                    if (cr) cr.style.display = (message.preset === 'custom' || message.isLegacy) ? 'block' : 'none';
+                    // Update preview
+                    const preview = document.getElementById('airlock-separator-preview');
+                    if (preview && message.pattern) {
+                        const p = message.pattern;
+                        const ex1 = p.replace(/\[N\]/g, '1');
+                        const ex2 = p.replace(/\[N\]/g, '2');
+                        preview.textContent = 'Preview matches:\n' + ex1 + '\n' + ex2;
+                    }
+                    break;
+                }
+                case 'clipboardSeparatorPatternResult': {
+                    const ci = document.getElementById('airlock-separator-input');
+                    const ce = document.getElementById('airlock-separator-error');
+                    if (ci) ci.value = message.pattern || '';
+                    if (ce) {
+                        ce.textContent = message.success ? '' : (message.error || 'Invalid pattern');
+                    }
+                    break;
+                }
+            }
+        });
+
+        // --- Rendering ---
+
+        function renderRunSheetDropdown(sheets) {
+            const lastSelected = runSheetSelect.value;
+            runSheetSelect.innerHTML = '';
+
+            if (!sheets || sheets.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.text = 'NO ACTIVE PLANS';
+                runSheetSelect.appendChild(opt);
+                updatePlanActionStates();
+                vscode.postMessage({ type: 'orchestratorSessionChange', sessionId: null });
+                return;
+            }
+
+            const collisionTotals = new Map();
+            const collisionSeen = new Map();
+
+            const getDayKey = (value) => {
+                const date = new Date(value);
+                if (isNaN(date.getTime())) return 'UNKNOWN';
+                return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+            };
+            const getDisplayDate = (value) => {
+                const date = new Date(value);
+                if (isNaN(date.getTime())) return 'UNKNOWN';
+                return date.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
+            };
+            const toTopic = (value) => (value || 'UNTITLED').toUpperCase().trim();
+            const toCollisionKey = (sheet) => `${toTopic(sheet.topic)}|${getDayKey(sheet.createdAt)}`;
+
+            sheets.forEach(sheet => {
+                const key = toCollisionKey(sheet);
+                collisionTotals.set(key, (collisionTotals.get(key) || 0) + 1);
+            });
+
+            sheets.forEach(sheet => {
+                const opt = document.createElement('option');
+                opt.value = sheet.sessionId;
+                const key = toCollisionKey(sheet);
+                const seen = (collisionSeen.get(key) || 0) + 1;
+                collisionSeen.set(key, seen);
+                const total = collisionTotals.get(key) || 0;
+                const counterSuffix = total > 1 ? ` (${seen})` : '';
+                const dateLabel = getDisplayDate(sheet.createdAt);
+                opt.text = `${toTopic(sheet.topic)}${counterSuffix} (${dateLabel})`;
+                runSheetSelect.appendChild(opt);
+            });
+
+            if (lastSelected && sheets.find(s => s.sessionId === lastSelected)) {
+                runSheetSelect.value = lastSelected;
+            } else {
+                runSheetSelect.selectedIndex = 0;
+            }
+            updatePlanActionStates();
+            vscode.postMessage({ type: 'orchestratorSessionChange', sessionId: runSheetSelect.value || null });
+        }
+
+        let currentAgentTab = 'agents';
+        let isAutobanPanelInteracting = false;
+        function switchAgentTab(tab) {
+            currentAgentTab = tab;
+            const tabs = { agents: agentListStandard, autoban: agentListAutoban, webai: agentListWebai };
+            document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+                btn.classList.toggle('is-active', btn.dataset.tab === tab);
+            });
+            Object.entries(tabs).forEach(([key, el]) => {
+                el.classList.toggle('hidden', key !== tab);
+            });
+        }
+
+        document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => switchAgentTab(btn.dataset.tab));
+        });
+
+        function createAgentRow(label, roleId, actionLabel, findTerminalFn, hideLocate) {
+            const container = document.createElement('div');
+            container.className = 'agent-row';
+
+            const termName = findTerminalFn ? findTerminalFn(lastTerminals) : null;
+            const dispatchInfo = lastDispatchReadiness && roleId ? lastDispatchReadiness[roleId] : null;
+            const dispatchState = dispatchInfo && dispatchInfo.state ? dispatchInfo.state : null;
+            const routedTermName = (dispatchInfo && dispatchInfo.terminalName) ? dispatchInfo.terminalName : null;
+            const resolvedTermName = termName || routedTermName;
+            const termData = resolvedTermName ? lastTerminals[resolvedTermName] : null;
+
+            // Status Logic
+            let isReady = false;
+            let isWorking = false;
+            let isRecoverable = false;
+
+            if (roleId === 'jules') {
+                isReady = true;
+                if (lastJulesActivePlans && lastJulesActivePlans.length > 0) {
+                    isWorking = true;
+                }
+            } else if (dispatchState === 'ready') {
+                isReady = true;
+            } else if (dispatchState === 'recoverable') {
+                isReady = true;
+                isRecoverable = true;
+            } else if (dispatchState === 'not_ready') {
+                isReady = false;
+            } else if (termData) {
+                // Check liveliness
+                const HEARTBEAT_THRESHOLD_MS = 120_000;
+                const lastSeenMs = Date.parse(termData.lastSeen || '');
+                const heartbeatAlive = !isNaN(lastSeenMs) && (Date.now() - lastSeenMs) < HEARTBEAT_THRESHOLD_MS;
+                const isAlive = termData.alive !== undefined ? termData.alive : (termData._isLocal || heartbeatAlive);
+
+                if (isAlive) {
+                    isReady = true;
+                    // For terminals, check statusState. For chat agents, check status.
+                    const currentStatus = termData.statusState || termData.status;
+                    if (currentStatus === 'working' || currentStatus === 'thinking' || currentStatus === 'active' || currentStatus === 'planning') {
+                        isWorking = true;
+                    }
+                }
+            }
+
+            // Row Header
+            const header = document.createElement('div');
+            header.className = 'row-header';
+
+            // Identity (Dot + Name)
+            const identity = document.createElement('div');
+            identity.className = 'agent-identity';
+
+            const dot = document.createElement('div');
+            dot.className = 'status-dot';
+            if (isWorking) dot.classList.add('green-pulse');
+            else if (isReady) dot.classList.add(isRecoverable ? 'orange' : 'green');
+            else dot.classList.add('red');
+
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            if (roleId !== 'jules' && lastStartupCommands[roleId]) {
+                const cmd = lastStartupCommands[roleId].trim().split(/\s+/)[0].toUpperCase();
+                name.innerText = `${label} - ${cmd} CLI`;
+            } else {
+                name.innerText = label;
+            }
+
+            identity.appendChild(dot);
+            identity.appendChild(name);
+
+            header.appendChild(identity);
+
+            if (roleId === 'jules') {
+                const locateBtn = document.createElement('button');
+                locateBtn.className = 'locate-btn';
+                locateBtn.innerText = 'locate';
+                locateBtn.onclick = () => {
+                    vscode.postMessage({ type: 'focusTerminal', terminalName: 'Jules Monitor' });
+                };
+                header.appendChild(locateBtn);
+            } else if (!hideLocate) {
+                // Locate Button
+                const locateBtn = document.createElement('button');
+                locateBtn.className = 'locate-btn';
+                locateBtn.innerText = 'locate';
+                // Disable/Hide for chat-only agents that are not locals
+                const isChatOnly = termData && termData._isChat && !termData._isLocal;
+                locateBtn.disabled = !resolvedTermName || isChatOnly;
+                if (isChatOnly) locateBtn.style.opacity = '0.3';
+
+                locateBtn.onclick = () => {
+                    if (resolvedTermName) vscode.postMessage({ type: 'focusTerminal', terminalName: resolvedTermName });
+                };
+                header.appendChild(locateBtn);
+            }
+
+            // Action Button
+            const btn = document.createElement('button');
+            btn.className = 'action-btn';
+            const pendingDispatch = isDispatchPending(roleId);
+            btn.innerText = pendingDispatch ? 'DISPATCHING...' : actionLabel;
+            btn.disabled = !isReady || pendingDispatch || !isPlanSelected();
+            btn.dataset.role = roleId;
+            btn.dataset.dispatchRole = roleId;
+            if (pendingDispatch) {
+                btn.classList.add('dispatching');
+            }
+            if (isRecoverable && dispatchInfo && dispatchInfo.source) {
+                btn.title = `Recoverable route (${dispatchInfo.source})`;
+            } else if (dispatchState === 'not_ready') {
+                btn.title = 'No executable terminal route in this window';
+            }
+
+            // Special click handlers based on role
+            btn.onclick = () => {
+                const sessionId = runSheetSelect.value;
+                if (!sessionId) return;
+                markDispatchPending(roleId);
+                getDispatchButtons(roleId).forEach((dispatchBtn) => {
+                    dispatchBtn.disabled = true;
+                });
+                btn.classList.add('dispatching');
+                btn.innerText = 'DISPATCHING...';
+
+                if (roleId === 'planner') {
+                    vscode.postMessage({ type: 'triggerAgentAction', role: 'planner', sessionFile: sessionId, instruction: 'improve-plan' });
+                } else if (roleId === 'reviewer') {
+                    vscode.postMessage({ type: 'triggerAgentAction', role: 'reviewer', sessionFile: sessionId });
+                } else if (roleId === 'coder') {
+                    // Coder: Action -> Implement
+                    vscode.postMessage({ type: 'triggerAgentAction', role: 'coder', sessionFile: sessionId });
+                } else if (roleId === 'lead') {
+                    vscode.postMessage({ type: 'triggerAgentAction', role: 'lead', sessionFile: sessionId });
+                } else if (roleId === 'jules') {
+                    vscode.postMessage({ type: 'triggerAgentAction', role: 'jules', sessionFile: sessionId, instruction: 'execute' });
+                } else {
+                    vscode.postMessage({ type: 'triggerAgentAction', role: roleId, sessionFile: sessionId });
+                }
+            };
+
+            container.appendChild(header);
+
+            if (roleId === 'jules') {
+                const julesSync = document.createElement('button');
+                julesSync.className = 'secondary-btn is-cyan w-full';
+                julesSync.id = 'jules-sync-btn';
+                julesSync.innerText = 'SYNC REPO';
+                julesSync.onclick = () => {
+                    julesSync.disabled = true;
+                    julesSync.innerText = 'SYNCING...';
+                    julesSync.classList.add('dispatching');
+                    vscode.postMessage({ type: 'airlock_syncRepo' });
+                };
+                container.appendChild(julesSync);
+
+                const syncStatus = document.createElement('div');
+                syncStatus.id = 'jules-sync-status';
+                syncStatus.style.cssText = 'padding:2px 8px; font-size:10px; color:var(--text-secondary); font-family:var(--font-mono);';
+                container.appendChild(syncStatus);
+            }
+
+            container.appendChild(btn);
+
+            if (roleId === 'jules') {
+                container.appendChild(createJulesHistoryList());
+            }
+
+            return container;
+        }
+
+        /**
+         * Returns true if roleId has an active Green-state agent.
+         * Green = dispatchState 'ready', OR terminal heartbeat alive.
+         * Does NOT count 'recoverable' (orange) or 'not_ready' (red).
+         * Jules is always green. Analyst uses the same terminal heartbeat check as other roles.
+         */
+        function isAgentGreen(roleId) {
+            // jules is a built-in cloud feature, always considered available
+            if (roleId === 'jules') return false;
+            const dispatchInfo = lastDispatchReadiness && roleId ? lastDispatchReadiness[roleId] : null;
+            const dispatchState = dispatchInfo?.state ?? null;
+            if (dispatchState === 'ready') return true;
+            if (dispatchState === 'recoverable' || dispatchState === 'not_ready') return false;
+            // Fallback: check terminal heartbeat for agents with no dispatch info
+            const HEARTBEAT_THRESHOLD_MS = 120_000;
+            const matchedTermName = Object.keys(lastTerminals).find(key => lastTerminals[key]?.role === roleId);
+            if (!matchedTermName) return false;
+            const termData = lastTerminals[matchedTermName];
+            if (!termData) return false;
+            const lastSeenMs = Date.parse(termData.lastSeen || '');
+            const heartbeatAlive = !isNaN(lastSeenMs) && (Date.now() - lastSeenMs) < HEARTBEAT_THRESHOLD_MS;
+            return termData.alive !== undefined ? !!termData.alive : (!!termData._isLocal || heartbeatAlive);
+        }
+
+        function shouldShowTeamLeadSidebarRow() {
+            if (lastVisibleAgents['team-lead'] !== true) {
+                return false;
+            }
+
+            if ((lastStartupCommands['team-lead'] || '').trim()) {
+                return true;
+            }
+
+            if (Object.keys(lastTerminals || {}).some(key => lastTerminals[key]?.role === 'team-lead')) {
+                return true;
+            }
+
+            const dispatchInfo = lastDispatchReadiness ? lastDispatchReadiness['team-lead'] : null;
+            if (!dispatchInfo) {
+                return false;
+            }
+
+            if (dispatchInfo.terminalName) {
+                return true;
+            }
+
+            return dispatchInfo.state === 'ready' || dispatchInfo.state === 'recoverable';
+        }
+
+        function renderAgentList() {
+            // Skip re-render when user is interacting with autoban dropdowns
+            if (isAutobanPanelInteracting && currentAgentTab === 'autoban') return;
+
+            // --- Onboarding Guard: show "Agents not connected" if no green agents for >5s ---
+            if (_setupComplete) {
+                const va = lastVisibleAgents;
+                // Count all visible terminal-based roles. Jules is excluded (cloud service, always available).
+                // Analyst is included — if the user has assigned a terminal to the analyst role, it counts.
+                const allRoles = [
+                    ...(va.planner !== false ? ['planner'] : []),
+                    ...(va.lead !== false ? ['lead'] : []),
+                    ...(shouldShowTeamLeadSidebarRow() ? ['team-lead'] : []),
+                    ...(va.coder !== false ? ['coder'] : []),
+                    ...(va.intern !== false ? ['intern'] : []),
+                    ...(va.reviewer !== false ? ['reviewer'] : []),
+                    ...(va.tester !== false ? ['tester'] : []),
+                    ...(va.analyst !== false ? ['analyst'] : []),
+                    ...lastCustomAgents.filter(a => va[a.role] !== false).map(a => a.role)
+                ];
+
+                if (allRoles.length > 0) {
+                    const greenCount = allRoles.filter(roleId => isAgentGreen(roleId)).length;
+
+                    if (greenCount > 0) {
+                        // Agents connected — reset detection state
+                        noAgentsDetectionTime = null;
+                        // Fall through to normal render below
+                    } else {
+                        // No green agents
+                        if (noAgentsDetectionTime === null) {
+                            noAgentsDetectionTime = Date.now();
+                        }
+                        const elapsed = Date.now() - noAgentsDetectionTime;
+                        if (elapsed < RECOVERY_THRESHOLD_MS) {
+                            // Still within grace period — keep the current display unchanged.
+                            return; // keep current display unchanged during grace period
+                        }
+                        // Grace period expired — render onboarding state
+                        agentListStandard.innerHTML = '';
+                        agentListAutoban.innerHTML = '';
+                        agentListWebai.innerHTML = '';
+
+                        // Onboarding message
+                        const onboardMsg = document.createElement('div');
+                        onboardMsg.style.cssText = 'text-align:center; padding:20px 12px; color:var(--text-secondary); font-family:var(--font-mono); font-size:11px; line-height:1.6;';
+                        onboardMsg.textContent = 'Agents not connected. Assign and open terminals in Terminal Operations below.';
+                        agentListStandard.appendChild(onboardMsg);
+
+                        // Auto-expand Terminal Operations only if user has not manually collapsed it this session
+                        if (!hasManuallyCollapsedThisSession) {
+                            const toFields = document.getElementById('terminal-operations-fields');
+                            const toChevron = document.getElementById('terminal-operations-chevron');
+                            if (toFields && toChevron && !toFields.classList.contains('open')) {
+                                // Collapse SETUP and Database Operations before auto-opening Terminal Ops
+                                collapseAllAccordions('terminal-operations-fields');
+                                toFields.classList.add('open');
+                                toChevron.classList.add('open');
+                                // Fire same messages as the toggle click handler would
+                                vscode.postMessage({ type: 'getStartupCommands' });
+                                vscode.postMessage({ type: 'getVisibleAgents' });
+                                vscode.postMessage({ type: 'getCustomAgents' });
+                                vscode.postMessage({ type: 'getJulesAutoSyncSetting' });
+                            }
+                        }
+
+                        // Restore autoban and webai panels so other tabs still work
+                        agentListAutoban.appendChild(createAutobanPanel());
+                        agentListWebai.appendChild(createClipboardImportPanel());
+                        agentListWebai.appendChild(createNotionPanel());
+                        agentListWebai.appendChild(createNotebookLMPanel());
+                        switchAgentTab(currentAgentTab);
+                        return; // skip the rest of normal renderAgentList
+                    }
+                }
+            }
+            // --- End Onboarding Guard ---
+
+            // Preserve stateful analyst input across re-renders
+            const existingInput = document.getElementById('analyst-input');
+            const analystSnapshot = {
+                value: existingInput ? existingInput.value : '',
+                focused: document.activeElement === existingInput,
+                selStart: existingInput ? existingInput.selectionStart : 0,
+                selEnd: existingInput ? existingInput.selectionEnd : 0
+            };
+
+            agentListStandard.innerHTML = '';
+            agentListAutoban.innerHTML = '';
+            agentListWebai.innerHTML = '';
+
+            // === AGENTS TAB: Planner, Lead Coder, Coder, Intern, Reviewer, Analyst ===
+            // Filter agents based on visibility preferences
+            const va = lastVisibleAgents;
+
+            // 1. Planner
+            if (va.planner !== false) {
+                agentListStandard.appendChild(createAgentRow('PLANNER', 'planner',
+                    'IMPROVE PLAN',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'planner')
+                ));
+            }
+
+            // 2. Lead Coder
+            if (va.lead !== false) {
+                agentListStandard.appendChild(createAgentRow('LEAD CODER', 'lead',
+                    'START CODING',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'lead')
+                ));
+            }
+
+            // 3. Coder
+            if (va.coder !== false) {
+                agentListStandard.appendChild(createAgentRow('CODER', 'coder',
+                    'START CODING',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'coder')
+                ));
+            }
+
+            // 3b. Intern
+            if (va.intern !== false) {
+                agentListStandard.appendChild(createAgentRow('INTERN', 'intern',
+                    'START CODING',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'intern')
+                ));
+            }
+
+            // 4. Reviewer (unchanged position)
+            if (va.reviewer !== false) {
+                agentListStandard.appendChild(createAgentRow('REVIEWER', 'reviewer',
+                    'REVIEW CODE',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'reviewer')
+                ));
+            }
+
+            if (va.tester !== false) {
+                agentListStandard.appendChild(createAgentRow('ACCEPTANCE TESTER', 'tester',
+                    'TEST REQUIREMENTS',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'tester')
+                ));
+            }
+
+            // 5. Analyst (unchanged position)
+            if (va.analyst !== false) {
+                agentListStandard.appendChild(createAnalystRow());
+                // Restore analyst input state after re-render
+                if (analystSnapshot.value || analystSnapshot.focused) {
+                    const inp = document.getElementById('analyst-input');
+                    if (inp) {
+                        inp.value = analystSnapshot.value;
+                        if (analystSnapshot.focused) {
+                            inp.focus();
+                            inp.selectionStart = analystSnapshot.selStart;
+                            inp.selectionEnd = analystSnapshot.selEnd;
+                        }
+                    }
+                }
+            }
+
+            // 5b. Team Lead
+            if (shouldShowTeamLeadSidebarRow()) {
+                agentListStandard.appendChild(createAgentRow('TEAM LEAD', 'team-lead',
+                    'START CODING',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'team-lead')
+                ));
+            }
+
+            for (const customAgent of lastCustomAgents) {
+                if (va[customAgent.role] === false) continue;
+                agentListStandard.appendChild(createAgentRow(
+                    customAgent.name.toUpperCase(),
+                    customAgent.role,
+                    'EXECUTE TASK',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === customAgent.role)
+                ));
+            }
+
+            // 6. Jules (unchanged position)
+            if (va.jules !== false) {
+                agentListStandard.appendChild(createAgentRow('JULES PARALLEL CODER', 'jules',
+                    'START CLOUD CODING',
+                    terminals => Object.keys(terminals).find(key => terminals[key].role === 'jules'),
+                    true
+                ));
+            }
+
+            // Show empty state if all agents are hidden
+            if (agentListStandard.children.length === 0) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.style.cssText = 'text-align:center; padding:20px; color:var(--text-secondary); font-family:var(--font-mono); font-size:11px;';
+                emptyMsg.textContent = 'All agents hidden. Open Setup to configure.';
+                agentListStandard.appendChild(emptyMsg);
+            }
+
+            // === AUTOBAN TAB: Kanban automation control center ===
+            agentListAutoban.appendChild(createAutobanPanel());
+
+            // === PLANNING TAB: Notion Design Doc + NotebookLM Airlock ===
+            agentListWebai.appendChild(createClipboardImportPanel());
+            agentListWebai.appendChild(createNotionPanel());
+            agentListWebai.appendChild(createNotebookLMPanel());
+
+            // Restore active tab visibility after re-render
+            switchAgentTab(currentAgentTab);
+        }
+
+        function createClipboardImportPanel() {
+            const container = document.createElement('div');
+            container.className = 'agent-row';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'row-header';
+            const identity = document.createElement('div');
+            identity.className = 'agent-identity';
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            name.style.cssText = 'color:var(--text-secondary);';
+            name.innerText = 'CLIPBOARD PLAN IMPORT';
+            identity.appendChild(name);
+            header.appendChild(identity);
+            container.appendChild(header);
+
+            // Description
+            const clipDesc = document.createElement('div');
+            clipDesc.style.cssText = 'padding:6px 8px; font-size:10px; color:var(--text-secondary); line-height:1.4;';
+            clipDesc.innerText = 'Copy AI-generated plans from NotebookLM, Claude, or Gemini, then click Import Plans below (or use the Import button in the Kanban NEW column). If multiple plans are detected with separator markers, they will be automatically split into separate plan files.';
+            container.appendChild(clipDesc);
+
+            // Preset dropdown
+            const clipDropdownRow = document.createElement('div');
+            clipDropdownRow.style.cssText = 'display:flex; gap:4px; align-items:center; padding:0 8px 4px;';
+
+            const clipDropdownLabel = document.createElement('span');
+            clipDropdownLabel.style.cssText = 'font-size:10px; color:var(--text-secondary); white-space:nowrap;';
+            clipDropdownLabel.innerText = 'Separator:';
+            clipDropdownRow.appendChild(clipDropdownLabel);
+
+            const clipDropdown = document.createElement('select');
+            clipDropdown.id = 'airlock-separator-preset';
+            clipDropdown.style.cssText = 'flex:1; font-family:var(--font-mono); font-size:10px; background:var(--bg-dim); color:var(--text-primary); border:1px solid var(--border-dim); border-radius:3px; padding:3px 4px;';
+            clipDropdownRow.appendChild(clipDropdown);
+            container.appendChild(clipDropdownRow);
+
+            // Custom pattern input (hidden by default)
+            const clipCustomRow = document.createElement('div');
+            clipCustomRow.id = 'airlock-separator-custom-row';
+            clipCustomRow.style.cssText = 'display:none; padding:0 8px 4px;';
+
+            const clipCustomInput = document.createElement('input');
+            clipCustomInput.id = 'airlock-separator-input';
+            clipCustomInput.type = 'text';
+            clipCustomInput.placeholder = '### PLAN [N] START';
+            clipCustomInput.style.cssText = 'width:100%; font-family:var(--font-mono); font-size:10px; box-sizing:border-box; background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); padding:3px 4px; border-radius:3px;';
+            clipCustomRow.appendChild(clipCustomInput);
+            container.appendChild(clipCustomRow);
+
+            // N placeholder hint
+            const clipHint = document.createElement('div');
+            clipHint.style.cssText = 'padding:0 8px 4px; font-size:9px; color:var(--text-secondary); font-family:var(--font-mono);';
+            clipHint.innerText = '[N] = auto-numbered placeholder (1, 2, 3...)';
+            container.appendChild(clipHint);
+
+            // Live preview
+            const clipPreview = document.createElement('div');
+            clipPreview.id = 'airlock-separator-preview';
+            clipPreview.style.cssText = 'margin:0 8px 8px; font-size:10px; color:var(--text-secondary); padding:6px 8px; background:var(--bg-dim); border:1px solid var(--border-dim); border-radius:4px; font-family:var(--font-mono); white-space:pre-line; line-height:1.4;';
+            container.appendChild(clipPreview);
+
+            // Error display
+            const clipError = document.createElement('div');
+            clipError.id = 'airlock-separator-error';
+            clipError.style.cssText = 'min-height:0; padding:0 8px; color:var(--accent-red); font-size:10px; font-family:var(--font-mono);';
+            container.appendChild(clipError);
+
+            // --- Helper: update preview from pattern ---
+            function updateSeparatorPreview(pattern) {
+                if (!pattern) { clipPreview.textContent = ''; return; }
+                const ex1 = pattern.replace(/\[N\]/g, '1');
+                const ex2 = pattern.replace(/\[N\]/g, '2');
+                clipPreview.textContent = 'Preview matches:\n' + ex1 + '\n' + ex2;
+            }
+
+            // --- Event: dropdown change ---
+            clipDropdown.addEventListener('change', () => {
+                const key = clipDropdown.value;
+                clipCustomRow.style.display = key === 'custom' ? 'block' : 'none';
+                clipError.textContent = '';
+                vscode.postMessage({ type: 'setClipboardSeparatorPreset', preset: key });
+                const opt = clipDropdown.options[clipDropdown.selectedIndex];
+                if (key !== 'custom' && opt.dataset.pattern) {
+                    updateSeparatorPreview(opt.dataset.pattern);
+                }
+            });
+
+            // --- Event: custom input change ---
+            clipCustomInput.addEventListener('change', () => {
+                clipError.textContent = '';
+                vscode.postMessage({ type: 'setClipboardSeparatorPattern', pattern: clipCustomInput.value });
+                updateSeparatorPreview(clipCustomInput.value);
+            });
+
+            // --- Helper text above Copy Agent Prompt button ---
+            const copyPromptHint = document.createElement('div');
+            copyPromptHint.style.cssText = 'padding:0 8px 4px; font-size:10px; color:var(--text-secondary); line-height:1.4;';
+            copyPromptHint.innerText = 'Click below to copy a prompt you can paste to any AI. This tells the AI to format multiple plans with the correct separators for automatic import.';
+            container.appendChild(copyPromptHint);
+
+            // --- Copy Agent Prompt button ---
+            const copyPromptBtn = document.createElement('button');
+            copyPromptBtn.className = 'secondary-btn';
+            copyPromptBtn.style.cssText = 'width:calc(100% - 16px); margin:0 8px 4px;';
+            copyPromptBtn.innerText = 'COPY AGENT PROMPT';
+            copyPromptBtn.onclick = () => {
+                const currentPattern = clipDropdown.value === 'custom'
+                    ? clipCustomInput.value || '### PLAN [N] START'
+                    : (clipDropdown.options[clipDropdown.selectedIndex]?.dataset?.pattern || '### PLAN [N] START');
+                const ex1 = currentPattern.replace(/\[N\]/g, '1');
+                const ex2 = currentPattern.replace(/\[N\]/g, '2');
+                const prompt = `Please output all features/plans as a single markdown block with each plan separated by this exact format:\n\n${ex1}\n[plan 1 content here]\n\n${ex2}\n[plan 2 content here]\n\n[etc...]\n\nEach plan should have its own H1 title (# Plan Title) and full content. I will copy the entire block and import it into my planning system which will automatically split it into separate plan files.`;
+                navigator.clipboard.writeText(prompt).then(() => {
+                    copyPromptBtn.innerText = 'COPIED';
+                    setTimeout(() => { copyPromptBtn.innerText = 'COPY AGENT PROMPT'; }, 2000);
+                });
+            };
+            container.appendChild(copyPromptBtn);
+
+            // --- Import Plans button ---
+            const importPlansBtn = document.createElement('button');
+            importPlansBtn.className = 'secondary-btn is-teal';
+            importPlansBtn.style.cssText = 'width:calc(100% - 16px); margin:0 8px 8px;';
+            importPlansBtn.innerText = 'IMPORT PLANS';
+            importPlansBtn.onclick = () => {
+                vscode.postMessage({ type: 'importPlansFromClipboard' });
+            };
+            container.appendChild(importPlansBtn);
+
+            // --- Request initial separator state ---
+            vscode.postMessage({ type: 'getClipboardSeparatorPattern' });
+
+            return container;
+        }
+
+        function createNotionPanel() {
+            const container = document.createElement('div');
+            container.className = 'agent-row';
+            container.dataset.panel = 'notion';
+
+            const header = document.createElement('div');
+            header.className = 'row-header';
+            const identity = document.createElement('div');
+            identity.className = 'agent-identity';
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            name.style.cssText = 'color:var(--text-secondary);';
+            name.innerText = 'NOTION DESIGN DOC';
+            identity.appendChild(name);
+            header.appendChild(identity);
+            container.appendChild(header);
+
+            const desc1 = document.createElement('div');
+            desc1.style.cssText = 'padding:6px 8px 4px; font-size:10px; color:var(--text-secondary); line-height:1.4;';
+            desc1.innerText = 'Fetch a Notion page and embed its full content in every planner prompt. The page is cached locally—no MCP call at prompt time.';
+            container.appendChild(desc1);
+
+            const desc2 = document.createElement('div');
+            desc2.style.cssText = 'padding:0 8px 8px; font-size:10px; color:var(--text-secondary); line-height:1.4;';
+            desc2.innerText = 'As an alternative, you can link a regular URL or a local file path. These provide foundational context for planning decisions, appended as a reference link.';
+            container.appendChild(desc2);
+
+            const urlRow = document.createElement('div');
+            urlRow.style.cssText = 'padding:0 8px 4px;';
+            const urlInput = document.createElement('input');
+            urlInput.id = 'notion-url-input';
+            urlInput.type = 'text';
+            urlInput.placeholder = 'https://notion.so/... or /path/to/design.md';
+            urlInput.style.cssText = 'width:100%; box-sizing:border-box; font-family:var(--font-mono); font-size:10px; background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); padding:3px 4px; border-radius:3px;';
+            urlInput.value = lastDesignDocLink;
+            urlRow.appendChild(urlInput);
+            container.appendChild(urlRow);
+
+            const syncRow = document.createElement('div');
+            syncRow.id = 'notion-sync-row';
+            syncRow.style.cssText = 'display:none; align-items:center; gap:8px; padding:0 8px 4px;';
+
+            const syncBtn = document.createElement('button');
+            syncBtn.id = 'notion-sync-btn';
+            syncBtn.style.cssText = 'font-size:11px; padding:3px 8px; cursor:pointer; white-space:nowrap;';
+            syncBtn.innerText = 'Sync from Notion';
+
+            const syncStatus = document.createElement('span');
+            syncStatus.id = 'notion-sync-status';
+            syncStatus.style.cssText = 'font-size:10px; color:var(--text-secondary); font-family:var(--font-mono);';
+            syncStatus.textContent = 'Not synced';
+
+            syncRow.appendChild(syncBtn);
+            syncRow.appendChild(syncStatus);
+            container.appendChild(syncRow);
+
+            const sizeWarn = document.createElement('div');
+            sizeWarn.id = 'notion-size-warning';
+            sizeWarn.style.cssText = 'display:none; padding:0 8px 4px; font-size:10px; color:var(--accent-orange); font-family:var(--font-mono);';
+            container.appendChild(sizeWarn);
+
+            function isNotionUrl(val) {
+                return val && (val.includes('notion.so') || val.includes('notion.site'));
+            }
+
+            function updateSyncRowVisibility(val) {
+                syncRow.style.display = isNotionUrl(val) ? 'flex' : 'none';
+            }
+
+            function updateConfigStatusLine(url) {
+                const sl = document.getElementById('design-doc-status-line');
+                if (!sl) { return; }
+                sl.textContent = url
+                    ? `Source: ${url.length > 60 ? url.slice(0, 57) + '...' : url}`
+                    : 'Not configured — configure in Planning tab';
+            }
+
+            updateSyncRowVisibility(urlInput.value);
+
+            let urlDebounce = null;
+            urlInput.addEventListener('input', () => {
+                clearTimeout(urlDebounce);
+                urlDebounce = setTimeout(() => {
+                    const val = urlInput.value.trim();
+                    lastDesignDocLink = val;
+                    updateSyncRowVisibility(val);
+                    updateConfigStatusLine(val);
+
+                    if (isNotionUrl(val) && lastNotionSyncedUrl && val !== lastNotionSyncedUrl) {
+                        syncStatus.textContent = 'URL changed — sync required';
+                        syncStatus.style.color = 'var(--accent-orange)';
+                    }
+
+                    vscode.postMessage({ type: 'setDesignDocUrl', url: val });
+                }, 400);
+            });
+
+            let lastNotionSyncedUrl = null;
+            syncBtn.addEventListener('click', () => {
+                const url = urlInput.value.trim();
+                if (!url) { return; }
+                syncBtn.disabled = true;
+                syncBtn.innerText = '⏳ Syncing...';
+                syncStatus.textContent = 'Fetching...';
+                syncStatus.style.color = 'var(--text-secondary)';
+                vscode.postMessage({ type: 'fetchNotionContent', url });
+            });
+
+            container._handleNotionFetchState = function(msg) {
+                syncBtn.disabled = false;
+                syncBtn.innerText = 'Sync from Notion';
+
+                if (msg.error) {
+                    syncStatus.textContent = `⚠️ ${msg.error}`;
+                    syncStatus.style.color = 'var(--accent-orange)';
+                    return;
+                }
+
+                if (msg.syncedAt) {
+                    lastNotionSyncedUrl = msg.pageUrl || null;
+                    const ago = _relativeTime(new Date(msg.syncedAt));
+                    syncStatus.textContent = `✅ Synced ${ago}${msg.pageTitle ? ` — ${msg.pageTitle}` : ''}`;
+                    syncStatus.style.color = 'var(--text-secondary)';
+                    updateConfigStatusLine(msg.pageUrl || urlInput.value.trim());
+                }
+
+                if (msg.charCount && msg.charCount > 40000) {
+                    sizeWarn.style.display = 'block';
+                    sizeWarn.textContent = `⚠️ Content is large (${(msg.charCount / 1000).toFixed(0)}k chars). Consider linking a shorter summary page.`;
+                } else {
+                    sizeWarn.style.display = 'none';
+                }
+            };
+
+            vscode.postMessage({ type: 'getNotionFetchState' });
+
+            return container;
+        }
+
+        function createNotebookLMPanel() {
+            const container = document.createElement('div');
+            container.className = 'agent-row';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'row-header';
+            const identity = document.createElement('div');
+            identity.className = 'agent-identity';
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            name.style.cssText = 'color:var(--text-secondary);';
+            name.innerText = 'NOTEBOOKLM';
+            identity.appendChild(name);
+            header.appendChild(identity);
+            container.appendChild(header);
+
+            // Intro
+            const intro = document.createElement('div');
+            intro.style.cssText = 'padding:6px 8px; font-size:10px; color:var(--text-secondary); font-family:var(--font-mono); line-height:1.5;';
+            intro.innerText = 'The Airlock allows you to upload all your code into NotebookLM to access unlimited Gemini quota for planning features and diagnosing bugs.';
+            container.appendChild(intro);
+
+            // Status line (used for bundle export feedback)
+            const statusLine = document.createElement('div');
+            statusLine.id = 'webai-status';
+            statusLine.style.cssText = 'padding:2px 8px; font-size:10px; color:var(--text-secondary); font-family:var(--font-mono);';
+            container.appendChild(statusLine);
+
+            // Step 1: Bundle Code
+            const s1Header = document.createElement('div');
+            s1Header.style.cssText = 'padding:8px 8px 2px; font-size:9px; color:var(--text-secondary); font-family:var(--font-mono); letter-spacing:1px;';
+            s1Header.innerText = '1. BUNDLE CODE';
+            container.appendChild(s1Header);
+
+            const s1Desc = document.createElement('div');
+            s1Desc.style.cssText = 'padding:0 8px 6px; font-size:10px; color:var(--text-secondary);';
+            s1Desc.innerText = 'Package code into docx files for NotebookLM compatibility.';
+            container.appendChild(s1Desc);
+
+            const exportBtn = document.createElement('button');
+            exportBtn.className = 'secondary-btn is-teal';
+            exportBtn.id = 'webai-export-btn';
+            exportBtn.style.cssText = 'width:calc(100% - 16px); margin:0 8px 8px;';
+            exportBtn.innerText = 'BUNDLE CODE';
+            exportBtn.onclick = () => {
+                exportBtn.disabled = true;
+                exportBtn.innerText = 'BUNDLING...';
+                exportBtn.classList.add('dispatching');
+                vscode.postMessage({ type: 'airlock_export' });
+            };
+            container.appendChild(exportBtn);
+
+            // Step 2: Upload to NotebookLM
+            const s2Header = document.createElement('div');
+            s2Header.style.cssText = 'padding:8px 8px 2px; font-size:9px; color:var(--text-secondary); font-family:var(--font-mono); letter-spacing:1px;';
+            s2Header.innerText = '2. UPLOAD TO NOTEBOOKLM';
+            container.appendChild(s2Header);
+
+            const s2Desc = document.createElement('div');
+            s2Desc.style.cssText = 'padding:0 8px 6px; font-size:10px; color:var(--text-secondary);';
+            s2Desc.innerText = 'Create new Notebook and upload all files in the airlock folder as sources';
+            container.appendChild(s2Desc);
+
+            const s2BtnRow = document.createElement('div');
+            s2BtnRow.style.cssText = 'display:flex; gap:8px; padding:0 8px 8px;';
+
+            const openNotebookBtn = document.createElement('button');
+            openNotebookBtn.className = 'secondary-btn is-teal';
+            openNotebookBtn.style.flex = '1';
+            openNotebookBtn.style.minWidth = '0';
+            openNotebookBtn.innerText = 'OPEN NOTEBOOKLM';
+            openNotebookBtn.onclick = () => {
+                vscode.postMessage({ type: 'airlock_openNotebookLM' });
+            };
+            s2BtnRow.appendChild(openNotebookBtn);
+
+            const openFolderBtn = document.createElement('button');
+            openFolderBtn.className = 'secondary-btn';
+            openFolderBtn.style.flex = '1';
+            openFolderBtn.style.minWidth = '0';
+            openFolderBtn.innerText = 'OPEN FOLDER';
+            openFolderBtn.onclick = () => {
+                vscode.postMessage({ type: 'airlock_openFolder' });
+            };
+            s2BtnRow.appendChild(openFolderBtn);
+
+            container.appendChild(s2BtnRow);
+
+            // Step 3: Copy Sprint Planning Prompt
+            // NOTE: This button reads 'airlock-separator-preset' and 'airlock-separator-input'
+            // via getElementById — those elements live in createClipboardImportPanel().
+            // This cross-panel dependency works because both panels share the same webview DOM.
+            const s3Header = document.createElement('div');
+            s3Header.style.cssText = 'padding:8px 8px 2px; font-size:9px; color:var(--text-secondary); font-family:var(--font-mono); letter-spacing:1px;';
+            s3Header.innerText = '3. COPY SPRINT PLANNING PROMPT';
+            container.appendChild(s3Header);
+
+            const s3Desc = document.createElement('div');
+            s3Desc.style.cssText = 'padding:0 8px 6px; font-size:10px; color:var(--text-secondary);';
+            s3Desc.innerText = 'Generate a prompt for NotebookLM to create detailed implementation plans for all plans in the NEW column.';
+            container.appendChild(s3Desc);
+
+            const copySprintBtn = document.createElement('button');
+            copySprintBtn.className = 'secondary-btn';
+            copySprintBtn.style.cssText = 'width:calc(100% - 16px); margin:0 8px 8px;';
+            copySprintBtn.innerText = 'COPY SPRINT PROMPT';
+            copySprintBtn.onclick = () => {
+                const dd = document.getElementById('airlock-separator-preset');
+                const ci = document.getElementById('airlock-separator-input');
+                let sepPattern = '### PLAN [N] START';
+                if (dd) {
+                    if (dd.value === 'custom' && ci) {
+                        sepPattern = ci.value || sepPattern;
+                    } else {
+                        const opt = dd.options[dd.selectedIndex];
+                        if (opt && opt.dataset.pattern) sepPattern = opt.dataset.pattern;
+                    }
+                }
+                const ex1 = sepPattern.replace(/\[N\]/g, '1');
+                const ex2 = sepPattern.replace(/\[N\]/g, '2');
+                const prompt = `Review the "new_column_plans.md" file in the uploaded sources. For each plan listed:\n\n1. Read the "how_to_plan.md" guide to understand the planning framework\n2. Generate a highly detailed implementation plan following the guide's structure\n3. Include:\n   - Specific file paths and line numbers\n   - Step-by-step implementation instructions\n   - Dependencies and potential conflicts\n   - Complexity audit (Routine / Complex classification)\n   - Verification steps\n\n**IMPORTANT - Multi-Plan Format:**\nWhen generating multiple plans in a single response, you MUST use plan markers to delimit each plan. This enables automatic import into Switchboard:\n\n- Before each plan, add a marker line: ${ex1} (where N is the plan number)\n- The plan's H1 title should immediately follow the marker\n- Example:\n  ${ex1}\n  \n  # First Plan Title\n  [plan content...]\n  \n  ${ex2}\n  \n  # Second Plan Title\n  [plan content...]\n\nWork through all plans in the list, using the marker format above.`;
+                navigator.clipboard.writeText(prompt).then(() => {
+                    copySprintBtn.innerText = '\u2713 COPIED';
+                    setTimeout(() => { copySprintBtn.innerText = 'COPY SPRINT PROMPT'; }, 2000);
+                });
+            };
+            container.appendChild(copySprintBtn);
+
+            // Step 4: Import plans from notebook
+            const s4Header = document.createElement('div');
+            s4Header.style.cssText = 'padding:8px 8px 2px; font-size:9px; color:var(--text-secondary); font-family:var(--font-mono); letter-spacing:1px;';
+            s4Header.innerText = '4. IMPORT PLANS FROM NOTEBOOK';
+            container.appendChild(s4Header);
+
+            const s4Desc = document.createElement('div');
+            s4Desc.style.cssText = 'padding:0 8px 6px; font-size:10px; color:var(--text-secondary);';
+            s4Desc.innerText = 'After NotebookLM generates the detailed plans, copy the entire response. In the Kanban view, click the [\u22EF] "Import plan from clipboard" button in the NEW column header. If multiple plans with markers are detected, they will be automatically split into separate plan files.';
+            container.appendChild(s4Desc);
+
+            return container;
+        }
+
+        function createJulesHistoryList() {
+            const container = document.createElement('div');
+            container.className = 'jules-history';
+            // Defensive filter: exclude completed sessions from UI (backend should already filter, but this ensures immediate UI responsiveness)
+            const sessions = (lastJulesSessions || [])
+                .filter(session => session && typeof session.planName === 'string' && session.planName.trim().length > 0)
+                .filter(session => {
+                    const status = session.switchboardStatus;
+                    return status !== 'Completed' && status !== 'Completed (No Changes)';
+                })
+                .slice(0, 15);
+            if (sessions.length === 0) return container;
+
+            for (const session of sessions) {
+                const item = document.createElement('div');
+                item.className = 'jules-history-item';
+                const name = session.planName.trim();
+                const status = session.switchboardStatus || session.julesStatus || 'Unknown';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'jules-history-name';
+                nameSpan.innerText = name;
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'jules-history-status';
+                statusSpan.innerText = status;
+                item.appendChild(nameSpan);
+                item.appendChild(statusSpan);
+                item.title = `Session: ${session.sessionId || 'unknown'}`;
+                container.appendChild(item);
+            }
+            return container;
+        }
+
+        function createAutobanPanel() {
+            const container = document.createElement('div');
+            container.style.cssText = 'padding: 8px; display: flex; flex-direction: column; gap: 12px;';
+            const autobanSelectStyle = 'background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); font-family:var(--font-mono); font-size:10px; padding:2px 4px; border-radius:3px;';
+            const autobanNumberInputStyle = 'width:56px; background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); font-family:var(--font-mono); font-size:10px; padding:2px 4px; border-radius:3px; text-align:center;';
+            const chipStyle = 'display:inline-flex; align-items:center; gap:4px; border:1px solid var(--border-color); border-radius:999px; padding:1px 6px; font-size:9px; color:var(--text-secondary);';
+            const smallButtonStyle = 'background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); font-family:var(--font-mono); font-size:9px; padding:3px 6px; border-radius:4px; cursor:pointer;';
+            const guardInteraction = (el) => {
+                el.addEventListener('focus', () => { isAutobanPanelInteracting = true; });
+                el.addEventListener('blur', () => { isAutobanPanelInteracting = false; });
+            };
+            const autobanRoles = [
+                { role: 'planner', label: 'Planner' },
+                { role: 'intern', label: 'Intern' },
+                { role: 'coder', label: 'Coder' },
+                { role: 'lead', label: 'Lead Coder' },
+                { role: 'reviewer', label: 'Reviewer' },
+                ...lastCustomAgents
+                    .filter(agent => agent.includeInKanban === true)
+                    .map(agent => ({ role: agent.role, label: agent.name }))
+            ];
+
+            const getAutobanRuleIdSuffix = (column) => column.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            const columnTransitions = [
+                { column: 'CREATED', label: 'CREATED -> PLAN REVIEWED', defaultMin: 10, floorPerPlan: 3 },
+                { column: 'PLAN REVIEWED', label: 'PLAN REVIEWED -> INTERN/CODER/LEAD', defaultMin: 20, floorPerPlan: 5 },
+                { column: 'INTERN CODED', label: 'INTERN CODED -> CODE REVIEWED', defaultMin: 15, floorPerPlan: 4 },
+                { column: 'LEAD CODED', label: 'LEAD CODED -> CODE REVIEWED', defaultMin: 15, floorPerPlan: 4 },
+                { column: 'CODER CODED', label: 'CODER CODED -> CODE REVIEWED', defaultMin: 15, floorPerPlan: 4 }
+            ];
+
+            const resolveTerminalLiveness = (terminalName) => {
+                const terminal = lastTerminals[terminalName];
+                if (!terminal) {
+                    return { terminal: null, alive: false };
+                }
+                const heartbeatThresholdMs = 60_000;
+                const lastSeenMs = Date.parse(terminal.lastSeen || '');
+                const heartbeatAlive = !isNaN(lastSeenMs) && (Date.now() - lastSeenMs) < heartbeatThresholdMs;
+                const alive = terminal.alive !== undefined ? terminal.alive : (terminal._isLocal || heartbeatAlive);
+                return { terminal, alive: !!alive };
+            };
+
+            const getRolePoolEntries = (role) => {
+                const configuredPool = Array.isArray(autobanState.terminalPools?.[role]) ? autobanState.terminalPools[role].filter(Boolean) : [];
+                const managedPool = new Set(Array.isArray(autobanState.managedTerminalPools?.[role]) ? autobanState.managedTerminalPools[role] : []);
+                const aliveRoleTerminals = Object.keys(lastTerminals)
+                    .filter(name => lastTerminals[name] && lastTerminals[name].role === role)
+                    .filter(name => resolveTerminalLiveness(name).alive)
+                    .sort((a, b) => a.localeCompare(b));
+                const alivePrimaryRoleTerminals = aliveRoleTerminals
+                    .filter(name => String(lastTerminals[name]?.purpose || '').trim().toLowerCase() !== 'autoban-backup');
+                const effectivePool = (
+                    configuredPool.length > 0
+                        ? configuredPool.filter(name => aliveRoleTerminals.includes(name))
+                        : alivePrimaryRoleTerminals
+                ).slice(0, 5);
+                return effectivePool.map(name => {
+                    const status = resolveTerminalLiveness(name);
+                    const count = Number(autobanState.sendCounts?.[name] || 0);
+                    return {
+                        name,
+                        count,
+                        max: Number(autobanState.maxSendsPerTerminal || 10),
+                        managed: managedPool.has(name),
+                        alive: status.alive,
+                        terminal: status.terminal,
+                        exhausted: count >= Number(autobanState.maxSendsPerTerminal || 10)
+                    };
+                });
+            };
+
+            const automationRulesHeader = document.createElement('div');
+            automationRulesHeader.style.cssText = 'padding:0 8px; font-family:var(--font-mono); font-size:9px; color:var(--text-secondary); letter-spacing:1.5px; margin-bottom:8px;';
+            automationRulesHeader.textContent = 'AUTOMATION RULES';
+            container.appendChild(automationRulesHeader);
+
+            const batchRow = document.createElement('div');
+            batchRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:0 8px; font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);';
+
+            const batchLabel = document.createElement('span');
+            batchLabel.textContent = 'MAX BATCH SIZE:';
+
+            const batchSelect = document.createElement('select');
+            batchSelect.style.cssText = autobanSelectStyle;
+            guardInteraction(batchSelect);
+            const AUTOBAN_BATCH_SIZE_OPTIONS = [1, 2, 3, 4, 5];
+            AUTOBAN_BATCH_SIZE_OPTIONS.forEach(val => {
+                const opt = document.createElement('option');
+                opt.value = String(val);
+                opt.textContent = String(val);
+                if (val === autobanState.batchSize) opt.selected = true;
+                batchSelect.appendChild(opt);
+            });
+            batchSelect.addEventListener('change', () => {
+                autobanState.batchSize = parseInt(batchSelect.value, 10) || 3;
+                emitAutobanState();
+            });
+
+            batchRow.appendChild(batchLabel);
+            batchRow.appendChild(batchSelect);
+            container.appendChild(batchRow);
+
+            const complexityRow = document.createElement('div');
+            complexityRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:0 8px; font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);';
+
+            const complexityLabel = document.createElement('span');
+            complexityLabel.textContent = 'COMPLEXITY:';
+
+            const complexitySelect = document.createElement('select');
+            complexitySelect.style.cssText = autobanSelectStyle;
+            guardInteraction(complexitySelect);
+            [
+                { value: 'all', label: 'All' },
+                { value: 'low_and_below', label: 'Low and below (1-4)' },
+                { value: 'medium_and_below', label: 'Medium and below (1-6)' },
+                { value: 'medium_and_above', label: 'Medium and above (5-10)' },
+                { value: 'high_and_above', label: 'High and above (7-10)' }
+            ].forEach(({ value, label }) => {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = label;
+                if (value === autobanState.complexityFilter) opt.selected = true;
+                complexitySelect.appendChild(opt);
+            });
+            complexitySelect.title = 'Unknown complexity is treated as High (8). Low and below excludes Unknown.';
+            complexitySelect.addEventListener('change', () => {
+                autobanState.complexityFilter = complexitySelect.value || 'all';
+                emitAutobanState();
+            });
+
+            complexityRow.appendChild(complexityLabel);
+            complexityRow.appendChild(complexitySelect);
+            container.appendChild(complexityRow);
+
+            const routingRow = document.createElement('div');
+            routingRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:0 8px; font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);';
+
+            const routingLabel = document.createElement('span');
+            routingLabel.textContent = 'ROUTING:';
+
+            const routingSelect = document.createElement('select');
+            routingSelect.style.cssText = autobanSelectStyle;
+            guardInteraction(routingSelect);
+            [
+                { value: 'dynamic', label: 'Dynamic' },
+                { value: 'all_coder', label: 'All -> Coder' },
+                { value: 'all_lead', label: 'All -> Lead' }
+            ].forEach(({ value, label }) => {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = label;
+                if (value === autobanState.routingMode) opt.selected = true;
+                routingSelect.appendChild(opt);
+            });
+            routingSelect.addEventListener('change', () => {
+                autobanState.routingMode = routingSelect.value || 'dynamic';
+                emitAutobanState();
+            });
+
+            routingRow.appendChild(routingLabel);
+            routingRow.appendChild(routingSelect);
+            container.appendChild(routingRow);
+
+            const maxSendsRow = document.createElement('div');
+            maxSendsRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:0 8px; font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);';
+
+            const maxSendsLabel = document.createElement('span');
+            maxSendsLabel.textContent = 'MAX SENDS / TERMINAL:';
+
+            const maxSendsInput = document.createElement('input');
+            maxSendsInput.type = 'number';
+            maxSendsInput.min = '1';
+            maxSendsInput.max = '100';
+            maxSendsInput.value = String(Number(autobanState.maxSendsPerTerminal || 10));
+            maxSendsInput.style.cssText = autobanNumberInputStyle;
+            guardInteraction(maxSendsInput);
+            maxSendsInput.addEventListener('change', () => {
+                const value = Math.max(1, Math.min(100, parseInt(maxSendsInput.value, 10) || 10));
+                autobanState.maxSendsPerTerminal = value;
+                maxSendsInput.value = String(value);
+                vscode.postMessage({ type: 'updateAutobanMaxSends', maxSendsPerTerminal: value });
+                isAutobanPanelInteracting = false;
+                renderAgentList();
+            });
+
+            const sessionCapBadge = document.createElement('span');
+            sessionCapBadge.style.cssText = chipStyle;
+            sessionCapBadge.textContent = 'SESSION ' + Number(autobanState.sessionSendCount || 0) + '/' + Number(autobanState.globalSessionCap || 200);
+
+            maxSendsRow.appendChild(maxSendsLabel);
+            maxSendsRow.appendChild(maxSendsInput);
+            maxSendsRow.appendChild(sessionCapBadge);
+            container.appendChild(maxSendsRow);
+
+            const sep = document.createElement('div');
+            sep.style.cssText = 'border-top:1px solid var(--border-color); margin:4px 0;';
+            container.appendChild(sep);
+
+            const rulesHeader = document.createElement('div');
+            rulesHeader.style.cssText = 'padding:0 8px; font-family:var(--font-mono); font-size:9px; color:var(--text-secondary); letter-spacing:1.5px;';
+            rulesHeader.textContent = 'COLUMN RULES';
+            container.appendChild(rulesHeader);
+
+            const timingExplanation = document.createElement('div');
+            timingExplanation.style.cssText = 'padding:8px 12px; font-size:11px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4;';
+            timingExplanation.textContent = 'Specify the time delay between advancing each plan to the next stage. Lower intervals require more backup terminals to avoid overwhelming each agent.';
+            container.appendChild(timingExplanation);
+
+            columnTransitions.forEach(({ column, label, defaultMin, floorPerPlan }) => {
+                const idSuffix = getAutobanRuleIdSuffix(column);
+                const rule = autobanState.rules[column] || { enabled: true, intervalMinutes: defaultMin };
+                const ruleRow = document.createElement('div');
+                ruleRow.style.cssText = 'display:flex; align-items:center; gap:6px; padding:4px 8px; font-family:var(--font-mono); font-size:10px;';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = rule.enabled;
+                checkbox.style.cssText = 'accent-color:var(--accent-teal); cursor:pointer;';
+                checkbox.addEventListener('change', () => {
+                    if (!autobanState.rules[column]) {
+                        autobanState.rules[column] = { enabled: true, intervalMinutes: defaultMin };
+                    }
+                    autobanState.rules[column].enabled = checkbox.checked;
+                    emitAutobanState();
+                });
+
+                const ruleLbl = document.createElement('span');
+                ruleLbl.style.cssText = 'color:var(--text-primary); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+                ruleLbl.textContent = label;
+
+                const everyLbl = document.createElement('span');
+                everyLbl.style.cssText = 'color:var(--text-secondary);';
+                everyLbl.textContent = 'every';
+
+                const minInput = document.createElement('input');
+                minInput.type = 'number';
+                minInput.min = '1';
+                minInput.max = '60';
+                minInput.id = 'interval-input-' + idSuffix;
+                minInput.value = String(rule.intervalMinutes);
+                minInput.style.cssText = 'width:40px; background:var(--panel-bg2); border:1px solid var(--border-color); color:var(--text-primary); font-family:var(--font-mono); font-size:10px; padding:2px 4px; border-radius:3px; text-align:center;';
+                guardInteraction(minInput);
+                minInput.addEventListener('change', () => {
+                    if (!autobanState.rules[column]) {
+                        autobanState.rules[column] = { enabled: true, intervalMinutes: defaultMin };
+                    }
+                    const val = Math.max(1, parseInt(minInput.value, 10) || defaultMin);
+                    autobanState.rules[column].intervalMinutes = val;
+                    minInput.value = String(val);
+                    emitAutobanState();
+                });
+
+                const minLbl = document.createElement('span');
+                minLbl.style.cssText = 'color:var(--text-secondary);';
+                minLbl.textContent = 'min';
+
+                ruleRow.appendChild(checkbox);
+                ruleRow.appendChild(ruleLbl);
+                ruleRow.appendChild(everyLbl);
+                ruleRow.appendChild(minInput);
+                ruleRow.appendChild(minLbl);
+                container.appendChild(ruleRow);
+            });
+
+            const poolSep = document.createElement('div');
+            poolSep.style.cssText = 'border-top:1px solid var(--border-color); margin:4px 0;';
+            container.appendChild(poolSep);
+
+            const poolsHeader = document.createElement('div');
+            poolsHeader.style.cssText = 'padding:0 8px; font-family:var(--font-mono); font-size:9px; color:var(--text-secondary); letter-spacing:1.5px;';
+            poolsHeader.textContent = 'TERMINAL POOLS';
+            container.appendChild(poolsHeader);
+
+            const poolsHelp = document.createElement('div');
+            poolsHelp.style.cssText = 'padding:0 8px; font-family:var(--font-mono); font-size:9px; color:var(--text-secondary); line-height:1.4;';
+            poolsHelp.textContent = 'Autoban rotates across the stored pool for each role. Backup terminals created here are kept until you remove or reset them.';
+            container.appendChild(poolsHelp);
+
+            autobanRoles.forEach(({ role, label }) => {
+                const poolEntries = getRolePoolEntries(role);
+                const roleBlock = document.createElement('div');
+                roleBlock.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:6px 8px; border:1px solid var(--border-color); border-radius:6px; background:var(--panel-bg2);';
+
+                const roleHeader = document.createElement('div');
+                roleHeader.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;';
+
+                const roleTitleWrap = document.createElement('div');
+                roleTitleWrap.style.cssText = 'display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 auto; overflow:hidden;';
+
+                const roleTitle = document.createElement('span');
+                roleTitle.style.cssText = 'font-family:var(--font-mono); font-size:10px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:1; min-width:0;';
+                roleTitle.textContent = label;
+
+                const roleCapacity = document.createElement('span');
+                roleCapacity.style.cssText = chipStyle + ' flex-shrink:0;';
+                roleCapacity.textContent = 'POOL ' + poolEntries.length + '/5';
+
+                roleTitleWrap.appendChild(roleTitle);
+                roleTitleWrap.appendChild(roleCapacity);
+
+                const addButton = document.createElement('button');
+                addButton.className = 'action-btn';
+                addButton.style.cssText = 'padding:3px 8px; font-size:9px; flex-shrink:0;';
+                addButton.textContent = 'ADD TERMINAL';
+                addButton.disabled = poolEntries.length >= 5;
+                addButton.addEventListener('click', () => {
+                    vscode.postMessage({ type: 'addAutobanTerminal', role });
+                });
+
+                roleHeader.appendChild(roleTitleWrap);
+                roleHeader.appendChild(addButton);
+                roleBlock.appendChild(roleHeader);
+
+                if (poolEntries.length === 0) {
+                    const emptyState = document.createElement('div');
+                    emptyState.style.cssText = 'font-family:var(--font-mono); font-size:9px; color:var(--text-secondary);';
+                    emptyState.textContent = 'No live terminals available for this role yet.';
+                    roleBlock.appendChild(emptyState);
+                } else {
+                    poolEntries.forEach(entry => {
+                        const terminalRow = document.createElement('div');
+                        terminalRow.style.cssText = 'display:flex; align-items:center; gap:6px; justify-content:space-between; flex-wrap:wrap;';
+
+                        const left = document.createElement('div');
+                        left.style.cssText = 'display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap;';
+
+                        const nameSpan = document.createElement('span');
+                        nameSpan.style.cssText = 'font-family:var(--font-mono); font-size:10px; color:var(--text-primary);';
+                        nameSpan.textContent = entry.name;
+
+                        const usageBadge = document.createElement('span');
+                        usageBadge.style.cssText = chipStyle + (entry.exhausted ? ' border-color:var(--accent-red, #e55); color:var(--accent-red, #e55);' : '');
+                        usageBadge.textContent = entry.count + '/' + entry.max;
+
+                        const statusBadge = document.createElement('span');
+                        statusBadge.style.cssText = chipStyle + (entry.alive ? '' : ' border-color:var(--accent-red, #e55); color:var(--accent-red, #e55);');
+                        statusBadge.textContent = entry.alive ? (entry.exhausted ? 'EXHAUSTED' : 'READY') : 'OFFLINE';
+
+                        const kindBadge = document.createElement('span');
+                        kindBadge.style.cssText = chipStyle;
+                        kindBadge.textContent = entry.managed ? 'BACKUP' : 'PRIMARY';
+
+                        left.appendChild(nameSpan);
+                        left.appendChild(usageBadge);
+                        left.appendChild(statusBadge);
+                        left.appendChild(kindBadge);
+
+                        const right = document.createElement('div');
+                        right.style.cssText = 'display:flex; align-items:center; gap:6px;';
+
+                        if (entry.terminal) {
+                            const focusButton = document.createElement('button');
+                            focusButton.style.cssText = smallButtonStyle;
+                            focusButton.textContent = 'FOCUS';
+                            focusButton.addEventListener('click', () => {
+                                vscode.postMessage({ type: 'focusTerminal', terminalName: entry.name });
+                            });
+                            right.appendChild(focusButton);
+                        }
+
+                        if (entry.managed) {
+                            const removeButton = document.createElement('button');
+                            removeButton.style.cssText = smallButtonStyle + ' color:var(--accent-red, #e55);';
+                            removeButton.textContent = 'REMOVE';
+                            removeButton.addEventListener('click', () => {
+                                vscode.postMessage({ type: 'removeAutobanTerminal', role, terminalName: entry.name });
+                            });
+                            right.appendChild(removeButton);
+                        }
+
+                        terminalRow.appendChild(left);
+                        terminalRow.appendChild(right);
+                        roleBlock.appendChild(terminalRow);
+                    });
+                }
+
+                container.appendChild(roleBlock);
+            });
+
+            const resetRow = document.createElement('div');
+            resetRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 8px;';
+
+            const resetHint = document.createElement('span');
+            resetHint.style.cssText = 'font-family:var(--font-mono); font-size:9px; color:var(--text-secondary); line-height:1.4;';
+            resetHint.textContent = 'Clear sends, restart timers, and remove autoban-created backup terminals.';
+
+            const resetButton = document.createElement('button');
+            resetButton.className = 'action-btn';
+            resetButton.style.cssText = 'padding:4px 8px; font-size:9px; color:var(--accent-red, #e55);';
+            resetButton.textContent = 'CLEAR & RESET';
+            resetButton.addEventListener('click', () => {
+                if (!window.confirm('Clear autoban send counters and remove autoban backup terminals?')) return;
+                vscode.postMessage({ type: 'resetAutobanPools' });
+            });
+
+            resetRow.appendChild(resetHint);
+            resetRow.appendChild(resetButton);
+            container.appendChild(resetRow);
+
+            return container;
+        }
+
+        function emitAutobanState() {
+            vscode.postMessage({
+                type: 'updateAutobanState',
+                state: {
+                    enabled: autobanState.enabled,
+                    batchSize: autobanState.batchSize,
+                    complexityFilter: autobanState.complexityFilter,
+                    routingMode: autobanState.routingMode,
+                    rules: autobanState.rules
+                }
+            });
+        }
+
+        function createAnalystRow() {
+            const container = document.createElement('div');
+            container.className = 'agent-row';
+
+            const termName = Object.keys(lastTerminals).find(key => lastTerminals[key].role === 'analyst');
+            const termData = termName ? lastTerminals[termName] : null;
+
+            let isReady = false;
+            if (termData) {
+                const HEARTBEAT_THRESHOLD_MS = 120_000;
+                const lastSeenMs = Date.parse(termData.lastSeen || '');
+                const heartbeatAlive = !isNaN(lastSeenMs) && (Date.now() - lastSeenMs) < HEARTBEAT_THRESHOLD_MS;
+                const isAlive = termData.alive !== undefined ? termData.alive : (termData._isLocal || heartbeatAlive);
+                isReady = !!isAlive;
+            }
+
+            const header = document.createElement('div');
+            header.className = 'row-header';
+
+            const identity = document.createElement('div');
+            identity.className = 'agent-identity';
+
+            const dot = document.createElement('div');
+            dot.className = 'status-dot';
+            if (isReady) dot.classList.add('green');
+            else dot.classList.add('red');
+
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            if (lastStartupCommands['analyst']) {
+                const cmd = lastStartupCommands['analyst'].trim().split(/\s+/)[0].toUpperCase();
+                name.innerText = `ANALYST - ${cmd} CLI`;
+            } else {
+                name.innerText = 'ANALYST';
+            }
+
+            identity.appendChild(dot);
+            identity.appendChild(name);
+            header.appendChild(identity);
+
+            const locateBtn = document.createElement('button');
+            locateBtn.className = 'locate-btn';
+            locateBtn.innerText = 'locate';
+            locateBtn.disabled = !termName;
+            locateBtn.onclick = () => {
+                if (termName) vscode.postMessage({ type: 'focusTerminal', terminalName: termName });
+            };
+            header.appendChild(locateBtn);
+
+            const input = document.createElement('textarea');
+            input.className = 'agent-input';
+            input.id = 'analyst-input';
+            input.placeholder = 'Ask analyst a question...';
+
+            const btn = document.createElement('button');
+            btn.className = 'action-btn';
+            btn.id = 'analyst-send-btn';
+            const pendingDispatch = isDispatchPending('analyst');
+            btn.innerText = pendingDispatch ? 'DISPATCHING...' : 'SEND QUESTION';
+            btn.disabled = !isReady || pendingDispatch;
+            btn.dataset.role = 'analyst';
+            if (pendingDispatch) {
+                btn.classList.add('dispatching');
+            }
+            if (analystButtonFeedback && Date.now() < analystButtonFeedback.expiresAt) {
+                btn.classList.add(analystButtonFeedback.className);
+                btn.innerText = analystButtonFeedback.text;
+                btn.disabled = true;
+            } else {
+                analystButtonFeedback = null;
+            }
+            btn.onclick = () => {
+                const text = input.value.trim();
+                if (!text) return;
+                markDispatchPending('analyst');
+                btn.disabled = true;
+                btn.classList.add('dispatching');
+                btn.innerText = 'DISPATCHING...';
+                vscode.postMessage({
+                    type: 'sendAnalystMessage',
+                    instruction: text
+                });
+                input.value = '';
+            };
+
+            container.appendChild(header);
+            container.appendChild(input);
+            container.appendChild(btn);
+
+            const archiveBtn = document.createElement('button');
+            archiveBtn.id = 'btn-query-archives';
+            archiveBtn.className = 'action-btn';
+            archiveBtn.style.marginTop = '4px';
+            archiveBtn.style.width = '100%';
+            archiveBtn.style.opacity = '0.85';
+            archiveBtn.innerText = pendingDispatch ? 'DISPATCHING...' : 'QUERY ARCHIVES';
+            archiveBtn.title = 'Ask Analyst to query archived plans';
+            archiveBtn.disabled = !isReady || pendingDispatch;
+            archiveBtn.onclick = () => {
+                markDispatchPending('analyst');
+                archiveBtn.disabled = true;
+                archiveBtn.innerText = 'DISPATCHING...';
+                vscode.postMessage({ type: 'queryArchives' });
+            };
+            container.appendChild(archiveBtn);
+
+            const tutorialBtn = document.createElement('button');
+            tutorialBtn.id = 'btn-plugin-tutorial';
+            tutorialBtn.className = 'action-btn';
+            tutorialBtn.style.marginTop = '4px';
+            tutorialBtn.style.width = '100%';
+            tutorialBtn.style.opacity = '0.85';
+            tutorialBtn.innerText = pendingDispatch ? 'DISPATCHING...' : 'PLUGIN TUTORIAL';
+            tutorialBtn.title = 'Ask Analyst to guide you through Switchboard features interactively';
+            tutorialBtn.disabled = !isReady || pendingDispatch;
+            tutorialBtn.onclick = () => {
+                markDispatchPending('analyst');
+                tutorialBtn.disabled = true;
+                tutorialBtn.innerText = 'DISPATCHING...';
+                vscode.postMessage({ type: 'pluginTutorial' });
+            };
+            container.appendChild(tutorialBtn);
+
+
+            return container;
+        }
+
+        function updateMcpStatus(msg) {
+            const recheckBtn = document.getElementById('mcp-recheck-btn');
+            if (msg.diagnostic === 'MCP: Checking...') {
+                mcpDot.className = 'tiny-dot orange';
+                mcpText.innerText = 'MCP: CHECKING';
+                if (recheckBtn) recheckBtn.style.opacity = '0.3';
+                return;
+            }
+            if (recheckBtn) recheckBtn.style.opacity = '0.6';
+            if (msg.connected) {
+                mcpDot.className = 'tiny-dot green';
+                mcpText.innerText = 'MCP: ONLINE';
+            } else if (msg.serverRunning) {
+                mcpDot.className = 'tiny-dot orange';
+                mcpText.innerText = 'MCP: CONNECTING';
+            } else {
+                mcpDot.className = 'tiny-dot red';
+                mcpText.innerText = 'MCP: OFFLINE';
+            }
+        }
+
+        // --- Onboarding Logic ---
+        const onboardingContainer = document.getElementById('onboarding-container');
+        const mainContainer = document.getElementById('main-container');
+        const onboardStepWelcome = document.getElementById('onboard-step-welcome');
+        const onboardStepCli = document.getElementById('onboard-step-cli');
+
+        function toggleOnboarding(needsSetup) {
+            if (needsSetup) {
+                _setupComplete = false;
+                onboardingContainer.classList.remove('hidden');
+                mainContainer.classList.add('hidden');
+            } else {
+                _setupComplete = true;
+                onboardingContainer.classList.add('hidden');
+                mainContainer.classList.remove('hidden');
+                // Request saved state to populate Terminal Operations section
+                vscode.postMessage({ type: 'getStartupCommands' });
+                vscode.postMessage({ type: 'getVisibleAgents' });
+            }
+        }
+
+        function handleOnboardingProgress(msg) {
+            const initStatus = document.getElementById('onboard-init-status');
+            const cliStatus = document.getElementById('onboard-cli-status');
+            switch (msg.step) {
+                case 'initializing':
+                    if (initStatus) initStatus.textContent = 'Initializing protocols...';
+                    break;
+                case 'initialized':
+                    if (initStatus) initStatus.textContent = '✅ Protocols initialized';
+                    // Advance to CLI config step
+                    setTimeout(() => {
+                        onboardStepWelcome.classList.add('hidden');
+                        onboardStepCli.classList.remove('hidden');
+                    }, 600);
+                    break;
+                case 'cli_saved':
+                    if (cliStatus) cliStatus.textContent = '✅ CLI agents saved';
+                    setTimeout(() => {
+                        vscode.postMessage({ type: 'finishOnboarding' });
+                    }, 400);
+                    break;
+                case 'error':
+                    const errTarget = onboardStepCli.classList.contains('hidden') ? initStatus : cliStatus;
+                    if (errTarget) errTarget.textContent = '❌ ' + (msg.message || 'Unknown error');
+                    break;
+            }
+        }
+
+        document.getElementById('btn-onboard-init').addEventListener('click', () => {
+            vscode.postMessage({ type: 'initializeProtocols' });
+        });
+
+        document.getElementById('btn-onboard-save').addEventListener('click', () => {
+            const agents = {
+                ...lastStartupCommands,
+                lead: document.getElementById('onboard-cli-lead').value,
+                coder: document.getElementById('onboard-cli-coder').value,
+                intern: document.getElementById('onboard-cli-intern').value,
+                reviewer: document.getElementById('onboard-cli-reviewer').value,
+                tester: document.getElementById('onboard-cli-tester').value,
+                planner: document.getElementById('onboard-cli-planner').value,
+                analyst: document.getElementById('onboard-cli-analyst').value,
+                'team-lead': lastStartupCommands['team-lead'] || ''
+            };
+            const visibleAgents = { lead: true, coder: true, intern: true, reviewer: true, tester: false, planner: true, analyst: true, 'team-lead': lastVisibleAgents['team-lead'] === true, jules: true };
+            document.querySelectorAll('.onboard-agent-toggle').forEach(cb => {
+                const role = cb.dataset.role;
+                if (role) visibleAgents[role] = cb.checked;
+            });
+            lastVisibleAgents = { ...lastVisibleAgents, ...visibleAgents };
+            vscode.postMessage({ type: 'saveStartupCommands', commands: agents, visibleAgents, accurateCodingEnabled: false, julesAutoSyncEnabled: !!document.getElementById('onboard-jules-auto-sync')?.checked, onboardingComplete: true });
+        });
+
+        document.getElementById('btn-onboard-skip').addEventListener('click', () => {
+            vscode.postMessage({ type: 'finishOnboarding' });
+        });
+
+        // Notify extension we are ready to receive data
+        updatePlanActionStates();
+        setActiveTab(activeTab, false);
+        vscode.postMessage({ type: 'getRecentActivity', limit: 50 });
+        vscode.postMessage({ type: 'ready' });
+
+    </script>
+</body>
+
+</html>
+</html>

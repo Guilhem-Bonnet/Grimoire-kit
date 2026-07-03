@@ -27,6 +27,11 @@
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
+    "kind": {
+      "type": "string",
+      "enum": ["flow-adapter", "mcp-toolbox", "observability", "capability"],
+      "description": "Nature de la prise : comment l'extension se branche au kit. flow-adapter = encapsule un framework agentique dans le flow ; mcp-toolbox = serveur MCP externe fournissant du grounding d'environnement ; observability = backend d'observation ; capability = capacité outillée. Orthogonal aux familles de patterns (qui disent ce que l'extension fait dans le flow)."
+    },
     "name": {
       "type": "string",
       "minLength": 1

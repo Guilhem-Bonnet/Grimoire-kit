@@ -104,6 +104,12 @@ CONTEXT_RULES: list[dict] = [
         "tools": ["tool-resolver.py", "tool-registry.py", "mcp-proxy.py"],
         "reason": "Contexte outillage — découverte et provision d'outils",
     },
+    {
+        "id": "CTX-012",
+        "pattern": r"(?:recette|recipe|template|rapport|report|hook path|shortcut|accel|compile)",
+        "tools": ["compiled-flow.py", "tool-advisor.py", "tool-resolver.py"],
+        "reason": "Contexte acceleration agentique — utiliser les recettes et templates compiles",
+    },
 ]
 
 # Séquences de workflow recommandées

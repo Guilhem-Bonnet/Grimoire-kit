@@ -34,13 +34,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-RAG_AUTO_INJECT_VERSION = "1.0.0"
+RAG_AUTO_INJECT_VERSION = "1.1.0"
 
-# Default knowledge directories to search (relative to project root)
-_KNOWLEDGE_DIRS = [
+# Default knowledge paths to search (relative to project root)
+_KNOWLEDGE_PATHS = [
+    "README.md",
     "docs",
     "_grimoire/_memory",
+    "_grimoire-runtime/_memory",
+    "grimoire-kit/README.md",
+    "grimoire-kit/docs",
     "framework",
+    "grimoire-kit/framework",
 ]
 
 # File extensions for knowledge extraction
@@ -71,12 +76,15 @@ def _extract_keywords(query: str) -> list[str]:
 # ── File-Based RAG ──────────────────────────────────────────────
 
 def _scan_knowledge_files(project_root: Path) -> list[Path]:
-    """Scan knowledge directories for relevant files."""
+    """Scan configured knowledge paths for relevant files."""
     files: list[Path] = []
-    for dir_name in _KNOWLEDGE_DIRS:
-        d = project_root / dir_name
-        if d.is_dir():
-            for f in d.rglob("*"):
+    for path_name in _KNOWLEDGE_PATHS:
+        candidate = project_root / path_name
+        if candidate.is_file() and candidate.suffix in _KNOWLEDGE_EXTENSIONS:
+            files.append(candidate)
+            continue
+        if candidate.is_dir():
+            for f in candidate.rglob("*"):
                 if f.is_file() and f.suffix in _KNOWLEDGE_EXTENSIONS:
                     files.append(f)
     return files
@@ -273,7 +281,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     files = _scan_knowledge_files(project_root)
 
     config = {
-        "knowledge_dirs": _KNOWLEDGE_DIRS,
+        "knowledge_paths": _KNOWLEDGE_PATHS,
         "extensions": sorted(_KNOWLEDGE_EXTENSIONS),
         "files_found": len(files),
         "max_chunk_size": _MAX_CHUNK_SIZE,
@@ -283,7 +291,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         print(json.dumps(config, indent=2, ensure_ascii=False))
     else:
         print("\n  ⚙️ RAG Auto-Inject Config\n")
-        print(f"  Knowledge dirs:  {', '.join(_KNOWLEDGE_DIRS)}")
+        print(f"  Knowledge paths: {', '.join(_KNOWLEDGE_PATHS)}")
         print(f"  Extensions:      {', '.join(sorted(_KNOWLEDGE_EXTENSIONS))}")
         print(f"  Files found:     {len(files)}")
         print(f"  Max chunk size:  {_MAX_CHUNK_SIZE}")

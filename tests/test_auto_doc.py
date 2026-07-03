@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests pour auto-doc.py — Synchronisation README automatique."""
 
+import re
 import shutil
 import sys
 import tempfile
@@ -152,8 +153,15 @@ class T(unittest.TestCase):
         self.assertEqual(len(missing), 0)
 
     def test_detect_real_drifts(self):
-        """Le vrai README a des drifts connus (737 vs 933+)."""
-        report = self.mod.detect_drifts(KIT_DIR)
+        """Construit un cas réel mais déterministe de drift à partir du README du projet."""
+        readme_text = (KIT_DIR / "README.md").read_text(encoding="utf-8")
+        if not re.search(r"(\d{1,3}(?:\s\d{3})*)\+?\s*tests", readme_text, re.IGNORECASE):
+            readme_text += "\nSuite de 999 tests.\n"
+
+        _write(self.tmpdir, "README.md", readme_text)
+        _write(self.tmpdir, "tests/test_minimal.py", "def test_one():\n    assert True\n")
+
+        report = self.mod.detect_drifts(self.tmpdir)
         self.assertGreater(report.drift_count, 0)
 
 

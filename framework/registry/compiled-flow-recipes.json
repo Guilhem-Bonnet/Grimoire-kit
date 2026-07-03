@@ -1,0 +1,451 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "compiled-flow-recipes",
+    "description": "Precompiled execution, chat, and report recipes for the Grimoire agentic control plane.",
+    "dynamicOverlayDir": "_grimoire-runtime-output/implementation-artifacts/compiled-flow/recipes",
+    "defaultScaffoldScope": "dynamic",
+    "allowedPlaceholderPattern": "[A-Z0-9_]+"
+  },
+  "shared_templates": {
+    "findings_first_chat": "Response contract:\n- Findings first, ordered by severity.\n- Quote the smallest set of concrete evidence.\n- Separate assumptions from verified facts.\n- End with the smallest verified next move.\n\nObjective:\n{{OBJECTIVE}}\n\nSuggested command plan:\n{{COMMAND_LIST}}",
+    "implementation_summary_chat": "Delivery contract:\n- State outcome first.\n- Then constraints and tradeoffs.\n- Mention validation evidence explicitly.\n- Mention unresolved risk only if it is real.\n\nGoal:\n{{OBJECTIVE}}\n\nProof path:\n{{COMMAND_LIST}}",
+    "diagnostic_report": "## Objective\n{{OBJECTIVE}}\n\n## Signals\n{{SUMMARY}}\n\n## Command Plan\n{{COMMAND_LIST}}\n\n## Decision\n{{DECISION}}\n\n## Risks\n{{RISKS}}",
+    "governance_decision_report": "## Trigger\n{{OBJECTIVE}}\n\n## Chosen Primitive\n{{DECISION}}\n\n## Why Not Modify A Universal Recipe\n{{SUMMARY}}\n\n## Dynamic Landing Zone\n{{TARGET}}\n\n## Validation\n{{COMMAND_LIST}}"
+  },
+  "recipes": [
+    {
+      "id": "ci-diagnosis",
+      "title": "Diagnostic CI GitHub",
+      "summary": "Diagnose failing GitHub Actions or status checks before editing workflows.",
+      "scope": "universal",
+      "kind": "analysis",
+      "risk_class": "read_only",
+      "keywords": [
+        "ci",
+        "github actions",
+        "status check",
+        "workflow",
+        "checks"
+      ],
+      "intent_patterns": [
+        "\\bci\\b",
+        "github actions",
+        "status checks?",
+        "workflow(s)?",
+        "checks? failed"
+      ],
+      "chat_template": "findings_first_chat",
+      "report_template": "diagnostic_report",
+      "hook_context": "Prefer findings-first restitution. Inspect checks, changed workflows, and targeted failing jobs before editing.",
+      "commands": [
+        {
+          "id": "status-checks",
+          "label": "Inspect PR checks",
+          "mode": "shell",
+          "template": "gh pr view {{PR_REF}} --json number,title,headRefName,statusCheckRollup"
+        },
+        {
+          "id": "workflow-scan",
+          "label": "Scan workflow files",
+          "mode": "shell",
+          "template": "rg -n \"^(name|on):\" {{PROJECT_ROOT}}/.github/workflows"
+        },
+        {
+          "id": "workflow-diff",
+          "label": "Inspect workflow diff",
+          "mode": "shell",
+          "template": "git --no-pager diff --stat {{BASE_REF}}..HEAD -- {{PROJECT_ROOT}}/.github/workflows"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "observability"
+        ],
+        "create_dynamic_when": [
+          "the request is tied to one branch, one repo path, or one incident",
+          "the recipe would need hardcoded refs or team-specific tokens"
+        ],
+        "forbid": [
+          "hardcoded user home paths",
+          "hardcoded branch names",
+          "single-incident wording"
+        ]
+      }
+    },
+    {
+      "id": "quality-loop",
+      "title": "Boucle de validation locale",
+      "summary": "Run the smallest local validation loop before claiming completion.",
+      "scope": "universal",
+      "kind": "execution",
+      "risk_class": "read_only",
+      "keywords": [
+        "validate",
+        "verification",
+        "quickcheck",
+        "preflight",
+        "ready to push"
+      ],
+      "intent_patterns": [
+        "validat",
+        "verify",
+        "preflight",
+        "quickcheck",
+        "ready to push"
+      ],
+      "chat_template": "implementation_summary_chat",
+      "report_template": "diagnostic_report",
+      "hook_context": "Prefer the smallest local validation loop first: lint, modified tests, quickcheck, then preflight.",
+      "commands": [
+        {
+          "id": "lint",
+          "label": "Run lint",
+          "mode": "task",
+          "template": "grimoire: lint"
+        },
+        {
+          "id": "test-modified",
+          "label": "Run modified tests",
+          "mode": "task",
+          "template": "grimoire: test-modified"
+        },
+        {
+          "id": "quickcheck",
+          "label": "Run quickcheck",
+          "mode": "task",
+          "template": "grimoire: quickcheck"
+        },
+        {
+          "id": "preflight",
+          "label": "Run preflight",
+          "mode": "task",
+          "template": "grimoire: preflight"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "observability"
+        ],
+        "create_dynamic_when": [
+          "the validation loop is specific to one experimental directory",
+          "the request introduces a one-off validation target"
+        ],
+        "forbid": [
+          "repo-specific absolute paths",
+          "tooling tied to a single temporary branch"
+        ]
+      }
+    },
+    {
+      "id": "hook-governance-audit",
+      "title": "Audit de gouvernance des hooks",
+      "summary": "Inspect promoted hooks, the safety gate, and control surfaces before changing hook behavior.",
+      "scope": "universal",
+      "kind": "analysis",
+      "risk_class": "read_only",
+      "keywords": [
+        "hook",
+        "guardrail",
+        "control surface",
+        "gateway",
+        "safety gate"
+      ],
+      "intent_patterns": [
+        "hooks?",
+        "guardrails?",
+        "control surface",
+        "gateway",
+        "safety gate"
+      ],
+      "chat_template": "findings_first_chat",
+      "report_template": "governance_decision_report",
+      "hook_context": "Keep hooks thin. Put durable logic in grimoire-kit/framework/tools and validate promoted hooks through the safety registry.",
+      "commands": [
+        {
+          "id": "hooks-status",
+          "label": "Inspect hook status",
+          "mode": "task",
+          "template": "grimoire: hooks-status"
+        },
+        {
+          "id": "hooks-smoke",
+          "label": "Run hook smoke checks",
+          "mode": "task",
+          "template": "grimoire: hooks-smoke"
+        },
+        {
+          "id": "registry-scan",
+          "label": "Inspect promoted hook registry",
+          "mode": "shell",
+          "template": "rg -n \"validatedDigest|mode|controlFile|scriptPath\" {{PROJECT_ROOT}}/_grimoire-runtime/_config/hook-safety-registry.json"
+        },
+        {
+          "id": "gateway-scan",
+          "label": "Inspect gateway surfaces",
+          "mode": "shell",
+          "template": "rg -n \"hook-safety-gate|grimoire-hook-gateway\" {{PROJECT_ROOT}}/.github/hooks/scripts {{PROJECT_ROOT}}/grimoire-kit/framework/tools"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "observability"
+        ],
+        "create_dynamic_when": [
+          "the hook change is tied to one temporary experiment",
+          "the behavior should not become part of the promoted control plane"
+        ],
+        "forbid": [
+          "business logic directly in shell hooks",
+          "bypassing the hook safety registry"
+        ]
+      }
+    },
+    {
+      "id": "documentation-pass",
+      "title": "Pass documentation structuree",
+      "summary": "Use prepared report and response structures when writing or reviewing documentation.",
+      "scope": "universal",
+      "kind": "documentation",
+      "risk_class": "read_only",
+      "keywords": [
+        "documentation",
+        "report",
+        "readme",
+        "explain",
+        "mermaid"
+      ],
+      "intent_patterns": [
+        "docs?",
+        "documentation",
+        "readme",
+        "report",
+        "explain"
+      ],
+      "chat_template": "implementation_summary_chat",
+      "report_template": "diagnostic_report",
+      "hook_context": "Prefer prepared chat and report templates for documentation work instead of free-form reporting.",
+      "commands": [
+        {
+          "id": "auto-doc-check",
+          "label": "Run doc checks",
+          "mode": "task",
+          "template": "grimoire: auto-doc-check"
+        },
+        {
+          "id": "doc-scan",
+          "label": "Inspect a target document",
+          "mode": "shell",
+          "template": "rg -n \"^#|^##|```|mermaid|TODO\" {{PROJECT_ROOT}}/{{DOC_PATH}}"
+        },
+        {
+          "id": "render-report",
+          "label": "Render the documentation report template",
+          "mode": "shell",
+          "template": "{{PROJECT_ROOT}}/grimoire-kit/.venv/bin/python {{PROJECT_ROOT}}/grimoire-kit/framework/tools/compiled-flow.py --project-root {{PROJECT_ROOT}} render --recipe documentation-pass --surface report --var DOC_PATH={{DOC_PATH}}"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "clarity"
+        ],
+        "create_dynamic_when": [
+          "the report structure is tied to one temporary deliverable",
+          "the document needs one-off stakeholder language"
+        ],
+        "forbid": [
+          "narrow audience-specific wording inside universal templates",
+          "mixing execution logs with durable documentation templates"
+        ]
+      }
+    },
+    {
+      "id": "tooling-extension",
+      "title": "Extension d'outillage gouvernee",
+      "summary": "Decide whether to extend an existing tool, scaffold a dynamic recipe, or create a new durable tool.",
+      "scope": "universal",
+      "kind": "execution",
+      "risk_class": "workspace_write",
+      "keywords": [
+        "tool",
+        "script",
+        "template",
+        "hook path",
+        "automate"
+      ],
+      "intent_patterns": [
+        "create tool",
+        "new script",
+        "new hook",
+        "template",
+        "automate"
+      ],
+      "chat_template": "implementation_summary_chat",
+      "report_template": "governance_decision_report",
+      "hook_context": "Do not bend a universal recipe for a one-off use case. Scaffold a dynamic recipe first, then promote it only after repeated reuse.",
+      "commands": [
+        {
+          "id": "catalog",
+          "label": "Inspect the compiled recipe catalog",
+          "mode": "shell",
+          "template": "{{PROJECT_ROOT}}/grimoire-kit/.venv/bin/python {{PROJECT_ROOT}}/grimoire-kit/framework/tools/compiled-flow.py --project-root {{PROJECT_ROOT}} catalog"
+        },
+        {
+          "id": "scaffold-dynamic",
+          "label": "Scaffold a dynamic recipe",
+          "mode": "shell",
+          "template": "{{PROJECT_ROOT}}/grimoire-kit/.venv/bin/python {{PROJECT_ROOT}}/grimoire-kit/framework/tools/compiled-flow.py --project-root {{PROJECT_ROOT}} scaffold --recipe-id {{TARGET}} --title \"{{GOAL}}\" --intent \"{{QUESTION}}\" --scope dynamic"
+        },
+        {
+          "id": "validate-recipes",
+          "label": "Validate the recipe catalog",
+          "mode": "task",
+          "template": "grimoire: compiled-flow:validate"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "discoverability"
+        ],
+        "create_dynamic_when": [
+          "the need is one-off, experimental, or tied to a local branch",
+          "the change requires repo-specific paths or stakeholder-specific wording"
+        ],
+        "forbid": [
+          "editing universal recipes for a single incident",
+          "hardcoding personal paths or branch refs"
+        ]
+      }
+    },
+    {
+      "id": "agentic-acceleration-design",
+      "title": "Design d'acceleration agentique",
+      "summary": "Design or revise compiled agentic surfaces instead of multiplying prompt wrappers.",
+      "scope": "universal",
+      "kind": "analysis",
+      "risk_class": "read_only",
+      "keywords": [
+        "accelerate",
+        "simplify",
+        "compiled",
+        "shortcut",
+        "report template"
+      ],
+      "intent_patterns": [
+        "simplif",
+        "accelerat",
+        "compiled",
+        "shortcut",
+        "flow agentique"
+      ],
+      "chat_template": "implementation_summary_chat",
+      "report_template": "governance_decision_report",
+      "hook_context": "Prefer compiled recipes, thin hook triggers, and durable tool logic over new prompt wrappers.",
+      "commands": [
+        {
+          "id": "catalog",
+          "label": "Inspect the compiled recipe catalog",
+          "mode": "shell",
+          "template": "{{PROJECT_ROOT}}/grimoire-kit/.venv/bin/python {{PROJECT_ROOT}}/grimoire-kit/framework/tools/compiled-flow.py --project-root {{PROJECT_ROOT}} catalog"
+        },
+        {
+          "id": "tool-scan",
+          "label": "Inspect core tool surfaces",
+          "mode": "shell",
+          "template": "rg -n \"tool-resolver|tool-advisor|guardrail-policy|hook-safety-gate|workflow-adapt\" {{PROJECT_ROOT}}/grimoire-kit/framework/tools"
+        },
+        {
+          "id": "reference-scan",
+          "label": "Inspect agentic reference docs",
+          "mode": "shell",
+          "template": "rg -n \"recipes|hooks|guardrails|tool|prompt\" {{PROJECT_ROOT}}/docs/references/bible-configuration-projet-agentique"
+        },
+        {
+          "id": "hooks-status",
+          "label": "Inspect hook promotion state",
+          "mode": "task",
+          "template": "grimoire: hooks-status"
+        }
+      ],
+      "governance": {
+        "mutate_universal_only_for": [
+          "portability",
+          "reliability",
+          "discoverability"
+        ],
+        "create_dynamic_when": [
+          "the acceleration path is tied to one team experiment",
+          "the recipe would encode one transient workshop or spike"
+        ],
+        "forbid": [
+          "prompt-wrapper sprawl",
+          "heavy business logic inside shell hooks"
+        ]
+      }
+    },
+    {
+      "id": "repo-analysis",
+      "title": "Analyse de Repo Structurée",
+      "summary": "Analyse approfondie d un repo avec grounding anti-hallucination, isolation contextuelle, CVTL cross-validation et gate adversariale.",
+      "scope": "universal",
+      "kind": "analysis",
+      "risk_class": "read_only",
+      "keywords": [
+        "analyse",
+        "analyser",
+        "analyze",
+        "audit",
+        "codebase",
+        "diagnostic",
+        "repo",
+        "review repo"
+      ],
+      "intent_patterns": [
+        "analys.*repo",
+        "audit.*code",
+        "review.*repo",
+        "diagnos.*codebase",
+        "inspect.*repo"
+      ],
+      "chat_template": "findings_first_chat",
+      "report_template": "diagnostic_report",
+      "hook_context": "REPO_ANALYSIS_WORKFLOW_AVAILABLE: load _grimoire-runtime/bmm/workflows/1-analysis/repo-analysis/workflow-repo-analysis.md. Run grounding script first: grimoire-kit/framework/tools/repo-analysis-grounding.sh <repo_path>. Use state script for self-piloting: grimoire-kit/framework/tools/repo-analysis-state.sh.",
+      "commands": [
+        {
+          "id": "grounding",
+          "label": "Scan repo structure",
+          "mode": "shell",
+          "template": "bash {{PROJECT_ROOT}}/grimoire-kit/framework/tools/repo-analysis-grounding.sh {{REPO_PATH}}"
+        },
+        {
+          "id": "code-review",
+          "label": "Automated code findings",
+          "mode": "shell",
+          "template": "python3 {{PROJECT_ROOT}}/grimoire-kit/framework/tools/code-review.py --project-root {{REPO_PATH}} review --json"
+        },
+        {
+          "id": "state-read",
+          "label": "Read current workflow state",
+          "mode": "shell",
+          "template": "bash {{PROJECT_ROOT}}/grimoire-kit/framework/tools/repo-analysis-state.sh read --project-root {{PROJECT_ROOT}}"
+        },
+        {
+          "id": "token-budget",
+          "label": "Check token budget",
+          "mode": "shell",
+          "template": "python3 {{PROJECT_ROOT}}/grimoire-kit/framework/tools/token-budget.py --project-root {{PROJECT_ROOT}} check --json"
+        }
+      ]
+    }
+  ]
+}

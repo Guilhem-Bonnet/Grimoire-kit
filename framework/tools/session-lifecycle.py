@@ -384,6 +384,182 @@ def _hook_stigmergy_complete(project_root: Path) -> HookResult:
     return result
 
 
+# ── Learnings Injection Hook ──────────────────────────────────────────────────
+
+
+def _hook_learnings_inject(project_root: Path) -> HookResult:
+    """Inject top learnings into session context at start.
+
+    Reads operational learnings JSONL and logs top entries so the
+    agent has cross-session knowledge from the very first prompt.
+    """
+    result = HookResult(name="learnings-inject")
+    start = time.monotonic()
+
+    learnings_path = project_root / "_grimoire" / "_memory" / "learnings" / "operational.jsonl"
+    if not learnings_path.exists():
+        result.status = "skipped"
+        result.message = "Pas de learnings stockés"
+        result.duration_seconds = round(time.monotonic() - start, 3)
+        return result
+
+    try:
+        lines = learnings_path.read_text(encoding="utf-8").strip().splitlines()
+        if not lines:
+            result.status = "skipped"
+            result.message = "Fichier learnings vide"
+        else:
+            # Parse and sort by confidence
+            entries = []
+            for line in lines:
+                if line.strip():
+                    entries.append(json.loads(line))
+            entries.sort(key=lambda e: e.get("confidence", 0), reverse=True)
+            top = entries[:5]
+            result.status = "completed"
+            result.message = f"{len(entries)} learnings chargés, top {len(top)} injectés"
+    except (json.JSONDecodeError, OSError) as exc:
+        result.status = "failed"
+        result.message = f"Erreur lecture learnings: {exc}"
+
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
+
+
+# ── Session Reflection Hook ──────────────────────────────────────────────────
+
+
+def _hook_session_reflection(project_root: Path, lifecycle_result: LifecycleResult) -> HookResult:
+    """Auto-capture session insights as operational learnings.
+
+    Analyzes the session's hook results and telemetry to identify
+    patterns worth remembering. This is the self-improvement loop.
+    """
+    result = HookResult(name="session-reflection")
+    start = time.monotonic()
+
+    learnings_path = project_root / "_grimoire" / "_memory" / "learnings" / "operational.jsonl"
+    learnings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        new_learnings = []
+
+        # Analyze hook failures
+        failed_hooks = [h for h in lifecycle_result.hooks if h.status == "failed"]
+        for hook in failed_hooks:
+            new_learnings.append({
+                "key": f"session-failure-{hook.name}",
+                "insight": f"Hook '{hook.name}' a échoué: {hook.message}",
+                "confidence": 60,
+                "source": "observed",
+                "skill": "session-lifecycle",
+                "tags": ["session", "failure", hook.name],
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "hit_count": 0,
+            })
+
+        # Check telemetry for recurring tool failures
+        telemetry_path = project_root / "_grimoire" / "_memory" / "telemetry" / "skill-usage.jsonl"
+        if telemetry_path.exists():
+            telem_lines = telemetry_path.read_text(encoding="utf-8").strip().splitlines()
+            recent = telem_lines[-20:] if len(telem_lines) > 20 else telem_lines
+            failure_counts: dict[str, int] = {}
+            for line in recent:
+                if line.strip():
+                    entry = json.loads(line)
+                    if entry.get("outcome") == "failure":
+                        tool = entry.get("tool") or entry.get("skill", "unknown")
+                        failure_counts[tool] = failure_counts.get(tool, 0) + 1
+
+            for tool, count in failure_counts.items():
+                if count >= 3:
+                    new_learnings.append({
+                        "key": f"recurring-failure-{tool}",
+                        "insight": f"{tool} a échoué {count}x dans les 20 dernières opérations — investiguer",
+                        "confidence": 75,
+                        "source": "inferred",
+                        "skill": "telemetry",
+                        "tags": ["failure", "recurring", tool],
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "hit_count": 0,
+                    })
+
+        # Append new learnings
+        if new_learnings:
+            with open(learnings_path, "a", encoding="utf-8") as f:
+                f.writelines(f"{json.dumps(learning, ensure_ascii=False)}\n" for learning in new_learnings)
+            result.status = "completed"
+            result.message = f"{len(new_learnings)} learnings auto-capturés"
+        else:
+            result.status = "completed"
+            result.message = "Session propre — rien à capturer"
+
+    except Exception as exc:
+        result.status = "failed"
+        result.message = f"Erreur reflection: {exc}"
+
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
+
+
+# ── SDK HookManager Bridge ───────────────────────────────────────────────────
+
+
+def _fire_sdk_hooks(project_root: Path, hook_name: str, **metadata) -> HookResult:
+    """Bridge to SDK HookManager — fires registered listeners.
+
+    This allows SDK consumers to register custom listeners via
+    grimoire.core.hooks.HookManager and have them fire during
+    the session lifecycle.
+    """
+    result = HookResult(name=f"sdk-{hook_name}")
+    start = time.monotonic()
+
+    try:
+        src = project_root / "src"
+        if src.exists() and str(src) not in sys.path:
+            sys.path.insert(0, str(src))
+
+        from grimoire.core.hooks import HookContext, HookManager
+
+        audit_path = project_root / "_grimoire" / "_memory" / "hooks-audit.jsonl"
+        mgr = HookManager(audit_path=audit_path)
+
+        # Auto-register built-in listeners
+        from grimoire.core.hooks import failure_capturer, learning_injector, quality_gate, session_summarizer
+
+        if hook_name == "post_tool_use":
+            mgr.register(hook_name, failure_capturer, name="failure_capturer")
+            mgr.register(hook_name, quality_gate, name="quality_gate")
+        if hook_name == "session_start":
+            mgr.register(hook_name, learning_injector, name="learning_injector")
+        if hook_name == "session_end":
+            mgr.register(hook_name, session_summarizer, name="session_summarizer")
+
+        ctx = HookContext(
+            hook=hook_name,
+            status="running",
+            metadata={
+                "project_root": str(project_root),
+                "learnings_path": str(project_root / "_grimoire" / "_memory" / "learnings" / "operational.jsonl"),
+                "failure_museum_path": str(project_root / "_grimoire" / "_memory" / "failure-museum.jsonl"),
+                **metadata,
+            },
+        )
+        executed = mgr.trigger(hook_name, ctx)
+        result.status = "completed"
+        result.message = f"SDK hooks: {', '.join(executed) if executed else 'aucun listener'}"
+    except ImportError:
+        result.status = "skipped"
+        result.message = "SDK grimoire.core.hooks non disponible"
+    except Exception as exc:
+        result.status = "failed"
+        result.message = f"Erreur SDK hooks: {exc}"
+
+    result.duration_seconds = round(time.monotonic() - start, 3)
+    return result
+
+
 # ── Lifecycle Orchestration ──────────────────────────────────────────────────
 
 
@@ -404,6 +580,14 @@ def run_pre_session(project_root: Path) -> LifecycleResult:
     for hook_fn in hooks:
         hook_result = hook_fn(project_root)
         result.hooks.append(hook_result)
+
+    # Learnings injection — surface cross-session knowledge
+    learnings_result = _hook_learnings_inject(project_root)
+    result.hooks.append(learnings_result)
+
+    # SDK HookManager bridge — fire session_start listeners
+    sdk_result = _fire_sdk_hooks(project_root, "session_start")
+    result.hooks.append(sdk_result)
 
     failed = [h for h in result.hooks if h.status == "failed"]
     result.status = "completed" if not failed else "partial"
@@ -432,9 +616,17 @@ def run_post_session(project_root: Path) -> LifecycleResult:
         hook_result = hook_fn(project_root)
         result.hooks.append(hook_result)
 
+    # Session reflection — auto-capture learnings from this session
+    reflection_result = _hook_session_reflection(project_root, result)
+    result.hooks.append(reflection_result)
+
     # Session chain — append structured summary for cross-session memory
     chain_result = _hook_session_chain(project_root, result)
     result.hooks.append(chain_result)
+
+    # SDK HookManager bridge — fire session_end listeners
+    sdk_result = _fire_sdk_hooks(project_root, "session_end", session_duration=str(round(time.monotonic() - start, 1)))
+    result.hooks.append(sdk_result)
 
     # COMPLETE signal — emitted after chain so the session is persisted first
     complete_result = _hook_stigmergy_complete(project_root)

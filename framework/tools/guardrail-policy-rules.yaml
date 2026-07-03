@@ -1,0 +1,72 @@
+challenge:
+  skipTests:
+    - sans test
+    - sans tests
+    - pas de test
+    - pas de tests
+    - no test
+    - no tests
+    - skip tests
+    - skip test
+  skipReview:
+    - sans review
+    - pas de review
+    - skip review
+    - sans pr
+    - pas de pr
+    - sans ci
+    - pas de ci
+  bypass:
+    - bypass les hooks
+    - bypass hook
+    - contourne les hooks
+    - contourner les hooks
+    - desactive les hooks
+    - desactive le hook
+    - disable hooks
+    - disable hook
+    - ignore le linter
+    - ignore le lint
+    - disable validation
+  dirtyShortcut:
+    - vite fait
+    - quick and dirty
+    - hack
+    - bourrin
+    - juste faire marcher
+    - just make it work
+  criticalDelivery:
+    - en prod direct
+    - directement en prod
+    - push direct sur main
+    - push direct sur master
+    - sans filet
+
+followThrough:
+  taskMap:
+    quick-check: 'grimoire: quickcheck'
+    memory-lint: 'grimoire: memory-lint'
+    preflight: 'grimoire: preflight'
+  taskSpecs:
+    'grimoire: quickcheck':
+      flow: quality
+      command:
+        - bash
+        - framework/tools/quick-check.sh
+      timeoutSeconds: 240
+    'grimoire: memory-lint':
+      flow: memory
+      command:
+        - .venv/bin/python
+        - framework/tools/memory-lint.py
+        - --project-root
+        - .
+      timeoutSeconds: 240
+    'grimoire: preflight':
+      flow: quality
+      command:
+        - .venv/bin/python
+        - framework/tools/preflight-check.py
+        - --project-root
+        - .
+      timeoutSeconds: 240

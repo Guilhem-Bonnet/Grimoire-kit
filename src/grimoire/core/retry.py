@@ -42,12 +42,11 @@ def with_retry(
         Exception types that trigger a retry.  All others propagate
         immediately.
 
-    Example::
-
-        from grimoire.core.retry import with_retry
-
-        @with_retry(max_attempts=3, retryable=(ConnectionError,))
-        def fetch(url: str) -> bytes: ...
+    Examples
+    --------
+    >>> from grimoire.core.retry import with_retry
+    >>> @with_retry(max_attempts=3, retryable=(ConnectionError,))
+    ... def fetch(url: str) -> bytes: ...
     """
 
     def decorator(func: Callable[..., _T]) -> Callable[..., _T]:

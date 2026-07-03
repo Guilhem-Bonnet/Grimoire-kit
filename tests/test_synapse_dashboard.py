@@ -13,6 +13,7 @@ Fonctions testées :
 import importlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,67 @@ def _load():
 
 
 dash = _load()
+
+
+class TestRouterSection(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.stats_file = self.tmpdir / "_grimoire-output" / ".router-stats.jsonl"
+        self.stats_file.parent.mkdir(parents=True, exist_ok=True)
+        entries = [
+            {
+                "timestamp": "2026-04-11T10:00:00",
+                "agent": "dev",
+                "model": "gpt-5.3-codex",
+                "selected_model": "gpt-5.3-codex",
+                "fallback_model": "gpt-5-mini",
+                "rule_matched": "agent:dev",
+                "complexity": "standard",
+                "task_type": "coding",
+                "confidence": 0.8,
+                "estimated_cost": 0.012,
+                "prompt_tokens_est": 120,
+                "prompt_summary": "Implement login endpoint"
+            },
+            {
+                "timestamp": "2026-04-11T10:05:00",
+                "agent": "architect",
+                "model": "gpt-5.4",
+                "selected_model": "gpt-5.4",
+                "fallback_model": "gpt-5.3-codex",
+                "rule_matched": "keywords:cross-validation",
+                "complexity": "expert",
+                "task_type": "reasoning",
+                "confidence": 0.9,
+                "estimated_cost": 0.034,
+                "prompt_tokens_est": 240,
+                "prompt_summary": "Run a cross-validation on architecture"
+            },
+        ]
+        self.stats_file.write_text(
+            "\n".join(json.dumps(entry) for entry in entries) + "\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_collect_router_reads_policy_and_telemetry(self):
+        result = dash._collect_router(self.tmpdir)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.data["summary"]["total_requests"], 2)
+        self.assertEqual(result.data["summary"]["alternate_path_count"], 2)
+        self.assertIn("Default model", result.markdown)
+        self.assertIn("Telemetry", result.markdown)
+        self.assertIn("Dernières décisions", result.markdown)
+
+    def test_build_dashboard_with_router_only(self):
+        report = dash.build_dashboard(self.tmpdir, ("router",))
+
+        self.assertEqual(len(report.sections), 1)
+        self.assertEqual(report.sections[0].name, "router")
+        self.assertEqual(report.sections[0].status, "ok")
 
 
 # ── Constants ────────────────────────────────────────────────────────────────

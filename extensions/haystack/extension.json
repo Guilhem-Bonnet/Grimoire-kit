@@ -1,42 +1,71 @@
 {
   "manifestVersion": 1,
   "id": "haystack",
+  "kind": "capability",
   "name": "Haystack RAG",
   "version": "0.1.0",
   "description": "Pipelines RAG Haystack gouvernés : indexation documentaire déclarée (sources, fraîcheur, propriétaire), rappel avec provenance obligatoire — contre le RAG aveugle.",
   "license": "Apache-2.0",
   "authors": [
-    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+    {
+      "name": "Guilhem Bonnet",
+      "url": "https://github.com/Guilhem-Bonnet"
+    }
   ],
   "upstream": {
     "repository": "https://github.com/deepset-ai/haystack",
     "kind": "framework",
     "pinnedVersion": "2.x"
   },
-  "compat": { "kit": ">=3.11", "manifest": 1 },
+  "compat": {
+    "kit": ">=3.11",
+    "manifest": 1
+  },
   "provides": {
     "agents": [],
-    "skills": ["artifacts/skills/haystack-pipeline-design/SKILL.md"],
+    "skills": [
+      "artifacts/skills/haystack-pipeline-design/SKILL.md"
+    ],
     "hooks": [],
     "workflows": [],
-    "instructions": ["artifacts/instructions/haystack-rag-governance.instructions.md"],
+    "instructions": [
+      "artifacts/instructions/haystack-rag-governance.instructions.md"
+    ],
     "nodes": [
       {
         "id": "haystack-retrieval",
         "label": "Haystack Retrieval",
         "description": "Un pipeline de rappel documentaire avec provenance obligatoire.",
-        "patterns": ["KNO-06", "KNO-02"],
-        "pins": [
-          { "id": "query", "direction": "in", "contract": "task-envelope" },
-          { "id": "documents", "direction": "out", "contract": "handoff-packet" }
+        "patterns": [
+          "KNO-06",
+          "KNO-02"
         ],
-        "compilesTo": ["skill"]
+        "pins": [
+          {
+            "id": "query",
+            "direction": "in",
+            "contract": "task-envelope"
+          },
+          {
+            "id": "documents",
+            "direction": "out",
+            "contract": "handoff-packet"
+          }
+        ],
+        "compilesTo": [
+          "skill"
+        ]
       }
     ]
   },
   "patterns": {
-    "implements": ["KNO-06", "KNO-02"],
-    "requires": ["ORC-06"]
+    "implements": [
+      "KNO-06",
+      "KNO-02"
+    ],
+    "requires": [
+      "ORC-06"
+    ]
   },
   "permissions": {
     "filesystem": "artifacts",
@@ -46,7 +75,12 @@
   },
   "install": {
     "steps": [
-      { "kind": "pip", "packages": ["haystack-ai"] },
+      {
+        "kind": "pip",
+        "packages": [
+          "haystack-ai"
+        ]
+      },
       {
         "kind": "copy",
         "from": "artifacts/skills/haystack-pipeline-design",

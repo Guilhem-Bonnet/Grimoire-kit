@@ -16,7 +16,23 @@ class TestDetectMemoryBackend:
             result = detect_memory_backend()
         assert result == "local"
 
-    def test_returns_qdrant_local_when_qdrant_up(self) -> None:
+    def test_returns_qdrant_server_when_qdrant_up(self) -> None:
+        class FakeResp:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def read(self): return b""
+
+        def fake_urlopen(req, timeout=2.0):
+            if "/v1/" in req.full_url:
+                raise OSError("no weaviate")
+            return FakeResp()
+
+        with patch("grimoire.cli.cmd_init.urllib.request.urlopen", side_effect=fake_urlopen):
+            result = detect_memory_backend()
+        assert result == "qdrant-server"
+
+    def test_returns_weaviate_server_when_weaviate_up(self) -> None:
         class FakeResp:
             status = 200
             def __enter__(self): return self
@@ -25,7 +41,7 @@ class TestDetectMemoryBackend:
 
         with patch("grimoire.cli.cmd_init.urllib.request.urlopen", return_value=FakeResp()):
             result = detect_memory_backend()
-        assert result == "qdrant-local"
+        assert result == "weaviate-server"
 
     def test_returns_local_on_timeout(self) -> None:
         with patch("grimoire.cli.cmd_init.urllib.request.urlopen", side_effect=TimeoutError("timeout")):
@@ -134,6 +150,47 @@ class TestInitCLI:
         assert data["ok"] is True
         assert data["project"] == "json-proj"
         assert "agents" in data
+
+    def test_init_qdrant_docker_generates_compose_and_starts(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "qdrant-proj"
+        with (
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=False),
+            patch("grimoire.cli.cmd_init._start_qdrant_docker", return_value=(True, "started")) as start,
+        ):
+            result = runner.invoke(app, ["-y", "init", str(target), "--qdrant-docker"])
+        assert result.exit_code == 0
+        assert (target / "docker-compose.memory.yml").is_file()
+        content = (target / "project-context.yaml").read_text()
+        assert 'backend: "qdrant-server"' in content
+        assert 'qdrant_url: "http://localhost:6333"' in content
+        start.assert_called_once_with(target.resolve())
+
+    def test_init_qdrant_docker_json_reports_status(self, runner, app, tmp_path: Path) -> None:
+        import json
+        target = tmp_path / "qdrant-json"
+        with (
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=False),
+            patch("grimoire.cli.cmd_init._start_qdrant_docker", return_value=(True, "started")),
+        ):
+            result = runner.invoke(app, ["-y", "-o", "json", "init", str(target), "--qdrant-docker"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["backend"] == "qdrant-server"
+        assert data["qdrant_docker"]["requested"] is True
+        assert data["qdrant_docker"]["started"] is True
+
+    def test_init_qdrant_docker_reuses_running_qdrant(self, runner, app, tmp_path: Path) -> None:
+        import json
+        target = tmp_path / "qdrant-running"
+        with (
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
+            patch("grimoire.cli.cmd_init._start_qdrant_docker") as start,
+        ):
+            result = runner.invoke(app, ["-y", "-o", "json", "init", str(target), "--qdrant-docker"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["qdrant_docker"]["started"] is True
+        start.assert_not_called()
 
     def test_init_invalid_archetype(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "bad-arch"
@@ -285,9 +342,11 @@ class TestParseArchetypeSelection:
         assert result == [_ARCHETYPE_KEYS[0]]
 
     def test_zero_triggers_guided(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-        # "0" calls _guided_discovery which needs user input — for unit test, we mock
         from unittest.mock import patch
+
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+
+        # "0" calls _guided_discovery which needs user input — for unit test, we mock
         with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
             result = _parse_archetype_selection("0")
         assert result == ["web-app"]

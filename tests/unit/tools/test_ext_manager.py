@@ -103,6 +103,22 @@ class TestValidateManifest:
         errors = validate_manifest(manifest, ext_dir)
         assert any("pattern id invalide" in e for e in errors)
 
+    def test_kind_valid(self, ext_dir: Path) -> None:
+        for kind in ("flow-adapter", "mcp-toolbox", "observability", "capability"):
+            manifest = make_manifest(kind=kind)
+            assert validate_manifest(manifest, ext_dir) == []
+
+    def test_kind_invalid(self, ext_dir: Path) -> None:
+        manifest = make_manifest(kind="plugin")
+        errors = validate_manifest(manifest, ext_dir)
+        assert any("kind invalide" in e for e in errors)
+
+    def test_kind_optional(self, ext_dir: Path) -> None:
+        # kind est optionnel (manifestVersion 1) : son absence reste valide.
+        manifest = make_manifest()
+        assert "kind" not in manifest
+        assert validate_manifest(manifest, ext_dir) == []
+
     def test_path_traversal_rejected(self, ext_dir: Path) -> None:
         manifest = make_manifest(
             install={

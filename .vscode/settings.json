@@ -1,4 +1,5 @@
 {
+  "terminal.integrated.gpuAcceleration": "off",
   // ════════════════════════════════════════════════════════════════════
   // Grimoire Custom Kit — VS Code settings
   // ════════════════════════════════════════════════════════════════════
@@ -14,8 +15,30 @@
 
   // ── Diff ────────────────────────────────────────────────────────────
   // Éviter "L'algorithme diff a été arrêté tôt" sur les gros fichiers
+  // diffAlgorithm=legacy : algorithme rapide (vs "advanced" lent depuis 1.72)
   "diffEditor.maxComputationTime": 0,
   "diffEditor.maxFileSize": 0,
+  "diffEditor.diffAlgorithm": "legacy",
+  "diffEditor.ignoreTrimWhitespace": true,
+
+  // ── Terminal (sessions longues) ───────────────────────────────────
+  "terminal.integrated.profiles.linux": {
+    "zsh (grimoire-safe)": {
+      "path": "/usr/bin/zsh",
+      "args": ["-f"]
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "zsh (grimoire-safe)",
+  "terminal.integrated.automationProfile.linux": {
+    "path": "/usr/bin/zsh",
+    "args": ["-f"]
+  },
+  "terminal.integrated.enablePersistentSessions": false,
+  "terminal.integrated.persistentSessionReviveProcess": "never",
+  "terminal.integrated.scrollback": 2000,
+  "terminal.integrated.persistentSessionScrollback": 200,
+  "terminal.integrated.hideOnStartup": "whenEmpty",
+  "task.allowAutomaticTasks": "off",
 
   // ── Fichiers exclus de l'explorateur ────────────────────────────────
   "files.exclude": {
@@ -63,6 +86,7 @@
     "editor.defaultFormatter": "charliermarsh.ruff"
   },
   "python.analysis.typeCheckingMode": "basic",
+  "typescript.tsserver.maxTsServerMemory": 1024,
 
   // ── Python Testing — désactiver la discovery automatique ──────────────
   // Empêche VS Code de spawner des centaines de processus

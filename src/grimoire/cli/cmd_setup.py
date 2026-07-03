@@ -3,8 +3,8 @@
 Source of truth: ``project-context.yaml``
 
 Target files (when they exist):
-  - ``_bmad/{bmm,core,cis,tea,bmb}/config.yaml``
-  - ``_bmad/_memory/config.yaml``
+  - ``_grimoire-runtime/{bmm,core,cis,tea,bmb}/config.yaml``
+  - ``_grimoire-runtime/_memory/config.yaml``
   - ``.github/copilot-instructions.md``
 """
 
@@ -196,10 +196,10 @@ def _apply_copilot(path: Path, vals: UserValues) -> bool:
 def check(project_root: Path, vals: UserValues) -> SetupResult:
     """Audit all config files against *vals* — pure read, no writes."""
     result = SetupResult()
-    bmad = project_root / "_bmad"
+    runtime_dir = project_root / "_grimoire-runtime"
     for mod in _MODULES:
-        result.diffs.extend(_check_file(bmad / mod / "config.yaml", vals, mod))
-    result.diffs.extend(_check_file(bmad / "_memory" / "config.yaml", vals, "_memory"))
+        result.diffs.extend(_check_file(runtime_dir / mod / "config.yaml", vals, mod))
+    result.diffs.extend(_check_file(runtime_dir / "_memory" / "config.yaml", vals, "_memory"))
     result.diffs.extend(_check_copilot(project_root / ".github" / "copilot-instructions.md", vals))
     return result
 
@@ -207,22 +207,22 @@ def check(project_root: Path, vals: UserValues) -> SetupResult:
 def apply(project_root: Path, vals: UserValues) -> SetupResult:
     """Write *vals* into every target file, return a report."""
     result = SetupResult()
-    bmad = project_root / "_bmad"
+    runtime_dir = project_root / "_grimoire-runtime"
 
     for mod in _MODULES:
-        p = bmad / mod / "config.yaml"
+        p = runtime_dir / mod / "config.yaml"
         if not p.exists():
-            result.skipped_files.append(f"_bmad/{mod}/config.yaml")
+            result.skipped_files.append(f"_grimoire-runtime/{mod}/config.yaml")
             continue
         if _apply_file(p, vals, mod):
-            result.updated_files.append(f"_bmad/{mod}/config.yaml")
+            result.updated_files.append(f"_grimoire-runtime/{mod}/config.yaml")
 
-    mem = bmad / "_memory" / "config.yaml"
+    mem = runtime_dir / "_memory" / "config.yaml"
     if mem.exists():
         if _apply_file(mem, vals, "_memory"):
-            result.updated_files.append("_bmad/_memory/config.yaml")
+            result.updated_files.append("_grimoire-runtime/_memory/config.yaml")
     else:
-        result.skipped_files.append("_bmad/_memory/config.yaml")
+        result.skipped_files.append("_grimoire-runtime/_memory/config.yaml")
 
     ci = project_root / ".github" / "copilot-instructions.md"
     if ci.exists():

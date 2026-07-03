@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+description: grimoire multi-llm canary v0
+
+# Requires a GITHUB_TOKEN with access to GitHub Models for remote eval.
+# Extend this baseline with a Mammouth aggregated API provider override once
+# the HTTP contract is fixed and versioned.
+providers:
+  - 'github:openai/gpt-5'
+  - 'github:anthropic/claude-4-opus'
+  - 'github:azureml-mistral/Codestral-2501'
+
+prompts:
+  - file://prompts/mission-pack-canary.txt
+
+tests:
+  - vars:
+      objective: 'Comparer trois modeles sur un meme pack de mission sans perdre la source de verite du repo.'
+      scope: 'Rester sur le cadrage multi-LLM et la verification de preuve.'
+      sources: 'docs/exploitation/strategie-exploitation-multi-llm-multi-source.md ; _grimoire-runtime/_config/model-routing.yaml'
+      constraints: 'Francais ; repo-first ; pas de transcript comme verite ; sortie courte et actionnable'
+      proof: 'Nommer au moins une source canonique et un gate de preuve.'
+    assert:
+      - type: contains
+        value: 'Objectif:'
+      - type: contains
+        value: 'Preuve:'
+      - type: javascript
+        value: "output.toLowerCase().includes('repo') || output.toLowerCase().includes('source de verite')"
+      - type: llm-rubric
+        value: 'The answer is in French, preserves the mission scope, cites canonical repo sources, and asks for evidence rather than trusting raw chat transcripts.'
+
+  - vars:
+      objective: 'Transformer une review externe en verdict exploitable par Forge.'
+      scope: 'Produire une synthese qui relie findings, verdict et preuve attendue.'
+      sources: 'docs/exploitation/checklist-design-review-host-bridge-agent-os-game-ui.md ; grimoire-kit/apps/grimoire-game/src/contracts/schemas.ts'
+      constraints: 'Nommer review artifact, verdict, findings et control review.'
+      proof: 'Citer un control review et une evidence ref.'
+    assert:
+      - type: contains
+        value: 'Risque principal:'
+      - type: contains
+        value: 'Preuve:'
+      - type: javascript
+        value: "output.toLowerCase().includes('review artifact') || output.toLowerCase().includes('verdict')"
+      - type: llm-rubric
+        value: 'The answer identifies a normalized review artifact, keeps findings actionable, and connects the review to at least one control or evidence reference.'
+
+  - vars:
+      objective: 'Rappeler pourquoi l API agregee reste fallback et eval, pas shell principal.'
+      scope: 'Verifier qu un modele ne renverse pas la politique Forge-first.'
+      sources: 'docs/exploitation/strategie-exploitation-multi-llm-multi-source.md ; _grimoire-runtime-output/planning-artifacts/PLAN-multi-llm-multi-source.md'
+      constraints: 'Nommer fallback, eval et source de verite.'
+      proof: 'Citer une verification ou un evidence pack attendu.'
+    assert:
+      - type: contains
+        value: 'Sources:'
+      - type: javascript
+        value: "output.toLowerCase().includes('fallback') && output.toLowerCase().includes('eval')"
+      - type: llm-rubric
+        value: 'The answer keeps Forge as the source of truth, treats the aggregated API as fallback or eval only, and names a verification gate or evidence pack.'

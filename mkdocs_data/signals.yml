@@ -1,18 +1,50 @@
 signals:
+  - title: SOG — Smart Orchestrator Gateway
+    path: concepts.md
+    date: 2026-04-21
+    kicker: BM-53 · dispatch invisible · ARG routing
+    summary: Architecture SOG v3 — point d'entrée unique avec dispatch invisible vers sub-agents, protocoles HUP/QEC/CVTL et routage ARG.
+    featured: true
+    proof: true
+
+  - title: UDF — Unified Dynamic Factory
+    path: creating-agents.md
+    date: 2026-04-21
+    kicker: agents · workflows · skills · instructions
+    summary: Création dynamique d'artefacts à la volée — triage durabilité éphémère/permanent, promotion automatique à 3 réutilisations.
+    featured: true
+    proof: true
+
+  - title: Modèle de routing task-aware
+    path: concepts.md
+    date: 2026-04-21
+    kicker: deep_reasoning · general_code · fast_iter · local_coder
+    summary: Le SOG adapte automatiquement le modèle LLM à la nature de la tâche — 5 profils de routing avec fallback dynamique.
+    featured: true
+    proof: false
+
+  - title: Taxonomie des workflows — type SOG Dispatch
+    path: workflow-taxonomy.md
+    date: 2026-04-21
+    kicker: SOG · dispatch · UDF · ARG
+    summary: Quatrième type de workflow ajouté — SOG Dispatch orchestre l'exécution agentique depuis une intention en langage naturel.
+    featured: true
+    proof: false
+
   - title: Guardrails runtime agentiques
     path: grimoire-game-runtime-guardrails.md
     date: 2026-04-09
     kicker: AIVS · OWASP Agentic · IEEE P3394
     summary: Contrat de mutation, niveaux de confiance et gouvernance runtime pour le Grimoire Game.
-    featured: true
+    featured: false
     proof: true
 
-  - title: Guide Observatory API
+  - title: Guide de l'API Observatory
     path: observatory-api.md
     date: 2026-04-09
     kicker: API locale · diff · apply · rollback
     summary: Surface HTTP locale pour comparer, appliquer et annuler des changements de configuration agentique.
-    featured: true
+    featured: false
     proof: false
 
   - title: Intégration MCP
@@ -20,15 +52,7 @@ signals:
     date: 2026-03-21
     kicker: Copilot · Claude Desktop · MCP
     summary: Mise en place du serveur MCP Grimoire et configuration des principaux clients compatibles.
-    featured: true
-    proof: false
-
-  - title: Créer un agent
-    path: creating-agents.md
-    date: 2026-03-08
-    kicker: Agent Forge · scaffold · installation
-    summary: Guide complet pour générer, revoir et installer un nouvel agent spécialisé.
-    featured: true
+    featured: false
     proof: false
 
   - title: Guide SDK Python
@@ -36,6 +60,14 @@ signals:
     date: 2026-03-21
     kicker: SDK · Project API · outils importables
     summary: Point d'entrée Python pour piloter projets, outils et workflows sans passer par le shell.
+    featured: false
+    proof: false
+
+  - title: Créer un agent
+    path: creating-agents.md
+    date: 2026-03-08
+    kicker: Agent Forge · scaffold · UDF · routing
+    summary: Guide complet pour générer, revoir et installer un agent — voie UDF dynamique ou création manuelle pas-à-pas.
     featured: false
     proof: false
 

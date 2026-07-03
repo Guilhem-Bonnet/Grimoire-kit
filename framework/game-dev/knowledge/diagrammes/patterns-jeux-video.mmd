@@ -1,0 +1,23 @@
+<!-- PROVENANCE
+Source amont : projet "Standard de structure agentique" (processus-developpement-agentique).
+Ce document est bundlé dans grimoire-kit comme connaissance de domaine (game-dev) pour usage self-contained.
+La source amont reste la source de vérité normative ; grimoire-kit consomme et trace, ne redéfinit pas.
+-->
+
+flowchart TD
+    GDD["UC-08 GDD gouverne\n(source de verite)"]
+    GDD --> GEN["UC-09 Generation de contenu"]
+    GDD -. cadre .-> ECO["UC-10 Equilibrage et economie"]
+    GEN --> ASSET["UC-12 Pipeline d'assets\n(validation gate)"]
+    GEN --> AI["UC-14 Comportements de jeu"]
+    DET["UC-13 Harnais deterministe"] --> AI
+    DET --> PLAY["UC-11 Playtest agentique"]
+    ASSET --> PLAY
+    AI --> PLAY
+    ECO --> PLAY
+    PLAY --> BUILD["UC-15 Build et certification"]
+    ECO --> BUILD
+    BUILD --> LIVE["UC-16 Live ops et telemetrie"]
+    LIVE -->|telemetrie| ECO
+    LIVE -->|drift detecte| GDD
+    LOC["UC-01 Traduction orchestree\n(localisation reutilisee)"] --> BUILD

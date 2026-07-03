@@ -48,6 +48,8 @@ class TestGenerateSchema:
         assert "enum" in type_prop
         assert "webapp" in type_prop["enum"]
         assert "api" in type_prop["enum"]
+        assert "framework" in type_prop["enum"]
+        assert "meta" in type_prop["enum"]
 
     def test_memory_backend_enum(self) -> None:
         schema = generate_schema()
@@ -55,6 +57,34 @@ class TestGenerateSchema:
         backend = mem["properties"]["backend"]
         assert "enum" in backend
         assert "auto" in backend["enum"]
+        assert "weaviate-server" in backend["enum"]
+
+    def test_memory_layers_are_described(self) -> None:
+        schema = generate_schema()
+        mem = schema["properties"]["memory"]
+        for key in (
+            "layer_profile",
+            "short_term_backend",
+            "redis_url",
+            "weaviate_url",
+            "weaviate_api_key_env",
+            "weaviate_collection",
+            "neo4j_uri",
+            "neo4j_user",
+            "neo4j_password_env",
+            "neo4j_database",
+            "migration_source_backend",
+            "migration_target_backend",
+            "migration_bundle_path",
+            "knowledge_graph",
+            "memory_graph",
+            "code_graph",
+            "task_memory",
+            "visualization",
+        ):
+            assert key in mem["properties"]
+        assert "redis" in mem["properties"]["short_term_backend"]["enum"]
+        assert "neo4j" in mem["properties"]["memory_graph"]["enum"]
 
     def test_additional_properties_true(self) -> None:
         schema = generate_schema()

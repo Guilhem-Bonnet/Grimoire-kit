@@ -102,5 +102,5 @@ La migration est additive — pour revenir en v2, supprimez simplement la sectio
 
 ## Voir aussi
 
-- [Getting Started](getting-started.md) — guide v3 complet
+- [Guide de démarrage](getting-started.md) — guide complet
 - [Référence YAML](grimoire-yaml-reference.md) — schéma v3

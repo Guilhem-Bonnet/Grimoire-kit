@@ -1,0 +1,51 @@
+<!-- PROVENANCE
+Source amont : projet "Standard de structure agentique" (processus-developpement-agentique).
+Ce document est bundlé dans grimoire-kit comme connaissance de domaine (game-dev) pour usage self-contained.
+La source amont reste la source de vérité normative ; grimoire-kit consomme et trace, ne redéfinit pas.
+-->
+
+flowchart TD
+    NEED["Besoin de production"] --> ART["Art - rayons B C D E F"]
+    NEED --> GAMEPLAY["Gameplay et IA - rayons I J"]
+    NEED --> AUDIOCINE["Audio et cinematiques - rayons G H"]
+    NEED --> PRESENTATION["UI et VR - rayons K M"]
+    NEED --> PERF["Optimisation - rayon L"]
+    NEED --> FOUND["Direction et pipeline - rayons A N"]
+    NEED --> CODE["Programmation et maths - rayon O"]
+    NEED --> ENGINE["Moteur et MCP - rayon P"]
+    NEED --> ARTDIR["Direction artistique et UI UX - rayon Q"]
+    NEED --> ONLINE["Reseau services et securite - rayon R"]
+    NEED --> IMAGE["Eclairage et image finale - rayon S"]
+    NEED --> CODEARCH["Architecture tests et prog systeme - rayon T"]
+    NEED --> LOC["Localisation et i18n - rayon U"]
+    NEED --> CAPABILITY["Capacites modalites et outils - rayon V"]
+    NEED --> AMBIANCE["Ambiance et atmosphere - rayon W"]
+    NEED --> NARRATIVE["Narration interactive - rayon X"]
+    NEED --> BUSINESS["Monetisation analytics conformite - rayon Y"]
+    NEED --> PROCEDURAL["Generation procedurale et monde ouvert - rayon Z"]
+    NEED --> MARKETING["Edition et go-to-market - rayon AA"]
+    NEED --> COMMUNITY["Operations communautaires et support - rayon AB"]
+    NEED --> SPECTATOR["Spectateur esports et replay - rayon AC"]
+    ART --> SKILL["Choisir un skill"]
+    GAMEPLAY --> SKILL
+    AUDIOCINE --> SKILL
+    PRESENTATION --> SKILL
+    PERF --> SKILL
+    FOUND --> SKILL
+    CODE --> SKILL
+    ENGINE --> SKILL
+    ARTDIR --> SKILL
+    ONLINE --> SKILL
+    IMAGE --> SKILL
+    CODEARCH --> SKILL
+    LOC --> SKILL
+    CAPABILITY --> SKILL
+    AMBIANCE --> SKILL
+    NARRATIVE --> SKILL
+    BUSINESS --> SKILL
+    PROCEDURAL --> SKILL
+    MARKETING --> SKILL
+    COMMUNITY --> SKILL
+    SPECTATOR --> SKILL
+    SKILL --> UC["Composer le use-case socle"]
+    UC --> PROOF["Produire la preuve"]

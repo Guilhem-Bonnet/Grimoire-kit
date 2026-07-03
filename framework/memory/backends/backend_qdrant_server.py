@@ -5,8 +5,9 @@ Se connecte à un serveur Qdrant existant (local ou réseau).
 Circuit breaker : timeout 500ms sur connect, 2s sur opérations.
 
 Variables d'environnement :
-  Grimoire_QDRANT_URL  — URL du serveur (ex: http://localhost:6333)
-  Grimoire_QDRANT_API_KEY — Clé API optionnelle (Qdrant Cloud)
+    GRIMOIRE_QDRANT_URL      — URL du serveur (ex: http://localhost:6333)
+    GRIMOIRE_QDRANT_API_KEY  — Clé API optionnelle (Qdrant Cloud)
+    Legacy compatibles: Grimoire_QDRANT_URL / Grimoire_QDRANT_API_KEY
 
 Dépendances : qdrant-client sentence-transformers
   pip install qdrant-client sentence-transformers
@@ -17,13 +18,38 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from pathlib import Path
+from typing import ClassVar
+
+_UI_GOAL = "visual_intuitive_agent_operations"
+_UI_NON_GOAL = "entertainment_gameplay"
+_UI_SCOPE = ["custom", "debug", "understand", "modify", "tune"]
+_ENV_QDRANT_URL = "GRIMOIRE_QDRANT_URL"
+_ENV_QDRANT_API_KEY = "GRIMOIRE_QDRANT_API_KEY"
+_ENV_QDRANT_URL_LEGACY = "Grimoire_QDRANT_URL"
+_ENV_QDRANT_API_KEY_LEGACY = "Grimoire_QDRANT_API_KEY"
+
+
+def _normalize_observability_metadata(metadata: dict | None) -> dict:
+    """Normalize metadata for observability-focused UI queries.
+
+    The default payload makes the product intent explicit and ensures that
+    live/multi-session filters are always available in Qdrant.
+    """
+    normalized = dict(metadata or {})
+    normalized.setdefault("ui_goal", _UI_GOAL)
+    normalized.setdefault("ui_non_goal", _UI_NON_GOAL)
+    normalized.setdefault("ui_scope", _UI_SCOPE)
+    normalized.setdefault("view_mode", "historical")
+    normalized.setdefault("is_live", False)
+    normalized.setdefault("session_id", "unknown")
+    normalized.setdefault("parallel_session_group", "default")
+    return normalized
 
 
 class QdrantServerBackend:
     """Qdrant serveur distant + sentence-transformers embeddings. Circuit breaker intégré."""
 
-    VECTOR_SIZE = {
+    VECTOR_SIZE: ClassVar[dict[str, int]] = {
         "all-MiniLM-L6-v2": 384,
         "all-mpnet-base-v2": 768,
         "nomic-embed-text": 768,
@@ -39,26 +65,34 @@ class QdrantServerBackend:
     ):
         try:
             from qdrant_client import QdrantClient
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "qdrant-client non installé. Exécuter :\n"
                 "  pip install qdrant-client sentence-transformers"
-            )
+            ) from err
         try:
             from sentence_transformers import SentenceTransformer
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "sentence-transformers non installé. Exécuter :\n"
                 "  pip install sentence-transformers"
-            )
+            ) from err
 
         model_short = embedding_model.split("/")[-1]
         self._vector_size = self.VECTOR_SIZE.get(model_short, 384)
         self._collection = collection
         self._timeout = timeout
 
-        _api_key = api_key or os.environ.get("Grimoire_QDRANT_API_KEY")
-        _url = os.environ.get("Grimoire_QDRANT_URL", qdrant_url)
+        _api_key = (
+            api_key
+            or os.environ.get(_ENV_QDRANT_API_KEY)
+            or os.environ.get(_ENV_QDRANT_API_KEY_LEGACY)
+        )
+        _url = (
+            os.environ.get(_ENV_QDRANT_URL)
+            or os.environ.get(_ENV_QDRANT_URL_LEGACY)
+            or qdrant_url
+        )
 
         # Connexion avec circuit breaker (timeout courte)
         self._client = QdrantClient(
@@ -86,11 +120,12 @@ class QdrantServerBackend:
 
         vector = self._model.encode(text).tolist()
         point_id = str(uuid.uuid4())
+        normalized_metadata = _normalize_observability_metadata(metadata)
         payload = {
             "memory": text,
             "user_id": user_id or "global",
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            **(metadata or {}),
+            **normalized_metadata,
         }
         self._client.upsert(
             collection_name=self._collection,
@@ -138,9 +173,18 @@ class QdrantServerBackend:
         info = self._client.get_collection(self._collection)
         return {
             "backend": "qdrant-server",
-            "url": os.environ.get("Grimoire_QDRANT_URL", "configured"),
+            "url": os.environ.get(_ENV_QDRANT_URL)
+            or os.environ.get(_ENV_QDRANT_URL_LEGACY)
+            or "configured",
             "collection": self._collection,
             "entries": self.count(),
             "vectors_config": str(info.config.params.vectors),
             "search": "semantic (sentence-transformers)",
+            "ui_goal": _UI_GOAL,
+            "session_fields": [
+                "session_id",
+                "parallel_session_group",
+                "view_mode",
+                "is_live",
+            ],
         }

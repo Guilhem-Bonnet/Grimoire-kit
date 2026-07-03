@@ -1,12 +1,16 @@
 {
   "manifestVersion": 1,
   "id": "langfuse",
+  "kind": "observability",
   "name": "Langfuse Observability",
   "version": "0.1.0",
   "description": "Pont d'observabilité Langfuse : exporte la télémétrie agentique locale (events.jsonl) vers Langfuse en mode best-effort, avec conventions de traces et guide d'installation. Hooks en shadow, jamais bloquants.",
   "license": "MIT",
   "authors": [
-    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+    {
+      "name": "Guilhem Bonnet",
+      "url": "https://github.com/Guilhem-Bonnet"
+    }
   ],
   "upstream": {
     "repository": "https://github.com/langfuse/langfuse",
@@ -19,24 +23,41 @@
   },
   "provides": {
     "agents": [],
-    "skills": ["artifacts/skills/langfuse-tracing-setup/SKILL.md"],
-    "hooks": ["artifacts/hooks/langfuse-trace-export.json"],
+    "skills": [
+      "artifacts/skills/langfuse-tracing-setup/SKILL.md"
+    ],
+    "hooks": [
+      "artifacts/hooks/langfuse-trace-export.json"
+    ],
     "workflows": [],
-    "instructions": ["artifacts/instructions/langfuse-observability.instructions.md"],
+    "instructions": [
+      "artifacts/instructions/langfuse-observability.instructions.md"
+    ],
     "nodes": []
   },
   "patterns": {
-    "implements": ["QUA-02", "QUA-08", "QUA-10"]
+    "implements": [
+      "QUA-02",
+      "QUA-08",
+      "QUA-10"
+    ]
   },
   "permissions": {
     "filesystem": "artifacts",
     "network": true,
-    "hooks": ["PostToolUse"],
+    "hooks": [
+      "PostToolUse"
+    ],
     "memory": "none"
   },
   "install": {
     "steps": [
-      { "kind": "pip", "packages": ["langfuse"] },
+      {
+        "kind": "pip",
+        "packages": [
+          "langfuse"
+        ]
+      },
       {
         "kind": "copy",
         "from": "artifacts/skills/langfuse-tracing-setup",
@@ -60,14 +81,20 @@
       {
         "kind": "script",
         "path": "scripts/register-hooks.sh",
-        "args": ["--mode", "shadow"]
+        "args": [
+          "--mode",
+          "shadow"
+        ]
       }
     ],
     "verify": "scripts/verify-install.sh"
   },
   "uninstall": {
     "steps": [
-      { "kind": "script", "path": "scripts/unregister-hooks.sh" }
+      {
+        "kind": "script",
+        "path": "scripts/unregister-hooks.sh"
+      }
     ]
   }
 }

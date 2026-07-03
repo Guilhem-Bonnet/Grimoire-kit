@@ -1,0 +1,3260 @@
+<!-- Switchboard Kanban Board -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Switchboard Kanban</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --panel-bg: #000000;
+            --panel-bg2: #0a0a0a;
+            --border-color: #333333;
+            --border-bright: #555555;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+
+            --accent-teal: #3ddbd9;
+            --accent-teal-dim: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+            --glow-teal: 0 0 10px color-mix(in srgb, var(--accent-teal) 50%, transparent);
+            --accent-red: #da3633;
+            --accent-orange: #d29922;
+            --font-family: var(--vscode-font-family, 'Segoe UI', 'Roboto', sans-serif);
+            --font-mono: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--bg-color);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .kanban-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--panel-bg);
+        }
+
+        .kanban-title {
+            flex: 1;
+            min-width: 0;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--accent-teal);
+            text-shadow: var(--glow-teal);
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .workspace-select {
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.5px;
+            padding: 4px 8px;
+            min-width: 180px;
+        }
+
+        .controls-strip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--panel-bg2);
+            flex-wrap: wrap;
+        }
+
+        .settings-strip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--panel-bg2) 85%, transparent);
+            flex-wrap: wrap;
+        }
+
+        .cli-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.6px;
+            color: var(--accent-teal);
+            user-select: none;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        .cli-toggle input[type="checkbox"] {
+            width: 12px;
+            height: 12px;
+            accent-color: var(--accent-teal);
+            cursor: pointer;
+        }
+
+        .cli-toggle.is-off .toggle-label {
+            color: var(--accent-orange);
+        }
+
+        .triggers-off-badge {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.6px;
+            color: var(--accent-orange);
+            border: 1px solid color-mix(in srgb, var(--accent-orange) 45%, transparent);
+            background: color-mix(in srgb, var(--accent-orange) 15%, transparent);
+            padding: 2px 6px;
+            border-radius: 2px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .strip-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+        }
+
+        .strip-btn:hover {
+            background: color-mix(in srgb, var(--accent-teal) 8%, transparent);
+            border-color: var(--accent-teal-dim);
+            color: var(--accent-teal);
+        }
+
+        .strip-btn.is-active {
+            color: var(--accent-teal);
+            border-color: var(--accent-teal-dim);
+            box-shadow: var(--glow-teal);
+            background: color-mix(in srgb, var(--accent-teal) 10%, transparent);
+        }
+
+        .mode-toggle-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+            background: color-mix(in srgb, var(--accent-teal) 10%, transparent);
+            border-color: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+            color: color-mix(in srgb, var(--accent-teal) 90%, var(--text-secondary));
+        }
+
+        .mode-toggle-btn:hover:not(:disabled) {
+            filter: brightness(1.15);
+        }
+
+        .btn-add-plan {
+            background: color-mix(in srgb, var(--accent-teal) 15%, transparent);
+            border: 1px solid color-mix(in srgb, var(--accent-teal) 30%, transparent);
+            color: var(--accent-teal);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: bold;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+            box-shadow: var(--glow-teal);
+        }
+
+        .btn-add-plan:hover {
+            background: var(--accent-teal);
+            color: var(--panel-bg);
+            box-shadow: 0 0 15px var(--accent-teal);
+        }
+
+        .btn-add-plan img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(0.9);
+            transition: filter 0.15s;
+        }
+
+        .btn-add-plan:hover img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(1.2);
+        }
+
+        .backlog-toggle-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+            text-transform: uppercase;
+        }
+        .backlog-toggle-btn:hover {
+            background: color-mix(in srgb, var(--accent-teal) 8%, transparent);
+            border-color: var(--accent-teal-dim);
+            color: var(--accent-teal);
+        }
+        .backlog-toggle-btn.is-active {
+            color: var(--accent-orange);
+            border-color: color-mix(in srgb, var(--accent-orange) 45%, transparent);
+            background: color-mix(in srgb, var(--accent-orange) 10%, transparent);
+        }
+
+        .btn-batch {
+            background: color-mix(in srgb, var(--accent-teal) 12%, transparent);
+            border: 1px solid color-mix(in srgb, var(--accent-teal) 28%, transparent);
+            color: var(--accent-teal);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            font-weight: bold;
+            letter-spacing: 0.6px;
+            line-height: 1;
+            min-height: 18px;
+            padding: 3px 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+        }
+
+        .btn-batch:hover {
+            background: var(--accent-teal);
+            color: var(--panel-bg);
+            box-shadow: 0 0 12px color-mix(in srgb, var(--accent-teal) 60%, transparent);
+        }
+
+        .kanban-board {
+            display: flex;
+            gap: 12px;
+            padding: 16px;
+            padding-top: 36px;
+            flex: 1;
+            min-height: 0;
+            overflow-x: auto;
+        }
+
+        .kanban-column {
+            flex: 1;
+            min-width: 220px;
+            max-width: 320px;
+            display: flex;
+            flex-direction: column;
+            background: var(--panel-bg);
+            border: 1px solid var(--vscode-contrastBorder, var(--border-color));
+            border-radius: 4px;
+            /* overflow: visible allows tooltips to escape the column without clipping */
+            overflow: visible;
+            position: relative;
+            transition: z-index 0s;
+        }
+
+        .kanban-column:hover {
+            /* Elevate hovered column to ensure tooltips appear above neighboring columns */
+            z-index: 100;
+        }
+
+        .column-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--panel-bg2);
+            min-height: 52px;
+            /* Add radii here since parent no longer clips overflow */
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            z-index: 20;
+        }
+
+        .column-name {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .column-agent {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            text-transform: uppercase;
+            opacity: 0.8;
+            letter-spacing: 0.5px;
+            height: 13px;
+        }
+
+        .column-subline-spacer {
+            height: 13px;
+            margin-top: 2px;
+        }
+
+        .column-count {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--accent-teal);
+            background: color-mix(in srgb, var(--accent-teal) 15%, transparent);
+            border: 1px solid color-mix(in srgb, var(--accent-teal) 30%, transparent);
+            padding: 1px 6px;
+            border-radius: 8px;
+            min-width: 20px;
+            text-align: center;
+            box-shadow: var(--glow-teal);
+        }
+
+        .column-select {
+            background: #0a0a0a;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            padding: 2px 4px;
+            outline: none;
+            margin-right: 8px;
+            margin-left: auto;
+        }
+
+        .column-select:hover,
+        .column-select:focus {
+            border-color: var(--border-bright);
+            outline: none;
+        }
+
+        .column-body {
+            flex: 1;
+            padding: 8px;
+            overflow-y: auto;
+            min-height: 120px;
+            transition: background 0.15s;
+            /* Ensure body is below header/button area for tooltip stacking */
+            z-index: 1;
+        }
+
+        .column-body.drag-over {
+            background: color-mix(in srgb, var(--accent-teal) 6%, transparent);
+            outline: 1px dashed var(--accent-teal-dim);
+            outline-offset: -4px;
+        }
+
+        .kanban-card {
+            /* Mix 12% teal into the top, fading to 4% teal at the bottom */
+            background: linear-gradient(180deg, color-mix(in srgb, var(--accent-teal) 12%, var(--panel-bg2)) 0%, color-mix(in srgb, var(--accent-teal) 4%, var(--panel-bg)) 100%);
+            border: 1px solid var(--vscode-contrastBorder, var(--border-color));
+            border-left: 3px solid var(--accent-teal-dim);
+            /* Persistent teal edge */
+            border-radius: 3px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: grab;
+            transition: all 0.15s;
+            position: relative;
+        }
+
+        .kanban-card:active {
+            cursor: grabbing;
+        }
+
+        .kanban-card:hover {
+            border-color: color-mix(in srgb, var(--accent-teal) 50%, transparent);
+            border-left-color: var(--accent-teal);
+            /* Replace black shadow with a glowing teal bloom */
+            box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-teal) 20%, transparent);
+            /* Elevate hovered card so its tooltip is above other cards */
+            z-index: 50;
+        }
+
+        .kanban-card.dragging {
+            opacity: 0.4;
+            border-color: var(--accent-teal-dim);
+        }
+
+        .kanban-card.completed {
+            opacity: 0.7;
+            border-left: 3px solid var(--vscode-testing-iconPassed, #73c991);
+        }
+        .kanban-card.completed:hover {
+            opacity: 0.85;
+        }
+        .card-done-badge {
+            font-size: 10px;
+            color: var(--vscode-testing-iconPassed, #73c991);
+            padding: 2px 6px;
+            border: 1px solid var(--vscode-testing-iconPassed, #73c991);
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
+        /* During drag, prevent child elements from interfering with drop targets */
+        .column-body.drag-over .kanban-card,
+        .column-body.drag-over .empty-state {
+            pointer-events: none;
+        }
+
+        .card-topic {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-meta {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: color-mix(in srgb, var(--text-secondary) 50%, var(--accent-teal-dim));
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .complexity-indicator {
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        .complexity-indicator.very-high { color: #ff00ff; }
+        .complexity-indicator.high { color: var(--accent-red); }
+        .complexity-indicator.medium { color: var(--accent-orange); }
+        .complexity-indicator.low { color: #98c379; }
+        .complexity-indicator.very-low { color: var(--accent-teal); }
+        .complexity-indicator.unknown { color: #7f848e; }
+
+        .card-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .card-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+        }
+
+        .card-btn:hover {
+            background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+
+        .card-btn.complete:hover {
+            border-color: var(--accent-teal-dim);
+            color: var(--accent-teal);
+        }
+
+        .card-btn.recover:hover {
+            border-color: var(--vscode-testing-iconPassed, #73c991);
+            color: var(--vscode-testing-iconPassed, #73c991);
+        }
+
+        .card-btn.icon-btn {
+            padding: 4px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 20px 10px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            letter-spacing: 0.5px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--vscode-scrollbarSlider-background, var(--border-bright));
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--vscode-scrollbarSlider-hoverBackground, var(--text-secondary));
+        }
+
+        /* Card Drop Animation */
+        @keyframes dropPulse {
+            0% { transform: scale(1.05); box-shadow: 0 4px 20px var(--accent-teal); }
+            100% { transform: scale(1); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-teal) 20%, transparent); }
+        }
+        .card-dropped {
+            animation: dropPulse 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Card Complete / Delete Animation */
+        @keyframes cardComplete {
+            0% { transform: scale(1); opacity: 1; }
+            40% { transform: scale(1.05); opacity: 0.9; }
+            100% { transform: scale(0.8) translateX(40px); opacity: 0; padding-top: 0; padding-bottom: 0; margin: 0; height: 0; border-width: 0; }
+        }
+        .card-completing {
+            animation: cardComplete 0.4s ease-out forwards;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        /* Autoban Read-Only Status Bar */
+        .autoban-status-bar {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            background: var(--panel-bg2);
+            border-bottom: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            min-height: 22px;
+        }
+
+        .autoban-indicator {
+            color: var(--text-secondary);
+            white-space: nowrap;
+            letter-spacing: 0.5px;
+        }
+
+        .autoban-indicator.is-active {
+            color: var(--accent-teal);
+        }
+
+        @keyframes autobanPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .autoban-indicator.is-active::before {
+            content: '⚡ ';
+            animation: autobanPulse 2s ease-in-out infinite;
+        }
+
+        /* Selected card highlight */
+        .kanban-card.selected {
+            border-color: var(--accent-teal);
+            border-left-color: var(--accent-teal);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-teal) 35%, transparent),
+                        inset 0 0 4px color-mix(in srgb, var(--accent-teal) 10%, transparent);
+        }
+
+        /* Live sync indicators */
+        .live-sync-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .live-sync-indicator.active {
+            background: #4ade80;  /* Green */
+            animation: pulse 2s infinite;
+        }
+
+        .live-sync-indicator.paused {
+            background: #fbbf24;  /* Amber */
+        }
+
+        .live-sync-indicator.error,
+        .live-sync-indicator.conflict {
+            background: #f87171;  /* Red */
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .card-context-menu .menu-item[data-action="pauseLiveSync"],
+        .card-context-menu .menu-item[data-action="resumeLiveSync"] {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Column button area */
+        .column-button-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 5px 8px;
+            background: var(--panel-bg2);
+            border-bottom: 1px solid var(--border-color);
+            min-height: 32px;
+            /* Prioritize button area in stacking context for tooltips */
+            z-index: 10;
+        }
+
+        /* Ensure last column (Completed) has same header height */
+        .kanban-column:last-child .column-button-area {
+            min-height: 32px;
+        }
+
+        /* Recover buttons in Completed column — visible text-style buttons */
+        .recover-selected-btn,
+        .recover-all-btn {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary, #888888);
+            padding: 3px;
+        }
+        .recover-selected-btn:hover,
+        .recover-all-btn:hover {
+            color: var(--accent-teal);
+        }
+
+        .column-icon-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            cursor: pointer;
+            padding: 3px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            position: relative;
+        }
+
+        .column-icon-btn:hover {
+            border-color: var(--accent-teal-dim);
+            background: color-mix(in srgb, var(--accent-teal) 10%, transparent);
+            box-shadow: 0 0 6px color-mix(in srgb, var(--accent-teal) 25%, transparent);
+            /* Elevate hovered button to ensure tooltip is on top */
+            z-index: 100;
+        }
+
+        .column-icon-btn img {
+            width: 22px;
+            height: 22px;
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(0.9);
+            transition: filter 0.15s;
+        }
+
+        .column-icon-btn:hover img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(1.2);
+        }
+
+        /* Flash animation for icon button clicks */
+        @keyframes iconFlash {
+            0% { filter: sepia(1) saturate(5) hue-rotate(140deg) brightness(2.5) drop-shadow(0 0 8px var(--accent-teal)); }
+            100% { filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(0.9); }
+        }
+        .column-icon-btn.flash img {
+            animation: iconFlash 0.35s ease-out forwards;
+        }
+
+        /* Testing Fail icon button */
+        .testing-fail-icon {
+            width: 22px;
+            height: 22px;
+            display: block;
+        }
+        .testing-fail-btn:hover .testing-fail-icon {
+            filter: drop-shadow(0 0 8px var(--accent-red));
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .modal-overlay.hidden {
+            display: none;
+        }
+        .modal-content {
+            background: var(--panel-bg2);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 480px;
+            max-width: 90vw;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .modal-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--accent-red);
+            margin: 0;
+        }
+        .modal-close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        .modal-close-btn:hover {
+            color: var(--text-primary);
+        }
+        .modal-body {
+            padding: 16px 20px;
+        }
+        .modal-body label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .modal-plan-count {
+            color: var(--text-primary);
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+        .modal-plan-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 12px 0;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .modal-plan-list li {
+            font-size: 12px;
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-left: 2px solid var(--accent-red);
+            margin-bottom: 4px;
+            background: color-mix(in srgb, var(--accent-red) 5%, transparent);
+            border-radius: 0 3px 3px 0;
+        }
+        .modal-textarea {
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: var(--font-family);
+            font-size: 13px;
+            padding: 10px;
+            resize: vertical;
+            min-height: 100px;
+        }
+        .modal-textarea:focus {
+            outline: none;
+            border-color: var(--accent-teal);
+            box-shadow: 0 0 4px var(--accent-teal-dim);
+        }
+        .modal-textarea::placeholder {
+            color: var(--text-secondary);
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 20px 16px;
+            border-top: 1px solid var(--border-color);
+        }
+        .modal-btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            font-family: var(--font-family);
+            transition: all 0.15s;
+        }
+        .modal-btn-secondary {
+            background: transparent;
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+        }
+        .modal-btn-secondary:hover {
+            border-color: var(--accent-teal);
+            background: color-mix(in srgb, var(--accent-teal) 10%, transparent);
+        }
+        .modal-btn-primary {
+            background: var(--accent-teal);
+            color: #000;
+            font-weight: 600;
+        }
+        .modal-btn-primary:hover {
+            background: color-mix(in srgb, var(--accent-teal) 80%, white);
+            box-shadow: 0 0 8px var(--accent-teal-dim);
+        }
+
+        /* CSS Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 32px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: var(--border-color);
+            border-radius: 16px;
+            transition: background 0.2s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            height: 12px;
+            width: 12px;
+            left: 2px;
+            bottom: 2px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: color-mix(in srgb, var(--accent-teal) 50%, transparent);
+        }
+
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(16px);
+            background: var(--accent-teal);
+            box-shadow: 0 0 4px var(--accent-teal);
+        }
+
+        /* Inline autoban timers in controls strip */
+        .autoban-timers-inline {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .autoban-timer-badge {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            background: color-mix(in srgb, var(--accent-teal) 6%, transparent);
+            border: 1px solid color-mix(in srgb, var(--accent-teal) 15%, transparent);
+            padding: 2px 6px;
+            border-radius: 2px;
+            white-space: nowrap;
+        }
+
+        .autoban-timer-badge.is-active {
+            color: var(--accent-teal);
+            border-color: color-mix(in srgb, var(--accent-teal) 35%, transparent);
+        }
+
+        /* Controls strip spacer */
+        .controls-spacer {
+            flex: 1;
+        }
+
+        /* CLI toggle inline label */
+        .cli-toggle-inline {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.6px;
+            color: var(--accent-teal);
+            text-transform: uppercase;
+            user-select: none;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .cli-toggle-inline.is-off {
+            color: var(--accent-orange);
+        }
+
+        /* Pair Programming mode dropdown */
+        .kanban-mode-dropdown {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            background: var(--panel-bg);
+            color: var(--accent-teal);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            padding: 3px 6px;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .kanban-mode-dropdown:hover,
+        .kanban-mode-dropdown:focus {
+            border-color: var(--accent-teal-dim);
+            box-shadow: var(--glow-teal);
+        }
+        .kanban-mode-dropdown.is-off {
+            color: var(--accent-orange);
+            border-color: color-mix(in srgb, var(--accent-orange) 45%, transparent);
+        }
+        .kanban-mode-dropdown.is-off:hover,
+        .kanban-mode-dropdown.is-off:focus {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-orange) 30%, transparent);
+        }
+        .kanban-mode-dropdown option {
+            background: var(--bg-color);
+            color: var(--text-primary);
+        }
+
+        /* Per-column mode toggle */
+        .mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-right: 8px;
+            margin-left: auto;
+        }
+
+        .mode-toggle:hover {
+            border-color: var(--accent-teal-dim);
+            background: color-mix(in srgb, var(--accent-teal) 8%, transparent);
+            box-shadow: var(--glow-teal);
+            z-index: 100;
+        }
+
+        .mode-toggle img {
+            width: 16px;
+            height: 16px;
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(0.8);
+            transition: filter 0.15s;
+        }
+
+        .mode-toggle:hover img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(1.1);
+        }
+
+        .complexity-routing-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-right: 4px;
+        }
+
+        .complexity-routing-btn:hover {
+            border-color: var(--accent-teal-dim);
+            background: color-mix(in srgb, var(--accent-teal) 8%, transparent);
+            box-shadow: var(--glow-teal);
+        }
+
+        .complexity-routing-btn img {
+            width: 16px;
+            height: 16px;
+            filter: grayscale(1) brightness(0.7);
+            transition: all 0.15s;
+        }
+
+        .complexity-routing-btn.is-active img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(0.9);
+        }
+
+        .complexity-routing-btn:hover img {
+            filter: sepia(1) saturate(3) hue-rotate(140deg) brightness(1.1);
+        }
+
+        .mode-toggle.mode-prompt img {
+            filter: sepia(1) saturate(1.5) hue-rotate(0deg) brightness(0.9);
+        }
+        
+        .mode-toggle.mode-prompt:hover img {
+            filter: sepia(1) saturate(1.5) hue-rotate(0deg) brightness(1.2);
+        }
+
+        /* Custom instant tooltips — replaces native title delay */
+        [data-tooltip] {
+            position: relative;
+        }
+
+        /* Body-level tooltip overlay — escapes all stacking contexts */
+        #tooltip-overlay {
+            position: fixed;
+            z-index: 9999;
+            pointer-events: none;
+            background: var(--bg-tertiary, #1a1a2e);
+            color: var(--text-primary, #e0e0e0);
+            font-size: 10px;
+            font-family: var(--font-mono);
+            padding: 3px 8px;
+            border-radius: 3px;
+            white-space: pre-line;
+            text-align: left;
+            max-width: 320px;
+            border: 1px solid var(--border-color, #2a2a4a);
+            opacity: 0;
+            visibility: hidden;
+            transition: none;
+        }
+        #tooltip-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+            animation: tooltipFadeIn 0.1s ease-out forwards;
+        }
+
+        @keyframes tooltipFadeIn {
+            to { opacity: 1; }
+        }
+
+        /* Routing Map Modal */
+        .routing-map-content {
+            width: 900px;
+            max-width: 95vw;
+        }
+
+        .routing-map-columns {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            padding: 20px;
+            min-height: 400px;
+        }
+
+        .routing-column {
+            background: var(--vscode-panel-background, #1e1e1e);
+            border: 1px solid var(--vscode-panel-border, #444);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .routing-column-header {
+            padding: 12px;
+            border-bottom: 1px solid var(--vscode-panel-border, #444);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .role-badge {
+            font-weight: 600;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .role-badge.lead { background: #ff6b6b; color: white; }
+        .role-badge.coder { background: #4ecdc4; color: white; }
+        .role-badge.intern { background: #45b7d1; color: white; }
+
+        .routing-drop-zone {
+            flex: 1;
+            padding: 12px;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .routing-drop-zone.drag-over {
+            background: var(--vscode-list-dropBackground, rgba(255,255,255,0.05));
+            border: 2px dashed var(--vscode-focusBorder, #007fd4);
+            border-radius: 6px;
+        }
+
+        .complexity-card {
+            background: var(--vscode-button-background, #0e639c);
+            color: var(--vscode-button-foreground, #fff);
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: grab;
+            text-align: center;
+            font-weight: 600;
+            font-size: 14px;
+            transition: transform 0.15s, box-shadow 0.15s;
+            user-select: none;
+            border: none;
+        }
+
+        .complexity-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .complexity-card.dragging {
+            opacity: 0.4;
+            cursor: grabbing;
+        }
+
+        .complexity-card.complexity-high { background: #c0392b; }
+        .complexity-card.complexity-medium { background: #16a085; }
+        .complexity-card.complexity-low { background: #2980b9; }
+
+        .routing-map-active-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-orange, #f0a500);
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+    </style>
+</head>
+
+    <body>
+    <div class="kanban-header">
+        <div class="kanban-title" id="kanban-title">AUTOBAN - Drag plan cards to trigger CLI Agent actions | Copy prompts to send to IDE chat agents</div>
+        <div class="header-controls">
+            <select id="workspace-select" class="workspace-select" data-tooltip="Select workspace"></select>
+        </div>
+    </div>
+    <div class="controls-strip">
+        <button class="strip-btn" id="btn-autoban" data-tooltip="Start or stop the automation engine">▶ START AUTOMATION</button>
+        <button class="strip-btn mode-toggle-btn" id="mode-toggle-btn" data-tooltip="Open ClickUp, Linear and Notion Integration setup">
+            <span id="mode-label">Integrations</span>
+        </button>
+        <div class="autoban-timers-inline" id="autoban-timers-inline"></div>
+        <span class="controls-spacer"></span>
+        <span class="triggers-off-badge" id="triggers-off-badge" hidden>⚠ TRIGGERS OFF</span>
+        <label class="cli-toggle-inline" id="cli-toggle" data-tooltip="When OFF, moves and prompts do not trigger CLI agent actions">
+            <label class="toggle-switch">
+                <input type="checkbox" id="cli-triggers-toggle" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">CLI Triggers</span>
+        </label>
+        <label class="cli-toggle-inline" id="unknown-complexity-label" data-tooltip="When OFF, batch moves skip plans with unknown complexity">
+            <label class="toggle-switch">
+                <input type="checkbox" id="unknown-complexity-toggle">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">Unknown → Auto</span>
+        </label>
+        <select id="pairProgrammingModeSelect" class="kanban-mode-dropdown" data-tooltip="Pair Programming mode: controls how Lead and Coder prompts are dispatched">
+            <option value="off">Pair Programming: Off</option>
+            <option value="cli-cli">CLI Lead + CLI Coder</option>
+            <option value="cli-ide">CLI Lead + IDE Coder</option>
+            <option value="ide-cli">IDE Lead + CLI Coder</option>
+            <option value="ide-ide">IDE Lead + IDE Coder</option>
+        </select>
+        <button class="strip-btn" id="btn-refresh-strip" data-tooltip="Sync board with latest backend state">↻ SYNC BOARD</button>
+        <button class="strip-btn" id="btn-routing-map" data-tooltip="Configure complexity-based routing rules">⇢ ROUTING MAP</button>
+        <button class="strip-btn" id="btn-collapse-coders" data-tooltip="Toggle collapsed coder columns view">⇥ COLLAPSE CODERS</button>
+    </div>
+    <div id="db-warning-banner" style="display:none; background:#3a2a00; color:#ffcc00; padding:6px 12px; font-size:12px; text-align:center; border-bottom:1px solid #554400;">
+        ⚠️ Database unavailable — card positions may not reflect manual moves
+    </div>
+    <div class="kanban-board" id="kanban-board"></div>
+
+    <!-- Testing Fail Modal -->
+    <div id="testing-fail-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Report Testing Failure</h3>
+                <button class="modal-close-btn" id="testing-fail-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-plan-count" id="testing-fail-plan-count"></p>
+                <ul class="modal-plan-list" id="testing-fail-plan-list"></ul>
+                <label for="testing-fail-feedback">Describe the testing issues:</label>
+                <textarea id="testing-fail-feedback" class="modal-textarea" placeholder="e.g. Tests failing due to null pointer in UserService.getUser()..." rows="6"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-secondary" id="testing-fail-copy">Copy Prompt</button>
+                <button class="modal-btn modal-btn-primary" id="testing-fail-send">Send to Lead Coder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Routing Map Modal -->
+    <div id="routing-map-modal" class="modal-overlay hidden">
+        <div class="modal-content routing-map-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Routing Map</h3>
+                <button class="modal-close-btn" data-action="closeRoutingMap">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <p style="margin: 12px 20px 0; color: var(--vscode-descriptionForeground); font-size: 12px;">Drag complexity cards to assign which agent tier handles each level.</p>
+                <div class="routing-map-columns">
+                    <div class="routing-column">
+                        <div class="routing-column-header">
+                            <span class="role-badge lead">Lead Coder</span>
+                        </div>
+                        <div class="routing-drop-zone" data-role="lead"></div>
+                    </div>
+                    <div class="routing-column">
+                        <div class="routing-column-header">
+                            <span class="role-badge coder">Coder</span>
+                        </div>
+                        <div class="routing-drop-zone" data-role="coder"></div>
+                    </div>
+                    <div class="routing-column">
+                        <div class="routing-column-header">
+                            <span class="role-badge intern">Intern</span>
+                        </div>
+                        <div class="routing-drop-zone" data-role="intern"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-secondary" data-action="closeRoutingMap">Cancel</button>
+                <button class="modal-btn modal-btn-primary" data-action="saveRoutingMap">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="integration-settings-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="integration-settings-title">Integration Settings</h3>
+                <button class="modal-close-btn" id="integration-settings-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="font-size:11px; color:var(--text-secondary); line-height:1.5; margin-bottom:12px;">
+                    Realtime sync is configured in Setup. These controls only adjust background auto-pull and automation polling.
+                </div>
+                <label class="cli-toggle-inline" style="margin: 0 0 12px 0;">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="integration-autopull-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="toggle-label">Enable Auto-Pull</span>
+                </label>
+                <label for="integration-interval-select" style="display:block; margin-bottom:6px;">Pull Interval</label>
+                <select id="integration-interval-select" class="kanban-mode-dropdown">
+                    <option value="5">Every 5 minutes</option>
+                    <option value="15">Every 15 minutes</option>
+                    <option value="30">Every 30 minutes</option>
+                    <option value="60">Every 60 minutes</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-secondary" id="integration-settings-cancel">Cancel</button>
+                <button class="modal-btn modal-btn-primary" id="integration-settings-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tooltip-overlay"></div>
+
+    <script src="./grimoire-shim.js"></script>
+    <script>
+        const vscode = acquireVsCodeApi();
+        const kanbanBoard = document.getElementById('kanban-board');
+
+        /* ── Tooltip overlay system ─────────────────────────────────── */
+        const tooltipOverlay = document.getElementById('tooltip-overlay');
+        let tooltipTarget = null;
+
+        function showTooltip(el) {
+            if (!tooltipOverlay) return;
+            const text = el.getAttribute('data-tooltip');
+            if (!text) return;
+
+            tooltipTarget = el;
+            tooltipOverlay.textContent = text;
+
+            // Make visible off-screen first to measure dimensions
+            tooltipOverlay.style.left = '-9999px';
+            tooltipOverlay.style.top = '-9999px';
+            tooltipOverlay.classList.add('visible');
+
+            const rect = el.getBoundingClientRect();
+            const tipRect = tooltipOverlay.getBoundingClientRect();
+            const viewportW = document.documentElement.clientWidth;
+            const GAP = 4;
+
+            // Vertical: prefer above, flip below if clipped at top
+            let top = rect.top - tipRect.height - GAP;
+            if (top < 0) {
+                top = rect.bottom + GAP;
+            }
+
+            // Horizontal: center on element, clamp to viewport
+            let left = rect.left + rect.width / 2 - tipRect.width / 2;
+            if (left < 4) left = 4;
+            if (left + tipRect.width > viewportW - 4) {
+                left = viewportW - tipRect.width - 4;
+            }
+
+            tooltipOverlay.style.left = left + 'px';
+            tooltipOverlay.style.top = top + 'px';
+        }
+
+        function hideTooltip() {
+            if (!tooltipOverlay) return;
+            tooltipOverlay.classList.remove('visible');
+            tooltipOverlay.style.left = '-9999px';
+            tooltipOverlay.style.top = '-9999px';
+            tooltipTarget = null;
+        }
+
+        // Delegation via mouseover/mouseout (these bubble, unlike mouseenter/mouseleave)
+        document.addEventListener('mouseover', (e) => {
+            const el = e.target.closest('[data-tooltip]');
+            if (!el) return;
+            if (el === tooltipTarget) return;
+            hideTooltip();
+            showTooltip(el);
+        });
+
+        document.addEventListener('mouseout', (e) => {
+            const el = e.target.closest('[data-tooltip]');
+            if (!el) return;
+            const related = e.relatedTarget;
+            if (related && el.contains(related)) return;
+            hideTooltip();
+        });
+        let columnDefinitions = [
+            { id: 'CREATED', label: 'New', role: null, autobanEnabled: true },
+            { id: 'PLAN REVIEWED', label: 'Planned', role: 'planner', autobanEnabled: true },
+            { id: 'LEAD CODED', label: 'Lead Coder', role: 'lead', autobanEnabled: true },
+            { id: 'CODER CODED', label: 'Coder', role: 'coder', autobanEnabled: true },
+            { id: 'CODE REVIEWED', label: 'Reviewed', role: 'reviewer', autobanEnabled: false },
+            { id: 'ACCEPTANCE TESTED', label: 'Acceptance Tested', role: 'tester', autobanEnabled: false },
+            { id: 'COMPLETED', label: 'Completed', kind: 'completed', autobanEnabled: false }
+        ];
+        let lastVisibleAgents = { lead: true, coder: true, intern: true, reviewer: true, tester: false, planner: true, analyst: true, 'team-lead': false, jules: true };
+        let columns = columnDefinitions
+            .filter(col => !col.role || lastVisibleAgents[col.role] !== false)
+            .map(col => col.id);
+        let currentCards = [];
+        let lastAgentNames = {};
+        let cliTriggersEnabled = true;
+        let dynamicComplexityRoutingEnabled = true;
+        let allowUnknownComplexityAutoMove = false;
+        let collapseCodersEnabled = true;
+        // Restore collapse toggle from webview state if available
+        try {
+            const savedState = vscode.getState();
+            if (savedState && typeof savedState.collapseCodersEnabled === 'boolean') {
+                collapseCodersEnabled = savedState.collapseCodersEnabled;
+            }
+        } catch (_) {}
+        let autobanConfig = null; // Received from backend: { enabled, batchSize, rules }
+        let autobanCountdownTimer = null;
+        let autobanColumns = columnDefinitions.filter(col => col.autobanEnabled).map(col => col.id);
+        let lastBoardSignature = '';
+        let currentWorkspaceRoot = '';
+        let workspaceItems = [];
+        let columnDragDropModes = {};
+        const integrationState = {
+            clickup: { setupComplete: false, realTimeSyncEnabled: false, autoPullEnabled: false, pullIntervalMinutes: 60, syncError: false, mappingWarning: '', unmappedColumnCount: 0 },
+            linear: { setupComplete: false, realTimeSyncEnabled: false, autoPullEnabled: false, pullIntervalMinutes: 60, syncError: false }
+        };
+        let activeIntegration = null;
+        const selectedCards = new Set();
+        let testingFailSessionIds = [];
+        let testingFailSourceColumn = '';
+        // Routing map state
+        let routingMapConfig = { lead: [7, 8, 9, 10], coder: [4, 5, 6], intern: [1, 2, 3] };
+        let routingMapDraggedCard = null;
+        // Column abbreviations for inline timers
+        const COLUMN_ABBREV = { 'CREATED': 'C', 'PLAN REVIEWED': 'P', 'INTERN CODED': 'I', 'LEAD CODED': 'L', 'CODER CODED': 'R', 'CODED_AUTO': 'A', 'COMPLETED': 'D' };
+
+        // Icon URIs injected by extension
+        const ICON_MOVE_SELECTED = './icons/25-1-100%20Sci-Fi%20Flat%20icons-53.png';
+        const ICON_MOVE_ALL = './icons/25-1-100%20Sci-Fi%20Flat%20icons-54.png';
+        const ICON_PROMPT_SELECTED = './icons/25-1-100%20Sci-Fi%20Flat%20icons-22.png';
+        const ICON_PROMPT_ALL = './icons/25-101-150%20Sci-Fi%20Flat%20icons-115.png';
+        const ICON_JULES = './icons/25-1-100%20Sci-Fi%20Flat%20icons-28.png';
+        const ICON_ANALYST_MAP = './icons/25-1-100%20Sci-Fi%20Flat%20icons-42.png';
+        const ICON_IMPORT_CLIPBOARD = './icons/25-101-150%20Sci-Fi%20Flat%20icons-121.png';
+        const ICON_CLI = './icons/25-1-100%20Sci-Fi%20Flat%20icons-53.png';
+        const ICON_PROMPT = './icons/25-1-100%20Sci-Fi%20Flat%20icons-22.png';
+        const ICON_DYNAMIC_ROUTING = './icons/25-1-100%20Sci-Fi%20Flat%20icons-59.png';
+        const ICON_RECOVER_SELECTED = './icons/25-1-100%20Sci-Fi%20Flat%20icons-55.png';
+        const ICON_TESTING_FAIL = './icons/25-1-100%20Sci-Fi%20Flat%20icons-85.png';
+        const ICON_CHAT = './icons/25-1-100%20Sci-Fi%20Flat%20icons-65.png';
+        const ICON_CODE_MAP = './icons/25-1-100%20Sci-Fi%20Flat%20icons-90.png';
+        const ICON_ARCHIVE_SELECTED = './icons/25-1-100%20Sci-Fi%20Flat%20icons-41.png';
+
+        function getActiveWorkspaceRoot() {
+            return currentWorkspaceRoot || (workspaceItems[0] && workspaceItems[0].workspaceRoot) || '';
+        }
+
+        function postKanbanMessage(message) {
+            vscode.postMessage({
+                ...message,
+                workspaceRoot: message.workspaceRoot || getActiveWorkspaceRoot()
+            });
+        }
+
+        function updateWorkspaceSelector() {
+            const select = document.getElementById('workspace-select');
+            if (!select) return;
+            const options = workspaceItems.map(item => `<option value="${escapeAttr(item.workspaceRoot)}">${escapeHtml(item.label)}</option>`).join('');
+            select.innerHTML = options;
+            if (currentWorkspaceRoot) {
+                select.value = currentWorkspaceRoot;
+            }
+        }
+
+        function updateCliToggleUi() {
+            const toggle = document.getElementById('cli-triggers-toggle');
+            const toggleLabel = document.getElementById('cli-toggle');
+            const offBadge = document.getElementById('triggers-off-badge');
+            if (toggle) {
+                toggle.checked = !!cliTriggersEnabled;
+            }
+            if (toggleLabel) {
+                toggleLabel.classList.toggle('is-off', !cliTriggersEnabled);
+            }
+            if (offBadge) {
+                offBadge.hidden = !!cliTriggersEnabled;
+            }
+        }
+
+        function updateComplexityRoutingToggleUi() {
+            const toggle = document.getElementById('complexity-routing-toggle');
+            if (toggle) {
+                toggle.classList.toggle('is-active', !!dynamicComplexityRoutingEnabled);
+            }
+        }
+
+        function updateUnknownComplexityToggleUi() {
+            const toggle = document.getElementById('unknown-complexity-toggle');
+            const toggleLabel = document.getElementById('unknown-complexity-label');
+            if (toggle) {
+                toggle.checked = !!allowUnknownComplexityAutoMove;
+            }
+            if (toggleLabel) {
+                toggleLabel.classList.toggle('is-off', !allowUnknownComplexityAutoMove);
+            }
+        }
+
+        /** Get the next column in the pipeline (returns null for last column). */
+        function getNextColumn(col) {
+            const idx = columns.indexOf(col);
+            if (idx < 0 || idx >= columns.length - 1) return null;
+            return columns[idx + 1];
+        }
+
+        /** Flash an icon button for visual feedback. */
+        function flashIconBtn(btn) {
+            btn.classList.remove('flash');
+            void btn.offsetWidth;
+            btn.classList.add('flash');
+            btn.addEventListener('animationend', () => btn.classList.remove('flash'), { once: true });
+        }
+
+        /** Get all selected session IDs within a specific column. */
+        function getSelectedInColumn(col) {
+            const container = document.getElementById('col-' + col);
+            if (!container) return [];
+            const ids = [];
+            container.querySelectorAll('.kanban-card.selected').forEach(el => {
+                ids.push(el.dataset.session);
+            });
+            return ids;
+        }
+
+        /** Get selected session IDs from the dragged card's rendered column container. */
+        function getSelectedInRenderedContainer(cardEl) {
+            const container = cardEl ? cardEl.closest('.column-body') : null;
+            if (!container) return [];
+            return Array.from(container.querySelectorAll('.kanban-card.selected'))
+                .map(el => el.dataset.session)
+                .filter(Boolean);
+        }
+
+        /** Get all session IDs within a specific column. */
+        function getAllInColumn(col) {
+            if (col === 'CODED_AUTO') {
+                const CODED_IDS = ['LEAD CODED', 'CODER CODED', 'INTERN CODED'];
+                return currentCards.filter(c => CODED_IDS.includes(c.column)).map(c => c.sessionId);
+            }
+            return currentCards.filter(c => c.column === col).map(c => c.sessionId);
+        }
+
+        function escapeAttr(value) {
+            return String(value || '').replace(/"/g, '&quot;');
+        }
+
+        function updateIntegrationIntervalState() {
+            const toggle = document.getElementById('integration-autopull-toggle');
+            const select = document.getElementById('integration-interval-select');
+            if (!toggle || !select) return;
+            select.disabled = !toggle.checked;
+        }
+
+        function openIntegrationSettings(kind) {
+            const modal = document.getElementById('integration-settings-modal');
+            const title = document.getElementById('integration-settings-title');
+            const toggle = document.getElementById('integration-autopull-toggle');
+            const select = document.getElementById('integration-interval-select');
+            const state = integrationState[kind];
+            if (!modal || !title || !toggle || !select || !state) return;
+
+            activeIntegration = kind;
+            title.textContent = kind === 'clickup' ? 'ClickUp Auto-Pull & Automation Settings' : 'Linear Auto-Pull & Automation Settings';
+            toggle.checked = !!state.autoPullEnabled;
+            select.value = String(state.pullIntervalMinutes || 60);
+            updateIntegrationIntervalState();
+            modal.classList.remove('hidden');
+        }
+
+        function closeIntegrationSettings() {
+            const modal = document.getElementById('integration-settings-modal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            activeIntegration = null;
+        }
+
+        function saveIntegrationSettings() {
+            const toggle = document.getElementById('integration-autopull-toggle');
+            const select = document.getElementById('integration-interval-select');
+            if (!activeIntegration || !toggle || !select) return;
+
+            postKanbanMessage({
+                type: 'saveIntegrationAutoPullSettings',
+                integration: activeIntegration,
+                autoPullEnabled: !!toggle.checked,
+                pullIntervalMinutes: Number(select.value || 60)
+            });
+            closeIntegrationSettings();
+        }
+
+        function openTestingFailModal(sessionIds, column) {
+            testingFailSessionIds = sessionIds;
+            testingFailSourceColumn = column;
+            const modal = document.getElementById('testing-fail-modal');
+            const countEl = document.getElementById('testing-fail-plan-count');
+            const listEl = document.getElementById('testing-fail-plan-list');
+            const textarea = document.getElementById('testing-fail-feedback');
+            const def = columnDefinitions.find(d => d.id === column);
+            const label = def ? def.label : column;
+            countEl.textContent = sessionIds.length + ' plan(s) selected from "' + label + '" column';
+            listEl.innerHTML = sessionIds.map(id => {
+                const card = currentCards.find(c => c.sessionId === id);
+                const topic = card ? escapeHtml(card.topic || card.sessionId) : escapeHtml(id);
+                return '<li>' + topic + '</li>';
+            }).join('');
+            textarea.value = '';
+            textarea.style.borderColor = '';
+            modal.classList.remove('hidden');
+            textarea.focus();
+        }
+
+        function closeTestingFailModal() {
+            const modal = document.getElementById('testing-fail-modal');
+            modal.classList.add('hidden');
+            testingFailSessionIds = [];
+            testingFailSourceColumn = '';
+        }
+
+        function getColumnDefinition(col) {
+            return columnDefinitions.find(def => def.id === col) || null;
+        }
+
+        function buildBoardSignature(cards) {
+            if (!Array.isArray(cards) || cards.length === 0) return '';
+            return cards
+                .map(card => `${card.workspaceRoot || ''}|${card.sessionId}|${card.column}|${card.topic || ''}|${card.planFile || ''}|${card.complexity || 'Unknown'}|${card.lastActivity || ''}`)
+                .sort()
+                .join('||');
+        }
+
+        function captureBoardViewState() {
+            const columnScrollTop = {};
+            columns.forEach(col => {
+                const container = document.getElementById('col-' + col);
+                if (container) columnScrollTop[col] = container.scrollTop;
+            });
+            // Capture synthetic CODED_AUTO scroll when collapsed
+            if (collapseCodersEnabled) {
+                const autoContainer = document.getElementById('col-CODED_AUTO');
+                if (autoContainer) columnScrollTop['CODED_AUTO'] = autoContainer.scrollTop;
+            }
+            return {
+                boardScrollLeft: kanbanBoard.scrollLeft,
+                pageScrollY: window.scrollY,
+                columnScrollTop
+            };
+        }
+
+        function restoreBoardViewState(viewState) {
+            if (!viewState) return;
+            kanbanBoard.scrollLeft = viewState.boardScrollLeft || 0;
+            columns.forEach(col => {
+                const container = document.getElementById('col-' + col);
+                if (container) container.scrollTop = viewState.columnScrollTop[col] || 0;
+            });
+            // Restore synthetic CODED_AUTO scroll when collapsed
+            if (collapseCodersEnabled && viewState.columnScrollTop['CODED_AUTO'] != null) {
+                const autoContainer = document.getElementById('col-CODED_AUTO');
+                if (autoContainer) autoContainer.scrollTop = viewState.columnScrollTop['CODED_AUTO'];
+            }
+            window.scrollTo(0, viewState.pageScrollY || 0);
+        }
+
+        function renderColumns() {
+            // When collapsed, replace the three coder columns with a single synthetic entry
+            let renderDefs = columnDefinitions;
+            if (collapseCodersEnabled) {
+                const coderDefs = columnDefinitions.filter(d => d.kind === 'coded');
+                if (coderDefs.length > 0) {
+                    const syntheticCol = {
+                        id: 'CODED_AUTO',
+                        label: 'AUTOCODE',
+                        role: null,
+                        order: coderDefs[0].order || 180,
+                        kind: 'coded',
+                        autobanEnabled: true,
+                        dragDropMode: 'cli'
+                    };
+                    renderDefs = columnDefinitions
+                        .filter(d => d.kind !== 'coded')
+                        .concat([syntheticCol])
+                        .sort((a, b) => (a.order || 0) - (b.order || 0));
+                }
+            }
+
+            kanbanBoard.innerHTML = renderDefs.map(def => {
+                const isCreated = def.id === 'CREATED';
+                const isPlanReviewed = def.id === 'PLAN REVIEWED';
+                const isCompleted = def.kind === 'completed';
+                // Last working column = the column immediately before the completed column
+                const completedIndex = renderDefs.findIndex(d => d.kind === 'completed');
+                const defIndex = renderDefs.indexOf(def);
+                const isLastWorkingColumn = !isCompleted && completedIndex > 0 && defIndex === completedIndex - 1;
+                const hasAgent = !isCreated && !isCompleted;
+                
+                const mode = columnDragDropModes[def.id] || 'cli';
+                const modeIcon = mode === 'prompt' ? ICON_PROMPT : ICON_CLI;
+                const modeTitle = mode === 'prompt' ? 'Mode: Copy Prompt (drag cards to copy prompt to clipboard)' : 'Mode: CLI Dispatch (drag cards to trigger CLI agent)';
+                const modeToggle = (!isCreated && !isLastWorkingColumn && !isCompleted) 
+                    ? `<div class="mode-toggle mode-${mode}" data-column="${escapeAttr(def.id)}" data-tooltip="${escapeAttr(modeTitle)}">
+                           <img src="${modeIcon}" alt="${mode}">
+                       </div>` 
+                    : '';
+
+                const complexityRoutingToggle = isPlanReviewed
+                    ? `<div id="complexity-routing-toggle" class="complexity-routing-btn ${dynamicComplexityRoutingEnabled ? 'is-active' : ''}" data-tooltip="Toggle complexity routing (low→coder, high→lead)">
+                           <img src="${ICON_DYNAMIC_ROUTING}" alt="Dynamic Routing">
+                       </div>`
+                    : '';
+
+                const backlogToggleBtn = isCreated
+                    ? `<button class="backlog-toggle-btn${showingBacklog ? ' is-active' : ''}" id="btn-toggle-backlog" style="${draggedSessionId !== null ? 'pointer-events:none;opacity:0.5;' : ''}" data-tooltip="${showingBacklog ? 'Switch to New view' : 'Switch to Backlog view'}">${showingBacklog ? 'NEW' : 'BACKLOG'}</button>`
+                    : '';
+                const rightSide = isCreated
+                    ? `<div style="display: flex; align-items: center; gap: 8px; line-height: 1;">
+                            ${backlogToggleBtn}
+                            <button class="btn-add-plan" id="btn-add-plan" data-tooltip="Add Plan">+</button>
+                            <button class="btn-add-plan" id="btn-import-clipboard" data-tooltip="Import plan(s) from clipboard&#10;&#10;Multi-plan? Separate with markers:&#10;### PLAN 1 START&#10;[plan 1 content]&#10;### PLAN 2 START&#10;[plan 2 content]"><img src="${ICON_IMPORT_CLIPBOARD}" alt="Import" style="width: 16px; height: 16px;"></button>
+                            <span class="column-count" id="count-${escapeAttr(def.id)}">0</span>
+                       </div>`
+                    : `<div style="display: flex; align-items: center; gap: 4px;">
+                            ${complexityRoutingToggle}
+                            ${modeToggle}
+                            <span class="column-count" id="count-${escapeAttr(def.id)}">0</span>
+                       </div>`;
+                const subline = hasAgent
+                    ? `<div class="column-agent" id="agent-${escapeAttr(def.id)}"></div>`
+                    : `<div class="column-subline-spacer" aria-hidden="true"></div>`;
+
+                // Column button area (with buttons for all columns except last/completed, empty strip for last)
+                let buttonArea = '';
+                if (isCompleted) {
+                    buttonArea = `<div class="column-button-area">
+                        <button class="column-icon-btn recover-selected-btn" data-column="${escapeAttr(def.id)}" data-tooltip="Recover selected plans back to active board">
+                            <img src="${ICON_RECOVER_SELECTED}" alt="Recover Selected">
+                        </button>
+                        <button class="column-icon-btn archive-selected-btn" data-column="${escapeAttr(def.id)}" data-tooltip="Archive selected plans to DuckDB">
+                            <img src="${ICON_ARCHIVE_SELECTED}" alt="Archive Selected">
+                        </button>
+                    </div>`;
+                } else if (isLastWorkingColumn) {
+                    // Reviewed column: Complete Selected / Complete All buttons only (no prompt/CLI dispatch)
+                    buttonArea = `<div class="column-button-area">
+                        <button class="column-icon-btn" data-action="completeSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Complete selected plans">
+                            <img src="${ICON_MOVE_SELECTED}" alt="Complete Selected">
+                        </button>
+                        <button class="column-icon-btn" data-action="completeAll" data-column="${escapeAttr(def.id)}" data-tooltip="Complete all plans in this column">
+                            <img src="${ICON_MOVE_ALL}" alt="Complete All">
+                        </button>
+                        <button class="column-icon-btn testing-fail-btn" data-action="testingFailed" data-column="${escapeAttr(def.id)}" data-tooltip="Report testing failure for selected plans">
+                            <img src="${ICON_TESTING_FAIL}" alt="Testing Failed" class="testing-fail-icon">
+                        </button>
+                    </div>`;
+                } else {
+                    const julesBtn = (isPlanReviewed && lastVisibleAgents.jules !== false)
+                        ? `<button class="column-icon-btn" data-action="julesSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Send selected plans to Jules">
+                               <img src="${ICON_JULES}" alt="Jules">
+                           </button>`
+                        : '';
+                    const rePlanBtn = (isPlanReviewed && lastVisibleAgents.planner !== false)
+                        ? `<button class="column-icon-btn" data-action="rePlanSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Re-plan selected plans (trigger high-reasoning refinement)">
+                               <img src="${ICON_ANALYST_MAP}" alt="Re-plan">
+                           </button>`
+                        : '';
+                    const codeMapBtn = (isCreated && lastVisibleAgents.analyst !== false)
+                        ? `<button class="column-icon-btn" data-action="codeMapSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Run code map on selected plans (or all if none selected)">
+                               <img src="${ICON_CODE_MAP}" alt="Code Map">
+                           </button>`
+                        : '';
+                    const testingFailBtn = (def.kind === 'coded')
+                        ? `<button class="column-icon-btn testing-fail-btn" data-action="testingFailed" data-column="${escapeAttr(def.id)}" data-tooltip="Report testing failure for selected plans">
+                               <img src="${ICON_TESTING_FAIL}" alt="Testing Failed" class="testing-fail-icon">
+                           </button>`
+                        : '';
+                    const chatBtn = isCreated
+                        ? `<button class="column-icon-btn" data-action="chatCopyPrompt" data-column="${escapeAttr(def.id)}" data-tooltip="Copy chat prompt for selected plans to clipboard">
+                               <img src="${ICON_CHAT}" alt="Chat">
+                           </button>`
+                        : '';
+                    buttonArea = `<div class="column-button-area">
+                        <button class="column-icon-btn" data-action="moveSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Move selected plans to next stage (triggers CLI if enabled)">
+                            <img src="${ICON_MOVE_SELECTED}" alt="Move Selected">
+                        </button>
+                        <button class="column-icon-btn" data-action="moveAll" data-column="${escapeAttr(def.id)}" data-tooltip="Move all plans in this column to next stage">
+                            <img src="${ICON_MOVE_ALL}" alt="Move All">
+                        </button>
+                        <button class="column-icon-btn" data-action="promptSelected" data-column="${escapeAttr(def.id)}" data-tooltip="Copy prompt for selected plans and advance to next stage">
+                            <img src="${ICON_PROMPT_SELECTED}" alt="Prompt Selected">
+                        </button>
+                        <button class="column-icon-btn" data-action="promptAll" data-column="${escapeAttr(def.id)}" data-tooltip="Copy prompt for all plans in this column and advance">
+                            <img src="${ICON_PROMPT_ALL}" alt="Prompt All">
+                        </button>
+                        ${julesBtn}
+                        ${rePlanBtn}
+                        ${codeMapBtn}
+                        ${testingFailBtn}
+                        ${chatBtn}
+                    </div>`;
+                }
+
+                const columnDisplayLabel = (isCreated && showingBacklog) ? 'BACKLOG' : def.label;
+                return `<div class="kanban-column" data-column="${escapeAttr(def.id)}">
+                    <div class="column-header">
+                        <div style="display:flex; flex-direction:column;">
+                            <span class="column-name">${escapeHtml(columnDisplayLabel)}</span>
+                            ${subline}
+                        </div>
+                        ${rightSide}
+                    </div>
+                    ${buttonArea}
+                    <div class="column-body" id="col-${escapeAttr(def.id)}"></div>
+                </div>`;
+            }).join('');
+
+            document.getElementById('btn-toggle-backlog')?.addEventListener('click', () => {
+                postKanbanMessage({ type: 'toggleBacklogView' });
+            });
+
+            // Integration setup shortcut in the header strip
+            const modeToggleBtn = document.getElementById('mode-toggle-btn');
+            if (modeToggleBtn) {
+                const newBtn = modeToggleBtn.cloneNode(true);
+                modeToggleBtn.parentNode.replaceChild(newBtn, modeToggleBtn);
+
+                newBtn.addEventListener('click', () => {
+                    postKanbanMessage({ type: 'openSetupPanel', section: 'project-mgmt' });
+                });
+            }
+
+            document.getElementById('btn-add-plan')?.addEventListener('click', () => {
+                postKanbanMessage({ type: 'createPlan' });
+            });
+
+            document.getElementById('btn-import-clipboard')?.addEventListener('click', () => {
+                postKanbanMessage({ type: 'importFromClipboard' });
+            });
+
+            // Mode toggle handlers
+            document.querySelectorAll('.mode-toggle').forEach(toggle => {
+                toggle.addEventListener('click', () => {
+                    const columnId = toggle.dataset.column;
+                    const currentMode = columnDragDropModes[columnId] || 'cli';
+                    const nextMode = currentMode === 'cli' ? 'prompt' : 'cli';
+                    
+                    // Optimistic update
+                    columnDragDropModes[columnId] = nextMode;
+                    renderColumns();
+                    renderBoard(currentCards);
+                    updateAllColumnAgents();
+                    
+                    postKanbanMessage({ type: 'setColumnDragDropMode', columnId, mode: nextMode });
+                });
+            });
+
+
+            // Column icon button handlers
+            document.querySelectorAll('.column-icon-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    flashIconBtn(btn);
+                    const action = btn.dataset.action;
+                    const column = btn.dataset.column;
+                    // CODED_AUTO is synthetic — resolve to a real coder column for getNextColumn and backend messages.
+                    // All coded columns share the same next column (CODE REVIEWED), so using the first real one works.
+                    const backendColumn = (column === 'CODED_AUTO') ? (columnDefinitions.find(d => d.kind === 'coded')?.id || 'LEAD CODED') : column;
+                    const nextCol = getNextColumn(backendColumn);
+                    if (!nextCol && action !== 'julesSelected' && action !== 'rePlanSelected' && action !== 'completeSelected' && action !== 'completeAll' && action !== 'testingFailed') return;
+
+                    switch (action) {
+                        case 'moveSelected': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) return;
+                            postKanbanMessage({ type: 'moveSelected', column: backendColumn, sessionIds: ids });
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'moveAll': {
+                            const ids = getAllInColumn(column);
+                            if (ids.length === 0) return;
+                            // CODED_AUTO: backend moveAll filters by single column, so send explicit IDs instead
+                            if (column === 'CODED_AUTO') {
+                                postKanbanMessage({ type: 'moveSelected', column: backendColumn, sessionIds: ids });
+                            } else {
+                                postKanbanMessage({ type: 'moveAll', column: backendColumn });
+                            }
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'promptSelected': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) return;
+                            postKanbanMessage({ type: 'promptSelected', column: backendColumn, sessionIds: ids });
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'promptAll': {
+                            const ids = getAllInColumn(column);
+                            if (ids.length === 0) return;
+                            // CODED_AUTO: backend promptAll filters by single column, so send explicit IDs instead
+                            if (column === 'CODED_AUTO') {
+                                postKanbanMessage({ type: 'promptSelected', column: backendColumn, sessionIds: ids });
+                            } else {
+                                postKanbanMessage({ type: 'promptAll', column: backendColumn });
+                            }
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'julesSelected': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) return;
+                            postKanbanMessage({ type: 'julesSelected', sessionIds: ids });
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'rePlanSelected': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) {
+                                postKanbanMessage({ type: 'showWarning', message: 'Please select at least one plan to re-plan.' });
+                                return;
+                            }
+                            postKanbanMessage({ type: 'rePlanSelected', sessionIds: ids, workspaceRoot: getActiveWorkspaceRoot() });
+                            break;
+                        }
+                        case 'codeMapSelected': {
+                            let ids = getSelectedInColumn(column);
+                            const usedAll = ids.length === 0;
+                            if (usedAll) {
+                                ids = getAllInColumn(column);
+                            }
+                            if (ids.length === 0) return;
+                            if (usedAll && ids.length > 5) {
+                                postKanbanMessage({ type: 'codeMapConfirm', sessionIds: ids, count: ids.length, workspaceRoot: getActiveWorkspaceRoot() });
+                            } else {
+                                postKanbanMessage({ type: 'codeMapSelected', sessionIds: ids, workspaceRoot: getActiveWorkspaceRoot() });
+                            }
+                            break;
+                        }
+                        case 'chatCopyPrompt': {
+                            const ids = getSelectedInColumn(column);
+                            postKanbanMessage({ type: 'chatCopyPrompt', sessionIds: ids, workspaceRoot: getActiveWorkspaceRoot() });
+                            break;
+                        }
+                        case 'testingFailed': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) return;
+                            openTestingFailModal(ids, backendColumn);
+                            break;
+                        }
+                        case 'completeSelected': {
+                            const ids = getSelectedInColumn(column);
+                            if (ids.length === 0) return;
+                            postKanbanMessage({ type: 'completeSelected', sessionIds: ids, workspaceRoot: getActiveWorkspaceRoot() });
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                        case 'completeAll': {
+                            const ids = getAllInColumn(column);
+                            if (ids.length === 0) return;
+                            postKanbanMessage({ type: 'completeAll', workspaceRoot: getActiveWorkspaceRoot() });
+                            ids.forEach(id => selectedCards.delete(id));
+                            break;
+                        }
+                    }
+                });
+            });
+
+            document.querySelectorAll('.column-body').forEach(container => {
+                const col = container.id.replace(/^col-/, '');
+                container.addEventListener('dragover', handleDragOver);
+                container.addEventListener('dragenter', handleDragEnter);
+                container.addEventListener('dragleave', handleDragLeave);
+                container.addEventListener('drop', (e) => handleDrop(e, col));
+            });
+        }
+
+        /** Map a kanban column to its assigned agent role. */
+        function columnToRole(col) {
+            const def = getColumnDefinition(col);
+            return def ? (def.role || null) : null;
+        }
+
+        /** Check if a column's agent is visible (enabled). */
+        function isColumnAgentVisible(col) {
+            const role = columnToRole(col);
+            if (!role) return true;
+            return lastVisibleAgents[role] !== false;
+        }
+
+        /** Check if a column currently has an assigned agent command behind it. */
+        function isColumnAgentAssigned(col) {
+            const role = columnToRole(col);
+            if (!role) return true;
+            const name = lastAgentNames[role];
+            return !!name && name !== 'No agent assigned';
+        }
+
+        function isColumnAgentAvailable(col) {
+            return isColumnAgentVisible(col) && isColumnAgentAssigned(col);
+        }
+
+        function updateAllColumnAgents() {
+            if (!lastAgentNames) return;
+
+            columns.forEach(col => {
+                const el = document.getElementById('agent-' + col);
+                if (el) {
+                    const role = columnToRole(col);
+                    const name = lastAgentNames[role];
+                    if (role && (lastVisibleAgents[role] === false || name === 'No agent assigned')) {
+                        el.textContent = 'No agent assigned';
+                        el.style.color = 'var(--vscode-editorWarning-foreground, #cca700)';
+                        el.style.fontStyle = 'italic';
+                    } else {
+                        el.textContent = name || '';
+                        el.style.color = '';
+                        el.style.fontStyle = '';
+                    }
+                }
+            });
+
+            // Update synthetic CODED_AUTO agent subline when collapsed
+            const autoRouteEl = document.getElementById('agent-CODED_AUTO');
+            if (autoRouteEl) {
+                autoRouteEl.textContent = 'Dynamic routing';
+                autoRouteEl.style.color = '';
+            }
+        }
+
+        function updateJulesButtonVisibility() {
+            const isVisible = lastVisibleAgents.jules !== false;
+            document.querySelectorAll('[data-action="julesSelected"]').forEach(btn => {
+                btn.style.display = isVisible ? '' : 'none';
+            });
+        }
+
+        function updateAutobanButtonState() {
+            const autobanBtn = document.getElementById('btn-autoban');
+            if (!autobanBtn) return;
+            const isEnabled = !!(autobanConfig && autobanConfig.enabled);
+            autobanBtn.classList.toggle('is-active', isEnabled);
+            autobanBtn.textContent = isEnabled ? '⏸ STOP AUTOMATION' : '▶ START AUTOMATION';
+            autobanBtn.title = isEnabled ? 'Stop automation engine' : 'Start automation engine';
+        }
+
+        function syncAutobanCountdownTimer() {
+            const shouldRun = !!(autobanConfig && autobanConfig.enabled);
+            if (shouldRun && !autobanCountdownTimer) {
+                autobanCountdownTimer = setInterval(updateAutobanIndicators, 1000);
+                return;
+            }
+            if (!shouldRun && autobanCountdownTimer) {
+                clearInterval(autobanCountdownTimer);
+                autobanCountdownTimer = null;
+            }
+        }
+
+        function renderBoard(cards) {
+            hideTooltip();
+            const viewState = captureBoardViewState();
+            currentCards = cards;
+            const buckets = {};
+            columns.forEach(c => buckets[c] = []);
+
+            // Filter/remap cards based on backlog view state
+            let displayCards = cards;
+            if (!showingBacklog) {
+                displayCards = cards.filter(card => card.column !== 'BACKLOG');
+            } else {
+                displayCards = cards
+                    .filter(card => card.column !== 'CREATED')
+                    .map(card => card.column === 'BACKLOG' ? { ...card, _effectiveColumn: 'CREATED' } : card);
+            }
+
+            displayCards.forEach(card => {
+                const effectiveCol = card._effectiveColumn || card.column;
+                const col = columns.includes(effectiveCol) ? effectiveCol : 'CREATED';
+                buckets[col].push(card);
+            });
+
+            const CODED_COLUMN_IDS = ['LEAD CODED', 'CODER CODED', 'INTERN CODED'];
+
+            if (collapseCodersEnabled) {
+                // Render all coder-column cards into the synthetic CODED_AUTO container
+                const coderItems = [];
+                CODED_COLUMN_IDS.forEach(colId => {
+                    coderItems.push(...(buckets[colId] || []));
+                });
+                coderItems.sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
+                const autoContainer = document.getElementById('col-CODED_AUTO');
+                const autoCountEl = document.getElementById('count-CODED_AUTO');
+                if (autoContainer && autoCountEl) {
+                    autoCountEl.textContent = String(coderItems.length);
+                    autoContainer.innerHTML = coderItems.length === 0
+                        ? '<div class="empty-state">No plans</div>'
+                        : coderItems.map(card => createCardHtml(card)).join('');
+                }
+            }
+
+            columns.forEach(col => {
+                // In collapsed mode, skip the individual coder columns (rendered above as CODED_AUTO)
+                if (collapseCodersEnabled && CODED_COLUMN_IDS.includes(col)) return;
+                const container = document.getElementById('col-' + col);
+                const countEl = document.getElementById('count-' + col);
+                const items = buckets[col];
+                if (!container || !countEl) return;
+                items.sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
+                countEl.textContent = items.length;
+
+                if (items.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No plans</div>';
+                } else {
+                    container.innerHTML = items.map(card => createCardHtml(card)).join('');
+                }
+            });
+
+            // Attach card-level event listeners
+            document.querySelectorAll('.kanban-card').forEach(el => {
+                el.addEventListener('dragstart', handleDragStart);
+                el.addEventListener('dragend', handleDragEnd);
+
+                // Card selection toggle (click on card body, not on buttons)
+                el.addEventListener('click', (e) => {
+                    if (e.target.closest('.card-btn') || e.target.closest('button')) return;
+                    const sid = el.dataset.session;
+                    if (selectedCards.has(sid)) {
+                        selectedCards.delete(sid);
+                        el.classList.remove('selected');
+                    } else {
+                        selectedCards.add(sid);
+                        el.classList.add('selected');
+                        // Sync sidebar dropdown on unmodified single clicks
+                        if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                            postKanbanMessage({ type: 'selectPlan', sessionId: sid });
+                        }
+                    }
+                });
+
+                // Re-apply selection state after re-render
+                if (selectedCards.has(el.dataset.session)) {
+                    el.classList.add('selected');
+                }
+            });
+
+            document.querySelectorAll('.card-btn.review').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    postKanbanMessage({ type: 'reviewPlan', sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                });
+            });
+
+            document.querySelectorAll('.card-btn.complete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const cardEl = e.target.closest('.kanban-card');
+                    if (cardEl) {
+                        // Optimistic UI: Animate out before sending to backend
+                        cardEl.classList.add('card-completing');
+                        setTimeout(() => {
+                            postKanbanMessage({ type: 'completePlan', sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                        }, 350); // Slightly less than 400ms to ensure smooth handoff to the backend redraw
+                    } else {
+                        // Fallback if DOM traversal fails
+                        postKanbanMessage({ type: 'completePlan', sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                    }
+                });
+            });
+
+            document.querySelectorAll('.card-btn.copy').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.disabled = true;
+                    const column = btn.dataset.column || btn.closest('.kanban-column')?.dataset?.column;
+                    postKanbanMessage({ type: 'copyPlanLink', sessionId: btn.dataset.session, column, workspaceRoot: btn.dataset.workspaceRoot });
+                });
+            });
+
+            document.querySelectorAll('.card-btn.recover').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.disabled = true;
+                    btn.textContent = 'Recovering…';
+                    postKanbanMessage({ type: 'recoverSelected', sessionIds: [btn.dataset.session] });
+                });
+            });
+
+            document.querySelectorAll('.card-btn.live-sync-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.dataset.liveSyncAction === 'resume' ? 'resumeLiveSync' : 'pauseLiveSync';
+                    postKanbanMessage({ type: action, sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                });
+            });
+
+            document.querySelectorAll('.pair-program-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const sessionId = btn.dataset.session;
+                    postKanbanMessage({ type: 'pairProgramCard', sessionId });
+                });
+            });
+
+            document.querySelectorAll('.send-to-backlog-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    postKanbanMessage({ type: 'sendToBacklog', sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                });
+            });
+
+            document.querySelectorAll('.send-to-new-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    postKanbanMessage({ type: 'sendToNew', sessionId: btn.dataset.session, workspaceRoot: btn.dataset.workspaceRoot });
+                });
+            });
+
+            requestAnimationFrame(() => restoreBoardViewState(viewState));
+        }
+        function scoreToCategory(scoreStr) {
+            if (scoreStr === 'High') return 'High';
+            if (scoreStr === 'Low') return 'Low';
+            const score = parseInt(scoreStr, 10);
+            if (isNaN(score) || score <= 0) return 'Unknown';
+            if (score <= 2) return 'Very Low';
+            if (score <= 4) return 'Low';
+            if (score <= 6) return 'Medium';
+            if (score <= 8) return 'High';
+            if (score <= 10) return 'Very High';
+            return 'Unknown';
+        }
+
+        function categoryToCssClass(category) {
+            return category.toLowerCase().replace(' ', '-');
+        }
+
+        function createCardHtml(card) {
+            const timeAgo = formatTimeAgo(card.lastActivity);
+            const shortTopic = card.topic.length > 50 ? card.topic.substring(0, 47) + '...' : card.topic;
+            const complexityValue = card.complexity || 'Unknown';
+            const category = scoreToCategory(complexityValue);
+            const complexityClass = categoryToCssClass(category);
+            const isCompleted = card.column === 'COMPLETED';
+            const completedClass = isCompleted ? ' completed' : '';
+
+            // Live sync indicator
+            const liveSyncState = window.liveSyncStates?.[card.sessionId];
+            const showIndicator = liveSyncState && ['active', 'syncing', 'paused', 'error', 'conflict'].includes(liveSyncState.status);
+            const indicatorHtml = showIndicator
+                ? `<span class="live-sync-indicator ${liveSyncState.status}" title="Live Sync: ${liveSyncState.status}"></span>`
+                : '';
+            const liveSyncActionBtn = !isCompleted && liveSyncState
+                ? (['active', 'syncing'].includes(liveSyncState.status)
+                    ? `<button class="card-btn icon-btn live-sync-toggle" data-live-sync-action="pause" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Pause live sync">⏸</button>`
+                    : (['paused', 'error'].includes(liveSyncState.status)
+                        ? `<button class="card-btn icon-btn live-sync-toggle" data-live-sync-action="resume" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Resume live sync">▶</button>`
+                        : ''))
+                : '';
+
+            // For completed cards, show a Recover button instead of Copy Prompt
+            let primaryActionBtn;
+            if (isCompleted) {
+                primaryActionBtn = `<button class="card-btn recover" data-session="${card.sessionId}" data-tooltip="Recover this plan">Recover</button>`;
+            } else {
+                let copyLabel = 'Copy Prompt';
+                if (card.column === 'CREATED') {
+                    copyLabel = 'Copy planning prompt';
+                } else if (card.column === 'PLAN REVIEWED') {
+                    copyLabel = 'Copy coder prompt';
+                } else if (card.column === 'LEAD CODED' || card.column === 'CODER CODED' || card.column === 'INTERN CODED') {
+                    copyLabel = 'Copy review prompt';
+                }
+                primaryActionBtn = `<button class="card-btn copy" data-session="${card.sessionId}" data-column="${escapeAttr(card.column)}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Copy prompt and advance">${copyLabel}</button>`;
+            }
+
+            const numericScore = parseInt(complexityValue, 10);
+            const isHighComplexity = complexityValue === 'High' || (!isNaN(numericScore) && numericScore >= 7);
+            const pairProgramBtn = (card.column === 'PLAN REVIEWED' && isHighComplexity)
+                ? `<button class="card-btn pair-program-btn" data-session="${card.sessionId}" data-tooltip="Pair programming (Lead + Coder)">Pair</button>`
+                : '';
+            const backlogActionBtn = (!isCompleted && card.column === 'CREATED' && !showingBacklog)
+                ? `<button class="card-btn send-to-backlog-btn" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Move to Backlog">→ Backlog</button>`
+                : (!isCompleted && showingBacklog && card.column === 'BACKLOG')
+                    ? `<button class="card-btn send-to-new-btn" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Move back to New">→ New</button>`
+                    : '';
+            const completeOrDoneBtn = isCompleted
+                ? `<span class="card-done-badge">✓ Done</span>`
+                : `<button class="card-btn icon-btn complete" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Complete and archive">
+                       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6"/></svg>
+                   </button>`;
+            return `
+                <div class="kanban-card${completedClass}" draggable="true" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}">
+                    <div class="card-topic">${indicatorHtml}${escapeHtml(shortTopic)}</div>
+                    <div class="card-meta">Complexity: <span class="complexity-indicator ${complexityClass}">${category}</span> · ${timeAgo}</div>
+                    <div class="card-actions" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; gap: 4px;">
+                            ${pairProgramBtn}
+                            ${primaryActionBtn}
+                            ${backlogActionBtn}
+                        </div>
+                        <div style="display: flex; gap: 4px;">
+                            ${liveSyncActionBtn}
+                            <button class="card-btn icon-btn review" data-session="${card.sessionId}" data-workspace-root="${escapeAttr(card.workspaceRoot)}" data-tooltip="Review plan">
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg>
+                            </button>
+                            ${completeOrDoneBtn}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function formatTimeAgo(iso) {
+            if (!iso) return '';
+            const diff = Date.now() - new Date(iso).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + 'm ago';
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return hrs + 'h ago';
+            return Math.floor(hrs / 24) + 'd ago';
+        }
+
+        // Recover Selected handler
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.recover-selected-btn');
+            if (!btn) return;
+            const selected = getSelectedInColumn('COMPLETED');
+            if (selected.length === 0) {
+                vscode.postMessage({ type: 'showInfo', message: 'No cards selected. Use checkboxes to select cards to recover.' });
+                return;
+            }
+            postKanbanMessage({ type: 'recoverSelected', sessionIds: selected });
+        });
+
+        // Archive Selected handler
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.archive-selected-btn');
+            if (!btn) return;
+            const selected = getSelectedInColumn('COMPLETED');
+            if (selected.length === 0) {
+                vscode.postMessage({ type: 'showInfo', message: 'No cards selected. Use checkboxes to select cards to archive.' });
+                return;
+            }
+            postKanbanMessage({ type: 'archiveSelected', sessionIds: selected });
+        });
+
+        // Recover All handler
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.recover-all-btn');
+            if (!btn) return;
+            const allCompleted = getAllInColumn('COMPLETED');
+            if (allCompleted.length === 0) return;
+            postKanbanMessage({ type: 'recoverAll', sessionIds: allCompleted, count: allCompleted.length });
+        });
+
+        // Backlog toggle state
+        let showingBacklog = false;
+
+        // Drag & Drop handlers
+        let draggedSessionId = null;
+
+        function handleDragStart(e) {
+            const draggedCardEl =
+                (e.currentTarget && e.currentTarget.classList && e.currentTarget.classList.contains('kanban-card'))
+                    ? e.currentTarget
+                    : e.target.closest('.kanban-card');
+            const draggedId = draggedCardEl?.dataset.session;
+            if (!draggedCardEl || !draggedId) return;
+            draggedSessionId = draggedId;
+            draggedCardEl.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+
+            // Check if the dragged card is part of a multi-selection
+            let idsToTransfer = [draggedId];
+            if (selectedCards.has(draggedId) && selectedCards.size > 1) {
+                const selectedInRenderedContainer = getSelectedInRenderedContainer(draggedCardEl);
+                if (selectedInRenderedContainer.length > 1 && selectedInRenderedContainer.includes(draggedId)) {
+                    idsToTransfer = selectedInRenderedContainer;
+                }
+            }
+
+            // Add dragging class to all cards being transferred
+            idsToTransfer.forEach(id => {
+                const el = document.querySelector(`.kanban-card[data-session="${id}"]`);
+                if (el) el.classList.add('dragging');
+            });
+
+            e.dataTransfer.setData('application/json', JSON.stringify(idsToTransfer));
+            e.dataTransfer.setData('text/plain', draggedId);
+            e.dataTransfer.setData('application/switchboard-workspace-root', draggedCardEl.dataset.workspaceRoot || getActiveWorkspaceRoot());
+        }
+
+        function handleDragEnd(e) {
+            document.querySelectorAll('.kanban-card.dragging').forEach(el => el.classList.remove('dragging'));
+            document.querySelectorAll('.column-body').forEach(el => el.classList.remove('drag-over'));
+            draggedSessionId = null;
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleDragEnter(e) {
+            e.preventDefault();
+            const body = e.currentTarget;
+            body.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            const body = e.currentTarget;
+            // Only remove drag-over when actually leaving the column-body,
+            // not when entering a child element within it.
+            const related = e.relatedTarget;
+            if (!related || !body.contains(related)) {
+                body.classList.remove('drag-over');
+            }
+        }
+
+        /**
+         * Resolve which real coder column a card should route to when dropped onto CODED_AUTO.
+         * Uses complexity score vs. routingMapConfig. Falls back to CODER CODED if unknown.
+         */
+        function resolveCodedAutoTarget(card) {
+            if (!dynamicComplexityRoutingEnabled) return 'LEAD CODED';
+            const score = parseInt(card?.complexity, 10);
+            if (isNaN(score)) return 'CODER CODED';
+            const roleMap = { lead: 'LEAD CODED', coder: 'CODER CODED', intern: 'INTERN CODED' };
+            for (const [role, scores] of Object.entries(routingMapConfig)) {
+                if (Array.isArray(scores) && scores.includes(score)) {
+                    // Only route to INTERN CODED if the column is actually present
+                    const resolved = roleMap[role] || 'CODER CODED';
+                    if (resolved === 'INTERN CODED' && !columnDefinitions.some(d => d.id === 'INTERN CODED')) {
+                        return 'CODER CODED';
+                    }
+                    return resolved;
+                }
+            }
+            return 'CODER CODED';
+        }
+
+        function handleDrop(e, targetColumn) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            const workspaceRoot = e.dataTransfer.getData('application/switchboard-workspace-root') || getActiveWorkspaceRoot();
+
+            let sessionIds = [];
+            try {
+                sessionIds = JSON.parse(e.dataTransfer.getData('application/json'));
+            } catch {
+                const plain = e.dataTransfer.getData('text/plain');
+                if (plain) sessionIds = [plain];
+            }
+
+            if (!sessionIds || sessionIds.length === 0) return;
+
+            // Handle drops onto the synthetic CODED_AUTO column — route each card to its real column
+            if (targetColumn === 'CODED_AUTO') {
+                const CODED_IDS = ['LEAD CODED', 'CODER CODED', 'INTERN CODED'];
+                document.querySelectorAll('.kanban-card.selected').forEach(el => el.classList.remove('selected'));
+                selectedCards.clear();
+                const targetBody = document.getElementById('col-CODED_AUTO');
+                const dispatchGroups = new Map();
+
+                sessionIds.forEach(id => {
+                    const card = currentCards.find(c => c.sessionId === id);
+                    if (!card) return;
+                    const resolvedTarget = resolveCodedAutoTarget(card);
+                    if (card.column === resolvedTarget) return;
+
+                    const prevCol = card.column;
+                    const srcIdx = prevCol === 'BACKLOG' ? 0 : columns.indexOf(prevCol);
+                    const tgtIdx = columns.indexOf(resolvedTarget);
+                    if (tgtIdx === srcIdx) return;
+
+                    const sourceColumnForPrompt = prevCol;
+                    const dropMode = columnDragDropModes[resolvedTarget] || 'cli';
+                    const dispatchType = tgtIdx < srcIdx
+                        ? 'backward'
+                        : (!cliTriggersEnabled ? 'move' : (dropMode === 'prompt' ? 'prompt' : 'cli'));
+                    const groupKey = dispatchType === 'prompt'
+                        ? `${dispatchType}::${resolvedTarget}::${sourceColumnForPrompt}`
+                        : `${dispatchType}::${resolvedTarget}`;
+                    const group = dispatchGroups.get(groupKey) || {
+                        dispatchType,
+                        targetColumn: resolvedTarget,
+                        sourceColumn: sourceColumnForPrompt,
+                        sessionIds: []
+                    };
+                    group.sessionIds.push(id);
+                    dispatchGroups.set(groupKey, group);
+
+                    // DOM optimistic update
+                    const cardEl = document.querySelector(`.kanban-card[data-session="${id}"]`);
+                    if (cardEl && targetBody) {
+                        // Source DOM column: cards in coder cols are already in CODED_AUTO dom container when collapsed
+                        const sourceDomCol = CODED_IDS.includes(card.column) ? 'CODED_AUTO' :
+                                             (card.column === 'BACKLOG' && showingBacklog ? 'CREATED' : card.column);
+                        const emptyState = targetBody.querySelector('.empty-state');
+                        if (emptyState) emptyState.remove();
+                        if (sourceDomCol !== 'CODED_AUTO') {
+                            targetBody.appendChild(cardEl);
+                            const sourceBody = document.getElementById('col-' + sourceDomCol);
+                            if (sourceBody && sourceBody.querySelectorAll('.kanban-card').length === 0) {
+                                sourceBody.innerHTML = '<div class="empty-state">No plans</div>';
+                            }
+                            const srcCount = document.getElementById('count-' + sourceDomCol);
+                            if (srcCount) srcCount.textContent = String(Math.max(0, parseInt(srcCount.textContent) - 1));
+                            const tgtCount = document.getElementById('count-CODED_AUTO');
+                            if (tgtCount) tgtCount.textContent = String(parseInt(tgtCount.textContent) + 1);
+                        }
+                        cardEl.classList.remove('card-dropped');
+                        void cardEl.offsetWidth;
+                        cardEl.classList.add('card-dropped');
+                        cardEl.addEventListener('animationend', () => cardEl.classList.remove('card-dropped'), { once: true });
+                    }
+
+                    card.column = resolvedTarget;
+                });
+
+                if (dispatchGroups.size === 0) return;
+
+                setTimeout(() => {
+                    dispatchGroups.forEach(group => {
+                        const groupedIds = group.sessionIds;
+                        if (groupedIds.length === 0) return;
+
+                        if (group.dispatchType === 'backward') {
+                            postKanbanMessage({ type: 'moveCardBackwards', sessionIds: groupedIds, targetColumn: group.targetColumn, workspaceRoot });
+                            return;
+                        }
+
+                        if (group.dispatchType === 'move') {
+                            postKanbanMessage({ type: 'moveCardForward', sessionIds: groupedIds, targetColumn: group.targetColumn, workspaceRoot });
+                            return;
+                        }
+
+                        if (group.dispatchType === 'prompt') {
+                            postKanbanMessage({
+                                type: 'promptOnDrop',
+                                sessionIds: groupedIds,
+                                sourceColumn: group.sourceColumn,
+                                targetColumn: group.targetColumn,
+                                workspaceRoot
+                            });
+                            return;
+                        }
+
+                        if (!isColumnAgentAvailable(group.targetColumn)) return;
+                        if (groupedIds.length === 1) {
+                            postKanbanMessage({ type: 'triggerAction', sessionId: groupedIds[0], targetColumn: group.targetColumn, workspaceRoot });
+                        } else {
+                            postKanbanMessage({ type: 'triggerBatchAction', sessionIds: groupedIds, targetColumn: group.targetColumn, workspaceRoot });
+                        }
+                    });
+                }, 350);
+                return;
+            }
+
+            const forwardIds = [];
+            const backwardIds = [];
+
+            // When backlog view is active, dropping to the CREATED slot means BACKLOG
+            const effectiveTargetColumn = (showingBacklog && targetColumn === 'CREATED') ? 'BACKLOG' : targetColumn;
+
+            sessionIds.forEach(id => {
+                const card = currentCards.find(c => c.sessionId === id);
+                if (!card || card.column === effectiveTargetColumn) return;
+
+                // BACKLOG cards are treated as index 0 (same as CREATED) for forward/backward calculation
+                const sourceIndex = card.column === 'BACKLOG' ? 0 : columns.indexOf(card.column);
+                const targetIndex = columns.indexOf(effectiveTargetColumn);
+
+                if (targetIndex < sourceIndex) {
+                    backwardIds.push(id);
+                } else {
+                    forwardIds.push(id);
+                }
+            });
+
+            // Special handling: forward drops INTO COMPLETED trigger archive, not dispatch
+            if (effectiveTargetColumn === 'COMPLETED' && forwardIds.length > 0) {
+                const completingIds = forwardIds.slice();
+                // Optimistic DOM move: relocate cards to COMPLETED column with animation
+                const targetBody = document.getElementById('col-' + targetColumn);
+                completingIds.forEach(id => {
+                    const card = currentCards.find(c => c.sessionId === id);
+                    const cardEl = document.querySelector(`.kanban-card[data-session="${id}"]`);
+                    if (cardEl && targetBody) {
+                        const emptyState = targetBody.querySelector('.empty-state');
+                        if (emptyState) emptyState.remove();
+                        cardEl.classList.add('card-completing');
+                        targetBody.appendChild(cardEl);
+                        // Update source column empty state
+                        if (card) {
+                            // Source DOM column: BACKLOG cards display in CREATED slot when showingBacklog
+                            const srcDomCol = (card.column === 'BACKLOG' && showingBacklog) ? 'CREATED' : card.column;
+                            const sourceBody = document.getElementById('col-' + srcDomCol);
+                            if (sourceBody && sourceBody.querySelectorAll('.kanban-card').length === 0) {
+                                sourceBody.innerHTML = '<div class="empty-state">No plans</div>';
+                            }
+                            const srcCount = document.getElementById('count-' + srcDomCol);
+                            if (srcCount) srcCount.textContent = String(Math.max(0, parseInt(srcCount.textContent) - 1));
+                            card.column = effectiveTargetColumn;
+                        }
+                        const tgtCount = document.getElementById('count-' + targetColumn);
+                        if (tgtCount) tgtCount.textContent = String(parseInt(tgtCount.textContent) + 1);
+                    }
+                    postKanbanMessage({ type: 'completePlan', sessionId: id, workspaceRoot: card?.workspaceRoot || workspaceRoot });
+                });
+                forwardIds.length = 0;
+            }
+
+            // Special handling: backward drags FROM COMPLETED trigger uncomplete/restore
+            const uncompleteIds = backwardIds.filter(id => {
+                const card = currentCards.find(c => c.sessionId === id);
+                return card && card.column === 'COMPLETED';
+            });
+            if (uncompleteIds.length > 0) {
+                postKanbanMessage({ type: 'uncompleteCard', sessionIds: uncompleteIds, targetColumn: effectiveTargetColumn, workspaceRoot });
+                uncompleteIds.forEach(id => {
+                    const idx = backwardIds.indexOf(id);
+                    if (idx >= 0) backwardIds.splice(idx, 1);
+                });
+            }
+
+            // Determine the effective drop mode for this column
+            const dropMode = columnDragDropModes[effectiveTargetColumn] || 'cli';
+
+            if (forwardIds.length > 0) {
+                // Agent availability check only applies in CLI mode — prompt mode doesn't need a CLI agent
+                if (dropMode === 'cli' && cliTriggersEnabled && !isColumnAgentAvailable(effectiveTargetColumn)) {
+                    // Strip forward moves if agent isn't ready/assigned, but allow backward moves to proceed
+                    forwardIds.length = 0;
+                    const agentEl = document.getElementById('agent-' + effectiveTargetColumn);
+                    if (agentEl) {
+                        agentEl.style.transition = 'color 0.15s';
+                        agentEl.style.color = 'var(--vscode-errorForeground, #f44747)';
+                        setTimeout(() => {
+                            agentEl.style.color = 'var(--vscode-editorWarning-foreground, #cca700)';
+                        }, 800);
+                    }
+                }
+            }
+
+            const validIds = [...forwardIds, ...backwardIds];
+            if (validIds.length === 0) return;
+
+            // Capture source columns BEFORE the optimistic update loop mutates card.column
+            const sourceColumnForPrompt = forwardIds.length > 0
+                ? (currentCards.find(c => c.sessionId === forwardIds[0])?.column || effectiveTargetColumn)
+                : effectiveTargetColumn;
+
+            // DOM target is the displayed column slot (targetColumn); logical target may differ (effectiveTargetColumn)
+            const targetBody = document.getElementById('col-' + targetColumn);
+
+            validIds.forEach(id => {
+                const card = currentCards.find(c => c.sessionId === id);
+                const cardEl = document.querySelector(`.kanban-card[data-session="${id}"]`);
+                // Source DOM column: BACKLOG cards display in CREATED slot when showingBacklog
+                const sourceDomColumn = (card && card.column === 'BACKLOG' && showingBacklog) ? 'CREATED' : (card?.column || targetColumn);
+                if (cardEl && targetBody) {
+                    // Remove empty-state placeholder if present
+                    const emptyState = targetBody.querySelector('.empty-state');
+                    if (emptyState) emptyState.remove();
+                    targetBody.appendChild(cardEl);
+
+                    // Update source column: show empty-state if now empty
+                    const sourceBody = document.getElementById('col-' + sourceDomColumn);
+                    if (sourceBody && sourceBody.querySelectorAll('.kanban-card').length === 0) {
+                        sourceBody.innerHTML = '<div class="empty-state">No plans</div>';
+                    }
+
+                    // Update counts
+                    const srcCount = document.getElementById('count-' + sourceDomColumn);
+                    const tgtCount = document.getElementById('count-' + targetColumn);
+                    if (srcCount) srcCount.textContent = String(Math.max(0, parseInt(srcCount.textContent) - 1));
+                    if (tgtCount) tgtCount.textContent = String(parseInt(tgtCount.textContent) + 1);
+
+                    // Update in-memory state (use effective column so backend is consistent)
+                    card.column = effectiveTargetColumn;
+
+                    // Trigger drop animation
+                    cardEl.classList.remove('card-dropped'); 
+                    void cardEl.offsetWidth; // Trigger reflow to restart animation
+                    cardEl.classList.add('card-dropped');
+                    cardEl.addEventListener('animationend', () => {
+                        cardEl.classList.remove('card-dropped');
+                    }, { once: true });
+                }
+            });
+
+            if (validIds.length > 0) {
+                document.querySelectorAll('.kanban-card.selected').forEach(el => el.classList.remove('selected'));
+                selectedCards.clear();
+                setTimeout(() => {
+                    if (cliTriggersEnabled && forwardIds.length > 0) {
+                        if (dropMode === 'prompt') {
+                            // Prompt mode: copy prompt to clipboard + visual advance (no CLI dispatch)
+                            // sourceColumnForPrompt was captured before the optimistic card.column update
+                            postKanbanMessage({ type: 'promptOnDrop', sessionIds: forwardIds, sourceColumn: sourceColumnForPrompt, targetColumn: effectiveTargetColumn, workspaceRoot });
+                        } else {
+                            // CLI mode: dispatch to CLI agent (existing behaviour)
+                            if (forwardIds.length === 1) {
+                                postKanbanMessage({ type: 'triggerAction', sessionId: forwardIds[0], targetColumn: effectiveTargetColumn, workspaceRoot });
+                            } else {
+                                postKanbanMessage({ type: 'triggerBatchAction', sessionIds: forwardIds, targetColumn: effectiveTargetColumn, workspaceRoot });
+                            }
+                        }
+                    } else if (forwardIds.length > 0) {
+                        postKanbanMessage({ type: 'moveCardForward', sessionIds: forwardIds, targetColumn: effectiveTargetColumn, workspaceRoot });
+                    }
+
+                    if (backwardIds.length > 0) {
+                        postKanbanMessage({ type: 'moveCardBackwards', sessionIds: backwardIds, targetColumn: effectiveTargetColumn, workspaceRoot });
+                    }
+                }, 350);
+            }
+        }
+
+        // Listen for messages from the extension
+        window.addEventListener('message', (event) => {
+            const msg = event.data;
+            switch (msg.type) {
+                case 'updateWorkspaceSelection':
+                    currentWorkspaceRoot = msg.workspaceRoot || '';
+                    workspaceItems = Array.isArray(msg.workspaces) ? msg.workspaces : [];
+                    updateWorkspaceSelector();
+                    break;
+                case 'updateBoard':
+                    const nextCards = Array.isArray(msg.cards) ? msg.cards : [];
+                    console.log('[Kanban WV] updateBoard received', nextCards.length, 'cards');
+                    const nextBoardSignature = buildBoardSignature(nextCards);
+                    const dbWarningBanner = document.getElementById('db-warning-banner');
+                    if (dbWarningBanner) {
+                        dbWarningBanner.style.display = msg.dbUnavailable ? '' : 'none';
+                    }
+                    if (typeof msg.showingBacklog !== 'undefined') {
+                        showingBacklog = msg.showingBacklog;
+                    }
+                    if (msg.routingConfig) {
+                        routingMapConfig = msg.routingConfig;
+                        updateRoutingMapButtonIndicator();
+                    }
+                    if (nextBoardSignature !== lastBoardSignature) {
+                        lastBoardSignature = nextBoardSignature;
+                        console.log('[Kanban WV] signature changed, calling renderBoard with', nextCards.length, 'cards');
+                        renderBoard(nextCards);
+                    } else {
+                        currentCards = nextCards;
+                    }
+                    break;
+                case 'backlogViewState':
+                    showingBacklog = event.data.showing;
+                    renderColumns();
+                    renderBoard(currentCards);
+                    break;
+                case 'updateColumns':
+                    if (Array.isArray(msg.columns) && msg.columns.length > 0) {
+                        columnDefinitions = msg.columns;
+                        columns = columnDefinitions.map(col => col.id);
+                        autobanColumns = columnDefinitions.filter(col => col.autobanEnabled).map(col => col.id);
+                        lastBoardSignature = '';
+                        renderColumns();
+                        renderBoard(currentCards);
+                        updateAllColumnAgents();
+                        updateAutobanIndicators();
+                    }
+                    break;
+                case 'updateAgentNames':
+                    lastAgentNames = msg.agentNames || {};
+                    updateAllColumnAgents();
+                    break;
+                case 'cliTriggersState':
+                    cliTriggersEnabled = msg.enabled !== false;
+                    updateCliToggleUi();
+                    break;
+                case 'dynamicComplexityRoutingState':
+                    dynamicComplexityRoutingEnabled = msg.enabled !== false;
+                    updateComplexityRoutingToggleUi();
+                    break;
+                case 'allowUnknownComplexityAutoMoveState':
+                    allowUnknownComplexityAutoMove = msg.enabled !== false;
+                    updateUnknownComplexityToggleUi();
+                    break;
+                case 'liveSyncUpdate': {
+                    window.liveSyncStates = window.liveSyncStates || {};
+                    window.liveSyncStates[msg.sessionId] = {
+                        status: msg.status,
+                        lastSyncAt: msg.lastSyncAt,
+                        reason: msg.reason
+                    };
+                    // Re-render affected card
+                    const cardEl = document.querySelector(`.kanban-card[data-session="${msg.sessionId}"]`);
+                    if (cardEl) {
+                        const card = currentCards.find(c => c.sessionId === msg.sessionId);
+                        if (card) {
+                            cardEl.outerHTML = createCardHtml(card);
+                            // Re-attach event listeners to the new card element
+                            const newCardEl = document.querySelector(`.kanban-card[data-session="${msg.sessionId}"]`);
+                            if (newCardEl) {
+                                newCardEl.addEventListener('dragstart', handleDragStart);
+                                newCardEl.addEventListener('dragend', handleDragEnd);
+                                newCardEl.addEventListener('click', (e) => {
+                                    if (!e.target.closest('.card-btn')) {
+                                        newCardEl.classList.toggle('selected');
+                                        if (newCardEl.classList.contains('selected')) {
+                                            selectedCards.add(card.sessionId);
+                                        } else {
+                                            selectedCards.delete(card.sessionId);
+                                        }
+                                        updateSelectAllCheckbox();
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    break;
+                }
+                case 'liveSyncStates': {
+                    // Bulk update on board refresh
+                    window.liveSyncStates = {};
+                    for (const state of msg.states) {
+                        window.liveSyncStates[state.sessionId] = state;
+                    }
+                    renderBoard(currentCards);  // Full re-render to show all indicators
+                    break;
+                }
+                case 'clickupState': {
+                    integrationState.clickup = {
+                        setupComplete: msg.setupComplete === true,
+                        realTimeSyncEnabled: msg.realTimeSyncEnabled === true,
+                        autoPullEnabled: msg.autoPullEnabled === true,
+                        pullIntervalMinutes: Number(msg.pullIntervalMinutes || 60),
+                        syncError: msg.syncError === true,
+                        mappingWarning: String(msg.mappingWarning || ''),
+                        unmappedColumnCount: Number(msg.unmappedColumnCount || 0)
+                    };
+                    break;
+                }
+                case 'linearState': {
+                    integrationState.linear = {
+                        setupComplete: msg.setupComplete === true,
+                        realTimeSyncEnabled: msg.realTimeSyncEnabled === true,
+                        autoPullEnabled: msg.autoPullEnabled === true,
+                        pullIntervalMinutes: Number(msg.pullIntervalMinutes || 60),
+                        syncError: msg.syncError === true
+                    };
+                    break;
+                }
+                case 'visibleAgents':
+                    if (msg.agents) {
+                        lastVisibleAgents = { ...lastVisibleAgents, ...msg.agents };
+                        updateAllColumnAgents();
+                        updateJulesButtonVisibility();
+                    }
+                    break;
+                case 'copyPlanLinkResult':
+                    const btn = document.querySelector(`.card-btn.copy[data-session="${msg.sessionId}"]`);
+                    if (btn) {
+                        if (msg.success) {
+                            const originalText = btn.textContent;
+                            btn.textContent = 'Copied!';
+                            const originalBg = btn.style.backgroundColor;
+                            const originalColor = btn.style.color;
+                            btn.style.backgroundColor = 'var(--vscode-testing-iconPassed, #73c991)';
+                            btn.style.color = 'var(--vscode-editor-background, #1e1e1e)';
+                            setTimeout(() => {
+                                btn.textContent = originalText;
+                                btn.style.backgroundColor = originalBg;
+                                btn.style.color = originalColor;
+                                btn.disabled = false;
+                            }, 1500);
+                        } else {
+                            btn.disabled = false;
+                        }
+                    }
+                    break;
+                case 'updateAutobanConfig':
+                    autobanConfig = msg.state || null;
+                    updateAutobanIndicators(true);
+                    syncAutobanCountdownTimer();
+                    updateAutobanButtonState();
+                    break;
+                case 'updatePairProgrammingMode': {
+                    const ppSelect = document.getElementById('pairProgrammingModeSelect');
+                    if (ppSelect) {
+                        ppSelect.value = msg.mode || 'off';
+                        ppSelect.classList.toggle('is-off', ppSelect.value === 'off');
+                    }
+                    break;
+                }
+                case 'updateColumnDragDropModes':
+                    if (msg.modes && typeof msg.modes === 'object') {
+                        columnDragDropModes = msg.modes;
+                        // Update toggle icons to reflect received modes
+                        document.querySelectorAll('.mode-toggle').forEach(toggle => {
+                            const colId = toggle.dataset.column;
+                            const mode = columnDragDropModes[colId] || 'cli';
+                            toggle.classList.toggle('mode-cli', mode === 'cli');
+                            toggle.classList.toggle('mode-prompt', mode === 'prompt');
+                            const img = toggle.querySelector('img');
+                            if (img) {
+                                img.src = mode === 'prompt' ? ICON_PROMPT : ICON_CLI;
+                                img.alt = mode;
+                            }
+                            toggle.title = mode === 'prompt'
+                                ? 'Mode: Copy Prompt (drag cards to copy prompt to clipboard)'
+                                : 'Mode: CLI Dispatch (drag cards to trigger CLI agent)';
+                        });
+                    }
+                    break;
+                case 'promptOnDropResult': {
+                    // Visual feedback when prompt-mode drop completes: flash the target column count badge green
+                    if (msg.success && Array.isArray(msg.sessionIds) && msg.sessionIds.length > 0) {
+                        const card = currentCards.find(c => msg.sessionIds.includes(c.sessionId));
+                        if (card) {
+                            const countEl = document.getElementById('count-' + card.column);
+                            if (countEl) {
+                                const origText = countEl.textContent;
+                                const origBg = countEl.style.background;
+                                const origColor = countEl.style.color;
+                                countEl.textContent = '✓';
+                                countEl.style.background = 'var(--vscode-testing-iconPassed, #73c991)';
+                                countEl.style.color = 'var(--vscode-editor-background, #1e1e1e)';
+                                setTimeout(() => {
+                                    countEl.textContent = origText;
+                                    countEl.style.background = origBg;
+                                    countEl.style.color = origColor;
+                                }, 1200);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+
+        /** Format seconds as MM:SS */
+        function formatCountdown(secs) {
+            const m = Math.floor(secs / 60);
+            const s = secs % 60;
+            return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+
+        /** Update autoban timer badges inline in the controls strip. */
+        /** Update autoban timer badges inline in the controls strip. */
+        function updateAutobanIndicators(forceRebuild) {
+            const container = document.getElementById('autoban-timers-inline');
+            if (!container) { updateAutobanButtonState(); return; }
+
+            if (!autobanConfig || !autobanConfig.enabled) {
+                if (container.innerHTML !== '') { container.innerHTML = ''; }
+                updateAutobanButtonState();
+                return;
+            }
+
+            // Compute desired state for each badge
+            const badgeData = autobanColumns.map(col => {
+                const abbrev = COLUMN_ABBREV[col] || col.charAt(0);
+                const rule = autobanConfig.rules && autobanConfig.rules[col];
+                if (rule && rule.enabled) {
+                    const lastTickAt = Number(autobanConfig.lastTickAt && autobanConfig.lastTickAt[col]) || Date.now();
+                    const intervalMs = Math.max(1, Number(rule.intervalMinutes) || 1) * 60 * 1000;
+                    const nextTickAt = lastTickAt + intervalMs;
+                    const remainingSec = Math.max(0, Math.ceil((nextTickAt - Date.now()) / 1000));
+                    const text = remainingSec > 0 ? `${abbrev}: ${formatCountdown(remainingSec)}` : `${abbrev}: GO`;
+                    return { text, active: true };
+                } else {
+                    return { text: `${abbrev}: off`, active: false };
+                }
+            });
+
+            const existingBadges = container.children;
+
+            // Full rebuild when structure changes or forced (config update)
+            if (forceRebuild || existingBadges.length !== badgeData.length) {
+                container.innerHTML = badgeData.map(b =>
+                    `<span class="autoban-timer-badge${b.active ? ' is-active' : ''}">${b.text}</span>`
+                ).join('');
+                updateAutobanButtonState();
+                return;
+            }
+
+            // Targeted update: only touch badges whose content or state changed
+            for (let i = 0; i < badgeData.length; i++) {
+                const el = existingBadges[i];
+                const data = badgeData[i];
+                if (el.textContent !== data.text) {
+                    el.textContent = data.text;
+                }
+                const hasActive = el.classList.contains('is-active');
+                if (data.active !== hasActive) {
+                    el.classList.toggle('is-active', data.active);
+                }
+            }
+            updateAutobanButtonState();
+        }
+
+        document.getElementById('workspace-select')?.addEventListener('change', (event) => {
+            currentWorkspaceRoot = event.target.value || '';
+            lastBoardSignature = '';
+            postKanbanMessage({ type: 'selectWorkspace', workspaceRoot: currentWorkspaceRoot });
+        });
+        document.getElementById('btn-autoban')?.addEventListener('click', () => {
+            const currentlyEnabled = !!(autobanConfig && autobanConfig.enabled);
+            postKanbanMessage({ type: 'toggleAutoban', enabled: !currentlyEnabled });
+        });
+        document.getElementById('btn-refresh-strip').addEventListener('click', () => {
+            postKanbanMessage({ type: 'refresh' });
+        });
+        document.getElementById('cli-triggers-toggle').addEventListener('change', (event) => {
+            const checked = !!event.target?.checked;
+            cliTriggersEnabled = checked;
+            updateCliToggleUi();
+            postKanbanMessage({ type: 'toggleCliTriggers', enabled: checked });
+        });
+        document.getElementById('unknown-complexity-toggle')?.addEventListener('change', (event) => {
+            const checked = !!event.target?.checked;
+            allowUnknownComplexityAutoMove = checked;
+            updateUnknownComplexityToggleUi();
+            postKanbanMessage({ type: 'toggleAllowUnknownComplexityAutoMove', enabled: checked });
+        });
+        document.getElementById('pairProgrammingModeSelect')?.addEventListener('change', (e) => {
+            const select = e.target;
+            select.classList.toggle('is-off', select.value === 'off');
+            postKanbanMessage({ type: 'setPairProgrammingMode', mode: select.value });
+        });
+
+        updateCliToggleUi();
+        renderColumns();
+        renderBoard([]);
+        updateAutobanButtonState();
+        syncAutobanCountdownTimer();
+
+        document.getElementById('integration-autopull-toggle')?.addEventListener('change', updateIntegrationIntervalState);
+        document.getElementById('integration-settings-close')?.addEventListener('click', closeIntegrationSettings);
+        document.getElementById('integration-settings-cancel')?.addEventListener('click', closeIntegrationSettings);
+        document.getElementById('integration-settings-save')?.addEventListener('click', saveIntegrationSettings);
+        document.getElementById('integration-settings-modal')?.addEventListener('click', function(e) {
+            if (e.target === e.currentTarget) closeIntegrationSettings();
+        });
+
+        // Testing Fail Modal event listeners
+        document.getElementById('testing-fail-close').addEventListener('click', closeTestingFailModal);
+        document.getElementById('testing-fail-modal').addEventListener('click', function(e) {
+            if (e.target === e.currentTarget) closeTestingFailModal();
+        });
+        document.getElementById('testing-fail-copy').addEventListener('click', function() {
+            const feedback = document.getElementById('testing-fail-feedback').value.trim();
+            if (!feedback) {
+                document.getElementById('testing-fail-feedback').style.borderColor = 'var(--accent-red)';
+                return;
+            }
+            postKanbanMessage({
+                type: 'testingFailed',
+                action: 'copyPrompt',
+                column: testingFailSourceColumn,
+                sessionIds: testingFailSessionIds,
+                feedback: feedback
+            });
+            closeTestingFailModal();
+        });
+        document.getElementById('testing-fail-send').addEventListener('click', function() {
+            const feedback = document.getElementById('testing-fail-feedback').value.trim();
+            if (!feedback) {
+                document.getElementById('testing-fail-feedback').style.borderColor = 'var(--accent-red)';
+                return;
+            }
+            postKanbanMessage({
+                type: 'testingFailed',
+                action: 'sendToLead',
+                column: testingFailSourceColumn,
+                sessionIds: testingFailSessionIds,
+                feedback: feedback
+            });
+            closeTestingFailModal();
+        });
+        document.getElementById('testing-fail-feedback').addEventListener('input', function() {
+            this.style.borderColor = '';
+        });
+
+        // Complexity routing toggle handler (event delegation to avoid memory leak)
+        document.addEventListener('click', (e) => {
+            const toggle = e.target.closest('#complexity-routing-toggle');
+            if (!toggle) return;
+            dynamicComplexityRoutingEnabled = !dynamicComplexityRoutingEnabled;
+            updateComplexityRoutingToggleUi();
+            postKanbanMessage({ type: 'toggleDynamicComplexityRouting', enabled: dynamicComplexityRoutingEnabled });
+        });
+
+        // ─── Routing Map ──────────────────────────────────────────────────────────
+
+        function updateRoutingMapButtonIndicator() {
+            const btn = document.getElementById('btn-routing-map');
+            if (!btn) return;
+            // Show orange dot when custom routing config differs from defaults
+            const isDefault = (
+                JSON.stringify(routingMapConfig.lead.slice().sort((a,b)=>a-b)) === JSON.stringify([7,8,9,10]) &&
+                JSON.stringify(routingMapConfig.coder.slice().sort((a,b)=>a-b)) === JSON.stringify([4,5,6]) &&
+                JSON.stringify(routingMapConfig.intern.slice().sort((a,b)=>a-b)) === JSON.stringify([1,2,3])
+            );
+            let dot = btn.querySelector('.routing-map-active-dot');
+            if (!isDefault) {
+                if (!dot) {
+                    dot = document.createElement('span');
+                    dot.className = 'routing-map-active-dot';
+                    btn.appendChild(dot);
+                }
+            } else if (dot) {
+                dot.remove();
+            }
+        }
+
+        function createComplexityCard(level) {
+            const card = document.createElement('div');
+            const cls = level >= 7 ? 'complexity-high' : level >= 4 ? 'complexity-medium' : 'complexity-low';
+            card.className = `complexity-card ${cls}`;
+            card.draggable = true;
+            card.dataset.complexity = level;
+            card.textContent = `Complexity ${level}`;
+
+            card.addEventListener('dragstart', (e) => {
+                routingMapDraggedCard = card;
+                card.classList.add('dragging');
+                e.dataTransfer.setData('text/plain', String(level));
+                e.dataTransfer.effectAllowed = 'move';
+                // Prevent kanban board drag handlers from seeing this event
+                e.stopPropagation();
+            });
+
+            card.addEventListener('dragend', () => {
+                card.classList.remove('dragging');
+                routingMapDraggedCard = null;
+            });
+
+            return card;
+        }
+
+        function renderRoutingCards() {
+            document.querySelectorAll('.routing-drop-zone').forEach(zone => { zone.innerHTML = ''; });
+            Object.entries(routingMapConfig).forEach(([role, complexities]) => {
+                const zone = document.querySelector(`.routing-drop-zone[data-role="${role}"]`);
+                if (!zone) return;
+                const sorted = [...complexities].sort((a, b) => b - a); // high→low within each column
+                sorted.forEach(level => zone.appendChild(createComplexityCard(level)));
+            });
+        }
+
+        // Bind drop zone listeners once (zones are static HTML, persist across renderRoutingCards calls)
+        document.querySelectorAll('.routing-drop-zone').forEach(zone => {
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                zone.classList.add('drag-over');
+            });
+            zone.addEventListener('dragleave', (e) => {
+                if (!zone.contains(e.relatedTarget)) {
+                    zone.classList.remove('drag-over');
+                }
+            });
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                zone.classList.remove('drag-over');
+                if (routingMapDraggedCard) {
+                    zone.appendChild(routingMapDraggedCard);
+                    updateRoutingConfigFromDOM();
+                }
+            });
+        });
+
+        function updateRoutingConfigFromDOM() {
+            routingMapConfig = { lead: [], coder: [], intern: [] };
+            document.querySelectorAll('.routing-drop-zone').forEach(zone => {
+                const role = zone.dataset.role;
+                if (!role || !(role in routingMapConfig)) return;
+                zone.querySelectorAll('.complexity-card').forEach(card => {
+                    routingMapConfig[role].push(parseInt(card.dataset.complexity, 10));
+                });
+                routingMapConfig[role].sort((a, b) => a - b);
+            });
+        }
+
+        function openRoutingMap() {
+            const modal = document.getElementById('routing-map-modal');
+            if (!modal) return;
+            renderRoutingCards();
+            modal.classList.remove('hidden');
+        }
+
+        function closeRoutingMap() {
+            const modal = document.getElementById('routing-map-modal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+        }
+
+        function saveRoutingMap() {
+            updateRoutingConfigFromDOM();
+            // Validate all 10 complexities assigned exactly once
+            const all = [...routingMapConfig.lead, ...routingMapConfig.coder, ...routingMapConfig.intern];
+            if (new Set(all).size !== 10 || all.length !== 10) {
+                // Should not happen with well-behaved drag-drop, but guard anyway
+                return;
+            }
+            postKanbanMessage({ type: 'updateRoutingConfig', config: routingMapConfig });
+            updateRoutingMapButtonIndicator();
+            closeRoutingMap();
+        }
+
+        // Routing map button
+        document.getElementById('btn-routing-map').addEventListener('click', openRoutingMap);
+
+        // Collapse coders toggle button
+        document.getElementById('btn-collapse-coders')?.addEventListener('click', () => {
+            collapseCodersEnabled = !collapseCodersEnabled;
+            const btn = document.getElementById('btn-collapse-coders');
+            if (btn) btn.classList.toggle('is-active', collapseCodersEnabled);
+            try {
+                const state = vscode.getState() || {};
+                state.collapseCodersEnabled = collapseCodersEnabled;
+                vscode.setState(state);
+            } catch (_) {}
+            renderColumns();
+            renderBoard(currentCards);
+            updateAllColumnAgents();
+        });
+        // Restore visual active state from saved toggle state
+        if (collapseCodersEnabled) {
+            document.getElementById('btn-collapse-coders')?.classList.add('is-active');
+        }
+
+        // Close buttons (both × header and Cancel footer)
+        document.querySelectorAll('[data-action="closeRoutingMap"]').forEach(btn => {
+            btn.addEventListener('click', closeRoutingMap);
+        });
+
+        // Save button
+        document.querySelector('[data-action="saveRoutingMap"]').addEventListener('click', saveRoutingMap);
+
+        // ─── End Routing Map ──────────────────────────────────────────────────────
+
+        // Signal to extension that webview is ready to receive data
+        postKanbanMessage({ type: 'ready' });
+    </script>
+</body>
+
+</html>

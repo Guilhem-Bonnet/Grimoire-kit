@@ -61,7 +61,7 @@ fi
 
 # ── Run ──────────────────────────────────────────────────────
 
-COVDIR="_bmad-output/bench-reports"
+COVDIR="_grimoire-output/bench-reports"
 mkdir -p "$COVDIR"
 
 if [[ "${1:-}" == "--quick" ]]; then

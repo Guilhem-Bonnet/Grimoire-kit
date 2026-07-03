@@ -1,0 +1,47 @@
+{
+  "name": "@grimoire-kit/grimoire-game",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist coverage .release .generated",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "cockpit:build": "npm run cockpit:prepare && vite build --base ./ --outDir .release/cockpit-app",
+    "cockpit:dev": "npm run cockpit:prepare && vite --host",
+    "cockpit:prepare": "vite-node --script examples/prepare-runtime-cockpit-app.ts",
+    "cockpit:verify": "npm run demo:views && npm run demo:report && npm run cockpit:build && test -f .release/runtime-views-report.html && test -f .release/cockpit-app/index.html",
+    "demo:report": "vite-node --script examples/render-runtime-views-report.ts",
+    "demo:views": "vite-node --script examples/demo-runtime-views.ts",
+    "pack:verify": "npm pack --dry-run",
+    "pack:artifact": "mkdir -p .release && npm pack --pack-destination .release --json > .release/npm-pack.json",
+    "release:verify": "npm run check && npm run build && npm run test:coverage && npm run cockpit:verify && npm run pack:verify",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@vitest/coverage-v8": "^3.1.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.2"
+  }
+}

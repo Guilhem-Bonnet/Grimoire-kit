@@ -26,39 +26,53 @@ GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 [[ -d "$GIT_ROOT/_grimoire" ]] || exit 0
 
+# ── Lire config projet ───────────────────────────────────────────────────────
+PROJECT_CTX="$GIT_ROOT/project-context.yaml"
+CONVENTION="free"
+MIN_LEN=10
+if [[ -f "$PROJECT_CTX" ]] && command -v python3 &>/dev/null; then
+    mapfile -t Grimoire_CONFIG < <(python3 - "$PROJECT_CTX" <<'PYEOF' 2>/dev/null || true
+import sys
+try:
+    values = {
+        "commit_convention": "free",
+        "commit_min_length": "10",
+    }
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.split("#", 1)[0].rstrip()
+            if not line or line.startswith((" ", "\t", "-")):
+                continue
+            for key in values:
+                prefix = f"{key}:"
+                if line.startswith(prefix):
+                    value = line.split(":", 1)[1].strip().strip('"').strip("'")
+                    if value:
+                        values[key] = value
+    print(values["commit_convention"])
+    print(values["commit_min_length"])
+except Exception:
+    pass
+PYEOF
+)
+    CONVENTION="${Grimoire_CONFIG[0]:-free}"
+    MIN_LEN="${Grimoire_CONFIG[1]:-10}"
+fi
+
+if ! [[ "$MIN_LEN" =~ ^[0-9]+$ ]]; then
+    MIN_LEN=10
+fi
+
 # Lire le message (sans les commentaires)
 MSG=$(grep -v '^#' "$COMMIT_MSG_FILE" | sed '/^[[:space:]]*$/d' | head -1)
 
 # ── Vérification longueur minimale ───────────────────────────────────────────
-MIN_LEN=10
 if [[ ${#MSG} -lt $MIN_LEN ]]; then
     echo ""
     echo "🚫 Grimoire commit-msg : message trop court (${#MSG} chars, min ${MIN_LEN})"
     echo "   Message : \"$MSG\""
     echo ""
     exit 1
-fi
-
-# ── Lire config projet ───────────────────────────────────────────────────────
-PROJECT_CTX="$GIT_ROOT/project-context.yaml"
-CONVENTION="free"
-if [[ -f "$PROJECT_CTX" ]] && command -v python3 &>/dev/null; then
-    CONVENTION=$(python3 - "$PROJECT_CTX" <<'PYEOF' 2>/dev/null || echo "free"
-import sys
-try:
-    # Parse YAML minimal sans dépendance
-    with open(sys.argv[1]) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("commit_convention:"):
-                val = line.split(":", 1)[1].strip().strip('"').strip("'")
-                print(val)
-                sys.exit(0)
-    print("free")
-except Exception:
-    print("free")
-PYEOF
-)
 fi
 
 # ── Validation Conventional Commits (mode strict) ────────────────────────────
@@ -81,7 +95,7 @@ if [[ "$CONVENTION" == "conventional" ]] || [[ "${Grimoire_CC_STRICT:-0}" == "1"
 else
     # Mode souple : juste un avertissement
     if ! echo "$MSG" | grep -qE "$CC_PATTERN"; then
-        echo "💡 Grimoire: message hors format CC — pensez à prefixer avec feat:/fix:/chore: etc."
+        echo "💡 Grimoire: message hors format CC — pensez a prefixer avec feat:/fix:/docs:/chore: etc."
     fi
 fi
 

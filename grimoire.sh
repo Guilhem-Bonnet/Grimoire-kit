@@ -66,6 +66,10 @@ ${BOLD}Commandes:${NC}
   ${GREEN}reset${NC}            Réinitialiser l'installation (soft/--hard)
   ${GREEN}uninstall${NC}        Supprimer complètement Grimoire du projet
   ${GREEN}quick-update${NC}     Mise à jour rapide du framework (sans prompts)
+  ${GREEN}standard${NC}         Conformité agentique (verify/audit/score/gate/context)
+  ${GREEN}memory${NC}           Gestion mémoire OS (status/gate/migrate/graph)
+  ${GREEN}ext${NC}              Extensions (add/list/remove/verify)
+  ${GREEN}serve${NC}            Mode local UI + API (setup, blueprints, télémétrie)
   ${GREEN}version${NC}          Version du kit
   ${GREEN}help${NC}             Cette aide
 
@@ -269,8 +273,31 @@ cmd_health() {
     python3 "${MEMORY_DIR}/maintenance.py" health-check "$@"
 }
 
+run_vscode_stability_guard() {
+    local mode="${1:-apply}"
+    local guard_script="${TOOLS_DIR}/vscode-stability-guard.py"
+
+    [[ -f "$guard_script" ]] || return 0
+    command -v python3 &>/dev/null || return 0
+
+    if [[ "$mode" == "check" ]]; then
+        python3 "$guard_script" --project-root "${PROJECT_ROOT}" --check --skip-runtime --quiet || true
+    else
+        python3 "$guard_script" --project-root "${PROJECT_ROOT}" --apply --skip-runtime --quiet || true
+    fi
+}
+
 cmd_setup() {
+    local mode="apply"
+    for arg in "$@"; do
+        if [[ "$arg" == "--check" ]]; then
+            mode="check"
+            break
+        fi
+    done
+
     python3 "${TOOLS_DIR}/grimoire-setup.py" --project-root "${PROJECT_ROOT}" "$@"
+    run_vscode_stability_guard "$mode"
 }
 
 cmd_init() {
@@ -287,6 +314,45 @@ cmd_uninstall() {
 
 cmd_quickupdate() {
     bash "${SCRIPT_DIR}/grimoire-init.sh" quick-update "$@"
+}
+
+# ─── Standard / Memory (canonical Kit Python CLI) ─────────────────────────────
+
+_kit_python() {
+    local py="${SCRIPT_DIR}/.venv/bin/python3"
+    if [[ ! -x "$py" ]]; then
+        echo -e "${RED}Erreur: .venv/bin/python3 introuvable dans ${SCRIPT_DIR}${NC}" >&2
+        exit 1
+    fi
+    echo "$py"
+}
+
+cmd_standard() {
+    "$(_kit_python)" -m grimoire.cli standard "$@"
+}
+
+cmd_ext() {
+    local py="${SCRIPT_DIR}/.venv/bin/python3"
+    if [[ -x "$py" ]]; then
+        "$py" -m grimoire.tools.ext_manager --project-root "${PROJECT_ROOT}" "$@"
+    else
+        PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+            python3 -m grimoire.tools.ext_manager --project-root "${PROJECT_ROOT}" "$@"
+    fi
+}
+
+cmd_serve() {
+    local py="${SCRIPT_DIR}/.venv/bin/python3"
+    if [[ -x "$py" ]]; then
+        "$py" -m grimoire.tools.forge_server --project-root "${PROJECT_ROOT}" --kit-root "${SCRIPT_DIR}" "$@"
+    else
+        PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+            python3 -m grimoire.tools.forge_server --project-root "${PROJECT_ROOT}" --kit-root "${SCRIPT_DIR}" "$@"
+    fi
+}
+
+cmd_memory_cmd() {
+    "$(_kit_python)" -m grimoire.cli memory "$@"
 }
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
@@ -307,6 +373,10 @@ main() {
         reset)      cmd_reset "$@" ;;
         uninstall)  cmd_uninstall "$@" ;;
         quick-update) cmd_quickupdate "$@" ;;
+        standard)   cmd_standard "$@" ;;
+        memory)     cmd_memory_cmd "$@" ;;
+        ext)        cmd_ext "$@" ;;
+        serve)      cmd_serve "$@" ;;
         version|-v|--version)  cmd_version ;;
         help|-h|--help)        cmd_help ;;
         *)

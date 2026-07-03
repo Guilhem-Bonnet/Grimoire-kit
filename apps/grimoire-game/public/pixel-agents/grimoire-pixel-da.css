@@ -1,0 +1,111 @@
+/**
+ * Grimoire DA overlay pour Pixel Agents.
+ * Align l'office pixel-agents (React/Tailwind) sur la charte Grimoire Forge.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root, html, body {
+  --grm-bg: #0B0C0E;
+  --grm-elev-1: #121418;
+  --grm-elev-2: #1A1D22;
+  --grm-ink: #F6F7F8;
+  --grm-ink-soft: #9BA0A8;
+  --grm-ink-muted: #5B6068;
+  --grm-line: rgba(255, 255, 255, 0.08);
+  --grm-accent: #FF6B3D;
+  --grm-accent-soft: rgba(255, 107, 61, 0.14);
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+body {
+  background: var(--grm-bg) !important;
+  color: var(--grm-ink) !important;
+}
+
+/* FX layer : ambient glow discret (même formule que Switchboard) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(255, 107, 61, 0.05), transparent 60%),
+    radial-gradient(1000px 500px at 85% 110%, rgba(92, 140, 255, 0.03), transparent 60%);
+  z-index: 0;
+}
+
+/* Canvas du pixel office reste au-dessus et intact */
+canvas, .office-canvas, [class*="canvas"] {
+  position: relative;
+  z-index: 1;
+  image-rendering: pixelated !important;
+  image-rendering: crisp-edges !important;
+}
+
+/* Top bar / panels : palette Grimoire */
+[class*="Panel"],
+[class*="panel"],
+.fixed.top-0,
+.fixed.bottom-0,
+header, nav {
+  background: rgba(18, 20, 24, 0.82) !important;
+  backdrop-filter: blur(8px);
+  border-color: var(--grm-line) !important;
+}
+
+/* Boutons : primary orange Grimoire */
+button {
+  font-family: 'Geist', sans-serif !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.2px !important;
+  transition: all 160ms ease !important;
+}
+button.bg-blue-500, button.bg-blue-600, button.bg-indigo-500,
+button[class*="bg-blue"], button[class*="bg-indigo"] {
+  background: linear-gradient(180deg, #FF6B3D 0%, #E8552A 100%) !important;
+  color: #0B0C0E !important;
+  font-weight: 600 !important;
+  box-shadow: 0 4px 12px rgba(255, 107, 61, 0.25) !important;
+  border: 0 !important;
+}
+button.bg-blue-500:hover, button.bg-blue-600:hover,
+button[class*="bg-blue"]:hover {
+  background: linear-gradient(180deg, #FF7A50 0%, #FF6B3D 100%) !important;
+  box-shadow: 0 6px 18px rgba(255, 107, 61, 0.35) !important;
+}
+
+/* Debug view / agent lists : dark premium */
+[class*="DebugView"], [class*="debug-view"] {
+  background: var(--grm-elev-1) !important;
+  border: 1px solid var(--grm-line) !important;
+  border-radius: 8px !important;
+  color: var(--grm-ink) !important;
+}
+
+/* Text labels : soft ink */
+.text-gray-400, .text-gray-500, .text-gray-600 {
+  color: var(--grm-ink-soft) !important;
+}
+.text-gray-200, .text-gray-300 {
+  color: var(--grm-ink) !important;
+}
+
+/* Status indicators (active/idle/waiting) : Grimoire semantic palette */
+[class*="bg-green"] { background-color: rgba(115, 201, 145, 0.18) !important; color: #73C991 !important; }
+[class*="bg-yellow"] { background-color: rgba(255, 184, 77, 0.18) !important; color: #FFB84D !important; }
+[class*="bg-red"] { background-color: rgba(255, 91, 91, 0.18) !important; color: #FF5B5B !important; }
+
+/* Scrollbar branding */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--grm-bg); }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 107, 61, 0.4); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before { display: none; }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

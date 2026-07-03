@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grimoire Kit — SDK Agentique Python</title>
+  <meta name="description" content="Grimoire Kit orchestre agents, mémoire et workflows dans un runtime Python léger. Composable, traçable, open source." />
+  <link rel="stylesheet" href="kit-tokens.css" />
+  <link rel="stylesheet" href="kit-base.css" />
+  <link rel="stylesheet" href="kit-motion.css" />
+  <style>
+    /* ── Hero layout ── */
+    #hero { padding: 148px 0 100px; position: relative; overflow: hidden; }
+    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: center; }
+    @media (max-width: 960px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
+
+    /* Hero blueprint overlay */
+    #hero::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.08'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    .hero-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+    .hero-h1 { margin-bottom: 18px; }
+    .hero-sub { font-size: 1rem; color: var(--ink-soft); line-height: 1.7; margin-bottom: 36px; max-width: 460px; }
+    .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+    .hero-embed { position: relative; }
+    .embed-badge {
+      position: absolute; top: 12px; right: 12px; z-index: 2;
+      font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em;
+      color: var(--data-green); background: rgba(52,211,153,0.12);
+      border: 1px solid rgba(52,211,153,0.25); border-radius: 2px; padding: 3px 8px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .embed-badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--data-green); box-shadow: 0 0 5px var(--data-green); }
+
+    /* ── SOG Demo ── */
+    #orchestration { padding: 120px 0; }
+    .sog-demo {
+      background: var(--elev-1); border: 1px solid var(--line);
+      border-radius: var(--r-md); padding: 40px;
+      max-width: 720px; margin: 52px auto 0;
+      position: relative; overflow: hidden;
+    }
+    .sog-demo::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.06'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    .sog-stage { position: relative; height: 340px; }
+    .sog-node {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--elev-2); border: 1.5px solid var(--accent);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; z-index: 2; transition: box-shadow 400ms;
+    }
+    .sog-node.pulse { box-shadow: 0 0 0 8px var(--accent-soft), 0 0 32px -4px var(--accent-glow); }
+    .sog-node-label { font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent); letter-spacing: 0.08em; font-weight: 600; }
+    .sog-node-sub   { font-family: var(--font-mono); font-size: 0.5rem; color: var(--ink-muted); }
+    .sog-user {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      background: var(--elev-2); border: 1px solid var(--line-strong);
+      border-radius: var(--r-md); padding: 10px 16px;
+      font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-soft);
+      white-space: nowrap; opacity: 0; transition: opacity 300ms, transform 300ms;
+    }
+    .sog-user.show { opacity: 1; }
+    .sog-agent {
+      position: absolute; width: 80px;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      opacity: 0; transition: opacity 400ms, transform 400ms;
+    }
+    .sog-agent.show { opacity: 1; }
+    .agent-avatar {
+      width: 44px; height: 44px; border-radius: var(--r-sm);
+      background: var(--elev-3); border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft);
+      position: relative; overflow: hidden; transition: border-color 300ms;
+    }
+    .agent-avatar.working { border-color: var(--accent); }
+    .agent-avatar .working-bar {
+      position: absolute; bottom: 0; left: 0; height: 2px;
+      background: var(--accent); width: 0%; transition: width 1.2s linear;
+    }
+    .agent-avatar.working .working-bar { width: 100%; }
+    .agent-name { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.06em; }
+    .sog-artefact {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: var(--accent-soft); border: 1px solid var(--accent-dim);
+      border-radius: var(--r-sm); padding: 8px 20px;
+      font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent);
+      white-space: nowrap; letter-spacing: 0.06em;
+      opacity: 0; transition: opacity 400ms, transform 400ms;
+      transform: translateX(-50%) translateY(8px);
+    }
+    .sog-artefact.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .sog-svg { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: visible; }
+    .sog-line { stroke: var(--accent); stroke-width: 1; fill: none; opacity: 0.5; stroke-dasharray: 6 4; }
+    .sog-controls { display: flex; align-items: center; gap: 14px; margin-top: 24px; position: relative; z-index: 2; }
+    .sog-input-wrap { flex: 1; display: flex; gap: 8px; }
+    .sog-input {
+      flex: 1; background: var(--elev-2); border: 1px solid var(--line);
+      border-radius: var(--r-sm); padding: 9px 14px;
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
+      outline: none; transition: border-color 200ms;
+    }
+    .sog-input:focus { border-color: var(--accent); }
+    .sog-send {
+      font-family: var(--font-mono); font-size: 0.7rem; padding: 9px 18px;
+      background: var(--accent); color: var(--bg); border: none; border-radius: var(--r-sm);
+      cursor: pointer; letter-spacing: 0.06em; transition: filter 200ms;
+      position: relative; overflow: hidden;
+    }
+    .sog-send:hover { filter: brightness(1.08); }
+    .sog-send:disabled { opacity: 0.5; cursor: default; }
+    .sog-replay {
+      font-family: var(--font-mono); font-size: 0.68rem; padding: 9px 14px;
+      background: transparent; color: var(--ink-muted); border: 1px solid var(--line);
+      border-radius: var(--r-sm); cursor: pointer; transition: all 200ms; display: none;
+    }
+    .sog-replay.show { display: block; }
+    .sog-replay:hover { color: var(--ink); border-color: var(--line-strong); }
+    .sog-status { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); }
+
+    /* ── Preuves grid ── */
+    .preuves-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 64px; align-items: start; margin-top: 52px; }
+    .metrics-row { display: flex; gap: 48px; margin-bottom: 40px; }
+    @media (max-width: 960px) { .preuves-grid { grid-template-columns: 1fr; gap: 40px; } .metrics-row { flex-wrap: wrap; gap: 32px; } }
+  </style>
+</head>
+<body>
+<a href="#main" class="skip-link">Aller au contenu</a>
+<div id="scroll-progress" aria-hidden="true"></div>
+<nav id="kit-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+
+<!-- ═══ HERO ═══ -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="hero-content">
+        <div class="hero-eyebrow" data-hero="0">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="eyebrow">SDK AGENTIQUE PYTHON &nbsp;·&nbsp; v2026</span>
+        </div>
+        <h1 class="hero-h1 grad-text" data-hero="1">Un SDK composable.<br>Pas un framework de plus.</h1>
+        <p class="hero-sub" data-hero="2">Grimoire Kit orchestre agents, mémoire et workflows dans un runtime Python léger. Conçu pour les équipes qui exigent la traçabilité et la composabilité.</p>
+        <div class="hero-ctas" data-hero="3">
+          <a href="#cta-final" class="btn btn-primary">INSTALLER LE SDK</a>
+          <a href="docs/" class="btn btn-ghost">LIRE LA DOC →</a>
+        </div>
+      </div>
+      <div class="hero-embed" data-hero="4">
+        <span class="embed-badge"><span class="dot"></span>READY</span>
+        <div class="cockpit-frame" role="img" aria-label="Terminal Grimoire Kit">
+          <div class="cockpit-bar">
+            <span class="ctl-dot r"></span><span class="ctl-dot y"></span><span class="ctl-dot g"></span>
+            <span class="cockpit-label">GRIMOIRE KIT · SDK · session-init</span>
+          </div>
+          <div class="cockpit-body">
+            <div class="term"><span class="p">▶ </span><span class="v">pip install "grimoire-kit[all]"</span></div>
+            <div class="term"><span class="d">  ↳ grimoire-kit 2026.4</span> <span class="ok">INSTALLED</span></div>
+            <div class="term"><span class="d">  ↳ 22 agents</span> <span class="ok">REGISTERED</span></div>
+            <div class="term"><span class="d">  ↳ memory/local</span> <span class="ok">READY</span></div>
+            <div class="term">&nbsp;</div>
+            <div class="term"><span class="p">▶ </span><span class="v">grimoire dispatch "Crée un PRD app notes"</span></div>
+            <div class="term"><span class="d">  ↳ SOG</span> <span class="ok">ROUTING</span> <span class="d">→ pm, analyst, tech-writer</span></div>
+            <div class="term"><span class="d">  ↳ agent/pm</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f1</span></div>
+            <div class="term"><span class="d">  ↳ agent/analyst</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f2</span></div>
+            <div class="term">&nbsp;</div>
+            <div class="term"><span class="d">  ↳ artefact/prd-app-notes-v1.md</span> <span class="ok">ÉMIS</span></div>
+            <div class="term"><span class="p">▶ </span><span class="v">_</span><span class="cursor-blink" aria-hidden="true" style="display:inline-block;width:7px;height:1em;background:var(--accent);vertical-align:middle;margin-left:1px;"></span></div>
+          </div>
+          <div class="agent-bar" aria-hidden="true">
+            <span class="agent-pill on"><span class="dot"></span>pm</span>
+            <span class="agent-pill on"><span class="dot"></span>analyst</span>
+            <span class="agent-pill on"><span class="dot"></span>tech-writer</span>
+            <span style="flex:1"></span>
+            <span class="agent-pill" style="color:var(--ink-muted)">SOG · 22 agents</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PROOF BAR ═══ -->
+<div id="proof-bar" aria-label="Références">
+  <div class="container">
+    <div class="proof-inner">
+      <span class="proof-item">22 AGENTS · PRÊTS</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">5 900+ TESTS · CI VERTE</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">PYTHON 3.12+</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">COMPATIBLE MCP · CLAUDE · COPILOT</span>
+      <span class="proof-sep">·</span>
+      <span class="proof-item">TRAÇABILITÉ JSONL · ZÉRO VENDOR LOCK</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MANIFESTE ═══ -->
+<section id="manifeste">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">01</span> · PHILOSOPHIE</div>
+    <div class="manifeste-grid">
+      <div class="manifeste-block reveal" data-delay="0">
+        <div class="manifeste-num">01 · SDK, PAS UN SaaS</div>
+        <h3>S'installe avec pip. Tourne dans ton projet.</h3>
+        <p>Aucune dépendance cloud, aucun vendor lock-in. Le runtime s'exécute localement — dans ton IDE, dans ton CI, dans ton infra. Tu gardes le contrôle complet de chaque artefact produit.</p>
+      </div>
+      <div class="manifeste-block reveal" data-delay="100">
+        <div class="manifeste-num">02 · UN SEUL POINT D'ENTRÉE</div>
+        <h3>Le SOG dispatche. Tu ne parles qu'à un agent.</h3>
+        <p>Le Smart Orchestrator Gateway analyse l'intention, dispatche vers des sub-agents invisibles, agrège les résultats. L'opérateur contrôle un système cohérent, pas une collection d'appels API.</p>
+      </div>
+      <div class="manifeste-block reveal" data-delay="200">
+        <div class="manifeste-num">03 · COMPOSABLE PAR NATURE</div>
+        <h3>Agents, skills, workflows : tout est modulaire, forgeable.</h3>
+        <p>Les modules BMM, CIS, TEA, BMB se combinent librement. Chaque agent est un fichier Markdown versionné. L'UDF crée dynamiquement ce qui manque. Tout est remplaçable sans toucher au runtime.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ MODULES ═══ -->
+<section id="modules">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">02</span> · MODULES</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:580px">Six modules. Un runtime commun.</h2>
+    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:500px">Chaque module expose des agents spécialisés. Ils s'activent via le SOG selon l'intention détectée.</p>
+    <div class="modules-grid surfaces-grid">
+      <div class="surface-card reveal" data-delay="0">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">BMM</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Méthode Grimoire</h3><p>Pipeline agentique complet : Analyst (Mary), PM (John), Architect (Winston), Dev (Amelia), QA (Quinn), SM (Bob), Tech-Writer (Paige), UX (Sally), Quick-Flow Solo Dev (Barry).</p><div class="surface-meta">9 agents · workflow BMM · CC protocol</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">analyst</span><span class="mini-val">MARY</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">architect</span><span class="mini-val">WINSTON</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">dev</span><span class="mini-val">AMELIA</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="60">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">CIS</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Créativité &amp; Innovation</h3><p>Rodin (débats), Art Director (Iris), Storyteller (Sophia), Brainstorming Coach (Carson), Creative Problem Solver (Dr. Quinn), Design Thinking Coach (Maya), Innovation Strategist (Victor), Presentation Master.</p><div class="surface-meta">8 agents · PCE · anti-chambre d'écho</div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">rodin</span><span class="mini-val">DÉBAT</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">art-director</span><span class="mini-val">IRIS</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">storyteller</span><span class="mini-val">SOPHIA</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="120">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">BMB</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Builders UDF</h3><p>Agent Builder (Bond), Workflow Builder (Wendy), Module Builder (Morgan). Créent dynamiquement les artefacts manquants via l'UDF.</p><div class="surface-meta">3 agents · UDF · triage éphémère/permanent</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent-builder</span><span class="mini-val">BOND</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">workflow-builder</span><span class="mini-val">WENDY</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">module-builder</span><span class="mini-val">MORGAN</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="0">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">TEA</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Test Architecture</h3><p>Murat orchestre la stratégie de test : ATDD, couverture, CI/CD, pyramide de tests. Handoff automatique vers dev et qa.</p><div class="surface-meta">1 agent · ATDD · pytest · CI/CD</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">tea</span><span class="mini-val">MURAT</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">640+ tests</span><span class="mini-val">CI ✓</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">couverture</span><span class="mini-val">&gt;70%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="60">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">MCP</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Model Context Protocol</h3><p>Serveur MCP intégré. Compatible Claude Desktop, VS Code Copilot, Cursor, et tout client MCP standard. Outils importables via SDK.</p><div class="surface-meta">grimoire-kit[mcp] · localhost · SSE</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">claude-desktop</span><span class="mini-val">✓ LINK</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">vscode-copilot</span><span class="mini-val">✓ LINK</span></div>
+              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">cursor</span><span class="mini-val">BETA</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="surface-card reveal" data-delay="120">
+        <div class="surface-card-inner">
+          <div class="surface-card-head"><span class="surface-badge">MEMORY</span><span class="surface-status live"><span class="dot"></span>STABLE</span></div>
+          <div class="surface-body"><h3>Mémoire structurée</h3><p>Trois niveaux de mémoire : working, episodic, semantic. Backends : Local JSON, Qdrant (local ou cloud), Ollama (AMD ROCm).</p><div class="surface-meta">grimoire-kit[qdrant] · TTL · namespace</div></div>
+          <div class="surface-preview" aria-hidden="true">
+            <div class="mini-rows">
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">backend/local</span><span class="mini-val">DEFAULT</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">backend/qdrant</span><span class="mini-val">OPT-IN</span></div>
+              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">backend/ollama</span><span class="mini-val">OPT-IN</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ORCHESTRATION / SOG ═══ -->
+<section id="orchestration">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">03</span> · ORCHESTRATION</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:600px">Un seul point d'entrée. Des dizaines de sub-agents invisibles.</h2>
+    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:520px">Le SOG reçoit la requête, dispatche vers les agents spécialisés, agrège les résultats. L'opérateur ne voit qu'une interface propre.</p>
+
+    <div class="sog-demo reveal" data-delay="160" role="region" aria-label="Démonstration du Smart Orchestrator Gateway">
+      <div class="sog-stage" id="sog-stage" aria-live="polite">
+        <div class="sog-user" id="sog-user">"Crée un PRD pour une app de notes"</div>
+        <svg class="sog-svg" id="sog-svg" aria-hidden="true"></svg>
+        <div class="sog-node" id="sog-node" aria-label="Smart Orchestrator Gateway">
+          <span class="sog-node-label">SOG</span>
+          <span class="sog-node-sub" id="sog-subtext">EN ATTENTE</span>
+        </div>
+        <div class="sog-agent" id="ag-pm"     style="left:80px;top:50%;transform:translateY(-50%)">
+          <div class="agent-avatar" id="av-pm"><span>pm</span><div class="working-bar"></div></div>
+          <span class="agent-name">PM · JOHN</span>
+        </div>
+        <div class="sog-agent" id="ag-analyst" style="left:50%;top:20px;transform:translateX(-50%)">
+          <div class="agent-avatar" id="av-analyst"><span>analyst</span><div class="working-bar"></div></div>
+          <span class="agent-name">ANALYST · MARY</span>
+        </div>
+        <div class="sog-agent" id="ag-writer"  style="right:80px;top:50%;transform:translateY(-50%)">
+          <div class="agent-avatar" id="av-writer"><span>writer</span><div class="working-bar"></div></div>
+          <span class="agent-name">TECH-WRITER · PAIGE</span>
+        </div>
+        <div class="sog-artefact" id="sog-artefact">KIT-0042 · prd-app-notes-v1.md · ÉMIS &amp; SCELLÉ</div>
+      </div>
+      <div class="sog-controls">
+        <div class="sog-input-wrap">
+          <input class="sog-input" id="sog-input" value="Crée un PRD pour une app de notes" readonly aria-label="Requête utilisateur" />
+          <button class="sog-send" id="sog-send">ORCHESTRER →</button>
+        </div>
+        <button class="sog-replay" id="sog-replay" aria-label="Rejouer la démonstration">REJOUER</button>
+        <span class="sog-status" id="sog-status" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TIMELINE ═══ -->
+<section id="section-timeline">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">04</span> · DÉMARRAGE</div>
+    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:500px">De l'installation à la production.</h2>
+    <div class="timeline-track reveal" data-delay="100" aria-hidden="true"><div class="timeline-track-fill"></div></div>
+    <div class="timeline-steps" role="list">
+      <div class="timeline-step reveal" data-delay="0"   role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">01</div><h3>Installer</h3><p><code style="font-family:var(--font-mono);font-size:.75rem;color:var(--accent)">pip install "grimoire-kit[all]"</code> — toutes les dépendances optionnelles incluses. Python 3.12+ requis.</p></div>
+      <div class="timeline-step reveal" data-delay="80"  role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">02</div><h3>Configurer</h3><p><code style="font-family:var(--font-mono);font-size:.75rem;color:var(--accent)">grimoire init</code> génère le <code style="font-family:var(--font-mono);font-size:.75rem">project-context.yaml</code> et la structure runtime dans ton projet.</p></div>
+      <div class="timeline-step reveal" data-delay="160" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">03</div><h3>Orchestrer</h3><p>Grimoire Master dispatche automatiquement. Décris ton besoin en langage naturel — le SOG route vers les agents adaptés.</p></div>
+      <div class="timeline-step reveal" data-delay="240" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">04</div><h3>Livrer</h3><p>Artefacts versionnés, traçabilité JSONL complète, contrats signés. Compatible CI/CD et audit.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CAPACITÉS ═══ -->
+<section id="capacites">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">05</span> · CAPACITÉS</div>
+        <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:560px">Des protocoles de précision.</h2>
+    <div class="feature-grid">
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">BM-53</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="14" cy="14" r="10"/><path d="M14 8v7l4 2.5"/></svg>
+        <h3>SOG — Smart Orchestrator Gateway</h3><p>Point d'entrée unique. Dispatch intelligent via ARG. Anti-hallucination HUP. Questions en batch QEC. Validation CVTL. L'opérateur ne voit qu'une interface propre.</p>
+        <a href="docs/concepts/" class="feature-link">SPEC SOG →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">UDF</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="1.5"/><path d="M9 11h10M9 15h6"/></svg>
+        <h3>UDF — Unified Dynamic Factory</h3><p>Crée dynamiquement agents, workflows, skills et instructions quand aucun existant ne couvre le besoin. Triage durabilité éphémère/permanent intégré.</p>
+        <a href="docs/creating-agents/" class="feature-link">GUIDE UDF →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">MEM</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 20h20M4 14h12M4 8h8"/></svg>
+        <h3>Mémoire tiered</h3><p>Contexte mémoire structuré en niveaux : working, episodic, semantic. Backends JSON, Qdrant, Ollama. Isolation namespace, TTL configurable par tier.</p>
+        <a href="docs/memory-system/" class="feature-link">MÉMOIRE DOC →</a></div>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">HOOKS</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4l4 8h6l-5 4 2 7-7-4-7 4 2-7-5-4h6z"/></svg>
+        <h3>Hooks sécurisés</h3><p>Points d'interception pré/post exécution avec validation de contrat. Neuf hooks lifecycle : SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop et plus.</p>
+        <a href="docs/concepts/" class="feature-link">HOOKS SPEC →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">ROUTING</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 14h18M14 5v18"/><circle cx="14" cy="14" r="10"/></svg>
+        <h3>Task-aware routing</h3><p>5 profils de routing déterministe : deep_reasoning, general_code, writing_structured, fast_iter, local_coder. Un seul LLM par dispatch — pas de multi-LLM caché (cf. ADR-001). Fallback explicite.</p>
+        <a href="docs/adr-001-no-multi-llm/" class="feature-link">ADR-001 →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">BM-52</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 22L14 4l4 10 4-5 2 13"/><circle cx="24" cy="22" r="2"/></svg>
+        <h3>CVTL cross-validation</h3><p>Cross-Validation Trust Layer : chaque artefact critique est soumis à un agent indépendant avant scellement. Détection automatique des incohérences.</p>
+        <a href="docs/concepts/" class="feature-link">CVTL DOC →</a></div>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">BM-54</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M7 14h4l3-8 4 16 3-8h4"/></svg>
+        <h3>PCE — Rodin debates</h3><p>Productive Conflict Engine via Rodin : débats socratiques structurés, anti-chambre d'écho, contre-arguments sur présupposés cachés avant toute décision critique.</p>
+        <a href="docs/faq/" class="feature-link">RODIN FAQ →</a></div>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">ALS</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4a10 10 0 0 1 0 20M14 4A10 10 0 0 0 4 14M14 24V4"/><path d="M4 14h20"/></svg>
+        <h3>AORA + ALS autonomy</h3><p>Assess → Orchestrate → Run → Audit. Boucle d'itération autonome sur risques L1/L2. Niveaux de confiance par action. Friction budget géré automatiquement.</p>
+        <a href="docs/faq/" class="feature-link">AORA DOC →</a></div>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">MCP</span>
+        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/><rect x="16" y="4" width="8" height="8" rx="1.5"/><rect x="4" y="16" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="8" height="8" rx="1.5"/></svg>
+        <h3>MCP intégré</h3><p>Serveur Model Context Protocol natif. Exposition de tous les outils Grimoire à Claude Desktop, VS Code Copilot et tout client MCP. Zéro configuration supplémentaire.</p>
+        <a href="docs/mcp-integration/" class="feature-link">GUIDE MCP →</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PREUVES ═══ -->
+<section id="preuves" style="background:var(--elev-1);border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="container">
+    <div class="divider" aria-hidden="true"></div>
+    <div class="eyebrow reveal"><span class="num">06</span> · PREUVES</div>
+    <div class="preuves-grid">
+      <div>
+        <div class="metrics-row">
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="22">22</span></div><div class="metric-label">AGENTS DISPONIBLES</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="5900">5900</span><span class="a">+</span></div><div class="metric-label">TESTS · CI VERTE</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="5">5</span></div><div class="metric-label">PROFILS ROUTING</div></div>
+        </div>
+        <div class="metrics-row">
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="0">0</span></div><div class="metric-label">DÉPENDANCE CLOUD OBLIGATOIRE</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="4">4</span></div><div class="metric-label">TYPES D'ARTEFACTS UDF</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="9">9</span></div><div class="metric-label">HOOKS LIFECYCLE</div></div>
+        </div>
+      </div>
+      <div class="quote-block reveal" data-delay="200">
+        <p class="quote-text">"Grimoire Kit m'a permis de connecter 18 agents spécialisés dans mon projet en une demi-journée. Le SOG fait le routage tout seul — je ne change que les prompts métier."</p>
+        <div class="quote-author">GUILHEM B. · ARCHITECT · GRIMOIRE-FORGE</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CTA FINAL ═══ -->
+<section id="cta-final">
+  <div class="container" style="position:relative;z-index:1">
+    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:28px"><span class="num">↓</span>&nbsp;&nbsp;OPEN SOURCE · PYTHON 3.12+</div>
+    <h2 class="reveal grad-text" data-delay="80" style="margin-bottom:12px">Installe ton runtime agentique.</h2>
+    <p class="reveal" data-delay="140" style="color:var(--ink-soft);margin-bottom:36px;font-size:.95rem">Composable. Traçable. Sans vendor lock-in. Prêt en une commande.</p>
+    <div class="reveal" data-delay="180" style="display:flex;justify-content:center;margin-bottom:32px">
+      <div class="install-block">
+        <span><span class="pip">$</span> pip install "grimoire-kit[all]"</span>
+        <button class="copy-btn" aria-label="Copier la commande">COPIER</button>
+      </div>
+    </div>
+    <div class="reveal" data-delay="220" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
+      <a href="docs/" class="btn btn-primary">LIRE LA DOCUMENTATION</a>
+      <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener" class="btn btn-ghost">VOIR SUR GITHUB →</a>
+    </div>
+    <p class="reveal" data-delay="300" style="margin-top:20px;font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);letter-spacing:.08em;text-align:center">pip install · grimoire init · grimoire dispatch · artefact scellé</p>
+  </div>
+</section>
+
+</main>
+<footer id="kit-footer"></footer>
+
+<script src="kit-nav.js"></script>
+<script>
+/* ── SOG ChatOrchestrator animation ── */
+(function() {
+  const stage     = document.getElementById('sog-stage');
+  const sogNode   = document.getElementById('sog-node');
+  const sogSub    = document.getElementById('sog-subtext');
+  const userBubble = document.getElementById('sog-user');
+  const artefact  = document.getElementById('sog-artefact');
+  const sendBtn   = document.getElementById('sog-send');
+  const replayBtn = document.getElementById('sog-replay');
+  const statusEl  = document.getElementById('sog-status');
+  const svg       = document.getElementById('sog-svg');
+  const agents    = ['ag-pm','ag-analyst','ag-writer'];
+  const avatars   = ['av-pm','av-analyst','av-writer'];
+  let running = false;
+
+  function getCenter(el) {
+    const sr = stage.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    return { x: er.left - sr.left + er.width/2, y: er.top - sr.top + er.height/2 };
+  }
+
+  function drawLine(x1,y1,x2,y2,id,col) {
+    let line = document.getElementById(id);
+    if (!line) { line = document.createElementNS('http://www.w3.org/2000/svg','line'); line.id = id; svg.appendChild(line); }
+    line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('class','sog-line');
+    line.style.opacity = col === 'on' ? '0.7' : '0.25';
+    line.style.stroke  = col === 'on' ? 'var(--accent)' : 'var(--ink-muted)';
+  }
+
+  function clearLines() { svg.innerHTML = ''; }
+
+  function reset() {
+    running = false;
+    userBubble.classList.remove('show');
+    artefact.classList.remove('show');
+    sogNode.classList.remove('pulse');
+    sogSub.textContent = 'EN ATTENTE';
+    agents.forEach(id => document.getElementById(id).classList.remove('show'));
+    avatars.forEach(id => { const av = document.getElementById(id); av.classList.remove('working'); });
+    clearLines();
+    sendBtn.disabled = false;
+    replayBtn.classList.remove('show');
+    statusEl.textContent = '';
+  }
+
+  async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function run() {
+    if (running) return;
+    running = true;
+    sendBtn.disabled = true;
+    clearLines();
+
+    userBubble.classList.add('show');
+    statusEl.textContent = 'Requête reçue...';
+    await delay(700);
+
+    sogNode.classList.add('pulse');
+    sogSub.textContent = 'DISPATCH...';
+    statusEl.textContent = 'SOG analyse et dispatche...';
+    await delay(600);
+
+    agents.forEach(id => document.getElementById(id).classList.add('show'));
+    await delay(200);
+
+    const sogC = getCenter(sogNode);
+    agents.forEach((id, i) => {
+      const ac = getCenter(document.getElementById(id));
+      drawLine(sogC.x, sogC.y, ac.x, ac.y, 'line-'+i, 'on');
+    });
+    await delay(800);
+
+    avatars.forEach(id => document.getElementById(id).classList.add('working'));
+    sogSub.textContent = 'EN COURS';
+    statusEl.textContent = '3 agents en parallèle...';
+    await delay(1600);
+
+    const sogC2 = getCenter(sogNode);
+    agents.forEach((id, i) => {
+      const ac = getCenter(document.getElementById(id));
+      drawLine(ac.x, ac.y, sogC2.x, sogC2.y, 'line-ret-'+i, 'dim');
+    });
+    sogSub.textContent = 'AGRÉGATION';
+    statusEl.textContent = 'Agrégation des résultats...';
+    await delay(900);
+
+    clearLines();
+    sogNode.classList.remove('pulse');
+    sogSub.textContent = 'SCELLÉ';
+    artefact.classList.add('show');
+    statusEl.textContent = '';
+    replayBtn.classList.add('show');
+  }
+
+  sendBtn.addEventListener('click', run);
+  replayBtn.addEventListener('click', () => { reset(); setTimeout(run, 300); });
+})();
+</script>
+</body>
+</html>

@@ -527,7 +527,7 @@ def scan_directory(root: Path, target: Path | None = None,
 
     # Filtrer les exclusions
     exclude_dirs = {"node_modules", ".git", "__pycache__", ".pytest_cache",
-                    ".ruff_cache", ".venv", "venv", ".bmad-rnd", "_grimoire-output"}
+                    ".ruff_cache", ".venv", "venv", ".grimoire-rnd", "_grimoire-output"}
 
     for fpath in files:
         # Vérifier les exclusions

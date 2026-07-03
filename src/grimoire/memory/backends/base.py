@@ -1,7 +1,7 @@
 """Abstract base for memory backends.
 
 Every backend must implement the seven core methods defined here.
-Optional methods (delete, update, store_many) have default implementations
+Optional methods (delete, update, upsert, store_many) have default implementations
 that raise ``NotImplementedError`` — override them for full CRUD support.
 """
 
@@ -24,6 +24,11 @@ class MemoryEntry:
     created_at: str = ""
     updated_at: str = ""
     score: float = 0.0
+    # Agent OS provenance fields (spec §12 MemoryRecord)
+    source: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+    freshness: str = "current"
+    task_ref: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +40,10 @@ class MemoryEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "score": self.score,
+            "source": self.source,
+            "provenance": dict(self.provenance),
+            "freshness": self.freshness,
+            "task_ref": self.task_ref,
         }
 
 
@@ -54,7 +63,7 @@ class MemoryBackend(abc.ABC):
     Subclasses must implement store, recall, search, get_all, count,
     health_check, and consolidate.
 
-    Optional methods ``delete``, ``update``, and ``store_many`` provide
+    Optional methods ``delete``, ``update``, ``upsert``, and ``store_many`` provide
     default implementations (``NotImplementedError`` / sequential fallback)
     so that existing subclasses are not broken.
     """
@@ -103,6 +112,18 @@ class MemoryBackend(abc.ABC):
     def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
         """Update an entry's text, tags, or metadata.  Returns updated entry or None."""
         raise NotImplementedError(f"{type(self).__name__} does not support update()")
+
+    def upsert(
+        self,
+        entry_id: str,
+        text: str,
+        *,
+        user_id: str = "",
+        tags: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryEntry:
+        """Create or replace an entry with a caller-provided stable ID."""
+        raise NotImplementedError(f"{type(self).__name__} does not support upsert()")
 
     def store_many(self, entries: list[dict[str, Any]]) -> list[MemoryEntry]:
         """Batch-store multiple entries.  Default: sequential ``store()`` calls."""

@@ -1,0 +1,161 @@
+/* ═══════════════════════════════════════════════
+   GRIMOIRE KIT — Motion & Reveal System
+   ═══════════════════════════════════════════════ */
+
+/* ── Scroll progress bar ── */
+#scroll-progress {
+  position: fixed;
+  top: 0; left: 0;
+  height: 2px;
+  width: 0%;
+  background: var(--accent);
+  z-index: 1000;
+  transition: width 80ms linear;
+  pointer-events: none;
+}
+
+/* ── View transitions ── */
+@keyframes vt-fade-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-8px); }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+::view-transition-old(root) {
+  animation: 280ms var(--ease-in) vt-fade-out;
+}
+::view-transition-new(root) {
+  animation: 280ms var(--ease-out) vt-fade-in;
+}
+
+/* ── Reveal: blur-in (hero elements) ── */
+.reveal-blur {
+  opacity: 0;
+  filter: blur(12px);
+  transform: translateY(12px);
+  transition:
+    opacity  var(--dur-slow) var(--ease-forge),
+    filter   var(--dur-slow) var(--ease-forge),
+    transform var(--dur-slow) var(--ease-forge);
+}
+.reveal-blur.visible { opacity: 1; filter: blur(0); transform: translateY(0); }
+
+/* ── Reveal: slide-up (general) ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity  600ms var(--ease-forge),
+    transform 600ms var(--ease-forge);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+/* ── Section divider line (draws left→right) ── */
+.divider {
+  height: 1px;
+  background: var(--accent);
+  width: 0%;
+  margin-bottom: 56px;
+  transition: width var(--dur-draw) var(--ease-out);
+}
+.divider.drawn { width: 100%; }
+
+/* ── Manifeste block border reveal ── */
+.manifeste-block {
+  border-left: 2px solid transparent;
+  transition: border-left-color 400ms var(--ease-forge);
+}
+.manifeste-block.lit { border-left-color: var(--accent); }
+
+/* ── CTA shimmer ── */
+@keyframes shimmer {
+  from { left: -100%; }
+  to   { left: 160%; }
+}
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+  transform: skewX(-20deg);
+  transition: left 400ms;
+  pointer-events: none;
+}
+.btn-primary:hover::before { left: 160%; }
+.btn-primary.shimmer-once::before {
+  animation: shimmer 600ms var(--ease-forge) forwards;
+}
+
+/* ── CTA click spark ── */
+@keyframes spark {
+  0%   { opacity: 0.4; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+.btn-primary:active::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,0.14);
+  border-radius: inherit;
+  animation: spark var(--dur-fast) forwards;
+  pointer-events: none;
+}
+
+/* ── Timeline dot ── */
+.timeline-dot {
+  transition: background 400ms, box-shadow 400ms;
+}
+.timeline-dot.active {
+  background: var(--accent) !important;
+  box-shadow: 0 0 8px var(--accent-dim);
+}
+
+/* ── Timeline track fill ── */
+.timeline-track-fill {
+  transition: width 1200ms var(--ease-forge);
+}
+
+/* ── Surface card hover border sweep ── */
+@property --sweep-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes sweep-border {
+  from { --sweep-angle: 0deg; }
+  to   { --sweep-angle: 360deg; }
+}
+.surface-card:hover::before {
+  opacity: 1;
+  animation: sweep-border 240ms var(--ease-forge) forwards;
+}
+
+/* ── Cockpit cursor blink ── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor-blink { animation: blink 1.1s step-end infinite; }
+
+/* ── Easter egg ── */
+@keyframes egg-heat {
+  0%   { color: var(--accent-hot); text-shadow: 0 0 20px var(--accent-hot); }
+  60%  { color: var(--accent-hot); text-shadow: 0 0 32px var(--accent-hot); }
+  100% { color: var(--accent); text-shadow: none; }
+}
+.kit-egg { animation: egg-heat 1.8s var(--ease-forge) forwards; }
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-blur {
+    opacity: 1 !important; transform: none !important; filter: none !important;
+    transition: opacity 150ms !important;
+  }
+  .divider { transition: none; width: 100%; }
+  .timeline-track-fill { transition: none; }
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none; }
+  .cursor-blink { animation: none; opacity: 1; }
+}

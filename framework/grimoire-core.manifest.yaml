@@ -1,0 +1,216 @@
+$schema: "grimoire-core-manifest/v1"
+
+# ============================================================================
+# Grimoire Core Manifest
+# ----------------------------------------------------------------------------
+# Index machine-lisible du COEUR grimoire (source de verite, harness-neutre).
+# Consomme par les adaptateurs (MCP, pi-package, opencode, copilot) via le
+# contrat defini dans adapter-contract.md.
+#
+# Principe directeur : grimoire pilote ; les harnesses sont des prises
+# interchangeables. Ce manifeste n'introduit aucune logique metier nouvelle ;
+# il indexe ce qui existe deja dans grimoire-kit/framework/ et .github/skills/.
+# ============================================================================
+
+metadata:
+  id: grimoire-core-manifest
+  version: "0.1.0"
+  owner: grimoire-kit
+  status: phase-0-draft
+  generated_from:
+    - ".github/skills/*/SKILL.md"
+    - "grimoire-kit/framework/*.md"
+    - "grimoire-kit/framework/registry/"
+    - "grimoire-kit/framework/agentic-standard/profile-map.yaml"
+  contract: "grimoire-kit/framework/adapter-contract.md"
+
+core:
+  source_of_truth: "grimoire-kit/framework/"
+  skills_root: ".github/skills/"
+  principles:
+    - id: single-source
+      rule: "Le coeur est l'unique source de verite. Aucun adaptateur ne porte de logique metier."
+    - id: provider-neutral-llm
+      rule: "Tout appel modele passe par un moteur unifie (pi-ai), declare avant execution."
+    - id: mcp-is-the-universal-socket
+      rule: "La prise universelle est le serveur MCP. Les adaptateurs natifs sont la profondeur opt-in."
+    - id: small-mcp-surface
+      rule: "La surface MCP se limite a quelques verbes ; le long tail passe par les skills (anti-bloat)."
+    - id: context-is-orchestrated
+      rule: "Le contexte est selectionne, classe, borne et justifie avant d'atteindre un agent."
+
+# ----------------------------------------------------------------------------
+# VERBES NEUTRES — l'API que tout adaptateur expose (schemas dans le contrat)
+# ----------------------------------------------------------------------------
+verbs:
+  - id: list_skills
+    summary: "Lister les capacites disponibles (skills) avec triggers et provenance."
+    backed_by: [skills]
+  - id: run_skill
+    summary: "Executer une skill nommee avec une entree."
+    backed_by: [skills]
+  - id: route
+    summary: "Classer une intention et router vers skill/agent/profil avec confiance et fallback."
+    backed_by: [grimoire-intent-routing, agent-relationship-graph, context-router]
+  - id: orchestrate
+    summary: "Dispatcher un objectif vers un ou plusieurs sous-agents (SOG) et agreger."
+    backed_by: [orchestrator-gateway, agent-relationship-graph, subagent-orchestration]
+  - id: validate
+    summary: "Verifier une sortie : cross-validation, incertitude honnete, score de confiance."
+    backed_by: [cross-validation-trust, honest-uncertainty-protocol, grimoire-trust-scoring, grimoire-verification]
+  - id: escalate_questions
+    summary: "Batcher des questions a l'utilisateur (QEC) plutot que de l'interrompre par agent."
+    backed_by: [question-escalation-chain, grimoire-friction-management]
+  - id: recall
+    summary: "Interroger la memoire operationnelle (Memory OS)."
+    backed_by: [event-log-shared-state]
+  - id: remember
+    summary: "Persister un fait/apprentissage dans la memoire operationnelle."
+    backed_by: [event-log-shared-state, grimoire-learnings]
+
+# ----------------------------------------------------------------------------
+# PROTOCOLES — specs neutres dans framework/, executees par les adaptateurs
+# ----------------------------------------------------------------------------
+protocols:
+  orchestration:
+    - { id: orchestrator-gateway,      path: "framework/orchestrator-gateway.md",      summary: "SOG : dispatch intelligent, agregation, garde anti-hallucination." }
+    - { id: hybrid-parallelism-engine, path: "framework/hybrid-parallelism-engine.md", summary: "Parallelisme controle des lectures/recherches independantes." }
+    - { id: selective-huddle-protocol, path: "framework/selective-huddle-protocol.md", summary: "Concertation ciblee entre agents quand un point critique l'exige." }
+    - { id: agent-mesh-network,        path: "framework/agent-mesh-network.md",        summary: "Topologie de communication inter-agents." }
+  routing:
+    - { id: agent-relationship-graph,  path: "framework/agent-relationship-graph.md",  summary: "ARG : graphe de relations et handoffs entre agents." }
+    - { id: context-router,            path: "framework/context-router.md",            summary: "Selection, classement et bornage du contexte." }
+    - { id: agent2agent,               path: "framework/agent2agent.md",               summary: "Protocole d'echange direct entre agents." }
+  cognitive:
+    - { id: cross-validation-trust,        path: "framework/cross-validation-trust.md",        summary: "CVTL : seconde opinion independante sur sortie critique." }
+    - { id: honest-uncertainty-protocol,   path: "framework/honest-uncertainty-protocol.md",   summary: "HUP : declaration explicite de l'incertitude, anti-hallucination." }
+    - { id: question-escalation-chain,     path: "framework/question-escalation-chain.md",     summary: "QEC : escalade et batch des questions utilisateur." }
+    - { id: productive-conflict-engine,    path: "framework/productive-conflict-engine.md",    summary: "PCE : debat contradictoire structure (party mode)." }
+  base:
+    - { id: agent-base,         path: "framework/agent-base.md",         summary: "Socle commun des agents (ALS, AORA, PIP, DCF, momentum, friction budget)." }
+    - { id: agent-base-compact, path: "framework/agent-base-compact.md", summary: "Variante compacte du socle agent." }
+    - { id: agent-rules,        path: "framework/agent-rules.md",        summary: "Regles transverses de comportement agent." }
+  state:
+    - { id: event-log-shared-state, path: "framework/event-log-shared-state.md", summary: "Etat partage par journal d'evenements." }
+    - { id: grimoire-trace,         path: "framework/grimoire-trace.md",         summary: "Tracage des transitions et decisions." }
+
+# ----------------------------------------------------------------------------
+# WORKFLOWS — sequences multi-etapes neutres
+# ----------------------------------------------------------------------------
+workflows:
+  - { id: boomerang-orchestration,  path: "framework/workflows/boomerang-orchestration.md" }
+  - { id: subagent-orchestration,   path: "framework/workflows/subagent-orchestration.md" }
+  - { id: incident-response,        path: "framework/workflows/incident-response.md" }
+  - { id: repo-map-generator,       path: "framework/workflows/repo-map-generator.md" }
+  - { id: state-checkpoint,         path: "framework/workflows/state-checkpoint.md" }
+
+# ----------------------------------------------------------------------------
+# SKILLS — 44 capacites au format Agent Skills (SKILL.md). Universellement
+# portables : pi, OpenCode (.opencode/skills + .claude/skills), Claude Code.
+# domain = regroupement fonctionnel neutre.
+# ----------------------------------------------------------------------------
+skills:
+  - { id: grimoire-intent-routing,        domain: orchestration, summary: "Routage d'intention avec scoring de confiance." }
+  - { id: grimoire-dispatch-engineer,     domain: orchestration, summary: "Genere un prompt de dispatch valide avant runSubagent." }
+  - { id: grimoire-subagent-dev,          domain: orchestration, summary: "Developpement pilote par sous-agents avec review 2 etapes." }
+  - { id: grimoire-visual-orchestration,  domain: orchestration, summary: "Pipeline visuel one-prompt." }
+  - { id: grimoire-writing-plans,         domain: planning,      summary: "Ecriture de plans d'implementation bite-sized." }
+  - { id: grimoire-executing-plans,       domain: planning,      summary: "Execution methodique de plans." }
+  - { id: grimoire-delivery-flow,         domain: planning,      summary: "Architecture, UX, stories et execution BMM." }
+  - { id: grimoire-product-discovery,     domain: planning,      summary: "Recherche, cadrage produit et PRD." }
+  - { id: grimoire-code-review,           domain: quality,       summary: "Review de code multi-couches, 3 reviewers paralleles." }
+  - { id: grimoire-architecture-review,   domain: quality,       summary: "Review d'architecture multi-dimension." }
+  - { id: grimoire-edge-case-hunter,      domain: quality,       summary: "Analyse exhaustive d'edge cases par enumeration de chemins." }
+  - { id: grimoire-security-review,       domain: quality,       summary: "Review securite code et configuration." }
+  - { id: grimoire-refactoring,           domain: quality,       summary: "Refactoring systematique avec filet de securite." }
+  - { id: grimoire-performance-profiling, domain: quality,       summary: "Profiling et optimisation de performance." }
+  - { id: grimoire-verification,          domain: quality,       summary: "Verification obligatoire avant toute claim de completion." }
+  - { id: grimoire-trust-scoring,         domain: quality,       summary: "Scoring de confiance des sorties agent/sous-agent." }
+  - { id: grimoire-tdd,                   domain: testing,       summary: "Workflow Test-Driven Development." }
+  - { id: grimoire-test-architecture,     domain: testing,       summary: "Strategie de test, ATDD et architecture QA/TEA." }
+  - { id: grimoire-test-scaffold,         domain: testing,       summary: "Generation de scaffolding de tests." }
+  - { id: grimoire-systematic-debugging,  domain: testing,       summary: "Debug systematique en 4 phases." }
+  - { id: grimoire-safety-guards,         domain: governance,    summary: "Garde-fous : careful mode, freeze zones, guard mode." }
+  - { id: grimoire-structure-governance,  domain: governance,    summary: "Canon de structure du depot et landing zones durables." }
+  - { id: grimoire-pre-push,              domain: governance,    summary: "Checklist de validation pre-push." }
+  - { id: grimoire-skill-analyzer,        domain: governance,    summary: "Audit qualite d'un SKILL.md/hook (grille 100 points)." }
+  - { id: grimoire-skill-forge,           domain: governance,    summary: "Creation gardee de skills et hooks avec gate qualite." }
+  - { id: grimoire-builder-factory,       domain: governance,    summary: "Creation/edition/validation d'artefacts via BMB." }
+  - { id: grimoire-friction-management,   domain: governance,    summary: "Gestion de la friction conversationnelle (QEC + budget)." }
+  - { id: grimoire-memory-audit,          domain: memory,        summary: "Audit profond du systeme de memoire." }
+  - { id: grimoire-learnings,             domain: memory,        summary: "Apprentissage operationnel cross-session." }
+  - { id: grimoire-dream,                 domain: memory,        summary: "Consolidation et pipeline d'insight (dream)." }
+  - { id: grimoire-session-bootstrap,     domain: memory,        summary: "Bootstrap d'une session avec contexte complet." }
+  - { id: grimoire-antifragile,           domain: resilience,    summary: "Evaluation de resilience et anti-fragilite." }
+  - { id: grimoire-self-heal,             domain: resilience,    summary: "Diagnostic et reparation des echecs de workflow." }
+  - { id: grimoire-health-check,          domain: resilience,    summary: "Health check complet du projet." }
+  - { id: grimoire-incident-response,     domain: resilience,    summary: "Reponse a incident code/infra." }
+  - { id: grimoire-documentation-engineering, domain: documentation, summary: "Documentation, review editoriale, maintenance du corpus." }
+  - { id: grimoire-distillator,           domain: documentation, summary: "Compression lossless de documents optimisee LLM." }
+  - { id: grimoire-changelog,             domain: documentation, summary: "CHANGELOG structure depuis git + chaine de session." }
+  - { id: architecture-docs,              domain: documentation, summary: "Cycle de vie ARCHITECTURE.md, diagrammes, releases archi." }
+  - { id: grimoire-brainstorming,         domain: creativity,    summary: "Brainstorming structure features/architecture/solutions." }
+  - { id: grimoire-innovate,              domain: creativity,    summary: "Pipeline d'innovation idee -> prototype." }
+  - { id: grimoire-2d-asset-pipeline,     domain: game-visual,   summary: "Direction artistique et production assets 2D." }
+  - { id: grimoire-pixel-observatory,     domain: game-visual,   summary: "Game engine, sprites proceduraux, timeline engine." }
+  - { id: grimoire-project-explore,       domain: exploration,   summary: "Exploration structure et patterns caches du projet." }
+
+# ----------------------------------------------------------------------------
+# ARCHETYPES — packs installables a la demande (registry existant)
+# ----------------------------------------------------------------------------
+archetypes:
+  builtin:
+    - { id: minimal,           summary: "Point de depart universel (Atlas, Sentinel, Mnemo)." }
+    - { id: infra-ops,         summary: "Infrastructure DevOps complete." }
+    - { id: web-app,           summary: "Applications web (frontend + fullstack)." }
+    - { id: fix-loop,          summary: "Boucle de correction certifiee 9 phases." }
+    - { id: agentic-standard,  summary: "Pont norme agentique -> artefacts Grimoire." }
+  stacks: [go, typescript, python, terraform, k8s, docker, ansible]
+  features: [vector-memory]
+
+# ----------------------------------------------------------------------------
+# ADAPTATEURS — registre des prises et de leur statut (cf. adapter-contract.md)
+# ----------------------------------------------------------------------------
+adapters:
+  - id: copilot-extension
+    kind: native
+    target: "GitHub Copilot Chat"
+    spec: "framework/copilot-extension/README.md"
+    status: existing
+  - id: grimoire-mcp
+    kind: universal-socket
+    target: "tout harness MCP-natif (OpenCode, Claude Code, Cursor, Gemini...)"
+    spec: "framework/mcp/grimoire-mcp-server.md"
+    impl: "grimoire-kit/adapters/grimoire-mcp/"
+    status: full-v1
+    priority: 1
+    verbs_covered: [list_skills, run_skill, route, orchestrate, validate, escalate_questions, recall, remember]
+    engine: "@earendil-works/pi-ai (cross-validation CVTL opt-in, testée via provider faux)"
+    memory: "JSONL lexical (Memory OS, sans DB vectorielle)"
+  - id: opencode-pack
+    kind: native
+    target: "OpenCode (opencode.json + .opencode/skills)"
+    spec: "TBD"
+    status: planned
+    priority: 2
+  - id: pi-package
+    kind: native
+    target: "pi (extensions TS + MCP-bridge)"
+    spec: "_grimoire-runtime-output/etudes/plan-grimoire-sur-pi.md"
+    status: planned
+    priority: 3
+
+# ----------------------------------------------------------------------------
+# MOTEUR — unification LLM par librairie (pas par produit)
+# ----------------------------------------------------------------------------
+engine:
+  llm_unification:
+    package: "@earendil-works/pi-ai"
+    license: MIT
+    providers: 39
+    rationale: "Moteur d'appel modele unifie sans dependance a pi-le-produit ni Lefos."
+    replaces: "framework/tools/llm-router.py"
+  optional_harness:
+    package: "@earendil-works/pi-agent-core"
+    license: MIT
+    use: "Harness maison minimal (mode SDK) si controle total de la surface requis."

@@ -141,7 +141,7 @@ _grimoire_init_complete() {
                 trace)
                     _arguments \
                         '--tail[Dernières N entrées]:nombre:(20 50 100)' \
-                        '--agent[Filtrer par agent]:agent:(dev qa architect pm sm bmad-master)' \
+                        '--agent[Filtrer par agent]:agent:(dev qa architect pm sm grimoire-master)' \
                         '--type[Filtrer par type]:type:(DECISION REMEMBER HANDOFF CHECKPOINT ACTION ERROR WARN)' \
                         '--branch[Filtrer par session]:branch:->branches' \
                         '--archive[Archiver la trace]' \
@@ -321,8 +321,8 @@ compdef _grimoire_init_complete grimoire-init
 
 # Alias optionnel pour utilisation raccourcie
 if [[ -n "${Grimoire_ALIAS:-}" ]]; then
-    alias bmad="$_Grimoire_KIT_DIR/grimoire-init.sh"
-    compdef _grimoire_init_complete bmad
+    alias grimoire="$_Grimoire_KIT_DIR/grimoire-init.sh"
+    compdef _grimoire_init_complete grimoire
 fi
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -371,4 +371,4 @@ fi
 #     esac
 # }
 #
-# complete -F _grimoire_init_bash grimoire-init.sh grimoire-init bmad
+# complete -F _grimoire_init_bash grimoire-init.sh grimoire-init grimoire

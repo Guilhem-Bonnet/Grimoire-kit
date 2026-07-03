@@ -1,0 +1,190 @@
+/**
+ * Grimoire DA override pour Switchboard.
+ * S'aligne sur la charte Grimoire Forge (Geist + orange #FF6B3D + dark premium).
+ * Non-invasif : override via re-déclaration des variables CSS du kanban upstream.
+ */
+
+:root, html, body {
+  /* Palette Grimoire canonique */
+  --bg-color: #0B0C0E !important;
+  --panel-bg: #121418 !important;
+  --panel-bg2: #1A1D22 !important;
+  --border-color: rgba(255, 255, 255, 0.08) !important;
+  --border-bright: rgba(255, 255, 255, 0.14) !important;
+  --text-primary: #F6F7F8 !important;
+  --text-secondary: #9BA0A8 !important;
+
+  /* Accent : orange chaud Grimoire (réservé aux verbes actions) */
+  --accent-teal: #FF6B3D !important;
+  --accent-teal-dim: rgba(255, 107, 61, 0.32) !important;
+  --glow-teal: 0 0 12px rgba(255, 107, 61, 0.35) !important;
+  --accent-red: #FF5B5B !important;
+  --accent-orange: #FFB84D !important;
+
+  /* Typographie Geist */
+  --vscode-font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  --vscode-editor-font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', Consolas, monospace !important;
+  --font-family: var(--vscode-font-family) !important;
+  --font-mono: var(--vscode-editor-font-family) !important;
+}
+
+/* Import Geist depuis Google Fonts (inline pour webview standalone) */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+/* FX layer discret — grid + ambient glow (prefers-reduced-motion safe) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(255, 107, 61, 0.06), transparent 60%),
+    radial-gradient(1000px 500px at 85% 110%, rgba(92, 140, 255, 0.04), transparent 60%);
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 80%);
+  z-index: 0;
+}
+
+/* S'assurer que le contenu reste au-dessus du FX */
+.kanban-header,
+.controls-strip,
+.settings-strip,
+.kanban-board,
+.mini-map,
+.autoban-strip,
+[class*="panel"],
+[class*="modal"] {
+  position: relative;
+  z-index: 1;
+}
+
+/* Typographie : eyebrow labels plus premium */
+.kanban-title {
+  font-family: var(--font-mono) !important;
+  font-weight: 600 !important;
+  letter-spacing: 2.4px !important;
+  color: #FF6B3D !important;
+  text-shadow: 0 0 14px rgba(255, 107, 61, 0.28) !important;
+}
+
+/* Column headers : alignement Grimoire */
+[class*="column-header"], .column-title, .kanban-column-title {
+  font-family: var(--font-mono) !important;
+  letter-spacing: 1.6px !important;
+  text-transform: uppercase !important;
+  font-weight: 600 !important;
+  font-size: 10px !important;
+}
+
+/* Cards : softer radius, subtle border, premium hover */
+[class*="card"]:not(.kanban-header *):not(.controls-strip *) {
+  border-radius: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: linear-gradient(180deg, #15181D 0%, #121418 100%) !important;
+  transition: border-color 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 180ms ease !important;
+}
+[class*="card"]:not(.kanban-header *):not(.controls-strip *):hover {
+  border-color: rgba(255, 107, 61, 0.35) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 107, 61, 0.12) !important;
+}
+
+/* Buttons : primary avec shimmer Grimoire */
+button, .btn, [class*="button"] {
+  font-family: var(--font-family) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.2px !important;
+  border-radius: 4px !important;
+  transition: all 160ms ease !important;
+}
+
+/* Primary action buttons (accent-teal was upstream primary) */
+[style*="accent-teal"], .btn-primary, .primary-btn {
+  background: linear-gradient(180deg, #FF6B3D 0%, #E8552A 100%) !important;
+  color: #0B0C0E !important;
+  font-weight: 600 !important;
+  box-shadow: 0 4px 12px rgba(255, 107, 61, 0.25) !important;
+}
+
+/* Inputs / select : premium dark */
+input, select, textarea {
+  background: #0B0C0E !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #F6F7F8 !important;
+  font-family: var(--font-family) !important;
+  border-radius: 4px !important;
+  transition: border-color 160ms ease !important;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(255, 107, 61, 0.6) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(255, 107, 61, 0.14) !important;
+}
+
+/* Scrollbars thinner & branded */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0B0C0E; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 107, 61, 0.4); }
+
+/* View switcher Grimoire (top-right) : refinement */
+nav[style*="position:fixed"][style*="top"] a {
+  font-family: var(--font-mono) !important;
+  letter-spacing: 1.4px !important;
+  border-radius: 3px !important;
+  transition: all 140ms ease !important;
+  padding: 5px 10px !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+}
+
+/* Grimoire extension markers (provenance/trust/room badges - injected by shim) */
+.grm-provenance-badge,
+.grm-trust-badge,
+.grm-room-badge,
+.grm-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.3);
+}
+.grm-provenance-badge.is-clean { color: #73C991; border-color: rgba(115, 201, 145, 0.35); }
+.grm-provenance-badge.is-missing-attribution { color: #FFB84D; border-color: rgba(255, 184, 77, 0.35); }
+.grm-provenance-badge.is-missing-license { color: #FF5B5B; border-color: rgba(255, 91, 91, 0.35); }
+.grm-trust-badge.is-trusted { color: #73C991; }
+.grm-trust-badge.is-blocked { color: #FF5B5B; border-color: rgba(255, 91, 91, 0.4); background: rgba(255, 91, 91, 0.08); }
+.grm-trust-badge.is-diverged { color: #FFB84D; border-color: rgba(255, 184, 77, 0.35); }
+.grm-room-badge { color: #9BA0A8; }
+.grm-agent-badge {
+  color: #FF6B3D;
+  border-color: rgba(255, 107, 61, 0.3);
+  background: rgba(255, 107, 61, 0.06);
+}
+
+/* prefers-reduced-motion : désactiver FX et transitions */
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { display: none; }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

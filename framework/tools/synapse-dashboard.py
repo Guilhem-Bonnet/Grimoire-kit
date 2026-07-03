@@ -123,18 +123,51 @@ def _collect_router(project_root: Path) -> SectionResult:
         return SectionResult(name="router", status="unavailable", error="llm-router.py introuvable")
 
     try:
+        build_router_fn = getattr(mod, "build_router_from_config", None)
         router_cls = getattr(mod, "LLMRouter", None)
-        if not router_cls:
-            return SectionResult(name="router", status="error", error="LLMRouter class not found")
+        if callable(build_router_fn):
+            router = build_router_fn(project_root)
+        elif router_cls:
+            router = router_cls(stats_file=project_root / "_grimoire-output" / ".router-stats.jsonl")
+        else:
+            return SectionResult(name="router", status="error", error="Router builder not found")
 
-        router = router_cls(project_root)
-        stats = router.get_stats()
-        stats_dicts = [asdict(s) for s in stats] if stats else []
+        stats = router.get_stats() if hasattr(router, "get_stats") else []
+        stats_dicts = [asdict(s) if hasattr(s, "__dataclass_fields__") else s for s in stats] if stats else []
+        summary = router.get_telemetry_summary() if hasattr(router, "get_telemetry_summary") else {}
+        policy = router.get_policy_snapshot() if hasattr(router, "get_policy_snapshot") else {
+            "default_model": getattr(router, "default_model", "?"),
+            "model_count": len(getattr(router, "models", {})),
+            "rule_count": len(getattr(router, "rules", [])),
+        }
+        recent_decisions = router.get_recent_decisions(limit=5) if hasattr(router, "get_recent_decisions") else []
 
         lines = ["## 🔀 LLM Router\n"]
-        if not stats_dicts:
+        lines.append(
+            f"- **Default model** : {policy.get('default_model', '?')}"
+        )
+        lines.append(
+            "- **Policy** : "
+            f"{policy.get('model_count', 0)} model(s), {policy.get('rule_count', 0)} rule(s) "
+            f"({policy.get('keyword_rule_count', 0)} keyword, "
+            f"{policy.get('agent_rule_count', 0)} agent, "
+            f"{policy.get('task_type_rule_count', 0)} task-type, "
+            f"{policy.get('complexity_rule_count', 0)} complexity)"
+        )
+
+        total_requests = summary.get("total_requests", 0) if isinstance(summary, dict) else 0
+        if not total_requests:
             lines.append("_Aucune statistique disponible — pas encore de requêtes routées._\n")
         else:
+            lines.append(
+                "- **Telemetry** : "
+                f"{total_requests} route(s), {summary.get('total_prompt_tokens', 0):,} tokens, "
+                f"${summary.get('total_estimated_cost', 0.0):.4f} estimés, "
+                f"{summary.get('alternate_path_count', 0)} fallback(s) préparés"
+            )
+            if summary.get("last_routed_at"):
+                lines.append(f"- **Dernière décision** : {summary.get('last_routed_at')}")
+            lines.append("")
             lines.append("| Modèle | Requêtes | Tokens | Coût estimé |")
             lines.append("|--------|----------|--------|-------------|")
             for s in stats_dicts:
@@ -144,6 +177,37 @@ def _collect_router(project_root: Path) -> SectionResult:
                 cost = s.get("estimated_cost", 0.0)
                 lines.append(f"| {model} | {reqs} | {tokens:,} | ${cost:.4f} |")
             lines.append("")
+
+            rule_distribution = summary.get("rule_distribution", {}) if isinstance(summary, dict) else {}
+            if isinstance(rule_distribution, dict) and rule_distribution:
+                lines.append("**Distribution des règles :**")
+                for rule_name, count in rule_distribution.items():
+                    lines.append(f"- {rule_name}: {count}")
+                lines.append("")
+
+            top_agents = summary.get("top_agents", {}) if isinstance(summary, dict) else {}
+            if isinstance(top_agents, dict) and top_agents:
+                lines.append("**Agents les plus routés :**")
+                for agent, count in top_agents.items():
+                    lines.append(f"- {agent}: {count}")
+                lines.append("")
+
+            if recent_decisions:
+                lines.append("### Dernières décisions\n")
+                lines.append("| Horodatage | Agent | Modèle | Fallback | Règle |")
+                lines.append("|------------|-------|--------|----------|-------|")
+                for decision in recent_decisions:
+                    if not isinstance(decision, dict):
+                        continue
+                    lines.append(
+                        "| "
+                        f"{decision.get('timestamp', '?')} | "
+                        f"{decision.get('agent', '?')} | "
+                        f"{decision.get('model', '?')} | "
+                        f"{decision.get('fallback_model', '—')} | "
+                        f"{decision.get('rule_matched', '?')} |"
+                    )
+                lines.append("")
 
         recs = router.get_recommendations() if hasattr(router, "get_recommendations") else []
         if recs:
@@ -155,7 +219,13 @@ def _collect_router(project_root: Path) -> SectionResult:
         elapsed = round((time.monotonic() - start) * 1000, 1)
         return SectionResult(
             name="router", markdown="\n".join(lines),
-            data={"stats": stats_dicts}, collection_time_ms=elapsed,
+            data={
+                "stats": stats_dicts,
+                "summary": summary,
+                "policy": policy,
+                "recent_decisions": recent_decisions,
+            },
+            collection_time_ms=elapsed,
         )
     except Exception as e:
         return SectionResult(name="router", status="error", error=str(e))

@@ -14,14 +14,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from grimoire.core.project_types import VALID_PROJECT_TYPES
+
 __all__ = ["generate_schema"]
 
-_VALID_TYPES = sorted(["webapp", "api", "service", "infrastructure", "library", "cli", "generic"])
+_VALID_TYPES = list(VALID_PROJECT_TYPES)
 _VALID_SKILL_LEVELS = sorted(["beginner", "intermediate", "expert"])
-_VALID_BACKENDS = sorted(["auto", "local", "qdrant-local", "qdrant-server", "ollama"])
+_VALID_BACKENDS = sorted(["auto", "local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"])
+_VALID_SHORT_TERM_BACKENDS = sorted(["sqlite", "redis", "none"])
+_VALID_LAYER_MODES = sorted(["disabled", "planned", "sqlite-sidecar", "qdrant", "weaviate", "neo4j", "runtime-dashboard"])
 _KNOWN_ARCHETYPES = sorted([
     "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
+    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
+    "game-dev",
 ])
 
 
@@ -118,7 +123,84 @@ def _memory_schema() -> dict[str, Any]:
             "collection_prefix": {"type": "string", "default": "grimoire", "description": "Collection name prefix."},
             "embedding_model": {"type": "string", "default": "", "description": "Embedding model name."},
             "qdrant_url": {"type": "string", "default": "", "description": "Qdrant server URL."},
+            "weaviate_url": {"type": "string", "default": "", "description": "Weaviate server URL."},
+            "weaviate_api_key_env": {
+                "type": "string",
+                "default": "GRIMOIRE_WEAVIATE_API_KEY",
+                "description": "Environment variable that contains the Weaviate API key.",
+            },
+            "weaviate_collection": {
+                "type": "string",
+                "default": "",
+                "description": "Optional Weaviate collection name. Defaults to a normalized collection_prefix.",
+            },
+            "neo4j_uri": {"type": "string", "default": "", "description": "Neo4j Bolt URI for graph memory layers."},
+            "neo4j_user": {"type": "string", "default": "neo4j", "description": "Neo4j user name."},
+            "neo4j_password_env": {
+                "type": "string",
+                "default": "GRIMOIRE_NEO4J_PASSWORD",
+                "description": "Environment variable that contains the Neo4j password.",
+            },
+            "neo4j_database": {"type": "string", "default": "neo4j", "description": "Neo4j database name."},
+            "migration_source_backend": {
+                "type": "string",
+                "default": "",
+                "description": "Backend used as the source while migrating Memory OS data.",
+            },
+            "migration_target_backend": {
+                "type": "string",
+                "default": "",
+                "description": "Backend targeted by the current Memory OS migration.",
+            },
+            "migration_bundle_path": {
+                "type": "string",
+                "default": "",
+                "description": "Portable migration bundle path used to preserve vectors, payloads, and graph projections.",
+            },
+            "mempalace_path": {"type": "string", "default": "", "description": "Optional MemPalace / Chroma palace path."},
             "ollama_url": {"type": "string", "default": "", "description": "Ollama server URL."},
+            "layer_profile": {
+                "type": "string",
+                "default": "standard",
+                "description": "Named Memory OS profile exposed to status and visualisation surfaces.",
+            },
+            "short_term_backend": {
+                "type": "string",
+                "enum": _VALID_SHORT_TERM_BACKENDS,
+                "default": "sqlite",
+                "description": "Hot short-term memory backend. Use redis for distributed sessions.",
+            },
+            "redis_url": {"type": "string", "default": "", "description": "Redis URL for short-term memory when enabled."},
+            "knowledge_graph": {
+                "type": "string",
+                "enum": _VALID_LAYER_MODES,
+                "default": "sqlite-sidecar",
+                "description": "Structured semantic knowledge graph layer.",
+            },
+            "memory_graph": {
+                "type": "string",
+                "enum": _VALID_LAYER_MODES,
+                "default": "sqlite-sidecar",
+                "description": "Semantic memory graph layer linking entities, facts, agents, and events.",
+            },
+            "code_graph": {
+                "type": "string",
+                "enum": _VALID_LAYER_MODES,
+                "default": "planned",
+                "description": "Semantic code graph layer for symbols, files, tests, and ownership.",
+            },
+            "task_memory": {
+                "type": "string",
+                "enum": _VALID_LAYER_MODES,
+                "default": "planned",
+                "description": "Kanban and task lifecycle memory layer.",
+            },
+            "visualization": {
+                "type": "string",
+                "enum": _VALID_LAYER_MODES,
+                "default": "runtime-dashboard",
+                "description": "Visualization surface for memory layers.",
+            },
         },
     }
 

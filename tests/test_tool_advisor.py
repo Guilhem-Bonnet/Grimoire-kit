@@ -212,6 +212,12 @@ class TestContextSuggestions:
         assert "session-state.py" in tools
         assert "shared-context.py" in tools
 
+    def test_ctx_012_compiled_flow(self):
+        suggestions = ta.suggest_for_context("preparer une recette, un template de rapport et un hook path")
+        tools = [s.tool for s in suggestions]
+        assert "compiled-flow.py" in tools
+        assert "tool-resolver.py" in tools
+
     def test_case_insensitive(self):
         lower = ta.suggest_for_context("debug")
         upper = ta.suggest_for_context("DEBUG")

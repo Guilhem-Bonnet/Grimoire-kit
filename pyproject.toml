@@ -32,16 +32,22 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
 qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0"]
+weaviate = ["sentence-transformers>=3.0"]
+neo4j = ["neo4j>=5.0"]
+redis = ["redis>=5.0.0"]
+mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
-all = ["grimoire-kit[mcp,qdrant,ollama]"]
+assets = ["Pillow>=10.0", "numpy>=1.26"]
+all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama,assets]"]
 dev = [
-    "grimoire-kit[all]",
+    "grimoire-kit[mcp,assets]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-xdist>=3.0",
     "mypy>=1.10",
     "ruff>=0.6",
     "pre-commit>=4.0",
+    "pip-audit>=2.8",
 ]
 docs = [
     "mkdocs-material>=9.5",

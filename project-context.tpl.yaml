@@ -82,7 +82,7 @@ user:
 memory:
   backend: "auto"                      # auto | local | qdrant-local | qdrant-server | ollama
   # qdrant_url: "http://localhost:6333"  # si qdrant-server
-  # qdrant_api_key: ""                    # optionnel; préférer Grimoire_QDRANT_API_KEY en environnement
+  # qdrant_api_key: ""                    # si Qdrant Cloud / serveur protégé
   # ollama_url: "http://localhost:11434"  # si ollama
   # embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # modèle d'embedding
   # collection_prefix: "grimoire"          # préfixe des collections Qdrant
@@ -110,86 +110,60 @@ installed_archetypes: []               # Rempli par grimoire-init.sh install
 
 # llm_router:
 #   enabled: true
-#   default_model: claude-sonnet
+#   selection_policy:
+#     default_mode: auto
+#     resolution_order: [user_override, task_override_profile, routing_default_profile, auto]
 #
-#   models:
-#     - id: claude-opus
-#       provider: anthropic
-#       api: copilot                   # copilot | direct | ollama | openrouter
-#       cost_per_1m_tokens: 15.0
-#       max_tokens: 200000
-#       capabilities: [reasoning, architecture, complex-analysis]
+#   provider_roles:
+#     primary: copilot
+#     fallback: mammouth-api
+#     eval_only: mammouth-api
 #
-#     - id: claude-sonnet
-#       provider: anthropic
-#       api: copilot
-#       cost_per_1m_tokens: 3.0
-#       max_tokens: 200000
-#       capabilities: [coding, review, general, reasoning]
+#   profiles:
+#     deep_reasoning:
+#       primary: auto
+#       preferred_models: [gpt-5.4, gpt-5.3-codex, claude-opus-4.6, gemini-3.1-pro, gemini-2.5-pro]
+#     general_code:
+#       primary: auto
+#       preferred_models: [gpt-5.3-codex, gpt-5-mini, claude-sonnet-4.6, gemini-2.5-pro]
+#     writing_structured:
+#       primary: auto
+#       preferred_models: [gpt-5-mini, claude-sonnet-4.6, gemini-3-flash]
+#     fast_iter:
+#       primary: auto
+#       preferred_models: [gpt-5.4-mini, gpt-5-mini, claude-haiku-4.5, gemini-3-flash]
 #
-#     - id: claude-haiku
-#       provider: anthropic
-#       api: copilot
-#       cost_per_1m_tokens: 0.25
-#       max_tokens: 200000
-#       capabilities: [formatting, simple-qa, summarization]
+#   routing_defaults:
+#     architect: deep_reasoning
+#     dev: general_code
+#     qa: general_code
+#     tech-writer: writing_structured
+#     brainstorming-coach: fast_iter
 #
-#     - id: gpt-4o
-#       provider: openai
-#       api: copilot
-#       cost_per_1m_tokens: 2.5
-#       max_tokens: 128000
-#       capabilities: [coding, reasoning, general]
+#   task_overrides:
+#     - tasks: [cross-validation, second-opinion, adverse-critique, nuanced-decision]
+#       profile: deep_reasoning
+#     - tasks: [prompt-engineering, workflow-creation, instruction-writing, yaml-authoring]
+#       profile: writing_structured
+#     - tasks: [simple-check, shell-command, status-query, quick-grep, trivial-task]
+#       profile: fast_iter
 #
-#     - id: gpt-4o-mini
-#       provider: openai
-#       api: copilot
-#       cost_per_1m_tokens: 0.15
-#       max_tokens: 128000
-#       capabilities: [coding, formatting, simple-qa]
+#   default_model: gpt-5.3-codex      # compat legacy CLI si aucun profil ne s'applique
 #
-#     - id: deepseek-coder
-#       provider: deepseek
-#       api: ollama
-#       cost_per_1m_tokens: 0.0        # local
-#       max_tokens: 128000
-#       capabilities: [coding, refactoring]
+#   # Surcharges optionnelles : le routeur infère une spec minimale si un modèle
+#   # apparait dans les profils sans definition explicite.
+#   # models:
+#   #   - id: gpt-5.3-codex
+#   #     provider: openai
+#   #     api: copilot
+#   #     cost_per_1m_tokens: 3.0
+#   #     max_tokens: 200000
+#   #     capabilities: [coding, review, reasoning]
 #
-#     - id: nomic-embed
-#       provider: nomic
-#       api: ollama
-#       cost_per_1m_tokens: 0.0        # local
-#       max_tokens: 8192
-#       capabilities: [embedding]
-#
-#   rules:
-#     # Par agent — quel modèle par défaut pour quel agent
-#     - match: { agent: architect }
-#       model: claude-opus
-#       fallback: claude-sonnet
-#
-#     - match: { agent: dev }
-#       model: claude-sonnet
-#       fallback: deepseek-coder
-#
-#     - match: { agent: qa }
-#       model: claude-haiku
-#       fallback: claude-sonnet
-#
-#     # Par type de tâche
-#     - match: { task_type: formatting }
-#       model: claude-haiku
-#
-#     - match: { task_type: architecture-review }
-#       model: claude-opus
-#
-#     - match: { task_type: embedding }
-#       model: nomic-embed
-#
-#   # Mots-clés custom pour le classifieur de complexité
-#   # custom_keywords:
-#   #   expert: ["terraform state", "k8s operator"]
-#   #   trivial: ["readme", "changelog"]
+#   # rules:                           # format legacy toujours supporte
+#   #   - match: { agent: dev }
+#   #     model: gpt-5.3-codex
+#   #     fallback: gpt-5-mini
 
 # ── RAG Pipeline (BM-42) — Indexation et retrieval sémantique ────────────────
 # Voir framework/tools/rag-indexer.py pour l'utilisation CLI

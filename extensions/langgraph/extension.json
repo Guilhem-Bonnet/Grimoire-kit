@@ -1,12 +1,16 @@
 {
   "manifestVersion": 1,
   "id": "langgraph",
+  "kind": "flow-adapter",
   "name": "LangGraph Bridge",
   "version": "0.1.0",
   "description": "Pont LangGraph : graphes d'agents à état persistant exposés comme workflows Grimoire gouvernés — état explicite, reprises auditées, checkpoints tracés. Matérialise ORC-09 (Workflow State Engine) et ORC-10 (Flow DSL minimal).",
   "license": "MIT",
   "authors": [
-    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+    {
+      "name": "Guilhem Bonnet",
+      "url": "https://github.com/Guilhem-Bonnet"
+    }
   ],
   "upstream": {
     "repository": "https://github.com/langchain-ai/langgraph",
@@ -18,28 +22,53 @@
     "manifest": 1
   },
   "provides": {
-    "agents": ["artifacts/agents/langgraph-graph-runner.agent.md"],
-    "skills": ["artifacts/skills/langgraph-graph-design/SKILL.md"],
+    "agents": [
+      "artifacts/agents/langgraph-graph-runner.agent.md"
+    ],
+    "skills": [
+      "artifacts/skills/langgraph-graph-design/SKILL.md"
+    ],
     "hooks": [],
-    "workflows": ["artifacts/prompts/langgraph-import-graph.prompt.md"],
+    "workflows": [
+      "artifacts/prompts/langgraph-import-graph.prompt.md"
+    ],
     "instructions": [],
     "nodes": [
       {
         "id": "langgraph-graph",
         "label": "LangGraph StateGraph",
         "description": "Un graphe LangGraph complet (state, nodes, edges conditionnels, checkpoints) exposé comme node composite.",
-        "patterns": ["ORC-09", "ORC-10"],
-        "pins": [
-          { "id": "mission", "direction": "in", "contract": "task-envelope" },
-          { "id": "result", "direction": "out", "contract": "handoff-packet" }
+        "patterns": [
+          "ORC-09",
+          "ORC-10"
         ],
-        "compilesTo": ["agent", "workflow"]
+        "pins": [
+          {
+            "id": "mission",
+            "direction": "in",
+            "contract": "task-envelope"
+          },
+          {
+            "id": "result",
+            "direction": "out",
+            "contract": "handoff-packet"
+          }
+        ],
+        "compilesTo": [
+          "agent",
+          "workflow"
+        ]
       }
     ]
   },
   "patterns": {
-    "implements": ["ORC-09", "ORC-10"],
-    "requires": ["GOV-01"]
+    "implements": [
+      "ORC-09",
+      "ORC-10"
+    ],
+    "requires": [
+      "GOV-01"
+    ]
   },
   "permissions": {
     "filesystem": "artifacts",
@@ -49,7 +78,12 @@
   },
   "install": {
     "steps": [
-      { "kind": "pip", "packages": ["langgraph"] },
+      {
+        "kind": "pip",
+        "packages": [
+          "langgraph"
+        ]
+      },
       {
         "kind": "copy",
         "from": "artifacts/agents/langgraph-graph-runner.agent.md",

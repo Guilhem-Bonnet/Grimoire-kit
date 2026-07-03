@@ -4,7 +4,7 @@
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "pip install -e '.[dev]' && pre-commit install",
+  "postCreateCommand": "bash -lc 'if command -v uv >/dev/null 2>&1; then uv sync --locked --extra dev && uv run pre-commit install; else pip install -e \".[dev]\" && pre-commit install; fi'",
   "customizations": {
     "vscode": {
       "settings": {

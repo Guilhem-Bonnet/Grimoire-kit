@@ -1,0 +1,17 @@
+Vous evaluez un pack de mission canari pour un workflow multi-LLM Grimoire.
+
+Objectif: {{objective}}
+Scope: {{scope}}
+Sources canoniques: {{sources}}
+Contraintes: {{constraints}}
+Preuve attendue: {{proof}}
+
+Repondez en francais avec exactement ces sections:
+Objectif:
+Sources:
+Risque principal:
+Preuve:
+
+Rappelez au moins une source canonique du repo.
+N'utilisez pas de transcript brut comme source de verite.
+N'inventez pas de contexte hors scope.

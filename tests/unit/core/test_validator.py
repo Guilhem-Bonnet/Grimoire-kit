@@ -46,7 +46,11 @@ class TestProjectSection:
         assert any("project.type" in e.path for e in errs)
 
     def test_valid_type(self) -> None:
-        data = {"project": {"name": "x", "type": "api"}}
+        data = {"project": {"name": "x", "type": "framework"}}
+        assert validate_config(data) == []
+
+    def test_meta_type_is_valid(self) -> None:
+        data = {"project": {"name": "x", "type": "meta"}}
         assert validate_config(data) == []
 
     def test_stack_not_list(self) -> None:
@@ -107,8 +111,38 @@ class TestMemorySection:
         assert any("memory.backend" in e.path for e in errs)
 
     def test_valid_backend(self) -> None:
-        data = {**_minimal(), "memory": {"backend": "qdrant-local"}}
+        data = {**_minimal(), "memory": {"backend": "weaviate-server"}}
         assert validate_config(data) == []
+
+    def test_valid_memory_layer_keys(self) -> None:
+        data = {
+            **_minimal(),
+            "memory": {
+                "backend": "qdrant-server",
+                "weaviate_url": "http://localhost:8080",
+                "weaviate_collection": "GrimoireKitMemory",
+                "neo4j_uri": "bolt://localhost:7687",
+                "neo4j_user": "neo4j",
+                "neo4j_password_env": "GRIMOIRE_NEO4J_PASSWORD",
+                "neo4j_database": "neo4j",
+                "migration_source_backend": "qdrant-server",
+                "migration_target_backend": "weaviate-server",
+                "migration_bundle_path": "_grimoire/_memory/migration/weaviate-neo4j",
+                "short_term_backend": "redis",
+                "redis_url": "redis://localhost:6379/0",
+                "knowledge_graph": "neo4j",
+                "memory_graph": "neo4j",
+                "code_graph": "neo4j",
+                "task_memory": "neo4j",
+                "visualization": "runtime-dashboard",
+            },
+        }
+        assert validate_config(data) == []
+
+    def test_invalid_short_term_backend(self) -> None:
+        data = {**_minimal(), "memory": {"short_term_backend": "memcached"}}
+        errs = validate_config(data)
+        assert any("memory.short_term_backend" in e.path for e in errs)
 
 
 class TestAgentsSection:

@@ -6,6 +6,7 @@ __pycache__/
 dist/
 build/
 *.egg
+node_modules/
 
 # Memory system runtime data
 qdrant_data/
@@ -53,13 +54,17 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 site/
+apps/**/dist/
+apps/**/coverage/
 
 # Grimoire memory runtime (local data)
 _grimoire/_memory/*.json
 _grimoire/_memory/*.jsonl
+_grimoire/_memory/*.sqlite3*
 
 # Runtime data
 .grimoire-rnd/
+.playwright-mcp/
 nohup.out
 _grimoire-output/.qdrant_data/
 _grimoire-output/.workers/
@@ -74,6 +79,7 @@ _grimoire-output/.tool-resolver/
 _grimoire-output/agent-debugger.html
 _grimoire-output/hpe-dashboard.html
 _grimoire-output/pheromone-board.json
+_grimoire-runtime-output/test-artifacts/playwright/
 .grimoire-memory/
 .grimoire-twin/
 framework/memory/session-state.md

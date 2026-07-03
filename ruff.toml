@@ -65,3 +65,18 @@ ignore = [
     "SIM112", # uncapitalized-env-vars — os.environ.get patterns are idiomatic
 ]
 "src/grimoire/tools/token_budget.py" = ["F401"]  # tiktoken import-for-availability
+"src/grimoire/memory/backends/weaviate.py" = ["S310"]  # Weaviate REST endpoint is configured and validated by project policy.
+"src/grimoire/memory/migration.py" = ["S310"]  # Qdrant REST endpoint is configured by migration policy.
+"src/grimoire/cli/*.py" = ["B008"]  # typer.Argument/Option() in defaults is standard Typer pattern
+"src/grimoire/cli/cmd_self.py" = ["B008", "S110"]  # S110: pipx detection is best-effort
+"src/grimoire/missions/schemas.py" = ["UP042"]  # str+Enum kept for cross-LLM JSON serialization compat
+"src/grimoire/evidence/schemas.py" = ["UP042"]
+"src/grimoire/policies/schemas.py" = ["UP042", "S105"]  # UP042: str+Enum compat; S105: SECRET_ACCESS is an enum value name
+"src/grimoire/runtime/schemas.py" = ["UP042"]
+"src/grimoire/traces/schemas.py" = ["UP042"]
+"src/grimoire/codegraph/schemas.py" = ["UP042"]
+"src/grimoire/missions/intake.py" = ["SIM102"]  # collapsible-if — readability in scoring logic
+"src/grimoire/missions/projections.py" = ["SIM102", "ERA001"]  # conditional readability; section comments
+"src/grimoire/codegraph/backends/neo4j.py" = ["S110", "ERA001"]  # try-except-pass in optional import; section markers
+"src/grimoire/bridges/schemas.py" = ["UP042", "F401"]  # UP042: str+Enum compat; F401: field imported for consistency
+"src/grimoire/evals/schemas.py" = ["UP042", "S105"]  # UP042: str+Enum compat; S105: PASS/FAIL enum value names

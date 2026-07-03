@@ -95,7 +95,17 @@ Valeurs acceptées :
 | `collection_prefix` | `string` | `"grimoire"` | Préfixe des collections mémoire. |
 | `embedding_model` | `string` | `""` | Modèle d'embeddings (si applicable). |
 | `qdrant_url` | `string` | `""` | URL du serveur Qdrant (requis si `backend: qdrant-server`). |
+| `weaviate_url` | `string` | `""` | URL du serveur Weaviate (requis si `backend: weaviate-server`). |
+| `weaviate_collection` | `string` | `""` | Nom de collection Weaviate. Vide, le manager utilise `collection_prefix`. |
 | `ollama_url` | `string` | `""` | URL du serveur Ollama (requis si `backend: ollama`). |
+| `neo4j_uri` | `string` | `""` | URI Bolt Neo4j pour les couches graphe. |
+| `neo4j_user` | `string` | `"neo4j"` | Utilisateur Neo4j. |
+| `neo4j_password_env` | `string` | `"GRIMOIRE_NEO4J_PASSWORD"` | Variable d'environnement qui contient le mot de passe Neo4j. |
+| `neo4j_database` | `string` | `"neo4j"` | Base Neo4j cible. |
+| `knowledge_graph` | `string` | `"sqlite-sidecar"` | Backend des faits structurés. |
+| `memory_graph` | `string` | `"sqlite-sidecar"` | Backend de projection graphe des souvenirs. |
+| `code_graph` | `string` | `"planned"` | Backend prévu pour le graphe de code. |
+| `task_memory` | `string` | `"planned"` | Backend prévu pour la mémoire de tâches. |
 
 ### `memory.backend`
 
@@ -105,6 +115,7 @@ Valeurs acceptées :
 | `local` | Stockage fichier local (JSON) | — |
 | `qdrant-local` | Qdrant embarqué en mémoire | `pip install grimoire-kit[qdrant]` |
 | `qdrant-server` | Serveur Qdrant distant | `pip install grimoire-kit[qdrant]` + `qdrant_url` |
+| `weaviate-server` | Serveur Weaviate distant | `pip install grimoire-kit[weaviate]` + `weaviate_url` |
 | `ollama` | Embeddings via Ollama local | `pip install grimoire-kit[ollama]` + `ollama_url` |
 
 ---

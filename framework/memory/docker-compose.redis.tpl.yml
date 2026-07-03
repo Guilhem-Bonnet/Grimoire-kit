@@ -1,0 +1,21 @@
+# Docker Compose - Redis hot memory for Grimoire
+#
+# Generated for archetypes that use memory.short_term_backend: redis.
+#
+# Usage:
+#   docker compose -f docker-compose.redis.yml up -d
+#   docker compose -f docker-compose.redis.yml down
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "${GRIMOIRE_REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scaffold import (
     FileCopy,
     ProjectScaffolder,
     ScaffoldPlan,
 )
-from grimoire.core.archetype_resolver import ResolvedArchetype
 
 
 @pytest.fixture

@@ -24,7 +24,79 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `stigmergy.py` | `stigmergy` | Coordination stigmergique — phéromones numériques entre agents |
 | `r-and-d.py` | *(direct)* | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes |
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
+| `observatory.py` | *(direct)* | Dashboard visuel + API locale de configuration agent (diff/apply/rollback) |
 | `grimoire-completion.zsh` | *(source)* | Autocomplétion zsh pour `grimoire-init.sh` |
+
+<img src="../../docs/assets/divider.svg" width="100%" alt="">
+
+## <img src="../../docs/assets/icons/chart.svg" width="28" height="28" alt=""> `observatory.py` — Observatory
+
+Dashboard interactif des traces Grimoire avec édition de profils agents en mode serveur local.
+
+### Démarrage rapide
+
+```bash
+# Générer l'HTML statique
+python3 framework/tools/observatory.py --project-root . generate
+
+# Lancer en HTTP avec auto-reload
+python3 framework/tools/observatory.py --project-root . serve --host 127.0.0.1 --port 8420
+
+# Exiger un commit message pour toute modification de config agent
+python3 framework/tools/observatory.py --project-root . serve --port 8420 --commit-required
+
+# Exposer l'API en lecture seule (diff autorisé, apply/rollback interdits)
+python3 framework/tools/observatory.py --project-root . serve --port 8420 --read-only
+```
+
+### Endpoints API (mode `serve`)
+
+| Endpoint | Méthode | Description |
+|---------|---------|-------------|
+| `/api/agent-config` | `GET` | Retourne la config courante, le flag `commit_required` et la liste des backups |
+| `/api/agent-config/diff` | `POST` | Calcule un diff field-level (`name`, `persona`, `description`, `skills`) |
+| `/api/agent-config/apply` | `POST` | Applique une mise à jour versionnée et crée un backup si nécessaire |
+| `/api/agent-config/rollback` | `POST` | Restaure le dernier backup (ou un backup nommé) |
+
+Le endpoint `GET /api/agent-config` expose aussi les flags runtime :
+
+- `commit_required`
+- `read_only`
+
+### Flux recommandé
+
+1. Ouvrir le drawer de configuration agent dans l'UI.
+2. Lancer `Diff` pour inspecter les changements.
+3. Lancer `Apply` pour persister.
+4. En cas de régression, utiliser `Rollback dernier`.
+
+Toutes les opérations API `diff/apply/rollback` sont journalisées dans `_grimoire-output/.agent-config-audit.jsonl`.
+
+### Exemple API minimal
+
+```bash
+# 1) Diff
+curl -sS -X POST http://127.0.0.1:8420/api/agent-config/diff \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"dev",
+    "candidate":{"name":"Dev Team","persona":"Amelia","description":"Core delivery","skills":["tdd","implementation"]}
+  }'
+
+# 2) Apply
+curl -sS -X POST http://127.0.0.1:8420/api/agent-config/apply \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"dev",
+    "candidate":{"name":"Dev Team","persona":"Amelia","description":"Core delivery","skills":["tdd","implementation"]},
+    "commit_message":"Align profile"
+  }'
+
+# 3) Rollback
+curl -sS -X POST http://127.0.0.1:8420/api/agent-config/rollback \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 

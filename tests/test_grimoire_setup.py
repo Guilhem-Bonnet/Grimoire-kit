@@ -51,15 +51,15 @@ BMM_CONFIG = textwrap.dedent("""\
 
     project_name: old-project
     user_skill_level: expert
-    planning_artifacts: "{project-root}/_bmad-output/planning-artifacts"
-    implementation_artifacts: "{project-root}/_bmad-output/implementation-artifacts"
+    planning_artifacts: "{project-root}/_grimoire-output/planning-artifacts"
+    implementation_artifacts: "{project-root}/_grimoire-output/implementation-artifacts"
     project_knowledge: "{project-root}/docs"
 
     # Core Configuration Values
     user_name: OldUser
     communication_language: Français
     document_output_language: Français
-    output_folder: "{project-root}/_bmad-output"
+    output_folder: "{project-root}/_grimoire-output"
     """)
 
 CORE_CONFIG = textwrap.dedent("""\
@@ -70,7 +70,7 @@ CORE_CONFIG = textwrap.dedent("""\
     user_name: OldUser
     communication_language: Français
     document_output_language: Français
-    output_folder: "{project-root}/_bmad-output"
+    output_folder: "{project-root}/_grimoire-output"
     """)
 
 CIS_CONFIG = textwrap.dedent("""\
@@ -82,7 +82,7 @@ CIS_CONFIG = textwrap.dedent("""\
     user_name: OldUser
     communication_language: Français
     document_output_language: Français
-    output_folder: "{project-root}/_bmad-output"
+    output_folder: "{project-root}/_grimoire-output"
     """)
 
 COPILOT_INSTRUCTIONS = textwrap.dedent("""\
@@ -96,7 +96,7 @@ COPILOT_INSTRUCTIONS = textwrap.dedent("""\
     - **Communication Language**: Français
     - **Document Output Language**: Français
     - **User Skill Level**: expert
-    - **Output Folder**: {project-root}/_bmad-output
+    - **Output Folder**: {project-root}/_grimoire-output
 
     ## BMAD Runtime Structure
     Some other content here.
@@ -110,9 +110,9 @@ def project_tree(tmp_path: Path) -> Path:
     # project-context.yaml
     (tmp_path / "project-context.yaml").write_text(PROJECT_CONTEXT, encoding="utf-8")
 
-    # _bmad module configs
+    # _grimoire-runtime module configs
     for module in ["bmm", "core", "cis", "tea", "bmb"]:
-        d = tmp_path / "_bmad" / module
+        d = tmp_path / "_grimoire-runtime" / module
         d.mkdir(parents=True)
         if module == "bmm":
             (d / "config.yaml").write_text(BMM_CONFIG, encoding="utf-8")
@@ -125,7 +125,7 @@ def project_tree(tmp_path: Path) -> Path:
             (d / "config.yaml").write_text(CORE_CONFIG, encoding="utf-8")
 
     # _memory config
-    mem = tmp_path / "_bmad" / "_memory"
+    mem = tmp_path / "_grimoire-runtime" / "_memory"
     mem.mkdir(parents=True)
     (mem / "config.yaml").write_text(CORE_CONFIG, encoding="utf-8")
 
@@ -156,7 +156,7 @@ def synced_tree(tmp_path: Path) -> Path:
         user_name: Bob
         communication_language: Français
         document_output_language: Français
-        output_folder: "{project-root}/_bmad-output"
+        output_folder: "{project-root}/_grimoire-output"
         """)
     bmm_tpl = textwrap.dedent("""\
         project_name: synced
@@ -164,16 +164,16 @@ def synced_tree(tmp_path: Path) -> Path:
         user_name: Bob
         communication_language: Français
         document_output_language: Français
-        output_folder: "{project-root}/_bmad-output"
+        output_folder: "{project-root}/_grimoire-output"
         """)
 
     for module in ["bmm", "core", "cis", "tea", "bmb"]:
-        d = tmp_path / "_bmad" / module
+        d = tmp_path / "_grimoire-runtime" / module
         d.mkdir(parents=True)
         content = bmm_tpl if module == "bmm" else module_tpl
         (d / "config.yaml").write_text(content, encoding="utf-8")
 
-    mem = tmp_path / "_bmad" / "_memory"
+    mem = tmp_path / "_grimoire-runtime" / "_memory"
     mem.mkdir(parents=True)
     (mem / "config.yaml").write_text(module_tpl, encoding="utf-8")
 
@@ -305,7 +305,7 @@ class TestUpdateCopilotInstructions:
 class TestCheckConfigFile:
     def test_detects_diffs_bmm(self, project_tree: Path):
         cfg = UserConfig("my-project", "Alice", "English", "English", "intermediate")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "bmm" / "config.yaml"
         diffs = grimoire_setup.check_config_file(path, cfg, "bmm")
         keys = {d.key for d in diffs}
         assert "user_name" in keys
@@ -315,7 +315,7 @@ class TestCheckConfigFile:
 
     def test_detects_diffs_core(self, project_tree: Path):
         cfg = UserConfig("my-project", "Alice", "English", "English", "intermediate")
-        path = project_tree / "_bmad" / "core" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "core" / "config.yaml"
         diffs = grimoire_setup.check_config_file(path, cfg, "core")
         keys = {d.key for d in diffs}
         assert "user_name" in keys
@@ -327,7 +327,7 @@ class TestCheckConfigFile:
     def test_no_diffs_when_synced(self, synced_tree: Path):
         cfg = UserConfig("synced", "Bob", "Français", "Français", "expert")
         for module in grimoire_setup.MODULE_CONFIGS:
-            path = synced_tree / "_bmad" / module / "config.yaml"
+            path = synced_tree / "_grimoire-runtime" / module / "config.yaml"
             assert grimoire_setup.check_config_file(path, cfg, module) == []
 
     def test_missing_file_returns_empty(self, tmp_path: Path):
@@ -361,7 +361,7 @@ class TestCheckCopilotInstructions:
 class TestApplyConfigFile:
     def test_updates_bmm(self, project_tree: Path):
         cfg = UserConfig("new-proj", "NewUser", "English", "English", "beginner")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "bmm" / "config.yaml"
         assert grimoire_setup.apply_config_file(path, cfg, "bmm") is True
         text = path.read_text(encoding="utf-8")
         assert "user_name: NewUser" in text
@@ -371,7 +371,7 @@ class TestApplyConfigFile:
 
     def test_updates_core(self, project_tree: Path):
         cfg = UserConfig("x", "NewUser", "English", "English", "x")
-        path = project_tree / "_bmad" / "core" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "core" / "config.yaml"
         assert grimoire_setup.apply_config_file(path, cfg, "core") is True
         text = path.read_text(encoding="utf-8")
         assert "user_name: NewUser" in text
@@ -379,7 +379,7 @@ class TestApplyConfigFile:
 
     def test_preserves_non_user_fields(self, project_tree: Path):
         cfg = UserConfig("x", "NewUser", "English", "English", "x")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "bmm" / "config.yaml"
         grimoire_setup.apply_config_file(path, cfg, "bmm")
         text = path.read_text(encoding="utf-8")
         assert "planning_artifacts:" in text
@@ -388,7 +388,7 @@ class TestApplyConfigFile:
 
     def test_no_change_returns_false(self, project_tree: Path):
         cfg = UserConfig("old-project", "OldUser", "Français", "Français", "expert")
-        path = project_tree / "_bmad" / "bmm" / "config.yaml"
+        path = project_tree / "_grimoire-runtime" / "bmm" / "config.yaml"
         assert grimoire_setup.apply_config_file(path, cfg, "bmm") is False
 
     def test_missing_file_returns_false(self, tmp_path: Path):
@@ -502,8 +502,8 @@ class TestRunApply:
         cfg = UserConfig("new-proj", "NewUser", "English", "English", "beginner")
         report = grimoire_setup.run_apply(project_tree, cfg)
         assert "project-context.yaml" in report.updated_files
-        assert "_bmad/bmm/config.yaml" in report.updated_files
-        assert "_bmad/core/config.yaml" in report.updated_files
+        assert "_grimoire-runtime/bmm/config.yaml" in report.updated_files
+        assert "_grimoire-runtime/core/config.yaml" in report.updated_files
         assert ".github/copilot-instructions.md" in report.updated_files
 
     def test_missing_module_skipped(self, tmp_path: Path):

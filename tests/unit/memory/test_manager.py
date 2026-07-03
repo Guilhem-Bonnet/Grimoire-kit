@@ -13,6 +13,7 @@ from grimoire.core.config import GrimoireConfig, MemoryConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.manager import MemoryManager, _create_backend, _resolve_auto
+from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ def mock_backend() -> MagicMock:
     b.consolidate.return_value = 0
     b.delete.return_value = True
     b.update.return_value = MemoryEntry(id="m-1", text="updated", user_id="global")
+    b.upsert.return_value = MemoryEntry(id="stable-1", text="projected", user_id="system")
     b.store_many.return_value = [MemoryEntry(id="m-1", text="a"), MemoryEntry(id="m-2", text="b")]
     return b
 
@@ -108,10 +110,107 @@ class TestFromBackend:
         mock_backend.store_many.assert_called_once_with(items)
         assert len(results) == 2
 
+    def test_upsert_delegates_stable_id(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        result = mgr.upsert("stable-1", "projected", user_id="system", tags=("projection",), metadata={"kind": "code"})
+        mock_backend.upsert.assert_called_once_with(
+            "stable-1",
+            "projected",
+            user_id="system",
+            tags=("projection",),
+            metadata={"kind": "code"},
+        )
+        assert result.id == "stable-1"
+
     def test_store_with_tags_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         mgr.store("tagged", tags=("t1", "t2"))
         mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata=None)
+
+    def test_search_taxonomy_falls_back_to_plain_search(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        results = mgr.search_taxonomy("query", wing="project-test-project")
+        assert len(results) == 0
+
+    def test_facts_require_sidecar_when_missing(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        with pytest.raises(GrimoireMemoryError, match="sidecar"):
+            mgr.facts_stats()
+
+
+class TestNeo4jGraphSync:
+    def test_store_syncs_memory_graph_after_backend_write(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        entry = mgr.store("hello", tags=("tag",))
+
+        graph.upsert_memory.assert_called_once_with(entry)
+
+    def test_update_syncs_updated_memory(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        updated = mgr.update("m-1", text="new")
+
+        graph.upsert_memory.assert_called_once_with(updated)
+
+    def test_delete_marks_memory_graph_deleted(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        assert mgr.delete("m-1") is True
+
+        graph.delete_memory.assert_called_once_with("m-1")
+
+    def test_store_many_syncs_each_memory(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        results = mgr.store_many([{"text": "a"}, {"text": "b"}])
+
+        assert len(results) == 2
+        assert graph.upsert_memory.call_count == 2
+
+    def test_upsert_syncs_memory_graph(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        entry = mgr.upsert("stable-1", "projected")
+
+        graph.upsert_memory.assert_called_once_with(entry)
+
+    def test_fact_and_diary_write_sync_to_graph(self, mock_backend: MagicMock, tmp_path: Path) -> None:
+        graph = MagicMock()
+        sidecar = MemorySidecar(tmp_path / "memory.sqlite3")
+        mgr = MemoryManager(mock_backend, sidecar=sidecar, memory_graph=graph)
+
+        fact = mgr.add_fact("team", "decided", "neo4j")
+        diary = mgr.write_diary("atlas", "graph synced")
+
+        graph.upsert_fact.assert_called_once_with(fact)
+        graph.upsert_diary.assert_called_once_with(diary)
+
+    def test_graph_sync_failure_does_not_block_store(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        graph.upsert_memory.side_effect = RuntimeError("neo4j down")
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        entry = mgr.store("hello")
+
+        assert entry.id == "m-1"
+        assert "neo4j down" in mgr._graph_sync_issue
+
+    def test_graph_health_failure_does_not_break_manager_health(self, mock_backend: MagicMock) -> None:
+        graph = MagicMock()
+        graph.health_check.side_effect = RuntimeError("health unavailable")
+        mgr = MemoryManager(mock_backend, memory_graph=graph)
+
+        status = mgr.health_check()
+
+        assert status.healthy is True
+        assert status.detail["neo4j_graph_sync"] == "error"
+        assert "health unavailable" in status.detail["neo4j_graph_sync_detail"]["reason"]
 
 
 # ── auto-resolution ──────────────────────────────────────────────────────────
@@ -161,6 +260,18 @@ class TestFromConfigLocal:
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
 
+    def test_local_upsert_preserves_stable_id(self, tmp_path: Path) -> None:
+        cfg = _make_config("local")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+
+        first = mgr.upsert("code:src/app.py", "old", tags=("projection",), metadata={"type": "code_chunk"})
+        second = mgr.upsert("code:src/app.py", "new", tags=("projection",), metadata={"type": "code_chunk"})
+
+        assert first.id == "code:src/app.py"
+        assert second.id == "code:src/app.py"
+        assert second.text == "new"
+        assert mgr.count() == 1
+
     def test_falls_back_to_cwd_when_no_project_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         cfg = _make_config("local")
@@ -169,6 +280,46 @@ class TestFromConfigLocal:
 
         assert isinstance(mgr.backend, LocalMemoryBackend)
         assert (tmp_path / "_grimoire" / "_memory").is_dir()
+
+    def test_store_auto_enriches_palace_metadata(self, tmp_path: Path) -> None:
+        cfg = _make_config("local")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        entry = mgr.store("ADR: choose local memory", metadata={"type": "decisions"})
+        assert entry.metadata["wing"] == "project-test-project"
+        assert entry.metadata["hall"] == "hall_facts"
+        assert entry.metadata["room"] == "decisions"
+
+    def test_search_taxonomy_filters_on_local_backend(self, tmp_path: Path) -> None:
+        cfg = _make_config("local")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        mgr.store("GraphQL migration", metadata={"room": "api", "hall": "hall_facts"})
+        mgr.store("GraphQL migration", metadata={"room": "ui", "hall": "hall_events"})
+        results = mgr.search_taxonomy("GraphQL", room="api")
+        assert len(results) == 1
+        assert results[0].metadata["room"] == "api"
+
+    def test_taxonomy_counts_entries(self, tmp_path: Path) -> None:
+        cfg = _make_config("local")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        mgr.store("Decision A", metadata={"type": "decisions"})
+        mgr.store("Learning A", metadata={"type": "agent-learnings", "agent": "atlas"})
+        taxonomy = mgr.taxonomy()
+        assert taxonomy["project-test-project"]["halls"]["hall_facts"]["rooms"]["decisions"] == 1
+        assert taxonomy["agent-atlas"]["halls"]["hall_discoveries"]["rooms"]["agent-learnings"] == 1
+
+    def test_sidecar_fact_and_diary_roundtrip(self, tmp_path: Path) -> None:
+        cfg = _make_config("local")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        entry = mgr.store("Decision B", metadata={"type": "decisions"})
+
+        fact = mgr.add_fact("team", "decided", "local-memory", source_memory_id=entry.id)
+        diary = mgr.write_diary("atlas", "Noted the decision", topic="memory")
+
+        assert isinstance(fact, KnowledgeFact)
+        assert fact.hall == "hall_facts"
+        assert isinstance(diary, DiaryRecord)
+        assert mgr.query_facts("team")[0].object == "local-memory"
+        assert mgr.read_diary("atlas", last_n=1)[0].entry == "Noted the decision"
 
 
 # ── error handling ────────────────────────────────────────────────────────────
@@ -304,3 +455,20 @@ class TestCreateBackendBranches:
         _create_backend(cfg)
         call_kwargs = mock_qdrant_mod.QdrantBackend.call_args
         assert call_kwargs.kwargs.get("embedding_model") == "all-MiniLM-L6-v2"
+
+    def test_mempalace_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        mock_palace_mod = MagicMock()
+        mock_palace_mod.MemPalaceBackend.return_value = MagicMock(spec=MemoryBackend)
+
+        def _mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "grimoire.memory.backends.mempalace":
+                return mock_palace_mod
+            return _real_import(name, *args, **kwargs)
+
+        cfg = _make_config("mempalace", mempalace_path=str(tmp_path / "palace"))
+        monkeypatch.setattr("builtins.__import__", _mock_import)
+        _create_backend(cfg, project_root=tmp_path)
+        call_kwargs = mock_palace_mod.MemPalaceBackend.call_args
+        assert call_kwargs.kwargs.get("palace_path") == str(tmp_path / "palace")

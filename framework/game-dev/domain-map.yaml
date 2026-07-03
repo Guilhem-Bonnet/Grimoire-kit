@@ -1,0 +1,496 @@
+$schema: "grimoire-game-dev-domain-map/v1"
+
+metadata:
+  id: game-dev-domain-map
+  version: "0.1.0"
+  owner: grimoire-kit
+  upstream_standard:
+    name: "Standard de structure agentique — cluster jeu vidéo"
+    repository: "processus-developpement-agentique"
+    canonical_entrypoints:
+      - "docs/patterns/guide-jeux-video.md"
+      - "docs/patterns/07-use-cases/README.md"
+      - "docs/patterns/catalogue-skills-jeux-video.md"
+      - "docs/patterns/profils-genres-jeux-video.md"
+      - "docs/patterns/matrice-capacites-modalites-jeux-video.md"
+  bundled_knowledge: "framework/game-dev/knowledge/"
+  intent: >
+    Map the upstream agentic game-dev cluster (use-cases UC-08..UC-50, the skill
+    aisles A..AC, genre lenses, and the capability/modality matrix) to concrete
+    Grimoire Kit artifacts: an archetype, discipline agents, templates, and
+    evidence-gated gates. Grimoire Kit consumes and traces the standard; it does
+    not redefine it.
+
+principles:
+  - id: gdd-is-upstream-truth
+    rule: "The Game Design Document and bible are the single versioned source of truth; generated content traces back to them."
+  - id: deterministic-simulation
+    rule: "Any tested simulation is replayable: seed, fixed step, state hash. Determinism is required for tests, replays, and netcode debugging."
+  - id: evidence-gated-milestones
+    rule: "A milestone, certification, or live change is reached by proof, never by declaration."
+  - id: capability-routing
+    rule: "Out of an LLM's core competence (art, audio, 3D, video), route to the capable target (specialized model, DCC tool, or human) rather than producing a mediocre final asset."
+  - id: telemetry-driven-liveops
+    rule: "Live tuning of balance or economy requires telemetry and canary; every live patch is rollback-able or compensable."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Règles normatives du domaine (invariants). Portées par l'archétype game-dev.
+# ─────────────────────────────────────────────────────────────────────────────
+normative_rules:
+  - id: GR-01
+    rule: "Le GDD est l'unique source de vérité ; tout contenu généré s'y rattache explicitement."
+    use_cases: [UC-08]
+    socle: [QUA-01, ORC-06]
+  - id: GR-02
+    rule: "Aucun contenu hors classification d'âge ; scan contre le rating déclaré avant intégration et soumission."
+    use_cases: [UC-15, UC-47]
+    socle: [GOV-08]
+  - id: GR-03
+    rule: "La simulation testée est déterministe : seed, pas fixe et hash d'état obligatoires."
+    use_cases: [UC-13]
+    socle: [RUN-13]
+  - id: GR-04
+    rule: "La certification est une gate de preuve : pas de soumission sans cert dry-run vert et evidence pack."
+    use_cases: [UC-15]
+    socle: [GOV-02, QUA-05]
+  - id: GR-05
+    rule: "Pas d'ajustement live sans télémétrie ni canary."
+    use_cases: [UC-16, UC-10]
+    socle: [GOV-10]
+  - id: GR-06
+    rule: "Pas de changement d'équilibrage sans non-régression."
+    use_cases: [UC-10]
+    socle: [QUA-05]
+  - id: GR-07
+    rule: "Gate de validation de contenu avant merge : budgets, références, naming, cohérence lore."
+    use_cases: [UC-12, UC-09]
+    socle: [GOV-08]
+  - id: GR-08
+    rule: "Build reproductible et jalon prouvé : build tagué et reproductible, jalon atteint par preuve."
+    use_cases: [UC-15]
+    socle: [QUA-05]
+  - id: GR-09
+    rule: "Tout patch live est rejouable ou compensable : rollback ou compensation prévue."
+    use_cases: [UC-16]
+    socle: [RUN-14, GOV-17]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Clusters de use-cases (UC-08 → UC-50), groupés par phase / discipline.
+# Référence détaillée : framework/game-dev/knowledge/use-cases-jeux-video.md
+# ─────────────────────────────────────────────────────────────────────────────
+use_case_clusters:
+  foundation:
+    label: "Concept & pré-production"
+    use_cases:
+      UC-08: "Game Design Document gouverné, source de vérité"
+  content:
+    label: "Production — contenu"
+    use_cases:
+      UC-09: "Génération de contenu de jeu gouvernée"
+      UC-12: "Pipeline d'assets gouverné"
+      UC-29: "Structure de projet et conventions d'assets gouvernées"
+      UC-43: "Génération procédurale (PCG) gouvernée"
+  systems_ai:
+    label: "Production — systèmes & IA"
+    use_cases:
+      UC-13: "Harnais de simulation déterministe"
+      UC-14: "Authoring de comportements de jeu gouverné"
+      UC-24: "IA de PNJ et navigation gouvernées"
+      UC-25: "Physique et collisions gouvernées"
+      UC-36: "Architecture des systèmes de jeu gouvernée"
+  balance_economy:
+    label: "Équilibrage & économie"
+    use_cases:
+      UC-10: "Équilibrage et économie gouvernés"
+      UC-41: "Monétisation, commerce et économie live gouvernés"
+      UC-42: "Analytics produit et expérimentation gouvernés"
+  qa_playtest:
+    label: "QA & playtest"
+    use_cases:
+      UC-11: "Playtest agentique gouverné"
+      UC-37: "Tests automatisés et fiabilité du code de jeu gouvernés"
+  combat_gameplay:
+    label: "Gameplay & ressenti"
+    use_cases:
+      UC-23: "Systèmes de combat gouvernés"
+      UC-26: "UI/UX et accessibilité gouvernées"
+      UC-27: "Optimisation et budgets de performance gouvernés"
+      UC-28: "Expérience VR/XR gouvernée"
+  art_audio:
+    label: "Art, audio & atmosphère"
+    use_cases:
+      UC-17: "Production d'art 3D gouvernée"
+      UC-18: "Matériaux et shaders gouvernés"
+      UC-19: "VFX temps réel gouvernés"
+      UC-20: "Animation et rigging gouvernés"
+      UC-21: "Audio et sound design gouvernés"
+      UC-22: "Cinématiques et mise en scène gouvernées"
+      UC-30: "Direction artistique et identité visuelle gouvernée"
+      UC-31: "Idéation et méthodologie UI/UX gouvernée"
+      UC-35: "Éclairage et image finale gouvernés"
+      UC-39: "Ambiance et atmosphère gouvernées"
+  narrative:
+    label: "Narration"
+    use_cases:
+      UC-40: "Narration interactive et systèmes de dialogue gouvernés"
+  network_services:
+    label: "Réseau, services & sécurité"
+    use_cases:
+      UC-32: "Architecture réseau et synchronisation gouvernées"
+      UC-33: "Services en ligne et backend de jeu gouvernés"
+      UC-34: "Anti-triche et sécurité du jeu gouvernées"
+      UC-45: "Systèmes sociaux et communication en jeu gouvernés"
+      UC-46: "Modding et contenu joueur (UGC) gouvernés"
+      UC-50: "Mode spectateur, esports et partage de replay gouvernés"
+  open_world:
+    label: "Monde ouvert"
+    use_cases:
+      UC-44: "Streaming de monde ouvert gouverné"
+  milestone_cert:
+    label: "Jalons & certification"
+    use_cases:
+      UC-15: "Build et certification gouvernés"
+      UC-47: "Conformité légale, classification et certification gouvernées"
+  liveops:
+    label: "Live ops"
+    use_cases:
+      UC-16: "Live ops et télémétrie gouvernés"
+  localization:
+    label: "Localisation"
+    use_cases:
+      UC-38: "Localisation et internationalisation du jeu gouvernées"
+      UC-01: "Traduction multilingue orchestrée (réutilisé)"
+  gtm_community:
+    label: "Go-to-market & communauté"
+    use_cases:
+      UC-48: "Édition, go-to-market et assets marketing gouvernés"
+      UC-49: "Opérations communautaires et support joueur gouvernés"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rayons du catalogue de skills (l'épicerie). Index A → AC.
+# Détail : framework/game-dev/knowledge/catalogue-skills-jeux-video.md
+# ─────────────────────────────────────────────────────────────────────────────
+skill_aisles:
+  A: "Direction & design"
+  B: "Art 2D"
+  C: "Art 3D"
+  D: "Matériaux & rendu"
+  E: "VFX"
+  F: "Animation & rigging"
+  G: "Audio"
+  H: "Cinématiques & mise en scène"
+  I: "Gameplay (combat, physique, collisions, navigation)"
+  J: "IA & PNJ"
+  K: "UI/UX & accessibilité"
+  L: "Optimisation & perf"
+  M: "VR/XR"
+  N: "Outils & pipeline"
+  O: "Fondations programmation & mathématiques"
+  P: "Maîtrise moteur & intégration (MCP)"
+  Q: "Direction artistique & idéation UI/UX"
+  R: "Réseau, services en ligne & sécurité"
+  S: "Éclairage, rendu final & technical art"
+  T: "Architecture, tests & programmation système"
+  U: "Localisation & internationalisation"
+  V: "Capacités, modalités & arbitrage d'outils"
+  W: "Ambiance & atmosphère"
+  X: "Narration interactive & dialogue"
+  Y: "Monétisation, analytics & conformité"
+  Z: "Génération procédurale & monde ouvert"
+  AA: "Go-to-market & assets marketing"
+  AB: "Opérations communautaires & support"
+  AC: "Spectateur, esports & replay"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lentilles par genre — priorisent les UC porteurs, rayons et pièges.
+# Détail : framework/game-dev/knowledge/profils-genres-jeux-video.md
+# ─────────────────────────────────────────────────────────────────────────────
+genre_lenses:
+  fps-tps:
+    label: "FPS / TPS (tir)"
+    key_use_cases: [UC-23, UC-24, UC-25, UC-27, UC-32]
+    aisles: [I, J, L, R, S]
+    critical_socle: [UC-13, QUA-08, GOV-08]
+    ambiance: "Tension, lisibilité de la menace, feedback de tir, impact."
+    pitfalls: "Netcode sans réconciliation ; hit registration non déterministe ; perf sous le plancher fps."
+  action-rpg:
+    label: "RPG / Action-RPG"
+    key_use_cases: [UC-08, UC-09, UC-10, UC-23, UC-38, UC-40]
+    aisles: [A, J, U, W, X]
+    critical_socle: [KNO-10, QUA-01, QUA-15]
+    ambiance: "Monde cohérent, mood narratif, identité régionale."
+    pitfalls: "GDD/lore fantôme ; économie déséquilibrée ; localisation tardive ; narration sans état."
+  strategy:
+    label: "Stratégie (RTS / 4X)"
+    key_use_cases: [UC-10, UC-13, UC-24, UC-27, UC-36]
+    aisles: [J, O, T]
+    critical_socle: [UC-13, QUA-08, QUA-14]
+    ambiance: "Lisibilité macro, sentiment d'échelle."
+    pitfalls: "Simulation non déterministe (désync lockstep) ; perf à grande échelle ; architecture émergente."
+  moba-arena:
+    label: "MOBA / arène"
+    key_use_cases: [UC-10, UC-16, UC-23, UC-33, UC-34, UC-41, UC-42, UC-50]
+    aisles: [I, R, Y, AC]
+    critical_socle: [QUA-08, GOV-08, GOV-07]
+    ambiance: "Clarté compétitive, équité."
+    pitfalls: "Déséquilibrage ; triche ; backend permissif ; monétisation prédatrice."
+  puzzle:
+    label: "Puzzle / réflexion"
+    key_use_cases: [UC-08, UC-09, UC-11, UC-26]
+    aisles: [A, K]
+    critical_socle: [COG-01, QUA-12]
+    ambiance: "Clarté, satisfaction du déclic."
+    pitfalls: "Difficulté mal calibrée ; génération de niveaux incohérente."
+  platformer:
+    label: "Plateforme / Metroidvania"
+    key_use_cases: [UC-09, UC-11, UC-20, UC-25, UC-35]
+    aisles: [F, I, S]
+    critical_socle: [QUA-12, UC-13]
+    ambiance: "Réactivité, game feel, lisibilité du saut."
+    pitfalls: "Game feel non mesuré ; collisions imprécises."
+  survival-horror:
+    label: "Survie / horreur"
+    key_use_cases: [UC-21, UC-24, UC-35, UC-39]
+    aisles: [G, S, W]
+    critical_socle: [QUA-12, MOD-03, GOV-08]
+    ambiance: "Tension, peur, obscurité, soundscape — le genre de l'ambiance."
+    pitfalls: "Ambiance au ressenti ; audio non spatialisé ; éclairage hors budget."
+  simulation:
+    label: "Simulation / gestion"
+    key_use_cases: [UC-10, UC-13, UC-26, UC-36]
+    aisles: [K, O, T]
+    critical_socle: [UC-13, QUA-14, KNO-03]
+    ambiance: "Lisibilité des données, profondeur systémique."
+    pitfalls: "Architecture émergente subie ; simulation non déterministe ; UI data illisible."
+  open-world:
+    label: "Monde ouvert / bac à sable"
+    key_use_cases: [UC-09, UC-12, UC-27, UC-29, UC-39, UC-43, UC-44]
+    aisles: [L, N, W, Z]
+    critical_socle: [QUA-08, KNO-10, GOV-08]
+    ambiance: "Météo, cycle jour/nuit, atmosphère vivante."
+    pitfalls: "Streaming/budget non tenu ; pop-in ; dérive de canon ; PCG non validée."
+  racing:
+    label: "Course (racing)"
+    key_use_cases: [UC-23, UC-25, UC-27, UC-32, UC-35]
+    aisles: [I, L, S]
+    critical_socle: [UC-13, QUA-08]
+    ambiance: "Sensation de vitesse, lisibilité de trajectoire."
+    pitfalls: "Physique véhicule non déterministe ; perf sous le plancher fps."
+  fighting:
+    label: "Combat (fighting)"
+    key_use_cases: [UC-11, UC-13, UC-23, UC-32]
+    aisles: [I, R]
+    critical_socle: [UC-13, QUA-05, GOV-08]
+    ambiance: "Impact, lisibilité des coups, timing."
+    pitfalls: "Frame data incohérente ; rollback netcode fragile."
+  roguelike:
+    label: "Rogue-like / rogue-lite"
+    key_use_cases: [UC-09, UC-10, UC-11, UC-13, UC-43]
+    aisles: [A, O, Z]
+    critical_socle: [RUN-13, UC-13, QUA-01]
+    ambiance: "Variété maîtrisée, tension de run."
+    pitfalls: "Génération procédurale incohérente ; runs déséquilibrées ; seed non reproductible."
+  narrative-adventure:
+    label: "Narratif / visual novel / aventure"
+    key_use_cases: [UC-08, UC-21, UC-22, UC-38, UC-39, UC-40]
+    aisles: [A, H, U, W, X]
+    critical_socle: [KNO-10, QUA-15, MOD-03]
+    ambiance: "Ton narratif, mood, mise en scène."
+    pitfalls: "Bible/lore fantôme ; voix finale via LLM texte ; localisation tardive ; narration sans état."
+  battle-royale:
+    label: "Compétitif en ligne / battle royale"
+    key_use_cases: [UC-16, UC-27, UC-32, UC-33, UC-34, UC-41, UC-42, UC-50]
+    aisles: [L, R, Y, AC]
+    critical_socle: [QUA-08, GOV-08, GOV-07]
+    ambiance: "Équité, lisibilité sous pression."
+    pitfalls: "Triche ; backend permissif ; netcode à grande échelle ; patch live à l'aveugle."
+  rhythm:
+    label: "Rythme / musical"
+    key_use_cases: [UC-11, UC-13, UC-21, UC-26]
+    aisles: [G, K]
+    critical_socle: [UC-13, QUA-05]
+    ambiance: "Synchronisation audio-visuelle, groove."
+    pitfalls: "Latence/désync audio ; timing non déterministe."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Matrice capacités / modalités (MOD-03). Router plutôt que simuler la maîtrise.
+# Détail : framework/game-dev/knowledge/matrice-capacites-modalites-jeux-video.md
+# ─────────────────────────────────────────────────────────────────────────────
+capability_modality_matrix:
+  legend_targets:
+    llm_frontier: "Décisions structurantes, code sensible, arbitrages coûteux à corriger tard."
+    llm_standard: "Travail systématique, code courant, intégration."
+    llm_economy: "Volume répétitif, première passe à vérifier."
+    specialized_model: "Modalité hors texte : image, audio, voix."
+    tool_dcc: "Logiciel métier (moteur, Blender, Substance, ZBrush, FMOD, profiler)."
+    human: "Cœur artistique, juridique, culturel ou décision sensible (GOV-15)."
+  routing:
+    - family: "Game design, GDD, quêtes, lore"
+      modality: text
+      target: llm_frontier_or_standard
+      core_competence: true
+    - family: "Équilibrage, économie, maths de gameplay"
+      modality: code+text
+      target: llm_frontier
+      core_competence: true
+      fallback: "Outil de simulation pour la preuve."
+    - family: "Architecture et code des systèmes"
+      modality: code
+      target: llm_frontier_or_standard
+      core_competence: true
+    - family: "Shaders et pipeline de rendu"
+      modality: code
+      target: llm_frontier
+      core_competence: true
+      do_not: "Juger « beau » sans mesurer."
+      fallback: "Profilage par outil obligatoire."
+    - family: "Tests automatisés, fiabilité du code"
+      modality: code
+      target: llm_standard
+      core_competence: true
+    - family: "Concept art, illustration"
+      modality: image
+      target: specialized_model_or_human
+      core_competence: false
+      do_not: "Produire l'illustration finale avec un LLM texte."
+      fallback: "Router vers modèle image ; sinon humain (GOV-15)."
+    - family: "Textures peintes, matériaux"
+      modality: image+tool
+      target: tool_dcc_or_human
+      core_competence: false
+      fallback: "Substance/DCC ou humain."
+    - family: "Modélisation 3D, sculpt, retopologie"
+      modality: 3d
+      target: tool_dcc_or_human
+      core_competence: false
+      do_not: "Générer le mesh final via LLM."
+      fallback: "Blender/Maya/ZBrush ; humain (GOV-15)."
+    - family: "VFX temps réel"
+      modality: 3d+tool
+      target: tool_dcc_or_human
+      core_competence: false
+      fallback: "Outil et profilage VFX."
+    - family: "Animation — clé artistique"
+      modality: 3d
+      target: tool_dcc_or_human
+      core_competence: false
+      fallback: "DCC ; humain."
+    - family: "Animation — runtime / procédurale"
+      modality: code
+      target: llm_standard
+      core_competence: true
+    - family: "Audio — SFX, musique, voix"
+      modality: audio
+      target: specialized_model_or_human
+      core_competence: false
+      do_not: "Produire le son ou la voix finale via LLM texte."
+      fallback: "Modèle audio ; humain (GOV-15)."
+    - family: "Cinématiques, mise en scène"
+      modality: text+tool
+      target: mixed
+      core_competence: false
+      fallback: "Séquenceur moteur et montage."
+    - family: "Localisation — texte"
+      modality: text
+      target: llm_per_language+human_review
+      core_competence: true
+      fallback: "Relecteur humain (GOV-15) sur segments à risque."
+    - family: "Optimisation, profilage"
+      modality: code+tool
+      target: llm+profiler
+      core_competence: true
+      do_not: "Optimiser au ressenti sans mesure."
+      fallback: "Profiler obligatoire pour la preuve."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Types d'artefacts (templates copiables). framework/game-dev/templates/
+# ─────────────────────────────────────────────────────────────────────────────
+artifact_types:
+  gdd:
+    template: "framework/game-dev/templates/gdd.md"
+    purpose: "Game Design Document gouverné — source de vérité versionnée (UC-08)."
+  content_validation_record:
+    template: "framework/game-dev/templates/content-validation-record.md"
+    purpose: "Preuve que niveaux/quêtes/dialogues/assets respectent design, lore et budgets (UC-09, UC-12)."
+  balance_regression_evidence:
+    template: "framework/game-dev/templates/balance-regression-evidence.md"
+    purpose: "Preuve de non-régression d'équilibrage via simulation (UC-10)."
+  playtest_evidence_pack:
+    template: "framework/game-dev/templates/playtest-evidence-pack.md"
+    purpose: "Preuve de jouabilité (atteignabilité, soft-locks, courbe de difficulté) (UC-11)."
+  determinism_replay_record:
+    template: "framework/game-dev/templates/determinism-replay-record.md"
+    purpose: "Preuve de simulation rejouable : seed, pas fixe, hash d'état (UC-13)."
+  certification_record:
+    template: "framework/game-dev/templates/certification-record.md"
+    purpose: "Checklists plateforme + rating + cert dry-run (UC-15, UC-47)."
+  telemetry_decision_record:
+    template: "framework/game-dev/templates/telemetry-decision-record.md"
+    purpose: "Décision live sourcée par télémétrie + canary + rollback (UC-16)."
+  capability_routing_record:
+    template: "framework/game-dev/templates/capability-routing-record.md"
+    purpose: "Trace de routage par modalité quand une tâche sort du cœur LLM (MOD-03)."
+  asset_budget_report:
+    template: "framework/game-dev/templates/asset-budget-report.md"
+    purpose: "Vérification polycount, textures, formats, naming, refs (UC-12)."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Disciplines → agents de l'archétype game-dev.
+# ─────────────────────────────────────────────────────────────────────────────
+disciplines:
+  - tag: game-designer
+    role: "Gardien du GDD, décomposeur d'objectifs en mécaniques."
+    use_cases: [UC-08, UC-09]
+    aisles: [A]
+  - tag: narrative-designer
+    role: "Cohérence du lore et narration interactive."
+    use_cases: [UC-08, UC-40]
+    aisles: [A, X]
+  - tag: level-designer
+    role: "Plan, blockout et validation de niveaux."
+    use_cases: [UC-09, UC-12]
+    aisles: [A, I]
+  - tag: gameplay-programmer
+    role: "Comportements de jeu + harnais déterministe."
+    use_cases: [UC-13, UC-14, UC-23, UC-25, UC-36]
+    aisles: [I, J, O, T]
+  - tag: systems-economist
+    role: "Simulation d'équilibrage et d'économie."
+    use_cases: [UC-10, UC-41, UC-42]
+    aisles: [O, Y]
+  - tag: tech-artist
+    role: "Pipeline d'assets gouverné, budgets, rendu, routage modalité."
+    use_cases: [UC-12, UC-17, UC-18, UC-27, UC-35]
+    aisles: [C, D, E, L, S, V]
+  - tag: game-qa
+    role: "Playtest agentique et préparation à la certification."
+    use_cases: [UC-11, UC-15, UC-37, UC-47]
+    aisles: [T]
+  - tag: liveops-analyst
+    role: "Analyse de télémétrie et pilotage de déploiement."
+    use_cases: [UC-16, UC-42]
+    aisles: [Y, AC]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cibles de génération dans un projet (preuves attachées au cycle).
+# ─────────────────────────────────────────────────────────────────────────────
+generation_targets:
+  project_root:
+    - path: "docs/GDD.md"
+      source_artifact: gdd
+  evidence_runtime:
+    - path: "_grimoire-output/evidence/{task-id}/content-validation-record.md"
+      source_artifact: content_validation_record
+    - path: "_grimoire-output/evidence/{task-id}/balance-regression-evidence.md"
+      source_artifact: balance_regression_evidence
+    - path: "_grimoire-output/evidence/{task-id}/playtest-evidence-pack.md"
+      source_artifact: playtest_evidence_pack
+    - path: "_grimoire-output/evidence/{task-id}/determinism-replay-record.md"
+      source_artifact: determinism_replay_record
+    - path: "_grimoire-output/evidence/{task-id}/capability-routing-record.md"
+      source_artifact: capability_routing_record
+  milestone:
+    - path: "_grimoire-output/evidence/milestones/{milestone}/certification-record.md"
+      source_artifact: certification_record
+    - path: "_grimoire-output/evidence/liveops/{patch}/telemetry-decision-record.md"
+      source_artifact: telemetry_decision_record

@@ -4,6 +4,7 @@ from grimoire.tools.agent_forge import AgentForge
 from grimoire.tools.context_guard import ContextGuard
 from grimoire.tools.context_router import ContextRouter
 from grimoire.tools.harmony_check import HarmonyCheck
+from grimoire.tools.learnings import Learnings
 from grimoire.tools.memory_lint import MemoryLint
 from grimoire.tools.preflight_check import PreflightCheck
 from grimoire.tools.stigmergy import Stigmergy
@@ -13,6 +14,7 @@ __all__ = [
     "ContextGuard",
     "ContextRouter",
     "HarmonyCheck",
+    "Learnings",
     "MemoryLint",
     "PreflightCheck",
     "Stigmergy",
