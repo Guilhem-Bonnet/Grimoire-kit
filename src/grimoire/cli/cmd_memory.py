@@ -1031,6 +1031,82 @@ def memory_search(
     console.print(tbl)
 
 
+# ── grimoire memory remember / recall (protocole agent typé, ADR-003) ────────
+
+
+@memory_app.command("remember")
+def memory_remember(
+    ctx: typer.Context,
+    text: str = typer.Argument(..., help="Text to remember."),
+    type_: str = typer.Option(..., "--type", "-t", help="Memory type: shared-context | decisions | agent-learnings | failures | stories."),
+    agent: str = typer.Option(..., "--agent", "-a", help="Emitting agent tag."),
+    tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
+) -> None:
+    """Typed idempotent memory write — same text + agent never duplicates.
+
+    SDK equivalent of the legacy `mem0-bridge.py remember` agent protocol
+    (deterministic UUID5 on project + agent + text).
+    """
+    from grimoire.core.exceptions import GrimoireMemoryError
+
+    mgr = _load_manager()
+    tag_tuple = tuple(t.strip() for t in tags.split(",") if t.strip())
+    try:
+        entry = mgr.remember(type_, agent, text, tags=tag_tuple)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(_entry_payload(entry), indent=2, default=str))
+        return
+    console.print(f"[green]OK[/green] remembered \\[{type_}] as {entry.id[:12]}… (agent: {agent})")
+
+
+@memory_app.command("recall")
+def memory_recall(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Search query."),
+    type_: str = typer.Option("", "--type", "-t", help="Filter by memory type."),
+    agent: str = typer.Option("", "--agent", "-a", help="Filter by emitting agent."),
+    limit: int = typer.Option(5, "--limit", "-n", help="Max results to return."),
+) -> None:
+    """Search typed memories written via `grimoire memory remember`."""
+    from grimoire.core.exceptions import GrimoireMemoryError
+
+    mgr = _load_manager()
+    try:
+        results = mgr.recall_typed(query, type_=type_, agent=agent, limit=limit)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps([_entry_payload(e) for e in results], indent=2, default=str))
+        return
+
+    if not results:
+        console.print(f"[yellow]No memories matching '{query}'.[/yellow]")
+        return
+
+    tbl = Table(title=f"Recall: {query}")
+    tbl.add_column("ID", style="dim", max_width=12)
+    tbl.add_column("Type")
+    tbl.add_column("Agent")
+    tbl.add_column("Text", max_width=60)
+    tbl.add_column("Tags")
+    for entry in results:
+        text_col = entry.text[:57] + "…" if len(entry.text) > 60 else entry.text
+        tbl.add_row(
+            entry.id[:12],
+            str(entry.metadata.get("type", entry.metadata.get("memory_type", "—"))),
+            str(entry.metadata.get("agent", entry.user_id or "—")),
+            text_col,
+            ", ".join(entry.tags) if entry.tags else "—",
+        )
+    console.print(tbl)
+
+
 # ── grimoire memory list ──────────────────────────────────────────────────────
 
 

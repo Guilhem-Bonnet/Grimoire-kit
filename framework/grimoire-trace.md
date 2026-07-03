@@ -53,8 +53,8 @@ Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 | `ACTION:implement` | Implémentation d'une tâche | Dev, Quick-Flow |
 | `ACTION:review` | Revue de code ou d'artefact | QA, Architect |
 | `DECISION` | Décision technique ou produit | Tout agent |
-| `REMEMBER` | Écriture en mémoire Qdrant | mem0-bridge.py |
-| `RECALL` | Lecture depuis mémoire Qdrant | mem0-bridge.py |
+| `REMEMBER` | Écriture en mémoire typée | grimoire memory (fallback mem0-bridge.py) |
+| `RECALL` | Lecture depuis mémoire typée | grimoire memory (fallback mem0-bridge.py) |
 | `HANDOFF` | Transfert de contrôle inter-agent | Workflow engine |
 | `CHECKPOINT` | Sauvegarde d'état de workflow | workflow engine |
 | `CHECKPOINT:resume` | Reprise depuis un checkpoint | grimoire-init resume |

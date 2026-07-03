@@ -130,6 +130,61 @@ class TestMemorySearch:
         assert "No memories matching" in result.output
 
 
+# ── grimoire memory remember / recall ─────────────────────────────────────────
+
+
+class TestMemoryRemember:
+    def test_remember_text(self, mock_manager: MagicMock) -> None:
+        mock_manager.remember.return_value = _make_entry(id="typed1", text="fait important")
+        result = runner.invoke(app, ["memory", "remember", "fait important", "-t", "decisions", "-a", "dev"])
+        assert result.exit_code == 0
+        assert "remembered" in result.output
+        mock_manager.remember.assert_called_once_with("decisions", "dev", "fait important", tags=())
+
+    def test_remember_json(self, mock_manager: MagicMock) -> None:
+        mock_manager.remember.return_value = _make_entry(id="typed1", text="fait")
+        result = runner.invoke(app, ["-o", "json", "memory", "remember", "fait", "-t", "failures", "-a", "qa"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["id"] == "typed1"
+
+    def test_remember_tags(self, mock_manager: MagicMock) -> None:
+        mock_manager.remember.return_value = _make_entry(id="typed1")
+        runner.invoke(app, ["memory", "remember", "x", "-t", "decisions", "-a", "dev", "--tags", "infra, db"])
+        mock_manager.remember.assert_called_once_with("decisions", "dev", "x", tags=("infra", "db"))
+
+    def test_remember_invalid_type_exits(self, mock_manager: MagicMock) -> None:
+        from grimoire.core.exceptions import GrimoireMemoryError
+
+        mock_manager.remember.side_effect = GrimoireMemoryError("Invalid memory type 'gossip'")
+        result = runner.invoke(app, ["memory", "remember", "x", "-t", "gossip", "-a", "dev"])
+        assert result.exit_code == 1
+
+
+class TestMemoryRecall:
+    def test_recall_text(self, mock_manager: MagicMock) -> None:
+        mock_manager.recall_typed.return_value = [_make_entry(id="e1", text="Hello world")]
+        result = runner.invoke(app, ["memory", "recall", "hello"])
+        assert result.exit_code == 0
+        assert "Hello world" in result.output
+
+    def test_recall_filters_forwarded(self, mock_manager: MagicMock) -> None:
+        mock_manager.recall_typed.return_value = []
+        runner.invoke(app, ["memory", "recall", "q", "-t", "failures", "-a", "dev", "-n", "3"])
+        mock_manager.recall_typed.assert_called_once_with("q", type_="failures", agent="dev", limit=3)
+
+    def test_recall_json(self, mock_manager: MagicMock) -> None:
+        mock_manager.recall_typed.return_value = [_make_entry(id="e1")]
+        result = runner.invoke(app, ["-o", "json", "memory", "recall", "q"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)[0]["id"] == "e1"
+
+    def test_recall_empty(self, mock_manager: MagicMock) -> None:
+        mock_manager.recall_typed.return_value = []
+        result = runner.invoke(app, ["memory", "recall", "nonexist"])
+        assert result.exit_code == 0
+        assert "No memories matching" in result.output
+
+
 # ── grimoire memory list ──────────────────────────────────────────────────────
 
 

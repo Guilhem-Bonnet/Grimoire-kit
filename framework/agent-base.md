@@ -671,21 +671,23 @@ Si >5 items domaine sont nécessaires :
 
 ### Mémoire & Observabilité
 
-#### MEMORY PROTOCOL — Qdrant source de vérité (dual-write)
+#### MEMORY PROTOCOL — écriture typée idempotente (dual-write)
 
-**Écrire** : `python {project-root}/_grimoire/_memory/mem0-bridge.py remember --type TYPE --agent {AGENT_TAG} "texte"`
+**Écrire** : `grimoire memory remember "texte" --type TYPE --agent {AGENT_TAG}`
 Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
-**Lire** : `python {project-root}/_grimoire/_memory/mem0-bridge.py recall "question"` (options : `--type TYPE`, `--agent AGENT`)
+**Lire** : `grimoire memory recall "question"` (options : `--type TYPE`, `--agent AGENT`)
 
-**Exporter** : `mem0-bridge.py export-md --type agent-learnings --output {project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md`
+> **Fallback** (SDK `grimoire` non installé) : `python {project-root}/_grimoire/_memory/mem0-bridge.py remember|recall …` — mêmes types, même déduplication UUID5, mêmes IDs (conventions alignées, cf. ADR-003).
 
-> Dual-write actif : Qdrant = source de vérité, fichiers `.md` = exports read-only. UUID5 = déduplication native.
+**Exporter** : `mem0-bridge.py export-md --type agent-learnings --output {project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md` (pas encore d'équivalent SDK)
+
+> Dual-write actif : backend mémoire = source de vérité, fichiers `.md` = exports read-only. UUID5 = déduplication native.
 
 - LAZY-LOAD : Ne PAS charger au démarrage session-state.md, network-topology.md, dependency-graph.md, oss-references.md. Charger À LA DEMANDE : reprise session → session-state.md | réseau/IPs → network-topology.md | impact/dépendances → dependency-graph.md | choix OSS → oss-references.md
 - Mettre à jour `{project-root}/_grimoire/_memory/decisions-log.md` ET exécuter `remember --type decisions` après chaque décision {DOMAIN_WORD}
 - Après résolution d'un problème non-trivial : exécuter `remember --type agent-learnings` ET ajouter dans `{project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md` au format `- [YYYY-MM-DD] description`
-- AUTO-MNEMO (post-remember) : L'upsert Qdrant est idempotent via UUID5 — même texte écrit deux fois = une seule entrée. La déduplication est native. Pour la détection de contradictions sémantiques, utiliser `mem0-bridge.py search` avant d'écrire une mémoire qui annule une précédente.
+- AUTO-MNEMO (post-remember) : L'upsert Qdrant est idempotent via UUID5 — même texte écrit deux fois = une seule entrée. La déduplication est native. Pour la détection de contradictions sémantiques, utiliser `grimoire memory recall` avant d'écrire une mémoire qui annule une précédente.
 - CONTRADICTION-LOG : Si tu détectes une information qui contredit une décision passée, ajouter une ligne dans `{project-root}/_grimoire/_memory/contradiction-log.md` ET utiliser `remember --type failures` pour capturer la contradiction.
 
 ### Handoff Inter-Agents
@@ -723,7 +725,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 > **JTBD émotionnel** (#101) : le greeting doit rassurer ("je sais où on en est"), l'exit doit satisfaire ("voilà ce qu'on a accompli").
 
-- FIN DE SESSION : Avant de traiter [DA] Quitter, TOUJOURS : 1) Afficher l'Exit Summary (Peak-End Rule) 2) Mettre à jour `{project-root}/_grimoire/_memory/session-state.md` 3) Exécuter `mem0-bridge.py remember --type agent-learnings --agent {AGENT_TAG} "résumé session"` 4) Si un fichier agent a été modifié, ajouter une entrée dans `{project-root}/_grimoire/_memory/agent-changelog.md` 5) Ne PAS attendre que l'utilisateur dise au revoir — si la conversation s'arrête, considérer la session terminée
+- FIN DE SESSION : Avant de traiter [DA] Quitter, TOUJOURS : 1) Afficher l'Exit Summary (Peak-End Rule) 2) Mettre à jour `{project-root}/_grimoire/_memory/session-state.md` 3) Exécuter `grimoire memory remember --type agent-learnings --agent {AGENT_TAG} "résumé session"` 4) Si un fichier agent a été modifié, ajouter une entrée dans `{project-root}/_grimoire/_memory/agent-changelog.md` 5) Ne PAS attendre que l'utilisateur dise au revoir — si la conversation s'arrête, considérer la session terminée
 - NOTE: La consolidation des learnings (Mnemo) est désormais exécutée automatiquement au DÉBUT du cycle suivant (activation step 2), pas en fin de session. Cela élimine le risque de perte si la session se termine sans [DA] Quitter.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -738,7 +740,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 2. **Reformuler** — "Si je comprends bien, vous voulez X pour obtenir Y, c'est correct ?"
 3. **Clarifier la contradiction** — "Plus tôt, nous avions décidé **A** (ref: decisions-log.md L42). Maintenant vous dites **B**. Voulez-vous : (a) changer la décision A, (b) trouver un compromis, (c) autre chose ?"
 4. **Confirmer le scope** — "Pour résumer, le périmètre est : [liste], hors-périmètre : [liste]. On est alignés ?"
-5. **Documenter** — Logger dans `{project-root}/_grimoire/_memory/contradiction-log.md` ET `mem0-bridge.py remember --type failures --agent {AGENT_TAG} "Contradiction: A→B, raison: ..."` 
+5. **Documenter** — Logger dans `{project-root}/_grimoire/_memory/contradiction-log.md` ET `grimoire memory remember --type failures --agent {AGENT_TAG} "Contradiction: A→B, raison: ..."` 
 
 ### Quand NE PAS activer
 - Correction d'une erreur factuelle (l'agent avait tort → corriger, pas de protocole)
