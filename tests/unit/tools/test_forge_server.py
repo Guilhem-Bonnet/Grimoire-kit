@@ -420,3 +420,67 @@ class TestSimulate:
         report = api.blueprint_simulate(bp)
         assert report["steps"][0]["ready"] is True
         assert report["verdict"] == "prêt à appliquer"
+
+
+class TestCompile:
+    def test_compiles_ready_blueprint(
+        self, api_with_catalogue: ForgeAPI, project_root: Path
+    ) -> None:
+        bp = {
+            "blueprintVersion": 1,
+            "id": "flow-ok",
+            "name": "Flow OK",
+            "catalogRef": {"version": "1.0.0"},
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "QUA-04")],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
+        }
+        result = api_with_catalogue.blueprint_compile(bp)
+        artifact = project_root / result["artifact"]
+        assert artifact.is_file()
+        content = artifact.read_text(encoding="utf-8")
+        assert "Plan d'exécution" in content
+        assert content.index("1. ORC-01") < content.index("2. QUA-04")
+        assert "Contrats aux frontières" in content
+        # Section compiled persistée avec hash cohérent
+        saved = api_with_catalogue.blueprint_get("flow-ok")
+        compiled = saved["compiled"]["artifacts"][0]
+        assert compiled["path"] == result["artifact"]
+        assert compiled["hash"] == result["hash"]
+        import hashlib
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        assert compiled["hash"] == f"sha256:{digest}"
+
+    def test_blocked_blueprint_refuses_compilation(self, api: ForgeAPI) -> None:
+        bp = {
+            "id": "flow-ko",
+            "nodes": [
+                {
+                    "id": "x", "kind": "extension-node", "ref": "crewai/crewai-crew",
+                    "label": "Crew",
+                    "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
+                }
+            ],
+            "edges": [],
+        }
+        with pytest.raises(ValueError, match="compilation refusée"):
+            api.blueprint_compile(bp)
+
+    def test_pattern_requirements_in_mission_pack(
+        self, api_with_catalogue: ForgeAPI, project_root: Path
+    ) -> None:
+        # Enrichir le catalogue de contrôles pour GOV-01
+        ui = api_with_catalogue.ui_dir
+        assert ui is not None
+        catalogue = json.loads((ui / "data" / "catalogue-export.json").read_text())
+        catalogue["patterns"][1]["controls"] = ["allowlist", "dry-run"]
+        (ui / "data" / "catalogue-export.json").write_text(json.dumps(catalogue))
+        bp = {
+            "id": "flow-req",
+            "name": "Req",
+            "catalogRef": {"version": "1.0.0"},
+            "nodes": [make_node("g", "GOV-01"), make_node("q", "QUA-04")],
+            "edges": [{"from": "g.out", "to": "q.in", "contract": "task-envelope"}],
+        }
+        result = api_with_catalogue.blueprint_compile(bp)
+        content = (project_root / result["artifact"]).read_text(encoding="utf-8")
+        assert "allowlist, dry-run" in content

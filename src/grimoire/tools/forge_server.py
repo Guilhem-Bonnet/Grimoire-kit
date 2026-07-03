@@ -19,9 +19,11 @@ Usage standalone::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import time
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -433,6 +435,109 @@ class ForgeAPI:
             "steps": steps,
         }
 
+    def blueprint_compile(self, blueprint: dict[str, Any]) -> dict[str, Any]:
+        """Compilation v1 (H4) : le blueprint devient un mission pack gouverné.
+
+        Un blueprint « bloqué » à la simulation ne compile pas. L'artefact
+        généré est un ``.prompt.md`` exécutable par l'orchestrateur existant ;
+        la section ``compiled`` du blueprint trace le hash pour la détection
+        de dérive. Aucun apply automatique : le diff git reste la revue.
+        """
+        report = self.blueprint_simulate(blueprint)
+        if report["blockers"]:
+            raise ValueError(
+                "compilation refusée, blueprint bloqué : "
+                + " ; ".join(report["blockers"])
+            )
+
+        bp_id = str(blueprint.get("id", "blueprint"))
+        name = blueprint.get("name", bp_id)
+        now = datetime.now(UTC).isoformat()
+        catalog_version = blueprint.get("catalogRef", {}).get("version", "inconnue")
+
+        lines = [
+            "---",
+            f"name: {bp_id}-blueprint",
+            f"description: Mission pack compilé depuis le blueprint {name}",
+            f"generatedFrom: _grimoire/blueprints/{bp_id}.blueprint.json",
+            f"generatedAt: {now}",
+            f"catalogVersion: {catalog_version}",
+            "---",
+            "",
+            f"# {name} — mission pack compilé",
+            "",
+        ]
+        if blueprint.get("description"):
+            lines += [str(blueprint["description"]), ""]
+        lines += [
+            "> Artefact généré par la compilation du blueprint — ne pas éditer",
+            "> à la main, recompiler depuis l'éditeur. L'exécution appartient au",
+            "> runtime existant et passe par ses gates.",
+            "",
+            "## Plan d'exécution",
+            "",
+        ]
+        for step in report["steps"]:
+            lines.append(f"### {step['order']}. {step['label']}")
+            lines.append("")
+            lines.append(f"- Node : `{step['id']}` ({step['kind']} : `{step['ref']}`)")
+            if step.get("action"):
+                lines.append(f"- Action : {step['action']}")
+            if step.get("requirements"):
+                lines.append(
+                    "- Obligations (contrôles du pattern) : "
+                    + ", ".join(step["requirements"])
+                )
+            if "ready" in step:
+                lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
+            lines.append("")
+
+        edges = blueprint.get("edges", [])
+        if edges:
+            lines += ["## Contrats aux frontières", ""]
+            lines += [
+                f"- `{e['from']}` -> `{e['to']}` : contrat `{e.get('contract', '?')}`"
+                for e in edges
+            ]
+            lines.append("")
+        lines += [
+            "## Entrées / sorties du flow",
+            "",
+            f"- Entrées : {', '.join(report['entryNodes']) or '—'}",
+            f"- Sorties : {', '.join(report['exitNodes']) or '—'}",
+            "",
+        ]
+        if report["warnings"]:
+            lines += ["## Avertissements du lint normatif", ""]
+            lines += [f"- {w}" for w in report["warnings"]]
+            lines.append("")
+        content = "\n".join(lines)
+
+        artifact_rel = f".github/prompts/{bp_id}.blueprint.prompt.md"
+        artifact_path = self.project_root / artifact_rel
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(content, encoding="utf-8")
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        blueprint["compiled"] = {
+            "at": now,
+            "catalogVersion": str(catalog_version),
+            "artifacts": [
+                {"path": artifact_rel, "hash": f"sha256:{digest}", "sourceNode": bp_id}
+            ],
+        }
+        self._blueprint_path(bp_id).parent.mkdir(parents=True, exist_ok=True)
+        self._blueprint_path(bp_id).write_text(
+            json.dumps(blueprint, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "compiled": bp_id,
+            "artifact": artifact_rel,
+            "hash": f"sha256:{digest}",
+            "warnings": report["warnings"],
+        }
+
     def _extension_node_patterns(self, ref: str) -> list[str]:
         ext_id = str(ref).split("/")[0]
         manifest_path = self.kit_root / "extensions" / ext_id / MANIFEST_NAME
@@ -549,6 +654,10 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
                     self._json(api.blueprint_simulate(blueprint))
+                elif path.startswith("/api/blueprints/") and path.endswith("/compile"):
+                    bp_id = path.split("/")[3]
+                    blueprint = body or api.blueprint_get(bp_id)
+                    self._json(api.blueprint_compile(blueprint))
                 else:
                     self._error("route inconnue", 404)
             except ExtensionError as exc:
