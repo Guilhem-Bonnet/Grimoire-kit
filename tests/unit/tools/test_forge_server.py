@@ -354,3 +354,69 @@ class TestComposites:
         # Le use-case apporte GOV-01 et QUA-04 : ni dépendance manquante, ni Faux Done
         assert not any("dépend de GOV-01" in w for w in lint["warnings"])
         assert not any("Faux Done" in w for w in lint["warnings"])
+
+
+class TestSimulate:
+    def test_orders_flow_and_reports_requirements(
+        self, api_with_catalogue: ForgeAPI
+    ) -> None:
+        bp = {
+            "nodes": [
+                make_node("b", "GOV-01"),
+                make_node("a", "ORC-01"),
+                make_node("c", "QUA-04"),
+            ],
+            "edges": [
+                {"from": "a.out", "to": "b.in", "contract": "task-envelope"},
+                {"from": "b.out", "to": "c.in", "contract": "task-envelope"},
+            ],
+        }
+        report = api_with_catalogue.blueprint_simulate(bp)
+        assert report["verdict"] == "prêt à appliquer"
+        assert [s["id"] for s in report["steps"]] == ["a", "b", "c"]
+        assert report["entryNodes"] == ["a"]
+        assert report["exitNodes"] == ["c"]
+        assert all(s["action"] == "appliquer le pattern" for s in report["steps"])
+
+    def test_cycle_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "GOV-01")],
+            "edges": [
+                {"from": "a.out", "to": "b.in", "contract": "task-envelope"},
+                {"from": "b.out", "to": "a.in", "contract": "task-envelope"},
+            ],
+        }
+        report = api.blueprint_simulate(bp)
+        assert report["verdict"] == "bloqué"
+        assert any("cycle détecté" in b for b in report["blockers"])
+
+    def test_missing_extension_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [
+                {
+                    "id": "x", "kind": "extension-node", "ref": "crewai/crewai-crew",
+                    "label": "Crew",
+                    "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
+                }
+            ],
+            "edges": [],
+        }
+        report = api.blueprint_simulate(bp)
+        assert report["verdict"] == "bloqué"
+        assert any("extension non installée" in b for b in report["blockers"])
+        assert report["steps"][0]["ready"] is False
+
+    def test_artifact_readiness(self, api: ForgeAPI, project_root: Path) -> None:
+        bp = {
+            "nodes": [
+                {
+                    "id": "a", "kind": "artifact", "ref": ".github/agents/dev.agent.md",
+                    "label": "dev",
+                    "pins": [{"id": "out", "direction": "out", "contract": "task-envelope"}],
+                }
+            ],
+            "edges": [],
+        }
+        report = api.blueprint_simulate(bp)
+        assert report["steps"][0]["ready"] is True
+        assert report["verdict"] == "prêt à appliquer"

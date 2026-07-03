@@ -350,6 +350,89 @@ class ForgeAPI:
 
         return {"errors": errors, "warnings": warnings}
 
+    def blueprint_simulate(self, blueprint: dict[str, Any]) -> dict[str, Any]:
+        """Simulation pré-exécution (H4) : dry-run du flow avant apply.
+
+        Ne produit aucun effet : ordonne le graphe, vérifie les prérequis
+        de chaque node (artefact présent, extension installée, contrôles du
+        pattern) et rend un verdict. Le runtime existant reste le seul
+        exécutant.
+        """
+        lint = self.blueprint_lint(blueprint)
+        blockers: list[str] = list(lint["errors"])
+        nodes = {str(n["id"]): n for n in blueprint.get("nodes", [])}
+
+        # Ordre topologique (Kahn) sur les connexions node -> node
+        deps: dict[str, set[str]] = {node_id: set() for node_id in nodes}
+        for edge in blueprint.get("edges", []):
+            src = str(edge.get("from", "")).split(".")[0]
+            dst = str(edge.get("to", "")).split(".")[0]
+            if src in nodes and dst in nodes:
+                deps[dst].add(src)
+        order: list[str] = []
+        remaining = {nid: set(d) for nid, d in deps.items()}
+        while remaining:
+            ready = sorted(nid for nid, d in remaining.items() if not d)
+            if not ready:
+                cycle = ", ".join(sorted(remaining))
+                blockers.append(f"cycle détecté dans le flow : {cycle}")
+                order.extend(sorted(remaining))
+                break
+            for nid in ready:
+                order.append(nid)
+                del remaining[nid]
+            for d in remaining.values():
+                d.difference_update(ready)
+
+        catalogue = self._catalogue()
+        controls = {
+            p["id"]: p.get("controls", [])
+            for p in (catalogue or {}).get("patterns", [])
+        }
+        installed = list_installed(self.project_root)
+
+        steps: list[dict[str, Any]] = []
+        for position, node_id in enumerate(order, start=1):
+            n = nodes[node_id]
+            kind, ref = n.get("kind"), str(n.get("ref", ""))
+            step: dict[str, Any] = {
+                "order": position,
+                "id": node_id,
+                "kind": kind,
+                "ref": ref,
+                "label": n.get("label", ""),
+            }
+            if kind == "pattern":
+                step["action"] = "appliquer le pattern"
+                step["requirements"] = controls.get(ref, [])
+            elif kind == "artifact":
+                step["action"] = "exécuté par le runtime existant"
+                step["ready"] = (self.project_root / ref).exists()
+            elif kind == "extension-node":
+                ext_id = ref.split("/")[0]
+                step["action"] = f"délégué à l'extension {ext_id}"
+                step["ready"] = ext_id in installed
+                if ext_id not in installed:
+                    blockers.append(
+                        f"extension non installée dans le projet : {ext_id} "
+                        f"(node {node_id})"
+                    )
+            elif kind == "composite":
+                step["action"] = "expansion du composite"
+            steps.append(step)
+
+        exits = [
+            nid for nid in order if not any(nid in d for d in deps.values())
+        ]
+        return {
+            "verdict": "prêt à appliquer" if not blockers else "bloqué",
+            "blockers": blockers,
+            "warnings": lint["warnings"],
+            "entryNodes": [nid for nid in order if not deps.get(nid)],
+            "exitNodes": exits,
+            "steps": steps,
+        }
+
     def _extension_node_patterns(self, ref: str) -> list[str]:
         ext_id = str(ref).split("/")[0]
         manifest_path = self.kit_root / "extensions" / ext_id / MANIFEST_NAME
@@ -462,6 +545,10 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
                     self._json(api.blueprint_lint(blueprint))
+                elif path.startswith("/api/blueprints/") and path.endswith("/simulate"):
+                    bp_id = path.split("/")[3]
+                    blueprint = body or api.blueprint_get(bp_id)
+                    self._json(api.blueprint_simulate(blueprint))
                 else:
                     self._error("route inconnue", 404)
             except ExtensionError as exc:
