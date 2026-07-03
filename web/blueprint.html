@@ -64,6 +64,14 @@
     .bp-d-rel .lbl { color: var(--ink-muted); font-size: .58rem; }
     .bp-d-doc { font-family: var(--font-mono); font-size: .58rem; color: var(--ink-muted); word-break: break-all; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 
+    /* ── Palette latérale (mode éditeur) ── */
+    .bp-pal-group { font-family: var(--font-mono); font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 10px 0 4px; }
+    .bp-pal-item { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: .62rem; color: var(--ink-soft); padding: 4px 6px; border-radius: var(--r-sm); cursor: pointer; }
+    .bp-pal-item:hover { background: var(--elev-2); color: var(--ink); }
+    .bp-pal-item .dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+    .eh-handle { background-color: #FF6B3D; width: 10px; height: 10px; }
+    .eh-ghost-edge, .eh-preview { line-color: #6EE7FF; }
+
     /* ── Mode éditeur (grimoire serve) ── */
     .bp-edit { display: none; align-items: center; gap: 8px; }
     .bp-edit.on { display: flex; }
@@ -88,10 +96,8 @@
   <div class="bp-spacer"></div>
   <div class="bp-edit" id="bp-edit">
     <select id="bp-file" aria-label="Blueprint à éditer"></select>
-    <select id="bp-palette" aria-label="Node à ajouter"></select>
-    <button type="button" class="bp-btn" id="bp-add">AJOUTER</button>
-    <button type="button" class="bp-btn" id="bp-link">CONNECTER</button>
-    <button type="button" class="bp-btn" id="bp-del">SUPPR.</button>
+    <button type="button" class="bp-btn" id="bp-undo" title="Ctrl+Z">ANNULER</button>
+    <button type="button" class="bp-btn" id="bp-layout">RÉORGANISER</button>
     <button type="button" class="bp-btn" id="bp-check">VALIDER</button>
     <button type="button" class="bp-btn" id="bp-sim">SIMULER</button>
     <button type="button" class="bp-btn" id="bp-compile">COMPILER</button>
@@ -103,7 +109,13 @@
 <div class="bp-toast" id="bp-toast" role="status"></div>
 
 <div class="bp-shell">
-  <aside class="bp-side" aria-label="Filtres du graphe">
+  <aside class="bp-side" aria-label="Filtres et palette">
+    <div id="bp-palette-panel" style="display:none">
+      <div class="bp-side-label">Palette — cliquer pour ajouter</div>
+      <input id="bp-palette-search" type="search" placeholder="Filtrer la palette…" aria-label="Filtrer la palette"
+             style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink);font-family:var(--font-mono);font-size:.66rem;padding:7px 9px;margin-bottom:8px"/>
+      <div id="bp-palette-list"></div>
+    </div>
     <div class="bp-search">
       <div class="bp-side-label">Recherche</div>
       <input id="bp-search" type="search" placeholder="ORC-02, envelope…" aria-label="Rechercher un pattern"/>
@@ -130,6 +142,8 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.min.js"></script>
 <script src="forge-nav.js"></script>
 <script src="forge-blueprint.js"></script>
 </body>

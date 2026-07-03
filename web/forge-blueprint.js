@@ -204,6 +204,7 @@
       const n = evt.target;
       const p = n.data('pattern');
       if (p) showPattern(p);
+      else if (window.__bpShowProps) window.__bpShowProps(n);
       cy.edges().removeClass('focus');
       n.connectedEdges().not('.dim').addClass('focus');
     });
@@ -260,6 +261,9 @@
       cy.add(bpElements(bp));
       cy.fit(undefined, 80);
       document.getElementById('bp-title').textContent = 'BLUEPRINT · ' + (bp.name || bp.id).toUpperCase();
+      const pal = document.getElementById('bp-palette-panel');
+      if (pal) pal.style.display = '';
+      if (window.__bpShowHelp) window.__bpShowHelp();
     }
 
     function backToCatalog() {
@@ -268,6 +272,8 @@
       cy.add(catalogElements);
       cy.fit(undefined, 40);
       document.getElementById('bp-title').textContent = 'BLUEPRINT · CATALOGUE DE PATTERNS';
+      const pal = document.getElementById('bp-palette-panel');
+      if (pal) pal.style.display = 'none';
     }
 
     function serialize() {
@@ -293,24 +299,39 @@
       document.getElementById('bp-edit').classList.add('on');
       refreshFileList();
 
-      // Palette : patterns du catalogue + artefacts du projet + node packs d'extensions
-      const palette = document.getElementById('bp-palette');
+      // Palette latérale : cliquer = ajouter au centre du viewport
       const extNodes = {};
+      const paletteItems = [];
       Promise.all([api('/api/setup'), api('/api/extensions')]).then(([view, exts]) => {
         const artifacts = [...(view.artifacts.agents || []), ...(view.artifacts.workflows || [])];
-        let extGroup = '';
-        for (const ext of exts.available || []) {
-          for (const n of ext.nodes || []) {
-            const ref = ext.id + '/' + n.id;
-            extNodes[ref] = n;
-            extGroup += `<option value="extnode:${ref}">${n.label} (${ext.id})</option>`;
-          }
+        for (const p of cat.patterns) paletteItems.push({ group: 'Patterns', value: 'pattern:' + p.id, label: p.id + ' ' + p.name, color: FAMILY_COLORS[p.family] || '#5B6068' });
+        for (const u of (cat.useCases || [])) paletteItems.push({ group: 'Use-cases', value: 'composite:use-case:' + u.id, label: u.name, color: '#A78BFA' });
+        for (const a of artifacts) paletteItems.push({ group: 'Artefacts du projet', value: 'artifact:' + a, label: a.split('/').pop(), color: '#9BA0A8' });
+        for (const ext of exts.available || []) for (const n of ext.nodes || []) {
+          const ref = ext.id + '/' + n.id;
+          extNodes[ref] = n;
+          paletteItems.push({ group: 'Nodes d’extensions', value: 'extnode:' + ref, label: n.label + ' (' + ext.id + ')', color: '#FF6B3D' });
         }
-        palette.innerHTML =
-          '<optgroup label="Patterns">' + cat.patterns.map(p => `<option value="pattern:${p.id}">${p.id} ${p.name}</option>`).join('') + '</optgroup>' +
-          '<optgroup label="Use-cases (composites)">' + (cat.useCases || []).map(u => `<option value="composite:use-case:${u.id}">${u.name}</option>`).join('') + '</optgroup>' +
-          '<optgroup label="Artefacts du projet">' + artifacts.map(a => `<option value="artifact:${a}">${a.split('/').pop()}</option>`).join('') + '</optgroup>' +
-          (extGroup ? '<optgroup label="Nodes d’extensions">' + extGroup + '</optgroup>' : '');
+        renderPalette('');
+      });
+
+      function renderPalette(q) {
+        const list = document.getElementById('bp-palette-list');
+        const groups = {};
+        for (const it of paletteItems) {
+          if (q && !it.label.toLowerCase().includes(q)) continue;
+          (groups[it.group] = groups[it.group] || []).push(it);
+        }
+        list.innerHTML = Object.entries(groups).map(([g, items]) =>
+          '<div class="bp-pal-group">' + esc(g) + '</div>' +
+          items.map(it => '<div class="bp-pal-item" data-value="' + esc(it.value) + '"><span class="dot" style="background:' + it.color + '"></span>' + esc(it.label) + '</div>').join('')
+        ).join('') || '<div class="bp-pal-group">aucun résultat</div>';
+      }
+      document.getElementById('bp-palette-search').addEventListener('input', function () { renderPalette(this.value.trim().toLowerCase()); });
+      document.getElementById('bp-palette-list').addEventListener('click', e => {
+        const item = e.target.closest('[data-value]');
+        if (item && current) { addNode(item.dataset.value); }
+        else if (item) toast('Ouvrir ou créer un blueprint d’abord.');
       });
 
       document.getElementById('bp-file').addEventListener('change', function () {
@@ -325,9 +346,9 @@
         api('/api/blueprints/' + this.value).then(openBlueprint);
       });
 
-      document.getElementById('bp-add').addEventListener('click', () => {
-        if (!current) { toast('Ouvrir ou créer un blueprint d’abord.'); return; }
-        const [paletteKind, ...refParts] = palette.value.split(':');
+      function addNode(paletteValue) {
+        snapshot();
+        const [paletteKind, ...refParts] = paletteValue.split(':');
         const ref = refParts.join(':');
         const id = 'n' + Date.now().toString(36) + (seq++);
         const kind = paletteKind === 'extnode' ? 'extension-node' : paletteKind;
@@ -354,24 +375,41 @@
         }
         const bpNode = { id, kind, ref, label, pins };
         const pan = cy.pan(), zoom = cy.zoom();
-        cy.add({
+        const added = cy.add({
           data: { id, label: (kind === 'pattern' ? ref + '\n' : '') + label, bpNode },
           position: { x: (cy.width() / 2 - pan.x) / zoom, y: (cy.height() / 2 - pan.y) / zoom },
           style: { 'border-color': nodeColor(bpNode) },
         });
+        added.select();
+      }
+
+      /* ── Undo (UX v2) : instantanés avant chaque mutation ── */
+      const undoStack = [];
+      function snapshot() {
+        if (!current) return;
+        undoStack.push(JSON.stringify(serialize()));
+        if (undoStack.length > 50) undoStack.shift();
+      }
+      function undo() {
+        if (!current || !undoStack.length) { toast('Rien à annuler.'); return; }
+        openBlueprint(JSON.parse(undoStack.pop()));
+        toast('Annulé.');
+      }
+      document.getElementById('bp-undo').addEventListener('click', undo);
+      document.addEventListener('keydown', e => {
+        if (!current) return;
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && cy.$(':selected').length
+            && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) {
+          snapshot();
+          cy.$(':selected').remove();
+          showEditorHelp();
+        }
       });
 
-      document.getElementById('bp-link').addEventListener('click', function () {
-        if (!current) { toast('Ouvrir un blueprint d’abord.'); return; }
-        linkSource = null;
-        this.classList.toggle('armed');
-        toast(this.classList.contains('armed')
-          ? 'Mode connexion : cliquer le node source puis le node cible.'
-          : 'Mode connexion désactivé.');
-      });
-
-      // Connexion typée (H4) : les contrats des pins doivent correspondre,
-      // sinon la connexion est refusée — le dessin suit le pseudo-code.
+      /* ── Connexion typée par drag (edgehandles) ──
+         Glisser depuis le bord d'un node vers un autre : la connexion se
+         crée si un contrat commun existe, sinon elle est refusée. */
       function compatiblePins(src, dst) {
         const outs = (src.data('bpNode').pins || []).filter(p => p.direction === 'out');
         const ins = (dst.data('bpNode').pins || []).filter(p => p.direction === 'in');
@@ -379,35 +417,102 @@
         return { outs, ins };
       }
 
-      cy.on('tap', 'node', evt => {
-        const armed = document.getElementById('bp-link').classList.contains('armed');
-        if (!armed || !current) return;
-        if (!linkSource) { linkSource = evt.target; toast('Source : ' + linkSource.id()); return; }
-        const target = evt.target;
-        if (target.id() !== linkSource.id()) {
-          const match = compatiblePins(linkSource, target);
-          if (!match.o) {
-            const outC = (match.outs || []).map(p => p.contract).join(', ') || 'aucun';
-            const inC = (match.ins || []).map(p => p.contract).join(', ') || 'aucun';
-            toast('Connexion refusée : contrats incompatibles.\nSorties : ' + outC + '\nEntrées : ' + inC, 5000);
-          } else {
-            const bpEdge = {
-              from: linkSource.id() + '.' + match.o.id,
-              to: target.id() + '.' + match.i.id,
-              contract: match.o.contract,
-            };
-            cy.add({ data: { id: 'be' + Date.now().toString(36), source: linkSource.id(), target: target.id(), kind: 'depends', bpEdge } });
-            toast('Connecté via contrat ' + match.o.contract + '.');
-          }
-        }
-        linkSource = null;
-        document.getElementById('bp-link').classList.remove('armed');
+      let eh = null;
+      if (typeof cy.edgehandles === 'function') {
+        eh = cy.edgehandles({
+          canConnect: (source, target) =>
+            Boolean(current) && source.id() !== target.id() && Boolean(compatiblePins(source, target).o),
+          edgeParams: () => ({ data: { kind: 'depends' } }),
+          snap: true,
+        });
+      } else {
+        toast('Plugin de connexion indisponible — drag désactivé.');
+      }
+
+      cy.on('ehcomplete', (evt, source, target, added) => {
+        snapshot();
+        const match = compatiblePins(source, target);
+        added.data('bpEdge', {
+          from: source.id() + '.' + match.o.id,
+          to: target.id() + '.' + match.i.id,
+          contract: match.o.contract,
+        });
+        toast('Connecté via contrat ' + match.o.contract + '.');
       });
 
-      document.getElementById('bp-del').addEventListener('click', () => {
-        if (!current) return;
-        cy.$(':selected').remove();
+      // Refus visuel : si le drag se termine sur un node incompatible
+      cy.on('ehstop', (evt, source) => {
+        if (!source || !current) return;
       });
+      cy.on('mouseover', 'node', evt => {
+        if (current) evt.target.addClass('eh-hoverable');
+      });
+
+      /* Le drag de connexion démarre depuis le bord du node (Maj+glisser
+         pour forcer), le corps du node reste déplaçable. */
+      let ehKeyDown = false;
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Shift' && current && eh && !ehKeyDown) { ehKeyDown = true; eh.enableDrawMode(); }
+      });
+      document.addEventListener('keyup', e => {
+        if (e.key === 'Shift' && ehKeyDown && eh) { ehKeyDown = false; eh.disableDrawMode(); }
+      });
+
+      /* ── Layout automatique ── */
+      document.getElementById('bp-layout').addEventListener('click', () => {
+        if (!current) { toast('Ouvrir un blueprint d’abord.'); return; }
+        snapshot();
+        cy.layout({ name: 'breadthfirst', directed: true, spacingFactor: 1.4, padding: 60, fit: true }).run();
+      });
+
+      /* ── Panneau propriétés du node sélectionné (UX v2) ── */
+      const detailPanel = document.getElementById('bp-detail');
+      function showEditorHelp() {
+        detailPanel.innerHTML = '<div class="empty">Mode édition.<br/><br/>'
+          + '- Palette (gauche) : cliquer pour ajouter un node.<br/>'
+          + '- Glisser un node pour le déplacer.<br/>'
+          + '- <b>Maj + glisser</b> depuis un node pour le connecter (contrats vérifiés).<br/>'
+          + '- Sélectionner un node : propriétés ici.<br/>'
+          + '- Suppr : retirer la sélection · Ctrl+Z : annuler.</div>';
+        detailPanel.classList.add('open');
+      }
+      window.__bpShowHelp = showEditorHelp;
+
+      window.__bpShowProps = function (n) {
+        if (!current) return;
+        const bpNode = n.data('bpNode');
+        if (!bpNode) return;
+        const contracts = (cat.contracts || []).map(c => c.id);
+        const pinRow = (pin, idx) => '<div class="bp-d-rel"><span class="k">' + esc(pin.direction) + '</span>'
+          + '<select data-pin="' + idx + '" style="background:var(--bg);border:1px solid var(--line);color:var(--ink);font-family:var(--font-mono);font-size:.6rem;padding:2px 4px;border-radius:var(--r-sm)">'
+          + contracts.map(c => '<option value="' + esc(c) + '"' + (c === pin.contract ? ' selected' : '') + '>' + esc(c) + '</option>').join('')
+          + '</select></div>';
+        detailPanel.innerHTML =
+          '<span class="bp-d-id" style="color:' + nodeColor(bpNode) + ';border-color:' + nodeColor(bpNode) + '">' + esc(bpNode.kind) + '</span>'
+          + '<div class="bp-d-sec" style="margin-top:10px"><h4>Label</h4>'
+          + '<input id="bp-prop-label" type="text" value="' + esc(bpNode.label) + '" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);font-family:var(--font-mono);font-size:.7rem;padding:6px 8px;border-radius:var(--r-sm)"/></div>'
+          + '<div class="bp-d-sec"><h4>Référence</h4><p style="word-break:break-all">' + esc(bpNode.ref) + '</p></div>'
+          + '<div class="bp-d-sec"><h4>Pins — contrats</h4>' + (bpNode.pins || []).map(pinRow).join('') + '</div>'
+          + '<button type="button" class="bp-btn" id="bp-prop-del" style="color:var(--data-red);border-color:rgba(248,113,113,.4)">SUPPRIMER LE NODE</button>';
+        detailPanel.classList.add('open');
+        document.getElementById('bp-prop-label').addEventListener('change', function () {
+          snapshot();
+          bpNode.label = this.value;
+          n.data('label', (bpNode.kind === 'pattern' ? bpNode.ref + '\n' : '') + this.value);
+        });
+        detailPanel.querySelectorAll('[data-pin]').forEach(sel => {
+          sel.addEventListener('change', function () {
+            snapshot();
+            bpNode.pins[Number(this.dataset.pin)].contract = this.value;
+            toast('Contrat du pin mis à jour — les edges existants seront revalidés au lint.');
+          });
+        });
+        document.getElementById('bp-prop-del').addEventListener('click', () => {
+          snapshot();
+          n.remove();
+          showEditorHelp();
+        });
+      };
 
       function lintReport(r) {
         const parts = [];
