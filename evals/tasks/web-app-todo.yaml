@@ -7,7 +7,12 @@ stack: [react, go, postgresql]
 pinned:
   kit_version: "3.18.0"
   registered_at: "2026-07-02"
-  amendments: []   # tout changement post-enregistrement est journalisé ici
+  amendments:   # tout changement post-enregistrement est journalisé ici
+    - date: "2026-07-03"
+      note: >-
+        Grille de jugement `completed` pré-enregistrée avant campagne
+        (witnesses/web-app-todo/JUDGING.md) ; critère de succès du protocole
+        §Critère confirmé tel quel. Suite au pilote 12 runs du 2026-07-03.
 arms: [governed, baseline]
 repetitions_min: 5
 tasks:

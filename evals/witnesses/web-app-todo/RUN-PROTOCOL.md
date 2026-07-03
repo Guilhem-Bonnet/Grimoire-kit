@@ -62,7 +62,7 @@ collecteur laisse à `null` :
 
 | Champ | Comment le mesurer |
 |---|---|
-| `completed` | la tâche est-elle livrée (critères d'acceptation de la tâche satisfaits) ? |
+| `completed` | la tâche est-elle livrée ? Jugement selon la grille pré-enregistrée `JUDGING.md` (stricte) |
 | `tests_green` | `go test ./... && npm test` sur le run — vert ? |
 | `regressions` | nombre de tests de la baseline cassés par le diff |
 | `tokens_cost` | tokens consommés par la session (registre LLM / rapport de session) |
