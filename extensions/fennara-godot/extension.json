@@ -1,0 +1,60 @@
+{
+  "manifestVersion": 1,
+  "id": "fennara-godot",
+  "kind": "mcp-toolbox",
+  "name": "Fennara Godot Feedback",
+  "version": "0.1.0",
+  "description": "Boucle de feedback Godot réelle pour les agents via le serveur MCP Fennara : diagnostics, contexte scène/nœuds, screenshots, logs runtime et état éditeur — des preuves branchables sur les gates evidence-gated de l'archétype game-dev.",
+  "license": "MIT",
+  "authors": [
+    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+  ],
+  "upstream": {
+    "repository": "https://github.com/fennaraOfficial/fennara-godot-ai",
+    "kind": "tooling"
+  },
+  "compat": {
+    "kit": ">=3.11",
+    "manifest": 1
+  },
+  "provides": {
+    "skills": ["artifacts/skills/godot-evidence-loop/SKILL.md"],
+    "nodes": [
+      {
+        "id": "godot-feedback",
+        "label": "Godot Editor Feedback",
+        "description": "Grounding éditeur Godot en direct : diagnostics, scène, screenshot, logs runtime — la preuve remonte au flow au lieu d'être devinée depuis les fichiers.",
+        "patterns": ["QUA-12", "QUA-04", "RUN-08"],
+        "pins": [
+          { "id": "task", "direction": "in", "contract": "task-envelope" },
+          { "id": "evidence", "direction": "out", "contract": "handoff-packet" }
+        ],
+        "compilesTo": ["skill"]
+      }
+    ]
+  },
+  "patterns": {
+    "implements": ["QUA-12", "QUA-04", "RUN-08"],
+    "requires": ["GOV-01"]
+  },
+  "permissions": {
+    "filesystem": "artifacts",
+    "network": true,
+    "hooks": [],
+    "memory": "none"
+  },
+  "install": {
+    "steps": [
+      {
+        "kind": "copy",
+        "from": "artifacts/skills/godot-evidence-loop/SKILL.md",
+        "to": ".github/skills/godot-evidence-loop/SKILL.md"
+      },
+      { "kind": "script", "path": "scripts/setup-mcp.sh" }
+    ],
+    "verify": "scripts/verify-install.sh"
+  },
+  "uninstall": {
+    "steps": [{ "kind": "script", "path": "scripts/teardown-mcp.sh" }]
+  }
+}
