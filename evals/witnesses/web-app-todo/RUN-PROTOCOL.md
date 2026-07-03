@@ -23,7 +23,9 @@ cd "$RUN_DIR"
 
 # 2. Enrôlement — SEULEMENT pour le bras governed
 #    (bras baseline : sauter cette étape, aucun artefact standard)
-grimoire init . --yes            # projet Grimoire minimal
+#    NB : `--yes` n'existe pas dans le CLI 3.18.0 ; archétype et backend
+#    explicites pour un enrôlement déterministe et non interactif.
+grimoire init . -a web-app -b local                 # projet Grimoire minimal
 grimoire standard init . --needs solo-prototyping   # profil starter + gates
 ```
 

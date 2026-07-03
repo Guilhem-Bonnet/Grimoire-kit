@@ -66,10 +66,20 @@ def collect_standard_metrics(project_root: Path, task_id: str) -> dict[str, Any]
 
 
 def collect_record(project_root: Path, witness: str, task_id: str, arm: str) -> dict[str, Any]:
-    """Construit un run-record complet, métriques externes à null."""
+    """Construit un run-record complet, métriques externes à null.
+
+    Le bloc ``standard`` n'a de sens que pour le bras ``governed`` : le bras
+    ``baseline`` ne reçoit aucun artefact du standard, ses métriques restent
+    ``null`` (protocole §Collecte).
+    """
     if arm not in ARMS:
         msg = f"arm invalide {arm!r} — attendu : {', '.join(ARMS)}"
         raise ValueError(msg)
+    standard = (
+        collect_standard_metrics(project_root.resolve(), task_id)
+        if arm == "governed"
+        else None
+    )
     return {
         "$schema": "grimoire-evals-run-record/v1",
         "collected_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -77,7 +87,7 @@ def collect_record(project_root: Path, witness: str, task_id: str, arm: str) -> 
         "witness": witness,
         "task_id": task_id,
         "arm": arm,
-        "standard": collect_standard_metrics(project_root.resolve(), task_id),
+        "standard": standard,
         "external": {
             "completed": None,
             "tests_green": None,
