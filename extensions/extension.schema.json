@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grimoire-forge.dev/schemas/extension/v1",
+  "title": "Grimoire Forge Extension Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "id",
+    "name",
+    "version",
+    "description",
+    "license",
+    "authors",
+    "compat",
+    "provides",
+    "patterns",
+    "permissions",
+    "install"
+  ],
+  "properties": {
+    "manifestVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "kind"],
+      "properties": {
+        "repository": { "type": "string", "format": "uri" },
+        "kind": {
+          "type": "string",
+          "enum": ["framework", "observability", "memory", "tooling"]
+        },
+        "pinnedVersion": { "type": "string" }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kit", "manifest"],
+      "properties": {
+        "kit": {
+          "type": "string",
+          "description": "Contrainte semver sur grimoire-kit, ex. >=3.11"
+        },
+        "manifest": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "provides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agents": { "$ref": "#/$defs/relativePathList" },
+        "skills": { "$ref": "#/$defs/relativePathList" },
+        "hooks": { "$ref": "#/$defs/relativePathList" },
+        "workflows": { "$ref": "#/$defs/relativePathList" },
+        "instructions": { "$ref": "#/$defs/relativePathList" },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nodeContribution" }
+        }
+      }
+    },
+    "patterns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implements"],
+      "properties": {
+        "implements": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/patternId" }
+        },
+        "requires": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/patternId" }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesystem", "network", "hooks", "memory"],
+      "properties": {
+        "filesystem": {
+          "type": "string",
+          "enum": ["none", "artifacts", "workspace"]
+        },
+        "network": { "type": "boolean" },
+        "hooks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "SessionStart",
+              "UserPromptSubmit",
+              "PreToolUse",
+              "PostToolUse",
+              "PreCompact",
+              "SubagentStart",
+              "SubagentStop",
+              "Stop"
+            ]
+          }
+        },
+        "memory": {
+          "type": "string",
+          "enum": ["none", "read", "readwrite"]
+        }
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/installStep" }
+        },
+        "verify": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "uninstall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/installStep" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "patternId": {
+      "type": "string",
+      "pattern": "^(ORG|ORC|GOV|QUA|KNO|RUN|COG|MOD)-\\d{2}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*\\.\\.)[^\\0]+$",
+      "description": "Chemin relatif à la racine de l'extension, sans remontée"
+    },
+    "relativePathList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relativePath" }
+    },
+    "nodeContribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "patterns", "pins", "compilesTo"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/patternId" }
+        },
+        "pins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "direction", "contract"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "direction": { "type": "string", "enum": ["in", "out"] },
+              "contract": {
+                "type": "string",
+                "description": "ID de contrat de l'export catalogue, ex. task-envelope"
+              }
+            }
+          }
+        },
+        "compilesTo": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["agent", "skill", "hook", "workflow", "instruction"]
+          }
+        }
+      }
+    },
+    "installStep": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["copy", "script", "pip", "npm"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "copy" } } },
+          "then": {
+            "required": ["from", "to"],
+            "properties": {
+              "kind": true,
+              "from": { "$ref": "#/$defs/relativePath" },
+              "to": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "script" } } },
+          "then": {
+            "required": ["path"],
+            "properties": {
+              "kind": true,
+              "path": { "$ref": "#/$defs/relativePath" },
+              "args": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "pip" } } },
+          "then": {
+            "required": ["packages"],
+            "properties": {
+              "kind": true,
+              "packages": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "npm" } } },
+          "then": {
+            "required": ["packages"],
+            "properties": {
+              "kind": true,
+              "packages": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}
