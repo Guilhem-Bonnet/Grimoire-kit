@@ -292,6 +292,42 @@ class TestAgentCaller(unittest.TestCase):
         spec = caller.get_agent_schema("nonexistent-agent")
         self.assertIsNone(spec)
 
+    def test_routing_consults_router_with_correct_signature(self):
+        # Regression (issue #39 C1): the caller must invoke the router as
+        # LLMRouter().route(prompt=..., agent_id=...). The old code used invalid
+        # kwargs (LLMRouter(project_root=...) then route(task_description=...)),
+        # raising a TypeError that was swallowed, so model_used silently fell back
+        # to the hardcoded default. A strict spy (real signature only) is injected
+        # as the router module so the path is exercised regardless of whether the
+        # optional llm-router shim is present on the branch.
+        import types
+
+        caller = self.mod.AgentCaller(self.tmpdir)
+        calls: dict = {}
+
+        class _Decision:
+            selected_model = "grimoire-spy-model"
+
+        class _SpyRouter:
+            def __init__(self):  # strict: rejects project_root=
+                pass
+
+            def route(self, prompt, agent_id=""):  # strict: rejects task_description=
+                calls["prompt"] = prompt
+                calls["agent_id"] = agent_id
+                return _Decision()
+
+        caller._router_mod = types.SimpleNamespace(LLMRouter=_SpyRouter)
+        req = self.mod.AgentCallRequest(
+            from_agent="pm", to_agent="dev", task="review the auth module"
+        )
+        resp = caller.call(req)
+
+        # The router was reached with the correct kwargs and its result was used.
+        self.assertEqual(calls.get("prompt"), "review the auth module")
+        self.assertEqual(calls.get("agent_id"), "dev")
+        self.assertEqual(resp.model_used, "grimoire-spy-model")
+
     def test_call_standalone_is_simulated(self):
         # Sans backend LLM, call() formate le prompt et doit le dire :
         # status="simulated", pas "success" (issue #33 — métriques honnêtes).

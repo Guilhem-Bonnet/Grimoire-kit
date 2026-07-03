@@ -100,6 +100,39 @@ class TestAgentWorkerManager(unittest.TestCase):
         self.assertTrue(ws.worker_id)
         self.assertTrue(ws.model)  # Should resolve a model
 
+    def test_resolve_model_returns_str_when_router_present(self):
+        # Regression (issue #39 C2): _resolve_model must return a concrete model
+        # id (str). The old code called TaskClassifier.classify(), returning a
+        # TaskClassification object (a truthy value that passed the weak
+        # ``assertTrue(ws.model)`` check, masking the bug). A fake router module
+        # is injected so the routing path is exercised on any branch, even when
+        # the optional llm-router shim is absent.
+        import types
+
+        class _Classification:  # what classify() used to return (non-str)
+            selected_model = "grimoire-spy-model"
+            suggested_model = ""
+
+        class _FakeClassifier:
+            def classify(self, *_a, **_k):
+                return _Classification()
+
+        class _FakeRouter:
+            def route(self, *_a, **_k):
+                return _Classification()
+
+        self.mgr._router_mod = types.SimpleNamespace(
+            TaskClassifier=_FakeClassifier, LLMRouter=_FakeRouter
+        )
+        model = self.mgr._resolve_model("dev")
+        self.assertIsInstance(model, str)
+        self.assertEqual(model, "grimoire-spy-model")
+
+    def test_started_worker_model_is_str(self):
+        # Regression (issue #39 C2): the persisted worker.model must be a str.
+        ws = self.mgr.start_worker("architect")
+        self.assertIsInstance(ws.model, str)
+
     def test_start_unknown_agent(self):
         with self.assertRaises(ValueError):
             self.mgr.start_worker("nonexistent-agent")
