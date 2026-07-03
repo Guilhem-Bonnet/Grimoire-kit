@@ -232,13 +232,11 @@ def analyze_trace(
                         include = line_dt >= since_dt
                     except ValueError as _exc:
                         _log.debug("ValueError suppressed: %s", _exc)
-                        # Silent exception — add logging when investigating issues
                 if include:
                     filtered_lines.append(line)
             lines = filtered_lines or lines
         except ValueError as _exc:
             _log.debug("ValueError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Extraire le contexte d'agent courant
     current_agent = "unknown"

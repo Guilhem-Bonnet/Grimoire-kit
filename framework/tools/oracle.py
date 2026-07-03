@@ -131,7 +131,6 @@ def _git_stats(project_root: Path) -> dict:
 
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError) as _exc:
         _log.debug("subprocess.TimeoutExpired, FileNotFoundError, ValueError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return stats
 
 
@@ -213,7 +212,6 @@ def analyze_swot(project_root: Path) -> SWOT:
             todo_count += content.upper().count("TODO")
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     if todo_count > 20:
         swot.weaknesses.append(SWOTItem(
             text=f"{todo_count} TODO dans le code",
@@ -308,7 +306,6 @@ def analyze_attractors(project_root: Path) -> list[Attractor]:
                     ))
         except (subprocess.TimeoutExpired, FileNotFoundError) as _exc:
             _log.debug("subprocess.TimeoutExpired, FileNotFoundError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Taille relative des composants
     component_sizes: dict[str, int] = {}

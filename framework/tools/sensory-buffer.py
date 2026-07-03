@@ -135,7 +135,6 @@ def _next_item_id(items: list[SensoryItem]) -> str:
                 max_num = max(max_num, num)
             except ValueError as _exc:
                 _log.debug("ValueError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return f"si-{max_num + 1:03d}"
 
 
@@ -392,7 +391,6 @@ def cmd_flush(root: Path, agent: str, older_than: str | None,
                     should_flush = True
             except (ValueError, TypeError) as _exc:
                 _log.debug("ValueError, TypeError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         # Critère de force
         if below_strength is not None:

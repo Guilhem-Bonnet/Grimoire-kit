@@ -263,7 +263,6 @@ class ToolDiscoverer:
                     description = description[:197] + "..."
         except SyntaxError as _exc:
             _log.debug("SyntaxError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
         # Extract version
         version_match = re.search(r'(\w+_VERSION)\s*=\s*["\']([^"\']+)["\']', source)

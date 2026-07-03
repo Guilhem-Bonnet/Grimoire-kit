@@ -122,7 +122,6 @@ def scan_patterns(project_root: Path) -> list[Pattern]:
                             break
                 except OSError as _exc:
                     _log.debug("OSError suppressed: %s", _exc)
-                    # Silent exception — add logging when investigating issues
 
                 patterns.append(Pattern(
                     id=f"PAT-{idx:03d}",
@@ -172,7 +171,6 @@ def export_patterns(project_root: Path, output: Path, patterns: list[Pattern],
             exported += 1
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Manifest
     manifest = {

@@ -119,17 +119,40 @@ def _hash_result(result: str) -> str:
 
 import re as _re  # noqa: E402
 
-# Patterns that indicate prompt injection attempts in MCP inputs
+# Patterns that indicate prompt injection attempts in MCP inputs.
+# Défense en profondeur HEURISTIQUE (issue #39 C8) : ces regex ne prétendent
+# pas à l'exhaustivité — les entrées sont normalisées (percent-decoding,
+# zero-width) avant scan pour couvrir les obfuscations courantes.
 _INJECTION_PATTERNS = [
     _re.compile(r"<\s*system\s*>", _re.IGNORECASE),
     _re.compile(r"<\s*/?\s*(?:tool_use|function_call|tool_result)\s*>", _re.IGNORECASE),
-    _re.compile(r"\bignore\s+(?:all\s+)?(?:previous|above)\s+instructions?\b", _re.IGNORECASE),
+    _re.compile(r"\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?\b", _re.IGNORECASE),
     _re.compile(r"\byou\s+are\s+now\b.*\bassistant\b", _re.IGNORECASE),
     _re.compile(r"\[\s*SYSTEM\s*\]", _re.IGNORECASE),
+    _re.compile(r"<\|im_(?:start|end)\|>", _re.IGNORECASE),
 ]
 
-# Path traversal patterns
-_PATH_TRAVERSAL_PATTERN = _re.compile(r"(?:\.\./|\.\.\\){2,}")
+# Path traversal : un segment `../` isolé reste PERMIS (chemins relatifs
+# légitimes, décision testée par test_single_dotdot_allowed) ; deux segments
+# ou plus — consécutifs ou non (`../a/../b`) — sont rejetés. Le comptage se
+# fait sur l'entrée normalisée, donc `%2e%2e%2f` ne contourne plus le filtre.
+_TRAVERSAL_SEGMENT = _re.compile(r"\.\.[/\\]")
+
+# Caractères zero-width utilisés pour casser les mots-clés d'injection
+_ZERO_WIDTH_MAP = dict.fromkeys(map(ord, "​‌‍⁠﻿"))
+
+
+def _normalize_for_scan(value: str) -> str:
+    """Normalise une entrée avant scan : zero-width strippés, percent-decode (2 passes max)."""
+    from urllib.parse import unquote
+
+    text = value.translate(_ZERO_WIDTH_MAP)
+    for _ in range(2):
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
 
 
 def _sanitize_mcp_input(args: dict) -> dict:
@@ -140,14 +163,15 @@ def _sanitize_mcp_input(args: dict) -> dict:
     sanitized = {}
     for key, value in args.items():
         if isinstance(value, str):
+            normalized = _normalize_for_scan(value)
             # Check for prompt injection
             for pattern in _INJECTION_PATTERNS:
-                if pattern.search(value):
+                if pattern.search(normalized):
                     raise ValueError(
                         f"[STOP] Entrée rejetée — pattern d'injection détecté dans '{key}'"
                     )
-            # Check for aggressive path traversal
-            if _PATH_TRAVERSAL_PATTERN.search(value):
+            # Check for path traversal (≥2 segments, même non consécutifs)
+            if len(_TRAVERSAL_SEGMENT.findall(normalized)) >= 2:
                 raise ValueError(
                     f"[STOP] Entrée rejetée — traversée de chemin détectée dans '{key}'"
                 )
@@ -395,7 +419,6 @@ def _call_discovered_tool(tool_name: str, args: dict) -> str:
                     val = int(val)
                 except ValueError as _exc:
                     _log.debug("ValueError suppressed: %s", _exc)
-                    # Silent exception — add logging when investigating issues
             call_args[param_name] = val
         elif param.default != inspect.Parameter.empty:
             pass  # Let the function use its default

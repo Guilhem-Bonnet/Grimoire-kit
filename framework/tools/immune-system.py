@@ -280,7 +280,6 @@ def scan_innate(project_root: Path, target: str = "") -> tuple[list[Finding], in
                             ))
                 except (OSError, UnicodeDecodeError) as _exc:
                     _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                    # Silent exception — add logging when investigating issues
 
     return findings, files_scanned
 
@@ -367,10 +366,8 @@ def scan_adaptive(project_root: Path, target: str = "") -> tuple[list[Finding], 
                             ))
                     except re.error as _exc:
                         _log.debug("re.error suppressed: %s", _exc)
-                        # Silent exception — add logging when investigating issues
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return findings, len(antibodies)
 

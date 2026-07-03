@@ -139,7 +139,6 @@ def _parse_trace_json(fpath: Path) -> list[TraceEntry]:
                 ))
     except (json.JSONDecodeError, OSError, ValueError) as _exc:
         _log.debug("json.JSONDecodeError, OSError, ValueError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return entries
 
 
@@ -161,7 +160,6 @@ def _parse_trace_log(fpath: Path) -> list[TraceEntry]:
                 ))
     except (OSError, UnicodeDecodeError) as _exc:
         _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return entries
 
 
@@ -200,7 +198,6 @@ def _synthesize_workflow_files(project_root: Path) -> list[WorkflowStats]:
                     ws.step_usage[step_name] = 0
             except (OSError, UnicodeDecodeError) as _exc:
                 _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
             stats.append(ws)
     return stats
 
@@ -306,7 +303,6 @@ def detect_from_workflow_structure(project_root: Path) -> list[Adaptation]:
                     ))
             except (OSError, UnicodeDecodeError) as _exc:
                 _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return adaptations
 
 
@@ -337,7 +333,6 @@ def save_history(project_root: Path, report: AdaptReport) -> Path:
             history = json.loads(out.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as _exc:
             _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     entry = {
         "timestamp": datetime.now().isoformat(),
         "workflows_analyzed": report.workflows_analyzed,

@@ -326,7 +326,6 @@ class SyncStateManager:
             self.state.file_hashes[str(filepath)] = hashlib.sha256(filepath.read_bytes()).hexdigest()
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
 
 # ── Memory Syncer ────────────────────────────────────────────────────────────

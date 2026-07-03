@@ -858,7 +858,6 @@ def read_last_dream_timestamp(project_root: Path) -> str | None:
             return ts
     except OSError as _exc:
         _log.debug("OSError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return None
 
 

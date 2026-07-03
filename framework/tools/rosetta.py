@@ -197,7 +197,6 @@ def build_glossary(project_root: Path) -> Glossary:
                     scanned += 1
                 except (OSError, UnicodeDecodeError) as _exc:
                     _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                    # Silent exception — add logging when investigating issues
 
     # Construire les entrées
     all_terms: set[str] = set()
@@ -268,7 +267,6 @@ def trace_etymology(project_root: Path, term: str) -> EtymologyRecord:
                 })
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Construire l'étymologie
     if mentions:

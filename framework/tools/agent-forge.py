@@ -458,7 +458,6 @@ def read_project_context(ctx_path: Path) -> dict:
                     ctx[key] = value
     except OSError as _exc:
         _log.debug("OSError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return ctx
 
 
@@ -476,7 +475,6 @@ def read_active_dna(archetypes_dir: Path) -> list[str]:
                     ac_items.append(desc)
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     return ac_items[:10]  # Max 10 pour ne pas surcharger
 
 

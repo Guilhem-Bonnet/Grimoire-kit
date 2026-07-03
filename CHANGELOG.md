@@ -7,6 +7,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé (issue #39 — suite)
+
+- **Sanitisation MCP durcie** (C8) : les entrées sont normalisées avant scan
+  (percent-decoding, caractères zero-width) — `%2e%2e%2f` et les mots-clés
+  d'injection obfusqués ne contournent plus le filtre ; la traversée de chemin
+  est détectée dès 2 segments même non consécutifs (`../a/../b`), le `../`
+  isolé restant permis (chemins relatifs légitimes). Patterns d'injection
+  élargis (disregard/forget/prior/earlier, marqueurs `<|im_start|>`),
+  explicitement documentés comme heuristiques. 7 tests.
+- **Commentaires « Silent exception » obsolètes retirés** (C5) : 100
+  occurrences dans 42 outils pointaient « add logging » au-dessus de lignes
+  qui loggent déjà — le cœur de C5 (chemins de routage) avait été traité
+  par #41 avec des warnings contextualisés.
+
+
 ## [3.21.0] - 2026-07-03
 
 ### Ajouté

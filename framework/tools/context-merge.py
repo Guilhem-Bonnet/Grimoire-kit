@@ -439,7 +439,6 @@ class ContextMerger:
                         mgr._save_branch_info(source_info)
             except Exception as _exc:
                 _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         # Write merge log
         self._write_merge_log(result)

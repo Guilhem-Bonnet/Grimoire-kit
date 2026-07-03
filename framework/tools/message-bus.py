@@ -385,7 +385,6 @@ class RedisBus(MessageBus):
                     return AgentMessage.from_dict(data)
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
         return None
 
     def subscribe(self, agent_id: str, pattern: str) -> bool:
@@ -438,7 +437,6 @@ class RedisBus(MessageBus):
                 self._redis.close()
             except Exception as _exc:
                 _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
 
 # ── NATSBus (stub) ──────────────────────────────────────────────────────────
@@ -461,7 +459,6 @@ class NATSBus(MessageBus):
             self._available = True
         except ImportError as _exc:
             _log.debug("ImportError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:

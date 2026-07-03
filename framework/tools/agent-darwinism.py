@@ -273,7 +273,6 @@ def parse_trace_stats(trace_path: Path,
             since_dt = datetime.fromisoformat(since)
         except ValueError as _exc:
             _log.debug("ValueError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     current_header: dict = {}
     content_lines: list[str] = []
@@ -296,7 +295,6 @@ def parse_trace_stats(trace_path: Path,
                     return
             except ValueError as _exc:
                 _log.debug("ValueError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         if ag not in agents:
             agents[ag] = RawAgentStats(agent_id=ag)
@@ -348,7 +346,6 @@ def parse_trace_stats(trace_path: Path,
         flush()
     except OSError as _exc:
         _log.debug("OSError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
 
     return agents
 
@@ -368,7 +365,6 @@ def count_agent_learnings(project_root: Path) -> dict[str, int]:
             counts[agent] = count
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     return counts
 
 

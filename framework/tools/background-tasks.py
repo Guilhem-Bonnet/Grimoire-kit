@@ -367,7 +367,6 @@ class BackgroundTaskManager:
                     os.kill(task.pid, signal.SIGKILL)
             except (OSError, ProcessLookupError) as _exc:
                 _log.debug("OSError, ProcessLookupError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         task.status = "cancelled"
         task.completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
