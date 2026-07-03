@@ -172,7 +172,6 @@ def analyze_agents(project_root: Path, use_git: bool) -> list[DesireEntry]:
                         used_agents[agent_name] += count
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     # Git activity
     if use_git:
@@ -227,7 +226,6 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
                     used_wf[wf_name] += count
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Chercher dans session-state et shared-context
     for md in project_root.glob("_grimoire/_memory/*.md"):
@@ -239,7 +237,6 @@ def analyze_workflows(project_root: Path, use_git: bool) -> list[DesireEntry]:
                     used_wf[wf_name] += count
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     all_wf = designed_wf | set(used_wf.keys())
     for wf in sorted(all_wf):
@@ -284,7 +281,6 @@ def analyze_tools(project_root: Path, use_git: bool) -> list[DesireEntry]:
                         used_tools[tool_name] += 1
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     # Git activity
     git_activity: dict[str, int] = {}

@@ -461,7 +461,6 @@ def save_result(result: ConsensusResult, project_root: Path) -> Path:
             history = json.loads(history_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as _exc:
             _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     entry = {
         "hash": result.decision_hash,

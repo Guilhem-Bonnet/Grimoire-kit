@@ -177,7 +177,6 @@ def extract_agent_tag(agent_file: Path) -> str:
             return m.group(1).strip()
     except OSError as _exc:
         _log.debug("OSError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return agent_file.stem
 
 

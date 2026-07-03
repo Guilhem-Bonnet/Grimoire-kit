@@ -568,7 +568,6 @@ def _collect_retro_pheromones(project_root: Path) -> list[RetroItem]:
                 ))
     except Exception as _exc:
         _log.debug("Exception suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return items
 
 
@@ -597,7 +596,6 @@ def _collect_retro_lint(project_root: Path) -> list[RetroItem]:
                 ))
     except Exception as _exc:
         _log.debug("Exception suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return items
 
 
@@ -627,7 +625,6 @@ def _collect_retro_antifragile(project_root: Path) -> list[RetroItem]:
                 ))
     except Exception as _exc:
         _log.debug("Exception suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     return items
 
 

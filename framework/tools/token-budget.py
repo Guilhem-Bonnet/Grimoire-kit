@@ -144,7 +144,6 @@ class TiktokenCounter(TokenCounter):
                 self._encoding = tiktoken.get_encoding("cl100k_base")
         except ImportError as _exc:
             _log.debug("ImportError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     def count(self, text: str) -> int:
         if self._encoding is None:
@@ -323,7 +322,6 @@ class TokenBudgetEnforcer:
                 return files
             except Exception as _exc:
                 _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         # Fallback: scan memory / agent files manually
         for pattern, prio in [

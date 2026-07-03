@@ -541,7 +541,6 @@ class EmbeddingProvider:
                 return
             except ImportError as _exc:
                 _log.debug("ImportError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         # Sinon, ollama
         if ollama_url:

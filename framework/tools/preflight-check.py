@@ -189,7 +189,6 @@ def check_tools_available(project_root: Path) -> list[Check]:
                         in_tools = False
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return checks
 
@@ -267,7 +266,6 @@ def check_memory_state(project_root: Path) -> list[Check]:
                 ))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Session state périmé
     session_state = memory_dir / "session-state.md"
@@ -284,7 +282,6 @@ def check_memory_state(project_root: Path) -> list[Check]:
                 ))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     # Requêtes inter-agents en attente
     shared_context = memory_dir / "shared-context.md"
@@ -301,7 +298,6 @@ def check_memory_state(project_root: Path) -> list[Check]:
                 ))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return checks
 
@@ -588,7 +584,6 @@ def check_wuwei(project_root: Path, agent: str) -> list[Check]:
                 ))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return checks
 

@@ -134,7 +134,6 @@ class EmbeddingProvider:
             self._available = True
         except ImportError as _exc:
             _log.debug("ImportError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:
@@ -186,7 +185,6 @@ class QdrantHistoryBackend:
             self._available = True
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     @property
     def available(self) -> bool:

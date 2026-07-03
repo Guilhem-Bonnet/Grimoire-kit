@@ -231,7 +231,6 @@ class CallHistoryManager:
                     return json.load(f)
             except (json.JSONDecodeError, OSError) as _exc:
                 _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
         return []
 
     def _save(self, entries: list[dict]) -> None:

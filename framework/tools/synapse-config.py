@@ -231,7 +231,6 @@ def _parse_yaml_simple(text: str) -> dict:
         return yaml.safe_load(text) or {}
     except ImportError as _exc:
         _log.debug("ImportError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
 
     # Fallback: mini parser ligne par ligne
     result: dict = {}
@@ -292,12 +291,10 @@ def _coerce_value(val: str):
         return int(val)
     except ValueError as _exc:
         _log.debug("ValueError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     try:
         return float(val)
     except ValueError as _exc:
         _log.debug("ValueError suppressed: %s", _exc)
-        # Silent exception — add logging when investigating issues
     # Strip quotes
     if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
         return val[1:-1]
@@ -334,7 +331,6 @@ def load_synapse_config(project_root: str | Path) -> SynapseConfig:
                 break
             except Exception as _exc:
                 _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     _CONFIG_CACHE[cache_key] = config
     return config

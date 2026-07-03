@@ -135,7 +135,6 @@ class CacheStatsManager:
                     return json.load(f)
             except (json.JSONDecodeError, OSError) as _exc:
                 _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
         return {"hits": 0, "misses": 0, "tokens_saved": 0, "stores": 0}
 
     def _save(self) -> None:
@@ -248,7 +247,6 @@ class SemanticCache:
                 return True
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
         return False
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
@@ -324,7 +322,6 @@ class SemanticCache:
 
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
         self._stats.record_miss()
         return result
@@ -494,7 +491,6 @@ class SemanticCache:
 
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
         return stats
 

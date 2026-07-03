@@ -173,7 +173,6 @@ def analyze_health(project_root: Path) -> HealthReport:
             todo_count += f.read_text(encoding="utf-8", errors="ignore").upper().count("TODO")
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     coherence_score = max(0, 100 - todo_count * 2)
     report.metrics.append(HealthMetric("Cohérence", coherence_score,
                                        f"{todo_count} TODOs"))
@@ -206,7 +205,6 @@ def analyze_entropy(project_root: Path) -> EntropyReport:
             dir_counts[top] += 1
         except ValueError as _exc:
             _log.debug("ValueError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     report.dir_entropy = _shannon_entropy(dict(dir_counts))
 
     return report
@@ -223,7 +221,6 @@ def analyze_pareto(project_root: Path) -> ParetoReport:
                 files.append((str(f.relative_to(project_root)), f.stat().st_size))
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     if not files:
         return report

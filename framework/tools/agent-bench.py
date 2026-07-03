@@ -158,7 +158,6 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
                     return
             except ValueError as _exc:
                 _log.debug("ValueError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         if agent_filter and agent_filter.lower() not in ag:
             return
@@ -250,7 +249,6 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
                 session.story_cycle_times[story_id] = round(delta_days, 2)
             except ValueError as _exc:
                 _log.debug("ValueError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     return session
 
@@ -271,7 +269,6 @@ def read_memory_stats(grimoire_dir: Path) -> dict:
                 stats[item.stem] = len(lines)
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     # Tentative API Qdrant local
     try:

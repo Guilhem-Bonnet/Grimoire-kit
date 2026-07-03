@@ -201,7 +201,6 @@ def load_history(project_root: Path) -> list[dict]:
             return json.loads(logfile.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as _exc:
             _log.debug("json.JSONDecodeError, OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     return []
 
 

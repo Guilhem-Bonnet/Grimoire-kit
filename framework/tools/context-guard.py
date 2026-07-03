@@ -254,7 +254,6 @@ def resolve_agent_loads(
             return loads
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     loads.append(FileLoad(path=trace_path, role="trace"))
 
     return loads
@@ -305,7 +304,6 @@ def find_agents(project_root: Path) -> list[Path]:
                     agents.append(f)
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return agents
 
 

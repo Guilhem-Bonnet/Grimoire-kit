@@ -121,7 +121,6 @@ def count_tests(project_root: Path) -> tuple[int, int]:
             count += len(re.findall(r"def test_", text))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return count, file_count
 
@@ -148,7 +147,6 @@ def count_tests_per_file(project_root: Path) -> dict[str, int]:
             result[f.name] = count
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     return result
 
 

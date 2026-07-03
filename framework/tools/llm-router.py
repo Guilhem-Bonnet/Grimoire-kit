@@ -519,7 +519,6 @@ class LLMRouter:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     def get_stats(self) -> list[UsageStat]:
         """Lit et agrège les stats d'utilisation."""
@@ -543,7 +542,6 @@ class LLMRouter:
                     stat.estimated_cost += entry.get("estimated_cost", 0.0)
         except (OSError, json.JSONDecodeError) as _exc:
             _log.debug("OSError, json.JSONDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
         return sorted(model_stats.values(), key=lambda s: s.request_count, reverse=True)
 
@@ -623,7 +621,6 @@ def _load_yaml_basic(project_root: Path) -> dict:
                     return {"_raw": match.group(1)}  # Signal qu'on a trouvé le bloc
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return {}
 
 

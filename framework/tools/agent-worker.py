@@ -392,7 +392,6 @@ class AgentWorkerManager:
                 worker.uptime_seconds = round(time.time() - start, 1)
             except (ValueError, OverflowError) as _exc:
                 _log.debug("ValueError, OverflowError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         return worker
 

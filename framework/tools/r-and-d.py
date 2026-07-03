@@ -482,7 +482,6 @@ def cmd_seed(args: argparse.Namespace) -> int:
                         seeded += 1
         except Exception as _exc:
             _log.debug("Exception suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
         if not args.json:
             print(f"  Incubateur: {seeded} idées ensemencées")
 
@@ -520,7 +519,6 @@ def cmd_seed(args: argparse.Namespace) -> int:
                     stig_count += 1
             except Exception as _exc:
                 _log.debug("Exception suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
         if not args.json:
             print(f"  Stigmergy: {stig_count} phéromones déposées")
 

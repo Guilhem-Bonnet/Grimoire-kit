@@ -184,7 +184,6 @@ def scan_project(project_root: Path) -> ArchScan:
                 scan.cross_refs[fpath] = sorted(refs_set)
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return scan
 
@@ -250,7 +249,6 @@ def detect_oversized(scan: ArchScan, project_root: Path) -> list[Dissonance]:
                     ))
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -282,7 +280,6 @@ def detect_manifest_mismatch(scan: ArchScan, project_root: Path) -> list[Dissona
                                 ))
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -316,7 +313,6 @@ def detect_broken_refs(scan: ArchScan, project_root: Path) -> list[Dissonance]:
                             ))
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
     return dissonances
 
 
@@ -334,7 +330,6 @@ def detect_duplication(scan: ArchScan, project_root: Path) -> list[Dissonance]:
                 agent_summaries[agent_path] = content
             except OSError as _exc:
                 _log.debug("OSError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     # Simple Jaccard sur les mots
     agent_list = list(agent_summaries.items())

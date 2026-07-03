@@ -168,7 +168,6 @@ def detect_magic_values(project_root: Path) -> list[DarkMatterItem]:
                     ))
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return items[:20]  # Cap
 
@@ -222,7 +221,6 @@ def detect_naming_conventions(project_root: Path) -> list[DarkMatterItem]:
             docs_content = readme.read_text(encoding="utf-8").lower()
         except OSError as _exc:
             _log.debug("OSError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     for prefix, count in prefixes.most_common(10):
         if prefix.lower() not in docs_content and count >= 2:
@@ -324,7 +322,6 @@ def detect_implicit_assumptions(project_root: Path) -> list[DarkMatterItem]:
                     ))
         except (OSError, UnicodeDecodeError) as _exc:
             _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-            # Silent exception — add logging when investigating issues
 
     return items[:30]
 
@@ -349,7 +346,6 @@ def detect_undocumented_dependencies(project_root: Path) -> list[DarkMatterItem]
                         tool_deps[py.stem].append(other_py.stem)
             except (OSError, UnicodeDecodeError) as _exc:
                 _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
         # Dépendances non documentées
         for tool, deps in tool_deps.items():
@@ -368,7 +364,6 @@ def detect_undocumented_dependencies(project_root: Path) -> list[DarkMatterItem]
                     ))
             except (OSError, UnicodeDecodeError) as _exc:
                 _log.debug("OSError, UnicodeDecodeError suppressed: %s", _exc)
-                # Silent exception — add logging when investigating issues
 
     return items
 
