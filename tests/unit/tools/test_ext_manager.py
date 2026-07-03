@@ -9,11 +9,13 @@ import pytest
 
 from grimoire.tools.ext_manager import (
     ExtensionError,
+    install_blueprint_from_registry,
     install_extension,
     install_from_registry,
     list_installed,
     load_manifest,
     main,
+    publish_blueprint,
     publish_extension,
     remove_extension,
     validate_manifest,
@@ -276,3 +278,76 @@ class TestMainCLI:
     ) -> None:
         assert main(["--project-root", str(project_root), "remove", "ghost"]) == 1
         assert "Erreur" in capsys.readouterr().err
+
+
+def make_blueprint(tmp_path: Path) -> Path:
+    bp = {
+        "blueprintVersion": 1,
+        "id": "demo-flow",
+        "name": "Demo Flow",
+        "catalogRef": {"version": "1.0.0"},
+        "extensions": [{"id": "demo-ext", "version": ">=0.1.0"}],
+        "nodes": [
+            {"id": "a", "kind": "pattern", "ref": "ORC-01", "label": "Orch",
+             "pins": [{"id": "out", "direction": "out", "contract": "task-envelope"}]}
+        ],
+        "edges": [],
+    }
+    path = tmp_path / "demo-flow.blueprint.json"
+    path.write_text(json.dumps(bp), encoding="utf-8")
+    return path
+
+
+class TestBlueprintRegistry:
+    def test_publish_and_install(
+        self, tmp_path: Path, project_root: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        entry = publish_blueprint(make_blueprint(tmp_path), registry)
+        assert entry["summary"]["nodes"] == 1
+        assert entry["checksum"].startswith("sha256:")
+        index = json.loads((registry / "registry.json").read_text(encoding="utf-8"))
+        assert "demo-flow" in index["blueprints"]
+
+        result = install_blueprint_from_registry("demo-flow", registry, project_root)
+        assert result["missingExtensions"] == ["demo-ext"]
+        assert (project_root / "_grimoire" / "blueprints" / "demo-flow.blueprint.json").is_file()
+
+    def test_install_refuses_overwrite_without_force(
+        self, tmp_path: Path, project_root: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        publish_blueprint(make_blueprint(tmp_path), registry)
+        install_blueprint_from_registry("demo-flow", registry, project_root)
+        with pytest.raises(ExtensionError, match="déjà présent"):
+            install_blueprint_from_registry("demo-flow", registry, project_root)
+        install_blueprint_from_registry("demo-flow", registry, project_root, force=True)
+
+    def test_tampered_blueprint_rejected(
+        self, tmp_path: Path, project_root: Path
+    ) -> None:
+        registry = tmp_path / "registry"
+        publish_blueprint(make_blueprint(tmp_path), registry)
+        target = registry / "blueprints" / "demo-flow.blueprint.json"
+        target.write_text(target.read_text(encoding="utf-8") + " ", encoding="utf-8")
+        with pytest.raises(ExtensionError, match="checksum invalide"):
+            install_blueprint_from_registry("demo-flow", registry, project_root)
+
+    def test_invalid_blueprint_refused_at_publish(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.blueprint.json"
+        path.write_text(json.dumps({"blueprintVersion": 1, "id": "X"}), encoding="utf-8")
+        with pytest.raises(ExtensionError, match="blueprint invalide"):
+            publish_blueprint(path, tmp_path / "registry")
+
+    def test_cli_publish_and_add_blueprint(
+        self, tmp_path: Path, project_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        registry = tmp_path / "registry"
+        bp = make_blueprint(tmp_path)
+        root = ["--project-root", str(project_root)]
+        assert main([*root, "publish", str(bp), "--registry", str(registry)]) == 0
+        assert "Blueprint publié : Demo Flow" in capsys.readouterr().out
+        assert main([*root, "add-blueprint", "demo-flow", "--registry", str(registry)]) == 0
+        out = capsys.readouterr().out
+        assert "Blueprint installé : demo-flow" in out
+        assert "demo-ext" in out

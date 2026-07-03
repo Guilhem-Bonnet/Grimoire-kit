@@ -38,10 +38,12 @@ from typing import Any, cast
 __all__ = [
     "ExtensionError",
     "InstallResult",
+    "install_blueprint_from_registry",
     "install_extension",
     "install_from_registry",
     "list_installed",
     "load_manifest",
+    "publish_blueprint",
     "publish_extension",
     "remove_extension",
     "validate_manifest",
@@ -412,6 +414,106 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
     return release
 
 
+def validate_blueprint_file(bp_path: Path) -> tuple[dict[str, Any], list[str]]:
+    """Validation structurelle légère d'un fichier .blueprint.json."""
+    errors: list[str] = []
+    try:
+        blueprint = json.loads(bp_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExtensionError(f"{bp_path} : illisible ({exc})") from exc
+    if blueprint.get("blueprintVersion") != 1:
+        errors.append("blueprintVersion non supporté (attendu : 1)")
+    if not ID_RE.match(str(blueprint.get("id", ""))):
+        errors.append(f"id invalide : {blueprint.get('id')}")
+    if not isinstance(blueprint.get("nodes"), list) or not blueprint["nodes"]:
+        errors.append("nodes vide ou absent")
+    if not isinstance(blueprint.get("edges"), list):
+        errors.append("edges absent")
+    return blueprint, errors
+
+
+def publish_blueprint(bp_path: Path, registry_dir: Path) -> dict[str, Any]:
+    """Publie un blueprint dans le registry (fichier + entrée d'index)."""
+    bp_path = bp_path.resolve()
+    registry_dir = registry_dir.resolve()
+    blueprint, errors = validate_blueprint_file(bp_path)
+    if errors:
+        raise ExtensionError("blueprint invalide :\n  - " + "\n  - ".join(errors))
+
+    bp_id = blueprint["id"]
+    file_rel = Path("blueprints") / f"{bp_id}.blueprint.json"
+    target = registry_dir / file_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(blueprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    checksum = _sha256(target)
+
+    index_path = registry_dir / REGISTRY_INDEX
+    index: dict[str, Any] = (
+        json.loads(index_path.read_text(encoding="utf-8"))
+        if index_path.is_file()
+        else {"registryVersion": 1, "extensions": {}}
+    )
+    entry = {
+        "file": str(file_rel),
+        "checksum": checksum,
+        "publishedAt": datetime.now(UTC).isoformat(),
+        "summary": {
+            "name": blueprint.get("name", bp_id),
+            "description": blueprint.get("description", ""),
+            "catalogVersion": blueprint.get("catalogRef", {}).get("version"),
+            "nodes": len(blueprint["nodes"]),
+            "edges": len(blueprint["edges"]),
+            "extensions": [e.get("id") for e in blueprint.get("extensions", [])],
+        },
+    }
+    index.setdefault("blueprints", {})[bp_id] = entry
+    index["updatedAt"] = datetime.now(UTC).isoformat()
+    index_path.write_text(
+        json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return entry
+
+
+def install_blueprint_from_registry(
+    bp_id: str, registry_dir: Path, project_root: Path, *, force: bool = False
+) -> dict[str, Any]:
+    """Installe un blueprint publié : checksum vérifié, extensions requises rapportées."""
+    registry_dir = registry_dir.resolve()
+    project_root = project_root.resolve()
+    index_path = registry_dir / REGISTRY_INDEX
+    if not index_path.is_file():
+        raise ExtensionError(f"registry introuvable : {index_path}")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    entry = index.get("blueprints", {}).get(bp_id)
+    if not entry:
+        raise ExtensionError(f"blueprint absent du registry : {bp_id}")
+    source = registry_dir / entry["file"]
+    if not source.is_file():
+        raise ExtensionError(f"fichier absent : {source}")
+    if _sha256(source) != entry["checksum"]:
+        raise ExtensionError(f"checksum invalide pour le blueprint {bp_id}")
+
+    target = project_root / "_grimoire" / "blueprints" / f"{bp_id}.blueprint.json"
+    if target.exists() and not force:
+        raise ExtensionError(f"blueprint déjà présent : {target} (utiliser --force)")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+    installed = list_installed(project_root)
+    blueprint = json.loads(source.read_text(encoding="utf-8"))
+    missing = [
+        e.get("id") for e in blueprint.get("extensions", [])
+        if e.get("id") not in installed
+    ]
+    return {
+        "installed": bp_id,
+        "path": str(target.relative_to(project_root)),
+        "missingExtensions": missing,
+    }
+
+
 def _safe_extract(archive: Path, dest: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar.getmembers():
@@ -520,9 +622,16 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("list", help="Extensions installées")
 
-    p_publish = sub.add_parser("publish", help="Publier une extension dans un registry")
+    p_publish = sub.add_parser(
+        "publish", help="Publier une extension ou un blueprint dans un registry"
+    )
     p_publish.add_argument("source", type=Path)
     p_publish.add_argument("--registry", type=Path, required=True)
+
+    p_addbp = sub.add_parser("add-blueprint", help="Installer un blueprint publié")
+    p_addbp.add_argument("id")
+    p_addbp.add_argument("--registry", type=Path, required=True)
+    p_addbp.add_argument("--force", action="store_true")
 
     p_remove = sub.add_parser("remove", help="Désinstaller une extension")
     p_remove.add_argument("id")
@@ -534,11 +643,28 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "publish":
-            release = publish_extension(args.source, args.registry)
-            print(
-                f"Publié : {release['summary']['name']} {release['version']} "
-                f"— {release['archive']} ({release['checksum'][:19]}…)"
+            if str(args.source).endswith(".blueprint.json"):
+                bp = publish_blueprint(args.source, args.registry)
+                print(
+                    f"Blueprint publié : {bp['summary']['name']} — {bp['file']} "
+                    f"({bp['checksum'][:19]}…)"
+                )
+            else:
+                release = publish_extension(args.source, args.registry)
+                print(
+                    f"Publié : {release['summary']['name']} {release['version']} "
+                    f"— {release['archive']} ({release['checksum'][:19]}…)"
+                )
+        elif args.command == "add-blueprint":
+            result_bp = install_blueprint_from_registry(
+                args.id, args.registry, args.project_root, force=args.force
             )
+            print(f"Blueprint installé : {result_bp['installed']} -> {result_bp['path']}")
+            if result_bp["missingExtensions"]:
+                print(
+                    "  Extensions requises non installées : "
+                    + ", ".join(result_bp["missingExtensions"])
+                )
         elif args.command == "add":
             if args.registry:
                 result = install_from_registry(

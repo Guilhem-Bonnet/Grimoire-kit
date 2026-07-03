@@ -13,9 +13,11 @@ import typer
 
 from grimoire.tools.ext_manager import (
     ExtensionError,
+    install_blueprint_from_registry,
     install_extension,
     install_from_registry,
     list_installed,
+    publish_blueprint,
     publish_extension,
     remove_extension,
     verify_extension,
@@ -105,8 +107,16 @@ def ext_publish(
     source: Path = _PUBLISH_SOURCE_ARGUMENT,
     registry: Path = _REGISTRY_REQUIRED_OPTION,
 ) -> None:
-    """Publier une extension dans un registry (archive déterministe + checksum)."""
+    """Publier une extension ou un blueprint (checksum déterministe)."""
     try:
+        if str(source).endswith(".blueprint.json"):
+            bp = publish_blueprint(source, registry)
+            typer.secho(
+                f"Blueprint publié : {bp['summary']['name']} — {bp['file']} "
+                f"({bp['checksum'][:19]}…)",
+                fg=typer.colors.GREEN,
+            )
+            return
         release = publish_extension(source, registry)
     except ExtensionError as exc:
         _fail(exc)
@@ -116,6 +126,26 @@ def ext_publish(
         f"{release['archive']} ({release['checksum'][:19]}…)",
         fg=typer.colors.GREEN,
     )
+
+
+@ext_app.command("add-blueprint")
+def ext_add_blueprint(
+    bp_id: str = _EXT_ID_ARGUMENT,
+    registry: Path = _REGISTRY_REQUIRED_OPTION,
+    project_root: Path = _PROJECT_ROOT_OPTION,
+    force: bool = _FORCE_OPTION,
+) -> None:
+    """Installer un blueprint publié (checksum vérifié, extensions requises rapportées)."""
+    try:
+        result = install_blueprint_from_registry(
+            bp_id, registry, project_root, force=force
+        )
+    except ExtensionError as exc:
+        _fail(exc)
+        return
+    typer.secho(f"Blueprint installé : {result['installed']} -> {result['path']}", fg=typer.colors.GREEN)
+    if result["missingExtensions"]:
+        typer.echo("  Extensions requises non installées : " + ", ".join(result["missingExtensions"]))
 
 
 @ext_app.command("verify")
