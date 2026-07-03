@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Extensions — Grimoire Forge</title>
+  <meta name="description" content="Extensions Grimoire Forge : frameworks agentiques publics (CrewAI, LangGraph...) packagés en artefacts gouvernés, installables en une commande, ancrés sur le catalogue de patterns." />
+  <link rel="stylesheet" href="forge-tokens.css"/>
+  <link rel="stylesheet" href="forge-base.css"/>
+  <link rel="stylesheet" href="forge-motion.css"/>
+  <style>
+    body { padding-top: 56px; }
+    .ext-hero { padding: 72px 0 40px; border-bottom: 1px solid var(--line); }
+    .ext-kicker { font-family: var(--font-mono); font-size: .62rem; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+    .ext-hero h1 { font-size: var(--text-4xl); line-height: var(--lh-title); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+    .ext-hero p { color: var(--ink-soft); max-width: 640px; line-height: var(--lh-body); }
+    .ext-install { margin-top: 28px; display: inline-flex; align-items: center; gap: 12px; background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 12px 16px; font-family: var(--font-mono); font-size: .78rem; }
+    .ext-install .p { color: var(--ink-muted); user-select: none; }
+    .ext-install code { color: var(--ink); }
+    .ext-install button { background: none; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-muted); font-family: var(--font-mono); font-size: .6rem; letter-spacing: .08em; padding: 4px 8px; cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
+    .ext-install button:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+    .ext-section { padding: 44px 0 12px; }
+    .ext-label { font-family: var(--font-mono); font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-soft); display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+    .ext-label .n { color: var(--accent); }
+    .ext-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+    .ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .ext-card { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 20px; display: flex; flex-direction: column; gap: 12px; transition: border-color var(--dur-base) var(--ease-forge), transform var(--dur-base) var(--ease-forge); }
+    .ext-card:hover { border-color: var(--accent-dim); transform: translateY(-2px); }
+    .ext-card-head { display: flex; align-items: baseline; gap: 10px; }
+    .ext-name { font-weight: 600; font-size: var(--text-md); }
+    .ext-ver { font-family: var(--font-mono); font-size: .62rem; color: var(--ink-muted); }
+    .ext-status { margin-left: auto; font-family: var(--font-mono); font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: var(--r-sm); }
+    .ext-status.available { color: var(--data-green); border: 1px solid rgba(52,211,153,.3); }
+    .ext-status.candidate { color: var(--data-amber); border: 1px solid rgba(252,211,77,.3); }
+    .ext-desc { color: var(--ink-soft); font-size: var(--text-sm); line-height: var(--lh-body); flex: 1; }
+    .ext-patterns { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ext-pat { font-family: var(--font-mono); font-size: .6rem; color: var(--data-cyan); background: rgba(110,231,255,.08); border: 1px solid rgba(110,231,255,.2); border-radius: var(--r-sm); padding: 2px 7px; }
+    .ext-pat.req { color: var(--data-violet); background: rgba(167,139,250,.08); border-color: rgba(167,139,250,.2); }
+    .ext-meta { display: flex; flex-wrap: wrap; gap: 12px; font-family: var(--font-mono); font-size: .6rem; color: var(--ink-muted); border-top: 1px solid var(--line); padding-top: 12px; }
+    .ext-meta a { color: var(--ink-muted); text-decoration: none; }
+    .ext-meta a:hover { color: var(--accent); }
+    .ext-cmd { font-family: var(--font-mono); font-size: .66rem; color: var(--ink-soft); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; }
+    .ext-cmd .p { color: var(--ink-muted); user-select: none; }
+
+    .ext-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 26px; }
+    .ext-tools input[type=search] { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); font-family: var(--font-mono); font-size: .72rem; padding: 9px 12px; width: 260px; }
+    .ext-tools input[type=search]:focus { outline: none; border-color: var(--accent-dim); }
+    .ext-chip { background: none; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-muted); font-family: var(--font-mono); font-size: .6rem; letter-spacing: .06em; padding: 6px 10px; cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
+    .ext-chip.on { color: var(--data-cyan); border-color: rgba(110,231,255,.4); }
+    .ext-chip:hover { border-color: var(--accent-dim); }
+    .ext-chip-kind { border-style: dashed; }
+    .ext-chip-kind.on { color: var(--data-amber, #ffd166); border-color: rgba(255,209,102,.4); }
+    .ext-chip-sep { color: var(--ink-muted); margin: 0 2px; }
+    .ext-contract { padding: 44px 0 90px; }
+    .ext-rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .ext-rule { background: var(--elev-1); border: 1px solid var(--line); border-left: 2px solid var(--accent); border-radius: var(--r-sm); padding: 16px; }
+    .ext-rule h3 { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink); margin-bottom: 8px; }
+    .ext-rule p { color: var(--ink-soft); font-size: .82rem; line-height: var(--lh-body); }
+    .ext-empty { color: var(--ink-muted); font-family: var(--font-mono); font-size: .72rem; padding: 20px 0; }
+  </style>
+</head>
+<body>
+<a href="#main" class="skip-link">Aller au contenu</a>
+<nav id="forge-nav" aria-label="Navigation principale"></nav>
+
+<main id="main">
+
+<section class="ext-hero">
+  <div class="container">
+    <div class="ext-kicker">MARKETPLACE · H1</div>
+    <h1>Extensions</h1>
+    <p>Chaque extension packe un framework agentique public en artefacts gouvernés — agents, skills, hooks, workflows — installés dans votre projet et ancrés sur le catalogue de patterns. Pas de boîte noire : un manifeste validé, des permissions déclarées, des hooks en mode shadow.</p>
+    <div class="ext-install">
+      <span class="p">$</span><code id="ext-install-cmd">grimoire ext add crewai --registry grimoire-extensions-registry</code>
+      <button type="button" data-copy="#ext-install-cmd" aria-label="Copier la commande">COPIER</button>
+    </div>
+    <div class="ext-tools">
+      <input id="ext-search" type="search" placeholder="Rechercher (nom, pattern, description)…" aria-label="Rechercher une extension"/>
+      <span id="ext-chips"></span>
+    </div>
+  </div>
+</section>
+
+<section class="ext-section">
+  <div class="container">
+    <div class="ext-label">DISPONIBLES <span class="n" id="ext-count-available"></span></div>
+    <div class="ext-grid" id="ext-available"><div class="ext-empty">Chargement…</div></div>
+  </div>
+</section>
+
+<section class="ext-section">
+  <div class="container">
+    <div class="ext-label">BLUEPRINTS <span class="n" id="ext-count-blueprints"></span></div>
+    <div class="ext-grid" id="ext-blueprints"></div>
+  </div>
+</section>
+
+<section class="ext-section">
+  <div class="container">
+    <div class="ext-label">EN ÉTUDE <span class="n" id="ext-count-candidates"></span></div>
+    <div class="ext-grid" id="ext-candidates"></div>
+  </div>
+</section>
+
+<section class="ext-contract">
+  <div class="container">
+    <div class="ext-label">CONTRAT MARKETPLACE</div>
+    <div class="ext-rules">
+      <div class="ext-rule"><h3>Manifeste validé</h3><p>Chaque extension déclare un <code>extension.json</code> validé par schéma avant toute installation. Chemins relatifs uniquement, pas de remontée hors du bundle.</p></div>
+      <div class="ext-rule"><h3>Ancrage patterns</h3><p>Le mapping vers le catalogue de patterns est obligatoire. Une extension sans <code>patterns.implements</code> est refusée — c'est ce qui distingue ce marketplace d'un annuaire.</p></div>
+      <div class="ext-rule"><h3>Hooks en shadow</h3><p>Tout hook fourni s'enregistre en mode shadow, sans exception. La promotion vers un mode bloquant reste une décision du projet hôte.</p></div>
+      <div class="ext-rule"><h3>Permissions déclarées</h3><p>Filesystem, réseau, événements interceptés, accès mémoire : tout est déclaré dans le manifeste et vérifiable avant installation.</p></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script src="forge-nav.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  function loadData(name) {
+    return fetch('data/' + name).catch(() => null)
+      .then(r => (r && r.ok) ? r.json() : fetch('/data/' + name).then(r2 => r2.json()));
+  }
+
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function permSummary(p) {
+    if (!p || !Object.keys(p).length) return '';
+    const bits = [];
+    if (p.filesystem && p.filesystem !== 'none') bits.push('fs:' + p.filesystem);
+    if (p.network) bits.push('réseau');
+    if (p.hooks && p.hooks.length) bits.push('hooks:' + p.hooks.join(','));
+    if (p.memory && p.memory !== 'none') bits.push('mémoire:' + p.memory);
+    return bits.length ? 'perm : ' + bits.join(' · ') : 'aucune permission';
+  }
+
+  function card(e) {
+    const patterns = (e.patterns || []).map(p => `<span class="ext-pat">${esc(p)}</span>`).join('')
+      + (e.requires || []).map(p => `<span class="ext-pat req" title="Requis dans le projet hôte">${esc(p)}</span>`).join('');
+    const provides = e.provides && Object.keys(e.provides).length
+      ? Object.entries(e.provides).map(([k, n]) => `${esc(k)}:${n}`).join(' · ') : '';
+    const meta = [
+      e.license ? `<span>${esc(e.license)}</span>` : '',
+      provides ? `<span>${provides}</span>` : '',
+      e.upstream ? `<a href="${esc(e.upstream)}" target="_blank" rel="noopener">upstream ↗</a>` : '',
+    ].filter(Boolean).join('');
+    const perms = permSummary(e.permissions);
+    return `<article class="ext-card">
+      <div class="ext-card-head">
+        <span class="ext-name">${esc(e.name)}</span>
+        ${e.version ? `<span class="ext-ver">v${esc(e.version)}</span>` : ''}
+        ${e.kind ? `<span class="ext-ver" title="Nature de la prise">${esc(e.kind)}</span>` : ''}
+        <span class="ext-status ${e.status}">${e.status === 'available' ? 'Disponible' : 'En étude'}</span>
+      </div>
+      <p class="ext-desc">${esc(e.description)}</p>
+      ${patterns ? `<div class="ext-patterns">${patterns}</div>` : ''}
+      ${e.status === 'available' ? `<div class="ext-cmd"><span class="p">$ </span>grimoire ext add extensions/${esc(e.id)}</div>` : ''}
+      <div class="ext-meta">${meta}${perms ? `<span title="Permissions déclarées">${esc(perms)}</span>` : ''}</div>
+    </article>`;
+  }
+
+  let allData = null;
+  const activeFamilies = new Set();
+  const activeKinds = new Set();
+
+  function matches(e) {
+    const q = document.getElementById('ext-search').value.trim().toLowerCase();
+    const hay = [e.name, e.description, e.kind || '', ...(e.patterns || [])].join(' ').toLowerCase();
+    if (q && !hay.includes(q)) return false;
+    if (activeFamilies.size) {
+      const fams = new Set((e.patterns || []).map(p => p.split('-')[0]));
+      if (![...activeFamilies].some(f => fams.has(f))) return false;
+    }
+    if (activeKinds.size && !activeKinds.has(e.kind || '')) return false;
+    return true;
+  }
+
+  function bpCard(b) {
+    return `<article class="ext-card">
+      <div class="ext-card-head"><span class="ext-name">${esc(b.name)}</span>
+        <span class="ext-status available">Blueprint</span></div>
+      <p class="ext-desc">${esc(b.description)}</p>
+      <div class="ext-meta"><span>${b.nodes} nodes · ${b.edges} edges</span>
+        ${b.extensions.length ? `<span>requiert : ${b.extensions.map(esc).join(', ')}</span>` : ''}</div>
+      <div class="ext-cmd"><span class="p">$ </span>grimoire ext add-blueprint ${esc(b.id)} --registry &lt;clone&gt;</div>
+    </article>`;
+  }
+
+  function render() {
+    const av = allData.available.filter(matches);
+    const ca = allData.candidates.filter(matches);
+    document.getElementById('ext-available').innerHTML = av.length
+      ? av.map(card).join('')
+      : '<div class="ext-empty">Aucune extension ne correspond aux filtres.</div>';
+    document.getElementById('ext-candidates').innerHTML = ca.length
+      ? ca.map(card).join('')
+      : '<div class="ext-empty">Aucun candidat ne correspond aux filtres.</div>';
+    document.getElementById('ext-count-available').textContent = '· ' + av.length + '/' + allData.available.length;
+    const bps = allData.blueprints || [];
+    document.getElementById('ext-blueprints').innerHTML = bps.length
+      ? bps.map(bpCard).join('')
+      : '<div class="ext-empty">Aucun blueprint publié pour le moment.</div>';
+    document.getElementById('ext-count-blueprints').textContent = '· ' + bps.length;
+    document.getElementById('ext-count-candidates').textContent = '· ' + ca.length + '/' + allData.candidates.length;
+  }
+
+  loadData('extensions.json').then(data => {
+    allData = data;
+    const families = [...new Set(data.available.flatMap(e => (e.patterns || []).map(p => p.split('-')[0])))].sort();
+    const kinds = [...new Set(data.available.map(e => e.kind).filter(Boolean))].sort();
+    document.getElementById('ext-chips').innerHTML =
+      families.map(f =>
+        `<button type="button" class="ext-chip" data-family="${esc(f)}">${esc(f)}</button>`).join(' ')
+      + (kinds.length ? ' <span class="ext-chip-sep" aria-hidden="true">·</span> ' : '')
+      + kinds.map(k =>
+        `<button type="button" class="ext-chip ext-chip-kind" data-kind="${esc(k)}" title="Nature de la prise">${esc(k)}</button>`).join(' ');
+    document.getElementById('ext-chips').addEventListener('click', e => {
+      const famChip = e.target.closest('[data-family]');
+      if (famChip) {
+        const f = famChip.dataset.family;
+        if (activeFamilies.has(f)) { activeFamilies.delete(f); famChip.classList.remove('on'); }
+        else { activeFamilies.add(f); famChip.classList.add('on'); }
+        render();
+        return;
+      }
+      const kindChip = e.target.closest('[data-kind]');
+      if (!kindChip) return;
+      const k = kindChip.dataset.kind;
+      if (activeKinds.has(k)) { activeKinds.delete(k); kindChip.classList.remove('on'); }
+      else { activeKinds.add(k); kindChip.classList.add('on'); }
+      render();
+    });
+    document.getElementById('ext-search').addEventListener('input', render);
+    render();
+  }).catch(() => {
+    document.getElementById('ext-available').innerHTML =
+      '<div class="ext-empty">Données indisponibles — lancer node scripts/build-extensions-data.mjs.</div>';
+  });
+
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const el = document.querySelector(btn.dataset.copy);
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        btn.textContent = 'COPIÉ ✓';
+        setTimeout(() => { btn.textContent = 'COPIER'; }, 1600);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

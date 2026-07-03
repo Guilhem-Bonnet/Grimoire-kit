@@ -28,6 +28,9 @@
             <li><a href="memory.html"        class="${isActive('memory.html') ? 'active' : ''}">MEMORY</a></li>
             <li><a href="kanban.html"        class="${isActive('kanban.html') ? 'active' : ''}">KANBAN</a></li>
             <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCUMENTATION</a></li>
+            <li><a href="extensions.html"    class="${isActive('extensions.html') ? 'active' : ''}">EXTENSIONS</a></li>
+            <li><a href="blueprint.html"     class="${isActive('blueprint.html') ? 'active' : ''}">BLUEPRINT</a></li>
+            <li><a href="setup.html"         class="${isActive('setup.html') ? 'active' : ''}">SETUP</a></li>
             <li><a href="anatomy.html"       class="${isActive('anatomy.html') ? 'active' : ''}">ANATOMIE</a></li>
           </ul>
           <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" class="nav-cta" target="_blank" rel="noopener">VOIR LE PROJET →</a>
