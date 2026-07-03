@@ -1,12 +1,16 @@
 {
   "manifestVersion": 1,
   "id": "crewai",
+  "kind": "flow-adapter",
   "name": "CrewAI Bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Expose les crews CrewAI comme artefacts Grimoire gouvernés via l'adaptateur grimoire.runtime.crewai_adapter : import de flows en Recipes, exécution bornée, traces normalisées.",
   "license": "MIT",
   "authors": [
-    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+    {
+      "name": "Guilhem Bonnet",
+      "url": "https://github.com/Guilhem-Bonnet"
+    }
   ],
   "upstream": {
     "repository": "https://github.com/crewAIInc/crewAI",
@@ -18,38 +22,74 @@
     "manifest": 1
   },
   "provides": {
-    "agents": ["artifacts/agents/crewai-crew-runner.agent.md"],
-    "skills": ["artifacts/skills/crewai-crew-design/SKILL.md"],
-    "hooks": ["artifacts/hooks/crewai-telemetry-bridge.json"],
-    "workflows": ["artifacts/prompts/crewai-import-crew.prompt.md"],
+    "agents": [
+      "artifacts/agents/crewai-crew-runner.agent.md"
+    ],
+    "skills": [
+      "artifacts/skills/crewai-crew-design/SKILL.md"
+    ],
+    "hooks": [
+      "artifacts/hooks/crewai-telemetry-bridge.json"
+    ],
+    "workflows": [
+      "artifacts/prompts/crewai-import-crew.prompt.md"
+    ],
     "instructions": [],
     "nodes": [
       {
         "id": "crewai-crew",
         "label": "CrewAI Crew",
         "description": "Un flow CrewAI complet (tasks + agents + dépendances) exposé comme node composite, compilé en Recipe Grimoire.",
-        "patterns": ["ORC-01", "ORC-02", "ORC-03"],
-        "pins": [
-          { "id": "mission", "direction": "in", "contract": "task-envelope" },
-          { "id": "result", "direction": "out", "contract": "handoff-packet" }
+        "patterns": [
+          "ORC-01",
+          "ORC-02",
+          "ORC-03"
         ],
-        "compilesTo": ["agent", "workflow"]
+        "pins": [
+          {
+            "id": "mission",
+            "direction": "in",
+            "contract": "task-envelope"
+          },
+          {
+            "id": "result",
+            "direction": "out",
+            "contract": "handoff-packet"
+          }
+        ],
+        "compilesTo": [
+          "agent",
+          "workflow"
+        ]
       }
     ]
   },
   "patterns": {
-    "implements": ["ORC-01", "ORC-02", "ORC-03"],
-    "requires": ["GOV-01"]
+    "implements": [
+      "ORC-01",
+      "ORC-02",
+      "ORC-03"
+    ],
+    "requires": [
+      "GOV-01"
+    ]
   },
   "permissions": {
     "filesystem": "artifacts",
     "network": true,
-    "hooks": ["PostToolUse"],
+    "hooks": [
+      "PostToolUse"
+    ],
     "memory": "none"
   },
   "install": {
     "steps": [
-      { "kind": "pip", "packages": ["crewai"] },
+      {
+        "kind": "pip",
+        "packages": [
+          "crewai"
+        ]
+      },
       {
         "kind": "copy",
         "from": "artifacts/agents/crewai-crew-runner.agent.md",
@@ -78,14 +118,20 @@
       {
         "kind": "script",
         "path": "scripts/register-hooks.sh",
-        "args": ["--mode", "shadow"]
+        "args": [
+          "--mode",
+          "shadow"
+        ]
       }
     ],
     "verify": "scripts/verify-install.sh"
   },
   "uninstall": {
     "steps": [
-      { "kind": "script", "path": "scripts/unregister-hooks.sh" }
+      {
+        "kind": "script",
+        "path": "scripts/unregister-hooks.sh"
+      }
     ]
   }
 }

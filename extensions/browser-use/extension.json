@@ -1,42 +1,71 @@
 {
   "manifestVersion": 1,
   "id": "browser-use",
+  "kind": "capability",
   "name": "Browser Use",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agents de navigation web gouvernés : chaque action UI produit une preuve (screenshot, DOM, URL), périmètre de navigation borné par allowlist, actions irréversibles simulées avant exécution.",
   "license": "MIT",
   "authors": [
-    { "name": "Guilhem Bonnet", "url": "https://github.com/Guilhem-Bonnet" }
+    {
+      "name": "Guilhem Bonnet",
+      "url": "https://github.com/Guilhem-Bonnet"
+    }
   ],
   "upstream": {
     "repository": "https://github.com/browser-use/browser-use",
     "kind": "tooling",
     "pinnedVersion": "0.3.x"
   },
-  "compat": { "kit": ">=3.11", "manifest": 1 },
+  "compat": {
+    "kit": ">=3.11",
+    "manifest": 1
+  },
   "provides": {
-    "agents": ["artifacts/agents/browser-use-runner.agent.md"],
+    "agents": [
+      "artifacts/agents/browser-use-runner.agent.md"
+    ],
     "skills": [],
     "hooks": [],
     "workflows": [],
-    "instructions": ["artifacts/instructions/browser-evidence.instructions.md"],
+    "instructions": [
+      "artifacts/instructions/browser-evidence.instructions.md"
+    ],
     "nodes": [
       {
         "id": "browser-task",
         "label": "Browser Task",
         "description": "Une tâche de navigation web bornée avec contrat de preuve UI.",
-        "patterns": ["QUA-11", "GOV-07"],
-        "pins": [
-          { "id": "mission", "direction": "in", "contract": "task-envelope" },
-          { "id": "result", "direction": "out", "contract": "handoff-packet" }
+        "patterns": [
+          "QUA-11",
+          "GOV-07"
         ],
-        "compilesTo": ["agent"]
+        "pins": [
+          {
+            "id": "mission",
+            "direction": "in",
+            "contract": "task-envelope"
+          },
+          {
+            "id": "result",
+            "direction": "out",
+            "contract": "handoff-packet"
+          }
+        ],
+        "compilesTo": [
+          "agent"
+        ]
       }
     ]
   },
   "patterns": {
-    "implements": ["QUA-11", "GOV-07"],
-    "requires": ["GOV-02"]
+    "implements": [
+      "QUA-11",
+      "GOV-07"
+    ],
+    "requires": [
+      "GOV-02"
+    ]
   },
   "permissions": {
     "filesystem": "artifacts",
@@ -46,7 +75,12 @@
   },
   "install": {
     "steps": [
-      { "kind": "pip", "packages": ["browser-use"] },
+      {
+        "kind": "pip",
+        "packages": [
+          "browser-use"
+        ]
+      },
       {
         "kind": "copy",
         "from": "artifacts/agents/browser-use-runner.agent.md",

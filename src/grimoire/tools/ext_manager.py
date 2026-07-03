@@ -72,6 +72,7 @@ REQUIRED_KEYS = (
     "install",
 )
 STEP_KINDS = ("copy", "script", "pip", "npm")
+EXTENSION_KINDS = ("flow-adapter", "mcp-toolbox", "observability", "capability")
 FILESYSTEM_PERMS = ("none", "artifacts", "workspace")
 MEMORY_PERMS = ("none", "read", "readwrite")
 
@@ -124,6 +125,10 @@ def validate_manifest(manifest: dict[str, Any], ext_dir: Path) -> list[str]:
         errors.append("manifestVersion non supporté (attendu : 1)")
     if not ID_RE.match(str(manifest["id"])):
         errors.append(f"id invalide (kebab-case attendu) : {manifest['id']}")
+    if "kind" in manifest and manifest["kind"] not in EXTENSION_KINDS:
+        errors.append(
+            f"kind invalide : {manifest['kind']} (attendu : {', '.join(EXTENSION_KINDS)})"
+        )
     if not SEMVER_RE.match(str(manifest["version"])):
         errors.append(f"version non semver : {manifest['version']}")
     if not manifest["authors"]:
@@ -396,6 +401,7 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
         "publishedAt": datetime.now(UTC).isoformat(),
         "summary": {
             "name": manifest["name"],
+            "kind": manifest.get("kind"),
             "description": manifest["description"],
             "license": manifest["license"],
             "patterns": manifest["patterns"]["implements"],
