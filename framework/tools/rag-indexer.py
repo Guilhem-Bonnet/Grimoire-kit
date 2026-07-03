@@ -36,10 +36,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import sys
 import time
 import uuid
@@ -71,10 +73,40 @@ _BLOCKED_IP_PREFIXES = (
 )
 
 
+
+def _addresses_for_host(host: str) -> list:
+    """Résout host en adresses IP (noms DNS et formes décimales/octales/hex incluses)."""
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise ValueError(f"Hôte irrésoluble: {host} ({exc})") from exc
+    addresses = []
+    for info in infos:
+        raw = str(info[4][0]).split("%", 1)[0]
+        try:
+            addresses.append(ipaddress.ip_address(raw))
+        except ValueError:
+            continue
+    if not addresses:
+        raise ValueError(f"Aucune adresse IP pour {host}")
+    return addresses
+
+
+def _forbidden_ip(ip, *, allow_loopback: bool = False) -> bool:
+    if allow_loopback and ip.is_loopback:
+        return False
+    return (
+        ip.is_loopback or ip.is_private or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
 def _validate_url(url: str, *, allow_localhost: bool = True) -> str:
     """Validate a URL against SSRF attacks.
 
-    Blocks cloud metadata endpoints and optionally private IPs.
+    Blocks cloud metadata endpoints and optionally private IPs. Resolves the
+    hostname (issue #39 C4) to block DNS rebinding at validation time and
+    decimal/octal/hex IP forms. Residual: TOCTOU between validation and fetch.
     Raises ValueError on invalid/dangerous URLs.
     """
     from urllib.parse import urlparse
@@ -89,6 +121,13 @@ def _validate_url(url: str, *, allow_localhost: bool = True) -> str:
         raise ValueError(f"URL bloquée (cloud metadata): {host}")
     if not allow_localhost and any(host.startswith(p) for p in _BLOCKED_IP_PREFIXES):
         raise ValueError(f"URL vers IP privée bloquée: {host}")
+    for ip in _addresses_for_host(host):
+        # allow_localhost couvre l'usage historique : services locaux ET LAN
+        # (qdrant distant). Le link-local (metadata 169.254.x) reste bloqué.
+        if allow_localhost and (ip.is_loopback or ip.is_private) and not ip.is_link_local:
+            continue
+        if _forbidden_ip(ip, allow_loopback=allow_localhost):
+            raise ValueError(f"URL résout vers une adresse interdite: {host} → {ip}")
     return url
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"

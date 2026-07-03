@@ -37,9 +37,11 @@ from __future__ import annotations
 import argparse
 import base64
 import html
+import ipaddress
 import json
 import logging
 import re
+import socket
 import sys
 import tempfile
 import time
@@ -83,8 +85,39 @@ _USER_AGENT = "Grimoire-WebBrowser/1.0 (Grimoire-Kit)"
 
 # ── URL Validation ────────────────────────────────────────────────────────────
 
+def _addresses_for_host(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Résout host en adresses IP (noms DNS et formes décimales/octales/hex incluses)."""
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise ValueError(f"Hôte irrésoluble: {host} ({exc})") from exc
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        raw = str(info[4][0]).split("%", 1)[0]
+        try:
+            addresses.append(ipaddress.ip_address(raw))
+        except ValueError:
+            continue
+    if not addresses:
+        raise ValueError(f"Aucune adresse IP pour {host}")
+    return addresses
+
+
+def _forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip.is_loopback or ip.is_private or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
 def validate_url(url: str) -> str:
-    """Valide une URL contre les attaques SSRF."""
+    """Valide une URL contre les attaques SSRF.
+
+    Résout le hostname (issue #39 C4) : bloque les domaines publics résolvant
+    vers des IP privées/loopback/link-local (DNS rebinding au moment de la
+    validation) et les formes IP décimales/octales/hex. Risque résiduel :
+    TOCTOU entre validation et fetch — le pinning d'IP n'est pas implémenté.
+    """
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise ValueError(f"Scheme '{parsed.scheme}' non autorisé (http/https uniquement)")
@@ -95,6 +128,9 @@ def validate_url(url: str) -> str:
         raise ValueError(f"URL bloquée (cloud metadata): {host}")
     if any(host.startswith(p) for p in _BLOCKED_IP_PREFIXES):
         raise ValueError(f"URL vers IP privée bloquée: {host}")
+    for ip in _addresses_for_host(host):
+        if _forbidden_ip(ip):
+            raise ValueError(f"URL résout vers une adresse interdite: {host} → {ip}")
     return url
 
 

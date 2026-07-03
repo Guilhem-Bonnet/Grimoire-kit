@@ -42,9 +42,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import ipaddress
 import json
 import logging
 import re
+import socket
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -84,10 +86,40 @@ _BLOCKED_IP_PREFIXES = (
 
 # ── URL Validation ───────────────────────────────────────────────────────────
 
+
+def _addresses_for_host(host: str) -> list:
+    """Résout host en adresses IP (noms DNS et formes décimales/octales/hex incluses)."""
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise ValueError(f"Hôte irrésoluble: {host} ({exc})") from exc
+    addresses = []
+    for info in infos:
+        raw = str(info[4][0]).split("%", 1)[0]
+        try:
+            addresses.append(ipaddress.ip_address(raw))
+        except ValueError:
+            continue
+    if not addresses:
+        raise ValueError(f"Aucune adresse IP pour {host}")
+    return addresses
+
+
+def _forbidden_ip(ip, *, allow_loopback: bool = False) -> bool:
+    if allow_loopback and ip.is_loopback:
+        return False
+    return (
+        ip.is_loopback or ip.is_private or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
 def validate_url(url: str) -> str:
     """Valide une URL contre les attaques SSRF.
 
-    Bloque les endpoints metadata cloud et les IPs privées.
+    Bloque les endpoints metadata cloud et les IPs privées ; résout le
+    hostname (issue #39 C4) pour bloquer DNS rebinding à la validation et les
+    formes IP décimales/octales/hex. Résiduel : TOCTOU validation→fetch.
     Raises ValueError si l'URL est dangereuse.
     """
     parsed = urlparse(url)
@@ -100,6 +132,9 @@ def validate_url(url: str) -> str:
         raise ValueError(f"URL bloquée (cloud metadata): {host}")
     if any(host.startswith(p) for p in _BLOCKED_IP_PREFIXES):
         raise ValueError(f"URL vers IP privée bloquée: {host}")
+    for ip in _addresses_for_host(host):
+        if _forbidden_ip(ip):
+            raise ValueError(f"URL résout vers une adresse interdite: {host} → {ip}")
     return url
 
 
