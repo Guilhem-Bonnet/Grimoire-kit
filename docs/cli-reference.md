@@ -531,3 +531,30 @@ Les erreurs Grimoire incluent un code stable et une suggestion de récupération
 | `GR005` | Conflit de merge non résolu | Résolution manuelle puis retry |
 | `GR010` | Erreur réseau | Vérifier la connexion |
 | `GR050` | Erreur de validation schéma | `grimoire validate` |
+
+
+## `grimoire ext`
+
+Gestion des extensions (bundles d'artefacts gouvernés). Voir
+[Extensions & marketplace](extensions-marketplace.md).
+
+| Commande | Rôle |
+| --- | --- |
+| `grimoire ext add <dossier>` | Installer depuis un dossier local |
+| `grimoire ext add <id> --registry <clone> [--version X.Y.Z]` | Installer depuis le registry, checksum vérifié |
+| `grimoire ext list` | Extensions installées et leurs patterns |
+| `grimoire ext verify <id>` | Vérification post-installation |
+| `grimoire ext remove <id>` | Désinstallation (hooks retirés du registre de sécurité) |
+| `grimoire ext publish <source> --registry <clone>` | Publier une extension ou un `.blueprint.json` |
+| `grimoire ext add-blueprint <id> --registry <clone>` | Installer un blueprint publié |
+
+## `grimoire serve`
+
+Mode local UI + API — marketplace, éditeur de blueprints, wizard de setup.
+Voir [Mode local & blueprints](serve-blueprints.md).
+
+| Option | Rôle |
+| --- | --- |
+| `--port` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
+| `--project-root` | Racine du projet cible |
+| `--ui-dir` | Servir une UI custom (défaut : UI embarquée dans le paquet) |

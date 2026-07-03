@@ -89,6 +89,8 @@ nav:
       - Taxonomie Workflows: workflow-taxonomy.md
       - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
   - Guides:
+      - Extensions & marketplace: extensions-marketplace.md
+      - Mode local & blueprints: serve-blueprints.md
       - SDK Python: sdk-guide.md
       - Créer un agent: creating-agents.md
       - Archétypes: archetype-guide.md
