@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": ".github/hooks/scripts/crewai-telemetry-bridge.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -9,6 +9,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Extensions** : `grimoire ext add|list|remove|verify|publish` — bundles
+  d'artefacts gouvernés décrits par `extension.json` (schéma versionné),
+  installation locale ou depuis le registry dédié
+  [grimoire-extensions-registry](https://github.com/Guilhem-Bonnet/grimoire-extensions-registry)
+  avec checksum sha256 vérifié et extraction sûre. Six extensions publiées :
+  crewai, langfuse, langgraph, autogen, browser-use, haystack — chacune
+  ancrée sur le catalogue de patterns agentiques (`patterns.implements`
+  obligatoire, hooks toujours en mode shadow).
+- **`grimoire serve`** : mode local UI + API (127.0.0.1) — wizard de setup
+  par archetypes, vue des artefacts gouvernés, gestion d'extensions, CRUD et
+  validation de blueprints, stream SSE des events.jsonl.
+- **Blueprints** : format `.blueprint.json` avec pins typés bloquants (une
+  connexion sans contrat commun ne compile pas), lint normatif dérivé du
+  catalogue (dépendances de patterns, heuristique Faux Done, nodes isolés)
+  et replay de télémétrie via bindings.
 - **Écriture mémoire typée dans le SDK** (`grimoire memory remember` /
   `recall`) — parité complète avec le protocole agent legacy : 5 types
   (shared-context, decisions, agent-learnings, failures, stories),
@@ -23,7 +38,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mem0-bridge.py` devient le fallback documenté (SDK absent). Idem
   `agent-base-compact.md` et `grimoire-trace.md`. `export-md` reste legacy
   (pas d'équivalent SDK).
-
 
 ## [3.20.0] - 2026-07-02
 
