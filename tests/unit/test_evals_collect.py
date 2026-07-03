@@ -47,9 +47,9 @@ def test_governed_record_has_standard_metrics(governed_project: Path) -> None:
 def test_baseline_record_on_bare_project(tmp_path: Path) -> None:
     mod = _load_module()
     record = mod.collect_record(tmp_path, "web-app-todo", "bootstrap", "baseline")
-    std = record["standard"]
-    # Non enrôlé : verify échoue proprement, rien n'est inventé.
-    assert std["verify_ok"] is False
+    # Protocole §Collecte : le bras baseline ne reçoit aucun artefact du
+    # standard — ses métriques restent null (cf. 34db7160).
+    assert record["standard"] is None
 
 
 def test_external_metrics_stay_null(governed_project: Path) -> None:
