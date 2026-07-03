@@ -79,3 +79,6 @@ _grimoire/_memory/*.sqlite3
 .grimoire-memory/
 .grimoire-twin/
 framework/memory/session-state.md
+
+# Evals — sorties brutes des runs (non committées, cf. docs/evals-protocol.md)
+evals/runs/
