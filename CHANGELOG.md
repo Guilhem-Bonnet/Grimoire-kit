@@ -7,6 +7,28 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-07-03
+
+### Ajouté
+
+- **UI embarquée** : les pages marketplace, blueprint et setup rejoignent le
+  wheel (`grimoire/data/web`) — `grimoire serve` sans `--ui-dir` sert
+  l'expérience complète après un simple `pip install grimoire-kit` (#57).
+- **UX v2 de l'éditeur blueprint** : drag de connexion Maj+glisser avec
+  contrats vérifiés au drop, palette latérale cliquable (recherche, groupes),
+  panneau propriétés du node (label, contrats de pins), undo Ctrl+Z,
+  layout automatique, aide contextuelle (#59).
+- **Extension fennara-godot** : premier `mcp-toolbox` du marketplace
+  (QUA-12, QUA-04, RUN-08) (#50).
+- **Campagne evals web-app-todo** : cadrage du témoin, baseline, grille de
+  jugement pré-enregistrée, mécanique de run standard-null hors bras
+  governed (#53, #54, #55, #56).
+
+### Corrigé
+
+- Test `test_baseline_record_on_bare_project` aligné sur le protocole
+  standard-null (#58).
+
 ## [3.21.1] - 2026-07-03
 
 ### Corrigé (issue #39 — suite)
