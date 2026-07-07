@@ -57,12 +57,12 @@
         </div>
         <div class="at-row" style="gap:8px;margin:14px 0 20px;flex-wrap:wrap">
           <span class="at-chip" id="pt-count">…</span>
-          <span class="at-chip">8 contrats documentés</span>
+          <span class="at-chip" id="pt-contracts">…</span>
           <span class="at-sp"></span>
           <input class="at-search" id="pt-search" placeholder="rechercher — ref, nom, contrat…" style="max-width:280px" />
         </div>
         <div id="pt-body"></div>
-        <p style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted);margin-top:28px">extrait documenté : 18/36 patterns — la fiche complète se régénère depuis <span style="color:var(--ink-soft)">capability-map.yaml</span></p>
+        <p style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted);margin-top:28px">catalogue complet — exporté depuis <span style="color:var(--ink-soft)">processus-developpement-agentique</span> (source de vérité versionnée)</p>
       </div></div>
       <div class="at-status" id="atelier-status"></div>
     </div>
@@ -79,13 +79,16 @@
     const esc = Atelier.esc;
     const IN_ATELIER = window.GrimoireMode === 'atelier';
     const { catalogue: CAT, extensions: EXT } = await Atelier.data();
+    const docBase = CAT.source && CAT.source.repository
+      ? CAT.source.repository.replace(/\.git$/, '') + '/blob/main/' : '';
 
     let view = 'familles';
     let activeCat = 'ALL';
     let selected = (location.hash || '').replace('#', '') || null;
     let q = '';
 
-    $('#pt-count').textContent = CAT.total_patterns + ' patterns · ' + CAT.total_categories + ' catégories';
+    $('#pt-count').textContent = CAT.patterns.length + ' patterns · ' + CAT.categories.length + ' familles';
+    $('#pt-contracts').textContent = CAT.contracts.length + ' contrats documentés';
 
     function implementedBy(ref) {
       return EXT.extensions.filter(e => (e.patterns || []).includes(ref));
@@ -125,11 +128,11 @@
         <div class="at-lbl" style="margin:14px 0 6px">Checks</div>
         ${p.checks.map(c => `<div style="font-size:0.72rem;color:var(--ink-soft);padding:2px 0">✓ ${esc(c)}</div>`).join('')}
         <div class="at-row sb" style="margin-top:14px">
-          <span class="at-lbl">Profil minimum</span>
-          <span class="at-chip">${esc(p.profile_min)}</span>
+          <span class="at-lbl">Maturité</span>
+          <span class="at-chip">${esc(p.maturity || '—')}</span>
         </div>
-        <div class="at-lbl" style="margin:14px 0 6px">Agents</div>
-        <div class="at-row" style="gap:5px;flex-wrap:wrap">${p.agents.map(a => `<span class="at-chip" style="font-size:0.56rem">${esc(a)}</span>`).join('')}</div>
+        ${p.docPath ? `<div class="at-lbl" style="margin:14px 0 6px">Fiche complète</div>
+        <a class="at-chip" style="font-size:0.56rem;text-decoration:none" target="_blank" rel="noopener" href="${esc(docBase + p.docPath)}">catalogue · ${esc(p.ref)} ↗</a>` : ''}
         ${impl.length ? `<div class="at-lbl" style="margin:14px 0 6px">Implémenté par</div>
         <div class="at-row" style="gap:5px;flex-wrap:wrap">${impl.map(e => `<a class="at-chip" style="font-size:0.56rem;text-decoration:none" href="extensions.html?ext=${esc(e.id)}">${esc(e.name)}</a>`).join('')}</div>` : ''}
         <div style="margin-top:18px">
@@ -155,11 +158,11 @@
       const cards = list.length ? `<div class="pt-grid">${list.map(p => `
         <div class="at-card pt-card ${selected === p.ref ? 'on' : ''}" data-ref="${p.ref}">
           <div class="at-row sb"><span class="ref" style="color:${Atelier.catColor(p.cat)}">${esc(p.ref)}</span>
-          <span style="font-family:var(--font-mono);font-size:0.54rem;color:var(--ink-muted)">${esc(p.profile_min)}</span></div>
+          <span style="font-family:var(--font-mono);font-size:0.54rem;color:var(--ink-muted)">${esc(p.maturity || '')}</span></div>
           <h4>${esc(p.name)}</h4>
           <p>${esc(p.desc)}</p>
         </div>`).join('')}</div>`
-        : `<p class="at-sub" style="padding:30px 0;text-align:center">aucun pattern ne correspond${activeCat !== 'ALL' ? ' dans cette catégorie' : ''} — les 36 fiches complètes viennent de capability-map.yaml</p>`;
+        : `<p class="at-sub" style="padding:30px 0;text-align:center">aucun pattern ne correspond${activeCat !== 'ALL' ? ' dans cette catégorie' : ''}</p>`;
       return `<div class="pt-layout">${cats}<div>${cards}</div>${fiche(sel)}</div>`;
     }
 

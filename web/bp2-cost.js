@@ -9,25 +9,25 @@
 
   /* k-tokens par run : { in, out, runs } — hypothèses moyennes par pattern */
   const NODE_COST = {
-    'PRD-01': { in: 2.4, out: 1.2, runs: 1 },
-    'ORC-01': { in: 3.2, out: 0.9, runs: 1 },
-    'ORC-02': { in: 4.5, out: 2.4, runs: 3 },
-    'ORC-03': { in: 5.0, out: 2.2, runs: 2 },
-    'ENG-01': { in: 14.0, out: 6.5, runs: 3 },
-    'ENG-02': { in: 12.0, out: 5.0, runs: 2 },
-    'QUA-01': { in: 6.0, out: 2.8, runs: 1 },
-    'QUA-02': { in: 9.0, out: 1.8, runs: 1 },
-    'QUA-03': { in: 7.0, out: 1.4, runs: 1 },
-    'GOV-01': { in: 3.5, out: 0.6, runs: 1 },
-    'GOV-02': { in: 1.8, out: 0.4, runs: 1 },
-    'GOV-03': { in: 6.0, out: 1.1, runs: 1 },
+    'ORC-02': { in: 2.4, out: 1.2, runs: 1 },
+    'ORC-01': { in: 4.5, out: 2.4, runs: 3 },
+    'ORC-03': { in: 1.6, out: 0.8, runs: 1 },
+    'ORC-11': { in: 14.0, out: 6.5, runs: 3 },
+    'COG-01': { in: 5.0, out: 2.2, runs: 1 },
+    'COG-03': { in: 12.0, out: 5.0, runs: 2 },
+    'QUA-04': { in: 6.0, out: 2.8, runs: 1 },
+    'QUA-15': { in: 9.0, out: 1.8, runs: 1 },
+    'QUA-13': { in: 7.0, out: 1.4, runs: 1 },
+    'QUA-05': { in: 3.5, out: 0.6, runs: 1 },
+    'QUA-03': { in: 1.8, out: 0.4, runs: 1 },
+    'GOV-01': { in: 2.0, out: 0.5, runs: 1 },
+    'GOV-02': { in: 2.5, out: 0.6, runs: 1 },
     'GOV-04': { in: 8.0, out: 2.2, runs: 1 },
-    'MEM-01': { in: 2.2, out: 1.1, runs: 1 },
-    'MEM-02': { in: 5.0, out: 1.6, runs: 1 },
-    'SEC-01': { in: 7.5, out: 2.4, runs: 1 },
-    'SEC-02': { in: 3.0, out: 0.5, runs: 1 },
-    'OPS-01': { in: 2.5, out: 0.6, runs: 1 },
-    'DAT-01': { in: 8.0, out: 3.0, runs: 2 }
+    'GOV-12': { in: 7.5, out: 2.4, runs: 1 },
+    'GOV-15': { in: 1.2, out: 0.3, runs: 1 },
+    'KNO-02': { in: 2.2, out: 1.1, runs: 1 },
+    'KNO-06': { in: 5.0, out: 1.6, runs: 1 },
+    'QUA-14': { in: 3.0, out: 0.5, runs: 1 }
   };
   const EXT_DEFAULT = { in: 18.0, out: 7.0, runs: 1 };   // un crew/graph externe
   const CAT_DEFAULT = { in: 5.0, out: 2.0, runs: 1 };

@@ -13,7 +13,7 @@
 
   /* ══ Templates par pattern ══ */
   const T = {};
-  T['PRD-01'] = [{ id: 'mission-brief.md', title: 'Mission brief', required: ['objectif', 'done_when', 'budget_tokens'],
+  T['ORC-02'] = [{ id: 'mission-brief.md', title: 'Mission brief', required: ['objectif', 'done_when', 'budget_tokens'],
     body: `# Mission brief — {{titre}}
 
 // cadré par @prd-author — le SOG route sur cette base
@@ -68,7 +68,7 @@ criteres:
 motifs: explicites, jamais silencieux
 sortie: decision-trace
 ` }];
-  T['ENG-01'] = [{ id: 'impl-loop.md', title: 'Boucle implement & prove', required: ['perimetre', 'preuves'],
+  T['ORC-11'] = [{ id: 'impl-loop.md', title: 'Boucle implement & prove', required: ['perimetre', 'preuves'],
     body: `# Implement & Prove
 
 // @implementer travaille, @debugger répare — preuves en continu
@@ -101,7 +101,7 @@ chaine: sha256, chaque entrée référence la précédente
 horodatage: signé
 sortie: audit-log
 ` }];
-  T['SEC-01'] = [{ id: 'threat-model.md', title: 'Threat model', required: ['surfaces', 'mitigations'],
+  T['GOV-12'] = [{ id: 'threat-model.md', title: 'Threat model', required: ['surfaces', 'mitigations'],
     body: `# Threat model
 
 // @threat-modeler énumère, @sentinel bloque tant que non accepté
@@ -112,7 +112,7 @@ mitigations:
   - …
 sortie: evidence-pack
 ` }];
-  T['MEM-01'] = [{ id: 'memory-policy.md', title: 'Politique mémoire', required: ['expiration'],
+  T['KNO-02'] = [{ id: 'memory-policy.md', title: 'Politique mémoire', required: ['expiration'],
     body: `# Shared context — politique
 
 // @memory-keeper publie au Memory OS
@@ -122,7 +122,7 @@ portee: bornée au projet {{projet}}
 expiration: …
 sortie: memory-slice
 ` }];
-  T['OPS-01'] = [{ id: 'pipeline-gate.yaml', title: 'Gate CI', required: ['verdict', 'rollback'],
+  T['GOV-02'] = [{ id: 'pipeline-gate.yaml', title: 'Gate CI', required: ['verdict', 'rollback'],
     body: `# Pipeline gate
 
 entree: compliance-declaration
@@ -191,7 +191,7 @@ entree: evidence-pack
 regles:
   - tests: verts, joints à la preuve
   - diff: borné à src/export/
-  - secrets: scan zéro fuite (#SEC-02 en amont)
+  - secrets: scan zéro fuite (#QUA-14 en amont)
 mode: fail-closed
 budget_tokens: 8k
 sortie: compliance-declaration

@@ -14,11 +14,11 @@
   /* ══ Templates préfaits ══ */
   function crewGraph(uid) {
     const n = (ref, x, y) => ({ id: uid(), ref, x, y });
-    const prd = n('PRD-01', 110, 300), orc = n('ORC-01', 410, 340), crew = { id: uid(), ref: 'ext:crewai:crew', x: 710, y: 300 },
-      qua = n('QUA-01', 1010, 360), gov = n('GOV-01', 1310, 300);
+    const prd = n('ORC-02', 110, 300), orc = n('ORC-01', 410, 340), crew = { id: uid(), ref: 'crewai-crew', x: 710, y: 300 },
+      qua = n('QUA-04', 1010, 360), gov = n('QUA-05', 1310, 300);
     const e = (a, b, c) => ({ id: uid(), from: a.id, to: b.id, contract: c });
     return { nodes: [prd, orc, crew, qua, gov],
-      edges: [e(prd, orc, 'mission-brief'), e(orc, crew, 'task-envelope'), e(crew, qua, 'evidence-pack'), e(qua, gov, 'evidence-pack')],
+      edges: [e(prd, orc, 'task-envelope'), e(orc, crew, 'task-envelope'), e(crew, qua, 'evidence-pack'), e(qua, gov, 'evidence-pack')],
       comments: [{ id: uid(), x: 60, y: 210, w: 1500, h: 320, label: 'délégation à un crew externe — sous contrat', color: '#FF6B3D' }] };
   }
   const composed = (answers, post) => uid => {
@@ -42,11 +42,11 @@
     { slug: 'release-blindee', name: 'Release blindée', tags: ['équipe', 'blindé', 'CI'],
       desc: 'Hooks de scan sur chaque agent, porte fail-closed, déploiement gated en CI.',
       make: composed({ goal: 'dev', team: 'orch', care: 'armored', mem: 'yes' }, (r, uid) => {
-        const gov = r.nodes.find(n => n.ref === 'GOV-01');
+        const gov = r.nodes.find(n => n.ref === 'QUA-05');
         if (gov) {
-          const ops = { id: uid(), ref: 'OPS-01', x: gov.x + 300, y: gov.y };
+          const ops = { id: uid(), ref: 'GOV-02', x: gov.x + 300, y: gov.y };
           r.nodes.push(ops);
-          r.edges.push({ id: uid(), from: gov.id, to: ops.id, contract: 'compliance-declaration' });
+          r.edges.push({ id: uid(), from: gov.id, to: ops.id, contract: 'verification-verdict' });
         }
       }) },
     { slug: 'crew-externe', name: 'Délégation à un crew externe', tags: ['extension', 'CrewAI'], requires: 'crewai',
@@ -75,20 +75,17 @@
   /* ══ Stockage : rename / duplicate / delete / export / import ══ */
   const slugify = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'flow';
-  function writeList(list) { localStorage.setItem(Atelier.LS.bpList, JSON.stringify(list)); }
-
   function renameBp(oldId, raw) {
     const newId = slugify(raw);
     if (!newId || newId === oldId) return;
     const list = Atelier.bpList();
     if (list.includes(newId)) { Atelier.toast('<b>' + esc(newId) + '</b> existe déjà.'); return; }
     const st = Atelier.loadBp(oldId);
-    localStorage.setItem(Atelier.LS.bpPrefix + newId, JSON.stringify(st));
-    localStorage.removeItem(Atelier.LS.bpPrefix + oldId);
-    writeList(list.map(x => x === oldId ? newId : x));
+    Atelier.saveBp(newId, st);
+    Atelier.deleteBp(oldId);
     if (activeId() === oldId) localStorage.setItem(LS_ACTIVE, newId);
     BPEditor.loadBp(newId);
-    Atelier.toast('Renommé en <b>' + esc(newId) + '</b> ✓');
+    Atelier.toast('Renommé en <b>' + esc(newId) + '</b> ✓ — l\u2019ancien fichier reste dans _grimoire/blueprints, supprimez-le au diff git.');
   }
   function duplicateBp(id) {
     const list = Atelier.bpList();
@@ -101,9 +98,8 @@
     Atelier.toast('<b>' + esc(copy) + '</b> créé — une dérive libre, l\u2019original n\u2019a pas bougé.', { good: true });
   }
   function deleteBp(id) {
+    Atelier.deleteBp(id);
     const list = Atelier.bpList().filter(x => x !== id);
-    localStorage.removeItem(Atelier.LS.bpPrefix + id);
-    writeList(list);
     if (activeId() === id) localStorage.removeItem(LS_ACTIVE);
     if (list.length) BPEditor.loadBp(list[0]);
     else {

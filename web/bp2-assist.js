@@ -11,25 +11,23 @@
 
   /* ── adjacences recommandées : ref → [[ref suivant, pourquoi]] ── */
   const NEXT = {
-    'PRD-01': [['ORC-01', 'router la mission — un seul point d\u2019entrée']],
-    'ORC-01': [['ENG-01', 'déléguer l\u2019implémentation sous contrat'], ['SEC-01', 'menace modélisée avant action sensible'], ['ORC-02', 'paralléliser en sous-tâches bornées']],
-    'ORC-02': [['ENG-01', 'exécuter chaque sous-tâche avec preuves']],
-    'ORC-03': [['ENG-01', 'agir seulement après plan validé']],
-    'ENG-01': [['QUA-01', 'assembler la preuve du travail'], ['SEC-02', 'scanner les secrets avant la porte']],
-    'ENG-02': [['QUA-01', 'prouver l\u2019équivalence avant/après']],
-    'QUA-01': [['GOV-01', 'porte fail-closed — le done se prouve'], ['QUA-02', 'revue par un agent distinct'], ['QUA-03', 'mesurer la couverture réelle']],
-    'QUA-02': [['GOV-02', 'chaîner la décision au journal'], ['MEM-01', 'persister le contexte utile']],
-    'QUA-03': [['GOV-01', 'décider sur preuve couverte']],
-    'GOV-01': [['OPS-01', 'déployer seulement sur verdict vert']],
-    'GOV-02': [['MEM-01', 'la mémoire repart du réel'], ['GOV-04', 'auditer la boucle antifragile']],
-    'GOV-03': [['GOV-02', 'journaliser l\u2019arbitrage']],
-    'SEC-01': [['QUA-02', 'revue du threat model par un tiers']],
-    'SEC-02': [['GOV-01', 'fermer sur preuve propre']],
-    'DAT-01': [['QUA-02', 'revue de migration par un tiers']],
-    'OPS-01': [['GOV-04', 'score antifragile sur les audits']]
+    'ORC-02': [['ORC-01', 'router la mission \u2014 un seul point d\u2019entrée'], ['GOV-01', 'la policy cadre avant de dispatcher']],
+    'ORC-01': [['ORC-11', 'déléguer l\u2019implémentation sous contrat'], ['GOV-12', 'menace modélisée avant action sensible'], ['QUA-04', 'exiger la preuve de chaque restitution']],
+    'ORC-11': [['QUA-04', 'assembler la preuve du travail'], ['QUA-14', 'valider la sortie avant la porte']],
+    'COG-01': [['ORC-11', 'exécuter chaque sous-objectif avec preuves']],
+    'COG-03': [['QUA-04', 'prouver l\u2019équivalence avant/après']],
+    'QUA-04': [['QUA-05', 'porte fail-closed \u2014 le done se prouve'], ['QUA-15', 'revue par un agent distinct'], ['QUA-13', 'mesurer la couverture réelle']],
+    'QUA-15': [['QUA-03', 'chaîner la décision au journal'], ['KNO-02', 'persister le contexte utile']],
+    'QUA-13': [['QUA-05', 'décider sur preuve couverte']],
+    'QUA-05': [['GOV-02', 'déployer seulement sur verdict vert']],
+    'QUA-03': [['KNO-02', 'la mémoire repart du réel'], ['GOV-04', 'auditer la boucle antifragile']],
+    'GOV-15': [['QUA-03', 'journaliser l\u2019arbitrage']],
+    'GOV-12': [['QUA-15', 'revue du threat model par un tiers']],
+    'QUA-14': [['QUA-05', 'fermer sur preuve propre']],
+    'GOV-02': [['GOV-04', 'score antifragile sur les audits'], ['KNO-02', 'la mémoire repart du réel']]
   };
-  const EXT_NEXT = [['QUA-01', 'prouver ce que le framework a produit'], ['SEC-02', 'scanner avant la porte']];
-  const FALLBACK_ORDER = ['GOV', 'QUA', 'SEC', 'MEM', 'OPS', 'ORC', 'ENG'];
+  const EXT_NEXT = [['QUA-04', 'prouver ce que le framework a produit'], ['QUA-14', 'valider la sortie avant la porte']];
+  const FALLBACK_ORDER = ['QUA', 'GOV', 'KNO', 'RUN', 'ORC', 'MOD', 'COG', 'ORG'];
 
   function suggestFor(node, g, specOf) {
     const s = specOf(node);
@@ -61,10 +59,10 @@
       recs = [['team:orch', 'confier la mission à un orchestrateur'], ['ORC-01', 'router vers le bon agent']];
     } else if (node.kind === 'agent') {
       recs = node.role === 'orchestrateur'
-        ? [['team:agent', 'déléguer à un spécialiste — il travaille et prouve'], ['SEC-01', 'menace modélisée avant action sensible']]
-        : (node.delegates ? [['team:sub', 'déléguer une sous-tâche rapide']] : []).concat([['GOV-01', 'porte fail-closed sur sa preuve'], ['QUA-02', 'revue par un agent tiers'], ['SEC-02', 'scanner les secrets']]);
+        ? [['team:agent', 'déléguer à un spécialiste — il travaille et prouve'], ['GOV-12', 'menace modélisée avant action sensible']]
+        : (node.delegates ? [['team:sub', 'déléguer une sous-tâche rapide']] : []).concat([['QUA-05', 'porte fail-closed sur sa preuve'], ['QUA-15', 'revue par un agent tiers'], ['QUA-14', 'valider la sortie']]);
     } else if (s.kind === 'ext') recs = EXT_NEXT;
-    else if (node.kind === 'group') recs = [['GOV-01', 'fermer le sous-flow par une porte'], ['QUA-02', 'revue de ce que le sous-flow produit']];
+    else if (node.kind === 'group') recs = [['QUA-05', 'fermer le sous-flow par une porte'], ['QUA-15', 'revue de ce que le sous-flow produit']];
     else recs = NEXT[node.ref] || [];
     recs.forEach(([r, w]) => push(r, w));
 
@@ -102,57 +100,57 @@
     /* R-01 · une preuve doit franchir une porte */
     nodes.forEach(n => {
       const s = sp(n);
-      if (!s || !s.out.includes('evidence-pack')) return;
+      if (!s || !s.out.includes('evidence-pack') || n.ref === 'QUA-05') return;
       const consumed = edges.some(e => e.from === n.id && e.contract === 'evidence-pack') || drained.has('evidence-pack');
       if (consumed) return;
       out.push({ level: 'warn', rule: 'R-01 · preuve → porte', node: n.id, path, ref: nameOf(n),
         text: `${where}sa preuve (evidence-pack) ne franchit aucune porte — un « fini » se décide fail-closed.`,
-        fix: { label: 'AJOUTER GOV-01 ET RELIER', run: () => { const gov = placeAfter(n, 'GOV-01', 0); wire(n, gov, specOf); } } });
+        fix: { label: 'AJOUTER QUA-05 ET RELIER', run: () => { const gov = placeAfter(n, 'QUA-05', 0); wire(n, gov, specOf); } } });
     });
 
     /* R-02 · pas de dispatch sans mission cadrée */
     nodes.filter(n => n.ref === 'ORC-01' || (n.kind === 'agent' && n.role === 'orchestrateur')).forEach(n => {
-      if (edges.some(e => e.to === n.id && e.contract === 'mission-brief') || fed.has('mission-brief')) return;
+      if (edges.some(e => e.to === n.id && e.contract === 'task-envelope') || fed.has('task-envelope')) return;
       out.push({ level: 'warn', rule: 'R-02 · cadrer avant de router', node: n.id, path, ref: n.ref || esc(n.name),
         text: `${where}le dispatch reçoit une intention non cadrée — posez un Mission Brief en amont.`,
-        fix: { label: 'AJOUTER PRD-01 EN AMONT', run: () => {
-          const p = core.addNode('PRD-01', n.x - 300, n.y, { silent: true });
-          core.addEdge(p.id, n.id, 'mission-brief');
+        fix: { label: 'AJOUTER ORC-02 EN AMONT', run: () => {
+          const p = core.addNode('ORC-02', n.x - 300, n.y, { silent: true });
+          core.addEdge(p.id, n.id, 'task-envelope');
         } } });
     });
 
     /* R-03 · décisions → mémoire */
-    const dec = nodes.find(n => { const s = sp(n); return s && s.out.includes('decision-trace'); });
-    if (dec && !hasCat('MEM')) {
+    const dec = nodes.find(n => { const s = sp(n); return s && s.out.includes('verification-verdict'); });
+    if (dec && !hasCat('KNO')) {
       out.push({ level: 'info', rule: 'R-03 · anti-amnésie', node: dec.id, path, ref: nameOf(dec),
         text: `${where}des décisions sont produites mais rien ne les persiste — les agents suivants repartiront de zéro.`,
-        fix: { label: 'AJOUTER MEM-01 ET RELIER', run: () => { const m = placeAfter(dec, 'MEM-01', 60); wire(dec, m, specOf); } } });
+        fix: { label: 'AJOUTER KNO-02 ET RELIER', run: () => { const m = placeAfter(dec, 'KNO-02', 60); wire(dec, m, specOf); } } });
     }
 
     /* R-04 · déploiement gated */
-    nodes.filter(n => n.ref === 'OPS-01').forEach(n => {
-      if (hasRef('GOV-01')) return;
-      out.push({ level: 'err', rule: 'R-04 · pas de déploiement sans verdict', node: n.id, path, ref: 'OPS-01',
-        text: `${where}la CI consomme un verdict — aucune porte GOV-01 n'existe pour l'émettre.`,
-        fix: { label: 'AJOUTER GOV-01 EN AMONT', run: () => {
-          const gov = core.addNode('GOV-01', n.x - 300, n.y, { silent: true });
-          core.addEdge(gov.id, n.id, 'compliance-declaration');
+    nodes.filter(n => n.ref === 'GOV-02').forEach(n => {
+      if (hasRef('QUA-05')) return;
+      out.push({ level: 'err', rule: 'R-04 · pas de déploiement sans verdict', node: n.id, path, ref: 'GOV-02',
+        text: `${where}la CI consomme un verdict — aucune porte QUA-05 n'existe pour l'émettre.`,
+        fix: { label: 'AJOUTER QUA-05 EN AMONT', run: () => {
+          const gov = core.addNode('QUA-05', n.x - 300, n.y, { silent: true });
+          core.addEdge(gov.id, n.id, 'verification-verdict');
         } } });
     });
 
     /* R-05 · exécution sans scan de secrets */
-    const exec = nodes.find(n => { const s = sp(n); return s && (s.kind === 'ext' || s.cat === 'ENG'); });
-    if (exec && !hasRef('SEC-02') && !path.length) {
-      out.push({ level: 'info', rule: 'R-05 · secrets scannés', node: exec.id, path, ref: nameOf(exec),
-        text: `${where}de l'exécution sans Secret Scan — un secret en clair doit fermer la porte, pas passer.`,
-        fix: { label: 'AJOUTER SEC-02', run: () => { const s2 = placeAfter(exec, 'SEC-02', -70); wire(exec, s2, specOf); } } });
+    const exec = nodes.find(n => { const s = sp(n); return s && (s.kind === 'ext' || n.ref === 'ORC-11'); });
+    if (exec && !hasRef('QUA-14') && !path.length) {
+      out.push({ level: 'info', rule: 'R-05 · sortie validée', node: exec.id, path, ref: nameOf(exec),
+        text: `${where}de l'exécution sans validateur de sortie — une sortie hors contrat doit fermer la porte, pas passer.`,
+        fix: { label: 'AJOUTER QUA-14', run: () => { const s2 = placeAfter(exec, 'QUA-14', -70); wire(exec, s2, specOf); } } });
     }
 
-    /* R-06 · fan-out sans mesure de couverture */
-    if (hasRef('ORC-02') && !hasRef('QUA-03')) {
-      const fo = nodes.find(n => n.ref === 'ORC-02');
-      out.push({ level: 'info', rule: 'R-06 · fan-out couvert', node: fo.id, path, ref: 'ORC-02',
-        text: `${where}du parallélisme sans Coverage Hawk — ce qui n'est pas couvert doit être déclaré, pas caché.`,
+    /* R-06 · orchestration sans journal de mission */
+    if (hasRef('ORC-01') && !hasRef('QUA-03')) {
+      const fo = nodes.find(n => n.ref === 'ORC-01');
+      out.push({ level: 'info', rule: 'R-06 · mission journalisée', node: fo.id, path, ref: 'ORC-01',
+        text: `${where}de l'orchestration sans Mission Ledger — ce qui est délégué doit être tracé, pas supposé.`,
         fix: { label: 'AJOUTER QUA-03', run: () => { const q = placeAfter(fo, 'QUA-03', 70); wire(fo, q, specOf); } } });
     }
 

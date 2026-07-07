@@ -263,15 +263,15 @@
       <div class="eyebrow reveal" style="margin-bottom:16px"><span class="num">FORGE-03</span> · MEMORY MANAGER</div>
       <h1 class="grad-text reveal" data-delay="60">La mémoire, inspectable.</h1>
       <p class="hero-sub reveal" data-delay="120">
-        La mémoire de Grimoire <strong>est</strong> une base de connaissances — 141 entrées : décisions,
+        La mémoire de Grimoire <strong>est</strong> une base de connaissances — <span id="mem-total-inline">…</span> entrées : décisions,
         learnings, contradictions, failures, handoffs. Cette page est un <em>Obsidian pour la mémoire
         agentique</em> : on voit le contenu, ses liens, son graphe, sa santé et le backend en place.
         <strong>Réelle en local</strong>, snapshot démo sur la vitrine. La mémoire est inspectable et vérifiable — pas une boîte noire.
       </p>
       <div class="hero-meta reveal" data-delay="160">
-        <span class="mem-badge"><span class="dot"></span>QDRANT · OPÉRATIONNEL</span>
-        <span class="mem-badge mode"><span class="dot"></span>LECTURE SEULE · VITRINE</span>
-        <span class="mem-badge" style="border-style:dashed">141 ENTRÉES</span>
+        <span class="mem-badge" id="mem-badge-backend"><span class="dot"></span>BACKEND…</span>
+        <span class="mem-badge mode" id="mem-badge-mode"><span class="dot"></span>…</span>
+        <span class="mem-badge" style="border-style:dashed" id="mem-badge-count">— ENTRÉES</span>
       </div>
     </div>
   </section>
@@ -315,7 +315,7 @@
         <div>
           <div class="eyebrow" style="margin-bottom:10px"><span class="num">A</span> · LE STORE</div>
           <h2>Ce que contient la mémoire.</h2>
-          <p class="lead">Backend détecté, extras installés, topologie du Memory OS et répartition des 141 entrées par type. La couche sémantique nous appartient ; l'admin brut du moteur reste aux consoles natives.</p>
+          <p class="lead">Backend détecté, extras installés, topologie du Memory OS et répartition des entrées par type. La couche sémantique nous appartient ; l'admin brut du moteur reste aux consoles natives.</p>
         </div>
         <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
       </div>
@@ -330,33 +330,27 @@
               <svg width="22" height="22" viewBox="0 0 22 22"><path d="M11 2L19 6.5V15.5L11 20L3 15.5V6.5L11 2Z" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11" cy="11" r="3" fill="var(--accent)"/></svg>
             </div>
             <div>
-              <div class="be-name">Qdrant</div>
-              <div class="be-role">vector store · localhost:6333</div>
+              <div class="be-name" id="be-name">—</div>
+              <div class="be-role" id="be-role">vector store</div>
             </div>
             <span class="status-tag real" style="margin-left:auto"><span class="dot"></span>OPÉRATIONNEL</span>
           </div>
         </div>
         <div class="panel reveal" data-delay="60">
           <div class="panel-head"><span>Extras installés</span><span class="sub">modules disponibles</span></div>
-          <div class="extras">
-            <span class="extra on"><span class="led"></span>qdrant</span>
-            <span class="extra on"><span class="led"></span>ollama</span>
-            <span class="extra"><span class="led"></span>neo4j</span>
-            <span class="extra"><span class="led"></span>redis</span>
-            <span class="extra"><span class="led"></span>weaviate</span>
-          </div>
-          <p class="dist-note">Modules détectés : local · ollama · qdrant_local · qdrant_server. Les backends absents sont masqués des consoles.</p>
+          <div class="extras" id="extras"></div>
+          <p class="dist-note" id="extras-note">Les backends absents sont masqués des consoles.</p>
         </div>
       </div>
 
       <!-- KPIs -->
       <div class="kpi-grid reveal" data-delay="80">
-        <div class="kpi"><div class="kpi-lbl">ENTRÉES</div><div class="kpi-val">141</div></div>
-        <div class="kpi"><div class="kpi-lbl">TYPES</div><div class="kpi-val">5</div></div>
-        <div class="kpi"><div class="kpi-lbl">TAGS UNIQUES</div><div class="kpi-val">24</div></div>
-        <div class="kpi"><div class="kpi-lbl">ORPHELINES</div><div class="kpi-val">5</div></div>
-        <div class="kpi"><div class="kpi-lbl">BACKEND</div><div class="kpi-val" style="font-size:1.05rem">qdrant</div></div>
-        <div class="kpi"><div class="kpi-lbl">SANTÉ LINT</div><div class="kpi-val">94<small>%</small></div></div>
+        <div class="kpi"><div class="kpi-lbl">ENTRÉES</div><div class="kpi-val" id="kpi-entries">—</div></div>
+        <div class="kpi"><div class="kpi-lbl">TYPES</div><div class="kpi-val" id="kpi-types">—</div></div>
+        <div class="kpi"><div class="kpi-lbl">TAGS UNIQUES</div><div class="kpi-val" id="kpi-tags">—</div></div>
+        <div class="kpi"><div class="kpi-lbl">ORPHELINES</div><div class="kpi-val" id="kpi-orphans">—</div></div>
+        <div class="kpi"><div class="kpi-lbl">BACKEND</div><div class="kpi-val" style="font-size:1.05rem" id="kpi-backend">—</div></div>
+        <div class="kpi"><div class="kpi-lbl">SANTÉ LINT</div><div class="kpi-val" id="kpi-lint">—</div></div>
       </div>
 
       <!-- Topology -->
@@ -366,14 +360,14 @@
           <div class="layer on">
             <span class="layer-idx">01</span>
             <span class="layer-name">Vector store<span>embeddings &amp; recherche sémantique</span></span>
-            <span class="layer-desc">Qdrant détecté · embeddings ollama en local. Pas encore d'extraction vectorielle persistée.</span>
-            <span class="layer-stat"><b>141</b>entrées</span>
+            <span class="layer-desc" id="topo-vector-desc">backend vectoriel détecté au démarrage.</span>
+            <span class="layer-stat"><b id="topo-entries">—</b>entrées</span>
           </div>
           <div class="layer derived">
             <span class="layer-idx">02</span>
             <span class="layer-name">Graph store<span>liens entre entrées</span></span>
-            <span class="layer-desc">neo4j non installé → liens dérivés des tags partagés (réel) — 10 sur l'échantillon affiché.</span>
-            <span class="layer-stat"><b>10</b>arêtes</span>
+            <span class="layer-desc" id="topo-graph-desc">liens dérivés des tags partagés sur l'échantillon.</span>
+            <span class="layer-stat"><b id="topo-edges">—</b>arêtes</span>
           </div>
           <div class="layer on">
             <span class="layer-idx">03</span>
@@ -385,30 +379,26 @@
             <span class="layer-idx">04</span>
             <span class="layer-name">Learnings<span>connaissances promues</span></span>
             <span class="layer-desc">Enseignements extraits des sessions, candidats à la promotion en décision.</span>
-            <span class="layer-stat"><b>8</b>learnings</span>
+            <span class="layer-stat"><b id="topo-learnings">—</b>learnings</span>
           </div>
           <div class="layer empty">
             <span class="layer-idx">05</span>
             <span class="layer-name">Decisions<span>choix gravés &amp; tracés</span></span>
-            <span class="layer-desc">Aucune décision figée pour l'instant — la promotion se fait en cockpit local.</span>
-            <span class="layer-stat"><b>0</b>decisions</span>
+            <span class="layer-desc" id="topo-decisions-desc">la promotion se fait en cockpit local.</span>
+            <span class="layer-stat"><b id="topo-decisions">—</b>decisions</span>
           </div>
         </div>
       </div>
 
       <!-- Distribution by type -->
       <div class="panel reveal" data-delay="120">
-        <div class="panel-head"><span>Répartition par type</span><span class="sub">141 entrées</span></div>
+        <div class="panel-head"><span>Répartition par type</span><span class="sub" id="dist-sub"></span></div>
         <div class="dist-grid">
           <div>
             <svg viewBox="0 0 150 150" class="donut-svg" id="dist-donut" aria-hidden="true"></svg>
           </div>
           <div>
-            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--ink-soft)"></span>mémoires</span><span class="bar-track"><span class="bar-fill" style="width:88%;background:var(--ink-soft)"></span></span><span class="bar-val">124</span></div>
-            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-amber)"></span>learnings</span><span class="bar-track"><span class="bar-fill" style="width:38%;background:var(--data-amber)"></span></span><span class="bar-val">8</span></div>
-            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-red)"></span>failures</span><span class="bar-track"><span class="bar-fill" style="width:26%;background:var(--data-red)"></span></span><span class="bar-val">5</span></div>
-            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-violet)"></span>contradictions</span><span class="bar-track"><span class="bar-fill" style="width:22%;background:var(--data-violet)"></span></span><span class="bar-val">4</span></div>
-            <div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:var(--data-cyan)"></span>decisions</span><span class="bar-track"><span class="bar-fill" style="width:2%;background:var(--data-cyan)"></span></span><span class="bar-val">0</span></div>
+            <div id="dist-bars"></div>
             <p class="dist-note">« mémoires » est le type de base : les 141 entrées au total. Learnings, failures, contradictions et decisions en sont les sous-types gouvernés.</p>
           </div>
         </div>
@@ -502,18 +492,14 @@
 
       <!-- Lint -->
       <div class="panel reveal" style="margin-bottom:14px">
-        <div class="panel-head"><span>Santé · memory-lint</span><span class="sub">v0.7 · 141 entrées scannées</span></div>
+        <div class="panel-head"><span>Santé · memory-lint</span><span class="sub" id="lint-sub"></span></div>
         <div class="lint-grid">
           <div>
             <svg viewBox="0 0 180 110" class="gauge-svg" id="lint-gauge" aria-hidden="true"></svg>
-            <p class="lint-summary">5 catégories de findings<br/>12 entrées concernées</p>
+            <p class="lint-summary" id="lint-summary"></p>
           </div>
           <div>
-            <div class="finding"><span class="find-sev error">ERROR</span><span><span class="find-label">Graphe : « neo4j requis » contredit « liens dérivés des tags »</span><span class="find-type">unresolved_contradiction · con-01</span></span><span class="find-count">1</span></div>
-            <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Seuils de cache divergents (0.8 vs 0.6) sur entrées proches</span><span class="find-type">drift · con-02</span></span><span class="find-count">2</span></div>
-            <div class="finding"><span class="find-sev warn">WARN</span><span><span class="find-label">Décision backend non revue depuis 58 jours</span><span class="find-type">stale · dec-01</span></span><span class="find-count">1</span></div>
-            <div class="finding"><span class="find-sev info">INFO</span><span><span class="find-label">Learnings quasi-identiques sur les embeddings locaux</span><span class="find-type">duplicate · lrn-01</span></span><span class="find-count">3</span></div>
-            <div class="finding"><span class="find-sev info">INFO</span><span><span class="find-label">Entrées sans tag — exclues du graphe</span><span class="find-type">orphan</span></span><span class="find-count">5</span></div>
+            <div id="lint-findings"></div>
           </div>
         </div>
       </div>
@@ -521,44 +507,7 @@
       <!-- Consoles -->
       <div class="panel reveal" data-delay="60" style="margin-bottom:14px">
         <div class="panel-head"><span>Consoles natives</span><span class="sub">redirection · admin brut du moteur</span></div>
-        <div class="consoles-grid">
-          <a class="console on" href="http://localhost:6333/dashboard" target="_blank" rel="noopener">
-            <span class="console-led"></span>
-            <span class="console-body">
-              <span class="console-name">Qdrant Dashboard</span>
-              <span class="console-role">vector store · installé</span>
-              <span class="console-url">localhost:6333/dashboard</span>
-            </span>
-            <span class="console-arrow">↗</span>
-          </a>
-          <span class="console off" aria-disabled="true">
-            <span class="console-led"></span>
-            <span class="console-body">
-              <span class="console-name">Neo4j Browser</span>
-              <span class="console-role">graph store · extra non installé</span>
-              <span class="console-url">pip install grimoire-kit[neo4j]</span>
-            </span>
-            <span class="console-arrow">—</span>
-          </span>
-          <span class="console off" aria-disabled="true">
-            <span class="console-led"></span>
-            <span class="console-body">
-              <span class="console-name">RedisInsight</span>
-              <span class="console-role">cache · extra non installé</span>
-              <span class="console-url">pip install grimoire-kit[redis]</span>
-            </span>
-            <span class="console-arrow">—</span>
-          </span>
-          <span class="console off" aria-disabled="true">
-            <span class="console-led"></span>
-            <span class="console-body">
-              <span class="console-name">Weaviate Console</span>
-              <span class="console-role">vector store · extra non installé</span>
-              <span class="console-url">pip install grimoire-kit[weaviate]</span>
-            </span>
-            <span class="console-arrow">—</span>
-          </span>
-        </div>
+        <div class="consoles-grid" id="consoles-grid"></div>
         <p class="consoles-note">On possède la couche sémantique (browse, lien, graphe, recherche). On <strong>redirige</strong> vers les consoles natives pour l'admin brut — Redis étant un pur cache, redirection seule. Seuls les backends détectés sont actifs.</p>
       </div>
 
@@ -608,12 +557,10 @@
 <script src="forge-nav.js"></script>
 <script>
 /* ════════════════════════════════════════════════════════════════════
-   memory.html — rendu autoporté (pas de JS externe).
-   Exemples statiques réalistes ; une boucle sur data/memory.json
-   les remplacera plus tard (CSS/classes conservés). Honnêteté des
-   données : SNAPSHOT DÉMO · DÉMO (projection) · COCKPIT LOCAL.
+   memory.html — rendu depuis data/memory.json (généré par gen-site-data
+   sur le store réel du projet). CSS/classes du design conservés.
    ════════════════════════════════════════════════════════════════════ */
-(function () {
+(async function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
@@ -625,26 +572,66 @@
   const TYPE_LABEL = { memory: 'mémoire', learning: 'learning', failure: 'failure', contradiction: 'contradiction', decision: 'decision' };
   const tc = (t) => TYPE_COLOR[t] || 'var(--ink-soft)';
 
-  /* ── Échantillon du vault (data/memory.json → store.sample) ── */
-  const ENTRIES = [
-    { id: 'dec-01', type: 'decision',      text: "Qdrant retenu comme vector store par défaut ; fallback local si l'extra est absent.", tags: ['backend', 'vector', 'qdrant'],          date: '2026-05-02' },
-    { id: 'lrn-01', type: 'learning',      text: "Les embeddings locaux via ollama suffisent sous ~2k entrées ; latence < 40 ms.",       tags: ['vector', 'ollama', 'perf'],            date: '2026-05-04' },
-    { id: 'con-01', type: 'contradiction', text: "La doc dit « neo4j requis pour le graphe » mais les liens sont dérivés des tags.",       tags: ['graph', 'doc', 'neo4j'],               date: '2026-05-06' },
-    { id: 'fai-01', type: 'failure',       text: "memory-sync v0.3 a dédupliqué trop agressivement : 3 learnings fusionnés à tort.",       tags: ['sync', 'migration', 'dedupe'],         date: '2026-05-09' },
-    { id: 'lrn-02', type: 'learning',      text: "Les tags partagés sont un proxy fiable de proximité sémantique pour le graphe.",         tags: ['graph', 'tags', 'semantic'],           date: '2026-05-11' },
-    { id: 'dec-02', type: 'decision',      text: "Toute écriture mémoire passe par l'API Memory OS, jamais de SQL ou d'accès brut.",       tags: ['api', 'governance', 'write'],          date: '2026-05-13' },
-    { id: 'mem-01', type: 'memory',        text: "Le handoff dev→qa porte le contexte de spec dans le shared-context.",                   tags: ['handoff', 'shared-context', 'agents'], date: '2026-05-15' },
-    { id: 'con-02', type: 'contradiction', text: "Deux entrées affirment des seuils de cache différents (0.8 vs 0.6).",                    tags: ['cache', 'perf', 'drift'],              date: '2026-05-17' },
-    { id: 'fai-02', type: 'failure',       text: "Le reindex Qdrant a échoué sur une collection vide : guard manquant.",                  tags: ['qdrant', 'reindex', 'guard'],          date: '2026-05-19' },
-    { id: 'lrn-03', type: 'learning',      text: "Le lint détecte le drift via la divergence de tags entre entrées proches.",             tags: ['lint', 'drift', 'quality'],            date: '2026-05-21' },
-    { id: 'mem-02', type: 'memory',        text: "RedisInsight reste l'outil d'admin du cache : on ne le réimplémente pas.",              tags: ['redis', 'console', 'cache'],           date: '2026-05-23' },
-    { id: 'dec-03', type: 'decision',      text: "L'édition gouvernée (CRUD) est réservée au cockpit local, jamais sur la vitrine.",       tags: ['governance', 'boundary', 'write'],     date: '2026-05-25' },
-    { id: 'lrn-04', type: 'learning',      text: "La projection 2D exige de vrais embeddings ; placeholder démo en attendant.",           tags: ['vector', 'projection', 'demo'],        date: '2026-05-27' },
-    { id: 'fai-03', type: 'failure',       text: "La promotion d'un learning en decision a perdu ses tags d'origine.",                    tags: ['promotion', 'tags', 'decision'],       date: '2026-05-29' },
-  ];
+  let M = null;
+  try {
+    const r = await fetch('data/memory.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    M = await r.json();
+  } catch (e) {
+    M = { store: { total_entries: 0, sample: [], tags_unique: 0, orphans: 0 },
+      counts_by_type: {}, backend: { active: null, extras_installed: {}, modules: [] },
+      lint: null, lint_health: null, consoles: {}, vector_projection: null };
+  }
 
-  /* ── Donut : répartition par type ── */
-  function donut(svg, segs) {
+  const store = M.store || {};
+  const ENTRIES = (store.sample || []).map(e => ({
+    id: e.id, type: e.type || 'memory', text: e.text || '',
+    tags: e.tags || [], date: String(e.created_at || '').slice(0, 10)
+  }));
+  const counts = M.counts_by_type || {};
+  const total = store.total_entries || ENTRIES.length;
+  const backend = M.backend || {};
+  const online = !!(window.Atelier && Atelier.online);
+
+  /* ── Hero & badges ── */
+  const ti = $('mem-total-inline'); if (ti) ti.textContent = total;
+  const bb = $('mem-badge-backend');
+  if (bb) bb.innerHTML = '<span class="dot"></span>' + esc((backend.active || 'AUCUN BACKEND').toUpperCase()) + (backend.active ? ' · DÉTECTÉ' : '');
+  const bm = $('mem-badge-mode');
+  if (bm) bm.innerHTML = '<span class="dot"></span>' + (online ? 'COCKPIT LOCAL · LECTURE' : 'LECTURE SEULE · VITRINE');
+  const bc = $('mem-badge-count'); if (bc) bc.textContent = total + ' ENTRÉES';
+
+  /* ── KPIs ── */
+  const typesNonZero = Object.values(counts).filter(v => v > 0).length;
+  if ($('kpi-entries')) $('kpi-entries').textContent = total;
+  if ($('kpi-types')) $('kpi-types').textContent = typesNonZero || Object.keys(TYPE_LABEL).length;
+  if ($('kpi-tags')) $('kpi-tags').textContent = store.tags_unique != null ? store.tags_unique : '—';
+  if ($('kpi-orphans')) $('kpi-orphans').textContent = store.orphans != null ? store.orphans : '—';
+  if ($('kpi-backend')) $('kpi-backend').textContent = backend.active || 'aucun';
+  if ($('kpi-lint')) $('kpi-lint').innerHTML = M.lint_health != null ? M.lint_health + '<small>%</small>' : '—';
+
+  /* ── Backend & extras ── */
+  if ($('be-name')) $('be-name').textContent = backend.active ? backend.active.charAt(0).toUpperCase() + backend.active.slice(1) : 'Aucun';
+  if ($('be-role')) $('be-role').textContent = backend.active ? 'vector store · détecté au démarrage' : 'installez un extra vectoriel (qdrant, weaviate…)';
+  const extras = backend.extras_installed || {};
+  if ($('extras')) $('extras').innerHTML = Object.keys(extras).length
+    ? Object.entries(extras).map(([k, v]) => '<span class="extra' + (v ? ' on' : '') + '"><span class="led"></span>' + esc(k) + '</span>').join('')
+    : '<span class="extra"><span class="led"></span>aucun extra détecté</span>';
+  if ($('extras-note')) $('extras-note').textContent = (backend.modules || []).length
+    ? 'Modules détectés : ' + backend.modules.join(' · ') + '. Les backends absents sont masqués des consoles.'
+    : 'Les backends absents sont masqués des consoles.';
+
+  /* ── Distribution : donut + barres ── */
+  const DIST = [
+    ['memories', 'mémoires', 'var(--ink-soft)'],
+    ['learnings', 'learnings', 'var(--data-amber)'],
+    ['failures', 'failures', 'var(--data-red)'],
+    ['contradictions', 'contradictions', 'var(--data-violet)'],
+    ['decisions', 'decisions', 'var(--data-cyan)'],
+  ].map(([k, label, color]) => ({ k, label, color, value: counts[k] || 0 }));
+  if ($('dist-sub')) $('dist-sub').textContent = total + ' entrées';
+
+  function donut(svg, segs, center) {
     const R = 56, S = 16, C = 2 * Math.PI * R, tot = segs.reduce((a, s) => a + s.value, 0) || 1;
     let off = 0, arcs = '';
     segs.forEach((s) => {
@@ -654,18 +641,24 @@
       off += len;
     });
     svg.innerHTML = `<circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--elev-3)" stroke-width="${S}"/>${arcs}` +
-      `<text x="75" y="72" text-anchor="middle" class="donut-c1">141</text>` +
+      `<text x="75" y="72" text-anchor="middle" class="donut-c1">${center}</text>` +
       `<text x="75" y="88" text-anchor="middle" class="donut-c2">ENTRÉES</text>`;
   }
-  donut($('dist-donut'), [
-    { label: 'mémoires', value: 124, color: 'var(--ink-soft)' },
-    { label: 'learnings', value: 8, color: 'var(--data-amber)' },
-    { label: 'failures', value: 5, color: 'var(--data-red)' },
-    { label: 'contradictions', value: 4, color: 'var(--data-violet)' },
-    { label: 'decisions', value: 0, color: 'var(--data-cyan)' },
-  ]);
+  if ($('dist-donut')) donut($('dist-donut'), DIST, total);
+  const maxV = Math.max(1, ...DIST.map(d => d.value));
+  if ($('dist-bars')) $('dist-bars').innerHTML = DIST.map(d =>
+    `<div class="bar-row"><span class="bar-lbl"><span class="sw" style="background:${d.color}"></span>${d.label}</span><span class="bar-track"><span class="bar-fill" style="width:${d.value ? Math.max(3, Math.round(d.value / maxV * 100)) : 0}%;background:${d.color}"></span></span><span class="bar-val">${d.value}</span></div>`
+  ).join('');
 
-  /* ── Gauge : santé lint ── */
+  /* ── Topologie ── */
+  if ($('topo-entries')) $('topo-entries').textContent = total;
+  if ($('topo-learnings')) $('topo-learnings').textContent = counts.learnings || 0;
+  if ($('topo-decisions')) $('topo-decisions').textContent = counts.decisions || 0;
+  if ($('topo-vector-desc')) $('topo-vector-desc').textContent = backend.active
+    ? backend.active + ' détecté' + (extras.ollama ? ' · embeddings ollama en local.' : '.')
+    : 'aucun backend vectoriel — recherche lexicale seule.';
+
+  /* ── Gauge lint ── */
   function gauge(svg, value) {
     const cx = 90, cy = 88, r = 70, frac = Math.max(0, Math.min(1, value / 100));
     const end = -90 + frac * 180;
@@ -677,15 +670,48 @@
       `<text x="90" y="80" text-anchor="middle" class="gauge-num" style="fill:${col}">${value}%</text>` +
       `<text x="90" y="100" text-anchor="middle" class="gauge-sub">SANTÉ DU STORE</text>`;
   }
-  gauge($('lint-gauge'), 94);
+  if ($('lint-gauge')) gauge($('lint-gauge'), M.lint_health != null ? M.lint_health : 0);
+
+  /* ── Lint findings ── */
+  const lint = M.lint || {};
+  if ($('lint-sub')) $('lint-sub').textContent =
+    (lint.version ? 'v' + lint.version + ' · ' : '') + (lint.entries_scanned != null ? lint.entries_scanned + ' entrées scannées' : '');
+  const sum = lint.summary || {};
+  if ($('lint-summary')) $('lint-summary').innerHTML =
+    (sum.total || 0) + ' finding' + ((sum.total || 0) > 1 ? 's' : '') + '<br/>' +
+    (sum.errors || 0) + ' error · ' + (sum.warnings || 0) + ' warn · ' + (sum.info || 0) + ' info';
+  const SEV = { error: 'error', warning: 'warn', warn: 'warn', info: 'info' };
+  if ($('lint-findings')) $('lint-findings').innerHTML = (lint.issues || []).length
+    ? lint.issues.map(i => {
+        const sev = SEV[(i.severity || 'info').toLowerCase()] || 'info';
+        return `<div class="finding"><span class="find-sev ${sev}">${esc((i.severity || 'info').toUpperCase())}</span><span><span class="find-label">${esc(i.message || i.label || '')}</span><span class="find-type">${esc(i.type || '')}${i.entry_id ? ' · ' + esc(i.entry_id) : ''}</span></span><span class="find-count">${i.count || 1}</span></div>`;
+      }).join('')
+    : '<div class="finding"><span class="find-sev info">INFO</span><span><span class="find-label">Aucun finding — le store est sain.</span><span class="find-type">memory-lint</span></span><span class="find-count">0</span></div>';
+
+  /* ── Consoles natives ── */
+  const CONSOLE_META = {
+    qdrant:   { role: 'vector store', extra: 'qdrant' },
+    neo4j:    { role: 'graph store', extra: 'neo4j' },
+    redis:    { role: 'cache', extra: 'redis' },
+    weaviate: { role: 'vector store', extra: 'weaviate' },
+  };
+  if ($('consoles-grid')) $('consoles-grid').innerHTML = Object.entries(M.consoles || {}).map(([k, c]) => {
+    const meta = CONSOLE_META[k] || { role: '', extra: k };
+    const on = !!extras[meta.extra];
+    return on
+      ? `<a class="console on" href="${esc(c.url)}" target="_blank" rel="noopener"><span class="console-led"></span><span class="console-body"><span class="console-name">${esc(c.label)}</span><span class="console-role">${meta.role} · installé</span><span class="console-url">${esc(c.url.replace(/^https?:\/\//, ''))}</span></span><span class="console-arrow">↗</span></a>`
+      : `<span class="console off" aria-disabled="true"><span class="console-led"></span><span class="console-body"><span class="console-name">${esc(c.label)}</span><span class="console-role">${meta.role} · extra non installé</span><span class="console-url">pip install grimoire-kit[${meta.extra}]</span></span><span class="console-arrow">—</span></span>`;
+  }).join('');
 
   /* ── Graphe : nœuds = entrées, arêtes = tags partagés ── */
+  let EDGE_COUNT = 0;
+  const NEIGH = {};
   (function renderGraph() {
-    const svg = $('graph'), W = 640, H = 460, cx = W / 2, cy = H / 2, rx = 252, ry = 176;
+    const svg = $('graph');
+    if (!svg) return;
+    const W = 640, H = 460, cx = W / 2, cy = H / 2, rx = 252, ry = 176;
     const nodes = ENTRIES;
-    // arêtes réelles : deux entrées partageant ≥1 tag
     const edges = [];
-    const NEIGH = {};
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const shared = nodes[i].tags.filter((t) => nodes[j].tags.includes(t));
@@ -695,6 +721,16 @@
           (NEIGH[nodes[j].id] = NEIGH[nodes[j].id] || new Set()).add(nodes[i].id);
         }
       }
+    }
+    EDGE_COUNT = edges.length;
+    if ($('topo-edges')) $('topo-edges').textContent = EDGE_COUNT;
+    if ($('topo-graph-desc')) $('topo-graph-desc').textContent = extras.neo4j
+      ? 'neo4j installé — graphe natif disponible via sa console.'
+      : 'neo4j non installé → liens dérivés des tags partagés — ' + EDGE_COUNT + ' sur l\u2019échantillon affiché.';
+    if (!nodes.length) {
+      svg.innerHTML = '<text x="320" y="230" text-anchor="middle" style="fill:var(--ink-muted);font-family:var(--font-mono);font-size:12px">store vide — initialisez la mémoire en cockpit local</text>';
+      $('graph-stats').innerHTML = '';
+      return;
     }
     const deg = (id) => (NEIGH[id] ? NEIGH[id].size : 0);
     const maxDeg = Math.max(1, ...nodes.map((n) => deg(n.id)));
@@ -718,7 +754,7 @@
         `<text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 12).toFixed(1)}" text-anchor="middle">${esc(n.id)}</text></g>`;
     });
     svg.innerHTML = eHTML + nHTML;
-    $('graph-stats').innerHTML = `<span><b>${nodes.length}</b> nœuds</span><span><b>${edges.length}</b> arêtes</span><span><b>24</b> tags uniques</span>`;
+    $('graph-stats').innerHTML = `<span><b>${nodes.length}</b> nœuds (échantillon)</span><span><b>${edges.length}</b> arêtes</span><span><b>${store.tags_unique != null ? store.tags_unique : '—'}</b> tags uniques</span>`;
 
     function focus(id) {
       svg.classList.add('focus');
@@ -744,22 +780,23 @@
     });
   })();
 
-  /* ── Scatter (DÉMO, sans embeddings) ── */
+  /* ── Scatter : projection réelle si disponible ── */
   (function renderScatter() {
-    const svg = $('scatter'), W = 300, H = 200;
-    // points pseudo-aléatoires déterministes, colorés par type — placeholder démo assumé
-    const types = ['memory', 'memory', 'memory', 'learning', 'failure', 'contradiction', 'decision'];
-    let seed = 7, rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-    let html = '';
-    for (let i = 0; i < 64; i++) {
-      const t = types[Math.floor(rnd() * types.length)];
-      // deux nuages mous pour évoquer une projection
-      const cxc = rnd() > 0.5 ? 110 : 195, cyc = rnd() > 0.5 ? 80 : 130;
-      const x = Math.max(8, Math.min(W - 8, cxc + (rnd() - 0.5) * 120));
-      const y = Math.max(8, Math.min(H - 8, cyc + (rnd() - 0.5) * 110));
-      html += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(2 + rnd() * 2).toFixed(1)}" fill="${tc(t)}"/>`;
+    const svg = $('scatter');
+    if (!svg) return;
+    const W = 300, H = 200;
+    const proj = M.vector_projection || {};
+    const pts = proj.points || [];
+    if (pts.length) {
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const nx = v => 10 + (x1 > x0 ? (v - x0) / (x1 - x0) : 0.5) * (W - 20);
+      const ny = v => 10 + (y1 > y0 ? (v - y0) / (y1 - y0) : 0.5) * (H - 20);
+      svg.innerHTML = pts.map(p =>
+        `<circle cx="${nx(p.x).toFixed(1)}" cy="${ny(p.y).toFixed(1)}" r="2.6" fill="${tc(p.type)}"><title>${esc(p.type || '')}</title></circle>`).join('');
+    } else {
+      svg.innerHTML = '<text x="150" y="105" text-anchor="middle" style="fill:var(--ink-muted);font-family:var(--font-mono);font-size:10px">pas de projection — vecteurs absents</text>';
     }
-    svg.innerHTML = html;
   })();
 
   /* ── Vault browser : liste + recherche + filtre + détail ── */
@@ -769,7 +806,7 @@
     return `<div class="ventry" data-id="${e.id}" data-type="${e.type}">` +
       `<div class="ventry-top">` +
         `<span class="ventry-id">${esc(e.id)}</span>` +
-        `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type])}</span>` +
+        `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type] || e.type)}</span>` +
         `<span class="ventry-date">${esc(e.date)}</span>` +
       `</div>` +
       `<div class="ventry-text">${esc(e.text)}</div>` +
@@ -789,7 +826,7 @@
     const list = $('vault-list');
     list.innerHTML = filtered.length ? filtered.map(entryRow).join('')
       : `<div class="ventry" style="cursor:default"><div class="ventry-text" style="color:var(--ink-muted);font-family:var(--font-mono);font-size:0.7rem">Aucune entrée ne correspond.</div></div>`;
-    $('vault-count').textContent = `échantillon · ${filtered.length} / ${ENTRIES.length} entrées`;
+    $('vault-count').textContent = `échantillon · ${filtered.length} / ${ENTRIES.length} affichées · ${total} au total`;
     list.querySelectorAll('.ventry[data-id]').forEach((el) => {
       el.classList.toggle('sel', el.dataset.id === selectedId);
       el.addEventListener('click', () => selectEntry(el.dataset.id, false));
@@ -800,17 +837,16 @@
     selectedId = id;
     const e = ENTRIES.find((x) => x.id === id);
     if (!e) return;
-    // liens = entrées partageant ≥1 tag
     const links = ENTRIES.filter((o) => o.id !== id && o.tags.some((t) => e.tags.includes(t)))
       .map((o) => ({ o, shared: o.tags.filter((t) => e.tags.includes(t)) }));
     $('vault-detail').innerHTML =
       `<div class="vd-top"><span class="vd-id">${esc(e.id)}</span>` +
-      `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type])}</span>` +
-      `<span class="status-tag snapshot" style="margin-left:auto"><span class="dot"></span>SNAPSHOT</span></div>` +
+      `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type] || e.type)}</span>` +
+      `<span class="status-tag ${online ? 'real' : 'snapshot'}" style="margin-left:auto"><span class="dot"></span>${online ? 'STORE LOCAL' : 'SNAPSHOT'}</span></div>` +
       `<div class="vd-text">${esc(e.text)}</div>` +
       `<div class="vd-meta">` +
-        `<div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date)}</span></div>` +
-        `<div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.map((t) => '#' + esc(t)).join('  ')}</span></div>` +
+        `<div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date || '—')}</span></div>` +
+        `<div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.length ? e.tags.map((t) => '#' + esc(t)).join('  ') : '—'}</span></div>` +
         `<div class="vd-row"><span class="vd-k">Liens (${links.length})</span><span class="vd-links">` +
           (links.length ? links.map((l) => `<span class="vd-link"><span class="sw" style="background:${tc(l.o.type)}"></span>${esc(l.o.id)} <b>· #${esc(l.shared.join(' #'))}</b></span>`).join('')
             : `<span class="vd-v" style="color:var(--ink-muted)">aucun lien — entrée orpheline</span>`) +
@@ -833,6 +869,14 @@
     });
   });
   renderList();
+
+  /* ── Statuts d'honnêteté : réel en cockpit local ── */
+  if (online) {
+    document.querySelectorAll('.status-tag.snapshot').forEach(el => {
+      el.classList.remove('snapshot'); el.classList.add('real');
+      el.innerHTML = '<span class="dot"></span>STORE LOCAL';
+    });
+  }
 
   /* ── Band dividers draw on scroll ── */
   const dObs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); dObs.unobserve(e.target); } }), { threshold: 0.5 });

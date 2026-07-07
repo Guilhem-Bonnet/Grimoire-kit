@@ -121,7 +121,7 @@ refus:
     const nodes = [], edges = [];
     const wire = (a, b, c) => edges.push({ id: uid(), from: a.id, to: b.id, contract: c });
 
-    const prd = { id: uid(), ref: 'PRD-01', x: 110, y: 320 };
+    const prd = { id: uid(), ref: 'ORC-02', x: 110, y: 320 };
     nodes.push(prd);
     let producers = [];
 
@@ -130,7 +130,7 @@ refus:
       const a1 = mkAgent(preset, 730, 210);
       const a2 = mkAgent({ ...preset.second, mission: 'vérifier et compléter le travail de ' + preset.name }, 730, 430);
       nodes.push(chef, a1, a2);
-      wire(prd, chef, 'mission-brief');
+      wire(prd, chef, 'task-envelope');
       wire(chef, a1, 'task-envelope');
       wire(chef, a2, 'task-envelope');
       producers = [a1, a2];
@@ -138,7 +138,7 @@ refus:
       const sog = { id: uid(), ref: 'ORC-01', x: 410, y: 320 };
       const a1 = mkAgent(preset, 720, 320);
       nodes.push(sog, a1);
-      wire(prd, sog, 'mission-brief');
+      wire(prd, sog, 'task-envelope');
       wire(sog, a1, 'task-envelope');
       producers = [a1];
     }
@@ -146,32 +146,32 @@ refus:
     const px = orch ? 1040 : 1010;
     let proofSrc = producers;
     if (armored) {
-      const sec = { id: uid(), ref: 'SEC-02', x: px, y: 320 };
+      const sec = { id: uid(), ref: 'QUA-14', x: px, y: 320 };
       nodes.push(sec);
       producers.forEach(a => wire(a, sec, 'evidence-pack'));
       proofSrc = [sec];
     }
-    const gov = { id: uid(), ref: 'GOV-01', x: px + 300, y: 250 };
+    const gov = { id: uid(), ref: 'QUA-05', x: px + 300, y: 250 };
     nodes.push(gov);
     proofSrc.forEach(a => wire(a, gov, 'evidence-pack'));
 
     if (care !== 'fast') {
-      const rev = { id: uid(), ref: 'QUA-02', x: px + 300, y: 450 };
-      const jr = { id: uid(), ref: 'GOV-02', x: px + 600, y: 450 };
+      const rev = { id: uid(), ref: 'QUA-15', x: px + 300, y: 450 };
+      const jr = { id: uid(), ref: 'QUA-03', x: px + 600, y: 450 };
       nodes.push(rev, jr);
       proofSrc.forEach(a => wire(a, rev, 'evidence-pack'));
-      wire(rev, jr, 'decision-trace');
+      wire(rev, jr, 'evidence-pack');
       if (mem) {
-        const m = { id: uid(), ref: 'MEM-01', x: px + 900, y: 450 };
+        const m = { id: uid(), ref: 'KNO-02', x: px + 900, y: 450 };
         nodes.push(m);
-        wire(rev, m, 'decision-trace');
+        wire(rev, m, 'evidence-pack');
       }
     } else if (mem) {
-      const rev = { id: uid(), ref: 'QUA-02', x: px + 300, y: 450 };
-      const m = { id: uid(), ref: 'MEM-01', x: px + 600, y: 450 };
+      const rev = { id: uid(), ref: 'QUA-15', x: px + 300, y: 450 };
+      const m = { id: uid(), ref: 'KNO-02', x: px + 600, y: 450 };
       nodes.push(rev, m);
       proofSrc.forEach(a => wire(a, rev, 'evidence-pack'));
-      wire(rev, m, 'decision-trace');
+      wire(rev, m, 'evidence-pack');
     }
 
     /* zone de commentaire */

@@ -12,6 +12,7 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = Atelier.esc;
 
+  await Atelier.ready;
   if (!Atelier.project()) { location.href = 'atelier.html'; return; }
   await Atelier.data();
   const CAT = Atelier.catalogue;
@@ -1137,8 +1138,8 @@
     visit(state, [], '');
     const allCats = [];
     (function walk(g) { g.nodes.forEach(n => { if (n.kind === 'group') walk(n.sub); else { const s = specOf(n); if (s) allCats.push(s.cat); } }); })(state);
-    if (!allCats.includes('GOV'))
-      out.push({ level: 'warn', path: [], text: 'Aucune porte de gouvernance (GOV) — le profil ' + esc((Atelier.project() || {}).profile || 'controlled') + ' en attend au moins une.' });
+    if (!allCats.includes('GOV') && !allCats.includes('QUA'))
+      out.push({ level: 'warn', path: [], text: 'Aucun pattern de gouvernance (GOV) ni de preuve (QUA) — un flow gouverné en attend au moins un.' });
     if (!out.some(r => r.level === 'warn' || r.level === 'err')) {
       const c = countAll();
       out.push({ level: 'ok', text: 'Blueprint valide — ' + c.n + ' nodes (' + c.g + ' sous-flow' + (c.g > 1 ? 's' : '') + '), ' + c.e + ' liens, 0 exécution.' });
@@ -1269,7 +1270,7 @@
       <p>${g.nodes.length} nodes · ${g.edges.length} liens · ${contracts.size} contrat${contracts.size > 1 ? 's' : ''} échangé${contracts.size > 1 ? 's' : ''} · <b>0 exécution</b> — la simulation est statique.${cost ? '<br>' + cost : ''}</p></div>`;
     if (!hasExec) {
       verdict += `<div class="bp-verdict warn" style="margin-top:8px"><div class="t">ce flow gouverne mais ne délègue rien</div>
-        <p>Ajoutez un node d'exécution quand vous serez prêt — ENG-01, ou un Crew d'extension.</p></div>`;
+        <p>Ajoutez un node d'exécution quand vous serez prêt — ORC-11, ou un Crew d'extension.</p></div>`;
     }
     $('#sim-verdict').innerHTML = verdict;
     state.meta.simulated = true;
@@ -1383,7 +1384,7 @@
         </div>
         <div class="at-row" style="gap:8px;margin-top:6px">
           <span class="at-chip"><span class="cdot" style="background:${Atelier.catColor(s.cat)}"></span>${esc(catName)}</span>
-          ${p ? `<span class="at-chip">profil min · ${esc(p.profile_min)}</span>` : ''}
+          ${p && p.maturity ? `<span class="at-chip">maturité · ${esc(p.maturity)}</span>` : ''}
         </div>
       </div>
       <div class="f-body">
@@ -1500,7 +1501,7 @@
     ['prd', 'chef', 'grp', 'gov', 'qua2', 'ops', 'gov2', 'mem', 'impl', 'test', 'sec'].forEach(k => id[k] = uid());
     const EX = window.BP2Docs ? BP2Docs.EXAMPLES : {};
     s2.nodes = [
-      { id: id.prd, ref: 'PRD-01', x: 90, y: 300, docs: { 'mission-brief.md': { content: EX['mission-brief.md'] || '', at: Date.now() } } },
+      { id: id.prd, ref: 'ORC-02', x: 90, y: 300, docs: { 'mission-brief.md': { content: EX['mission-brief.md'] || '', at: Date.now() } } },
       { id: id.chef, kind: 'agent', role: 'orchestrateur', name: 'chef-de-mission', model: 'sonnet', delegates: false,
         tools: [], mcp: [], skills: [], hooks: [{ when: 'task-end', then: 'log-trace' }], docs: {}, x: 400, y: 300 },
       { id: id.grp, kind: 'group', name: 'exécution prouvée', x: 720, y: 290,
@@ -1513,7 +1514,7 @@
             { id: id.test, kind: 'agent', role: 'agent', name: 'testeur', sub: true, model: 'haiku', delegates: false,
               tools: ['fs-read', 'tests'], mcp: [], skills: ['ecriture-tests', 'revue-code'],
               hooks: [{ when: 'task-end', then: 'run-tests' }], docs: {}, x: 140, y: 400 },
-            { id: id.sec, ref: 'SEC-02', x: 560, y: 290 }
+            { id: id.sec, ref: 'QUA-04', x: 560, y: 290 }
           ],
           edges: [
             { id: uid(), from: id.impl, to: id.sec, contract: 'evidence-pack' },
@@ -1521,20 +1522,20 @@
           ],
           comments: [{ id: uid(), x: 80, y: 110, w: 800, h: 430, label: 'les agents produisent, le scan verrouille' }]
         } },
-      { id: id.gov, ref: 'GOV-01', x: 1060, y: 240, docs: { 'completion-contract.yaml': { content: EX['completion-contract.yaml'] || '', at: Date.now() } } },
+      { id: id.gov, ref: 'QUA-05', x: 1060, y: 240, docs: { 'completion-contract.yaml': { content: EX['completion-contract.yaml'] || '', at: Date.now() } } },
       { id: id.qua2, ref: 'QUA-02', x: 1060, y: 440 },
-      { id: id.ops, ref: 'OPS-01', x: 1370, y: 240 },
-      { id: id.gov2, ref: 'GOV-02', x: 1370, y: 440 },
-      { id: id.mem, ref: 'MEM-01', x: 1670, y: 440 }
+      { id: id.ops, ref: 'QUA-08', x: 1370, y: 240 },
+      { id: id.gov2, ref: 'QUA-01', x: 1370, y: 440 },
+      { id: id.mem, ref: 'KNO-02', x: 1670, y: 440 }
     ];
     s2.edges = [
-      { id: uid(), from: id.prd, to: id.chef, contract: 'mission-brief' },
+      { id: uid(), from: id.prd, to: id.chef, contract: 'task-envelope' },
       { id: uid(), from: id.chef, to: id.grp, contract: 'task-envelope' },
       { id: uid(), from: id.grp, to: id.gov, contract: 'evidence-pack' },
       { id: uid(), from: id.grp, to: id.qua2, contract: 'evidence-pack' },
-      { id: uid(), from: id.gov, to: id.ops, contract: 'compliance-declaration' },
-      { id: uid(), from: id.qua2, to: id.gov2, contract: 'decision-trace' },
-      { id: uid(), from: id.qua2, to: id.mem, contract: 'decision-trace' }
+      { id: uid(), from: id.gov, to: id.ops, contract: 'evidence-pack' },
+      { id: uid(), from: id.qua2, to: id.gov2, contract: 'evidence-pack' },
+      { id: uid(), from: id.qua2, to: id.mem, contract: 'evidence-pack' }
     ];
     s2.comments = [{ id: uid(), x: 1020, y: 160, w: 560, h: 220, label: 'décider — porte + déploiement' }];
     return s2;

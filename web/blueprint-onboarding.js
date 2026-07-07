@@ -22,19 +22,19 @@
     const STEPS = [
       {
         label: '1/4 · ~15 s',
-        html: 'Tout flow gouverné finit par <b>une preuve et une porte</b>. Posez la preuve : <b>QUA-01 — Evidence Pack</b>. La recherche est déjà remplie — cliquez la carte dans la palette.',
-        setup() { E.palette.search('QUA-01'); E.pulsePalette('QUA-01'); },
-        done: ev => ev.type === 'node-added' && ev.data.ref === 'QUA-01'
+        html: 'Tout flow gouverné finit par <b>une preuve et une porte</b>. Posez la preuve : <b>QUA-04 — Evidence pack et verification verdict</b>. La recherche est déjà remplie — cliquez la carte dans la palette.',
+        setup() { E.palette.search('QUA-04'); E.pulsePalette('QUA-04'); },
+        done: ev => ev.type === 'node-added' && ev.data.ref === 'QUA-04'
       },
       {
         label: '2/4 · ~20 s',
-        html: 'Une preuve sans porte ne décide rien. La palette montre maintenant <b>ce qui se branche</b> sur sa sortie — posez <b>GOV-01 — Completion Contract</b>.',
-        setup() { E.palette.search(''); E.pulsePalette('GOV-01'); },
-        done: ev => ev.type === 'node-added' && ev.data.ref === 'GOV-01'
+        html: 'Une preuve sans porte ne décide rien. La palette montre maintenant <b>ce qui se branche</b> sur sa sortie — posez <b>QUA-05 — Evidence-driven transition</b>, la porte qui décide sur preuve.',
+        setup() { E.palette.search('QUA-05'); E.pulsePalette('QUA-05'); },
+        done: ev => ev.type === 'node-added' && ev.data.ref === 'QUA-05'
       },
       {
         label: '3/4 · ~15 s',
-        html: 'Reliez : attrapez le pin <b>sortie ○ evidence-pack</b> de QUA-01 et lâchez-le sur l\u2019<b>entrée ○</b> de GOV-01. (Lâché dans le vide, le fil ouvre le menu des nodes compatibles.)',
+        html: 'Reliez : attrapez le pin <b>sortie ○ evidence-pack</b> de QUA-04 et lâchez-le sur l\u2019<b>entrée ○</b> de QUA-05. (Lâché dans le vide, le fil ouvre le menu des nodes compatibles.)',
         setup() { E.pulsePin('out', 'evidence-pack'); },
         done: ev => ev.type === 'edge-added'
       },

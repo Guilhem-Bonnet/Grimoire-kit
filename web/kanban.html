@@ -175,183 +175,9 @@ h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-heig
     </div>
   </div>
 
-  <!-- ═══ Board ═══ -->
+  <!-- ═══ Board — rendu depuis data/taskboard.json ═══ -->
   <section class="board">
-    <div class="columns" role="list" aria-label="Colonnes du tableau gouverné">
-
-      <!-- 1 · PROPOSÉ ──────────────────────────── -->
-      <div class="col" style="--st:var(--ink-muted)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Proposé</span><span class="col-count">2</span></div>
-        <div class="gate open">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12 a5 5 0 0 1 10 0"/><path d="M12 12 v6"/></svg>
-          <span class="gate-label">entrée ouverte · <b>backlog</b></span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--ink-muted)">
-            <div class="card-top"><h3 class="card-title">Indexer les ADR dans la mémoire longue</h3></div>
-            <div class="meta"><span class="chip owner">@<b>planner</b></span><span class="chip role">planner</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>Prêt · requiert <b>critères d'acceptation</b></span></div>
-          </article>
-
-          <article class="card" style="--prio:var(--ink-muted)">
-            <div class="card-top"><h3 class="card-title">Provider OTel pour les traces d'agent</h3></div>
-            <div class="meta"><span class="chip owner">@<b>dev</b></span><span class="chip role">dev</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>Prêt · requiert <b>critères d'acceptation</b></span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 2 · PRÊT ──────────────────────────── -->
-      <div class="col" style="--st:var(--cyan)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Prêt</span><span class="col-count">2</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">porte · <b>critères d'acceptation</b> validés</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--red)">
-            <div class="card-top"><h3 class="card-title">Verify fail-closed</h3><span class="prio-flag">high</span></div>
-            <div class="meta"><span class="chip owner">@<b>qa</b></span><span class="chip role">qa</span><span class="chip role">planner</span></div>
-            <div class="artifacts"><span class="artifact">critères</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>En cours · requiert <b>context bundle</b></span></div>
-          </article>
-
-          <article class="card" style="--prio:var(--amber)">
-            <div class="card-top"><h3 class="card-title">Schéma de signature des evidence packs</h3></div>
-            <div class="meta"><span class="chip owner">@<b>dev</b></span><span class="chip role">dev</span><span class="chip role">challenger</span></div>
-            <div class="artifacts"><span class="artifact">critères</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>En cours · requiert <b>context bundle</b></span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 3 · EN COURS ──────────────────────────── -->
-      <div class="col" style="--st:var(--accent)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">En cours</span><span class="col-count">2</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">porte · <b>context bundle</b> attaché</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--amber)">
-            <div class="card-top"><h3 class="card-title">Mem. Weaviate</h3></div>
-            <div class="meta"><span class="chip owner">@<b>dev</b></span><span class="chip role">dev</span><span class="chip role">memory_keeper</span></div>
-            <div class="artifacts"><span class="artifact">contexte</span><span class="artifact">evidence</span></div>
-            <div class="advance ready"><span class="arr">&rarr;</span><span>Revue · <b>evidence pack</b> prêt</span></div>
-          </article>
-
-          <article class="card" style="--prio:var(--ink-muted)">
-            <div class="card-top"><h3 class="card-title">Câbler le challenger sur les diffs CLI</h3></div>
-            <div class="meta"><span class="chip owner">@<b>challenger</b></span><span class="chip role">challenger</span><span class="chip role">dev</span></div>
-            <div class="artifacts"><span class="artifact">contexte</span><span class="artifact warn">evidence&nbsp;partiel</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>Revue · requiert <b>evidence pack</b> complet</span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 4 · BLOQUÉ ──────────────────────────── -->
-      <div class="col" style="--st:var(--red)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Bloqué</span><span class="col-count">1</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">depuis tout état · <b>trace de remédiation</b> ouverte</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--red)">
-            <div class="card-top"><h3 class="card-title">Release gates v3.17</h3></div>
-            <div class="meta"><span class="chip owner">@<b>dev</b></span><span class="chip role">dev</span><span class="chip role">release_manager</span></div>
-            <div class="blockers"><span class="blocker">compliance_score sous seuil</span></div>
-            <div class="artifacts"><span class="artifact warn">remédiation</span></div>
-            <div class="advance stuck"><span class="arr">&times;</span><span>retour <b>En cours</b> à la levée du blocage</span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 5 · REVUE ──────────────────────────── -->
-      <div class="col" style="--st:var(--amber)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Revue</span><span class="col-count">1</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">porte · <b>evidence pack</b> signé</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--amber)">
-            <div class="card-top"><h3 class="card-title">Revue adversariale CLI</h3></div>
-            <div class="meta"><span class="chip owner">@<b>challenger</b></span><span class="chip role">challenger</span><span class="chip role">qa</span></div>
-            <div class="artifacts"><span class="artifact">evidence</span><span class="artifact">décision</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>Accepté · <b>review gate</b> en attente</span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 6 · ACCEPTÉ ──────────────────────────── -->
-      <div class="col" style="--st:var(--green)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Accepté</span><span class="col-count">1</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">porte · <b>decision trace</b> + review gate</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--green)">
-            <div class="card-top"><h3 class="card-title">Politique de rétention mémoire 90j</h3></div>
-            <div class="meta"><span class="chip owner">@<b>planner</b></span><span class="chip role">planner</span><span class="chip role">memory_keeper</span></div>
-            <div class="artifacts"><span class="artifact">décision</span><span class="artifact">evidence</span></div>
-            <div class="advance wait"><span class="arr">&rarr;</span><span>Publié · requiert <b>release gate</b></span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 7 · PUBLIÉ ──────────────────────────── -->
-      <div class="col" style="--st:var(--violet)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Publié</span><span class="col-count">1</span></div>
-        <div class="gate">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>
-          <span class="gate-label">porte · <b>release gate</b> franchi</span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--violet)">
-            <div class="card-top"><h3 class="card-title">v3.16 purge BMAD</h3></div>
-            <div class="meta"><span class="chip owner">@<b>project-maintainer</b></span><span class="chip role">release_manager</span></div>
-            <div class="artifacts"><span class="artifact">décision</span><span class="artifact">evidence</span></div>
-            <div class="advance term"><span class="arr">&rarr;</span><span>Archivé après fenêtre de rétention</span></div>
-          </article>
-
-        </div>
-      </div>
-
-      <!-- 8 · ARCHIVÉ ──────────────────────────── -->
-      <div class="col" style="--st:var(--ink-muted)" role="listitem">
-        <div class="col-head"><span class="col-dot"></span><span class="col-name">Archivé</span><span class="col-count">1</span></div>
-        <div class="gate open">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8 h16 v3 H4 z"/><path d="M6 11 v8 h12 v-8"/><path d="M10 14 h4"/></svg>
-          <span class="gate-label">terminal · trace scellée &amp; <b>rejouable</b></span>
-        </div>
-        <div class="col-body">
-
-          <article class="card" style="--prio:var(--ink-muted)">
-            <div class="card-top"><h3 class="card-title">v3.15 migration tokens Forge</h3></div>
-            <div class="meta"><span class="chip owner">@<b>project-maintainer</b></span><span class="chip role">release_manager</span></div>
-            <div class="artifacts"><span class="artifact">décision</span><span class="artifact">evidence</span></div>
-            <div class="advance term"><span class="arr">&bull;</span><span>scellé · 2026-05-30</span></div>
-          </article>
-
-        </div>
-      </div>
-
-    </div>
+    <div class="columns" id="kb-cols" role="list" aria-label="Colonnes du tableau gouverné"></div>
   </section>
 
 </main>
@@ -360,5 +186,86 @@ h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-heig
 </div>
 </div>
 <script src="atelier-nav.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let data = null;
+  try {
+    const r = await fetch('data/taskboard.json', { cache: 'no-store' });
+    data = await r.json();
+  } catch (e) {
+    document.getElementById('kb-cols').innerHTML =
+      '<p style="font-family:var(--font-mono);font-size:0.7rem;color:var(--ink-muted);padding:20px 2px">données du board indisponibles (data/taskboard.json) — générez-les avec <code>gen-site-data</code> dans un projet gouverné.</p>';
+    return;
+  }
+
+  const META = {
+    proposed:    { name: 'Proposé',  st: 'var(--ink-muted)', gate: 'entrée ouverte · <b>backlog</b>', open: true },
+    ready:       { name: 'Prêt',     st: 'var(--cyan)',      gate: 'porte · <b>critères d\u2019acceptation</b> + owner' },
+    in_progress: { name: 'En cours', st: 'var(--amber)',     gate: 'porte · <b>context bundle</b> + provider policy' },
+    blocked:     { name: 'Bloqué',   st: 'var(--red)',       gate: 'porte · <b>blocker déclaré</b> + plan de remédiation' },
+    review:      { name: 'Revue',    st: 'var(--cyan)',      gate: 'porte · <b>evidence pack</b> + decision trace' },
+    accepted:    { name: 'Accepté',  st: 'var(--green)',     gate: 'porte · <b>review gate</b> + evidence gate' },
+    released:    { name: 'Publié',   st: 'var(--violet)',    gate: 'porte · <b>release gate</b> franchi' },
+    archived:    { name: 'Archivé',  st: 'var(--ink-muted)', gate: 'terminal · trace scellée &amp; <b>rejouable</b>', open: true }
+  };
+  const NEXT = {
+    proposed:    { cls: 'wait',  txt: 'Prêt · requiert <b>critères d\u2019acceptation</b>' },
+    ready:       { cls: 'wait',  txt: 'En cours · requiert <b>context bundle</b>' },
+    in_progress: { cls: 'wait',  txt: 'Revue · requiert <b>evidence pack</b> + <b>decision trace</b>' },
+    blocked:     { cls: 'stuck', txt: 'Reprise · requiert <b>plan de remédiation</b>' },
+    review:      { cls: 'wait',  txt: 'Accepté · requiert <b>review gate</b> + <b>evidence gate</b>' },
+    accepted:    { cls: 'wait',  txt: 'Publié · requiert <b>release gate</b>' },
+    released:    { cls: 'term',  txt: 'Archivé après fenêtre de rétention' },
+    archived:    { cls: 'term',  txt: 'scellé · terminal' }
+  };
+  const PRIO = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--ink-muted)' };
+
+  function artifacts(t) {
+    const out = [];
+    if ((t.acceptance_criteria || []).length) out.push(['critères', '']);
+    if (t.context_bundle_ref) out.push(['context', '']);
+    if (t.evidence_pack_ref) out.push(['evidence', '']);
+    if (t.decision_trace_ref) out.push(['décision', '']);
+    if (t.remediation_ref && t.status === 'blocked') out.push(['remédiation', 'warn']);
+    return out;
+  }
+
+  function card(t) {
+    const nx = NEXT[t.status] || NEXT.proposed;
+    const arts = artifacts(t);
+    return `<article class="card" style="--prio:${PRIO[t.priority] || 'var(--ink-muted)'}">
+      <div class="card-top"><h3 class="card-title">${esc(t.title)}</h3>${t.priority === 'high' ? '<span class="prio-flag">high</span>' : ''}</div>
+      <div class="meta"><span class="chip owner">@<b>${esc(t.owner || '?')}</b></span>${(t.agent_roles || []).map(r => '<span class="chip role">' + esc(r) + '</span>').join('')}</div>
+      ${(t.blockers || []).length ? '<div class="blockers">' + t.blockers.map(b => '<div class="blocker">' + esc(typeof b === 'string' ? b : (b.reason || JSON.stringify(b))) + '</div>').join('') + '</div>' : ''}
+      ${arts.length ? '<div class="artifacts">' + arts.map(([a, w]) => '<span class="artifact ' + w + '">' + esc(a) + '</span>').join('') + '</div>' : ''}
+      <div class="advance ${nx.cls}"><span class="arr">${nx.cls === 'term' ? '&bull;' : '&rarr;'}</span><span>${nx.txt}</span></div>
+    </article>`;
+  }
+
+  const states = (data.states || Object.keys(META)).filter(st => META[st]);
+  const tasks = data.tasks || [];
+  document.getElementById('kb-cols').innerHTML = states.map(st => {
+    const m = META[st];
+    const list = tasks.filter(t => t.status === st);
+    const gateIcon = m.open
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12 a5 5 0 0 1 10 0"/><path d="M12 12 v6"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.6"/><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"/></svg>';
+    return `<div class="col" style="--st:${m.st}" role="listitem">
+      <div class="col-head"><span class="col-dot"></span><span class="col-name">${m.name}</span><span class="col-count">${list.length}</span></div>
+      <div class="gate${m.open ? ' open' : ''}">${gateIcon}<span class="gate-label">${m.gate}</span></div>
+      <div class="col-body">${list.map(card).join('') || '<span class="col-empty">vide</span>'}</div>
+    </div>`;
+  }).join('');
+
+  if (data.is_demo) {
+    const h = document.querySelector('header.page .eyebrow');
+    if (h) h.insertAdjacentHTML('beforeend',
+      '<span style="margin-left:auto;font-family:var(--font-mono);font-size:0.54rem;letter-spacing:0.1em;color:var(--accent);border:1px solid var(--accent-dim);border-radius:2px;padding:3px 8px">TEMPLATE DU STANDARD — board du projet non initialisé</span>');
+  }
+})();
+</script>
+
 </body>
 </html>
