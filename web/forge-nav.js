@@ -3,6 +3,10 @@
 (function () {
   'use strict';
 
+  /* Mode atelier : le chrome vitrine (topbar + footer) ne s'injecte pas.
+     Les helpers de motion (reveal, dividers, compteurs) restent actifs. */
+  const MODE_ATELIER = document.documentElement.classList.contains('mode-atelier');
+
   /* ── Active page detection ── */
   const path = location.pathname.replace(/\/$/, '').split('/').pop() || 'index';
 
@@ -13,124 +17,170 @@
 
   /* ── Nav HTML ── */
   const navEl = document.getElementById('forge-nav');
-  if (navEl) {
+  if (navEl && !MODE_ATELIER) {
+    const napStyle = document.createElement('style');
+    napStyle.textContent = `
+      .nav-atelier { position: relative; }
+      .nav-atelier .nav-cta { background: var(--accent); color: var(--bg); cursor: pointer; font-weight: 600; }
+      .nav-atelier .nav-cta:hover { filter: brightness(1.08); }
+      .nav-atelier-panel {
+        position: absolute; top: calc(100% + 12px); right: 0; width: 300px;
+        background: var(--elev-2); border: 1px solid var(--line-strong); border-radius: 8px;
+        padding: 16px; box-shadow: 0 18px 48px rgba(0,0,0,0.55); z-index: 950; }
+      .nav-atelier-panel .nap-lbl { display: block; font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.14em; color: var(--ink-muted); margin-bottom: 8px; }
+      .nav-atelier-panel code { display: block; font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink); background: var(--elev-1); border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; margin-bottom: 6px; }
+      .nav-atelier-panel p { font-size: 0.7rem; color: var(--ink-soft); line-height: 1.55; margin: 10px 0 12px; }
+      .nav-atelier-panel p b { color: var(--ink); }
+      .nav-atelier-panel .nap-open { display: block; text-align: center; font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600; background: var(--accent); color: var(--bg); padding: 9px 12px; border-radius: 4px; text-decoration: none; margin-bottom: 10px; }
+      .nav-atelier-panel .nap-gh { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); text-decoration: none; }
+      .nav-atelier-panel .nap-gh:hover { color: var(--ink); }`;
+    document.head.appendChild(napStyle);
+
     navEl.innerHTML = `
       <div class="container">
         <div class="nav-inner">
-          <a href="index.html" class="nav-logo" aria-label="Grimoire Kit — Accueil">
-            GRIMOIRE&nbsp;<span class="logo-accent" id="forge-word">KIT</span>
-          </a>
-          <span id="fp-slot"></span>
+          <div class="nav-left">
+            <a href="index.html" class="nav-logo" aria-label="Grimoire Kit — Accueil">
+              GRIMOIRE&nbsp;<span class="logo-accent" id="forge-word">KIT</span>
+            </a>
+            <div id="forge-projects-mount"></div>
+          </div>
           <ul class="nav-links" role="list">
-            <li><a href="demo.html"         class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>
-            <li><a href="game-ui.html"       class="${isActive('game-ui.html') ? 'active' : ''}">GAME UI</a></li>
-            <li><a href="observability.html" class="${isActive('observability.html') ? 'active' : ''}">OBSERVABILITY</a></li>
-            <li><a href="memory.html"        class="${isActive('memory.html') ? 'active' : ''}">MEMORY</a></li>
-            <li><a href="kanban.html"        class="${isActive('kanban.html') ? 'active' : ''}">KANBAN</a></li>
-            <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCUMENTATION</a></li>
+            <li><a href="demo.html"          class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>
+            <li><a href="patterns.html"      class="${isActive('patterns.html') ? 'active' : ''}">PATTERNS</a></li>
             <li><a href="extensions.html"    class="${isActive('extensions.html') ? 'active' : ''}">EXTENSIONS</a></li>
-            <li><a href="blueprint.html"     class="${isActive('blueprint.html') ? 'active' : ''}">BLUEPRINT</a></li>
-            <li><a href="setup.html"         class="${isActive('setup.html') ? 'active' : ''}">SETUP</a></li>
-            <li><a href="anatomy.html"       class="${isActive('anatomy.html') ? 'active' : ''}">ANATOMIE</a></li>
+            <li><a href="portfolio.html"     class="${isActive('portfolio.html') ? 'active' : ''}">PORTEFEUILLE</a></li>
+            <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCS</a></li>
           </ul>
-          <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" class="nav-cta" target="_blank" rel="noopener">VOIR LE PROJET →</a>
+          <div class="nav-atelier" id="nav-atelier">
+            <button class="nav-cta" id="nav-atelier-btn" type="button">LANCER L'ATELIER →</button>
+            <div class="nav-atelier-panel" id="nav-atelier-panel" hidden>
+              <span class="nap-lbl">DANS VOTRE TERMINAL</span>
+              <code>pip install grimoire-kit</code>
+              <code>grimoire serve</code>
+              <p>Le même site s'ouvre en <b>mode atelier</b> : projet, éditeur de blueprints, extensions — l'API locale active les capacités.</p>
+              <a class="nap-open" href="atelier.html">OUVRIR L'ATELIER (DÉMO) →</a>
+              <a class="nap-gh" href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener">GitHub ↗</a>
+            </div>
+          </div>
         </div>
       </div>`;
+
+    const napBtn = document.getElementById('nav-atelier-btn');
+    const napPanel = document.getElementById('nav-atelier-panel');
+    if (napBtn && napPanel) {
+      napBtn.addEventListener('click', (e) => { e.stopPropagation(); napPanel.hidden = !napPanel.hidden; });
+      document.addEventListener('click', (e) => { if (!napPanel.hidden && !e.target.closest('#nav-atelier')) napPanel.hidden = true; });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !napPanel.hidden) napPanel.hidden = true; });
+    }
+
+    /* Tout lien .js-launch-atelier ouvre le seuil — l'unique passage vers l'atelier */
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest('.js-launch-atelier');
+      if (!t) return;
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (napPanel) napPanel.hidden = false;
+    });
   }
 
-  /* ── Sélecteur de projet (multi-projets) — CSS-only dropdown, data-driven ── */
-  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
-  if (navEl && !document.getElementById('forge-projects-css')) {
-    const st = document.createElement('style');
-    st.id = 'forge-projects-css';
-    st.textContent = `
-      .forge-projects{--fp-accent:var(--accent,#FF6B3D);--fp-bg:var(--elev-1,#121418);--fp-bg-2:var(--elev-2,#1A1D22);--fp-line:var(--line,rgba(255,255,255,0.08));--fp-line-s:var(--line-strong,rgba(255,255,255,0.14));--fp-ink:var(--ink,#F6F7F8);--fp-soft:var(--ink-soft,#9BA0A8);--fp-muted:var(--ink-muted,#5B6068);--fp-green:var(--data-green,#34D399);--fp-red:var(--data-red,#F87171);--fp-mono:var(--font-mono,'Geist Mono',monospace);position:relative;display:inline-block;user-select:none;margin-left:6px}
-      .forge-projects[open]{z-index:60}
-      .fp-trigger{list-style:none;display:flex;align-items:center;gap:10px;height:34px;padding:0 10px 0 12px;border:1px solid var(--fp-line-s);border-radius:var(--r-md,8px);background:var(--fp-bg);cursor:pointer;transition:border-color 160ms,background 160ms}
-      .fp-trigger::-webkit-details-marker{display:none}
-      .fp-trigger:hover,.forge-projects[open] .fp-trigger{border-color:var(--fp-accent);background:var(--fp-bg-2)}
-      .fp-trigger-label{display:flex;flex-direction:column;line-height:1;gap:3px}
-      .fp-eyebrow{font-family:var(--fp-mono);font-size:.56rem;letter-spacing:.16em;color:var(--fp-muted);text-transform:uppercase}
-      .fp-current{font-family:var(--fp-mono);font-size:.74rem;font-weight:600;color:var(--fp-ink);letter-spacing:.02em}
-      .fp-caret{width:7px;height:7px;margin-left:2px;border-right:1.5px solid var(--fp-soft);border-bottom:1.5px solid var(--fp-soft);transform:rotate(45deg) translateY(-1px);transition:transform 200ms,border-color 160ms}
-      .forge-projects[open] .fp-caret{transform:rotate(-135deg) translateY(-1px);border-color:var(--fp-accent)}
-      .fp-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--fp-muted)}
-      .fp-dot--pass{background:var(--fp-green);box-shadow:0 0 0 3px color-mix(in oklab,var(--fp-green) 22%,transparent)}
-      .fp-dot--fail{background:var(--fp-red);box-shadow:0 0 0 3px color-mix(in oklab,var(--fp-red) 22%,transparent)}
-      .fp-panel{position:absolute;top:calc(100% + 8px);left:0;width:320px;max-width:88vw;background:var(--fp-bg);border:1px solid var(--fp-line-s);border-radius:var(--r-md,8px);box-shadow:0 18px 48px rgba(0,0,0,.55);padding:6px;animation:fp-in 180ms cubic-bezier(0,0,.2,1)}
-      @keyframes fp-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
-      @media (prefers-reduced-motion:reduce){.fp-panel{animation:none}}
-      .fp-panel-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 10px;font-family:var(--fp-mono);font-size:.58rem;letter-spacing:.16em;color:var(--fp-muted);text-transform:uppercase}
-      .fp-count{font-size:.6rem;letter-spacing:0;color:var(--fp-soft);border:1px solid var(--fp-line);border-radius:999px;padding:1px 7px}
-      .fp-item{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:var(--r-sm,4px);text-decoration:none;border:1px solid transparent;transition:background 140ms,border-color 140ms}
-      .fp-item:hover{background:var(--fp-bg-2)}
-      .fp-item.is-active{background:var(--accent-soft,rgba(255,107,61,.12));border-color:color-mix(in oklab,var(--fp-accent) 40%,transparent)}
-      .fp-meta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-      .fp-name{font-family:var(--font-sans,system-ui);font-size:.82rem;font-weight:500;color:var(--fp-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .fp-item.is-active .fp-name{color:var(--fp-accent)}
-      .fp-slug{font-family:var(--fp-mono);font-size:.62rem;letter-spacing:.04em;color:var(--fp-muted)}
-      .fp-stats{display:flex;align-items:center;gap:10px;flex:none}
-      .fp-cost{font-family:var(--fp-mono);font-size:.7rem;font-weight:500;color:var(--fp-soft);font-variant-numeric:tabular-nums}
-      .fp-af{font-family:var(--fp-mono);font-size:.72rem;font-weight:600;color:var(--fp-ink);font-variant-numeric:tabular-nums;display:inline-flex;align-items:baseline;gap:2px;padding:2px 7px;border-radius:var(--r-sm,4px);border:1px solid var(--fp-line);background:rgba(255,255,255,.02)}
-      .fp-af small{font-size:.5rem;letter-spacing:.08em;color:var(--fp-muted);font-weight:500}
-      .fp-af[data-grade="a"]{color:var(--fp-green);border-color:color-mix(in oklab,var(--fp-green) 30%,transparent)}
-      .fp-af[data-grade="b"]{color:var(--data-amber,#FCD34D);border-color:color-mix(in oklab,var(--data-amber,#FCD34D) 30%,transparent)}
-      .fp-af[data-grade="c"]{color:var(--fp-red);border-color:color-mix(in oklab,var(--fp-red) 30%,transparent)}
-      .fp-af[data-grade] small{color:inherit;opacity:.7}
-      .fp-portfolio{display:flex;align-items:center;justify-content:space-between;margin-top:6px;padding:11px 12px;border-top:1px solid var(--fp-line);font-family:var(--fp-mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fp-soft);text-decoration:none;transition:color 140ms}
-      .fp-portfolio:hover{color:var(--fp-accent)}
-      .fp-portfolio-arrow{transition:transform 180ms}
-      .fp-portfolio:hover .fp-portfolio-arrow{transform:translateX(4px)}
-      .forge-projects--solo{display:inline-flex;align-items:center;gap:10px;height:34px;padding:0 12px;border:1px solid var(--fp-line);border-radius:var(--r-md,8px);background:transparent;margin-left:6px}
-      @media (max-width:880px){.fp-eyebrow{display:none}.fp-panel{width:280px}}`;
-    document.head.appendChild(st);
+  /* ── Project selector (data-driven, monté dans la nav) ── */
+  (function mountProjectSelector() {
+    const mount = document.getElementById('forge-projects-mount');
+    if (!mount) return;
 
-    const grade = (s) => (s == null ? '' : (s >= 85 ? 'a' : (s >= 70 ? 'b' : 'c')));
-    const dotCls = (ci) => (ci === 'failure' ? 'fp-dot--fail' : 'fp-dot--pass');
-    // Env : vitrine publique (features de pilotage bloquées) vs cockpit local.
-    // Un site servi en localhost est TOUJOURS local — même s'il affiche le
-    // snapshot démo committé (env=vitrine) tant qu'aucun projet réel n'est ajouté.
-    const isLocal = /^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname) ||
-      location.hostname === '::1' || location.hostname.endsWith('.local') || location.hostname === '';
-    const hostVitrine = /github\.io$/.test(location.hostname);
-    document.documentElement.dataset.env = hostVitrine ? 'vitrine' : 'local';
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const ciClass = (ci) => (ci === 'pass' || ci === 'green' || ci === 'ok') ? 'fp-dot--pass'
+      : (ci === 'fail' || ci === 'red' || ci === 'ko') ? 'fp-dot--fail' : '';
+    const afGrade = (n) => (n >= 85 ? 'a' : n >= 78 ? 'b' : 'c');
+
     fetch('data/projects.json', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((idx) => {
-        if (idx && idx.env && !isLocal) document.documentElement.dataset.env = idx.env;
-        const slot = document.getElementById('fp-slot');
-        if (!slot || !idx || !(idx.projects || []).length) return;
-        const cur = new URLSearchParams(location.search).get('project') || idx.primary;
-        const active = idx.projects.find((p) => p.slug === cur) || idx.projects[0];
-        const soloLabel = `<span class="fp-dot ${dotCls(active.ci_status)}"></span><span class="fp-trigger-label"><span class="fp-eyebrow">PROJET</span><span class="fp-current">${_esc(active.name)}</span></span>`;
-        if (idx.projects.length <= 1) {
-          slot.innerHTML = `<span class="forge-projects forge-projects--solo">${soloLabel}</span>`;
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data) => {
+        const projects = (data && data.projects) || [];
+        if (!projects.length) { mount.remove(); return; }
+
+        const current = new URLSearchParams(location.search).get('project') || data.active;
+        const cur = projects.find((p) => p.slug === current) || projects[0];
+        const portfolio = data.portfolio_url || 'portfolio.html';
+
+        // ── Mono-projet : étiquette compacte, pas de dropdown ──
+        if (projects.length === 1) {
+          mount.outerHTML = `
+            <span class="forge-projects forge-projects--solo">
+              <span class="fp-dot ${ciClass(cur.ci)}" title="${esc(cur.ci_label || '')}"></span>
+              <span class="fp-trigger-label">
+                <span class="fp-eyebrow">PROJET</span>
+                <span class="fp-current">${esc(cur.name)}</span>
+              </span>
+            </span>`;
           return;
         }
-        const items = idx.projects.map((p) => {
-          const af = p.antifragile;
-          return `<a href="?project=${encodeURIComponent(p.slug)}" class="fp-item ${p.slug === cur ? 'is-active' : ''}" role="menuitem"${p.slug === cur ? ' aria-current="true"' : ''}>` +
-            `<span class="fp-dot ${dotCls(p.ci_status)}"></span>` +
-            `<span class="fp-meta"><span class="fp-name">${_esc(p.name)}</span><span class="fp-slug">${_esc(p.slug)}</span></span>` +
-            `<span class="fp-stats"><span class="fp-cost">$${(p.total_cost_usd || 0).toFixed(2)}</span>` +
-            (af != null ? `<span class="fp-af" data-grade="${grade(af)}">${Math.round(af)}<small>AF</small></span>` : '') +
-            `</span></a>`;
+
+        // ── Multi-projets : dropdown ──
+        const items = projects.map((p) => {
+          const active = p.slug === cur.slug;
+          return `
+            <a href="?project=${esc(p.slug)}" class="fp-item${active ? ' is-active' : ''}" role="menuitem"${active ? ' aria-current="true"' : ''}>
+              <span class="fp-dot ${ciClass(p.ci)}" title="${esc(p.ci_label || '')}"></span>
+              <span class="fp-meta">
+                <span class="fp-name">${esc(p.name)}</span>
+                <span class="fp-slug">${esc(p.slug)}</span>
+              </span>
+              <span class="fp-stats">
+                <span class="fp-cost" title="Coût run">${esc(p.cost)}</span>
+                <span class="fp-af" data-grade="${afGrade(+p.antifragile || 0)}" title="Score antifragile">${esc(p.antifragile)}<small>AF</small></span>
+              </span>
+            </a>`;
         }).join('');
-        slot.innerHTML = `<details class="forge-projects" id="forge-projects"><summary class="fp-trigger">${soloLabel}<span class="fp-caret"></span></summary>` +
-          `<div class="fp-panel" role="menu"><div class="fp-panel-head"><span>SÉLECTIONNER UN PROJET</span><span class="fp-count">${idx.projects.length}</span></div>` +
-          items + `<a href="portfolio.html" class="fp-portfolio" role="menuitem">Portefeuille <span class="fp-portfolio-arrow">→</span></a></div></details>`;
-      }).catch(() => {});
-  }
+
+        mount.outerHTML = `
+          <details class="forge-projects" id="forge-projects">
+            <summary class="fp-trigger" aria-label="Changer de projet">
+              <span class="fp-dot ${ciClass(cur.ci)}" aria-hidden="true"></span>
+              <span class="fp-trigger-label">
+                <span class="fp-eyebrow">PROJET</span>
+                <span class="fp-current">${esc(cur.name)}</span>
+              </span>
+              <span class="fp-caret" aria-hidden="true"></span>
+            </summary>
+            <div class="fp-panel" role="menu">
+              <div class="fp-panel-head">
+                <span>SÉLECTIONNER UN PROJET</span>
+                <span class="fp-count">${projects.length}</span>
+              </div>
+              ${items}
+              <a href="${esc(portfolio)}" class="fp-portfolio" role="menuitem">
+                Portefeuille
+                <span class="fp-portfolio-arrow" aria-hidden="true">&rarr;</span>
+              </a>
+            </div>
+          </details>`;
+
+        // Fermer au clic extérieur / Échap
+        const det = document.getElementById('forge-projects');
+        if (det) {
+          document.addEventListener('click', (e) => {
+            if (det.open && !det.contains(e.target)) det.open = false;
+          });
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && det.open) det.open = false;
+          });
+        }
+      })
+      .catch(() => { mount.remove(); });
+  })();
 
   /* ── Footer HTML ── */
   const footerEl = document.getElementById('forge-footer');
-  if (footerEl) {
+  if (footerEl && !MODE_ATELIER) {
     footerEl.innerHTML = `
       <div class="container">
         <div class="footer-grid">
           <div>
             <div class="footer-brand-name">GRIMOIRE <span>KIT</span></div>
-            <p class="footer-desc">Noyau agentique modulaire.<br>Frappé, pas assemblé.<br>v2026 · runtime typé · open surface protocol.</p>
+            <p class="footer-desc">Noyau agentique modulaire.<br>Composé, gouverné, tracé.<br>v2026 · runtime typé · open surface protocol.</p>
           </div>
           <div class="footer-col">
             <h4>RUNTIME</h4>
@@ -142,23 +192,22 @@
             </ul>
           </div>
           <div class="footer-col">
-            <h4>SURFACES</h4>
+            <h4>EXPLORER</h4>
             <ul>
-              <li><a href="game-ui.html">Game UI</a></li>
-              <li><a href="observability.html">Observatory</a></li>
-              <li><a href="memory.html">Memory</a></li>
-              <li><a href="kanban.html">Kanban</a></li>
-              <li><a href="documentation.html">Documentation</a></li>
+              <li><a href="demo.html">Démo</a></li>
+              <li><a href="patterns.html">Patterns</a></li>
+              <li><a href="extensions.html">Extensions</a></li>
+              <li><a href="portfolio.html">Portefeuille</a></li>
+              <li><a href="game-ui.html">Labs · Game UI</a></li>
+              <li><a href="anatomy.html">Labs · Anatomie</a></li>
             </ul>
           </div>
           <div class="footer-col">
-            <h4>PROJET</h4>
+            <h4>ATELIER</h4>
             <ul>
-              <li><a href="demo.html">Démo</a></li>
-              <li><a href="anatomy.html">Anatomie</a></li>
-              <li><a href="https://pypi.org/project/grimoire-kit/" target="_blank" rel="noopener">Installer (pip)</a></li>
-              <li><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Roadmap</a></li>
+              <li><a href="#" class="js-launch-atelier" style="color:var(--accent)">Lancer l'atelier →</a></li>
             </ul>
+            <p style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-muted);line-height:1.7;margin-top:10px">grimoire serve — le même site<br>s'ouvre en mode atelier :<br>éditeur, surfaces, projet.</p>
           </div>
         </div>
         <div class="footer-bottom">
@@ -169,7 +218,7 @@
   }
 
   /* ── Nav scroll state ── */
-  if (navEl) {
+  if (navEl && !MODE_ATELIER) {
     const onScroll = () => {
       navEl.classList.toggle('scrolled', window.scrollY > 80);
     };

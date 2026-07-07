@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forge · Sélecteur de projet</title>
+<link rel="stylesheet" href="forge-tokens.css">
+<link rel="stylesheet" href="forge-base.css">
+<style>
+  /* page de démonstration seulement — pas livré */
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); margin: 0; min-height: 100vh; }
+  .demo-wrap { max-width: 1240px; margin: 0 auto; padding: 120px 24px 80px; }
+  .demo-h { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted); margin: 0 0 12px; }
+  .demo-block { margin-bottom: 64px; }
+  .demo-rule { height: 1px; background: var(--line); border: 0; margin: 56px 0; }
+  .demo-note { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ink-soft); line-height: var(--lh-mono); max-width: 60ch; }
+  .demo-note b { color: var(--accent); font-weight: 500; }
+  /* simulation d'une barre de nav statique pour la démo */
+  .demo-nav { display: flex; align-items: center; gap: 28px; height: 56px; padding: 0 24px;
+    background: rgba(18,20,24,0.92); border: 1px solid var(--line-strong); border-radius: var(--r-md); }
+  .demo-nav .nav-logo { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: var(--ink); text-decoration: none; letter-spacing: 0.04em; }
+  .demo-nav .nav-logo .logo-accent { color: var(--accent); }
+  .demo-nav .spacer { flex: 1; }
+  .demo-nav .nav-links { display: flex; gap: 24px; list-style: none; margin: 0; padding: 0; }
+  .demo-nav .nav-links a { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-muted); text-decoration: none; letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+<div class="demo-wrap">
+
+  <!-- ════════ ÉTAT MULTI-PROJETS ════════ -->
+  <div class="demo-block">
+    <p class="demo-h">État · plusieurs projets — barre + dropdown</p>
+    <nav class="demo-nav">
+      <a href="index.html" class="nav-logo">GRIMOIRE&nbsp;<span class="logo-accent">KIT</span></a>
+
+      <!-- ▼▼▼ FRAGMENT À INJECTER ▼▼▼ -->
+      <details class="forge-projects" id="forge-projects" open>
+        <summary class="fp-trigger" aria-label="Changer de projet">
+          <span class="fp-dot fp-dot--pass" aria-hidden="true"></span>
+          <span class="fp-trigger-label">
+            <span class="fp-eyebrow">PROJET</span>
+            <span class="fp-current">Grimoire Core</span>
+          </span>
+          <span class="fp-caret" aria-hidden="true"></span>
+        </summary>
+        <div class="fp-panel" role="menu">
+          <div class="fp-panel-head">
+            <span>SÉLECTIONNER UN PROJET</span>
+            <span class="fp-count">4</span>
+          </div>
+
+          <!-- ── markup répétable : une ligne par projet ── -->
+          <a href="?project=grimoire-core" class="fp-item is-active" role="menuitem" aria-current="true">
+            <span class="fp-dot fp-dot--pass" title="CI vert · build #1284"></span>
+            <span class="fp-meta">
+              <span class="fp-name">Grimoire Core</span>
+              <span class="fp-slug">grimoire-core</span>
+            </span>
+            <span class="fp-stats">
+              <span class="fp-cost" title="Coût run">$0.38</span>
+              <span class="fp-af" data-grade="a" title="Score antifragile">94<small>AF</small></span>
+            </span>
+          </a>
+
+          <a href="?project=atlas-ops" class="fp-item" role="menuitem">
+            <span class="fp-dot fp-dot--pass" title="CI vert · build #872"></span>
+            <span class="fp-meta">
+              <span class="fp-name">Atlas Ops</span>
+              <span class="fp-slug">atlas-ops</span>
+            </span>
+            <span class="fp-stats">
+              <span class="fp-cost" title="Coût run">$1.24</span>
+              <span class="fp-af" data-grade="a" title="Score antifragile">88<small>AF</small></span>
+            </span>
+          </a>
+
+          <a href="?project=sentinel-sec" class="fp-item" role="menuitem">
+            <span class="fp-dot fp-dot--fail" title="CI rouge · build #503"></span>
+            <span class="fp-meta">
+              <span class="fp-name">Sentinel Sec</span>
+              <span class="fp-slug">sentinel-sec</span>
+            </span>
+            <span class="fp-stats">
+              <span class="fp-cost" title="Coût run">$0.61</span>
+              <span class="fp-af" data-grade="c" title="Score antifragile">71<small>AF</small></span>
+            </span>
+          </a>
+
+          <a href="?project=ledger-data" class="fp-item" role="menuitem">
+            <span class="fp-dot fp-dot--pass" title="CI vert · build #2041"></span>
+            <span class="fp-meta">
+              <span class="fp-name">Ledger Data</span>
+              <span class="fp-slug">ledger-data</span>
+            </span>
+            <span class="fp-stats">
+              <span class="fp-cost" title="Coût run">$2.07</span>
+              <span class="fp-af" data-grade="b" title="Score antifragile">82<small>AF</small></span>
+            </span>
+          </a>
+
+          <a href="portfolio.html" class="fp-portfolio" role="menuitem">
+            Portefeuille
+            <span class="fp-portfolio-arrow" aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      </details>
+      <!-- ▲▲▲ FIN DU FRAGMENT ▲▲▲ -->
+
+      <span class="spacer"></span>
+      <ul class="nav-links" role="list">
+        <li><a href="demo.html">DÉMO</a></li>
+        <li><a href="documentation.html">DOCUMENTATION</a></li>
+      </ul>
+    </nav>
+    <hr class="demo-rule">
+    <p class="demo-note">
+      Cliquez le déclencheur pour ouvrir le dropdown (pur CSS via <b>&lt;details&gt;</b>, aucun JS).
+      Chaque ligne est un <b>&lt;a href="?project=&lt;slug&gt;"&gt;</b> — le clic recharge la page avec le paramètre.
+      Le projet courant porte la classe <b>.is-active</b>. Pastille verte = CI au vert, rouge = CI cassé.
+    </p>
+  </div>
+
+  <!-- ════════ ÉTAT MONO-PROJET ════════ -->
+  <div class="demo-block">
+    <p class="demo-h">État · projet unique — forme compacte non intrusive</p>
+    <nav class="demo-nav">
+      <a href="index.html" class="nav-logo">GRIMOIRE&nbsp;<span class="logo-accent">KIT</span></a>
+
+      <!-- ▼ FRAGMENT MONO-PROJET (pas de dropdown) ▼ -->
+      <span class="forge-projects forge-projects--solo">
+        <span class="fp-dot fp-dot--pass" title="CI vert"></span>
+        <span class="fp-trigger-label">
+          <span class="fp-eyebrow">PROJET</span>
+          <span class="fp-current">Grimoire Core</span>
+        </span>
+      </span>
+      <!-- ▲ FIN ▲ -->
+
+      <span class="spacer"></span>
+      <ul class="nav-links" role="list">
+        <li><a href="demo.html">DÉMO</a></li>
+        <li><a href="documentation.html">DOCUMENTATION</a></li>
+      </ul>
+    </nav>
+    <hr class="demo-rule">
+    <p class="demo-note">
+      Vitrine mono-projet : on retire le <b>&lt;details&gt;</b> et on garde une étiquette statique
+      (ou on masque entièrement le bloc). Aucune affordance de dropdown, donc zéro bruit visuel.
+    </p>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     CSS DU FRAGMENT — autoporté. Variables avec valeurs de repli :
+     fonctionne même sans forge-tokens.css.
+     ══════════════════════════════════════════════════════════════ -->
+<style id="forge-projects-css">
+  .forge-projects {
+    --fp-accent: var(--accent, #FF6B3D);
+    --fp-bg:     var(--elev-1, #121418);
+    --fp-bg-2:   var(--elev-2, #1A1D22);
+    --fp-line:   var(--line, rgba(255,255,255,0.08));
+    --fp-line-s: var(--line-strong, rgba(255,255,255,0.14));
+    --fp-ink:    var(--ink, #F6F7F8);
+    --fp-soft:   var(--ink-soft, #9BA0A8);
+    --fp-muted:  var(--ink-muted, #5B6068);
+    --fp-green:  var(--data-green, #34D399);
+    --fp-red:    var(--data-red, #F87171);
+    --fp-mono:   var(--font-mono, 'Geist Mono', ui-monospace, monospace);
+    position: relative;
+    display: inline-block;
+    user-select: none;
+  }
+  .forge-projects[open] { z-index: 60; }
+
+  /* ── Déclencheur ── */
+  .fp-trigger {
+    list-style: none;
+    display: flex; align-items: center; gap: 10px;
+    height: 34px; padding: 0 10px 0 12px;
+    border: 1px solid var(--fp-line-s);
+    border-radius: var(--r-md, 8px);
+    background: var(--fp-bg);
+    cursor: pointer;
+    transition: border-color 160ms, background 160ms;
+  }
+  .fp-trigger::-webkit-details-marker { display: none; }
+  .fp-trigger:hover { border-color: var(--fp-accent); background: var(--fp-bg-2); }
+  .forge-projects[open] .fp-trigger { border-color: var(--fp-accent); background: var(--fp-bg-2); }
+
+  .fp-trigger-label { display: flex; flex-direction: column; line-height: 1; gap: 3px; }
+  .fp-eyebrow {
+    font-family: var(--fp-mono); font-size: 0.56rem; letter-spacing: 0.16em;
+    color: var(--fp-muted); text-transform: uppercase;
+  }
+  .fp-current {
+    font-family: var(--fp-mono); font-size: 0.74rem; font-weight: 600;
+    color: var(--fp-ink); letter-spacing: 0.02em;
+  }
+  .fp-caret {
+    width: 7px; height: 7px; margin-left: 2px;
+    border-right: 1.5px solid var(--fp-soft); border-bottom: 1.5px solid var(--fp-soft);
+    transform: rotate(45deg) translateY(-1px);
+    transition: transform 200ms var(--ease-forge, cubic-bezier(0.2,0.8,0.2,1)), border-color 160ms;
+  }
+  .forge-projects[open] .fp-caret { transform: rotate(-135deg) translateY(-1px); border-color: var(--fp-accent); }
+
+  /* ── Pastille statut CI ── */
+  .fp-dot {
+    flex: none; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--fp-muted); position: relative;
+  }
+  .fp-dot--pass { background: var(--fp-green); box-shadow: 0 0 0 3px color-mix(in oklab, var(--fp-green) 22%, transparent); }
+  .fp-dot--fail { background: var(--fp-red);   box-shadow: 0 0 0 3px color-mix(in oklab, var(--fp-red) 22%, transparent); }
+
+  /* ── Panneau ── */
+  .fp-panel {
+    position: absolute; top: calc(100% + 8px); left: 0;
+    width: 320px; max-width: 88vw;
+    background: var(--fp-bg);
+    border: 1px solid var(--fp-line-s);
+    border-radius: var(--r-md, 8px);
+    box-shadow: 0 18px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.3);
+    padding: 6px;
+    animation: fp-in 180ms var(--ease-out, cubic-bezier(0,0,0.2,1));
+  }
+  @keyframes fp-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .fp-panel { animation: none; } }
+
+  .fp-panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px 10px;
+    font-family: var(--fp-mono); font-size: 0.58rem; letter-spacing: 0.16em;
+    color: var(--fp-muted); text-transform: uppercase;
+  }
+  .fp-count {
+    font-size: 0.6rem; letter-spacing: 0; color: var(--fp-soft);
+    border: 1px solid var(--fp-line); border-radius: 999px; padding: 1px 7px;
+  }
+
+  /* ── Ligne projet ── */
+  .fp-item {
+    display: flex; align-items: center; gap: 11px;
+    padding: 9px 10px;
+    border-radius: var(--r-sm, 4px);
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: background 140ms, border-color 140ms;
+  }
+  .fp-item:hover { background: var(--fp-bg-2); }
+  .fp-item.is-active { background: var(--accent-soft, rgba(255,107,61,0.12)); border-color: color-mix(in oklab, var(--fp-accent) 40%, transparent); }
+
+  .fp-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+  .fp-name {
+    font-family: var(--font-sans, system-ui); font-size: 0.82rem; font-weight: 500;
+    color: var(--fp-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .fp-item.is-active .fp-name { color: var(--fp-accent); }
+  .fp-slug {
+    font-family: var(--fp-mono); font-size: 0.62rem; letter-spacing: 0.04em;
+    color: var(--fp-muted);
+  }
+
+  .fp-stats { display: flex; align-items: center; gap: 10px; flex: none; }
+  .fp-cost {
+    font-family: var(--fp-mono); font-size: 0.7rem; font-weight: 500;
+    color: var(--fp-soft); font-variant-numeric: tabular-nums;
+  }
+  .fp-af {
+    font-family: var(--fp-mono); font-size: 0.72rem; font-weight: 600;
+    color: var(--fp-ink); font-variant-numeric: tabular-nums;
+    display: inline-flex; align-items: baseline; gap: 2px;
+    padding: 2px 7px; border-radius: var(--r-sm, 4px);
+    border: 1px solid var(--fp-line); background: rgba(255,255,255,0.02);
+  }
+  .fp-af small { font-size: 0.5rem; letter-spacing: 0.08em; color: var(--fp-muted); font-weight: 500; }
+  .fp-af[data-grade="a"] { color: var(--fp-green); border-color: color-mix(in oklab, var(--fp-green) 30%, transparent); }
+  .fp-af[data-grade="b"] { color: var(--data-amber, #FCD34D); border-color: color-mix(in oklab, var(--data-amber, #FCD34D) 30%, transparent); }
+  .fp-af[data-grade="c"] { color: var(--fp-red); border-color: color-mix(in oklab, var(--fp-red) 30%, transparent); }
+  .fp-af[data-grade="a"] small,
+  .fp-af[data-grade="b"] small,
+  .fp-af[data-grade="c"] small { color: inherit; opacity: 0.7; }
+
+  /* ── Lien Portefeuille ── */
+  .fp-portfolio {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 6px; padding: 11px 12px;
+    border-top: 1px solid var(--fp-line);
+    font-family: var(--fp-mono); font-size: 0.68rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--fp-soft);
+    text-decoration: none;
+    transition: color 140ms;
+  }
+  .fp-portfolio:hover { color: var(--fp-accent); }
+  .fp-portfolio-arrow { transition: transform 180ms var(--ease-forge, cubic-bezier(0.2,0.8,0.2,1)); }
+  .fp-portfolio:hover .fp-portfolio-arrow { transform: translateX(4px); }
+
+  /* ── Variante mono-projet ── */
+  .forge-projects--solo {
+    display: inline-flex; align-items: center; gap: 10px;
+    height: 34px; padding: 0 12px;
+    border: 1px solid var(--fp-line);
+    border-radius: var(--r-md, 8px);
+    background: transparent;
+  }
+
+  @media (max-width: 640px) {
+    .fp-eyebrow { display: none; }
+    .fp-panel { width: 280px; }
+  }
+</style>
+
+</body>
+</html>

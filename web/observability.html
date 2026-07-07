@@ -12,8 +12,9 @@
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
+  <link rel="stylesheet" href="atelier.css"/>
+  <script src="grimoire-mode.js"></script>
   <style>
-    body { padding-top: 56px; }
     .wrap { max-width: var(--max-w); margin: 0 auto; padding: 0 var(--gap); position: relative; z-index: 1; }
 
     /* ── HERO ── */
@@ -272,11 +273,12 @@
     #obs-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
 </head>
-<body>
+<body class="at-body">
 <a href="#main" class="skip-link">Aller au contenu</a>
-<div id="scroll-progress" aria-hidden="true"></div>
-<nav id="forge-nav" aria-label="Navigation principale"></nav>
-
+<div class="at-app">
+<aside class="at-side" id="atelier-side"></aside>
+<div class="at-main">
+<div class="at-scroll flush">
 <main id="main">
   <!-- ════════════ HERO ════════════ -->
   <section id="hero">
@@ -551,11 +553,13 @@
     </div>
   </section>
 </main>
+</div>
+<div class="at-status" id="atelier-status"></div>
+</div>
+</div>
 
-<footer id="forge-footer"></footer>
-
+<script src="atelier-nav.js"></script>
 <script src="forge-nav.js"></script>
-<script src="forge-motion.js"></script>
 <script src="forge-observatory.js"></script>
 <script>
   /* band dividers draw on scroll */

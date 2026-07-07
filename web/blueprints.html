@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blueprints — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <link rel="stylesheet" href="bp2.css" />
+  <link rel="stylesheet" href="bp2-team.css" />
+  <script src="grimoire-mode.js"></script>
+</head>
+<body class="at-body">
+  <div class="at-app rail">
+    <aside class="at-side" id="atelier-side"><a class="at-logo" href="index.html">GRIMOIRE&nbsp;<span>KIT</span></a></aside>
+    <div class="at-main">
+      <div class="bp-app">
+
+        <!-- ── Toolbar ── -->
+        <div class="bp-toolbar">
+          <select id="bp-select" class="at-search" style="width:auto;padding:6px 10px;cursor:pointer"></select>
+          <button class="at-btn sm ghost" id="bp-new" title="Nouveau blueprint">+</button>
+          <button class="at-btn sm ghost" id="bp-manage" title="Gérer ce blueprint : actif, renommer, templates, exporter…">⋯</button>
+          <button class="bp-active-chip" id="bp-active"></button>
+          <span class="sep"></span>
+          <nav class="bp-crumb" id="bp-crumb" title="Profondeur du flow — C4"></nav>
+          <span class="at-sub" id="bp-saved">sauvegardé ✓ auto</span>
+          <span class="at-sp"></span>
+          <span id="bp-progress-slot"></span>
+          <span class="at-sp"></span>
+          <button class="bp-cost-chip" id="bp-cost-chip" title="Estimation de coût — ouvre l'onglet COÛT"></button>
+          <button class="at-btn sm ghost" id="bp-heat" title="Vue chaleur : coût en tokens sur la toile">◉ COÛT</button>
+          <span class="sep"></span>
+          <button class="at-btn sm" id="bp-validate">VALIDER</button>
+          <button class="at-btn sm" id="bp-simulate">SIMULER</button>
+          <button class="at-btn sm acc" id="bp-compile" data-state="dirty" disabled title="Compile le blueprint en artefacts — n'exécute jamais rien">
+            <span class="st-dot"></span> COMPILER <span id="bp-compile-state">· MODIFIÉ</span>
+          </button>
+          <span class="sep"></span>
+          <button class="at-btn sm ghost" id="bp-tour-btn" title="Nouveautés du studio — rejouer la visite">✦</button>
+          <button class="at-btn sm ghost" id="bp-help" title="Lexique & visite guidée">?</button>
+        </div>
+
+        <!-- ── Body ── -->
+        <div class="bp-body">
+          <div class="bp-palette" id="bp-palette">
+            <div class="head">
+              <input class="at-search" id="pal-search" placeholder="rechercher un pattern…" />
+            </div>
+            <div class="list" id="pal-list"></div>
+            <div class="bp-pal-foot">la palette EST le catalogue (36 patterns + nodes d'extensions), filtrée pour l'action — cliquer ou glisser pour poser</div>
+          </div>
+
+          <div class="bp-canvas-wrap" id="bp-canvas" tabindex="0">
+            <div class="bp-world" id="bp-world">
+              <div class="bp-grid"></div>
+              <svg id="bp-edges"></svg>
+              <div id="bp-items"></div>
+            </div>
+            <div class="bp-hud">
+              <button id="hud-tidy" title="Ranger le graphe (auto-layout)">⇥</button>
+              <button id="hud-out" title="Zoom −">−</button>
+              <span id="hud-zoom">100 %</span>
+              <button id="hud-in" title="Zoom +">+</button>
+              <button id="hud-fit" title="Recadrer (F)">⌂</button>
+            </div>
+            <div class="bp-hint">
+              <span>clic droit : ajouter</span>
+              <span>⌘G : grouper en sous-flow</span>
+              <span>double-clic : configurer / entrer</span>
+              <span>C : commentaire</span>
+              <span>F : recadrer</span>
+              <span>⌘Z · ⌘D · suppr</span>
+            </div>
+          </div>
+
+          <div class="bp-inspector">
+            <div class="bp-tabs">
+              <button class="bp-tab on" data-tab="node">NODE</button>
+              <button class="bp-tab" data-tab="validation">RÈGLES<span class="n" id="val-count" style="display:none">0</span></button>
+              <button class="bp-tab" data-tab="simulation">SIMU</button>
+              <button class="bp-tab" data-tab="cout">COÛT</button>
+            </div>
+            <div class="bp-panel on" data-panel="node" id="panel-node"><p class="empty">sélectionnez un node, un lien ou une zone.</p></div>
+            <div class="bp-panel" data-panel="validation" id="panel-validation"></div>
+            <div class="bp-panel" data-panel="simulation" id="panel-simulation"></div>
+            <div class="bp-panel" data-panel="cout" id="panel-cout"></div>
+          </div>
+        </div>
+
+      </div>
+      <div class="at-status" id="atelier-status"><span><span class="ok">●</span> API locale · :7431</span></div>
+    </div>
+  </div>
+
+  <!-- Fiche pattern / dossier de node (drawer) -->
+  <div class="bp-fiche" id="bp-fiche"></div>
+  <!-- Éditeur de document (modal) -->
+  <div id="bp-doc-host"></div>
+
+  <script src="atelier-nav.js"></script>
+  <script src="bp2-cost.js"></script>
+  <script src="bp2-docs.js"></script>
+  <script src="bp2-team.js"></script>
+  <script src="bp2-assist.js"></script>
+  <script src="bp2-core.js"></script>
+  <script src="bp2-composer.js"></script>
+  <script src="bp2-library.js"></script>
+  <script src="blueprint-onboarding.js"></script>
+  <script src="bp2-tour.js"></script>
+</body>
+</html>

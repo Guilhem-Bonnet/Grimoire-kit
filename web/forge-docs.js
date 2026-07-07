@@ -222,35 +222,12 @@
       md = await r.text();
     } catch (e) { errorState(file); els.toc.innerHTML = '<div class="toc-empty">—</div>'; return; }
 
-    md = stripMkdocs(md);
-
     let html;
     try { html = window.marked.parse(md, { mangle: false, headerIds: false }); }
     catch (e) { html = '<pre><code>' + md.replace(/</g, '&lt;') + '</code></pre>'; }
     setState(html);
     postProcess(file);
     els.article.scrollTop = 0;
-  }
-
-  // mkdocs → marked compatibility: strip macros/attr_list, convert admonitions
-  function stripMkdocs(md) {
-    md = md.replace(/\{\{[^}]*\}\}/g, '');
-    md = md.replace(/[ \t]*\{:[^}]*\}[ \t]*$/gm, '');
-    const lines = md.split('\n'), out = [];
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/^(?:!!!|\?\?\?\+?)\s+\S+(?:\s+"([^"]*)")?\s*$/);
-      if (!m) { out.push(lines[i]); continue; }
-      if (m[1]) { out.push('**' + m[1] + '**', ''); }
-      let j = i + 1;
-      for (; j < lines.length; j++) {
-        const ln = lines[j];
-        if (ln.trim() === '') { out.push(''); continue; }
-        if (/^( {4}|\t)/.test(ln)) out.push(ln.replace(/^( {4}|\t)/, ''));
-        else break;
-      }
-      i = j - 1;
-    }
-    return out.join('\n');
   }
 
   function setCrumb(meta) {

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patterns — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <script src="grimoire-mode.js"></script>
+  <style>
+    .pt-layout { display: grid; grid-template-columns: 172px 1fr 300px; gap: 20px; align-items: start; }
+    @media (max-width: 1100px) { .pt-layout { grid-template-columns: 1fr; } }
+    .pt-cats { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+    .pt-cat {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft);
+      padding: 6px 9px; border-radius: var(--r-sm); cursor: pointer;
+      border: 1px solid transparent; background: none; text-align: left; width: 100%;
+    }
+    .pt-cat:hover { background: var(--elev-2); color: var(--ink); }
+    .pt-cat.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-dim); }
+    .pt-cat .cdot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+    .pt-cat .n { margin-left: auto; color: var(--ink-muted); font-size: 0.58rem; }
+    .pt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+    .pt-card { padding: 13px 15px; cursor: pointer; transition: border-color 150ms; }
+    .pt-card:hover { border-color: var(--ink-muted); }
+    .pt-card.on { border-color: var(--accent); }
+    .pt-card .ref { font-family: var(--font-mono); font-size: 0.64rem; font-weight: 600; }
+    .pt-card h4 { font-size: 0.82rem; margin: 4px 0 6px; font-weight: 600; }
+    .pt-card p { font-size: 0.7rem; color: var(--ink-soft); line-height: 1.5; }
+    .pt-fiche { position: sticky; top: 0; }
+    .pt-io { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.64rem; padding: 5px 0; color: var(--ink-soft); }
+    .pt-io .cdot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+    .uc-card { padding: 18px 20px; }
+    .uc-slots { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 14px; align-items: center; }
+    .uc-slot { border: 1px dashed var(--line-strong); border-radius: var(--r-sm); padding: 7px 11px; font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); }
+    .uc-slot b { display: block; color: var(--ink); font-size: 0.66rem; }
+    .uc-arr { color: var(--ink-muted); font-family: var(--font-mono); }
+    html.mode-vitrine .pt-cats, html.mode-vitrine .pt-fiche { top: 76px; }
+  </style>
+</head>
+<body class="at-body">
+  <nav id="forge-nav" aria-label="Navigation principale"></nav>
+  <div class="at-app">
+    <aside class="at-side" id="atelier-side"></aside>
+    <div class="at-main">
+      <div class="at-scroll"><div class="at-page">
+        <div class="at-row sb" style="align-items:flex-start;margin-bottom:4px">
+          <div>
+            <div class="at-h1-row" style="margin-bottom:4px"><h1 class="at-h1">Patterns</h1><span class="at-sub">catalogue normatif</span></div>
+            <p class="at-lead">Les pratiques gouvernées du standard, et les artefacts typés qu'elles échangent. Chaque blueprint compose ces patterns.</p>
+          </div>
+          <div class="at-row" id="pt-views">
+            <button class="at-chip on" data-view="familles">CATÉGORIES</button>
+            <button class="at-chip" data-view="usecases">USE-CASES</button>
+          </div>
+        </div>
+        <div class="at-row" style="gap:8px;margin:14px 0 20px;flex-wrap:wrap">
+          <span class="at-chip" id="pt-count">…</span>
+          <span class="at-chip">8 contrats documentés</span>
+          <span class="at-sp"></span>
+          <input class="at-search" id="pt-search" placeholder="rechercher — ref, nom, contrat…" style="max-width:280px" />
+        </div>
+        <div id="pt-body"></div>
+        <p style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted);margin-top:28px">extrait documenté : 18/36 patterns — la fiche complète se régénère depuis <span style="color:var(--ink-soft)">capability-map.yaml</span></p>
+      </div></div>
+      <div class="at-status" id="atelier-status"></div>
+    </div>
+  </div>
+
+  <footer id="forge-footer"></footer>
+
+  <script src="atelier-nav.js"></script>
+  <script src="forge-nav.js"></script>
+  <script>
+  (async function () {
+    'use strict';
+    const $ = (s, r) => (r || document).querySelector(s);
+    const esc = Atelier.esc;
+    const IN_ATELIER = window.GrimoireMode === 'atelier';
+    const { catalogue: CAT, extensions: EXT } = await Atelier.data();
+
+    let view = 'familles';
+    let activeCat = 'ALL';
+    let selected = (location.hash || '').replace('#', '') || null;
+    let q = '';
+
+    $('#pt-count').textContent = CAT.total_patterns + ' patterns · ' + CAT.total_categories + ' catégories';
+
+    function implementedBy(ref) {
+      return EXT.extensions.filter(e => (e.patterns || []).includes(ref));
+    }
+
+    function filtered() {
+      let list = CAT.patterns;
+      if (activeCat !== 'ALL') list = list.filter(p => p.cat === activeCat);
+      if (q) {
+        const s = q.toLowerCase();
+        list = list.filter(p =>
+          p.ref.toLowerCase().includes(s) || p.name.toLowerCase().includes(s) ||
+          p.desc.toLowerCase().includes(s) ||
+          p.in.concat(p.out).some(c => c.includes(s)));
+      }
+      return list;
+    }
+
+    function fiche(p) {
+      if (!p) return `<div class="at-card pt-fiche"><p class="at-sub" style="padding:20px 0;text-align:center">sélectionnez un pattern</p></div>`;
+      const impl = implementedBy(p.ref);
+      const cat = Atelier.catById[p.cat];
+      const io = (dir, ids) => ids.length
+        ? ids.map(c => `<div class="pt-io"><span class="cdot" style="background:${Atelier.contractColor(c)}"></span>${dir} · <b style="color:var(--ink)">${esc(c)}</b></div>`).join('')
+        : `<div class="pt-io" style="color:var(--ink-muted)">${dir} · — ${dir === 'in' ? '(source du flow)' : '(terminal)'}</div>`;
+      const hasProject = !!Atelier.project();
+      return `
+      <div class="at-card pt-fiche">
+        <div class="at-row sb" style="margin-bottom:8px">
+          <span style="font-family:var(--font-mono);font-size:0.78rem;font-weight:700">${esc(p.ref)}</span>
+          <span class="at-chip"><span class="cdot" style="background:${Atelier.catColor(p.cat)};width:7px;height:7px;border-radius:2px"></span>${esc(cat ? cat.name : p.cat)}</span>
+        </div>
+        <h3 style="font-size:1rem;margin-bottom:8px">${esc(p.name)}</h3>
+        <p style="font-size:0.76rem;color:var(--ink-soft);line-height:1.6;margin-bottom:14px">${esc(p.desc)}</p>
+        <div class="at-lbl" style="margin-bottom:4px">Contrats — ce que le pattern échange</div>
+        ${io('in', p.in)}${io('out', p.out)}
+        <div class="at-lbl" style="margin:14px 0 6px">Checks</div>
+        ${p.checks.map(c => `<div style="font-size:0.72rem;color:var(--ink-soft);padding:2px 0">✓ ${esc(c)}</div>`).join('')}
+        <div class="at-row sb" style="margin-top:14px">
+          <span class="at-lbl">Profil minimum</span>
+          <span class="at-chip">${esc(p.profile_min)}</span>
+        </div>
+        <div class="at-lbl" style="margin:14px 0 6px">Agents</div>
+        <div class="at-row" style="gap:5px;flex-wrap:wrap">${p.agents.map(a => `<span class="at-chip" style="font-size:0.56rem">${esc(a)}</span>`).join('')}</div>
+        ${impl.length ? `<div class="at-lbl" style="margin:14px 0 6px">Implémenté par</div>
+        <div class="at-row" style="gap:5px;flex-wrap:wrap">${impl.map(e => `<a class="at-chip" style="font-size:0.56rem;text-decoration:none" href="extensions.html?ext=${esc(e.id)}">${esc(e.name)}</a>`).join('')}</div>` : ''}
+        <div style="margin-top:18px">
+          ${!IN_ATELIER
+            ? `<span class="at-sub">se compose dans l'éditeur de blueprints — <a href="#" class="js-launch-atelier" style="color:var(--accent)">lancer l'atelier →</a></span>`
+            : hasProject
+              ? `<a class="at-btn pri" style="width:100%" href="blueprints.html?add=${esc(p.ref)}">UTILISER DANS UN BLUEPRINT →</a>`
+              : `<span class="at-sub">disponible dans l'éditeur une fois un projet créé — <a href="atelier.html" style="color:var(--accent)">créer →</a></span>`}
+        </div>
+      </div>`;
+    }
+
+    function famillesView() {
+      const counts = {};
+      CAT.patterns.forEach(p => counts[p.cat] = (counts[p.cat] || 0) + 1);
+      const cats = `<div class="pt-cats">
+        <button class="pt-cat ${activeCat === 'ALL' ? 'on' : ''}" data-cat="ALL">Toutes<span class="n">${CAT.patterns.length}</span></button>
+        ${CAT.categories.map(c => `<button class="pt-cat ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">
+          <span class="cdot" style="background:${c.color}"></span>${esc(c.id)} · ${esc(c.name)}<span class="n">${counts[c.id] || 0}</span></button>`).join('')}
+      </div>`;
+      const list = filtered();
+      const sel = CAT.patterns.find(p => p.ref === selected) || null;
+      const cards = list.length ? `<div class="pt-grid">${list.map(p => `
+        <div class="at-card pt-card ${selected === p.ref ? 'on' : ''}" data-ref="${p.ref}">
+          <div class="at-row sb"><span class="ref" style="color:${Atelier.catColor(p.cat)}">${esc(p.ref)}</span>
+          <span style="font-family:var(--font-mono);font-size:0.54rem;color:var(--ink-muted)">${esc(p.profile_min)}</span></div>
+          <h4>${esc(p.name)}</h4>
+          <p>${esc(p.desc)}</p>
+        </div>`).join('')}</div>`
+        : `<p class="at-sub" style="padding:30px 0;text-align:center">aucun pattern ne correspond${activeCat !== 'ALL' ? ' dans cette catégorie' : ''} — les 36 fiches complètes viennent de capability-map.yaml</p>`;
+      return `<div class="pt-layout">${cats}<div>${cards}</div>${fiche(sel)}</div>`;
+    }
+
+    function usecasesView() {
+      return `<div class="at-col" style="gap:14px">${CAT.use_cases.map(uc => `
+        <div class="at-card uc-card">
+          <div class="at-row sb">
+            <h3 style="font-size:0.95rem">${esc(uc.name)}</h3>
+            ${IN_ATELIER && Atelier.project() ? `<a class="at-btn sm acc" href="blueprints.html?uc=${esc(uc.id)}">OUVRIR COMME SQUELETTE →</a>` : ''}
+          </div>
+          <p style="font-size:0.76rem;color:var(--ink-soft);margin-top:4px">${esc(uc.desc)}</p>
+          <div class="uc-slots">
+            ${uc.slots.map((s, i) => `${i ? '<span class="uc-arr">→</span>' : ''}<span class="uc-slot"><b>${i + 1} · ${esc(s.label)}</b>${esc(s.suggest.join(', '))}</span>`).join('')}
+          </div>
+        </div>`).join('')}
+        <p style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-muted)">un squelette pose des emplacements typés dans l'éditeur — on remplit, on peut diverger, rien n'est verrouillé.</p>
+      </div>`;
+    }
+
+    function render() {
+      $('#pt-body').innerHTML = view === 'familles' ? famillesView() : usecasesView();
+      document.querySelectorAll('.pt-cat').forEach(b => b.addEventListener('click', () => { activeCat = b.dataset.cat; render(); }));
+      document.querySelectorAll('.pt-card').forEach(c => c.addEventListener('click', () => {
+        selected = c.dataset.ref;
+        history.replaceState(null, '', '#' + selected);
+        render();
+      }));
+    }
+
+    document.querySelectorAll('#pt-views .at-chip').forEach(b => b.addEventListener('click', () => {
+      view = b.dataset.view;
+      document.querySelectorAll('#pt-views .at-chip').forEach(x => x.classList.toggle('on', x === b));
+      render();
+    }));
+    $('#pt-search').addEventListener('input', e => { q = e.target.value.trim(); render(); });
+
+    render();
+  })();
+  </script>
+</body>
+</html>
