@@ -1274,6 +1274,25 @@
     }
     $('#sim-verdict').innerHTML = verdict;
     state.meta.simulated = true;
+
+    /* verdict du serveur réel : lint normatif + prérequis projet (extensions,
+       artefacts présents) — la vue locale reste l'animation, lui décide. */
+    if (Atelier.online) {
+      try {
+        const payload = Object.assign({ blueprintVersion: 2, id: bpId, name: (state.meta && state.meta.name) || bpId }, state);
+        const r = await Atelier.api('/api/blueprints/' + encodeURIComponent(bpId) + '/simulate',
+          { method: 'POST', body: JSON.stringify(payload) });
+        if ((r.blockers || []).length) {
+          state.meta.simulated = false;
+          verdict = `<div class="bp-verdict warn"><div class="t">bloqué par le serveur — ${r.blockers.length} prérequis</div>
+            <p>${r.blockers.map(esc).join('<br>')}</p></div>`;
+        } else {
+          verdict += `<div class="bp-verdict" style="margin-top:8px"><div class="t">vérifié par l'API locale ✓</div>
+            <p>${esc(r.verdict)} · ${(r.steps || []).length} étapes ordonnées${(r.warnings || []).length ? '<br>avertissements : ' + r.warnings.map(esc).join(' · ') : ''}</p></div>`;
+        }
+        $('#sim-verdict').innerHTML = verdict;
+      } catch (e) { /* API indisponible en cours de route : verdict local seul */ }
+    }
     updateCompileBtn();
     persist();
     simRunning = false;
@@ -1294,7 +1313,7 @@
       st.textContent = state.nodes.length ? '· SIMULEZ D\u2019ABORD' : '· MODIFIÉ';
     }
   }
-  function compile() {
+  async function compile() {
     if (!state.meta.simulated) return;
     const agents = new Set();
     let skills = 0, groups = 0, hasExt = false;
@@ -1315,22 +1334,30 @@
     if (tc.tools.size) itemsOut.outils = tc.tools.size;
     if (tc.mcp.size) itemsOut.mcp = tc.mcp.size;
     if (hasExt || tc.hooks) itemsOut.hooks = (hasExt ? 1 : 0) + tc.hooks;
-    const total = Object.values(itemsOut).reduce((a, b) => a + b, 0);
-    const steps = ['validation ✓', 'génération des artefacts ✓', 'écrits sous artifacts/ — rien ne s\u2019est exécuté'];
-    let i = 0;
-    (function tick() {
-      Atelier.toast('<b>' + esc(bpId) + '</b> — ' + steps.slice(0, i + 1).join(' · '), { good: i === steps.length - 1, ms: 1700 });
-      i++;
-      if (i < steps.length) setTimeout(tick, 520);
-      else {
-        Atelier.pushArtifacts({ bp: bpId, when: Date.now(), items: itemsOut });
-        state.meta.compiledAt = Date.now();
-        state.meta.dirty = false;
-        updateCompileBtn(); persist();
-        Atelier.toast('<b>' + total + ' artefacts</b> dans l\u2019Atelier — ' + Object.entries(itemsOut).map(([k, v]) => k + ' ' + v).join(' · ') + (groups ? ' · les sous-flows deviennent des workflows imbriqués' : ''), { good: true, ms: 4200 });
-        emit('compiled', itemsOut);
-      }
-    })();
+
+    if (!Atelier.online) {
+      Atelier.toast('Compilation impossible hors atelier \u2014 lancez <code>grimoire serve</code> dans le projet.', { ms: 5200 });
+      return;
+    }
+    const btn = $('#bp-compile'); if (btn) btn.disabled = true;
+    Atelier.toast('<b>' + esc(bpId) + '</b> \u2014 compilation par l\u2019API locale\u2026', { ms: 2200 });
+    try {
+      const payload = Object.assign({ blueprintVersion: 2, id: bpId, name: (state.meta && state.meta.name) || bpId }, state);
+      const r = await Atelier.api('/api/blueprints/' + encodeURIComponent(bpId) + '/compile',
+        { method: 'POST', body: JSON.stringify(payload) });
+      Atelier.pushArtifacts({ bp: bpId, when: Date.now(), items: itemsOut, artifact: r.artifact, hash: r.hash });
+      state.meta.compiledAt = Date.now();
+      state.meta.dirty = false;
+      updateCompileBtn(); persist();
+      Atelier.toast('<b>' + esc(bpId) + '</b> compilé ✓ \u2014 <code>' + esc(r.artifact) + '</code> écrit dans le projet'
+        + (r.hash ? ' · <span style="opacity:.7">' + esc(String(r.hash).slice(0, 19)) + '\u2026</span>' : '')
+        + '<br>rien ne s\u2019est exécuté \u2014 la revue est le diff git.', { good: true, ms: 6500 });
+      emit('compiled', itemsOut);
+    } catch (e) {
+      Atelier.toast('Compilation refusée : ' + esc(String(e.message || e)), { ms: 6500 });
+      updateCompileBtn();
+    }
+    if (btn) btn.disabled = false;
   }
   $('#bp-compile').addEventListener('click', compile);
 

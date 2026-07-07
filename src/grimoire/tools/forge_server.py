@@ -39,7 +39,28 @@ from grimoire.tools.ext_manager import (
 )
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
 BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
+
+# Pins par famille pour les blueprints du Studio (v2) : même heuristique que
+# web/atelier-nav.js — à remplacer par une curation par pattern dans le
+# catalogue quand elle existera. `handoff-packet` circule partout.
+STUDIO_FAMILY_PINS: dict[str, dict[str, list[str]]] = {
+    "ORG": {"in": ["handoff-packet"], "out": ["task-envelope"]},
+    "ORC": {"in": ["task-envelope"], "out": ["task-envelope", "handoff-packet"]},
+    "GOV": {"in": ["task-envelope"], "out": ["task-envelope"]},
+    "MOD": {"in": ["task-envelope"], "out": ["handoff-packet"]},
+    "COG": {"in": ["task-envelope", "context-pack"], "out": ["handoff-packet"]},
+    "QUA": {
+        "in": ["handoff-packet", "evidence-pack"],
+        "out": ["evidence-pack", "verification-verdict"],
+    },
+    "KNO": {
+        "in": ["handoff-packet", "evidence-pack"],
+        "out": ["context-pack", "memory-record"],
+    },
+    "RUN": {"in": ["handoff-packet"], "out": ["telemetry-event"]},
+}
 
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
@@ -155,6 +176,7 @@ class ForgeAPI:
                 available.append(
                     {
                         "id": m["id"],
+                        "kind": m.get("kind"),
                         "name": m["name"],
                         "version": m["version"],
                         "description": m["description"],
@@ -216,6 +238,123 @@ class ForgeAPI:
             json.dumps(blueprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         return {"saved": bp_id, **lint}
+
+    # ── pont Studio (v2) → format compilable (v1) ─────────────────────────
+
+    @staticmethod
+    def _is_studio(blueprint: dict[str, Any]) -> bool:
+        """Un blueprint du Studio (v2) : nodes positionnés sans pins déclarés."""
+        if blueprint.get("blueprintVersion") == 2:
+            return True
+        nodes = blueprint.get("nodes", [])
+        return bool(nodes) and all("pins" not in n for n in nodes)
+
+    def _ext_node_index(self) -> dict[str, str]:
+        """node_id du manifeste -> id d'extension, pour retrouver `ext/node`."""
+        index: dict[str, str] = {}
+        base = self.kit_root / "extensions"
+        if not base.is_dir():
+            return index
+        for manifest_path in sorted(base.glob(f"*/{MANIFEST_NAME}")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            for node in manifest.get("provides", {}).get("nodes", []):
+                if isinstance(node, dict) and node.get("id"):
+                    index[str(node["id"])] = str(manifest.get("id", manifest_path.parent.name))
+        return index
+
+    def _studio_to_v1(self, blueprint: dict[str, Any]) -> dict[str, Any]:
+        """Convertit un état Studio en blueprint v1 lint/simulable/compilable.
+
+        Les groupes (sous-flows C4) sont aplatis ; les pins de chaque node
+        sont dérivés des contrats de ses edges (plus, pour les patterns,
+        l'heuristique par famille) : la structure du Studio est la source
+        de vérité, le typage v1 en est la projection.
+        """
+        if not self._is_studio(blueprint):
+            return blueprint
+        ext_index = self._ext_node_index()
+        catalogue = self._catalogue()
+        names = {p["id"]: p["name"] for p in (catalogue or {}).get("patterns", [])}
+
+        flat_nodes: list[dict[str, Any]] = []
+        flat_edges: list[dict[str, Any]] = []
+
+        def walk(graph: dict[str, Any]) -> None:
+            for n in graph.get("nodes", []):
+                if n.get("kind") == "group":
+                    flat_nodes.append(
+                        {
+                            "id": n.get("id"),
+                            "kind": "composite-inline",
+                            "ref": n.get("name", "sous-flow"),
+                            "label": n.get("name", "sous-flow"),
+                        }
+                    )
+                    walk(n.get("sub", {}))
+                    continue
+                ref = str(n.get("ref", ""))
+                if n.get("kind") in ("agent", "trigger"):
+                    kind, label = "agent-spec", n.get("name", n.get("kind"))
+                elif ref in ext_index:
+                    kind, label = "extension-node", ref
+                    ref = f"{ext_index[ref]}/{ref}"
+                elif PATTERN_REF_RE.match(ref):
+                    kind, label = "pattern", names.get(ref, ref)
+                else:
+                    kind, label = "artifact", ref
+                flat_nodes.append({"id": n.get("id"), "kind": kind, "ref": ref, "label": label})
+            for e in graph.get("edges", []):
+                flat_edges.append(dict(e))
+
+        walk(blueprint)
+
+        # pins dérivés : contrats des edges + heuristique famille des patterns
+        pins_in: dict[str, set[str]] = {str(n["id"]): set() for n in flat_nodes}
+        pins_out: dict[str, set[str]] = {str(n["id"]): set() for n in flat_nodes}
+        for e in flat_edges:
+            contract = str(e.get("contract") or "handoff-packet")
+            src, dst = str(e.get("from", "")), str(e.get("to", ""))
+            if src in pins_out:
+                pins_out[src].add(contract)
+            if dst in pins_in:
+                pins_in[dst].add(contract)
+        for n in flat_nodes:
+            if n["kind"] == "pattern":
+                family = str(n["ref"])[:3]
+                heur = STUDIO_FAMILY_PINS.get(family, {})
+                pins_in[str(n["id"])].update(heur.get("in", []))
+                pins_out[str(n["id"])].update(heur.get("out", []))
+            n["pins"] = [
+                {"id": f"in-{c}", "direction": "in", "contract": c}
+                for c in sorted(pins_in[str(n["id"])])
+            ] + [
+                {"id": f"out-{c}", "direction": "out", "contract": c}
+                for c in sorted(pins_out[str(n["id"])])
+            ]
+
+        edges_v1 = [
+            {
+                "from": f"{e.get('from')}.out-{e.get('contract') or 'handoff-packet'}",
+                "to": f"{e.get('to')}.in-{e.get('contract') or 'handoff-packet'}",
+                "contract": e.get("contract") or "handoff-packet",
+            }
+            for e in flat_edges
+        ]
+        meta = blueprint.get("meta") or {}
+        return {
+            "blueprintVersion": 1,
+            "id": blueprint.get("id", "blueprint"),
+            "name": blueprint.get("name", meta.get("name", blueprint.get("id", ""))),
+            "description": blueprint.get("description", ""),
+            "catalogRef": {
+                "version": (catalogue or {}).get("catalogVersion", "inconnue")
+            },
+            "nodes": flat_nodes,
+            "edges": edges_v1,
+        }
 
     def _catalogue(self) -> dict[str, Any] | None:
         if self.ui_dir:
@@ -302,6 +441,7 @@ class ForgeAPI:
         absentes du flow, exigences des extensions, heuristiques
         anti-patterns (flow sans preuve, node isolé).
         """
+        blueprint = self._studio_to_v1(blueprint)
         errors = self.blueprint_validate(blueprint)
         warnings: list[str] = []
         nodes = blueprint.get("nodes", [])
@@ -360,6 +500,7 @@ class ForgeAPI:
         pattern) et rend un verdict. Le runtime existant reste le seul
         exécutant.
         """
+        blueprint = self._studio_to_v1(blueprint)
         lint = self.blueprint_lint(blueprint)
         blockers: list[str] = list(lint["errors"])
         nodes = {str(n["id"]): n for n in blueprint.get("nodes", [])}
@@ -442,7 +583,13 @@ class ForgeAPI:
         généré est un ``.prompt.md`` exécutable par l'orchestrateur existant ;
         la section ``compiled`` du blueprint trace le hash pour la détection
         de dérive. Aucun apply automatique : le diff git reste la revue.
+
+        Un blueprint du Studio (v2) est compilé via sa projection v1 ; la
+        section ``compiled`` est écrite dans le blueprint d'origine, qui
+        reste la source de vérité de l'éditeur.
         """
+        source = blueprint
+        blueprint = self._studio_to_v1(blueprint)
         report = self.blueprint_simulate(blueprint)
         if report["blockers"]:
             raise ValueError(
@@ -519,7 +666,7 @@ class ForgeAPI:
         artifact_path.write_text(content, encoding="utf-8")
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-        blueprint["compiled"] = {
+        source["compiled"] = {
             "at": now,
             "catalogVersion": str(catalog_version),
             "artifacts": [
@@ -528,7 +675,7 @@ class ForgeAPI:
         }
         self._blueprint_path(bp_id).parent.mkdir(parents=True, exist_ok=True)
         self._blueprint_path(bp_id).write_text(
-            json.dumps(blueprint, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(source, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         return {
@@ -644,7 +791,7 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/extensions/remove":
                     api.extension_remove(str(body.get("id", "")))
                     self._json({"removed": body.get("id")})
-                elif path == "/api/setup/plan":
+                elif path in ("/api/setup", "/api/setup/plan"):
                     self._json(api.setup_plan(body))
                 elif path.startswith("/api/blueprints/") and path.endswith("/validate"):
                     bp_id = path.split("/")[3]
