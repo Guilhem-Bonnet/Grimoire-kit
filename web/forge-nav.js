@@ -59,7 +59,7 @@
               <code>pip install grimoire-kit</code>
               <code>grimoire serve</code>
               <p>Le même site s'ouvre en <b>mode atelier</b> : projet, éditeur de blueprints, extensions — l'API locale active les capacités.</p>
-              <a class="nap-open" href="atelier.html">OUVRIR L'ATELIER (DÉMO) →</a>
+              <a class="nap-open" href="atelier.html">OUVRIR L'ATELIER →</a>
               <a class="nap-gh" href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener">GitHub ↗</a>
             </div>
           </div>

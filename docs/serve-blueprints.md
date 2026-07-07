@@ -5,9 +5,18 @@ pip install grimoire-kit
 grimoire serve
 ```
 
-Ouvre `http://127.0.0.1:4173/` : l'UI complète est embarquée dans le paquet
-(marketplace, éditeur de blueprints, wizard de setup). Le serveur est lié à
-`127.0.0.1` — c'est un outil local, pas un service.
+`grimoire serve` ouvre l'**atelier** sur `http://127.0.0.1:4173/atelier.html` :
+l'UI complète est embarquée dans le paquet (hub de projet, marketplace,
+éditeur de blueprints, wizard de setup). Le serveur est lié à `127.0.0.1` —
+c'est un outil local, pas un service.
+
+Le site public (GitHub Pages) et l'atelier local sont **la même UI** : sans
+API locale, les pages « atelier » affichent l'écran de premier lancement avec
+les commandes ci-dessus ; avec `grimoire serve`, elles se branchent sur le
+projet réel.
+
+Options utiles : `grimoire serve --port 8080`, `--project-root <chemin>`,
+`--no-open` (ne pas ouvrir le navigateur).
 
 Principe non négociable : le serveur **lit, valide et écrit des artefacts** ;
 il n'exécute rien. L'exécution appartient au runtime existant et passe par
@@ -17,9 +26,11 @@ ses gates.
 
 | Page | Rôle |
 | --- | --- |
-| `extensions.html` | Marketplace : extensions publiées, recherche, filtres par famille, blueprints |
-| `blueprint.html` | Catalogue des 78 patterns en graphe + éditeur de flows (mode local) |
-| `setup.html` | Wizard : archetype, installation d'extensions, vue des artefacts gouvernés |
+| `atelier.html` | Hub du projet : premier lancement, wizard de setup, blueprints, extensions et artefacts |
+| `patterns.html` | Catalogue des 78 patterns (familles, contrats échangés, fiches) |
+| `extensions.html` | Marketplace : extensions publiées, recherche, filtres par famille, blueprints publiés |
+| `blueprints.html` | Éditeur de flows (Studio) : composer, connecter, valider, simuler, compiler |
+| `memory.html` · `kanban.html` · `observability.html` | Observer : mémoire, tableau gouverné, télémétrie |
 
 ## L'éditeur de blueprints
 
@@ -59,11 +70,16 @@ bindings du blueprint.
 | Route | Rôle |
 | --- | --- |
 | `GET /api/status` | Racine projet, version kit, UI servie |
-| `GET /api/setup` | Artefacts gouvernés, extensions installées, blueprints |
+| `GET /api/setup` · `POST /api/setup` | Vue des artefacts / plan d'init (wizard) |
 | `GET /api/archetypes` | Archetypes du kit (wizard) |
 | `GET /api/extensions` · `POST /api/extensions/add` · `/remove` | Gestion des extensions |
 | `GET/PUT /api/blueprints/<id>` | CRUD des blueprints |
 | `POST /api/blueprints/<id>/validate` · `/simulate` · `/compile` | Lint, dry-run, compilation |
 | `GET /api/events` (SSE) · `GET /api/events/log` | Télémétrie live et replay |
 
-Options : `--project-root`, `--port`, `--ui-dir` (UI custom), `--kit-root`.
+Les blueprints du Studio (format v2, positionné) sont acceptés directement :
+le serveur en dérive la projection compilable (pins typés depuis les contrats,
+sous-flows aplatis) pour valider, simuler et compiler.
+
+Pour un contrôle fin (UI custom, racine du kit), la forme longue reste
+disponible : `python -m grimoire.tools.forge_server --ui-dir <dir> --kit-root <dir>`.

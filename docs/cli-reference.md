@@ -555,6 +555,9 @@ Voir [Mode local & blueprints](serve-blueprints.md).
 
 | Option | Rôle |
 | --- | --- |
-| `--port` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
-| `--project-root` | Racine du projet cible |
-| `--ui-dir` | Servir une UI custom (défaut : UI embarquée dans le paquet) |
+| `--port, -p` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
+| `--project-root` | Racine du projet servi (défaut : dossier courant) |
+| `--open / --no-open` | Ouvrir (ou non) le navigateur sur l'atelier |
+
+Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
+utiliser la forme longue : `python -m grimoire.tools.forge_server`.
