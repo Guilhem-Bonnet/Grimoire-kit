@@ -1346,6 +1346,9 @@
       const r = await Atelier.api('/api/blueprints/' + encodeURIComponent(bpId) + '/compile',
         { method: 'POST', body: JSON.stringify(payload) });
       Atelier.pushArtifacts({ bp: bpId, when: Date.now(), items: itemsOut, artifact: r.artifact, hash: r.hash });
+      /* la section compiled vit dans l'état : l'auto-save (PUT) la persiste
+         avec le blueprint — détection de dérive au hash. */
+      state.compiled = { at: new Date().toISOString(), artifacts: [{ path: r.artifact, hash: r.hash, sourceNode: bpId }] };
       state.meta.compiledAt = Date.now();
       state.meta.dirty = false;
       updateCompileBtn(); persist();
