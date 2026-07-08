@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Atelier — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <script src="grimoire-mode.js"></script>
+</head>
+<body class="at-body">
+  <div class="at-app">
+    <aside class="at-side" id="atelier-side"></aside>
+    <div class="at-main">
+      <div class="at-scroll"><div class="at-page" id="page"></div></div>
+      <div class="at-status" id="atelier-status"></div>
+    </div>
+  </div>
+
+  <script src="atelier-nav.js"></script>
+  <script>
+  (async function () {
+    'use strict';
+    const $ = (s, r) => (r || document).querySelector(s);
+    const esc = Atelier.esc;
+    await Atelier.data();
+
+    function render() {
+      const proj = Atelier.online ? Atelier.project() : null;
+      $('#page').innerHTML = proj ? hubView(proj) : offlineView();
+      bind(proj);
+      Atelier.refreshChrome();
+    }
+
+    /* ═══ HORS LIGNE — l'API locale ne répond pas ═══ */
+    function offlineView() {
+      const nPat = Atelier.catalogue.patterns.length;
+      return `
+      <div style="max-width:860px;margin:0 auto;padding-top:8vh">
+        <div class="at-row" style="gap:8px;margin-bottom:26px;flex-wrap:wrap">
+          <span class="at-chip"><span style="color:var(--data-red)">●</span> API locale indisponible</span>
+          <span class="at-chip">catalogue v${esc(String(Atelier.catalogue.version || ''))} · ${nPat} patterns</span>
+        </div>
+        <h1 class="at-h1" style="font-size:1.7rem">L'atelier travaille sur un vrai projet.</h1>
+        <p class="at-lead" style="margin:8px 0 28px">Lancez le serveur local depuis la racine de votre projet, puis rechargez cette page.</p>
+        <div class="at-card" style="margin-bottom:16px">
+          <div class="at-lbl" style="margin-bottom:10px">Depuis un terminal</div>
+          <div style="padding:9px 12px;background:var(--elev-2);border:1px solid var(--line);border-radius:4px;font-family:var(--font-mono);font-size:0.68rem;color:var(--ink-soft)">$ pip install grimoire-kit<br>$ cd votre-projet/<br>$ grimoire serve</div>
+          <p style="font-size:0.72rem;color:var(--ink-muted);margin-top:10px">Le serveur n'expose l'atelier qu'en local (127.0.0.1). Rien ne part vers l'extérieur.</p>
+        </div>
+        <div class="at-doors">
+          <div class="at-card at-door">
+            <span class="at-lbl">Comprendre d'abord</span>
+            <h3>Parcourir le catalogue</h3>
+            <p>${nPat} patterns, ${Atelier.catalogue.categories.length} familles, les contrats qu'ils échangent — la matière de tout blueprint.</p>
+            <a class="at-btn" href="patterns.html">VOIR LES PATTERNS</a>
+          </div>
+          <div class="at-card at-door">
+            <span class="at-lbl">Lire</span>
+            <h3>Documentation</h3>
+            <p>Installation, extensions, blueprints, gouvernance : le manuel du kit.</p>
+            <a class="at-btn" href="documentation.html">OUVRIR LES DOCS</a>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    /* ═══ WIZARD — initialiser le projet servi (POST /api/setup) ═══ */
+    const wiz = { step: 1, name: '', user: '', archetype: 'minimal', exts: [], archetypes: [] };
+
+    function wizardHtml() {
+      const steps = ['Nom', 'Archétype', 'Extensions'];
+      const dots = steps.map((s, i) =>
+        `<span class="at-step-dot${wiz.step === i + 1 ? ' on' : ''}${wiz.step > i + 1 ? ' done' : ''}">${s}</span>`).join('');
+      const proj = Atelier.project() || {};
+      let body = '';
+      if (wiz.step === 1) {
+        body = `
+          <div class="at-col">
+            <div>
+              <div class="at-lbl" style="margin-bottom:6px">Nom du projet</div>
+              <input class="at-search" id="wiz-name" value="${esc(wiz.name)}" spellcheck="false" />
+            </div>
+            <div>
+              <div class="at-lbl" style="margin-bottom:6px">Votre nom (pour les artefacts)</div>
+              <input class="at-search" id="wiz-user" value="${esc(wiz.user)}" spellcheck="false" />
+            </div>
+            <p style="font-family:var(--font-mono);font-size:0.62rem;color:var(--ink-muted)">racine servie : ${esc(proj.path || '')}</p>
+          </div>`;
+      } else if (wiz.step === 2) {
+        body = `<div class="at-col">` + (wiz.archetypes.length ? wiz.archetypes.map(a => `
+          <label class="at-radio ${wiz.archetype === a.id ? 'sel' : ''}"><input type="radio" name="archetype" value="${esc(a.id)}" ${wiz.archetype === a.id ? 'checked' : ''} />
+            <span><b>${esc(a.name)}</b><span>${esc(a.description || '')}</span></span></label>`).join('')
+          : `<p class="at-sub">aucun archétype exposé par ce kit — l'init utilisera <b>minimal</b>.</p>`) + `</div>`;
+      } else {
+        const opts = Atelier.extensions.extensions.filter(e => e.status === 'available');
+        body = `
+          <p style="font-size:0.76rem;color:var(--ink-soft);margin-bottom:12px">Facultatif — tout s'installe aussi plus tard, depuis l'éditeur ou le marketplace.</p>
+          <div class="at-col">` + opts.map(o => `
+            <label class="at-radio ${wiz.exts.includes(o.id) ? 'sel' : ''}"><input type="checkbox" name="ext" value="${esc(o.id)}" ${wiz.exts.includes(o.id) ? 'checked' : ''} />
+              <span><b>${esc(o.name)}</b><span>${esc(o.desc)}</span></span></label>`).join('') + `</div>`;
+      }
+      const cmd = `grimoire init --archetype ${wiz.archetype}${wiz.exts.map(e => ' && grimoire ext add ' + e).join('')}`;
+      return `
+        <div class="at-steps">${dots}</div>
+        <h2>${wiz.step === 1 ? 'Nom & racine' : wiz.step === 2 ? 'Archétype de départ' : 'Extensions de départ'}</h2>
+        <p style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-muted);margin-bottom:16px">étape ${wiz.step}/3</p>
+        ${body}
+        <div style="margin-top:18px;padding:9px 12px;background:var(--elev-2);border:1px solid var(--line);border-radius:4px;font-family:var(--font-mono);font-size:0.62rem;color:var(--ink-soft)">$ ${esc(cmd)}</div>
+        <div class="at-row sb" style="margin-top:18px">
+          <button class="at-btn ghost" id="wiz-back">${wiz.step === 1 ? 'ANNULER' : '← RETOUR'}</button>
+          <div class="at-row">
+            ${wiz.step === 3 ? '<button class="at-btn" id="wiz-skip">PASSER</button>' : ''}
+            <button class="at-btn pri" id="wiz-next">${wiz.step === 3 ? 'PRÉPARER LE PROJET →' : 'CONTINUER →'}</button>
+          </div>
+        </div>`;
+    }
+
+    async function openWizard() {
+      wiz.step = 1;
+      const proj = Atelier.project() || {};
+      wiz.name = wiz.name || proj.name || '';
+      try { wiz.archetypes = await Atelier.api('/api/archetypes'); }
+      catch (e) { wiz.archetypes = []; }
+      if (wiz.archetypes.length && !wiz.archetypes.some(a => a.id === wiz.archetype)) {
+        wiz.archetype = wiz.archetypes[0].id;
+      }
+      let ov = document.createElement('div');
+      ov.className = 'at-overlay'; ov.id = 'wiz-ov';
+      ov.innerHTML = `<div class="at-modal" id="wiz-modal"></div>`;
+      document.body.appendChild(ov);
+      drawWizard();
+      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    }
+
+    function drawWizard() {
+      const m = $('#wiz-modal');
+      m.innerHTML = wizardHtml();
+      m.querySelectorAll('input[name="archetype"]').forEach(i => i.addEventListener('change', () => { wiz.archetype = i.value; drawWizard(); }));
+      m.querySelectorAll('input[name="ext"]').forEach(i => i.addEventListener('change', () => {
+        wiz.exts = wiz.exts.includes(i.value) ? wiz.exts.filter(x => x !== i.value) : wiz.exts.concat(i.value);
+        drawWizard();
+      }));
+      const nameInput = $('#wiz-name', m);
+      if (nameInput) nameInput.addEventListener('input', () => { wiz.name = nameInput.value.trim(); });
+      const userInput = $('#wiz-user', m);
+      if (userInput) userInput.addEventListener('input', () => { wiz.user = userInput.value.trim(); });
+      $('#wiz-back', m).addEventListener('click', () => {
+        if (wiz.step === 1) $('#wiz-ov').remove();
+        else { wiz.step--; drawWizard(); }
+      });
+      const skip = $('#wiz-skip', m);
+      if (skip) skip.addEventListener('click', () => { wiz.exts = []; createProject(); });
+      $('#wiz-next', m).addEventListener('click', () => {
+        if (wiz.step < 3) { wiz.step++; drawWizard(); }
+        else createProject();
+      });
+    }
+
+    async function createProject() {
+      const btn = $('#wiz-next'); if (btn) { btn.disabled = true; btn.textContent = 'PRÉPARATION…'; }
+      try {
+        const plan = await Atelier.api('/api/setup', { method: 'POST', body: JSON.stringify({
+          name: wiz.name, user: wiz.user, archetype: wiz.archetype, extensions: wiz.exts
+        }) });
+        const ov = $('#wiz-ov'); if (ov) ov.remove();
+        const errs = (plan.extensionErrors || []);
+        Atelier.toast(
+          'Plan écrit dans <b>_grimoire/setup-plan.json</b>' +
+          ((plan.extensionsInstalled || []).length ? ' · extensions : ' + esc(plan.extensionsInstalled.join(', ')) : '') +
+          (errs.length ? '<br><span style="color:var(--data-red)">' + esc(errs.join(' · ')) + '</span>' : '') +
+          '<br>Terminez l\u2019init : <code>' + esc(plan.initCommand || 'grimoire init') + '</code>',
+          { good: !errs.length, ms: 9000 });
+        location.reload();
+      } catch (e) {
+        Atelier.toast('Préparation refusée : ' + esc(String(e.message || e)));
+        if (btn) { btn.disabled = false; btn.textContent = 'PRÉPARER LE PROJET →'; }
+      }
+    }
+
+    /* ═══ HUB ═══ */
+    function relTime(ts) {
+      const m = Math.round((Date.now() - ts) / 60000);
+      if (m < 1) return 'à l\u2019instant';
+      if (m < 60) return 'il y a ' + m + ' min';
+      const h = Math.round(m / 60);
+      return h < 24 ? 'il y a ' + h + ' h' : 'il y a ' + Math.round(h / 24) + ' j';
+    }
+
+    function hubView(proj) {
+      const exts = Atelier.installedExts();
+      const bps = Atelier.bpList();
+      const arts = Atelier.artifacts();
+      const setup = Atelier.setupInfo() || { artifacts: {} };
+      const isFresh = !bps.length && !arts.length;
+      const kitV = Atelier.status && Atelier.status.kitVersion ? 'kit v' + esc(Atelier.status.kitVersion) : '';
+      const catV = Atelier.catalogue.version ? 'catalogue v' + esc(String(Atelier.catalogue.version)) : '';
+
+      const bpRows = bps.map(id => {
+        const g = Atelier.loadBp(id) || {};
+        const meta = g.meta || {};
+        const n = (g.nodes || []).length, e = (g.edges || []).length;
+        return `<div class="at-card" style="padding:12px 14px;background:var(--elev-2)">
+          <div class="at-row sb">
+            <a href="blueprints.html?bp=${esc(id)}" style="font-family:var(--font-mono);font-size:0.76rem;color:var(--ink);text-decoration:none">${esc(id)}</a>
+            <span class="at-sub">${n} node${n > 1 ? 's' : ''} · ${e} lien${e > 1 ? 's' : ''}</span>
+          </div>
+          <div class="at-row" style="gap:6px;margin-top:8px">
+            <span class="at-status-tag ${meta.validated ? 'inst' : 'disp'}">${meta.validated ? 'validé ✓' : 'non validé'}</span>
+            <span class="at-status-tag ${meta.simulated ? 'inst' : 'disp'}">${meta.simulated ? 'simulé ✓' : 'non simulé'}</span>
+            <span class="at-status-tag ${meta.compiledAt ? 'maj' : 'disp'}">${meta.compiledAt ? 'compilé · ' + relTime(meta.compiledAt) : 'non compilé'}</span>
+          </div>
+        </div>`;
+      }).join('') || `<p style="font-family:var(--font-mono);font-size:0.66rem;color:var(--ink-muted)">aucun blueprint — composez le premier.</p>`;
+
+      const extRows = exts.map(id => {
+        const e = Atelier.extById[id] || { id, name: id, version: '' };
+        return `<div class="at-row sb" style="padding:7px 2px;border-bottom:1px solid var(--line)">
+          <span style="font-family:var(--font-mono);font-size:0.72rem">${esc(e.name)}${e.version ? ' <span style="color:var(--ink-muted)">v' + esc(e.version) + '</span>' : ''}</span>
+          <span class="at-row" style="gap:6px">
+            ${e.kind ? '<span class="at-chip" style="font-size:0.54rem">' + esc(e.kind) + '</span>' : ''}
+            <span class="at-status-tag inst">installée ✓</span>
+          </span>
+        </div>`;
+      }).join('') || `<p style="font-family:var(--font-mono);font-size:0.66rem;color:var(--ink-muted)">aucune extension installée.</p>`;
+
+      const lastArt = arts[0];
+      const surf = setup.artifacts || {};
+      const surfSummary = Object.keys(surf).length
+        ? Object.entries(surf).map(([k, v]) => `${k} ${v.length}`).join(' · ')
+        : 'aucune surface détectée — le projet n\u2019est peut-être pas encore initialisé.';
+
+      return `
+        <div class="at-row sb" style="margin-bottom:6px;align-items:flex-start">
+          <div>
+            <div class="at-h1-row" style="margin-bottom:4px"><h1 class="at-h1">${esc(proj.name)}</h1></div>
+            <div class="at-sub">${esc(proj.path)}${kitV ? ' · ' + kitV : ''}${catV ? ' · ' + catV : ''}</div>
+          </div>
+          <div class="at-row">
+            <button class="at-btn sm ghost" id="hub-reset" title="Oublier l'état local du navigateur (le projet sur disque n'est pas touché)">⟲ ÉTAT LOCAL</button>
+            <button class="at-btn sm" id="hub-new">PRÉPARER L'INIT</button>
+          </div>
+        </div>
+        <div class="at-row" style="gap:8px;margin:14px 0 22px;flex-wrap:wrap">
+          <span class="at-chip">${bps.length} blueprint${bps.length > 1 ? 's' : ''}</span>
+          <span class="at-chip">${exts.length} extension${exts.length > 1 ? 's' : ''}</span>
+          <span class="at-chip">${arts.length} compilation${arts.length > 1 ? 's' : ''} (session)</span>
+          ${lastArt ? `<span class="at-chip acc">dernière compilation · ${relTime(lastArt.when)}</span>` : ''}
+        </div>
+
+        ${isFresh ? `
+        <div class="at-card" style="border-color:var(--accent-dim);margin-bottom:16px">
+          <div class="at-lbl" style="color:var(--accent);margin-bottom:10px">Trois prochaines actions</div>
+          <div class="at-col" style="gap:8px">
+            <div class="at-row sb"><span style="font-size:0.8rem"><b style="font-family:var(--font-mono);font-size:0.72rem">1</b> · Installer une extension d'exécution — crewai, langgraph…</span><a class="at-btn sm" href="extensions.html">MARKETPLACE →</a></div>
+            <div class="at-row sb"><span style="font-size:0.8rem"><b style="font-family:var(--font-mono);font-size:0.72rem">2</b> · Composer un premier flow — guidé, moins de 2 minutes</span><a class="at-btn sm acc" href="blueprints.html">OUVRIR L'ÉDITEUR →</a></div>
+            <div class="at-row sb"><span style="font-size:0.8rem"><b style="font-family:var(--font-mono);font-size:0.72rem">3</b> · Compiler — le blueprint devient artefacts, rien ne s'exécute</span><span class="at-sub">depuis l'éditeur</span></div>
+          </div>
+        </div>` : ''}
+
+        <div class="at-grid2">
+          <div class="at-card">
+            <div class="at-row sb" style="margin-bottom:12px"><span class="at-lbl">Blueprints du projet</span><a class="at-btn sm" href="blueprints.html?new=1">+ NOUVEAU</a></div>
+            <div class="at-col" style="gap:8px">${bpRows}</div>
+          </div>
+          <div class="at-card">
+            <div class="at-row sb" style="margin-bottom:12px"><span class="at-lbl">Extensions installées</span><a class="at-btn sm" href="extensions.html">MARKETPLACE →</a></div>
+            ${extRows}
+          </div>
+          <div class="at-card">
+            <div class="at-row sb" style="margin-bottom:12px"><span class="at-lbl">Artefacts compilés</span><a class="at-btn sm ghost" href="observability.html">OBSERVATOIRE →</a></div>
+            <p style="font-family:var(--font-mono);font-size:0.72rem;color:var(--ink-soft)">${lastArt ? esc(lastArt.bp) + ' → ' + Object.values(lastArt.items || {}).reduce((a, b) => a + b, 0) + ' artefacts · ' + relTime(lastArt.when) : 'aucune compilation dans cette session — compilez un blueprint.'}</p>
+            <p style="font-family:var(--font-mono);font-size:0.62rem;color:var(--ink-muted);margin-top:8px">la vérité est le diff git du projet — l'atelier ne fait que journaliser.</p>
+          </div>
+          <div class="at-card">
+            <div class="at-lbl" style="margin-bottom:12px">Surfaces gouvernées du projet</div>
+            <p style="font-family:var(--font-mono);font-size:0.72rem;color:var(--ink-soft)">${esc(surfSummary)}</p>
+            <div class="at-row sb" style="padding:10px 0 4px"><span style="font-size:0.78rem;color:var(--ink-soft)">Blueprints validés</span><span style="font-family:var(--font-mono);font-size:0.68rem;color:${bps.length && bps.every(id => (Atelier.loadBp(id) || {}).meta && Atelier.loadBp(id).meta.validated) ? 'var(--data-green)' : 'var(--ink-muted)'}">${bps.filter(id => (Atelier.loadBp(id) || {}).meta && Atelier.loadBp(id).meta.validated).length}/${bps.length} ✓</span></div>
+          </div>
+        </div>`;
+    }
+
+    /* ═══ BIND ═══ */
+    function bind(proj) {
+      if (!proj) return;
+      $('#hub-new').addEventListener('click', openWizard);
+      $('#hub-reset').addEventListener('click', () => {
+        if (confirm('Oublier l\u2019état local du navigateur (journal de compilations, onboarding) ? Le projet sur disque n\u2019est pas touché.')) {
+          Atelier.clearProject(); location.reload();
+        }
+      });
+    }
+
+    render();
+  })();
+  </script>
+</body>
+</html>

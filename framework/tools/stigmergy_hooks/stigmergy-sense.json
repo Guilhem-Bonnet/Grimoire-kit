@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": ".github/hooks/scripts/stigmergy-sense.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

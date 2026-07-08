@@ -5,7 +5,7 @@
   <title>Grimoire Kit — Noyau Agentique</title>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Grimoire Kit — Noyau Agentique"/>
-  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
+  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns vérifiables), catalogue de 78, mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/"/>
   <meta name="twitter:card" content="summary"/>
   <meta name="description" content="Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace." />
@@ -171,6 +171,7 @@
     .mini-lbl { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); flex: 1; }
     .mini-val { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-soft); }
   </style>
+  <script src="grimoire-mode.js"></script>
 </head>
 <body>
 <a href="#main" class="skip-link">Aller au contenu</a>
@@ -188,10 +189,10 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span class="eyebrow">NOYAU AGENTIQUE &nbsp;·&nbsp; v2026</span>
         </div>
-        <h1 class="hero-h1 grad-text" data-hero="1">Un noyau agentique.<br>Frappé, pas assemblé.</h1>
+        <h1 class="hero-h1 grad-text" data-hero="1">Un noyau agentique.<br>Composé, gouverné, tracé.</h1>
         <p class="hero-sub" data-hero="2">Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace.</p>
         <div class="hero-ctas" data-hero="3">
-          <a href="#cta-final" class="btn btn-primary">OUVRIR LE COCKPIT</a>
+          <a href="#" class="btn btn-primary js-launch-atelier">LANCER L'ATELIER</a>
           <a href="demo.html"  class="btn btn-ghost">VOIR LA DÉMO</a>
         </div>
       </div>
@@ -242,7 +243,7 @@
       <span class="proof-sep">·</span>
       <span class="proof-item">10 ARCHÉTYPES · 33 AGENTS</span>
       <span class="proof-sep">·</span>
-      <span class="proof-item">PyPI v3.16.0 · MIT</span>
+      <span class="proof-item">PyPI grimoire-kit · MIT</span>
       <span class="proof-sep">·</span>
       <span class="proof-item">TRACE COMPLÈTE · JSONL</span>
     </div>
@@ -268,7 +269,7 @@
       <div class="manifeste-block reveal" data-delay="200">
         <div class="manifeste-num">03 · COMPOSABLE PAR NATURE</div>
         <h3>Agents, skills, workflows, instructions : tout est modulaire, tout est forgeable.</h3>
-        <p>Archétypes, agents, workflows et skills se combinent librement, et le standard agentique gouverné active 36 patterns vérifiables. Tout est remplaçable sans toucher au runtime.</p>
+        <p>Archétypes, agents, workflows et skills se combinent librement ; le standard agentique gouverné apporte 36 patterns vérifiables, ancrés sur un catalogue normatif de 78 patterns. Tout est remplaçable sans toucher au runtime.</p>
       </div>
     </div>
   </div>
@@ -284,7 +285,7 @@
     <div class="surfaces-grid">
       <div class="surface-card reveal" data-delay="0">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-01</span><span class="surface-status partial"><span class="dot"></span>CONCEPT</span></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-01</span><span class="surface-status partial"><span class="dot"></span>CONCEPT</span></div>
           <div class="surface-body"><h3>Cockpit</h3><p>Interface opérationnelle temps réel. Contrôle agents, inspection pipelines, émission de directives.</p><div class="surface-meta">vue de pilotage · vision</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
@@ -297,7 +298,7 @@
       </div>
       <div class="surface-card reveal" data-delay="60">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-02</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-02</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
           <div class="surface-body"><h3>Observatory</h3><p>Vue longitudinale des traces. Inspection artefacts, diff versions, audit contrats, télémétrie.</p><div class="surface-meta">observatory.py · HTML autoporté · traces</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
@@ -310,8 +311,8 @@
       </div>
       <div class="surface-card reveal" data-delay="120">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-03</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
-          <div class="surface-body"><h3>Kanban gouverné</h3><p>Tableau agentique : 8 états, transitions gated par la preuve. <a href="kanban.html" style="color:var(--accent)">→ voir le board</a></p><div class="surface-meta">task-board.yaml · 8 états · evidence-gated</div></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-03</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
+          <div class="surface-body"><h3>Kanban gouverné</h3><p>Tableau agentique : 8 états, transitions gated par la preuve. <a href="#" class="js-launch-atelier" style="color:var(--accent)">→ le board, dans l'atelier</a></p><div class="surface-meta">task-board.yaml · 8 états · evidence-gated</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
               <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">EN COURS · 2</span><span class="mini-val">→ dev</span></div>
@@ -323,14 +324,14 @@
       </div>
       <div class="surface-card reveal" data-delay="0">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-04</span><span class="surface-status roadmap"><span class="dot"></span>Q3 2026</span></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-04</span><span class="surface-status roadmap"><span class="dot"></span>Q3 2026</span></div>
           <div class="surface-body"><h3>War Room</h3><p>Coordination multi-sessions. Tableaux croisés, escalade inter-agents, débats PCE, conflits ressources.</p><div class="surface-meta">runtime/warroom · multi-tenant · RBAC</div></div>
           <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;" aria-hidden="true"><span style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);letter-spacing:.08em">ROADMAP · Q3 2026</span></div>
         </div>
       </div>
       <div class="surface-card reveal" data-delay="60">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-05</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-05</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
           <div class="surface-body"><h3>Game UI</h3><p>Runtime rendu en pixel art isométrique. Chaque agent devient un personnage. Chaque tâche, une scène.</p><div class="surface-meta">runtime/gameui · canvas+CSS · temps réel</div></div>
           <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;gap:8px;" aria-hidden="true">
             <!-- Mini isometric preview -->
@@ -348,7 +349,7 @@
       </div>
       <div class="surface-card reveal" data-delay="120">
         <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">FORGE-06</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
+          <div class="surface-card-head"><span class="surface-badge">GK-06</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
           <div class="surface-body"><h3>Proofs</h3><p>Registre des preuves. Hash d'artefacts, signatures de contrats, replay de sessions, export audit.</p><div class="surface-meta">ledger JSONL · sha256 · immuable</div></div>
           <div class="surface-preview" aria-hidden="true">
             <div class="mini-rows">
@@ -395,7 +396,7 @@
           <span class="agent-name">TECH-WRITER</span>
         </div>
         <!-- Artefact -->
-        <div class="sog-artefact" id="sog-artefact">FORGE-0342 · prd-app-notes-v1.md · ÉMIS &amp; SCELLÉ</div>
+        <div class="sog-artefact" id="sog-artefact">GK-0342 · prd-app-notes-v1.md · ÉMIS &amp; SCELLÉ</div>
       </div>
       <div class="sog-controls">
         <div class="sog-input-wrap">
@@ -419,7 +420,7 @@
     <div class="timeline-steps" role="list">
       <div class="timeline-step reveal" data-delay="0" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">01</div><h3>Contrat</h3><p>L'opérateur définit l'objectif, les outils autorisés et les critères. Le runtime valide la signature avant exécution.</p></div>
       <div class="timeline-step reveal" data-delay="80"  role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">02</div><h3>Orchestration</h3><p>Le SOG sélectionne et spawne les agents selon le contrat. Chaque agent reçoit un contexte mémoire délimité.</p></div>
-      <div class="timeline-step reveal" data-delay="160" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">03</div><h3>Frappe</h3><p>Le runtime orchestre la séquence, gère les dépendances et enregistre chaque décision dans le trace ledger.</p></div>
+      <div class="timeline-step reveal" data-delay="160" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">03</div><h3>Exécution</h3><p>Le runtime orchestre la séquence, gère les dépendances et enregistre chaque décision dans le trace ledger.</p></div>
       <div class="timeline-step reveal" data-delay="240" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">04</div><h3>Artefact tracé</h3><p>L'artefact est versioné, adressable par hash et signé. Disponible dans l'Observatory, exportable via API.</p></div>
     </div>
   </div>
@@ -432,42 +433,42 @@
     <div class="eyebrow reveal"><span class="num">06</span> · CAPACITÉS</div>
     <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:560px">Neuf surfaces de précision.</h2>
     <div class="feature-grid">
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-01</span>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-01</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="14" cy="14" r="10"/><path d="M14 8v7l4 2.5"/></svg>
         <h3>Sub-agents invisibles</h3><p>Le SOG dispatche vers des agents spécialisés sans exposer la complexité à l'opérateur. Un point d'entrée, des dizaines de capacités.</p>
         <a href="demo.html" class="feature-link">VOIR LA DÉMO →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-02</span>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-02</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="1.5"/><path d="M9 11h10M9 15h6"/></svg>
         <h3>Artefacts UDF</h3><p>Unified Dynamic Factory : agents, workflows, skills, instructions créés dynamiquement avec triage éphémère/permanent intégré.</p>
         <a href="documentation.html" class="feature-link">SPEC UDF →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-03</span>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-03</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 20h20M4 14h12M4 8h8"/></svg>
         <h3>Memory tiered</h3><p>Contexte mémoire structuré en niveaux : working, episodic, semantic. Isolation par namespace, TTL configurable par tier.</p>
         <a href="documentation.html" class="feature-link">MÉMOIRE API →</a></div>
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-04</span>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-04</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4l4 8h6l-5 4 2 7-7-4-7 4 2-7-5-4h6z"/></svg>
         <h3>Hooks sécurisés</h3><p>Points d'interception pré/post exécution avec validation de contrat. Aucun agent ne peut contourner les hooks déclarés.</p>
         <a href="documentation.html" class="feature-link">HOOKS SPEC →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-05</span>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-05</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 14h18M14 5v18"/><circle cx="14" cy="14" r="10"/></svg>
         <h3>Multi-LLM routing</h3><p>Anthropic, OpenAI, Mistral, Ollama. Le runtime abstrait le modèle. Les contrats restent valides quelle que soit la coulée.</p>
         <a href="documentation.html" class="feature-link">ADAPTATEURS →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-06</span>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-06</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 22L14 4l4 10 4-5 2 13"/><circle cx="24" cy="22" r="2"/></svg>
         <h3>CVTL cross-validation</h3><p>Cross-Validation Trust Layer : chaque artefact est soumis à un agent critique indépendant avant scellement. Taux d'erreur mesuré.</p>
         <a href="documentation.html" class="feature-link">CVTL DOC →</a></div>
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">FORGE-07</span>
+      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-07</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M7 14h4l3-8 4 16 3-8h4"/></svg>
         <h3>PCE debates</h3><p>Productive Conflict Engine : agents configurables en opposition pour forcer l'émergence des hypothèses faibles avant livraison.</p>
         <a href="documentation.html" class="feature-link">PCE SPEC →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">FORGE-08</span>
+      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-08</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4a10 10 0 0 1 0 20M14 4A10 10 0 0 0 4 14M14 24V4"/><path d="M4 14h20"/></svg>
         <h3>AORA iteration loop</h3><p>Assess → Orchestrate → Run → Audit : boucle d'itération autonome avec critères d'arrêt déclarés dans le contrat.</p>
         <a href="documentation.html" class="feature-link">AORA DOC →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">FORGE-09</span>
+      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-09</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/><rect x="16" y="4" width="8" height="8" rx="1.5"/><rect x="4" y="16" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="8" height="8" rx="1.5"/></svg>
         <h3>Trust scoring</h3><p>Score de confiance par agent, par session et par type d'artefact. Alerte automatique si le score descend sous le seuil du contrat.</p>
-        <a href="observability.html" class="feature-link">VOIR OBSERVABILITY →</a></div>
+        <a href="#" class="feature-link js-launch-atelier">OBSERVATOIRE — DANS L'ATELIER →</a></div>
     </div>
   </div>
 </section>
@@ -531,7 +532,6 @@
 </div>
 
 <script src="forge-nav.js"></script>
-<script src="data-loader.js" defer></script>
 <script>
 /* ── SOG ChatOrchestrator animation ── */
 (function() {

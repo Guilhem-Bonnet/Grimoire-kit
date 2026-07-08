@@ -1,5 +1,5 @@
 /* ============================================================
-   GRIMOIRE KIT — forge-landing.css
+   GRIMOIRE FORGE — forge-landing.css
    Design tokens + composants + animations CSS
    ============================================================ */
 
@@ -97,7 +97,7 @@ h3 { font-size: clamp(1.1rem, 2vw, 1.4rem); font-weight: 600; }
 
 .eyebrow {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
@@ -147,7 +147,7 @@ nav {
 
 .nav-logo {
   font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--text);
   text-decoration: none;
@@ -164,7 +164,7 @@ nav {
 
 .nav-links a {
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   color: var(--muted);
   text-decoration: none;
   letter-spacing: 0.06em;
@@ -174,7 +174,7 @@ nav {
 
 .nav-cta {
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   padding: 6px 16px;
   border: 1px solid var(--accent);
   color: var(--accent);
@@ -190,7 +190,7 @@ nav {
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-decoration: none;
@@ -334,7 +334,7 @@ nav {
 
 .cockpit-title {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--muted);
   margin-left: 8px;
   letter-spacing: 0.08em;
@@ -345,7 +345,7 @@ nav {
 /* Terminal lines in cockpit */
 .term-line {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   line-height: 1.8;
   color: var(--muted);
   white-space: nowrap;
@@ -383,7 +383,7 @@ nav {
 
 .agent-pill {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.67rem;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -411,7 +411,7 @@ nav {
 
 .proof-item {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   color: var(--muted);
   padding: 0 28px;
   letter-spacing: 0.06em;
@@ -421,7 +421,7 @@ nav {
 .proof-sep {
   color: var(--line);
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
 }
 
 /* ── Manifeste ── */
@@ -446,7 +446,7 @@ nav {
 
 .manifeste-num {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--accent);
   letter-spacing: 0.1em;
   margin-bottom: 20px;
@@ -459,7 +459,7 @@ nav {
 }
 
 .manifeste-block p {
-  font-size: 0.875rem;
+  font-size: 0.92rem;
   color: var(--soft);
   line-height: 1.7;
 }
@@ -522,7 +522,7 @@ nav {
 
 .surface-badge {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.67rem;
   letter-spacing: 0.1em;
   color: var(--muted);
   background: var(--elev-2);
@@ -535,7 +535,7 @@ nav {
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.67rem;
   color: var(--muted);
 }
 
@@ -549,11 +549,11 @@ nav {
 
 .surface-card-body { padding: 20px 24px 24px; }
 .surface-card-body h3 { font-size: 1rem; margin-bottom: 6px; }
-.surface-card-body p { font-size: 0.8rem; color: var(--soft); margin-bottom: 16px; }
+.surface-card-body p { font-size: 0.88rem; color: var(--soft); margin-bottom: 16px; }
 
 .surface-meta {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--muted);
   letter-spacing: 0.04em;
 }
@@ -575,7 +575,7 @@ nav {
   align-items: center;
   justify-content: center;
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--muted);
 }
 
@@ -594,13 +594,13 @@ nav {
 .mini-row-dot.warn { background: #F6B83A; }
 .mini-row-label {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.67rem;
   color: var(--muted);
   flex: 1;
 }
 .mini-row-val {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.67rem;
   color: var(--soft);
 }
 
@@ -649,14 +649,14 @@ nav {
 
 .timeline-step-num {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--accent);
   letter-spacing: 0.1em;
   margin-bottom: 12px;
 }
 
 .timeline-step h3 { font-size: 0.95rem; margin-bottom: 8px; }
-.timeline-step p { font-size: 0.8rem; color: var(--soft); line-height: 1.6; }
+.timeline-step p { font-size: 0.88rem; color: var(--soft); line-height: 1.6; }
 
 .timeline-dot {
   position: absolute;
@@ -698,11 +698,11 @@ nav {
 }
 
 .feature-card h3 { font-size: 0.95rem; margin-bottom: 8px; }
-.feature-card p { font-size: 0.8rem; color: var(--soft); line-height: 1.6; margin-bottom: 16px; }
+.feature-card p { font-size: 0.88rem; color: var(--soft); line-height: 1.6; margin-bottom: 16px; }
 
 .feature-link {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   color: var(--muted);
   text-decoration: none;
   letter-spacing: 0.06em;
@@ -743,7 +743,7 @@ nav {
 
 .metric-label {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   color: var(--muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -764,7 +764,7 @@ nav {
 
 .quote-author {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--muted);
   letter-spacing: 0.08em;
 }
@@ -814,7 +814,7 @@ footer {
 
 .footer-brand .logo {
   font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0.04em;
@@ -825,7 +825,7 @@ footer {
 
 .footer-brand p {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   color: var(--muted);
   line-height: 1.7;
   max-width: 260px;
@@ -833,7 +833,7 @@ footer {
 
 .footer-col h4 {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
@@ -845,7 +845,7 @@ footer {
 
 .footer-col a {
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   color: var(--soft);
   text-decoration: none;
   border-bottom: 1px solid transparent;
@@ -863,7 +863,7 @@ footer {
 
 .footer-bottom p {
   font-family: var(--mono);
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   color: var(--muted);
 }
 

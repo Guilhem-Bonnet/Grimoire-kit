@@ -484,3 +484,109 @@ class TestCompile:
         result = api_with_catalogue.blueprint_compile(bp)
         content = (project_root / result["artifact"]).read_text(encoding="utf-8")
         assert "allowlist, dry-run" in content
+
+
+class TestStudioBridge:
+    """Pont Studio (v2) → format compilable (v1)."""
+
+    @staticmethod
+    def studio_state() -> dict[str, object]:
+        return {
+            "blueprintVersion": 2,
+            "id": "flow-studio",
+            "name": "Flow studio",
+            "nodes": [
+                {"id": "n1", "ref": "ORC-02", "x": 100, "y": 200},
+                {"id": "n2", "ref": "ORC-01", "x": 400, "y": 200},
+                {
+                    "id": "g1",
+                    "kind": "group",
+                    "name": "exécution",
+                    "x": 700,
+                    "y": 200,
+                    "sub": {
+                        "nodes": [{"id": "n3", "ref": "QUA-04", "x": 100, "y": 100}],
+                        "edges": [],
+                        "comments": [],
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "e1", "from": "n1", "to": "n2", "contract": "task-envelope"},
+                {"id": "e2", "from": "n2", "to": "g1", "contract": "handoff-packet"},
+            ],
+            "comments": [],
+            "view": None,
+            "meta": {"validated": False, "simulated": False, "compiledAt": None},
+        }
+
+    def test_detects_studio_format(self, api: ForgeAPI) -> None:
+        assert api._is_studio(self.studio_state())
+        v1 = {
+            "nodes": [{"id": "a", "kind": "pattern", "ref": "ORC-01", "pins": []}],
+            "edges": [],
+        }
+        assert not api._is_studio(v1)
+
+    def test_conversion_flattens_groups_and_derives_pins(self, api: ForgeAPI) -> None:
+        v1 = api._studio_to_v1(self.studio_state())
+        kinds = {n["id"]: n["kind"] for n in v1["nodes"]}
+        assert kinds == {
+            "n1": "pattern",
+            "n2": "pattern",
+            "g1": "composite-inline",
+            "n3": "pattern",
+        }
+        n1 = next(n for n in v1["nodes"] if n["id"] == "n1")
+        out_contracts = {p["contract"] for p in n1["pins"] if p["direction"] == "out"}
+        assert "task-envelope" in out_contracts
+        assert v1["edges"][0]["from"] == "n1.out-task-envelope"
+        assert v1["edges"][0]["to"] == "n2.in-task-envelope"
+
+    def test_studio_lint_has_no_structural_errors(self, api: ForgeAPI) -> None:
+        lint = api.blueprint_lint(self.studio_state())
+        assert lint["errors"] == []
+
+    def test_studio_simulate_orders_steps(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self.studio_state())
+        assert report["blockers"] == []
+        order = [s["id"] for s in report["steps"]]
+        assert order.index("n1") < order.index("n2") < order.index("g1")
+
+    def test_studio_compile_persists_v2_source(self, api: ForgeAPI) -> None:
+        state = self.studio_state()
+        result = api.blueprint_compile(state)
+        assert result["compiled"] == "flow-studio"
+        artifact = api.project_root / result["artifact"]
+        assert artifact.is_file()
+        saved = json.loads(
+            (api.project_root / "_grimoire" / "blueprints" / "flow-studio.blueprint.json")
+            .read_text(encoding="utf-8")
+        )
+        assert saved["blueprintVersion"] == 2
+        assert saved["compiled"]["artifacts"][0]["path"] == result["artifact"]
+        assert saved["nodes"][2]["kind"] == "group"
+
+
+class TestStigmergyView:
+    def test_empty_board(self, api: ForgeAPI) -> None:
+        view = api.stigmergy_view()
+        assert view["active"] == []
+        assert view["trails"] == []
+        assert view["stats"]["active"] == 0
+
+    def test_active_signals_and_convergence(self, api: ForgeAPI) -> None:
+        from grimoire.tools import stigmergy as stig
+
+        board = stig.load_board(api.project_root)
+        stig.emit_pheromone(board, ptype="NEED", location="src/auth",
+                            text="review", emitter="dev")
+        stig.emit_pheromone(board, ptype="ALERT", location="src/auth",
+                            text="faille", emitter="qa")
+        stig.save_board(api.project_root, board)
+
+        view = api.stigmergy_view()
+        assert view["stats"]["active"] == 2
+        assert {s["type"] for s in view["active"]} == {"NEED", "ALERT"}
+        assert any(t["type"] == "convergence" for t in view["trails"])
+        assert view["stats"]["byType"]["NEED"] == 1

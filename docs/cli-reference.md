@@ -555,6 +555,52 @@ Voir [Mode local & blueprints](serve-blueprints.md).
 
 | Option | Rôle |
 | --- | --- |
-| `--port` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
-| `--project-root` | Racine du projet cible |
-| `--ui-dir` | Servir une UI custom (défaut : UI embarquée dans le paquet) |
+| `--port, -p` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
+| `--project-root` | Racine du projet servi (défaut : dossier courant) |
+| `--open / --no-open` | Ouvrir (ou non) le navigateur sur l'atelier |
+
+Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
+utiliser la forme longue : `python -m grimoire.tools.forge_server`.
+
+## `grimoire features`
+
+Canaux de features : **stable** (contrat SemVer), **beta** (opt-in par projet,
+journalisées, promues sur métriques d'usage), **experimental** (surface R&D).
+État persisté dans `_grimoire/features.json`. La page **Labs** de l'atelier
+(`grimoire serve`) expose les mêmes bascules.
+
+| Sous-commande | Rôle |
+| --- | --- |
+| `list` | Lister les features à canal et leur état pour le projet |
+| `enable <id>` · `disable <id>` | Basculer une feature beta (certaines portent une action réelle, ex. `stigmergy-hooks` installe/retire les hooks) |
+
+## `grimoire stigmergy` *(beta)*
+
+Coordination indirecte par phéromones (canal beta — voir
+[R&D expérimental](rnd.md)). Tableau local `_grimoire-output/pheromone-board.json`.
+
+| Sous-commande | Rôle |
+| --- | --- |
+| `emit --type --location --text --agent [--tags] [--intensity]` | Déposer un signal typé (NEED, ALERT, OPPORTUNITY, PROGRESS, COMPLETE, BLOCK) |
+| `sense [--type] [--location] [--json]` | Détecter les signaux actifs (au-dessus du seuil) |
+| `amplify --id --agent` · `resolve --id --agent` | Renforcer / résoudre un signal |
+| `trails` | Patterns émergents (hot-zone, convergence, bottleneck, relay) |
+| `evaporate [--dry-run]` · `stats` | Purge des signaux morts / statistiques |
+| `install-hooks` · `uninstall-hooks` | Câbler / retirer l'émission + captation automatiques |
+
+Chaque sous-commande accepte `--project-root` (défaut : dossier courant).
+L'intensité décroît par demi-vie (72 h), calculée à la lecture — aucun démon.
+
+### Boucle vivante (hooks)
+
+`grimoire stigmergy install-hooks` rend le système autonome, en copiant trois
+hooks **non bloquants** dans `.github/hooks/` du projet :
+
+- **SessionStart** — injecte les signaux actifs dans le contexte de l'agent.
+- **PostToolUse** — une édition dépose (ou *renforce*, anti-bruit) un signal
+  `PROGRESS` sur la zone touchée.
+- **Stop** — marque `COMPLETE` la zone la plus active et purge les signaux morts.
+
+Ces hooks sont **safe par construction** : ils n'émettent que du contexte ou
+rien, jamais de décision de blocage. S'il existe, ils sont journalisés en
+mode `shadow` dans `_grimoire-runtime/_config/hook-safety-registry.json`.

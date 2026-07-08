@@ -1,4 +1,4 @@
-/* forge-motion.js — Grimoire Kit signature effects
+/* forge-motion.js — Grimoire Forge signature effects
    IntersectionObserver-based, zero infinite loops (except ambient glow).
    prefers-reduced-motion respected throughout.
    ============================================================ */

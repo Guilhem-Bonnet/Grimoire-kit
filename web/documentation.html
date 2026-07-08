@@ -5,7 +5,7 @@
   <title>Documentation — Grimoire Kit</title>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Documentation — Grimoire Kit"/>
-  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns), mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
+  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns vérifiables), catalogue de 78, mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/documentation.html"/>
   <meta name="twitter:card" content="summary"/>
   <meta name="description" content="Documentation du runtime Grimoire Kit, rendue en direct depuis le dépôt Grimoire-kit. Diagrammes Mermaid, code colorisé, recherche et table des matières." />
@@ -13,11 +13,17 @@
   <link rel="stylesheet" href="forge-base.css" />
   <link rel="stylesheet" href="forge-motion.css" />
   <link rel="stylesheet" href="forge-docs.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <script src="grimoire-mode.js"></script>
   <style>
     /* Page dédiée : application plein écran, pas de scroll de page */
     html, body { height: 100%; }
-    body { padding-top: 56px; overflow: hidden; }
-    #documentation { height: calc(100vh - 56px); padding: 0; margin: 0; }
+    body { overflow: hidden; }
+    html.mode-vitrine body.at-body { overflow: hidden; padding-top: 56px; }
+    #documentation { padding: 0; margin: 0; }
+    html.mode-vitrine #documentation { height: calc(100vh - 56px); }
+    html.mode-atelier #main { flex: 1; min-height: 0; }
+    html.mode-atelier #documentation { height: 100%; }
     #documentation > .container {
       max-width: none; padding: 0; margin: 0;
       height: 100%; position: relative; z-index: 1;
@@ -40,10 +46,13 @@
     .tw-sep { border: none; border-top: 1px solid var(--line); margin: 8px 0 12px; }
   </style>
 </head>
-<body>
+<body class="at-body">
 <a href="#docs-article" class="skip-link">Aller au contenu</a>
 <nav id="forge-nav" aria-label="Navigation principale"></nav>
 
+<div class="at-app">
+<aside class="at-side" id="atelier-side"></aside>
+<div class="at-main">
 <main id="main">
 
 <!-- ═══ DOCUMENTATION — plein écran ═══ -->
@@ -82,6 +91,9 @@
 </section>
 
 </main>
+<div class="at-status" id="atelier-status"></div>
+</div>
+</div>
 
 <!-- Tweaks panel -->
 <div id="tweaks-panel" role="complementary" aria-label="Panneau de configuration">
@@ -98,6 +110,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="atelier-nav.js"></script>
 <script src="forge-nav.js"></script>
 <script src="forge-docs.js"></script>
 

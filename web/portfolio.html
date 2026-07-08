@@ -134,6 +134,7 @@
 
     #pf-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
+  <script src="grimoire-mode.js"></script>
 </head>
 <body>
 <a href="#main" class="skip-link">Aller au contenu</a>
@@ -214,37 +215,32 @@
 <script>
 /* ══════════════════════════════════════════════════════════════
    PORTEFEUILLE — cockpit de gouvernance
-   Lit data/projects.json (schéma réel gen-site-data) et normalise
-   vers les champs de rendu. FALLBACK démo si fetch échoue (file://).
+   Lit data/projects.json et fusionne avec une carte d'enrichissement
+   par slug pour les champs de gouvernance absents du JSON minimal
+   (version, commits, mémoire, contradictions, couverture).
+   Remplace ENRICH + le fallback par les champs réels de projects.json
+   et la boucle render() tournera telle quelle.
    ══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  /* ── Enrichissement gouvernance par slug (à porter dans projects.json) ── */
+  const ENRICH = {
+    'grimoire-core': { version: 'v2.4.1', commits: 1284, commits_7j: 47, memory: 'SQLite + FAISS',     contradictions: 0, coverage: 96 },
+    'atlas-ops':     { version: 'v1.8.0', commits: 872,  commits_7j: 23, memory: 'Redis + Qdrant',      contradictions: 2, coverage: 84 },
+    'sentinel-sec':  { version: 'v0.9.3', commits: 503,  commits_7j: 12, memory: 'JSONL + Chroma',      contradictions: 7, coverage: 68 },
+    'ledger-data':   { version: 'v3.1.2', commits: 2041, commits_7j: 31, memory: 'Postgres + pgvector', contradictions: 1, coverage: 79 },
+  };
+
   /* ── Fallback : projets démo (si fetch échoue, ex. file://) ── */
   const FALLBACK = [
-    { slug: 'grimoire-core', name: 'Grimoire Core', desc: 'Noyau agentique — runtime typé',       ci: 'pass', ci_label: 'build #1284 vert', cost: '$0.38', antifragile: 94, version: 'v2.4.1', commits: 1284, commits_7j: 47, memory: 'SQLite + FAISS', contradictions: 0, coverage: 96 },
-    { slug: 'atlas-ops',     name: 'Atlas Ops',     desc: 'Pipeline infra-ops k8s',               ci: 'pass', ci_label: 'build #872 vert',  cost: '$1.24', antifragile: 88, version: 'v1.8.0', commits: 872,  commits_7j: 23, memory: 'Redis + Qdrant', contradictions: 2, coverage: 84 },
-    { slug: 'sentinel-sec',  name: 'Sentinel Sec',  desc: 'Surface sécurité — threat model',      ci: 'fail', ci_label: 'build #503 rouge', cost: '$0.61', antifragile: 71, version: 'v0.9.3', commits: 503,  commits_7j: 12, memory: 'JSONL + Chroma', contradictions: 7, coverage: 68 },
-    { slug: 'ledger-data',   name: 'Ledger Data',   desc: 'ETL + schema-keeper',                  ci: 'pass', ci_label: 'build #2041 vert', cost: '$2.07', antifragile: 82, version: 'v3.1.2', commits: 2041, commits_7j: 31, memory: 'Postgres + pgvector', contradictions: 1, coverage: 79 },
+    { slug: 'grimoire-core', name: 'Grimoire Core', desc: 'Noyau agentique — runtime typé',       ci: 'pass', ci_label: 'build #1284 vert', cost: '$0.38', antifragile: 94 },
+    { slug: 'atlas-ops',     name: 'Atlas Ops',     desc: 'Pipeline infra-ops k8s',               ci: 'pass', ci_label: 'build #872 vert',  cost: '$1.24', antifragile: 88 },
+    { slug: 'sentinel-sec',  name: 'Sentinel Sec',  desc: 'Surface sécurité — threat model',      ci: 'fail', ci_label: 'build #503 rouge', cost: '$0.61', antifragile: 71 },
+    { slug: 'ledger-data',   name: 'Ledger Data',   desc: 'ETL + schema-keeper',                  ci: 'pass', ci_label: 'build #2041 vert', cost: '$2.07', antifragile: 82 },
   ];
-
-  /* ── Normalisation : schéma projects.json (gen-site-data) → champs de rendu ── */
-  function norm(p) {
-    return {
-      slug: p.slug, name: p.name, version: p.version || '',
-      desc: '',
-      commits: p.commits_total || 0, commits_7j: p.commits_7d || 0,
-      cost: '$' + Number(p.total_cost_usd || 0).toFixed(2),
-      ci: p.ci_status === 'failure' ? 'fail' : 'pass',
-      ci_label: 'CI ' + (p.ci_status || ''),
-      antifragile: Math.round(p.antifragile || 0),
-      contradictions: p.contradictions || 0,
-      coverage: Math.round(p.coverage || 0),
-      memory: p.memory_backend || '—',
-    };
-  }
 
   /* ── Helpers gouvernance ── */
   const isFail = (ci) => ci === 'fail' || ci === 'red' || ci === 'ko';
@@ -304,7 +300,7 @@
     ct.innerHTML = `<span class="dot"></span>${flagged.length} À SURVEILLER`;
 
     document.getElementById('watch-list').innerHTML = flagged.map(({ p, w }) => `
-      <a class="watch-row" href="observability.html?project=${esc(p.slug)}">
+      <a class="watch-row js-launch-atelier" href="#">
         <span class="watch-dot" style="background:${isFail(p.ci) ? 'var(--data-red)' : 'var(--data-amber)'}"></span>
         <span class="watch-name"><b>${esc(p.name)}</b><span>${esc(p.slug)} · ${esc(p.version || '')}</span></span>
         <span class="watch-reasons">${w.reasons.map((r) => `<span class="reason ${r.cls}">${esc(r.txt)}</span>`).join('')}</span>
@@ -366,8 +362,8 @@
       </div>
 
       <div class="pf-links">
-        <a class="pf-link" href="observability.html?project=${esc(p.slug)}">OBSERVABILITÉ <span class="arr">→</span></a>
-        <a class="pf-link" href="memory.html?project=${esc(p.slug)}">MÉMOIRE <span class="arr">→</span></a>
+        <a class="pf-link js-launch-atelier" href="#">OBSERVABILITÉ · ATELIER <span class="arr">→</span></a>
+        <a class="pf-link js-launch-atelier" href="#">MÉMOIRE · ATELIER <span class="arr">→</span></a>
       </div>
     </article>`;
   }
@@ -386,15 +382,17 @@
     renderGrid(list);
   }
 
-  /* ── Chargement : projects.json normalisé ── */
+  /* ── Chargement : projects.json fusionné avec ENRICH ── */
   fetch('data/projects.json', { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((data) => {
       const base = (data && data.projects) || [];
       if (!base.length) return Promise.reject('empty');
-      render(base.map(norm));
+      render(base.map((p) => ({ ...ENRICH[p.slug], ...p })));
     })
-    .catch(() => { render(FALLBACK); });
+    .catch(() => {
+      render(FALLBACK.map((p) => ({ ...ENRICH[p.slug], ...p })));
+    });
 
   /* dividers */
   const obs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); obs.unobserve(e.target); } }), { threshold: 0.5 });

@@ -85,6 +85,9 @@ else:
 
 Tous les outils sont disponibles comme classes Python :
 
+Tous les outils partagent la même interface : ils se construisent avec un
+`project_root` et s'exécutent via `run(**kwargs)`, qui rend un résultat typé.
+
 ```python
 from grimoire.tools import (
     AgentForge,
@@ -96,48 +99,46 @@ from grimoire.tools import (
     Stigmergy,
 )
 
-# Harmony Check — vérifie la cohérence du projet
-hc = HarmonyCheck(project_root=Path("."))
-report = hc.run()
-print(f"Score: {report.score}/100")
-for issue in report.issues:
-    print(f"  [{issue.severity}] {issue.message}")
+root = Path(".")
+
+# Harmony Check — cohérence architecturale du projet
+harmony = HarmonyCheck(root).run()
+print(f"Score: {harmony.score}/100 (grade {harmony.grade})")
+for d in harmony.dissonances:
+    print(f"  {d}")
 
 # Preflight Check — vérification pré-déploiement
-pf = PreflightCheck(project_root=Path("."))
-result = pf.run()
-for check in result.checks:
-    print(f"  {'[OK]' if check.passed else '[x]'} {check.name}")
+preflight = PreflightCheck(root).run()
+print(f"Go/No-Go: {preflight.go_nogo}")
+for check in preflight.checks:
+    print(f"  {check}")
 
-# Memory Lint — vérifie l'intégrité de la mémoire
-ml = MemoryLint(project_root=Path("."))
-report = ml.run()
-for issue in report.issues:
-    print(f"  {issue.severity}: {issue.message}")
+# Memory Lint — intégrité de la mémoire
+lint = MemoryLint(root).run()
+print(f"{lint.error_count} erreurs, {lint.warning_count} avertissements")
+for issue in lint.issues:
+    print(f"  {issue}")
 
-# Context Router — routage vers l'agent optimal
-cr = ContextRouter(project_root=Path("."))
-result = cr.route("Comment déployer sur Kubernetes ?")
-print(f"Agent recommandé: {result.agent_id}")
+# Context Router — plan de chargement pour un agent
+plan = ContextRouter(root).run(agent="architect", task="Déployer sur Kubernetes")
+print(f"Agent: {plan.agent} · {plan.total_tokens} tokens · {plan.status}")
 
-# Context Guard — vérification du budget contexte
-cg = ContextGuard(max_tokens=8000)
-result = cg.check(Path("_grimoire/_config/agents/architect.md"))
-print(f"Tokens: {result.token_count} / {cg.max_tokens}")
+# Context Guard — budget contexte par agent
+guard = ContextGuard(root).run(agent="architect")
+print(f"{guard.overbudget_count} agent(s) hors budget")
 
-# Stigmergy — signaux inter-agents
-st = Stigmergy(project_root=Path("."))
-st.deposit("insight", {"content": "Pattern détecté"})
-signals = st.collect("insight")
+# Stigmergy (expérimental) — coordination par phéromones
+board = Stigmergy(root).run(action="emit", ptype="ALERT", location="src/auth")
+print(f"{board.total_emitted} phéromones émises")
 
-# Agent Forge — génération de squelettes d'agents
-af = AgentForge()
-skeleton = af.generate(
-    agent_id="my-agent",
-    name="Mon Agent",
-    title="Expert Custom",
-)
+# Agent Forge — proposition de squelette d'agent
+proposal = AgentForge(root).run(description="un agent qui écrit et lance les tests")
+print(f"{proposal.agent_name} — {proposal.agent_role}")
 ```
+
+> **Stigmergy** fait partie des features **expérimentales** (R&D) : elle
+> fonctionne et est testée, mais son API reste hors du contrat de stabilité
+> SemVer. Voir [R&D expérimental](rnd.md).
 
 ## Merge Engine
 

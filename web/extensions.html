@@ -1,257 +1,251 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Extensions — Grimoire Forge</title>
-  <meta name="description" content="Extensions Grimoire Forge : frameworks agentiques publics (CrewAI, LangGraph...) packagés en artefacts gouvernés, installables en une commande, ancrés sur le catalogue de patterns." />
-  <link rel="stylesheet" href="forge-tokens.css"/>
-  <link rel="stylesheet" href="forge-base.css"/>
-  <link rel="stylesheet" href="forge-motion.css"/>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Extensions — Grimoire Kit</title>
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <script src="grimoire-mode.js"></script>
   <style>
-    body { padding-top: 56px; }
-    .ext-hero { padding: 72px 0 40px; border-bottom: 1px solid var(--line); }
-    .ext-kicker { font-family: var(--font-mono); font-size: .62rem; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
-    .ext-hero h1 { font-size: var(--text-4xl); line-height: var(--lh-title); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
-    .ext-hero p { color: var(--ink-soft); max-width: 640px; line-height: var(--lh-body); }
-    .ext-install { margin-top: 28px; display: inline-flex; align-items: center; gap: 12px; background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 12px 16px; font-family: var(--font-mono); font-size: .78rem; }
-    .ext-install .p { color: var(--ink-muted); user-select: none; }
-    .ext-install code { color: var(--ink); }
-    .ext-install button { background: none; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-muted); font-family: var(--font-mono); font-size: .6rem; letter-spacing: .08em; padding: 4px 8px; cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
-    .ext-install button:hover { color: var(--accent); border-color: var(--accent-dim); }
-
-    .ext-section { padding: 44px 0 12px; }
-    .ext-label { font-family: var(--font-mono); font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-soft); display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-    .ext-label .n { color: var(--accent); }
-    .ext-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-
-    .ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-    .ext-card { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 20px; display: flex; flex-direction: column; gap: 12px; transition: border-color var(--dur-base) var(--ease-forge), transform var(--dur-base) var(--ease-forge); }
-    .ext-card:hover { border-color: var(--accent-dim); transform: translateY(-2px); }
-    .ext-card-head { display: flex; align-items: baseline; gap: 10px; }
-    .ext-name { font-weight: 600; font-size: var(--text-md); }
-    .ext-ver { font-family: var(--font-mono); font-size: .62rem; color: var(--ink-muted); }
-    .ext-status { margin-left: auto; font-family: var(--font-mono); font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: var(--r-sm); }
-    .ext-status.available { color: var(--data-green); border: 1px solid rgba(52,211,153,.3); }
-    .ext-status.candidate { color: var(--data-amber); border: 1px solid rgba(252,211,77,.3); }
-    .ext-desc { color: var(--ink-soft); font-size: var(--text-sm); line-height: var(--lh-body); flex: 1; }
-    .ext-patterns { display: flex; flex-wrap: wrap; gap: 6px; }
-    .ext-pat { font-family: var(--font-mono); font-size: .6rem; color: var(--data-cyan); background: rgba(110,231,255,.08); border: 1px solid rgba(110,231,255,.2); border-radius: var(--r-sm); padding: 2px 7px; }
-    .ext-pat.req { color: var(--data-violet); background: rgba(167,139,250,.08); border-color: rgba(167,139,250,.2); }
-    .ext-meta { display: flex; flex-wrap: wrap; gap: 12px; font-family: var(--font-mono); font-size: .6rem; color: var(--ink-muted); border-top: 1px solid var(--line); padding-top: 12px; }
-    .ext-meta a { color: var(--ink-muted); text-decoration: none; }
-    .ext-meta a:hover { color: var(--accent); }
-    .ext-cmd { font-family: var(--font-mono); font-size: .66rem; color: var(--ink-soft); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; }
-    .ext-cmd .p { color: var(--ink-muted); user-select: none; }
-
-    .ext-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 26px; }
-    .ext-tools input[type=search] { background: var(--elev-1); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); font-family: var(--font-mono); font-size: .72rem; padding: 9px 12px; width: 260px; }
-    .ext-tools input[type=search]:focus { outline: none; border-color: var(--accent-dim); }
-    .ext-chip { background: none; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-muted); font-family: var(--font-mono); font-size: .6rem; letter-spacing: .06em; padding: 6px 10px; cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
-    .ext-chip.on { color: var(--data-cyan); border-color: rgba(110,231,255,.4); }
-    .ext-chip:hover { border-color: var(--accent-dim); }
-    .ext-chip-kind { border-style: dashed; }
-    .ext-chip-kind.on { color: var(--data-amber, #ffd166); border-color: rgba(255,209,102,.4); }
-    .ext-chip-sep { color: var(--ink-muted); margin: 0 2px; }
-    .ext-contract { padding: 44px 0 90px; }
-    .ext-rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-    .ext-rule { background: var(--elev-1); border: 1px solid var(--line); border-left: 2px solid var(--accent); border-radius: var(--r-sm); padding: 16px; }
-    .ext-rule h3 { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink); margin-bottom: 8px; }
-    .ext-rule p { color: var(--ink-soft); font-size: .82rem; line-height: var(--lh-body); }
-    .ext-empty { color: var(--ink-muted); font-family: var(--font-mono); font-size: .72rem; padding: 20px 0; }
+    .ex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 1000px) { .ex-grid { grid-template-columns: 1fr; } }
+    .ex-card h3 { font-size: 0.92rem; }
+    .ex-card p { font-size: 0.74rem; color: var(--ink-soft); line-height: 1.55; margin: 6px 0 12px; }
+    .ex-card.study { border-style: dashed; }
+    .ex-card.study h3 { color: var(--ink-soft); }
+    .ex-card.start { background: var(--elev-2); }
+    .ex-proc { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ex-proc .at-chip { font-size: 0.56rem; }
+    .ex-proc .a { color: var(--ink-muted); font-family: var(--font-mono); }
   </style>
 </head>
-<body>
-<a href="#main" class="skip-link">Aller au contenu</a>
-<nav id="forge-nav" aria-label="Navigation principale"></nav>
-
-<main id="main">
-
-<section class="ext-hero">
-  <div class="container">
-    <div class="ext-kicker">MARKETPLACE · H1</div>
-    <h1>Extensions</h1>
-    <p>Chaque extension packe un framework agentique public en artefacts gouvernés — agents, skills, hooks, workflows — installés dans votre projet et ancrés sur le catalogue de patterns. Pas de boîte noire : un manifeste validé, des permissions déclarées, des hooks en mode shadow.</p>
-    <div class="ext-install">
-      <span class="p">$</span><code id="ext-install-cmd">grimoire ext add crewai --registry grimoire-extensions-registry</code>
-      <button type="button" data-copy="#ext-install-cmd" aria-label="Copier la commande">COPIER</button>
-    </div>
-    <div class="ext-tools">
-      <input id="ext-search" type="search" placeholder="Rechercher (nom, pattern, description)…" aria-label="Rechercher une extension"/>
-      <span id="ext-chips"></span>
-    </div>
-  </div>
-</section>
-
-<section class="ext-section">
-  <div class="container">
-    <div class="ext-label">DISPONIBLES <span class="n" id="ext-count-available"></span></div>
-    <div class="ext-grid" id="ext-available"><div class="ext-empty">Chargement…</div></div>
-  </div>
-</section>
-
-<section class="ext-section">
-  <div class="container">
-    <div class="ext-label">BLUEPRINTS <span class="n" id="ext-count-blueprints"></span></div>
-    <div class="ext-grid" id="ext-blueprints"></div>
-  </div>
-</section>
-
-<section class="ext-section">
-  <div class="container">
-    <div class="ext-label">EN ÉTUDE <span class="n" id="ext-count-candidates"></span></div>
-    <div class="ext-grid" id="ext-candidates"></div>
-  </div>
-</section>
-
-<section class="ext-contract">
-  <div class="container">
-    <div class="ext-label">CONTRAT MARKETPLACE</div>
-    <div class="ext-rules">
-      <div class="ext-rule"><h3>Manifeste validé</h3><p>Chaque extension déclare un <code>extension.json</code> validé par schéma avant toute installation. Chemins relatifs uniquement, pas de remontée hors du bundle.</p></div>
-      <div class="ext-rule"><h3>Ancrage patterns</h3><p>Le mapping vers le catalogue de patterns est obligatoire. Une extension sans <code>patterns.implements</code> est refusée — c'est ce qui distingue ce marketplace d'un annuaire.</p></div>
-      <div class="ext-rule"><h3>Hooks en shadow</h3><p>Tout hook fourni s'enregistre en mode shadow, sans exception. La promotion vers un mode bloquant reste une décision du projet hôte.</p></div>
-      <div class="ext-rule"><h3>Permissions déclarées</h3><p>Filesystem, réseau, événements interceptés, accès mémoire : tout est déclaré dans le manifeste et vérifiable avant installation.</p></div>
+<body class="at-body">
+  <nav id="forge-nav" aria-label="Navigation principale"></nav>
+  <div class="at-app">
+    <aside class="at-side" id="atelier-side"></aside>
+    <div class="at-main">
+      <div class="at-scroll"><div class="at-page">
+        <div class="at-row sb" style="align-items:flex-start;margin-bottom:4px">
+          <div>
+            <div class="at-h1-row" style="margin-bottom:4px"><h1 class="at-h1">Extensions</h1><span class="at-sub">marketplace gouverné</span></div>
+            <p class="at-lead">Chaque extension packe un framework public en artefacts gouvernés, ancrés sur des patterns du standard. Manifeste validé, hooks en shadow, réversible.</p>
+          </div>
+          <input class="at-search" id="ex-search" placeholder="rechercher…" style="max-width:240px" />
+        </div>
+        <div class="at-row" style="gap:8px;margin:16px 0 20px;flex-wrap:wrap" id="ex-segs"></div>
+        <div class="ex-grid" id="ex-grid"></div>
+      </div></div>
+      <div class="at-status" id="atelier-status"></div>
     </div>
   </div>
-</section>
 
-</main>
+  <footer id="forge-footer"></footer>
 
-<script src="forge-nav.js"></script>
-<script>
-(function () {
-  'use strict';
+  <!-- Fiche extension (drawer) -->
+  <div class="bp-fiche" id="ex-fiche"></div>
 
-  function loadData(name) {
-    return fetch('data/' + name).catch(() => null)
-      .then(r => (r && r.ok) ? r.json() : fetch('/data/' + name).then(r2 => r2.json()));
-  }
+  <script src="atelier-nav.js"></script>
+  <script src="forge-nav.js"></script>
+  <script>
+  (async function () {
+    'use strict';
+    const $ = (s, r) => (r || document).querySelector(s);
+    const esc = Atelier.esc;
+    const { catalogue: CAT, extensions: EXT } = await Atelier.data();
+    const IN_ATELIER = window.GrimoireMode === 'atelier';
 
-  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    let seg = 'all';
+    let q = '';
 
-  function permSummary(p) {
-    if (!p || !Object.keys(p).length) return '';
-    const bits = [];
-    if (p.filesystem && p.filesystem !== 'none') bits.push('fs:' + p.filesystem);
-    if (p.network) bits.push('réseau');
-    if (p.hooks && p.hooks.length) bits.push('hooks:' + p.hooks.join(','));
-    if (p.memory && p.memory !== 'none') bits.push('mémoire:' + p.memory);
-    return bits.length ? 'perm : ' + bits.join(' · ') : 'aucune permission';
-  }
+    const statusOf = e => e.status === 'study' ? 'study' : (IN_ATELIER && Atelier.installedExts().includes(e.id) ? 'installed' : 'available');
 
-  function card(e) {
-    const patterns = (e.patterns || []).map(p => `<span class="ext-pat">${esc(p)}</span>`).join('')
-      + (e.requires || []).map(p => `<span class="ext-pat req" title="Requis dans le projet hôte">${esc(p)}</span>`).join('');
-    const provides = e.provides && Object.keys(e.provides).length
-      ? Object.entries(e.provides).map(([k, n]) => `${esc(k)}:${n}`).join(' · ') : '';
-    const meta = [
-      e.license ? `<span>${esc(e.license)}</span>` : '',
-      provides ? `<span>${provides}</span>` : '',
-      e.upstream ? `<a href="${esc(e.upstream)}" target="_blank" rel="noopener">upstream ↗</a>` : '',
-    ].filter(Boolean).join('');
-    const perms = permSummary(e.permissions);
-    return `<article class="ext-card">
-      <div class="ext-card-head">
-        <span class="ext-name">${esc(e.name)}</span>
-        ${e.version ? `<span class="ext-ver">v${esc(e.version)}</span>` : ''}
-        ${e.kind ? `<span class="ext-ver" title="Nature de la prise">${esc(e.kind)}</span>` : ''}
-        <span class="ext-status ${e.status}">${e.status === 'available' ? 'Disponible' : 'En étude'}</span>
-      </div>
-      <p class="ext-desc">${esc(e.description)}</p>
-      ${patterns ? `<div class="ext-patterns">${patterns}</div>` : ''}
-      ${e.status === 'available' ? `<div class="ext-cmd"><span class="p">$ </span>grimoire ext add extensions/${esc(e.id)}</div>` : ''}
-      <div class="ext-meta">${meta}${perms ? `<span title="Permissions déclarées">${esc(perms)}</span>` : ''}</div>
-    </article>`;
-  }
-
-  let allData = null;
-  const activeFamilies = new Set();
-  const activeKinds = new Set();
-
-  function matches(e) {
-    const q = document.getElementById('ext-search').value.trim().toLowerCase();
-    const hay = [e.name, e.description, e.kind || '', ...(e.patterns || [])].join(' ').toLowerCase();
-    if (q && !hay.includes(q)) return false;
-    if (activeFamilies.size) {
-      const fams = new Set((e.patterns || []).map(p => p.split('-')[0]));
-      if (![...activeFamilies].some(f => fams.has(f))) return false;
+    function patternChips(refs) {
+      return (refs || []).map(r => {
+        const p = Atelier.byRef[r];
+        return `<a class="at-chip" style="font-size:0.56rem;text-decoration:none" href="patterns.html#${esc(r)}" title="${esc(p ? p.name : '')}">
+          <span class="cdot" style="background:${Atelier.catColor(r.slice(0, 3))}"></span>${esc(r)}</a>`;
+      }).join('');
     }
-    if (activeKinds.size && !activeKinds.has(e.kind || '')) return false;
-    return true;
-  }
 
-  function bpCard(b) {
-    return `<article class="ext-card">
-      <div class="ext-card-head"><span class="ext-name">${esc(b.name)}</span>
-        <span class="ext-status available">Blueprint</span></div>
-      <p class="ext-desc">${esc(b.description)}</p>
-      <div class="ext-meta"><span>${b.nodes} nodes · ${b.edges} edges</span>
-        ${b.extensions.length ? `<span>requiert : ${b.extensions.map(esc).join(', ')}</span>` : ''}</div>
-      <div class="ext-cmd"><span class="p">$ </span>grimoire ext add-blueprint ${esc(b.id)} --registry &lt;clone&gt;</div>
-    </article>`;
-  }
+    function segs() {
+      const insts = EXT.extensions.filter(e => statusOf(e) === 'installed').length;
+      const disp  = EXT.extensions.filter(e => statusOf(e) === 'available').length;
+      const study = EXT.extensions.filter(e => e.status === 'study').length;
+      const mk = (id, label, n, extra) => `<button class="at-chip ${seg === id ? 'on' : ''}" data-seg="${id}" ${extra || ''}>${label} · ${n}</button>`;
+      $('#ex-segs').innerHTML =
+        mk('all', 'TOUTES', EXT.extensions.length) +
+        (IN_ATELIER ? mk('installed', 'INSTALLÉES', insts) : '') +
+        mk('available', 'DISPONIBLES', disp) +
+        mk('study', 'À L\u2019ÉTUDE', study) +
+        `<span style="width:10px"></span>` +
+        mk('starts', 'POINTS DE DÉPART', (EXT.published_blueprints || []).length, 'style="border-style:dashed"');
+      document.querySelectorAll('#ex-segs .at-chip').forEach(b =>
+        b.addEventListener('click', () => { seg = b.dataset.seg; render(); }));
+    }
 
-  function render() {
-    const av = allData.available.filter(matches);
-    const ca = allData.candidates.filter(matches);
-    document.getElementById('ext-available').innerHTML = av.length
-      ? av.map(card).join('')
-      : '<div class="ext-empty">Aucune extension ne correspond aux filtres.</div>';
-    document.getElementById('ext-candidates').innerHTML = ca.length
-      ? ca.map(card).join('')
-      : '<div class="ext-empty">Aucun candidat ne correspond aux filtres.</div>';
-    document.getElementById('ext-count-available').textContent = '· ' + av.length + '/' + allData.available.length;
-    const bps = allData.blueprints || [];
-    document.getElementById('ext-blueprints').innerHTML = bps.length
-      ? bps.map(bpCard).join('')
-      : '<div class="ext-empty">Aucun blueprint publié pour le moment.</div>';
-    document.getElementById('ext-count-blueprints').textContent = '· ' + bps.length;
-    document.getElementById('ext-count-candidates').textContent = '· ' + ca.length + '/' + allData.candidates.length;
-  }
+    function card(e) {
+      const st = statusOf(e);
+      const tag = st === 'installed'
+        ? `<span class="at-status-tag inst">installée ✓ v${esc(e.version)}</span>`
+        : st === 'study'
+          ? `<span class="at-status-tag etude">à l'étude</span>`
+          : `<span class="at-status-tag disp">disponible</span>`;
+      const action = st === 'installed'
+        ? `<button class="at-btn sm ghost" data-open="${e.id}">GÉRER →</button>`
+        : st === 'study'
+          ? `<a class="at-btn sm ghost" href="${esc(e.upstream)}" target="_blank" rel="noopener">UPSTREAM ↗</a>`
+          : IN_ATELIER
+            ? `<button class="at-btn sm" data-install="${e.id}">INSTALLER</button>`
+            : `<button class="at-btn sm ghost" data-open="${e.id}">FICHE →</button>`;
+      return `<div class="at-card ex-card ${st === 'study' ? 'study' : ''}" data-open-card="${e.id}">
+        <div class="at-row sb"><h3>${esc(e.name)}</h3>${tag}</div>
+        <p>${esc(e.desc)}</p>
+        <div class="at-row sb">
+          <div class="at-row" style="gap:5px;flex-wrap:wrap">${patternChips(e.patterns)}
+            ${(e.hooks || []).some(h => h.mode === 'shadow') ? '<span class="at-chip acc" style="font-size:0.54rem">hooks · shadow</span>' : ''}
+          </div>
+          ${action}
+        </div>
+      </div>`;
+    }
 
-  loadData('extensions.json').then(data => {
-    allData = data;
-    const families = [...new Set(data.available.flatMap(e => (e.patterns || []).map(p => p.split('-')[0])))].sort();
-    const kinds = [...new Set(data.available.map(e => e.kind).filter(Boolean))].sort();
-    document.getElementById('ext-chips').innerHTML =
-      families.map(f =>
-        `<button type="button" class="ext-chip" data-family="${esc(f)}">${esc(f)}</button>`).join(' ')
-      + (kinds.length ? ' <span class="ext-chip-sep" aria-hidden="true">·</span> ' : '')
-      + kinds.map(k =>
-        `<button type="button" class="ext-chip ext-chip-kind" data-kind="${esc(k)}" title="Nature de la prise">${esc(k)}</button>`).join(' ');
-    document.getElementById('ext-chips').addEventListener('click', e => {
-      const famChip = e.target.closest('[data-family]');
-      if (famChip) {
-        const f = famChip.dataset.family;
-        if (activeFamilies.has(f)) { activeFamilies.delete(f); famChip.classList.remove('on'); }
-        else { activeFamilies.add(f); famChip.classList.add('on'); }
-        render();
-        return;
-      }
-      const kindChip = e.target.closest('[data-kind]');
-      if (!kindChip) return;
-      const k = kindChip.dataset.kind;
-      if (activeKinds.has(k)) { activeKinds.delete(k); kindChip.classList.remove('on'); }
-      else { activeKinds.add(k); kindChip.classList.add('on'); }
-      render();
-    });
-    document.getElementById('ext-search').addEventListener('input', render);
-    render();
-  }).catch(() => {
-    document.getElementById('ext-available').innerHTML =
-      '<div class="ext-empty">Données indisponibles — lancer node scripts/build-extensions-data.mjs.</div>';
-  });
+    function startCard(b) {
+      const needs = (b.requires || []).filter(id => !Atelier.installedExts().includes(id));
+      return `<div class="at-card ex-card start">
+        <div class="at-row sb"><h3>${esc(b.name)}</h3><span class="at-chip" style="font-size:0.54rem">point de départ</span></div>
+        <p>${esc(b.desc)}</p>
+        <div class="at-row sb">
+          <span style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted)">${!IN_ATELIER ? 'nécessite l\u2019atelier local' : needs.length ? 'installera : ' + needs.join(', ') : 's\u2019ouvre dans l\u2019éditeur'}</span>
+          ${IN_ATELIER
+            ? `<a class="at-btn sm acc" href="blueprints.html?bp=${esc(b.id)}">OUVRIR DANS L'ÉDITEUR →</a>`
+            : `<a class="at-btn sm acc js-launch-atelier" href="#">DANS L'ATELIER →</a>`}
+        </div>
+      </div>`;
+    }
 
-  document.querySelectorAll('[data-copy]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const el = document.querySelector(btn.dataset.copy);
-      navigator.clipboard.writeText(el.textContent).then(() => {
-        btn.textContent = 'COPIÉ ✓';
-        setTimeout(() => { btn.textContent = 'COPIER'; }, 1600);
+    function render() {
+      segs();
+      let items = EXT.extensions.filter(e => {
+        if (seg === 'starts') return false;
+        if (seg !== 'all' && statusOf(e) !== seg) return false;
+        if (q) {
+          const s = q.toLowerCase();
+          if (!(e.name.toLowerCase().includes(s) || e.desc.toLowerCase().includes(s) || (e.patterns || []).some(p => p.toLowerCase().includes(s)))) return false;
+        }
+        return true;
       });
-    });
-  });
-})();
-</script>
+      let html = items.map(card).join('');
+      if (seg === 'all' || seg === 'starts') html += (EXT.published_blueprints || []).map(startCard).join('');
+      $('#ex-grid').innerHTML = html || '<p class="at-sub" style="padding:30px 0">rien ici.</p>';
+
+      document.querySelectorAll('[data-install]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); install(b.dataset.install); }));
+      document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); openFiche(b.dataset.open); }));
+      document.querySelectorAll('[data-open-card]').forEach(c => c.addEventListener('click', () => openFiche(c.dataset.openCard)));
+    }
+
+    /* ── Installation : la procédure est montrée, étape par étape ── */
+    function install(id, after) {
+      const e = Atelier.extById[id];
+      const steps = ['manifeste validé (schéma) ✓', 'artefacts copiés dans le projet ✓',
+        (e.hooks || []).length ? 'hooks enregistrés en shadow ✓' : 'aucun hook à enregistrer ✓',
+        'installée · réversible'];
+      let i = 0;
+      const tick = () => {
+        Atelier.toast('<b>' + esc(e.name) + '</b> — ' + steps.slice(0, i + 1).join(' · '), { good: i === steps.length - 1, ms: 1800 });
+        i++;
+        if (i < steps.length) setTimeout(tick, 550);
+        else { Atelier.installExt(id); render(); if (after) after(); }
+      };
+      tick();
+    }
+
+    /* ── Fiche ── */
+    function openFiche(id) {
+      const e = Atelier.extById[id];
+      if (!e || e.status === 'study') return;
+      const st = statusOf(e);
+      const f = $('#ex-fiche');
+      f.innerHTML = `
+        <div class="f-head">
+          <div class="at-row sb">
+            <div class="at-row" style="gap:10px">
+              <h2 style="font-size:1.05rem">${esc(e.name)}</h2>
+              <span class="at-chip" style="font-size:0.56rem">${esc(e.kind)}</span>
+            </div>
+            <button class="at-btn sm ghost" id="ex-close">✕</button>
+          </div>
+          <div class="at-row sb" style="margin-top:8px">
+            <span class="at-sub">v${esc(e.version)} · ${esc(e.license)} · <a href="${esc(e.upstream)}" target="_blank" rel="noopener" style="color:var(--ink-soft)">upstream ↗</a></span>
+            ${st === 'installed' ? '<span class="at-status-tag inst">installée ✓ · à jour</span>' : '<span class="at-status-tag disp">disponible</span>'}
+          </div>
+        </div>
+        <div class="f-body">
+          <p style="font-size:0.78rem;color:var(--ink-soft);line-height:1.6">${esc(e.desc)}</p>
+          <div>
+            <div class="at-lbl" style="margin-bottom:6px">Patterns implémentés — l'ancrage au standard</div>
+            <div class="at-row" style="gap:5px;flex-wrap:wrap">${patternChips(e.patterns)}</div>
+            <p style="font-family:var(--font-mono);font-size:0.56rem;color:var(--ink-muted);margin-top:6px">une extension sans ancrage est refusée du registry</p>
+          </div>
+          <div>
+            <div class="at-lbl" style="margin-bottom:6px">Artefacts installés dans le projet</div>
+            <p style="font-family:var(--font-mono);font-size:0.7rem;color:var(--ink-soft)">${Object.entries(e.artifacts || {}).map(([k, v]) => k + ' ' + v).join(' · ') || '—'}</p>
+            ${(e.hooks || []).map(h => `<div class="at-row sb" style="margin-top:8px;border:1px solid var(--line);border-radius:4px;padding:8px 10px">
+              <span style="font-size:0.7rem;color:var(--ink-soft)">hook · ${esc(h.event)} — ${esc(h.desc)}</span>
+              <span class="at-chip acc" style="font-size:0.52rem">${esc(h.mode)} · promotion = votre décision</span></div>`).join('')}
+          </div>
+          ${(e.provides_nodes || []).length ? `<div>
+            <div class="at-lbl" style="margin-bottom:6px">Nodes fournis à l'éditeur</div>
+            ${e.provides_nodes.map(n => `<div class="at-row sb" style="border:1px solid var(--line);border-radius:4px;padding:8px 10px">
+              <span style="font-size:0.72rem"><b style="font-family:var(--font-mono);font-size:0.66rem">${esc(n.name)}</b> — ${esc(n.desc)}</span>
+              ${IN_ATELIER ? `<a class="at-btn sm" href="blueprints.html?add=${esc(n.id)}">UTILISER →</a>` : `<span class="at-sub">via l'éditeur de l'atelier</span>`}</div>`).join('')}
+          </div>` : ''}
+          <div>
+            <div class="at-lbl" style="margin-bottom:6px">Permissions déclarées</div>
+            <table class="at-table">${(e.permissions || []).map(p => `<tr><td>${esc(p.scope)}</td><td>${esc(p.why)}</td></tr>`).join('')}</table>
+          </div>
+          <div>
+            <div class="at-lbl" style="margin-bottom:8px">Installation — ce qui se passe, dans l'ordre</div>
+            <div class="ex-proc">
+              <span class="at-chip">manifeste validé</span><span class="a">→</span>
+              <span class="at-chip">artefacts copiés</span><span class="a">→</span>
+              <span class="at-chip">hooks en shadow</span><span class="a">→</span>
+              <span class="at-chip" style="border-color:rgba(52,211,153,.4);color:var(--data-green)">installée ✓ · réversible</span>
+            </div>
+          </div>
+          ${IN_ATELIER ? `<div>
+            <div class="at-lbl" style="margin-bottom:6px">En vitrine (site public)</div>
+            <div style="padding:8px 12px;background:var(--elev-2);border:1px solid var(--line);border-radius:4px;font-family:var(--font-mono);font-size:0.64rem;color:var(--ink-soft)">$ ${esc(e.install_cmd)}</div>
+            <p style="font-family:var(--font-mono);font-size:0.56rem;color:var(--ink-muted);margin-top:5px">même fiche, le bouton devient la commande</p>
+          </div>` : ''}
+        </div>
+        <div class="f-foot">
+          ${st === 'installed'
+            ? `<button class="at-btn" id="ex-remove">RETIRER — réversible</button><span class="at-sp"></span><span class="at-status-tag inst" style="align-self:center">à jour ✓</span>`
+            : IN_ATELIER
+              ? `<button class="at-btn pri" id="ex-do-install" style="flex:1">INSTALLER — 1 CLIC</button>`
+              : `<div style="flex:1;display:flex;flex-direction:column;gap:7px"><div style="padding:8px 12px;background:var(--elev-2);border:1px solid var(--line);border-radius:4px;font-family:var(--font-mono);font-size:0.64rem;color:var(--ink)">$ ${esc(e.install_cmd)}</div><span class="at-sub">installation en 1 clic dans l'atelier — <a href="#" class="js-launch-atelier" style="color:var(--accent)">lancer →</a></span></div>`}
+        </div>`;
+      f.classList.add('open');
+      $('#ex-close').addEventListener('click', closeFiche);
+      const rm = $('#ex-remove');
+      if (rm) rm.addEventListener('click', () => {
+        Atelier.removeExt(e.id);
+        Atelier.toast('<b>' + esc(e.name) + '</b> retirée — artefacts nettoyés, hooks désinscrits.');
+        closeFiche(); render();
+      });
+      const di = $('#ex-do-install');
+      if (di) di.addEventListener('click', () => { closeFiche(); install(e.id); });
+    }
+    function closeFiche() { $('#ex-fiche').classList.remove('open'); }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFiche(); });
+
+    $('#ex-search').addEventListener('input', e => { q = e.target.value.trim(); render(); });
+
+    render();
+    const deepLink = new URLSearchParams(location.search).get('ext');
+    if (deepLink) openFiche(deepLink);
+  })();
+  </script>
 </body>
 </html>

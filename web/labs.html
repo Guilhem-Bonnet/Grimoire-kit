@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Labs — Grimoire Kit</title>
+  <meta name="description" content="Canaux de features Grimoire Kit : beta activables par projet, surface expérimentale R&D. Chaque capacité candidate est journalisée et promue sur métriques d'usage." />
+  <link rel="stylesheet" href="forge-tokens.css" />
+  <link rel="stylesheet" href="forge-base.css" />
+  <link rel="stylesheet" href="atelier.css" />
+  <script src="grimoire-mode.js"></script>
+  <style>
+    .lab-card { padding: 16px 18px; }
+    .lab-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .lab-name { font-size: 0.92rem; font-weight: 600; }
+    .lab-desc { font-size: 0.76rem; color: var(--ink-soft); line-height: 1.55; margin-top: 6px; max-width: 62ch; }
+    .lab-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .chan { font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--line); }
+    .chan.beta { color: var(--data-amber); border-color: rgba(252,211,77,0.35); background: rgba(252,211,77,0.07); }
+    .chan.experimental { color: var(--data-violet); border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.07); }
+    .chan.stable { color: var(--data-green); border-color: rgba(52,211,153,0.3); }
+    /* toggle */
+    .tgl { position: relative; width: 42px; height: 22px; flex: none; border-radius: 999px;
+      background: var(--elev-3); border: 1px solid var(--line-strong); cursor: pointer; transition: background 160ms; }
+    .tgl::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+      background: var(--ink-muted); transition: transform 160ms, background 160ms; }
+    .tgl.on { background: var(--accent-soft); border-color: var(--accent-dim); }
+    .tgl.on::after { transform: translateX(20px); background: var(--accent); }
+    .tgl.busy { opacity: 0.5; pointer-events: none; }
+    .tgl[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+    .lab-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-top: 8px; }
+    .xp-row { display: flex; align-items: baseline; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+    .xp-row b { font-family: var(--font-mono); font-size: 0.72rem; flex: none; }
+    .xp-row span { font-size: 0.72rem; color: var(--ink-soft); }
+  </style>
+</head>
+<body class="at-body">
+  <div class="at-app">
+    <aside class="at-side" id="atelier-side"></aside>
+    <div class="at-main">
+      <div class="at-scroll"><div class="at-page">
+        <div class="at-h1-row" style="margin-bottom:4px"><h1 class="at-h1">Labs</h1><span class="at-sub">canaux de features</span></div>
+        <p class="at-lead" style="max-width:70ch">Les capacités du kit mûrissent par canal : <b>beta</b> — fonctionnelles, testées, opt-in par projet, journalisées pour décider leur promotion sur des métriques d'usage réelles ; <b>expérimental</b> — surface R&amp;D exploratoire, hors contrat de stabilité.</p>
+
+        <div class="at-lbl" style="margin:24px 0 10px">Beta — activables pour ce projet</div>
+        <div class="at-col" style="gap:10px" id="lab-beta">
+          <p class="at-sub" id="lab-beta-empty">chargement…</p>
+        </div>
+
+        <div class="at-lbl" style="margin:28px 0 10px">Expérimental — surface R&amp;D (CLI directe, hors contrat)</div>
+        <div class="at-card lab-card" id="lab-xp"></div>
+        <p style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-muted);margin-top:14px">
+          règle de promotion : une feature beta passe stable quand son usage réel est démontré par le journal
+          (<span style="color:var(--ink-soft)">_grimoire-output/stigmergy-events.jsonl</span> et équivalents), son API figée et sa valeur mesurée — voir
+          <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/docs/rnd.md" target="_blank" rel="noopener" style="color:var(--accent)">docs/rnd.md ↗</a>
+        </p>
+      </div></div>
+      <div class="at-status" id="atelier-status"></div>
+    </div>
+  </div>
+
+  <script src="atelier-nav.js"></script>
+  <script>
+  (async function () {
+    'use strict';
+    const $ = (s, r) => (r || document).querySelector(s);
+    const esc = Atelier.esc;
+    await Atelier.ready;
+
+    /* ── Surface expérimentale : catalogue R&D (statique, source rnd.md) ── */
+    const XP = [
+      ['Session Branching', 'explorer plusieurs approches en parallèle — diff, merge, cherry-pick'],
+      ['Agent Darwinism', 'sélection naturelle des agents : fitness, générations, hybridation'],
+      ['Dream Mode', 'consolidation hors-session : mémoire × trace × décisions → insights'],
+      ['R&D Engine', 'boucle d’innovation : bandit ε-greedy, prototypage, gap-analysis'],
+      ['Adversarial Consensus', 'quorum 3 votants + avocat du diable pour décisions critiques'],
+      ['Digital Twin', 'jumeau numérique : snapshot, simulation d’impact, what-if'],
+      ['Quantum Branch', 'timelines parallèles : fork, compare, merge de configurations'],
+      ['Time-Travel', 'checkpoints, replay, restore, bisect'],
+      ['CRISPR', 'édition chirurgicale de workflows : scan, splice, excise, transplant'],
+      ['Mirror Agent', 'transfert de patterns inter-agents par observation'],
+      ['Self-Improvement Loop', 'analyse des échecs pour améliorer le framework'],
+    ];
+    $('#lab-xp').innerHTML = XP.map(([n, d]) =>
+      `<div class="xp-row"><b>${esc(n)}</b><span>${esc(d)}</span></div>`).join('')
+      + '<p class="lab-note">outils sous framework/tools/ — testés, mais surface et API libres de bouger.</p>';
+
+    /* ── Canal beta : data-driven par l'API locale ── */
+    async function render() {
+      const host = $('#lab-beta');
+      if (!Atelier.online) {
+        host.innerHTML = '<div class="at-card lab-card"><p class="lab-desc">'
+          + 'Les toggles beta agissent sur un projet réel — lancez <code>grimoire serve</code> '
+          + 'dans votre projet pour les activer ici, ou utilisez <code>grimoire features list</code> en CLI.</p></div>';
+        return;
+      }
+      let feats;
+      try { feats = await Atelier.api('/api/features'); }
+      catch (e) { host.innerHTML = '<p class="at-sub">API features indisponible.</p>'; return; }
+      host.innerHTML = feats.map(f => `
+        <div class="at-card lab-card">
+          <div class="lab-head">
+            <div>
+              <div class="lab-name">${esc(f.name)}</div>
+              <div class="lab-desc">${esc(f.description)}</div>
+              <div class="lab-meta">
+                <span class="chan ${esc(f.channel)}">${esc(f.channel)}</span>
+                ${(f.surfaces || []).map(sf => `<span class="at-chip" style="font-size:0.54rem">${esc(sf)}</span>`).join('')}
+              </div>
+              <div class="lab-note" id="note-${esc(f.id)}"></div>
+            </div>
+            <div class="tgl ${f.enabled ? 'on' : ''}" data-id="${esc(f.id)}"
+                 role="switch" aria-checked="${f.enabled}" ${f.toggleable ? '' : 'aria-disabled="true"'}
+                 title="${f.toggleable ? 'Activer / désactiver pour ce projet' : 'Toujours active (non togglable)'}"></div>
+          </div>
+        </div>`).join('');
+
+      document.querySelectorAll('.tgl[data-id]').forEach(t => t.addEventListener('click', async () => {
+        const id = t.dataset.id;
+        const target = !t.classList.contains('on');
+        t.classList.add('busy');
+        try {
+          const r = await Atelier.api('/api/features/' + encodeURIComponent(id),
+            { method: 'POST', body: JSON.stringify({ enabled: target }) });
+          t.classList.toggle('on', r.enabled);
+          t.setAttribute('aria-checked', String(r.enabled));
+          const note = $('#note-' + CSS.escape(id));
+          if (note && r.note) note.textContent = r.note;
+          Atelier.toast('<b>' + esc(id) + '</b> ' + (r.enabled ? 'activée' : 'désactivée')
+            + (r.note ? ' — ' + esc(r.note) : ''), { good: true, ms: 4500 });
+        } catch (e) {
+          Atelier.toast('Bascule refusée : ' + esc(String(e.message || e)));
+        }
+        t.classList.remove('busy');
+      }));
+    }
+    await render();
+  })();
+  </script>
+</body>
+</html>

@@ -26,6 +26,7 @@
       ['getting-started.md', 'Prise en main'],
       ['onboarding.md', 'Onboarding'],
       ['vscode-setup.md', 'Setup VS Code'],
+      ['serve-blueprints.md', 'Atelier local · grimoire serve'],
       ['faq.md', 'FAQ'],
     ]},
     { label: 'Concepts', items: [
@@ -47,15 +48,20 @@
       ['observatory-api.md', 'Observatory API'],
     ]},
     { label: 'Intégration', items: [
+      ['extensions-marketplace.md', 'Extensions & marketplace'],
       ['sdk-guide.md', 'SDK'],
       ['mcp-integration.md', 'MCP'],
       ['plugin-development.md', 'Développement de plugins'],
+    ]},
+    { label: 'Qualité', items: [
+      ['evals-protocol.md', 'Protocole d’évaluation'],
     ]},
     { label: 'Gouvernance', items: [
       ['governed-controls.md', 'Contrôles gouvernés'],
       ['grimoire-game-runtime-guardrails.md', 'Runtime guardrails'],
       ['adr-001-no-multi-llm.md', 'ADR-001 · No multi-LLM'],
       ['adr-002-semver-policy.md', 'ADR-002 · SemVer'],
+      ['adr-003-memory-duality.md', 'ADR-003 · Dualité mémoire'],
     ]},
     { label: 'Agentic Standard', items: [
       ['agentic-standard-final-target.md', 'Cible finale'],
@@ -68,9 +74,19 @@
     { label: 'Exploitation', items: [
       ['troubleshooting.md', 'Dépannage'],
       ['migration-v2-v3.md', 'Migration v2 → v3'],
+      ['rnd.md', 'R&D expérimental'],
       ['changelog.md', 'Changelog'],
     ]},
   ];
+
+  /* Fichiers .md du dépôt à NE PAS surfacer dans le viewer :
+     - pages MkDocs à syntaxe attr_list ({: .class }) que `marked` rend mal ;
+     - annexes d'ingénierie internes et instantanés de backlog datés. */
+  const EXCLUDE = new Set([
+    'presentation-decouverte.md',   // page MkDocs (attr_list) — rendue par MkDocs, pas ici
+    'signaux.md',                   // source interne du fil de nouveautés
+    'travaux-inacheves-2026Q2.md',  // annexe d'ingénierie, instantané daté
+  ]);
 
   const DEFAULT_DOC = 'index.md';
 
@@ -118,7 +134,7 @@
       if (items.length) groups.push({ label: cat.label, items });
     });
     if (available) {
-      const extras = [...available].filter(f => !seen.has(f)).sort();
+      const extras = [...available].filter(f => !seen.has(f) && !EXCLUDE.has(f)).sort();
       if (extras.length) {
         groups.push({ label: 'Autres', items: extras.map(f => ({ file: f, label: prettify(f), catLabel: 'Autres' })) });
       }
@@ -222,35 +238,12 @@
       md = await r.text();
     } catch (e) { errorState(file); els.toc.innerHTML = '<div class="toc-empty">—</div>'; return; }
 
-    md = stripMkdocs(md);
-
     let html;
     try { html = window.marked.parse(md, { mangle: false, headerIds: false }); }
     catch (e) { html = '<pre><code>' + md.replace(/</g, '&lt;') + '</code></pre>'; }
     setState(html);
     postProcess(file);
     els.article.scrollTop = 0;
-  }
-
-  // mkdocs → marked compatibility: strip macros/attr_list, convert admonitions
-  function stripMkdocs(md) {
-    md = md.replace(/\{\{[^}]*\}\}/g, '');
-    md = md.replace(/[ \t]*\{:[^}]*\}[ \t]*$/gm, '');
-    const lines = md.split('\n'), out = [];
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/^(?:!!!|\?\?\?\+?)\s+\S+(?:\s+"([^"]*)")?\s*$/);
-      if (!m) { out.push(lines[i]); continue; }
-      if (m[1]) { out.push('**' + m[1] + '**', ''); }
-      let j = i + 1;
-      for (; j < lines.length; j++) {
-        const ln = lines[j];
-        if (ln.trim() === '') { out.push(''); continue; }
-        if (/^( {4}|\t)/.test(ln)) out.push(ln.replace(/^( {4}|\t)/, ''));
-        else break;
-      }
-      i = j - 1;
-    }
-    return out.join('\n');
   }
 
   function setCrumb(meta) {

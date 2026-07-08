@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   GRIMOIRE KIT — Documentation surface
+   GRIMOIRE FORGE — Documentation surface
    Live-rendered markdown from github/Grimoire-kit
    Hérite des tokens forge-tokens.css. Aucune couleur
    hors tokens.
@@ -35,7 +35,7 @@
 .docs-bar .cockpit-label { flex: 0 0 auto; }
 .docs-bar .docs-source {
   margin-left: auto;
-  font-family: var(--font-mono); font-size: 0.6rem;
+  font-family: var(--font-mono); font-size: 0.67rem;
   color: var(--ink-muted); letter-spacing: 0.04em;
   text-decoration: none; display: flex; align-items: center; gap: 6px;
   transition: color 200ms;
@@ -50,7 +50,7 @@
 .docs-focus-pick { display: none; }
 .docs-focus-pick select {
   background: var(--elev-2); border: 1px solid var(--line); color: var(--ink);
-  font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.04em;
+  font-family: var(--font-mono); font-size: 0.73rem; letter-spacing: 0.04em;
   padding: 5px 10px; border-radius: var(--r-sm); outline: none; max-width: 260px;
 }
 
@@ -76,7 +76,7 @@
   width: 100%;
   background: var(--elev-2); border: 1px solid var(--line);
   border-radius: var(--r-sm); color: var(--ink);
-  font-family: var(--font-mono); font-size: 0.68rem;
+  font-family: var(--font-mono); font-size: 0.73rem;
   padding: 7px 10px 7px 28px; outline: none;
   transition: border-color 200ms;
 }
@@ -93,14 +93,14 @@
 }
 .docs-group { margin-bottom: 6px; }
 .docs-group-label {
-  font-family: var(--font-mono); font-size: 0.56rem;
+  font-family: var(--font-mono); font-size: 0.64rem;
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--ink-muted); padding: 12px 10px 6px;
 }
 .docs-link {
   display: flex; align-items: center; gap: 8px;
   width: 100%; text-align: left;
-  font-family: var(--font-mono); font-size: 0.7rem;
+  font-family: var(--font-mono); font-size: 0.77rem;
   color: var(--ink-soft); background: none; border: none;
   padding: 6px 10px; border-radius: var(--r-sm);
   cursor: pointer; letter-spacing: 0.01em; line-height: 1.35;
@@ -120,7 +120,7 @@
 .docs-link:hover .bullet { background: var(--ink-soft); }
 .docs-link.active .bullet { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 .docs-empty {
-  font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted);
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-muted);
   padding: 18px 12px; text-align: center;
 }
 
@@ -135,7 +135,7 @@
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 12px 32px; border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted);
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-muted);
   letter-spacing: 0.04em;
 }
 .docs-crumb .cr {
@@ -159,7 +159,7 @@
 .docs-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; height: 100%;
-  font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-muted);
+  font-family: var(--font-mono); font-size: 0.77rem; color: var(--ink-muted);
 }
 .docs-state .spin {
   width: 22px; height: 22px; border-radius: 50%;
@@ -168,7 +168,7 @@
 }
 @keyframes docs-spin { to { transform: rotate(360deg); } }
 .docs-state .retry {
-  margin-top: 4px; font-family: var(--font-mono); font-size: 0.66rem;
+  margin-top: 4px; font-family: var(--font-mono); font-size: 0.73rem;
   color: var(--accent); background: none; border: 1px solid var(--accent-dim);
   padding: 6px 14px; border-radius: var(--r-sm); cursor: pointer;
   transition: background 160ms;
@@ -182,25 +182,25 @@
   background: var(--elev-1);
 }
 .docs-toc-label {
-  font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.14em;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-muted); margin-bottom: 12px;
 }
 .docs-toc nav { display: flex; flex-direction: column; gap: 1px; }
 .docs-toc a {
-  font-family: var(--font-mono); font-size: 0.64rem; line-height: 1.45;
+  font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.45;
   color: var(--ink-muted); text-decoration: none;
   padding: 4px 8px; border-left: 2px solid transparent;
   transition: color 160ms, border-color 160ms;
 }
-.docs-toc a.lvl-3 { padding-left: 18px; font-size: 0.6rem; }
+.docs-toc a.lvl-3 { padding-left: 18px; font-size: 0.67rem; }
 .docs-toc a:hover { color: var(--ink-soft); }
 .docs-toc a.active { color: var(--accent); border-left-color: var(--accent); }
-.docs-toc .toc-empty { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); }
+.docs-toc .toc-empty { font-family: var(--font-mono); font-size: 0.67rem; color: var(--ink-muted); }
 
 /* ════════════════════════════════════════════
    Markdown body — typeset in Forge DA
    ════════════════════════════════════════════ */
-.md-body { color: var(--ink-soft); font-size: 0.9rem; line-height: 1.75; }
+.md-body { color: var(--ink-soft); font-size: 0.92rem; line-height: 1.75; }
 .md-body > *:first-child { margin-top: 0 !important; }
 
 .md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5 {
@@ -215,7 +215,7 @@
 }
 .md-body h3 { font-size: 1.04rem; font-weight: 600; margin: 28px 0 10px; }
 .md-body h4 {
-  font-size: 0.78rem; font-weight: 600; margin: 22px 0 8px;
+  font-size: 0.82rem; font-weight: 600; margin: 22px 0 8px;
   font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--ink-soft);
 }
@@ -267,19 +267,19 @@
   border-radius: var(--r-sm); overflow: hidden;
 }
 .md-body pre code {
-  display: block; font-family: var(--font-mono); font-size: 0.76rem;
+  display: block; font-family: var(--font-mono); font-size: 0.82rem;
   line-height: 1.65; color: var(--ink-soft);
   padding: 30px 16px 16px; overflow-x: auto; white-space: pre;
   background: transparent;
 }
 .md-pre-lang {
   position: absolute; top: 9px; left: 14px;
-  font-family: var(--font-mono); font-size: 0.54rem; letter-spacing: 0.12em;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--ink-muted); pointer-events: none;
 }
 .md-copy {
   position: absolute; top: 8px; right: 8px;
-  font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.08em;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.08em;
   color: var(--ink-muted); background: var(--elev-2);
   border: 1px solid var(--line); border-radius: 3px;
   padding: 4px 9px; cursor: pointer; opacity: 0;
@@ -292,13 +292,13 @@
 /* Tables */
 .md-body table {
   width: 100%; border-collapse: collapse; margin: 0 0 18px;
-  font-size: 0.8rem; display: block; overflow-x: auto;
+  font-size: 0.88rem; display: block; overflow-x: auto;
 }
 .md-body th, .md-body td {
   border: 1px solid var(--line); padding: 8px 12px; text-align: left;
 }
 .md-body th {
-  font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.06em;
+  font-family: var(--font-mono); font-size: 0.73rem; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-muted);
   background: var(--elev-1); font-weight: 500;
 }
@@ -342,7 +342,7 @@
 .mmd-btn svg { width: 13px; height: 13px; }
 .mmd-hint {
   position: absolute; bottom: 8px; left: 12px; z-index: 3;
-  font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.05em;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.05em;
   color: var(--ink-muted); opacity: 0; transition: opacity 160ms; pointer-events: none;
 }
 .mermaid-diagram:hover .mmd-hint { opacity: 0.75; }
@@ -358,15 +358,15 @@
 .mmd-overlay-bar {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 18px; border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); letter-spacing: 0.08em;
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-muted); letter-spacing: 0.08em;
 }
 .mmd-overlay-bar .sp { flex: 1; }
 .mmd-overlay-stage { flex: 1; position: relative; overflow: hidden; cursor: grab; touch-action: none; }
 .mmd-overlay-stage.grabbing { cursor: grabbing; }
-.mmd-zoomlabel { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); min-width: 46px; text-align: center; }
+.mmd-zoomlabel { font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-soft); min-width: 46px; text-align: center; }
 .mmd-close {
   display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-soft);
+  font-family: var(--font-mono); font-size: 0.67rem; color: var(--ink-soft);
   background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-sm);
   padding: 5px 11px; cursor: pointer; letter-spacing: 0.08em; transition: all 160ms;
 }
@@ -459,12 +459,12 @@
   padding: 16px 16px 2px; flex: 0 0 auto;
 }
 .docs-nav-title {
-  font-family: var(--font-mono); font-size: 0.6rem;
+  font-family: var(--font-mono); font-size: 0.67rem;
   letter-spacing: 0.18em; color: var(--ink-soft);
 }
 .docs-nav-sync {
   display: flex; align-items: center; gap: 5px;
-  font-family: var(--font-mono); font-size: 0.52rem; letter-spacing: 0.1em;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.1em;
   color: var(--data-green);
 }
 .docs-nav-sync .sync {

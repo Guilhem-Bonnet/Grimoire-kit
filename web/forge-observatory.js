@@ -131,16 +131,13 @@
   let OBS = null, META = null, ACT = null, INS = null, filter = null;
   const NEIGH = {};
 
-  // Multi-projets (cockpit local) : ?project=<slug> → data/projects/<slug>/ ; sinon flat data/ (vitrine mono).
-  const _slug = new URLSearchParams(location.search).get('project');
-  const DATA = _slug ? 'data/projects/' + _slug.replace(/[^a-z0-9-]/gi, '') + '/' : 'data/';
-  function getJSON(path) { return fetch(DATA + path, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null); }
+  function getJSON(path) { return fetch(path, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null); }
 
   Promise.all([
-    getJSON('observatory.json'),
-    getJSON('meta.json'),
-    getJSON('activity.json'),
-    getJSON('insights.json'),
+    getJSON('data/observatory.json'),
+    getJSON('data/meta.json'),
+    getJSON('data/activity.json'),
+    getJSON('data/insights.json'),
   ]).then(([obs, meta, act, ins]) => {
     OBS = obs; META = meta; ACT = act; INS = ins;
     if (!obs) { const e = $('obs-empty'); if (e) e.style.display = 'block'; const b = $('obs-badge'); if (b) b.innerHTML = '<span class="dot" style="background:var(--ink-muted)"></span>AUCUNE DONNÉE'; }
@@ -320,6 +317,7 @@
     const spans = OBS.spans || [];
     if (!spans.length) { hide('#card-chains'); return; }
     const traces = [...new Set(spans.map((s) => s.trace_id))];
+    const sessOf = {}; // best-effort label
     $('chains').innerHTML = traces.map((tid) => {
       const ss = spans.filter((s) => s.trace_id === tid);
       const root = ss.find((s) => !s.parent_span_id) || ss[0];
@@ -454,6 +452,7 @@
       ['30 JOURS', '+' + num(g.commits_30d)], ['/ JOUR (30j)', (g.avg_per_day_30d).toFixed(1)],
     ].map(([l, v]) => `<div class="ministat"><span class="ms-lbl">${l}</span><span class="ms-val">${v}</span></div>`).join('');
     $('commits-chart').innerHTML = columns((g.per_day || []).map((d) => ({ label: d.date.slice(5), value: d.count })), { color: 'var(--accent-dim)' });
+    const maxC = Math.max(1, ...(g.contributors || []).map((c) => c.commits));
     $('contributors').innerHTML = bars((g.contributors || []).map((c) => ({ label: c.name, value: c.commits, color: 'var(--data-violet)' })), { disp: (v) => num(v) });
     $('pulls').innerHTML = (ACT.pulls || []).map((p) =>
       `<a class="pr-row" href="${esc(p.url)}" target="_blank" rel="noopener"><span class="pr-num">#${p.number}</span>` +

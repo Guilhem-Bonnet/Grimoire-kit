@@ -24,8 +24,11 @@ from grimoire.__version__ import __version__
 from grimoire.cli.cmd_cockpit import cockpit_app
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
+from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
+from grimoire.cli.cmd_stigmergy import stigmergy_app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
 from grimoire.core.log import configure_logging
@@ -939,6 +942,9 @@ app.add_typer(workflows_app, name="wf", hidden=True)
 app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 app.add_typer(ext_app, name="ext", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
+app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
+app.add_typer(features_app, name="features", rich_help_panel="Project")
+app.command("serve", rich_help_panel="Project")(serve_cmd)
 
 
 _WF_DESCRIPTIONS: dict[str, str] = {

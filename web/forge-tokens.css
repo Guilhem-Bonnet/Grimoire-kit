@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   GRIMOIRE KIT — Design Tokens
+   GRIMOIRE FORGE — Design Tokens
    Source unique de vérité. Ne jamais hardcoder
    de couleur, taille ou durée hors de ce fichier.
    ═══════════════════════════════════════════════ */
@@ -41,8 +41,8 @@
   --font-mono:   'Geist Mono', 'Courier New', monospace;
 
   /* ── Échelle type ── */
-  --text-xs:   0.75rem;   /* 12px */
-  --text-sm:   0.875rem;  /* 14px */
+  --text-xs:   0.8rem;     /* ~13px — plancher lisible */
+  --text-sm:   0.92rem;    /* ~15px */
   --text-base: 1rem;      /* 16px */
   --text-md:   1.125rem;  /* 18px */
   --text-lg:   1.25rem;   /* 20px */
@@ -56,8 +56,8 @@
   /* ── Line heights ── */
   --lh-tight:  1.0;
   --lh-title:  1.2;
-  --lh-body:   1.55;
-  --lh-mono:   1.4;
+  --lh-body:   1.6;
+  --lh-mono:   1.5;
 
   /* ── Layout ── */
   --gap:        24px;
