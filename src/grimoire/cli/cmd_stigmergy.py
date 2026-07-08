@@ -187,3 +187,109 @@ def stats(
                   f"évaporés : {board.total_evaporated} · demi-vie : {board.half_life_hours:g} h")
     if by_type:
         console.print("  " + " · ".join(f"{k} {v}" for k, v in sorted(by_type.items())))
+
+
+# ── Câblage des hooks (P1/P2 : captation + émission automatiques) ───────────
+
+_HOOK_MANIFESTS = ("stigmergy-sense.json", "stigmergy-emit.json")
+_HOOK_SCRIPTS = (
+    "stigmergy_hook.py",
+    "stigmergy-sense.sh",
+    "stigmergy-emit-post-edit.sh",
+    "stigmergy-emit-stop.sh",
+)
+_REGISTRY_REL = Path("_grimoire-runtime") / "_config" / "hook-safety-registry.json"
+
+
+def _assets_dir() -> Path:
+    from grimoire.data import framework_path
+
+    return framework_path() / "tools" / "stigmergy_hooks"
+
+
+def _register_shadow(root: Path, install: bool) -> str:
+    """Enregistre/retire les hooks dans le registre de sûreté (best-effort).
+
+    Les hooks sont safe par construction (émission seule, jamais de blocage) ;
+    le registre n'est qu'un journal de gouvernance côté runtime Grimoire.
+    """
+    registry_path = root / _REGISTRY_REL
+    if not registry_path.is_file():
+        return ("registre de sûreté absent — hooks copiés, non journalisés "
+                "(ils restent non bloquants par construction)")
+    import json
+
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return "registre de sûreté illisible — journalisation ignorée"
+    hooks = registry.setdefault("hooks", {})
+    entries = {
+        "stigmergy-sense": (".github/hooks/scripts/stigmergy-sense.sh", ".github/hooks/stigmergy-sense.json"),
+        "stigmergy-emit": (".github/hooks/scripts/stigmergy-emit-post-edit.sh", ".github/hooks/stigmergy-emit.json"),
+    }
+    for name, (script, control) in entries.items():
+        if install:
+            hooks[name] = {"mode": "shadow", "script": script,
+                           "control_file": control, "origin": "stigmergy"}
+        else:
+            hooks.pop(name, None)
+    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return "hooks journalisés en mode shadow" if install else "hooks retirés du registre"
+
+
+@stigmergy_app.command("install-hooks")
+def install_hooks(
+    project_root: Annotated[Path | None, _ROOT_OPTION] = None,
+) -> None:
+    """Câbler la captation + l'émission automatiques (hooks non bloquants).
+
+    Copie les hooks stigmergiques dans .github/hooks/ du projet :
+    SessionStart injecte les signaux actifs en contexte ; PostToolUse/Stop
+    déposent des signaux (PROGRESS renforcé, COMPLETE) sans jamais bloquer.
+    """
+    import shutil
+
+    root = _root(project_root)
+    src = _assets_dir()
+    if not src.is_dir():
+        console.print(f"[red]✗[/red] Assets de hooks introuvables ({src}).")
+        raise typer.Exit(1)
+    hooks_dir = root / ".github" / "hooks"
+    scripts_dir = hooks_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    for name in _HOOK_MANIFESTS:
+        shutil.copy2(src / name, hooks_dir / name)
+    for name in _HOOK_SCRIPTS:
+        dest = scripts_dir / name
+        shutil.copy2(src / "scripts" / name, dest)
+        if name.endswith((".sh", ".py")):
+            dest.chmod(0o755)
+    note = _register_shadow(root, install=True)
+    console.print("[green]✓[/green] Hooks stigmergiques installés dans "
+                  f"[cyan]{hooks_dir}[/cyan]")
+    console.print("  SessionStart · PostToolUse · Stop — mode shadow, non bloquants")
+    console.print(f"  [dim]{note}[/dim]")
+    console.print("  [dim]Retrait : grimoire stigmergy uninstall-hooks[/dim]")
+
+
+@stigmergy_app.command("uninstall-hooks")
+def uninstall_hooks(
+    project_root: Annotated[Path | None, _ROOT_OPTION] = None,
+) -> None:
+    """Retirer les hooks stigmergiques du projet."""
+    root = _root(project_root)
+    hooks_dir = root / ".github" / "hooks"
+    removed = 0
+    for name in _HOOK_MANIFESTS:
+        target = hooks_dir / name
+        if target.exists():
+            target.unlink()
+            removed += 1
+    for name in _HOOK_SCRIPTS:
+        target = hooks_dir / "scripts" / name
+        if target.exists():
+            target.unlink()
+            removed += 1
+    note = _register_shadow(root, install=False)
+    console.print(f"[green]✓[/green] {removed} fichier(s) de hook retiré(s). [dim]{note}[/dim]")

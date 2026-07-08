@@ -574,6 +574,21 @@ Coordination indirecte par phéromones (R&D, hors contrat SemVer — voir
 | `amplify --id --agent` · `resolve --id --agent` | Renforcer / résoudre un signal |
 | `trails` | Patterns émergents (hot-zone, convergence, bottleneck, relay) |
 | `evaporate [--dry-run]` · `stats` | Purge des signaux morts / statistiques |
+| `install-hooks` · `uninstall-hooks` | Câbler / retirer l'émission + captation automatiques |
 
 Chaque sous-commande accepte `--project-root` (défaut : dossier courant).
 L'intensité décroît par demi-vie (72 h), calculée à la lecture — aucun démon.
+
+### Boucle vivante (hooks)
+
+`grimoire stigmergy install-hooks` rend le système autonome, en copiant trois
+hooks **non bloquants** dans `.github/hooks/` du projet :
+
+- **SessionStart** — injecte les signaux actifs dans le contexte de l'agent.
+- **PostToolUse** — une édition dépose (ou *renforce*, anti-bruit) un signal
+  `PROGRESS` sur la zone touchée.
+- **Stop** — marque `COMPLETE` la zone la plus active et purge les signaux morts.
+
+Ces hooks sont **safe par construction** : ils n'émettent que du contexte ou
+rien, jamais de décision de blocage. S'il existe, ils sont journalisés en
+mode `shadow` dans `_grimoire-runtime/_config/hook-safety-registry.json`.

@@ -105,3 +105,33 @@ def test_stats(tmp_path: Path) -> None:
     result = runner.invoke(app, ["stigmergy", "stats", "--project-root", str(tmp_path)])
     assert result.exit_code == 0
     assert "Actifs" in result.output
+
+
+def test_install_then_uninstall_hooks(tmp_path: Path) -> None:
+    res = runner.invoke(app, ["stigmergy", "install-hooks", "--project-root", str(tmp_path)])
+    assert res.exit_code == 0, res.output
+    hooks = tmp_path / ".github" / "hooks"
+    assert (hooks / "stigmergy-sense.json").is_file()
+    assert (hooks / "stigmergy-emit.json").is_file()
+    assert (hooks / "scripts" / "stigmergy_hook.py").is_file()
+    assert (hooks / "scripts" / "stigmergy-emit-post-edit.sh").is_file()
+
+    res2 = runner.invoke(app, ["stigmergy", "uninstall-hooks", "--project-root", str(tmp_path)])
+    assert res2.exit_code == 0
+    assert not (hooks / "stigmergy-sense.json").exists()
+    assert not (hooks / "scripts" / "stigmergy_hook.py").exists()
+
+
+def test_install_hooks_registers_shadow(tmp_path: Path) -> None:
+    reg = tmp_path / "_grimoire-runtime" / "_config" / "hook-safety-registry.json"
+    reg.parent.mkdir(parents=True)
+    reg.write_text('{"hooks": {}}\n', encoding="utf-8")
+
+    res = runner.invoke(app, ["stigmergy", "install-hooks", "--project-root", str(tmp_path)])
+    assert res.exit_code == 0
+    hooks = json.loads(reg.read_text(encoding="utf-8"))["hooks"]
+    assert hooks["stigmergy-sense"]["mode"] == "shadow"
+    assert hooks["stigmergy-emit"]["mode"] == "shadow"
+
+    runner.invoke(app, ["stigmergy", "uninstall-hooks", "--project-root", str(tmp_path)])
+    assert json.loads(reg.read_text(encoding="utf-8"))["hooks"] == {}
