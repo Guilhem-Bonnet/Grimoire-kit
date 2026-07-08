@@ -32,6 +32,8 @@ from pathlib import Path
 from typing import Any
 
 BOARD_REL = Path("_grimoire-output") / "pheromone-board.json"
+EVENTS_REL = Path("_grimoire-output") / "stigmergy-events.jsonl"
+FEATURES_REL = Path("_grimoire") / "features.json"
 DEFAULT_HALF_LIFE_HOURS = 72.0
 DETECTION_THRESHOLD = 0.05
 PROGRESS_INTENSITY = 0.45
@@ -143,6 +145,41 @@ def evaporate(board: dict[str, Any], now: datetime) -> int:
     board["pheromones"] = survivors
     board["total_evaporated"] = int(board.get("total_evaporated", 0)) + removed
     return removed
+
+
+# ── Canal beta : flag projet + journal comportemental ──────────────────────
+
+def hooks_enabled(root: Path) -> bool:
+    """Respecte le toggle `stigmergy-hooks` de _grimoire/features.json.
+
+    Absent ou illisible ⇒ activé (les hooks ne sont copiés que sur opt-in ;
+    le flag sert à couper la boucle sans désinstaller)."""
+    path = root / FEATURES_REL
+    if not path.is_file():
+        return True
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        entry = data.get("stigmergy-hooks")
+        if isinstance(entry, dict) and entry.get("enabled") is False:
+            return False
+    except (json.JSONDecodeError, OSError):
+        pass
+    return True
+
+
+def log_event(root: Path, action: str, **fields: Any) -> None:
+    """Journal JSONL append-only des actes stigmergiques (fail-open).
+
+    Base des métriques de promotion beta→stable : chaque émission, renfort,
+    complétion et injection de contexte laisse une trace datée."""
+    try:
+        path = root / EVENTS_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"ts": _now().isoformat(), "action": action, "source": "hook", **fields}
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 # ── Extraction défensive de l'event (Claude Code / Copilot) ─────────────────
@@ -275,20 +312,38 @@ def main(argv: list[str] | None = None) -> int:
     action = args[0] if args else ""
     try:
         root = Path.cwd()
+        if not hooks_enabled(root):
+            if action == "sense":
+                _emit_context("", "SessionStart")
+            else:
+                sys.stdin.read()
+                print("{}")
+            return 0
         if action == "sense":
             board = load_board(root)
-            _emit_context(format_sense(board, _now()), "SessionStart")
+            text = format_sense(board, _now())
+            if text:
+                log_event(root, "sense-injected",
+                          signals=len(text.splitlines()) - 1)
+            _emit_context(text, "SessionStart")
             return 0
         event = read_event()
         now = _now()
         if action == "emit-post-edit":
             board = load_board(root)
-            if decide_post_edit(board, event, now):
+            outcome = decide_post_edit(board, event, now)
+            if outcome:
                 save_board(root, board)
+                log_event(root, outcome, ptype="PROGRESS",
+                          location=zone_of(event_file_path(event)),
+                          emitter=event_emitter(event))
         elif action == "emit-stop":
             board = load_board(root)
-            decide_stop(board, event, now)
+            zone = decide_stop(board, event, now)
             save_board(root, board)
+            if zone:
+                log_event(root, "complete", ptype="COMPLETE", location=zone,
+                          emitter=event_emitter(event))
         print("{}")
         return 0
     except Exception:  # fail-open strict : un hook ne casse jamais une session

@@ -559,7 +559,7 @@
         <div>
           <div class="eyebrow" style="margin-bottom:10px"><span class="num">D</span> · COORDINATION STIGMERGIQUE</div>
           <h2>Les phéromones du projet.</h2>
-          <p class="lead">Coordination indirecte : les agents déposent des signaux typés — besoin, alerte, progression, blocage — qui s'évaporent (demi-vie) et se renforcent. L'environnement est le médium. <b>Expérimental (R&amp;D).</b></p>
+          <p class="lead">Coordination indirecte : les agents déposent des signaux typés — besoin, alerte, progression, blocage — qui s'évaporent (demi-vie) et se renforcent. L'environnement est le médium. <b>Canal beta</b> — <a href="labs.html" style="color:var(--accent)">activable dans Labs</a>.</p>
         </div>
         <span class="status-tag" id="stig-tag"><span class="dot"></span>CHARGEMENT…</span>
       </div>
@@ -658,8 +658,10 @@
     catch (e) { setOffline(); return false; }
     const tag = $('stig-tag');
     if (tag) { tag.className = 'status-tag real'; tag.innerHTML = '<span class="dot"></span>LIVE'; }
+    const b = d.behavior || {};
     if ($('stig-count')) $('stig-count').textContent = (d.stats.active || 0) + ' actif(s) · '
-      + (d.stats.emitted || 0) + ' émis';
+      + (d.stats.emitted || 0) + ' émis · ' + (b.autoEmits || 0) + ' auto · '
+      + (b.senseInjections || 0) + ' injections · utile ' + Math.round((b.usefulRatio || 0) * 100) + '%';
     renderSignals(d.active || []);
     renderTrails(d.trails || []);
     return true;

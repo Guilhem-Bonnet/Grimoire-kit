@@ -38,6 +38,7 @@ class BulkSignal(TypedDict):
     intensity: NotRequired[float]
 
 PHEROMONE_FILE = "pheromone-board.json"
+EVENTS_FILE = "stigmergy-events.jsonl"
 VALID_TYPES = frozenset({"NEED", "ALERT", "OPPORTUNITY", "PROGRESS", "COMPLETE", "BLOCK"})
 
 DEFAULT_HALF_LIFE_HOURS = 72.0
@@ -173,6 +174,46 @@ class TrailPattern:
 
 def _board_path(project_root: Path) -> Path:
     return project_root / "_grimoire-output" / PHEROMONE_FILE
+
+
+def log_event(project_root: Path, action: str, *, source: str = "cli",
+              **fields: Any) -> None:
+    """Journal JSONL append-only des actes stigmergiques (fail-open).
+
+    Même fichier que les hooks (``_grimoire-output/stigmergy-events.jsonl``) :
+    la base des métriques de promotion beta→stable.
+    """
+    try:
+        path = project_root / "_grimoire-output" / EVENTS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"ts": datetime.now(tz=UTC).isoformat(), "action": action,
+                 "source": source, **fields}
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def read_events(project_root: Path) -> list[dict[str, Any]]:
+    """Relit le journal comportemental (liste vide si absent/corrompu)."""
+    path = project_root / "_grimoire-output" / EVENTS_FILE
+    if not path.is_file():
+        return []
+    entries: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                entries.append(item)
+    except OSError:
+        return []
+    return entries
 
 
 def load_board(project_root: Path) -> PheromoneBoard:

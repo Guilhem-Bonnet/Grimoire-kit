@@ -693,6 +693,33 @@ class ForgeAPI:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         return cast(list[str], manifest.get("patterns", {}).get("implements", []))
 
+    # ── canaux de features (beta / experimental) ──────────────────────────
+
+    def features_view(self) -> list[dict[str, Any]]:
+        from grimoire.tools import features as feat
+        from grimoire.tools import stigmergy_hooks as sh
+
+        entries = feat.list_features(self.project_root)
+        for entry in entries:
+            if entry["id"] == "stigmergy-hooks":
+                entry["installed"] = sh.hooks_installed(self.project_root)
+        return entries
+
+    def feature_toggle(self, feature_id: str, enabled: bool) -> dict[str, Any]:
+        from grimoire.tools import features as feat
+
+        feat.set_enabled(self.project_root, feature_id, enabled)
+        note = None
+        if feature_id == "stigmergy-hooks":
+            from grimoire.tools import stigmergy_hooks as sh
+
+            if enabled:
+                note = sh.install_hooks(self.project_root)
+            else:
+                removed, registry_note = sh.uninstall_hooks(self.project_root)
+                note = f"{removed} fichier(s) retiré(s) · {registry_note}"
+        return {**feat.feature_state(self.project_root, feature_id), "note": note}
+
     # ── télémétrie ────────────────────────────────────────────────────────
 
     def event_files(self) -> list[tuple[str, Path]]:
@@ -755,6 +782,16 @@ class ForgeAPI:
         by_type: dict[str, int] = {}
         for p, _ in active:
             by_type[p.pheromone_type] = by_type.get(p.pheromone_type, 0) + 1
+
+        # Métriques comportementales (base de la promotion beta→stable) :
+        # le journal dit si le board coordonne réellement ou tourne à vide.
+        events = stig.read_events(self.project_root)
+        actions = [str(e.get("action", "")) for e in events]
+        resolved = sum(1 for p in board.pheromones if p.resolved)
+        reinforcements = sum(p.reinforcements for p in board.pheromones)
+        relays = sum(1 for t in trails if t["type"] == "relay")
+        useful = resolved + relays
+        denominator = board.total_emitted or 1
         return {
             "active": signals,
             "trails": trails,
@@ -764,6 +801,21 @@ class ForgeAPI:
                 "evaporated": board.total_evaporated,
                 "halfLifeHours": board.half_life_hours,
                 "byType": by_type,
+            },
+            "behavior": {
+                "senseInjections": actions.count("sense-injected"),
+                "autoEmits": sum(
+                    1 for e in events
+                    if e.get("source") == "hook" and e.get("action") in ("emit", "reinforce")
+                ),
+                "manualEmits": sum(
+                    1 for e in events
+                    if e.get("source") != "hook" and e.get("action") in ("emit", "reinforce")
+                ),
+                "resolved": resolved,
+                "reinforcements": reinforcements,
+                "relays": relays,
+                "usefulRatio": round(useful / denominator, 3),
             },
         }
 
@@ -811,6 +863,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json(api.events_log())
                 elif path == "/api/stigmergy":
                     self._json(api.stigmergy_view())
+                elif path == "/api/features":
+                    self._json(api.features_view())
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":
@@ -843,6 +897,12 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json({"removed": body.get("id")})
                 elif path in ("/api/setup", "/api/setup/plan"):
                     self._json(api.setup_plan(body))
+                elif path.startswith("/api/features/"):
+                    feature_id = path.rsplit("/", 1)[1]
+                    try:
+                        self._json(api.feature_toggle(feature_id, bool(body.get("enabled"))))
+                    except KeyError:
+                        self._error(f"feature inconnue : {feature_id}", 404)
                 elif path.startswith("/api/blueprints/") and path.endswith("/validate"):
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)

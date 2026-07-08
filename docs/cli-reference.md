@@ -562,9 +562,21 @@ Voir [Mode local & blueprints](serve-blueprints.md).
 Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
 utiliser la forme longue : `python -m grimoire.tools.forge_server`.
 
-## `grimoire stigmergy` *(expérimental)*
+## `grimoire features`
 
-Coordination indirecte par phéromones (R&D, hors contrat SemVer — voir
+Canaux de features : **stable** (contrat SemVer), **beta** (opt-in par projet,
+journalisées, promues sur métriques d'usage), **experimental** (surface R&D).
+État persisté dans `_grimoire/features.json`. La page **Labs** de l'atelier
+(`grimoire serve`) expose les mêmes bascules.
+
+| Sous-commande | Rôle |
+| --- | --- |
+| `list` | Lister les features à canal et leur état pour le projet |
+| `enable <id>` · `disable <id>` | Basculer une feature beta (certaines portent une action réelle, ex. `stigmergy-hooks` installe/retire les hooks) |
+
+## `grimoire stigmergy` *(beta)*
+
+Coordination indirecte par phéromones (canal beta — voir
 [R&D expérimental](rnd.md)). Tableau local `_grimoire-output/pheromone-board.json`.
 
 | Sous-commande | Rôle |

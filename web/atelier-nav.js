@@ -426,7 +426,8 @@
     docs:       '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h6l3 3v9H4z"/><path d="M10 2v3h3"/></svg>',
     observatory:'<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.6"/><path d="M8 2v2.5M14 8h-2.5"/></svg>',
     memory:     '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6.5h4M6 9.5h4"/></svg>',
-    kanban:     '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3v10M8 3v6.5M13 3v10"/></svg>'
+    kanban:     '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3v10M8 3v6.5M13 3v10"/></svg>',
+    labs:       '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6.5 2h3M7 2v4.2L3.6 12a1.6 1.6 0 0 0 1.4 2.4h6a1.6 1.6 0 0 0 1.4-2.4L9 6.2V2"/><path d="M5 10.5h6"/></svg>'
   };
 
   function navItem(href, label, icon, opts) {
@@ -459,6 +460,7 @@
         ${navItem('observability.html', 'Observatoire', 'observatory', { disabled: noProj })}
         ${navItem('memory.html', 'Mémoire', 'memory', { disabled: noProj })}
         ${navItem('kanban.html', 'Kanban', 'kanban', { disabled: noProj })}
+        ${navItem('labs.html', 'Labs', 'labs')}
         <div class="at-foot">
           <a href="index.html" class="at-nav-i">Site public ↗</a>
         </div>`;
