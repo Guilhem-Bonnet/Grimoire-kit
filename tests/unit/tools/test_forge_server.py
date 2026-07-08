@@ -566,3 +566,27 @@ class TestStudioBridge:
         assert saved["blueprintVersion"] == 2
         assert saved["compiled"]["artifacts"][0]["path"] == result["artifact"]
         assert saved["nodes"][2]["kind"] == "group"
+
+
+class TestStigmergyView:
+    def test_empty_board(self, api: ForgeAPI) -> None:
+        view = api.stigmergy_view()
+        assert view["active"] == []
+        assert view["trails"] == []
+        assert view["stats"]["active"] == 0
+
+    def test_active_signals_and_convergence(self, api: ForgeAPI) -> None:
+        from grimoire.tools import stigmergy as stig
+
+        board = stig.load_board(api.project_root)
+        stig.emit_pheromone(board, ptype="NEED", location="src/auth",
+                            text="review", emitter="dev")
+        stig.emit_pheromone(board, ptype="ALERT", location="src/auth",
+                            text="faille", emitter="qa")
+        stig.save_board(api.project_root, board)
+
+        view = api.stigmergy_view()
+        assert view["stats"]["active"] == 2
+        assert {s["type"] for s in view["active"]} == {"NEED", "ALERT"}
+        assert any(t["type"] == "convergence" for t in view["trails"])
+        assert view["stats"]["byType"]["NEED"] == 1

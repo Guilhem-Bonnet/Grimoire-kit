@@ -76,6 +76,7 @@ bindings du blueprint.
 | `GET/PUT /api/blueprints/<id>` | CRUD des blueprints |
 | `POST /api/blueprints/<id>/validate` · `/simulate` · `/compile` | Lint, dry-run, compilation |
 | `GET /api/events` (SSE) · `GET /api/events/log` | Télémétrie live et replay |
+| `GET /api/stigmergy` | Vue live du tableau phéromonique (signaux actifs, trails) — expérimental |
 
 Les blueprints du Studio (format v2, positionné) sont acceptés directement :
 le serveur en dérive la projection compilable (pins typés depuis les contrats,

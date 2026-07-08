@@ -719,6 +719,54 @@ class ForgeAPI:
             log[name] = entries
         return log
 
+    # ── coordination stigmergique (expérimental) ──────────────────────────
+
+    def stigmergy_view(self) -> dict[str, Any]:
+        """Vue live du tableau phéromonique du projet (signaux actifs + trails).
+
+        Lit ``_grimoire-output/pheromone-board.json`` via le module SDK ;
+        l'intensité est décroissante (calculée à la lecture). Rien n'est écrit.
+        """
+        from grimoire.tools import stigmergy as stig
+
+        board = stig.load_board(self.project_root)
+        active = stig.sense_pheromones(board)
+        signals = [
+            {
+                "id": p.pheromone_id,
+                "type": p.pheromone_type,
+                "location": p.location,
+                "text": p.text,
+                "emitter": p.emitter,
+                "intensity": round(inten, 4),
+                "reinforcements": p.reinforcements,
+            }
+            for p, inten in active
+        ]
+        trails = [
+            {
+                "type": t.pattern_type,
+                "location": t.location,
+                "description": t.description,
+                "agents": list(t.involved_agents),
+            }
+            for t in stig.analyze_trails(board)
+        ]
+        by_type: dict[str, int] = {}
+        for p, _ in active:
+            by_type[p.pheromone_type] = by_type.get(p.pheromone_type, 0) + 1
+        return {
+            "active": signals,
+            "trails": trails,
+            "stats": {
+                "active": len(signals),
+                "emitted": board.total_emitted,
+                "evaporated": board.total_evaporated,
+                "halfLifeHours": board.half_life_hours,
+                "byType": by_type,
+            },
+        }
+
 
 def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
@@ -761,6 +809,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json(api.blueprints_list())
                 elif path == "/api/events/log":
                     self._json(api.events_log())
+                elif path == "/api/stigmergy":
+                    self._json(api.stigmergy_view())
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":

@@ -551,7 +551,32 @@
         <span class="status-tag private" style="margin-left:auto"><span class="dot"></span>PRIVÉ · NON PUBLIÉ</span>
       </div>
     </div>
+  
+  <!-- ════════════ BAND D — COORDINATION STIGMERGIQUE (live · expérimental) ════════════ -->
+  <section class="band alt" id="band-stigmergy">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">D</span> · COORDINATION STIGMERGIQUE</div>
+          <h2>Les phéromones du projet.</h2>
+          <p class="lead">Coordination indirecte : les agents déposent des signaux typés — besoin, alerte, progression, blocage — qui s'évaporent (demi-vie) et se renforcent. L'environnement est le médium. <b>Expérimental (R&amp;D).</b></p>
+        </div>
+        <span class="status-tag" id="stig-tag"><span class="dot"></span>CHARGEMENT…</span>
+      </div>
+      <div class="band-divider"></div>
+      <div class="row g2" style="margin-bottom:0">
+        <div class="panel reveal">
+          <div class="panel-head"><span>Signaux actifs</span><span class="sub" id="stig-count">—</span></div>
+          <div id="stig-signals"></div>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head"><span>Patterns émergents</span><span class="sub">trails de coordination</span></div>
+          <div id="stig-trails"></div>
+        </div>
+      </div>
+    </div>
   </section>
+</section>
 </main>
 </div>
 <div class="at-status" id="atelier-status"></div>
@@ -567,6 +592,85 @@
     const obs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); obs.unobserve(e.target); } }), { threshold: 0.6 });
     document.querySelectorAll('.band-divider').forEach((d) => obs.observe(d));
   })();
+</script>
+
+<script>
+/* Coordination stigmergique — vue live via /api/stigmergy (atelier local).
+   Sur la vitrine (hors API), affiche la marche à suivre. Poll léger. */
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => (window.Atelier ? Atelier.esc(s) : String(s == null ? '' : s));
+  const TYPE_COLOR = {
+    NEED: 'var(--data-cyan)', ALERT: 'var(--data-red)',
+    OPPORTUNITY: 'var(--data-green)', PROGRESS: 'var(--accent)',
+    COMPLETE: 'var(--data-green)', BLOCK: 'var(--data-amber)',
+  };
+  const tc = (t) => TYPE_COLOR[t] || 'var(--ink-soft)';
+
+  function setOffline() {
+    const tag = $('stig-tag');
+    if (tag) { tag.className = 'status-tag'; tag.innerHTML = '<span class="dot"></span>ATELIER LOCAL'; }
+    if ($('stig-count')) $('stig-count').textContent = '—';
+    if ($('stig-signals')) $('stig-signals').innerHTML =
+      '<p style="font-family:var(--font-mono);font-size:0.72rem;color:var(--ink-soft);line-height:1.6">'
+      + 'Vue live disponible dans l\u2019atelier local. Lancez <code>grimoire serve</code>, '
+      + 'puis activez la boucle : <code>grimoire stigmergy install-hooks</code>.</p>';
+    if ($('stig-trails')) $('stig-trails').innerHTML =
+      '<p style="font-family:var(--font-mono);font-size:0.66rem;color:var(--ink-muted)">'
+      + 'les patterns (convergence, hot-zone, bottleneck, relay) apparaissent quand des signaux s\u2019accumulent.</p>';
+  }
+
+  function renderSignals(active) {
+    if (!active.length) {
+      $('stig-signals').innerHTML = '<p style="font-family:var(--font-mono);font-size:0.7rem;color:var(--ink-muted)">Aucun signal actif — le board est calme.</p>';
+      return;
+    }
+    const max = Math.max.apply(null, active.map(s => s.intensity));
+    $('stig-signals').innerHTML = active.slice(0, 8).map(s => {
+      const w = Math.max(4, Math.round(s.intensity / (max || 1) * 100));
+      const rf = s.reinforcements ? ' <span style="color:var(--ink-muted)">\u00d7' + (s.reinforcements + 1) + '</span>' : '';
+      return '<div class="bar-row"><span class="bar-lbl" title="' + esc(s.text) + '">'
+        + '<span class="cdot" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + tc(s.type) + ';margin-right:6px"></span>'
+        + esc(s.type) + ' @ ' + esc(s.location || '—') + rf
+        + '</span><span class="bar-track"><span class="bar-fill" style="width:' + w + '%;background:' + tc(s.type) + '"></span></span>'
+        + '<span class="bar-val">' + Math.round(s.intensity * 100) + '%</span></div>';
+    }).join('');
+  }
+
+  function renderTrails(trails) {
+    if (!trails.length) {
+      $('stig-trails').innerHTML = '<p style="font-family:var(--font-mono);font-size:0.7rem;color:var(--ink-muted)">Aucun pattern émergent pour l\u2019instant.</p>';
+      return;
+    }
+    $('stig-trails').innerHTML = trails.map(t =>
+      '<div style="padding:8px 0;border-bottom:1px solid var(--line)">'
+      + '<span class="chip" style="color:var(--accent);border-color:var(--accent-dim)">' + esc(t.type) + '</span> '
+      + '<b style="font-family:var(--font-mono);font-size:0.72rem">' + esc(t.location || '—') + '</b>'
+      + '<div style="font-size:0.72rem;color:var(--ink-soft);margin-top:3px">' + esc(t.description) + '</div></div>'
+    ).join('');
+  }
+
+  async function tick() {
+    if (!(window.Atelier && Atelier.online)) { setOffline(); return false; }
+    let d;
+    try { d = await Atelier.api('/api/stigmergy'); }
+    catch (e) { setOffline(); return false; }
+    const tag = $('stig-tag');
+    if (tag) { tag.className = 'status-tag real'; tag.innerHTML = '<span class="dot"></span>LIVE'; }
+    if ($('stig-count')) $('stig-count').textContent = (d.stats.active || 0) + ' actif(s) · '
+      + (d.stats.emitted || 0) + ' émis';
+    renderSignals(d.active || []);
+    renderTrails(d.trails || []);
+    return true;
+  }
+
+  (async function () {
+    if (window.Atelier && Atelier.ready) { try { await Atelier.ready; } catch (e) {} }
+    const online = await tick();
+    if (online) setInterval(tick, 5000);
+  })();
+})();
 </script>
 </body>
 </html>
