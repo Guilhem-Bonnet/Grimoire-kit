@@ -561,3 +561,19 @@ Voir [Mode local & blueprints](serve-blueprints.md).
 
 Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
 utiliser la forme longue : `python -m grimoire.tools.forge_server`.
+
+## `grimoire stigmergy` *(expérimental)*
+
+Coordination indirecte par phéromones (R&D, hors contrat SemVer — voir
+[R&D expérimental](rnd.md)). Tableau local `_grimoire-output/pheromone-board.json`.
+
+| Sous-commande | Rôle |
+| --- | --- |
+| `emit --type --location --text --agent [--tags] [--intensity]` | Déposer un signal typé (NEED, ALERT, OPPORTUNITY, PROGRESS, COMPLETE, BLOCK) |
+| `sense [--type] [--location] [--json]` | Détecter les signaux actifs (au-dessus du seuil) |
+| `amplify --id --agent` · `resolve --id --agent` | Renforcer / résoudre un signal |
+| `trails` | Patterns émergents (hot-zone, convergence, bottleneck, relay) |
+| `evaporate [--dry-run]` · `stats` | Purge des signaux morts / statistiques |
+
+Chaque sous-commande accepte `--project-root` (défaut : dossier courant).
+L'intensité décroît par demi-vie (72 h), calculée à la lecture — aucun démon.

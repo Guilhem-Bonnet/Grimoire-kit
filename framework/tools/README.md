@@ -337,28 +337,38 @@ Système de phéromones numériques : les agents déposent des signaux typés da
 
 ### Usage
 
+Avec le paquet installé (`pip install grimoire-kit`), la commande de premier
+niveau `grimoire stigmergy` est le chemin recommandé :
+
 ```bash
 # Émettre un signal
-bash grimoire-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité requise" --agent dev
-bash grimoire-init.sh stigmergy emit --type ALERT --location "src/db" --text "breaking change" --agent architect --tags "db,urgent"
+grimoire stigmergy emit --type NEED --location "src/auth" --text "review sécurité requise" --agent dev
+grimoire stigmergy emit --type ALERT --location "src/db" --text "breaking change" --agent architect --tags "db,urgent"
 
 # Détecter les signaux actifs
-bash grimoire-init.sh stigmergy sense
-bash grimoire-init.sh stigmergy sense --type ALERT
-bash grimoire-init.sh stigmergy sense --location "auth" --json
+grimoire stigmergy sense
+grimoire stigmergy sense --type ALERT
+grimoire stigmergy sense --location "auth" --json
 
 # Renforcer / Résoudre
-bash grimoire-init.sh stigmergy amplify --id PH-a1b2c3d4 --agent qa
-bash grimoire-init.sh stigmergy resolve --id PH-a1b2c3d4 --agent qa
+grimoire stigmergy amplify --id PH-a1b2c3d4 --agent qa
+grimoire stigmergy resolve --id PH-a1b2c3d4 --agent qa
 
-# Cartographie
-bash grimoire-init.sh stigmergy landscape
-bash grimoire-init.sh stigmergy trails
+# Patterns émergents / Maintenance
+grimoire stigmergy trails
+grimoire stigmergy evaporate
+grimoire stigmergy evaporate --dry-run
+grimoire stigmergy stats
+```
 
-# Maintenance
-bash grimoire-init.sh stigmergy evaporate
-bash grimoire-init.sh stigmergy evaporate --dry-run
-bash grimoire-init.sh stigmergy stats
+Le script autonome (`framework/tools/stigmergy.py`, embarqué dans un projet
+sans le paquet) reste utilisable directement et partage le **même** tableau
+(`_grimoire-output/pheromone-board.json`) ; il expose en plus `landscape` :
+
+```bash
+python framework/tools/stigmergy.py sense
+python framework/tools/stigmergy.py landscape
+```
 ```
 
 ### Patterns de coordination détectés
