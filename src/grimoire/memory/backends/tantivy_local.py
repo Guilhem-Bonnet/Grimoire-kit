@@ -16,6 +16,7 @@ import json
 import re
 import threading
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,12 @@ from typing import Any
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
-_TEXT_FIELDS = ["text", "text_en", "text_fr"]
+_TEXT_FIELDS = ["text", "text_en", "text_fr", "text_folded"]
+
+
+def _fold(text: str) -> str:
+    """Strip diacritics (NFD, drop combining marks) for accent-insensitive matching."""
+    return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
 
 
 def _require_tantivy() -> Any:
@@ -64,6 +70,7 @@ class TantivyMemoryBackend(MemoryBackend):
         builder.add_text_field("text", stored=True)
         builder.add_text_field("text_en", stored=False, tokenizer_name="en_stem")
         builder.add_text_field("text_fr", stored=False, tokenizer_name="fr_stem")
+        builder.add_text_field("text_folded", stored=False)
         builder.add_text_field("user_id", stored=True, tokenizer_name="raw")
         builder.add_text_field("payload", stored=True, tokenizer_name="raw")
         self._schema = builder.build()
@@ -81,6 +88,7 @@ class TantivyMemoryBackend(MemoryBackend):
             text=text,
             text_en=text,
             text_fr=text,
+            text_folded=_fold(text),
             user_id=user_id,
             payload=json.dumps(payload, ensure_ascii=False),
         ))
@@ -141,7 +149,9 @@ class TantivyMemoryBackend(MemoryBackend):
         tokens = re.findall(r"\w+", query.lower())
         if not tokens:
             return []
-        expression = " OR ".join(tokens)
+        # Add folded variants so accented and unaccented queries both match.
+        folded = [_fold(token) for token in tokens]
+        expression = " OR ".join(dict.fromkeys(tokens + folded))
         with self._lock:
             searcher = self._index.searcher()
             parsed = self._index.parse_query(expression, _TEXT_FIELDS)

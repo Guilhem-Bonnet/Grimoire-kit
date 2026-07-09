@@ -373,6 +373,36 @@ def memory_vector_sync_code(
         console.print(f"  Graph nodes    : {graph_stats['code_nodes']}")
 
 
+_docs_paths_opt = typer.Option("docs,README.md", "--paths", help="Comma-separated files or directories to index.")
+
+
+@vector_app.command("sync-docs")
+def memory_vector_sync_docs(
+    ctx: typer.Context,
+    paths: str = _docs_paths_opt,
+    exclude: str = _graph_exclude_opt,
+) -> None:
+    """Upsert deterministic markdown docs pages into the active memory backend."""
+    from grimoire.memory.projections import sync_docs_projection
+
+    mgr, _, root = _load_manager_context()
+    stats = sync_docs_projection(
+        mgr,
+        project_root=root,
+        paths=_parse_paths(paths),
+        exclude=_parse_exclude(exclude),
+    )
+
+    fmt = _get_fmt(ctx)
+    if fmt == "json":
+        typer.echo(json.dumps(stats, indent=2, default=str))
+        return
+    console.print("[green]Docs projection synced[/green]")
+    console.print(f"  Pages expected : {stats['expected']}")
+    console.print(f"  Upserted       : {stats['upserted']}")
+    console.print(f"  Unchanged      : {stats['unchanged']}")
+
+
 @vector_app.command("sync-tasks")
 def memory_vector_sync_tasks(
     ctx: typer.Context,
@@ -991,10 +1021,23 @@ def memory_search(
     wing: str = typer.Option("", "--wing", help="Filter by palace wing."),
     hall: str = typer.Option("", "--hall", help="Filter by palace hall."),
     room: str = typer.Option("", "--room", help="Filter by palace room."),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Fuse vector and lexical BM25 rankings (RRF)."),
 ) -> None:
     """Search memories by keyword or semantic similarity."""
     mgr = _load_manager()
-    results = mgr.search_taxonomy(query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+    if hybrid:
+        from grimoire.memory.taxonomy import entry_matches_filters
+
+        has_filters = bool(wing or hall or room)
+        fetch = max(limit * 10, limit) if has_filters else limit
+        results = mgr.hybrid_search(query, user_id=user_id, limit=fetch)
+        if has_filters:
+            results = [
+                entry for entry in results
+                if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
+            ][:limit]
+    else:
+        results = mgr.search_taxonomy(query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
     fmt = _get_fmt(ctx)
 
     if fmt == "json":
@@ -1029,6 +1072,31 @@ def memory_search(
         )
 
     console.print(tbl)
+
+
+# ── grimoire memory reindex-lexical ──────────────────────────────────────────
+
+
+@memory_app.command("reindex-lexical")
+def memory_reindex_lexical(ctx: typer.Context) -> None:
+    """Backfill the lexical companion index from the primary backend.
+
+    Use after enabling hybrid retrieval on a project with pre-existing
+    memories.  No-op when the primary backend is already lexical/local.
+    """
+    mgr = _load_manager()
+    mirrored = mgr.reindex_lexical_companion()
+    fmt = _get_fmt(ctx)
+    if fmt == "json":
+        typer.echo(json.dumps({
+            "mirrored": mirrored,
+            "companion": mgr.lexical_companion is not None,
+        }))
+        return
+    if mgr.lexical_companion is None:
+        console.print("[yellow]No lexical companion configured (primary backend is already lexical/local).[/yellow]")
+        return
+    console.print(f"[green][OK][/green] {mirrored} entries mirrored into the lexical companion index.")
 
 
 # ── grimoire memory remember / recall (protocole agent typé, ADR-003) ────────

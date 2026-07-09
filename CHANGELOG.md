@@ -33,6 +33,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tolérant aux pannes. `MemoryManager.hybrid_search()` fusionne le classement
   vectoriel et un index compagnon lexical FTS5, mirroré automatiquement à
   chaque écriture ; `reindex_lexical_companion()` pour le backfill.
+- **Surface CLI retrieval** : `grimoire memory search --hybrid` (fusion RRF)
+  et `grimoire memory reindex-lexical` (backfill du compagnon).
+- **Projection docs** : `grimoire memory vector sync-docs` indexe les pages
+  markdown (`docs/`, `README.md` par défaut) dans le backend mémoire actif —
+  scope `docs` interrogeable via la recherche BM25/hybride. Le scope `code`
+  est couvert par la projection backend-agnostique existante
+  (`memory vector sync-code`), compatible avec les nouveaux backends.
+- **Evals retrieval** : gold set recall@k
+  (`tests/unit/memory/test_retrieval_quality.py`) gardant l'échelle de
+  qualité — lexical jamais sous local, stemming tantivy complet sur les
+  requêtes morphologiques françaises, fusion RRF récupérant les deux
+  classements.
+- **Tantivy insensible aux diacritiques** : champ `text_folded` (NFD) — les
+  requêtes accentuées et non accentuées matchent dans les deux sens.
 
 ### Corrigé
 
