@@ -20,7 +20,7 @@ __all__ = ["generate_schema"]
 
 _VALID_TYPES = list(VALID_PROJECT_TYPES)
 _VALID_SKILL_LEVELS = sorted(["beginner", "intermediate", "expert"])
-_VALID_BACKENDS = sorted(["auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"])
+_VALID_BACKENDS = sorted(["auto", "local", "lexical", "tantivy-local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"])
 _VALID_SHORT_TERM_BACKENDS = sorted(["sqlite", "redis", "none"])
 _VALID_LAYER_MODES = sorted(["disabled", "planned", "sqlite-sidecar", "qdrant", "weaviate", "neo4j", "runtime-dashboard"])
 _KNOWN_ARCHETYPES = sorted([

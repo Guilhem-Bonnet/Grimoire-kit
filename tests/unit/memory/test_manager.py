@@ -117,9 +117,12 @@ class TestFromBackend:
 # ── auto-resolution ──────────────────────────────────────────────────────────
 
 class TestResolveAuto:
-    def test_auto_defaults_to_local(self) -> None:
+    def test_auto_defaults_to_best_local(self) -> None:
+        from grimoire.memory.backends.lexical import fts5_available
+
         cfg = _make_config("auto")
-        assert _resolve_auto(cfg) == "local"
+        expected = "lexical" if fts5_available() else "local"
+        assert _resolve_auto(cfg) == expected
 
     def test_auto_with_ollama_url(self) -> None:
         cfg = _make_config("auto", ollama_url="http://gpu:11434")
@@ -132,6 +135,25 @@ class TestResolveAuto:
     def test_ollama_takes_priority_over_qdrant(self) -> None:
         cfg = _make_config("auto", ollama_url="http://gpu:11434", qdrant_url="http://q:6333")
         assert _resolve_auto(cfg) == "ollama"
+
+    def test_lexical_retrieval_mode_overrides_server_urls(self) -> None:
+        from grimoire.memory.backends.lexical import fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        cfg = _make_config("auto", retrieval_mode="lexical", qdrant_url="http://q:6333")
+        assert _resolve_auto(cfg) == "lexical"
+
+    def test_vector_database_false_forces_lexical(self) -> None:
+        from grimoire.memory.backends.lexical import fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "test-project"},
+            "memory": {"backend": "auto", "vector_database": False, "weaviate_url": "http://w:8080"},
+        })
+        assert _resolve_auto(cfg) == "lexical"
 
 
 # ── from_config with local backend ───────────────────────────────────────────
@@ -154,12 +176,38 @@ class TestFromConfigLocal:
         assert len(results) == 1
         assert "python" in results[0].text.lower()
 
-    def test_local_auto_resolves(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_auto_resolves_to_lexical_or_local(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = _make_config("auto")
         mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        from grimoire.memory.backends.lexical import LexicalMemoryBackend, fts5_available
         from grimoire.memory.backends.local import LocalMemoryBackend
 
-        assert isinstance(mgr.backend, LocalMemoryBackend)
+        expected = LexicalMemoryBackend if fts5_available() else LocalMemoryBackend
+        assert isinstance(mgr.backend, expected)
+
+    def test_explicit_lexical_backend(self, tmp_path: Path) -> None:
+        from grimoire.memory.backends.lexical import LexicalMemoryBackend, fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        cfg = _make_config("lexical")
+        mgr = MemoryManager.from_config(cfg, project_root=tmp_path)
+        assert isinstance(mgr.backend, LexicalMemoryBackend)
+        mgr.store("harmonisation des grimoires")
+        results = mgr.search("harmonisation")
+        assert len(results) == 1
+
+    def test_lexical_migrates_legacy_local_json(self, tmp_path: Path) -> None:
+        from grimoire.memory.backends.lexical import fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        # Seed a legacy local JSON store, then switch the project to lexical.
+        legacy_mgr = MemoryManager.from_config(_make_config("local"), project_root=tmp_path)
+        legacy_mgr.store("souvenir historique")
+        lexical_mgr = MemoryManager.from_config(_make_config("lexical"), project_root=tmp_path)
+        assert lexical_mgr.count() == 1
+        assert len(lexical_mgr.search("souvenir")) == 1
 
     def test_falls_back_to_cwd_when_no_project_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -200,6 +248,63 @@ class TestFromConfigErrors:
 
         with pytest.raises(GrimoireMemoryError, match="Missing dependency"):
             MemoryManager.from_config(cfg)
+
+
+# ── hybrid retrieval (lexical companion) ──────────────────────────────────────
+
+class TestHybridRetrieval:
+    @pytest.fixture()
+    def companion(self, tmp_path: Path) -> Any:
+        from grimoire.memory.backends.lexical import LexicalMemoryBackend, fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        return LexicalMemoryBackend(tmp_path / "companion.sqlite3")
+
+    def test_hybrid_search_falls_back_without_companion(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        results = mgr.hybrid_search("query")
+        assert [e.id for e in results] == ["m-1"]
+        mock_backend.search.assert_called_once()
+
+    def test_store_mirrors_to_companion(self, mock_backend: MagicMock, companion: Any) -> None:
+        mgr = MemoryManager(mock_backend, lexical_companion=companion)
+        mgr.store("stored")
+        assert companion.count() == 1
+        assert companion.recall("m-1") is not None
+
+    def test_delete_mirrors_to_companion(self, mock_backend: MagicMock, companion: Any) -> None:
+        mgr = MemoryManager(mock_backend, lexical_companion=companion)
+        mgr.store("stored")
+        mgr.delete("m-1")
+        assert companion.count() == 0
+
+    def test_hybrid_search_fuses_vector_and_lexical(self, mock_backend: MagicMock, companion: Any) -> None:
+        companion.upsert("lex-only", "grimoire lexical entry about stored things")
+        mock_backend.search.return_value = [MemoryEntry(id="m-1", text="stored", score=0.9)]
+        mgr = MemoryManager(mock_backend, lexical_companion=companion)
+        results = mgr.hybrid_search("stored")
+        assert {e.id for e in results} == {"m-1", "lex-only"}
+
+    def test_hybrid_search_survives_vector_failure(self, mock_backend: MagicMock, companion: Any) -> None:
+        companion.upsert("lex-only", "resilient entry")
+        mock_backend.search.side_effect = RuntimeError("vector down")
+        mgr = MemoryManager(mock_backend, lexical_companion=companion)
+        results = mgr.hybrid_search("resilient")
+        assert [e.id for e in results] == ["lex-only"]
+
+    def test_reindex_lexical_companion(self, mock_backend: MagicMock, companion: Any) -> None:
+        mock_backend.get_all.return_value = [
+            MemoryEntry(id="m-1", text="first fact"),
+            MemoryEntry(id="m-2", text="second fact"),
+        ]
+        mgr = MemoryManager(mock_backend, lexical_companion=companion)
+        assert mgr.reindex_lexical_companion() == 2
+        assert companion.count() == 2
+
+    def test_reindex_without_companion_is_noop(self, mock_backend: MagicMock) -> None:
+        mgr = MemoryManager.from_backend(mock_backend)
+        assert mgr.reindex_lexical_companion() == 0
 
 
 # ── _create_backend branches ─────────────────────────────────────────────────

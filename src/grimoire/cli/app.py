@@ -292,7 +292,7 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, tantivy-local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
 ) -> None:

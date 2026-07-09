@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -40,6 +41,8 @@ MEMORY_TYPES: tuple[str, ...] = (
 
 # Backend identifiers matching MemoryConfig.backend values
 _BACKEND_LOCAL = "local"
+_BACKEND_LEXICAL = "lexical"
+_BACKEND_TANTIVY = "tantivy-local"
 _BACKEND_QDRANT_LOCAL = "qdrant-local"
 _BACKEND_QDRANT_SERVER = "qdrant-server"
 _BACKEND_WEAVIATE_SERVER = "weaviate-server"
@@ -47,17 +50,31 @@ _BACKEND_MEMPALACE = "mempalace"
 _BACKEND_OLLAMA = "ollama"
 _BACKEND_AUTO = "auto"
 
+# Server-backed vector backends that benefit from a lexical companion index.
+_VECTOR_BACKENDS = frozenset({
+    _BACKEND_QDRANT_LOCAL, _BACKEND_QDRANT_SERVER, _BACKEND_WEAVIATE_SERVER, _BACKEND_OLLAMA,
+})
+
+
+def _best_local_backend() -> str:
+    """FTS5 BM25 when the bundled SQLite supports it, keyword JSON otherwise."""
+    from grimoire.memory.backends.lexical import fts5_available
+
+    return _BACKEND_LEXICAL if fts5_available() else _BACKEND_LOCAL
+
 
 def _resolve_auto(config: GrimoireConfig) -> str:
     """Determine the best backend when ``backend: auto``."""
     mem = config.memory
+    if mem.retrieval_mode == "lexical" or not mem.vector_database:
+        return _best_local_backend()
     if mem.weaviate_url:
         return _BACKEND_WEAVIATE_SERVER
     if mem.ollama_url:
         return _BACKEND_OLLAMA
     if mem.qdrant_url:
         return _BACKEND_QDRANT_SERVER
-    return _BACKEND_LOCAL
+    return _best_local_backend()
 
 
 def _create_backend(config: GrimoireConfig, project_root: Path | None = None) -> MemoryBackend:
@@ -81,6 +98,16 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
         memory_dir = root / "_grimoire" / "_memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         return LocalMemoryBackend(memory_dir / f"{mem.collection_prefix}.json")
+
+    if backend_id == _BACKEND_LEXICAL:
+        return _create_lexical_backend(mem.collection_prefix, root)
+
+    if backend_id == _BACKEND_TANTIVY:
+        from grimoire.memory.backends.tantivy_local import TantivyMemoryBackend
+
+        memory_dir = root / "_grimoire" / "_memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        return TantivyMemoryBackend(memory_dir / f"{mem.collection_prefix}_tantivy")
 
     if backend_id == _BACKEND_QDRANT_LOCAL:
         from grimoire.memory.backends.qdrant import QdrantBackend
@@ -132,6 +159,37 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
         return OllamaBackend(**kwargs)
 
     raise GrimoireMemoryError(f"Unknown memory backend: {backend_id}")
+
+
+def _create_lexical_backend(collection_prefix: str, root: Path) -> MemoryBackend:
+    """FTS5 lexical backend at the standard path, migrating any legacy JSON store."""
+    from grimoire.memory.backends.lexical import LexicalMemoryBackend
+
+    memory_dir = root / "_grimoire" / "_memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    return LexicalMemoryBackend(
+        memory_dir / f"{collection_prefix}_lexical.sqlite3",
+        legacy_json=memory_dir / f"{collection_prefix}.json",
+    )
+
+
+def _create_lexical_companion(config: GrimoireConfig, backend_id: str, root: Path) -> MemoryBackend | None:
+    """Lexical companion index for hybrid (vector + BM25) retrieval.
+
+    Only created for vector backends when FTS5 is available and the project
+    has not opted out of vector retrieval — the companion mirrors writes so
+    :meth:`MemoryManager.hybrid_search` can fuse both rankings.
+    """
+    from grimoire.memory.backends.lexical import fts5_available
+
+    if backend_id not in _VECTOR_BACKENDS or config.memory.retrieval_mode != "vector":
+        return None
+    if not fts5_available():
+        return None
+    try:
+        return _create_lexical_backend(config.memory.collection_prefix, root)
+    except Exception:
+        return None
 
 
 def _wants_neo4j_graph(config: GrimoireConfig) -> bool:
@@ -205,6 +263,7 @@ class MemoryManager:
         graph_sync_issue: str = "",
         hot_memory: RedisHotMemory | None = None,
         hot_memory_issue: str = "",
+        lexical_companion: MemoryBackend | None = None,
     ) -> None:
         self._backend = backend
         self._project_name = project_name
@@ -214,6 +273,7 @@ class MemoryManager:
         self._graph_sync_issue = graph_sync_issue
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
+        self._lexical_companion = lexical_companion
 
     @classmethod
     def from_config(cls, config: GrimoireConfig, *, project_root: Path | None = None) -> MemoryManager:
@@ -236,6 +296,8 @@ class MemoryManager:
         except Exception as exc:
             raise GrimoireMemoryError(f"Failed to initialise memory backend: {exc}") from exc
         root = (project_root or Path()).resolve()
+        mem = config.memory
+        backend_id = mem.backend if mem.backend != _BACKEND_AUTO else _resolve_auto(config)
         sidecar = MemorySidecar(root / "_grimoire" / "_memory" / "palace_sidecar.sqlite3")
         memory_graph, graph_sync_issue = _create_memory_graph(config)
         hot_memory, hot_memory_issue = _create_hot_memory(config)
@@ -248,6 +310,7 @@ class MemoryManager:
             graph_sync_issue=graph_sync_issue,
             hot_memory=hot_memory,
             hot_memory_issue=hot_memory_issue,
+            lexical_companion=_create_lexical_companion(config, backend_id, root),
         )
 
     @classmethod
@@ -304,6 +367,46 @@ class MemoryManager:
 
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
         return self._backend.search(query, user_id=user_id, limit=limit)
+
+    # ── Hybrid retrieval (vector + lexical BM25, RRF fusion) ─────────────────
+
+    @property
+    def lexical_companion(self) -> MemoryBackend | None:
+        """The optional lexical companion index used for hybrid retrieval."""
+        return self._lexical_companion
+
+    def hybrid_search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
+        """Fuse vector and lexical rankings via RRF.
+
+        Falls back to plain :meth:`search` when no lexical companion is
+        configured (local/lexical primaries already are lexical).
+        """
+        if self._lexical_companion is None:
+            return self.search(query, user_id=user_id, limit=limit)
+        from grimoire.memory.retrieval import HybridRetriever
+
+        retriever = HybridRetriever([
+            ("vector", self._backend),
+            ("lexical", self._lexical_companion),
+        ])
+        return retriever.search(query, user_id=user_id, limit=limit)
+
+    def reindex_lexical_companion(self) -> int:
+        """Backfill the lexical companion from the primary backend.
+
+        Returns the number of entries mirrored; 0 when no companion is
+        configured.  Use after enabling hybrid retrieval on a project with
+        pre-existing memories.
+        """
+        if self._lexical_companion is None:
+            return 0
+        mirrored = 0
+        for entry in self._backend.get_all():
+            self._lexical_companion.upsert(
+                entry.id, entry.text, user_id=entry.user_id, tags=entry.tags, metadata=dict(entry.metadata),
+            )
+            mirrored += 1
+        return mirrored
 
     # ── Typed memory protocol (parity with legacy mem0-bridge, ADR-003) ──────
 
@@ -649,6 +752,7 @@ class MemoryManager:
     # ── Optional Neo4j runtime graph projection ───────────────────────
 
     def _sync_memory(self, entry: MemoryEntry) -> None:
+        self._mirror_to_companion(entry)
         if self._memory_graph is None:
             return
         try:
@@ -656,11 +760,24 @@ class MemoryManager:
         except Exception as exc:
             self._record_graph_sync_issue("memory", exc)
 
+    def _mirror_to_companion(self, entry: MemoryEntry) -> None:
+        """Best-effort write mirror into the lexical companion index."""
+        if self._lexical_companion is None:
+            return
+        # Companion is advisory: the primary write already succeeded.
+        with contextlib.suppress(Exception):
+            self._lexical_companion.upsert(
+                entry.id, entry.text, user_id=entry.user_id, tags=entry.tags, metadata=dict(entry.metadata),
+            )
+
     def _sync_memories(self, entries: list[MemoryEntry]) -> None:
         for entry in entries:
             self._sync_memory(entry)
 
     def _sync_delete_memory(self, entry_id: str) -> None:
+        if self._lexical_companion is not None:
+            with contextlib.suppress(Exception):
+                self._lexical_companion.delete(entry_id)
         if self._memory_graph is None:
             return
         try:

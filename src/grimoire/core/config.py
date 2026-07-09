@@ -104,7 +104,7 @@ class UserConfig:
 
 
 _VALID_BACKENDS = frozenset({
-    "auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
+    "auto", "local", "lexical", "tantivy-local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama",
 })
 _VALID_SHORT_TERM_BACKENDS = frozenset({"sqlite", "redis", "none"})
 _VALID_LAYER_MODES = frozenset({
