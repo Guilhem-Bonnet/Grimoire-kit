@@ -7,6 +7,42 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.23.0] - 2026-07-08
+
+### Ajouté
+
+- **`grimoire serve`** : commande de premier niveau lançant l'atelier local
+  (UI Forge + API blueprints) sur `127.0.0.1`. Remplace l'ancien
+  `python -m grimoire.tools.forge_server`, qui reste disponible pour l'usage
+  avancé (`--ui-dir`, `--kit-root`).
+- **Rework Vitrine/Atelier** : le site v2 est branché de bout en bout sur le
+  réel — catalogue normatif (78 patterns), marketplace, éditeur de blueprints
+  (Studio), wizard de setup, observatoire et mémoire lisent l'API locale et
+  les données générées. Plus aucune donnée de démo dans le mode atelier.
+- **`grimoire stigmergy`** *(canal beta)* : coordination indirecte par
+  phéromones — `emit/sense/amplify/resolve/trails/evaporate/stats`, plus
+  `install-hooks`/`uninstall-hooks` pour câbler l'émission et la captation
+  automatiques via des hooks **non bloquants** (SessionStart, PostToolUse,
+  Stop). Vue live dans l'observatoire.
+- **`grimoire features`** : canaux de maturité stable / beta / experimental,
+  activables par projet (`_grimoire/features.json`), avec page **Labs** dans
+  l'atelier et journalisation des usages pour la promotion sur métriques.
+- **Packaging** : le wheel embarque désormais `extensions/` et `version.txt`
+  — un `pip install` dispose d'un marketplace réel et de la bonne version.
+
+### Corrigé
+
+- **Robustesse & concurrence** (audit du kit contre son propre catalogue) :
+  écritures atomiques (board, features, journal), verrou inter-process contre
+  les pertes de mise à jour des hooks concurrents, cap par zone anti
+  signal-storm, journal stigmergique borné et versionné.
+- **Sécurité du serveur local** : garde CSRF / DNS-rebinding sur les mutations
+  (refus des Host non-loopback et Origin cross-origin), correctif de préfixe
+  dans le service statique, télémétrie gouvernée des mutations.
+- **`install_hooks`** : rollback transactionnel sur échec partiel.
+- **`quick-check.sh`** : bit exécutable rétabli (déblocage des pre-push
+  consommateurs).
+
 ## [3.22.0] - 2026-07-03
 
 ### Ajouté
