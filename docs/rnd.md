@@ -11,7 +11,7 @@ API et formats peuvent évoluer sans garantie de compatibilité. Le cœur mûr d
 |---|---|
 | **Session Branching** | Explorer plusieurs approches en parallèle — comme des branches Git, mais pour les sessions d'agents. Diff, merge, cherry-pick |
 | **Agent Darwinism** | Sélection naturelle des agents : fitness multi-dimensionnelle, évolution par générations, leaderboard, hybridation |
-| **Stigmergy** | Coordination indirecte par phéromones numériques : émission, détection, amplification, évaporation |
+| **Stigmergy** *(promue beta)* | Coordination indirecte par phéromones : émission, détection, renfort, évaporation. Désormais en canal **beta** — CLI `grimoire stigmergy`, hooks opt-in, métriques d'usage (`grimoire features`). |
 | **Dream Mode** | Consolidation hors-session : croise mémoire, trace, décisions et failure museum pour produire des insights émergents |
 | **R&D Engine v2.1** | Boucle d'innovation : bandit ε-greedy à reward closed-loop, prototypage automatique, seed memory, gap-analysis |
 | **Adversarial Consensus** | Quorum à 3 votants + 1 avocat du diable pour les décisions critiques |

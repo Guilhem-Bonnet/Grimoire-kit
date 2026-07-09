@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 STATE_RELPATH = Path("_grimoire") / "features.json"
+STATE_SCHEMA_VERSION = 1
 
 __all__ = [
     "FEATURES",
@@ -101,9 +102,18 @@ def _load_state(project_root: Path) -> dict[str, Any]:
 
 
 def _save_state(project_root: Path, state: dict[str, Any]) -> None:
+    """Écriture atomique + schéma versionné (RUN-14, save-non-versionnée)."""
+    import os
+
+    state.setdefault("schemaVersion", STATE_SCHEMA_VERSION)
     path = _state_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def is_enabled(project_root: Path, feature_id: str) -> bool:

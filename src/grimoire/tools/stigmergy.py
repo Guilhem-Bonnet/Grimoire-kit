@@ -18,6 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import pow as mpow
@@ -39,6 +41,9 @@ class BulkSignal(TypedDict):
 
 PHEROMONE_FILE = "pheromone-board.json"
 EVENTS_FILE = "stigmergy-events.jsonl"
+BOARD_SCHEMA_VERSION = "1.0.0"
+EVENTS_SCHEMA_VERSION = 1
+EVENTS_MAX_LINES = 2000  # KNO-01 : le journal ne grandit pas indéfiniment
 VALID_TYPES = frozenset({"NEED", "ALERT", "OPPORTUNITY", "PROGRESS", "COMPLETE", "BLOCK"})
 
 DEFAULT_HALF_LIFE_HOURS = 72.0
@@ -176,20 +181,46 @@ def _board_path(project_root: Path) -> Path:
     return project_root / "_grimoire-output" / PHEROMONE_FILE
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Écriture atomique : fichier temporaire + ``os.replace`` (RUN-14).
+
+    Un crash en cours d'écriture ne laisse jamais un board/état à moitié écrit
+    et corrompu — l'ancien contenu reste intact jusqu'au rename atomique.
+    """
+    import os
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def log_event(project_root: Path, action: str, *, source: str = "cli",
               **fields: Any) -> None:
-    """Journal JSONL append-only des actes stigmergiques (fail-open).
+    """Journal JSONL des actes stigmergiques (fail-open, borné — KNO-01).
 
     Même fichier que les hooks (``_grimoire-output/stigmergy-events.jsonl``) :
-    la base des métriques de promotion beta→stable.
+    la base des métriques de promotion beta→stable. Le journal est plafonné
+    (``EVENTS_MAX_LINES``) et versionné — pas d'anti-pattern « tout-indexer ».
     """
     try:
         path = project_root / "_grimoire-output" / EVENTS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"ts": datetime.now(tz=UTC).isoformat(), "action": action,
-                 "source": source, **fields}
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        entry = {"v": EVENTS_SCHEMA_VERSION,
+                 "ts": datetime.now(tz=UTC).isoformat(),
+                 "action": action, "source": source, **fields}
+        line = json.dumps(entry, ensure_ascii=False)
+        existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        existing.append(line)
+        if len(existing) > EVENTS_MAX_LINES:
+            existing = existing[-EVENTS_MAX_LINES:]
+            atomic_write_text(path, "\n".join(existing) + "\n")
+        else:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
     except OSError:
         pass
 
@@ -228,12 +259,56 @@ def load_board(project_root: Path) -> PheromoneBoard:
 
 
 def save_board(project_root: Path, board: PheromoneBoard) -> None:
+    atomic_write_text(
+        _board_path(project_root),
+        json.dumps(board.to_dict(), indent=2, ensure_ascii=False),
+    )
+
+
+@contextmanager
+def _board_lock(project_root: Path) -> Iterator[None]:
+    """Verrou exclusif inter-process sur le board (POSIX/Windows, best-effort).
+
+    Évite l'anti-pattern « lost-update » quand plusieurs hooks PostToolUse
+    (subagents parallèles) font un read-modify-write concurrent. Dégrade en
+    no-op si le verrouillage n'est pas disponible — jamais bloquant.
+    """
     path = _board_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(board.to_dict(), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    lock_path = path.with_name(f".{path.name}.lock")
+    fh = None
+    try:
+        fh = lock_path.open("w", encoding="utf-8")
+        try:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass  # Windows ou FS sans flock : best-effort
+        yield
+    finally:
+        if fh is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            fh.close()
+
+
+def update_board(
+    project_root: Path, mutator: Callable[[PheromoneBoard], object]
+) -> None:
+    """Read-modify-write atomique et verrouillé du board.
+
+    ``mutator`` reçoit le board chargé sous verrou et le modifie en place ;
+    la sauvegarde (atomique) et le déverrouillage sont garantis.
+    """
+    with _board_lock(project_root):
+        board = load_board(project_root)
+        mutator(board)
+        save_board(project_root, board)
 
 
 # ── Core Logic ────────────────────────────────────────────────────────────────
