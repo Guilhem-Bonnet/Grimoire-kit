@@ -38,6 +38,9 @@ DEFAULT_HALF_LIFE_HOURS = 72.0
 DETECTION_THRESHOLD = 0.05
 PROGRESS_INTENSITY = 0.45
 COMPLETE_INTENSITY = 0.7
+EVENTS_SCHEMA_VERSION = 1
+EVENTS_MAX_LINES = 2000       # KNO-01 : journal borné
+MAX_ACTIVE_PER_ZONE = 12      # anti signal-storm par zone
 # Extensions de fichiers considérées comme « source » (émission ciblée).
 SOURCE_SUFFIXES = frozenset({
     ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".rb",
@@ -70,9 +73,50 @@ def load_board(root: Path) -> dict[str, Any]:
 
 
 def save_board(root: Path, board: dict[str, Any]) -> None:
+    """Écriture atomique (temp + replace) : jamais de board corrompu."""
+    import os
+
     path = _board_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(board, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(board, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+class board_lock:  # noqa: N801 — context manager léger
+    """Verrou exclusif inter-process sur le board (best-effort, fail-open).
+
+    Sérialise les hooks PostToolUse concurrents (subagents parallèles) pour
+    éviter les pertes de mise à jour ; no-op si flock indisponible."""
+
+    def __init__(self, root: Path) -> None:
+        path = _board_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock_path = path.with_name(f".{path.name}.lock")
+        self._fh = None
+
+    def __enter__(self) -> board_lock:
+        try:
+            self._fh = self._lock_path.open("w", encoding="utf-8")
+            import fcntl
+
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._fh is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            self._fh.close()
 
 
 def _now() -> datetime:
@@ -130,6 +174,18 @@ def emit_or_reinforce(board: dict[str, Any], ptype: str, location: str,
             ph["intensity"] = min(float(ph.get("intensity", 0.0)) + 0.2, 1.0)
             ph["timestamp"] = now.isoformat()  # rafraîchit la piste
             return "reinforce"
+    # Anti signal-storm : si la zone est saturée, renforcer le plus fort
+    # plutôt que d'empiler un signal de plus.
+    active_in_zone = [
+        ph for ph in board["pheromones"]
+        if ph.get("location") == location and not ph.get("resolved")
+        and compute_intensity(ph, half_life, now) >= DETECTION_THRESHOLD
+    ]
+    if len(active_in_zone) >= MAX_ACTIVE_PER_ZONE:
+        strongest = max(active_in_zone, key=lambda p: float(p.get("intensity", 0.0)))
+        strongest["reinforcements"] = int(strongest.get("reinforcements", 0)) + 1
+        strongest["intensity"] = min(float(strongest.get("intensity", 0.0)) + 0.2, 1.0)
+        return "reinforce"
     emit(board, ptype, location, text, emitter, intensity)
     return "emit"
 
@@ -168,16 +224,28 @@ def hooks_enabled(root: Path) -> bool:
 
 
 def log_event(root: Path, action: str, **fields: Any) -> None:
-    """Journal JSONL append-only des actes stigmergiques (fail-open).
+    """Journal JSONL borné des actes stigmergiques (fail-open, KNO-01).
 
-    Base des métriques de promotion beta→stable : chaque émission, renfort,
-    complétion et injection de contexte laisse une trace datée."""
+    Base des métriques de promotion beta→stable. Plafonné et versionné :
+    pas d'anti-pattern « tout-indexer »."""
     try:
         path = root / EVENTS_REL
         path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"ts": _now().isoformat(), "action": action, "source": "hook", **fields}
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        entry = {"v": EVENTS_SCHEMA_VERSION, "ts": _now().isoformat(),
+                 "action": action, "source": "hook", **fields}
+        line = json.dumps(entry, ensure_ascii=False)
+        existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        existing.append(line)
+        if len(existing) > EVENTS_MAX_LINES:
+            import os
+
+            existing = existing[-EVENTS_MAX_LINES:]
+            tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            tmp.write_text("\n".join(existing) + "\n", encoding="utf-8")
+            tmp.replace(path)
+        else:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
     except OSError:
         pass
 
@@ -330,17 +398,20 @@ def main(argv: list[str] | None = None) -> int:
         event = read_event()
         now = _now()
         if action == "emit-post-edit":
-            board = load_board(root)
-            outcome = decide_post_edit(board, event, now)
+            with board_lock(root):  # anti lost-update (subagents parallèles)
+                board = load_board(root)
+                outcome = decide_post_edit(board, event, now)
+                if outcome:
+                    save_board(root, board)
             if outcome:
-                save_board(root, board)
                 log_event(root, outcome, ptype="PROGRESS",
                           location=zone_of(event_file_path(event)),
                           emitter=event_emitter(event))
         elif action == "emit-stop":
-            board = load_board(root)
-            zone = decide_stop(board, event, now)
-            save_board(root, board)
+            with board_lock(root):
+                board = load_board(root)
+                zone = decide_stop(board, event, now)
+                save_board(root, board)
             if zone:
                 log_event(root, "complete", ptype="COMPLETE", location=zone,
                           emitter=event_emitter(event))

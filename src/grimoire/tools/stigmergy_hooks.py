@@ -64,7 +64,11 @@ def _register_shadow(project_root: Path, install: bool) -> str:
 
 
 def install_hooks(project_root: Path) -> str:
-    """Copie les hooks dans ``.github/hooks/`` et journalise (best-effort)."""
+    """Copie les hooks dans ``.github/hooks/`` et journalise (best-effort).
+
+    Transactionnel (RUN-14) : si une copie échoue en cours, tous les fichiers
+    déjà écrits par cet appel sont retirés — jamais d'installation partielle.
+    """
     src = _assets_dir()
     if not src.is_dir():
         msg = f"assets de hooks introuvables : {src}"
@@ -72,12 +76,21 @@ def install_hooks(project_root: Path) -> str:
     hooks_dir = project_root / ".github" / "hooks"
     scripts_dir = hooks_dir / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
-    for name in HOOK_MANIFESTS:
-        shutil.copy2(src / name, hooks_dir / name)
-    for name in HOOK_SCRIPTS:
-        dest = scripts_dir / name
-        shutil.copy2(src / "scripts" / name, dest)
-        dest.chmod(0o755)
+    written: list[Path] = []
+    try:
+        for name in HOOK_MANIFESTS:
+            dest = hooks_dir / name
+            shutil.copy2(src / name, dest)
+            written.append(dest)
+        for name in HOOK_SCRIPTS:
+            dest = scripts_dir / name
+            shutil.copy2(src / "scripts" / name, dest)
+            dest.chmod(0o755)
+            written.append(dest)
+    except OSError:
+        for dest in written:
+            dest.unlink(missing_ok=True)
+        raise
     return _register_shadow(project_root, install=True)
 
 

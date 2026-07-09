@@ -792,6 +792,9 @@ class ForgeAPI:
         relays = sum(1 for t in trails if t["type"] == "relay")
         useful = resolved + relays
         denominator = board.total_emitted or 1
+        useful_ratio = round(useful / denominator, 3)
+        # Seuil de promotion beta→stable (QUA-13) : la mesure sert une décision.
+        target_ratio = 0.4
         return {
             "active": signals,
             "trails": trails,
@@ -815,7 +818,9 @@ class ForgeAPI:
                 "resolved": resolved,
                 "reinforcements": reinforcements,
                 "relays": relays,
-                "usefulRatio": round(useful / denominator, 3),
+                "usefulRatio": useful_ratio,
+                "targetUsefulRatio": target_ratio,
+                "promotionReady": bool(board.total_emitted >= 20 and useful_ratio >= target_ratio),
             },
         }
 
@@ -843,6 +848,45 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             if not length:
                 return {}
             return cast(dict[str, Any], json.loads(self.rfile.read(length).decode("utf-8")))
+
+        def _guard_mutation(self) -> bool:
+            """Anti CSRF / DNS-rebinding vers localhost (backend-permissif).
+
+            Refuse toute mutation dont le Host n'est pas la loopback, ou dont
+            l'Origin (si présent, cas navigateur) est cross-origin. Un outil
+            local ne doit répondre qu'à sa propre UI, pas à une page tierce
+            ouverte dans le navigateur de l'utilisateur.
+            """
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            if host not in ("127.0.0.1", "localhost", "::1", ""):
+                self._error("hôte non autorisé", 403)
+                return False
+            origin = self.headers.get("Origin")
+            if origin:
+                from urllib.parse import urlparse
+
+                oh = urlparse(origin).hostname or ""
+                if oh.lower() not in ("127.0.0.1", "localhost", "::1"):
+                    self._error("origine non autorisée", 403)
+                    return False
+            return True
+
+        def _governed_event(self, action: str, **fields: Any) -> None:
+            """Trace gouvernée d'une mutation serve (QUA-08), fail-open."""
+            try:
+                path = (
+                    api.project_root / "_grimoire-runtime-output"
+                    / "hook-runtime" / "serve-mutations.jsonl"
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                entry = {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "source": "serve", "action": action, **fields,
+                }
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
 
         # ── GET ───────────────────────────────────────────────────────────
 
@@ -880,10 +924,14 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             path = self.path.split("?")[0]
+            if not self._guard_mutation():
+                return
             try:
                 body = self._body()
                 if path == "/api/extensions/add":
                     result = api.extension_add(str(body.get("source", "")))
+                    self._governed_event("extension.add", id=result.extension_id,
+                                         version=result.version)
                     self._json(
                         {
                             "installed": result.extension_id,
@@ -894,13 +942,17 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     )
                 elif path == "/api/extensions/remove":
                     api.extension_remove(str(body.get("id", "")))
+                    self._governed_event("extension.remove", id=str(body.get("id", "")))
                     self._json({"removed": body.get("id")})
                 elif path in ("/api/setup", "/api/setup/plan"):
                     self._json(api.setup_plan(body))
                 elif path.startswith("/api/features/"):
                     feature_id = path.rsplit("/", 1)[1]
                     try:
-                        self._json(api.feature_toggle(feature_id, bool(body.get("enabled"))))
+                        enabled = bool(body.get("enabled"))
+                        toggled = api.feature_toggle(feature_id, enabled)
+                        self._governed_event("feature.toggle", id=feature_id, enabled=enabled)
+                        self._json(toggled)
                     except KeyError:
                         self._error(f"feature inconnue : {feature_id}", 404)
                 elif path.startswith("/api/blueprints/") and path.endswith("/validate"):
@@ -914,7 +966,10 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 elif path.startswith("/api/blueprints/") and path.endswith("/compile"):
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
-                    self._json(api.blueprint_compile(blueprint))
+                    compiled = api.blueprint_compile(blueprint)
+                    self._governed_event("blueprint.compile", id=bp_id,
+                                         artifact=compiled.get("artifact"))
+                    self._json(compiled)
                 else:
                     self._error("route inconnue", 404)
             except ExtensionError as exc:
@@ -926,6 +981,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:
             path = self.path.split("?")[0]
+            if not self._guard_mutation():
+                return
             try:
                 if path.startswith("/api/blueprints/"):
                     bp_id = path.rsplit("/", 1)[1]
@@ -972,7 +1029,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 return
             rel = path.lstrip("/") or "index.html"
             target = (api.ui_dir / rel).resolve()
-            if not str(target).startswith(str(api.ui_dir)):
+            # is_relative_to évite la confusion de préfixe (/a/web vs /a/web2).
+            if not target.is_relative_to(api.ui_dir.resolve()):
                 self._error("chemin refusé", 403)
                 return
             if target.is_dir():

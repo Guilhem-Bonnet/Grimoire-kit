@@ -1,6 +1,7 @@
 """CLI ``grimoire stigmergy`` — coordination stigmergique (phéromones).
 
-Feature **expérimentale** (R&D, hors contrat SemVer — voir docs/rnd.md).
+Feature en canal **beta** (opt-in, journalisée, promue sur métriques — voir
+docs/rnd.md et `grimoire features`).
 
 Coordination indirecte : les agents déposent des signaux typés qui
 s'évaporent (décroissance par demi-vie, calculée à la lecture), d'autres
@@ -24,7 +25,7 @@ from grimoire.tools import stigmergy as stig
 
 console = Console()
 stigmergy_app = typer.Typer(
-    help="Coordination stigmergique par phéromones (expérimental).",
+    help="Coordination stigmergique par phéromones (canal beta).",
     no_args_is_help=True,
 )
 
