@@ -6,7 +6,7 @@
 
 Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA de comportements et de templates adapté à un type de projet spécifique. Chaque archétype déclare ses **traits** (règles comportementales), ses **constraints** (bloquants), ses **tools_required** et ses **acceptance_criteria** machine-lisibles.
 
-> **Chemin recommandé (SDK)** : `pipx install grimoire-kit` puis
+> **Chemin recommandé (SDK)** : `uv tool install grimoire-kit` (ou `pipx install grimoire-kit`) puis
 > `grimoire init . -a <archetype>`. Les commandes `grimoire-init.sh` ci-dessous
 > restent valides (chemin shell en mode maintenance) et couvrent quelques
 > opérations sans équivalent SDK (`install --inspect`, `validate --all`).
