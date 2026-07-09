@@ -7,6 +7,28 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **`grimoire hooks`** (install/list/status) : port Python de
+  `grimoire-init.sh hooks` — première étape du plan de résorption bash
+  (`docs/resorption-bash.md`). Résolution correcte dans les worktrees git
+  (`git rev-parse --git-path hooks`), sources depuis le checkout du kit ou
+  les données embarquées du wheel, préservation des hooks tiers, sortie
+  `-o json`.
+- **Plan de résorption bash** : inventaire complet des 28 sous-commandes de
+  `grimoire-init.sh` (couvert / wrapper mince / gap) et séquence de port
+  dans `docs/resorption-bash.md`.
+
+### Corrigé
+
+- **`framework/hooks/pre-commit-cc.sh`** : le venv du projet est préfixé au
+  PATH — le Completion Contract utilise le pytest/ruff/mypy du projet au
+  lieu de l'outillage système.
+- **`framework/hooks/pre-push.sh`** : étape quickcheck avec résolution de
+  layout correcte (kit direct `framework/tools/` ou kit nested
+  `grimoire-kit/framework/tools/`) — l'ancien hook installé cherchait un
+  chemin valable uniquement depuis un projet hôte.
+
 ## [3.23.0] - 2026-07-08
 
 ### Ajouté

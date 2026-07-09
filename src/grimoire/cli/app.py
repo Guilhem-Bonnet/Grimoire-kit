@@ -25,6 +25,7 @@ from grimoire.cli.cmd_cockpit import cockpit_app
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
+from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_memory import memory_app
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
@@ -920,6 +921,11 @@ def up(
 # ── grimoire memory ───────────────────────────────────────────────────────────────
 
 app.add_typer(memory_app, name="memory", rich_help_panel="Data")
+
+
+# ── grimoire hooks ────────────────────────────────────────────────────────────────
+
+app.add_typer(hooks_app, name="hooks", rich_help_panel="Project")
 
 
 # ── grimoire debugger ─────────────────────────────────────────────────────────────
