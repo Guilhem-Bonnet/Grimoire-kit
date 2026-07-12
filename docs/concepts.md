@@ -271,7 +271,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 ```
 grimoire-kit/
 │
-├── grimoire-init.sh                 ← Point d'entrée : installe et configure tout
+├── grimoire-init.sh                 ← Chemin shell legacy (maintenance) — utiliser `grimoire init`
 ├── project-context.tpl.yaml     ← Template : identité du projet
 │
 ├── framework/                   ← Le "système d'exploitation" (jamais modifié par projet)
@@ -298,7 +298,7 @@ grimoire-kit/
 ```
 votre-projet/
 ├── votre-code/
-├── _grimoire/                       ← Créé par grimoire-init.sh
+├── _grimoire/                       ← Créé par `grimoire init`
 │   ├── _config/
 │   │   └── custom/
 │   │       ├── agents/          ← Vos agents (copiés depuis les archétypes)
