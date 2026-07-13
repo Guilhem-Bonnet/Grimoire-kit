@@ -76,7 +76,23 @@ bindings du blueprint.
 | `GET/PUT /api/blueprints/<id>` | CRUD des blueprints |
 | `POST /api/blueprints/<id>/validate` · `/simulate` · `/compile` | Lint, dry-run, compilation |
 | `GET /api/events` (SSE) · `GET /api/events/log` | Télémétrie live et replay |
-| `GET /api/stigmergy` | Vue live du tableau phéromonique (signaux actifs, trails) — expérimental |
+| `GET /api/stigmergy` | Vue live du tableau phéromonique (signaux actifs, trails, métriques) — beta |
+
+Le bloc `behavior` de `GET /api/stigmergy` porte les métriques de promotion
+beta→stable et la thèse qu'elles testent (QUA-13, mesure-sans-hypothèse) :
+
+- `usefulRatio` — part des signaux émis ayant produit une coordination utile
+  (résolution ou relais) ;
+- `targetUsefulRatio` (`0.4`) — seuil de promotion visé ;
+- `minEmitted` (`20`) — volume minimal d'émissions pour que la mesure compte ;
+- `hypothesis` — l'hypothèse testée, en clair ;
+- `promotionReady` — `true` quand `usefulRatio >= targetUsefulRatio` sur au
+  moins `minEmitted` émissions : la mesure sert une décision.
+
+Chaque mutation servie (`POST /api/extensions/add|remove`, toggle de feature,
+`PUT` et `compile` de blueprint) est tracée en JSONL dans
+`_grimoire-runtime-output/hook-runtime/serve-mutations.jsonl` (QUA-08) ; les
+`GET` restent silencieux.
 
 Les blueprints du Studio (format v2, positionné) sont acceptés directement :
 le serveur en dérive la projection compilable (pins typés depuis les contrats,
