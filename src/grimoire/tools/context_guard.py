@@ -148,13 +148,28 @@ def resolve_agent_loads(agent_path: Path, project_root: Path) -> list[FileLoad]:
     rel = str(agent_path.relative_to(project_root)) if agent_path.is_relative_to(project_root) else str(agent_path)
 
     # Agent definition
+    agent_text = ""
     if agent_path.exists():
+        try:
+            agent_text = agent_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            agent_text = ""
         loads.append(FileLoad(path=rel, role="agent-definition",
-                              tokens=_read_tokens(agent_path)))
+                              tokens=estimate_tokens(agent_text)))
 
-    # Agent base protocol
-    for bp in [project_root / "_grimoire/_config/custom/agent-base.md",
-               project_root / "framework/agent-base.md"]:
+    # Agent base protocol — measure the variant the sheet actually loads:
+    # sheets ship compact-by-default since 3.24 (issue #39, C3); older
+    # projects whose sheets still reference agent-base.md keep the full
+    # protocol in their budget.
+    if "agent-base-compact.md" in agent_text:
+        base_candidates = [project_root / "_grimoire/_config/custom/agent-base-compact.md",
+                           project_root / "_grimoire/_config/custom/agent-base.md",
+                           project_root / "framework/agent-base-compact.md",
+                           project_root / "framework/agent-base.md"]
+    else:
+        base_candidates = [project_root / "_grimoire/_config/custom/agent-base.md",
+                           project_root / "framework/agent-base.md"]
+    for bp in base_candidates:
         if bp.exists():
             loads.append(FileLoad(
                 path=str(bp.relative_to(project_root)),

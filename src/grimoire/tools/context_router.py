@@ -154,14 +154,25 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     mem = project_root / "_grimoire" / "_memory"
     cfg = project_root / "_grimoire" / "_config"
 
-    # P0: Agent base + agent persona
-    agent_base = cfg / "custom" / "agent-base.md"
+    # P0: Agent base + agent persona — the planner recommends the compact
+    # protocol when scaffolded (sheets load it by default since 3.24); the
+    # full agent-base.md stays available on demand (P4).
+    compact_base = cfg / "custom" / "agent-base-compact.md"
+    full_base = cfg / "custom" / "agent-base.md"
+    agent_base = compact_base if compact_base.exists() else full_base
     if agent_base.exists():
         entries.append(FileEntry(
             path=str(agent_base.relative_to(project_root)),
             priority=Priority.P0_ALWAYS,
             estimated_tokens=_file_tokens(agent_base),
             reason="Base protocol",
+        ))
+    if agent_base == compact_base and full_base.exists():
+        entries.append(FileEntry(
+            path=str(full_base.relative_to(project_root)),
+            priority=Priority.P4_ON_REQUEST,
+            estimated_tokens=_file_tokens(full_base),
+            reason="Full base protocol (on demand)",
         ))
 
     # Find agent file matching tag
