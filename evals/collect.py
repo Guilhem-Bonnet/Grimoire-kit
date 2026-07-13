@@ -27,11 +27,23 @@ from grimoire.core.agentic_standard import (
     verify_standard_profile,
 )
 
-ARMS = ("governed", "baseline")
+ARMS = ("governed", "baseline", "activated")
+ENROLLED_ARMS = ("governed", "activated")
 
 
-def collect_standard_metrics(project_root: Path, task_id: str) -> dict[str, Any]:
-    """Collecte verify/score/gate ; les échecs structurels deviennent des nulls."""
+def collect_standard_metrics(
+    project_root: Path,
+    task_id: str,
+    *,
+    gate_target_state: str | None = None,
+) -> dict[str, Any]:
+    """Collecte verify/score/gate ; les échecs structurels deviennent des nulls.
+
+    ``gate_target_state`` : pour le bras ``activated``, le gate est évalué à
+    l'état ``review`` (celui que le mécanisme d'activation impose) ; sans état
+    cible, un projet starter sans task-board passe trivialement le gate et le
+    contrôle de manipulation ne mesure rien.
+    """
     metrics: dict[str, Any] = {
         "verify_ok": None,
         "profile": None,
@@ -58,30 +70,51 @@ def collect_standard_metrics(project_root: Path, task_id: str) -> dict[str, Any]
     except (ValueError, FileNotFoundError, OSError):
         pass
     try:
-        gate = check_evidence_gates(project_root, task_id=task_id)
+        gate = check_evidence_gates(project_root, task_id=task_id, target_state=gate_target_state)
         metrics.update({"gate_ok": gate.ok, "gate_missing": list(gate.missing)})
     except (ValueError, FileNotFoundError, OSError):
         pass
     return metrics
 
 
-def collect_record(project_root: Path, witness: str, task_id: str, arm: str) -> dict[str, Any]:
+def collect_record(
+    project_root: Path,
+    witness: str,
+    task_id: str,
+    arm: str,
+    standard_task_id: str = "bootstrap",
+) -> dict[str, Any]:
     """Construit un run-record complet, métriques externes à null.
 
-    Le bloc ``standard`` n'a de sens que pour le bras ``governed`` : le bras
-    ``baseline`` ne reçoit aucun artefact du standard, ses métriques restent
-    ``null`` (protocole §Collecte).
+    Le bloc ``standard`` n'a de sens que pour les bras enrôlés (``governed``
+    et ``activated``) : le bras ``baseline`` ne reçoit aucun artefact du
+    standard, ses métriques restent ``null`` (protocole §Collecte).
+
+    Schéma v2 (protocole v2, 2026-07-12) : les régressions sont scindées en
+    ``regressions_hard`` (test/build baseline cassé, supprimé ou affaibli) et
+    ``regressions_adapted`` (test modifié, suite verte, contrat préservé).
+
+    ``standard_task_id`` : id de tâche des artefacts du standard dans la copie
+    enrôlée (``bootstrap`` par défaut — celui que scaffolde ``grimoire
+    standard init`` et que le mécanisme d'activation impose). Il est distinct
+    de ``task_id``, le label de la tâche d'évaluation ; en v1 le label était
+    utilisé pour verify/gate, qui pointaient donc sur des artefacts
+    inexistants.
     """
     if arm not in ARMS:
         msg = f"arm invalide {arm!r} — attendu : {', '.join(ARMS)}"
         raise ValueError(msg)
     standard = (
-        collect_standard_metrics(project_root.resolve(), task_id)
-        if arm == "governed"
+        collect_standard_metrics(
+            project_root.resolve(),
+            standard_task_id,
+            gate_target_state="review" if arm == "activated" else None,
+        )
+        if arm in ENROLLED_ARMS
         else None
     )
     return {
-        "$schema": "grimoire-evals-run-record/v1",
+        "$schema": "grimoire-evals-run-record/v2",
         "collected_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "kit_version": __version__,
         "witness": witness,
@@ -91,7 +124,8 @@ def collect_record(project_root: Path, witness: str, task_id: str, arm: str) -> 
         "external": {
             "completed": None,
             "tests_green": None,
-            "regressions": None,
+            "regressions_hard": None,
+            "regressions_adapted": None,
             "tokens_cost": None,
             "human_interventions": None,
         },
@@ -104,10 +138,15 @@ def main() -> int:
     parser.add_argument("--witness", required=True)
     parser.add_argument("--task", required=True)
     parser.add_argument("--arm", required=True, choices=ARMS)
+    parser.add_argument(
+        "--standard-task-id",
+        default="bootstrap",
+        help="Id de tâche des artefacts du standard dans la copie enrôlée (défaut : bootstrap).",
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    record = collect_record(args.project, args.witness, args.task, args.arm)
+    record = collect_record(args.project, args.witness, args.task, args.arm, standard_task_id=args.standard_task_id)
     payload = json.dumps(record, indent=2, ensure_ascii=False)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -13,7 +13,18 @@ pinned:
         Grille de jugement `completed` pré-enregistrée avant campagne
         (witnesses/web-app-todo/JUDGING.md) ; critère de succès du protocole
         §Critère confirmé tel quel. Suite au pilote 12 runs du 2026-07-03.
-arms: [governed, baseline]
+    - date: "2026-07-12"
+      note: >-
+        Protocole v2 (docs/evals-protocol.md) : ajout du bras `activated`
+        (enrôlement governed + hooks d'activation,
+        witnesses/web-app-todo/activated/) ; régressions scindées en
+        `regressions_hard` vs `regressions_adapted`, critère principal sur
+        les dures ; `refactor-handlers` critère « tests du nouveau package »
+        requalifié en métrique secondaire (JUDGING.md) ;
+        `fix-timezone-display` réduite à 1 run de contrôle par bras (bruit
+        nul démontré : 20/20 runs identiques, campagne 2026-07-03), exclue
+        des agrégats du critère principal.
+arms: [governed, baseline, activated]
 repetitions_min: 5
 tasks:
   - id: feat-due-dates
@@ -35,6 +46,8 @@ tasks:
       - état UI cohérent après échec partiel
   - id: fix-timezone-display
     kind: bugfix
+    repetitions: 1   # v2 : run de contrôle unique par bras (témoin de bruit nul)
+    control_only: true
     prompt: >-
       Les horodatages s'affichent en UTC au lieu du fuseau du navigateur.
       Corriger l'affichage sans changer le stockage (UTC en base).
