@@ -9,9 +9,9 @@ Requires ``qdrant-client``::
     pip install grimoire-kit[qdrant]
 
 Environment variables:
-    Grimoire_OLLAMA_URL   — Ollama server URL (default: http://localhost:11434)
-    Grimoire_QDRANT_URL   — Remote Qdrant URL (if absent → local file mode)
-    Grimoire_QDRANT_API_KEY — API key for remote Qdrant
+    GRIMOIRE_OLLAMA_URL   — Ollama server URL (default: http://localhost:11434)
+    GRIMOIRE_QDRANT_URL   — Remote Qdrant URL (if absent → local file mode)
+    GRIMOIRE_QDRANT_API_KEY — API key for remote Qdrant
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def ollama_embed(text: str, model: str, base_url: str, *, timeout: float = 10.0)
         raise RuntimeError(
             f"Ollama unreachable at {base_url}.\n"
             f"  → Check that Ollama is running: ollama serve\n"
-            f"  → Or set Grimoire_OLLAMA_URL"
+            f"  → Or set GRIMOIRE_OLLAMA_URL"
         ) from exc
 
 

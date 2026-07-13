@@ -104,16 +104,16 @@ class TestBar(unittest.TestCase):
 
     def test_zero(self):
         result = self.cg.bar(0, width=10)
-        self.assertIn("·" * 10, result)
+        self.assertIn("-" * 10, result)
 
     def test_hundred(self):
         result = self.cg.bar(100, width=10)
-        # All filled, no dots
-        self.assertNotIn("·", result)
+        # All filled, no empty markers
+        self.assertNotIn("-", result.strip("[]"))
 
     def test_fifty(self):
         result = self.cg.bar(50, width=10)
-        self.assertEqual(len(result), 12)  # [chars·dots]
+        self.assertEqual(len(result), 12)  # [filled+empty]
 
 
 class TestRoleIcon(unittest.TestCase):

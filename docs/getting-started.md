@@ -36,21 +36,49 @@ grimoire --version
 
 ## Créer un projet
 
-### Nouveau projet
+### En une commande (recommandé)
+
+`grimoire up` enchaîne tout le parcours : init (mode express), propagation de
+l'identité, standard agentique gouverné, puis diagnostic de santé. La commande
+est idempotente — relancée sur un projet déjà en place, elle ne fait que
+combler les manques.
 
 ```bash
-grimoire init mon-projet --archetype web-app
-cd mon-projet
-```
+# Nouveau projet
+grimoire up mon-projet --archetype web-app --name "Mon Projet" --user "Alice"
 
-Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `creative-studio`, `fix-loop`.
-
-### Projet existant
-
-```bash
+# Projet existant
 cd votre-projet/
-grimoire init . --name "Mon Projet"
+grimoire up .
+
+# Wizard interactif complet, ou sans le standard gouverné
+grimoire up . --interactive
+grimoire up . --no-standard
 ```
+
+Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `platform-engineering`,
+`agentic-standard`, `creative-studio`, `fix-loop`.
+
+### Étape par étape (ce que `up` enchaîne)
+
+```bash
+grimoire init mon-projet --archetype web-app   # scaffold seul
+cd mon-projet
+grimoire setup                                 # propagation identité
+grimoire standard init . --needs solo-prototyping
+grimoire doctor
+```
+
+### Détecter vos projets existants
+
+Pour recenser les projets d'une machine et les enrôler dans le cockpit :
+
+```bash
+grimoire cockpit scan ~/dev            # crawl récursif (profondeur 4 par défaut)
+grimoire cockpit scan ~/dev --yes      # enrôle tous les projets Grimoire détectés
+```
+
+Les dépôts git non initialisés sont listés avec la suggestion `grimoire up <path>`.
 
 ## Structure générée
 
@@ -77,17 +105,19 @@ mon-projet/
 
 | Commande | Description |
 |----------|-------------|
-| `grimoire init <path>` | Initialiser un projet |
+| `grimoire up [path]` | Parcours complet : init + setup + standard + doctor (idempotent) |
+| `grimoire init <path>` | Initialiser un projet (scaffold seul) |
 | `grimoire setup` | Synchroniser la config utilisateur |
 | `grimoire setup --check` | Auditer la synchronisation (CI-friendly) |
-| `grimoire doctor` | Vérifier la santé du projet |
+| `grimoire doctor [--fix]` | Vérifier la santé du projet et de l'environnement ; `--fix` régénère wrappers et `.mcp.json` manquants |
+| `grimoire cockpit scan <racine>` | Détecter et enrôler les projets existants |
+| `grimoire blueprint <cmd>` | Blueprints : `new`, `validate`, `compile` |
 | `grimoire status` | Afficher l'état du projet |
 | `grimoire add <agent>` | Ajouter un agent |
 | `grimoire remove <agent>` | Retirer un agent |
 | `grimoire validate` | Valider `project-context.yaml` |
 | `grimoire check` | Lint + validate + doctor en une passe |
 | `grimoire standard <cmd>` | Standard agentique gouverné (`needs`, `init`, `verify`, `audit`, `score`, `gate`) |
-| `grimoire up` | Déployer les agents configurés |
 | `grimoire merge <source>` | Fusionner des fichiers Grimoire |
 | `grimoire merge --undo` | Annuler le dernier merge |
 | `grimoire upgrade` | Migrer un projet v2 → v3 |
@@ -119,14 +149,31 @@ grimoire setup --check
 grimoire doctor
 ```
 
-Sortie attendue :
+Sortie attendue (extrait) :
 
+```text
+  OK  project-context.yaml found
+  OK  Config valid — project: Demo
+  OK  _grimoire/ present
+  OK  Archetype configured: minimal
+  OK  7 VS Code agent wrapper(s) in .github/agents/
+  OK  uv available (/home/user/.local/bin/uv)
+  OK  docker daemon reachable (server 29.6.1)
+  OK  Qdrant reachable at http://localhost:6333
+  OK  Ollama reachable at http://localhost:11434
+  OK  .mcp.json server 'grimoire' resolves (grimoire-mcp)
+
+17/17 checks passed
 ```
-[OK] project-context.yaml found
-[OK] YAML valid
-[OK] _grimoire directory exists
-[OK] At least one agent configured
-[OK] Memory directory exists
+
+Les checks d'environnement (uv, docker, Qdrant, Ollama) sont optionnels : un
+avertissement affiche la commande de remédiation exacte sans bloquer. Une
+référence cassée dans `.mcp.json` est en revanche une erreur.
+
+Pour réparer un projet (wrappers agents ou `.mcp.json` manquants) :
+
+```bash
+grimoire doctor . --fix
 ```
 
 ## Adopter le standard agentique gouverné
@@ -157,6 +204,26 @@ Référence des contrôles : [Contrôles gouvernés](governed-controls.md) · in
 `.cursorrules` (pointant vers `.github/copilot-instructions.md`) et un `.mcp.json` OS-neutre —
 pour que le projet fonctionne avec Copilot, Claude Code, Codex, Gemini CLI et Cursor sans
 configuration manuelle.
+
+## Créer un blueprint
+
+Un blueprint décrit un pipeline d'agents (nodes, edges, contrats) compilable en
+mission pack. Le CLI couvre tout le cycle :
+
+```bash
+grimoire blueprint new mon-pipeline            # scaffold un .blueprint.json valide
+grimoire blueprint validate mon-pipeline.blueprint.json
+grimoire blueprint compile mon-pipeline.blueprint.json
+```
+
+- Schéma de référence : `schemas/blueprint-v1.schema.json`
+- Exemples prêts à l'emploi : `registry/blueprints/` (`minimal`, `web-pipeline`)
+- L'atelier visuel reste disponible via `grimoire serve` (le cockpit
+  multi-projets, lui, est servi par `grimoire cockpit`)
+
+Chaque erreur de validation indique le chemin JSON fautif, la valeur attendue et
+la remédiation ; une extension manquante à la compilation affiche la commande
+`grimoire ext add` exacte.
 
 ## Utiliser le SDK Python
 

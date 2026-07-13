@@ -684,9 +684,9 @@ def build_syncer_from_config(project_root: Path) -> MemorySyncer:
 
     return MemorySyncer(
         project_root=project_root,
-        qdrant_url=os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", "")),
+        qdrant_url=os.environ.get("GRIMOIRE_QDRANT_URL", os.environ.get("Grimoire_QDRANT_URL", config.get("qdrant_url", ""))),
         embedding_model=config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"),
-        ollama_url=os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", "")),
+        ollama_url=os.environ.get("GRIMOIRE_OLLAMA_URL", os.environ.get("Grimoire_OLLAMA_URL", config.get("ollama_url", ""))),
         project_name=config.get("collection_prefix", "grimoire"),
     )
 

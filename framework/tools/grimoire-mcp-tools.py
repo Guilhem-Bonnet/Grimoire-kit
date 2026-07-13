@@ -215,7 +215,7 @@ def _rate_limit_check(tool_name: str) -> str | None:
 
 # ── Project Root ─────────────────────────────────────────────────────────────
 
-PROJECT_ROOT = Path(os.environ.get("Grimoire_PROJECT_ROOT", ".")).resolve()
+PROJECT_ROOT = Path(os.environ.get("GRIMOIRE_PROJECT_ROOT", os.environ.get("Grimoire_PROJECT_ROOT", "."))).resolve()
 TOOLS_DIR = Path(__file__).parent
 
 
@@ -847,7 +847,7 @@ Configuration MCP (VS Code mcp.json) :
       "grimoire-intelligence": {{
         "command": "python3",
         "args": ["{Path(__file__).resolve()}"],
-        "env": {{ "Grimoire_PROJECT_ROOT": "{PROJECT_ROOT}" }}
+        "env": {{ "GRIMOIRE_PROJECT_ROOT": "{PROJECT_ROOT}" }}
       }}
     }}
   }}

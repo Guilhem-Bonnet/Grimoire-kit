@@ -10,7 +10,14 @@
 #   curl -fsSL <URL>/install.sh | bash -s -- --name "Mon Projet" --user "Alice"
 #   bash install.sh --name "Mon Projet" --user "Alice" --archetype infra-ops
 #
-# Ce script :
+# CHEMIN RECOMMANDE (SDK Python) :
+#   pipx install grimoire-kit
+#   grimoire up .          # init + setup + standard + doctor en une commande
+#
+# Ce script shell est le chemin LEGACY (mode maintenance). Sans --legacy, il
+# affiche les instructions SDK et s'arrête.
+#
+# Mode legacy (--legacy) :
 #   1. Clone le kit Grimoire dans un dossier temporaire
 #   2. Exécute grimoire-init.sh avec les arguments fournis
 #   3. Nettoie le clone temporaire (ou --keep-kit pour garder)
@@ -25,6 +32,7 @@ REPO_URL="https://github.com/Guilhem-Bonnet/Grimoire-kit.git"
 BRANCH="main"
 KEEP_KIT=false
 KIT_DIR=""
+LEGACY=false
 
 # ─── Couleurs ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -67,10 +75,17 @@ usage() {
     cat <<EOF
 ${CYAN}Grimoire Custom Kit — Bootstrap Installer${NC}
 
+CHEMIN RECOMMANDE (SDK Python) :
+  pipx install grimoire-kit
+  grimoire up .              # init + setup + standard + doctor en une commande
+
+Ce script est le chemin legacy (mode maintenance). Il exige --legacy.
+
 Usage:
-  bash install.sh --name "Nom du Projet" --user "Votre Nom" [options]
+  bash install.sh --legacy --name "Nom du Projet" --user "Votre Nom" [options]
 
 Options:
+  --legacy            Exécuter l'installeur shell legacy (sinon: instructions SDK)
   --name NAME         Nom du projet (requis)
   --user USER         Votre nom (requis)
   --lang LANGUAGE     Langue de communication (défaut: Français)
@@ -94,6 +109,7 @@ EOF
 INIT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --legacy)    LEGACY=true; shift ;;
         --branch)    BRANCH="$2"; shift 2 ;;
         --keep-kit)  KEEP_KIT=true; shift ;;
         --kit-dir)   KIT_DIR="$2"; shift 2 ;;
@@ -106,8 +122,28 @@ done
 # ─── Main ────────────────────────────────────────────────────────────────────
 main() {
     echo ""
-    echo -e "${CYAN}🤖 Grimoire Custom Kit — Bootstrap Installer${NC}"
+    echo -e "${CYAN}Grimoire Custom Kit — Bootstrap Installer${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if [[ "$LEGACY" == false ]]; then
+        cat <<EOF
+Le chemin d'installation recommandé est le SDK Python :
+
+    pipx install grimoire-kit      # ou: pip install grimoire-kit (dans un venv)
+    grimoire up .                  # init + setup + standard + doctor en une commande
+
+Autres commandes utiles :
+    grimoire doctor                # diagnostic de l'environnement
+    grimoire cockpit scan ~/dev    # détecter et enrôler vos projets existants
+
+Cet installeur shell est conservé en mode maintenance uniquement.
+Pour l'exécuter malgré tout : relancez avec --legacy
+EOF
+        exit 0
+    fi
+
+    warn "Mode legacy : le chemin recommandé est le SDK (pipx install grimoire-kit && grimoire up .)"
     echo ""
 
     check_prerequisites

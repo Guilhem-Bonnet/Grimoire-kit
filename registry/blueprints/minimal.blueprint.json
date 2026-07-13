@@ -1,0 +1,21 @@
+{
+  "blueprintVersion": 1,
+  "id": "minimal",
+  "name": "Minimal blueprint",
+  "description": "The smallest valid v1 blueprint: one catalogue pattern node, no edges, no extension dependency. blueprintVersion must be the integer 1; id must be lowercase-with-hyphens; nodes must be non-empty; edges must be present (an empty list is fine). Every node carries a `pins` key, even empty: without it the file is treated as a Studio draft and re-projected.",
+  "catalogRef": {
+    "version": "1.0.0"
+  },
+  "nodes": [
+    {
+      "id": "orchestrate",
+      "kind": "pattern",
+      "ref": "ORC-01",
+      "label": "Orchestrator",
+      "description": "kind `pattern` points at a catalogue pattern id (three uppercase letters, a dash, two digits). This node is unconnected, so its pins list is empty; as soon as you add edges, declare one pin per contract with `id`, `direction` (in|out) and `contract`.",
+      "pins": []
+    }
+  ],
+  "edges": [],
+  "extensions": []
+}

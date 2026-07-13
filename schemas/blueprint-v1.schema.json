@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grimoire-kit.dev/schemas/blueprint-v1.schema.json",
+  "title": "Grimoire blueprint (v1)",
+  "description": "Compilable blueprint format consumed by the Forge (grimoire serve) and by `grimoire ext publish` / `grimoire ext add-blueprint`. A v1 blueprint declares typed nodes with explicit pins; edges connect pins whose contracts must match. Studio drafts (blueprintVersion 2, or nodes without a `pins` key) are NOT covered by this schema: they are converted to v1 by the Forge before lint/simulate/compile.",
+  "type": "object",
+  "required": ["blueprintVersion", "id", "nodes", "edges"],
+  "properties": {
+    "blueprintVersion": {
+      "const": 1,
+      "description": "Format version. Must be the integer 1: `grimoire ext publish` refuses any other value, and nodes carrying a `pins` key mark the file as v1 (not a Studio draft)."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Blueprint identifier: lowercase letters and digits separated by single hyphens (e.g. `web-pipeline`). Also used as the file stem (`<id>.blueprint.json`) and the compiled mission pack name (`.github/prompts/<id>.blueprint.prompt.md`)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable display name. Optional; defaults to the id in listings and in the compiled mission pack."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-text description. Optional; copied verbatim into the compiled mission pack."
+    },
+    "catalogRef": {
+      "type": "object",
+      "description": "Pin of the pattern catalogue the blueprint was authored against. The compiler traces `catalogRef.version` into the generated artifact for drift detection.",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Catalogue version (e.g. `1.0.0`). See `catalogVersion` in the catalogue export."
+        }
+      },
+      "additionalProperties": true
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Flow nodes. Must be non-empty. Every node MUST carry a `pins` key (even empty): if all nodes lack it, the file is treated as a Studio draft and re-projected, bypassing the declared typing.",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Typed connections between pins. Required (may be empty for a single-node flow). Each endpoint is `<nodeId>.<pinId>` and both pins must declare the same contract.",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "extensions": {
+      "type": "array",
+      "description": "Extensions the blueprint depends on. `grimoire ext add-blueprint` compares these ids against the installed extensions and reports the missing ones (with the install command to run).",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Extension id as published in the registry (e.g. `crewai`)."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "compiled": {
+      "type": "object",
+      "description": "Written by the compiler after a successful `blueprint_compile`: timestamp, catalogue version and hashes of the generated artifacts. Do not author this section by hand.",
+      "properties": {
+        "at": { "type": "string", "description": "ISO 8601 compilation timestamp (UTC)." },
+        "catalogVersion": { "type": "string", "description": "Catalogue version at compile time." },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string", "description": "Project-relative path of the generated artifact." },
+              "hash": { "type": "string", "description": "`sha256:<hex>` digest of the artifact content." },
+              "sourceNode": { "type": "string", "description": "Blueprint id (or node id) the artifact was generated from." }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "meta": {
+      "type": "object",
+      "description": "Editor metadata (validated/simulated flags, timestamps). Ignored by the compiler."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^.\\s]+$",
+      "description": "Node and pin identifiers must not contain dots or whitespace: edge endpoints are parsed by splitting `<nodeId>.<pinId>` on the first dot."
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "ref", "pins"],
+      "description": "A flow node. `kind` selects how `ref` is resolved and which prerequisites the simulation checks.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier",
+          "description": "Node id, unique within the blueprint (duplicate ids are a blocking error)."
+        },
+        "kind": {
+          "enum": ["pattern", "artifact", "extension-node", "composite", "composite-inline", "agent-spec"],
+          "description": "Node kind. `pattern`: catalogue pattern (ref = pattern id). `artifact`: governed project file (ref = project-relative path, must exist at validation time). `extension-node`: node provided by an extension (ref = `<extId>/<nodeId>`, the extension must be installed to compile). `composite`: sub-flow (ref = `use-case:<id>` or a `.blueprint.json` path). `composite-inline`: flattened Studio group (informational). `agent-spec`: agent/trigger sketch from the Studio (informational)."
+        },
+        "ref": {
+          "type": "string",
+          "description": "Target reference; shape depends on `kind` (see the per-kind constraints below)."
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label. Optional; used in listings, simulation steps and the compiled mission pack."
+        },
+        "description": {
+          "type": "string",
+          "description": "Free-text note about the node's role in the flow. Optional, informational."
+        },
+        "pins": {
+          "type": "array",
+          "description": "Typed connection points. REQUIRED on every v1 node (an empty list is fine for an unconnected node): a missing `pins` key on all nodes downgrades the file to a Studio draft.",
+          "items": { "$ref": "#/$defs/pin" }
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "pattern" } } },
+          "then": {
+            "properties": {
+              "ref": {
+                "pattern": "^[A-Z]{3}-[0-9]{2}$",
+                "description": "Catalogue pattern id, e.g. `ORC-01`, `QUA-04` (checked against the catalogue when one is available)."
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "extension-node" } } },
+          "then": {
+            "properties": {
+              "ref": {
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*/[A-Za-z0-9][A-Za-z0-9_-]*$",
+                "description": "`<extensionId>/<nodeId>` as declared in the extension manifest `provides.nodes` (e.g. `crewai/crewai-crew`). Compilation is blocked until the extension is installed in the project."
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "composite" } } },
+          "then": {
+            "properties": {
+              "ref": {
+                "pattern": "^(use-case:[a-z0-9]+(-[a-z0-9]+)*|.+\\.blueprint\\.json)$",
+                "description": "Either `use-case:<catalogue-use-case-id>` or a project-relative path to a sub-blueprint ending in `.blueprint.json`."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pin": {
+      "type": "object",
+      "required": ["id", "direction", "contract"],
+      "description": "Typed connection point of a node. An edge endpoint `<nodeId>.<pinId>` resolves to a pin, and the contracts on both ends must be identical.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier",
+          "description": "Pin id, unique within its node (e.g. `in`, `out`, `mission`, `result`)."
+        },
+        "direction": {
+          "enum": ["in", "out"],
+          "description": "`in`: the pin receives; `out`: the pin emits."
+        },
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Contract carried by the pin (e.g. `task-envelope`, `handoff-packet`, `evidence-pack`). Checked against the catalogue contracts when one is available."
+        }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "description": "Connection between two pins. Both endpoints must exist and carry the same contract; a declared `contract` must match the pins' contract. Edges also define execution order (the flow must be acyclic to compile).",
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[^.\\s]+\\.[^.\\s]+$",
+          "description": "Source endpoint `<nodeId>.<pinId>`; the pin should have direction `out`."
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[^.\\s]+\\.[^.\\s]+$",
+          "description": "Destination endpoint `<nodeId>.<pinId>`; the pin should have direction `in`."
+        },
+        "contract": {
+          "type": "string",
+          "description": "Optional explicit contract. When present it must equal the contract of both connected pins (mismatch is a blocking error)."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

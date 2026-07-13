@@ -218,7 +218,7 @@ class TestCLIIntegration(unittest.TestCase):
             capture_output=True, text=True, timeout=10,
         )
         self.assertIn("grimoire-intelligence", result.stdout)
-        self.assertIn("Grimoire_PROJECT_ROOT", result.stdout)
+        self.assertIn("GRIMOIRE_PROJECT_ROOT", result.stdout)
 
 
 # ── Auto-Discovery Engine (Story 8.5R) ──────────────────────────────────────

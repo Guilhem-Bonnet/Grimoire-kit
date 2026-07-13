@@ -428,13 +428,25 @@ def validate_blueprint_file(bp_path: Path) -> tuple[dict[str, Any], list[str]]:
     except (OSError, json.JSONDecodeError) as exc:
         raise ExtensionError(f"{bp_path} : illisible ({exc})") from exc
     if blueprint.get("blueprintVersion") != 1:
-        errors.append("blueprintVersion non supporté (attendu : 1)")
+        errors.append(
+            f"blueprintVersion non supporté : {blueprint.get('blueprintVersion')!r} "
+            "(attendu : l'entier 1)"
+        )
     if not ID_RE.match(str(blueprint.get("id", ""))):
-        errors.append(f"id invalide : {blueprint.get('id')}")
-    if not isinstance(blueprint.get("nodes"), list) or not blueprint["nodes"]:
-        errors.append("nodes vide ou absent")
+        errors.append(
+            f"id invalide : {blueprint.get('id')!r} (attendu : minuscules, chiffres "
+            "et tirets simples, ex. web-pipeline)"
+        )
+    if not isinstance(blueprint.get("nodes"), list) or not blueprint.get("nodes"):
+        errors.append(
+            "nodes vide ou absent (attendu : liste non vide d'objets "
+            "{id, kind, ref, pins})"
+        )
     if not isinstance(blueprint.get("edges"), list):
-        errors.append("edges absent")
+        errors.append(
+            "edges absent (attendu : liste, éventuellement vide, d'objets "
+            "{from, to, contract})"
+        )
     return blueprint, errors
 
 
@@ -517,6 +529,12 @@ def install_blueprint_from_registry(
         "installed": bp_id,
         "path": str(target.relative_to(project_root)),
         "missingExtensions": missing,
+        # Commande exacte pour résoudre chaque extension manquante.
+        "remediations": [
+            f"grimoire ext add {ext_id} --registry {registry_dir} "
+            f"--project-root {project_root}"
+            for ext_id in missing
+        ],
     }
 
 

@@ -1,0 +1,62 @@
+{
+  "blueprintVersion": 1,
+  "id": "web-pipeline",
+  "name": "Web pipeline",
+  "description": "A realistic multi-node flow: an orchestrator pattern plans the mission, a CrewAI crew executes it, a LangGraph state graph refines the result, and an evidence-pack pattern closes the loop. It references extension nodes published in this registry (crewai, langgraph): compiling requires those extensions to be installed in the target project — `grimoire blueprint compile` lists the exact install command for each missing one.",
+  "catalogRef": {
+    "version": "1.0.0"
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "pattern",
+      "ref": "ORC-01",
+      "label": "Plan the mission",
+      "description": "Catalogue pattern: orchestrator with specialized subagents. Emits a task-envelope.",
+      "pins": [
+        {"id": "out", "direction": "out", "contract": "task-envelope"}
+      ]
+    },
+    {
+      "id": "crew",
+      "kind": "extension-node",
+      "ref": "crewai/crewai-crew",
+      "label": "CrewAI crew",
+      "description": "Extension node `<extensionId>/<nodeId>` from the crewai extension manifest (provides.nodes). Pin ids mirror the manifest: mission in, result out.",
+      "pins": [
+        {"id": "mission", "direction": "in", "contract": "task-envelope"},
+        {"id": "result", "direction": "out", "contract": "handoff-packet"}
+      ]
+    },
+    {
+      "id": "refine",
+      "kind": "extension-node",
+      "ref": "langgraph/langgraph-graph",
+      "label": "LangGraph refinement",
+      "description": "Second bridge: a LangGraph StateGraph consumes the crew handoff and emits a refined handoff-packet.",
+      "pins": [
+        {"id": "mission", "direction": "in", "contract": "handoff-packet"},
+        {"id": "result", "direction": "out", "contract": "handoff-packet"}
+      ]
+    },
+    {
+      "id": "verify",
+      "kind": "pattern",
+      "ref": "QUA-04",
+      "label": "Evidence pack",
+      "description": "Quality pattern closing the flow with a proof (avoids the Faux Done anti-pattern warning).",
+      "pins": [
+        {"id": "in", "direction": "in", "contract": "handoff-packet"}
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "plan.out", "to": "crew.mission", "contract": "task-envelope"},
+    {"from": "crew.result", "to": "refine.mission", "contract": "handoff-packet"},
+    {"from": "refine.result", "to": "verify.in", "contract": "handoff-packet"}
+  ],
+  "extensions": [
+    {"id": "crewai"},
+    {"id": "langgraph"}
+  ]
+}

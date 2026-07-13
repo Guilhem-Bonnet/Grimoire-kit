@@ -261,7 +261,7 @@ npm install   # ou pip install -r requirements.txt
       "command": "node",
       "args": ["/chemin/vers/grimoire-kit/framework/mcp/server.js"],
       "env": {
-        "Grimoire_PROJECT_ROOT": "/chemin/vers/votre-projet"
+        "GRIMOIRE_PROJECT_ROOT": "/chemin/vers/votre-projet"
       }
     }
   }
@@ -287,7 +287,7 @@ import { readFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import { resolve, join } from "path";
 
-const PROJECT_ROOT = process.env.Grimoire_PROJECT_ROOT || process.cwd();
+const PROJECT_ROOT = process.env.GRIMOIRE_PROJECT_ROOT || process.cwd();
 const Grimoire_MEMORY = join(PROJECT_ROOT, "_grimoire/_memory");
 const Grimoire_OUTPUT = join(PROJECT_ROOT, "_grimoire-output");
 
