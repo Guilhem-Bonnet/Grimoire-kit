@@ -67,8 +67,46 @@ evals/
 
 ## Critère de succès (à pré-enregistrer)
 
-Exemple de seuil raisonnable — à confirmer avant la campagne : le bras governed
-est déclaré « utile » si les régressions baissent d'au moins 30 % relatif SANS
-que le taux de complétion ne baisse ni que le coût tokens n'augmente de plus de
-25 %. Tout autre résultat = « non démontré » et le README ne fait aucun claim
+Critère composite en vigueur (composante coût amendée par **A1**, voir le
+journal des amendements) : le bras testé est déclaré « utile » si
+
+1. les régressions baissent d'au moins 30 % relatif vs baseline ;
+2. le taux de complétion ne baisse pas ;
+3. **le coût par tâche complétée ne dépasse pas celui du bras baseline de
+   référence.** Garde-fou de validité : si le taux de complétion du bras testé
+   est inférieur à 25 %, le coût par tâche complétée est jugé non interprétable
+   et la composante coût est déclarée échouée.
+
+Le coût brut par run reste rapporté dans chaque rapport, à titre informatif
+(les deux lectures sont toujours publiées), mais n'est plus décisionnel.
+Tout autre résultat = « non démontré » et le README ne fait aucun claim
 d'efficacité.
+
+> Critère original (campagnes 2026-07-03 et 2026-07-09, conservé pour
+> lecture des rapports correspondants) : régressions −30 % relatif SANS
+> baisse du taux de complétion ni hausse du coût tokens de plus de 25 %.
+
+## Journal des amendements
+
+### A1 — 2026-07-12 — composante coût : du coût brut par run au coût par tâche complétée
+
+- **Moment** : après les campagnes 2026-07-03 (baseline/governed) et
+  2026-07-09 (activated), **avant** toute exécution d'un bras ultérieur.
+  Aucune donnée du bras suivant n'existait au moment de cet amendement.
+- **Contexte** : le bras `activated` du 2026-07-09 passe les composantes
+  régressions (−61,5 %) et complétion (15/40 vs 6/40) mais échoue sur le
+  plafond de coût brut (+47,4 % > +25 %), d'où le verdict « non démontré ».
+  Le rapport documente que le coût brut par run pénalise mécaniquement un
+  bras qui complète 2,5× plus de tâches (chaque run accompli plus de
+  travail réel) et que le coût par unité de valeur est la métrique
+  économique pertinente (3,68 $/tâche complétée en baseline contre 2,17 $
+  en activated). Il recommande explicitement de trancher ce choix *avant*
+  la campagne suivante.
+- **Décision** : pour toute campagne exécutée après le 2026-07-12, la
+  composante coût du critère composite est « coût par tâche complétée ≤
+  celui du bras baseline de référence », avec le garde-fou de validité
+  ci-dessus (complétion < 25 % ⇒ composante échouée). Le coût brut par
+  run est rapporté mais non décisionnel.
+- **Portée** : non rétroactif. Le verdict « non démontré » de la campagne
+  2026-07-09 reste inchangé et ne sera pas réinterprété avec le critère
+  amendé ; seule une nouvelle campagne peut produire un verdict positif.
