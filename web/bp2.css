@@ -298,6 +298,33 @@
 /* liens edge : coût en heat */
 .edge-label .flowtok { color: var(--data-amber); }
 
+/* ── Contexte (C1) : halo d'isolation, pression, panneau ── */
+.bp-node.ctx-isolated {
+  box-shadow: 0 0 0 3px rgba(110, 231, 255, 0.28), 0 0 18px rgba(110, 231, 255, 0.18);
+  outline: 1px dashed rgba(110, 231, 255, 0.55); outline-offset: 3px;
+}
+.bp-node.ctx-critical {
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.4), 0 0 22px rgba(248, 113, 113, 0.25);
+}
+.ctx-grid { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.ctx-field { display: flex; flex-direction: column; gap: 3px; }
+.ctx-field > span {
+  font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-muted);
+}
+.ctx-sel {
+  width: 100%; background: var(--elev-2); border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); color: var(--ink); padding: 7px 10px;
+  font-family: var(--font-mono); font-size: 0.77rem; outline: none;
+}
+.ctx-sel:focus { border-color: var(--accent); }
+.ctx-vd {
+  font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 1px 6px; border-radius: var(--r-sm);
+}
+.ctx-vd.warn { color: var(--data-amber); border: 1px solid var(--data-amber); }
+.ctx-vd.critical { color: #F87171; border: 1px solid #F87171; }
+
 /* ── Toolbar étroite : passage en 2 rangées propres ── */
 @media (max-width: 1240px) {
   .bp-toolbar { flex-wrap: wrap; height: auto; min-height: 46px; padding-top: 7px; padding-bottom: 7px; row-gap: 7px; }

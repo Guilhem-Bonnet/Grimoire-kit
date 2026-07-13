@@ -28,6 +28,7 @@
   let curPath = [];            // ids de groupes → niveau courant (C4)
   let history = [];
   let heatMode = false;
+  let ctxPressure = {};        // nodeId → verdict de pression (simulation serveur)
   let selection = { nodes: new Set(), edge: null, comment: null };
   const uid = () => 'x' + Math.random().toString(36).slice(2, 8);
 
@@ -130,6 +131,7 @@
     state.meta.dirty = true;
     state.meta.validated = false;
     state.meta.simulated = false;
+    ctxPressure = {};
     updateCompileBtn();
     runValidation(true);
     if (window.BP2Cost) BP2Cost.refresh();
@@ -194,7 +196,9 @@
       cost = `<span class="cost-badge">~${BP2Cost.fmtK(k)} tok</span>`;
     }
     const heatCls = heatMode && window.BP2Cost ? BP2Cost.heatClass(n, G(), specOf) : '';
-    return `<div class="bp-node${isGrp ? ' group' : ''}${isAg ? ' agent' : ''}${isTrg ? ' trigger' : ''}${selection.nodes.has(n.id) ? ' sel' : ''}${heatCls}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px${locked ? ';border-style:dashed;opacity:.75' : ''}">
+    const ctxIso = ctxOf(n).isolation === 'isolated';
+    const ctxCrit = ctxPressure[n.id] === 'critical';
+    return `<div class="bp-node${isGrp ? ' group' : ''}${isAg ? ' agent' : ''}${isTrg ? ' trigger' : ''}${selection.nodes.has(n.id) ? ' sel' : ''}${heatCls}${ctxIso ? ' ctx-isolated' : ''}${ctxCrit ? ' ctx-critical' : ''}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px${locked ? ';border-style:dashed;opacity:.75' : ''}">
       ${warns ? `<span class="warn-badge" data-warn="${n.id}">⚠ ${esc(warns)}</span>` : ''}
       ${cost}
       <div class="head" style="background:${color}14">
@@ -969,6 +973,66 @@
   }
   $$('.bp-tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 
+  /* ── Contexte (ingénierie de contexte, C1) : politique par node ── */
+  const CTX_TIERS = ['tiny', 'small', 'medium', 'deep'];
+  const CTX_STRATEGIES = ['digest', 'selective', 'index-guided', 'full'];
+  const CTX_ISOLATIONS = ['shared', 'isolated'];
+  function ctxOf(n) { return (n && n.config && n.config.context) || {}; }
+  function findNodeDeep(id, g) {
+    for (const n of (g || state).nodes || []) {
+      if (n.id === id) return n;
+      if (n.kind === 'group' && n.sub) { const f = findNodeDeep(id, n.sub); if (f) return f; }
+    }
+    return null;
+  }
+  function contextSectionHtml(n) {
+    const ctx = ctxOf(n);
+    const budget = ctx.budget || {};
+    const comp = ctx.compaction || {};
+    const tier = budget.tier || 'medium';
+    const sel = (id, opts, cur) => `<select class="ctx-sel" id="${id}">${opts.map(o => `<option value="${o}"${o === cur ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+    return `
+      <div class="bp-prop"><div class="k">Contexte — politique de fenêtre</div>
+        <div class="ctx-grid">
+          <label class="ctx-field"><span>budget (tier)</span>${sel('ctx-tier', CTX_TIERS, tier)}</label>
+          <label class="ctx-field"><span>plafond (tokens)</span><input class="grp-name-input" type="number" id="ctx-max" min="1" step="1000" value="${budget.maxTokens || ''}" placeholder="aucun" /></label>
+          <label class="ctx-field"><span>justification</span><input class="grp-name-input" type="text" id="ctx-just" value="${esc(budget.justification || '')}" placeholder="${tier === 'deep' ? 'requise pour le tier deep' : 'optionnelle'}" spellcheck="false" /></label>
+          <label class="ctx-field"><span>compaction de l'amont</span>${sel('ctx-strategy', CTX_STRATEGIES, comp.strategy || 'full')}</label>
+          <label class="ctx-field"><span>isolation</span>${sel('ctx-iso', CTX_ISOLATIONS, ctx.isolation || 'shared')}</label>
+        </div>
+        <div class="v soft" style="margin-top:6px">budget reçu, compression de l'amont, fenêtre partagée ou quarantaine — compilé en directives dans le mission pack. Un node isolé ne sort que par digest (handoff-packet ou context-pack).</div>
+      </div>`;
+  }
+  function bindContextSection(panel, n) {
+    const write = () => {
+      const tier = $('#ctx-tier', panel).value;
+      const maxTokens = parseInt($('#ctx-max', panel).value, 10);
+      const justification = $('#ctx-just', panel).value.trim();
+      const strategy = $('#ctx-strategy', panel).value;
+      const isolation = $('#ctx-iso', panel).value;
+      const ctx = {};
+      const budget = {};
+      if (tier !== 'medium') budget.tier = tier;
+      if (!isNaN(maxTokens) && maxTokens > 0) budget.maxTokens = maxTokens;
+      if (justification) budget.justification = justification;
+      if (Object.keys(budget).length) ctx.budget = budget;
+      if (strategy !== 'full') ctx.compaction = { strategy };
+      if (isolation !== 'shared') ctx.isolation = isolation;
+      if (Object.keys(ctx).length) {
+        n.config = n.config || {};
+        n.config.context = ctx;
+      } else if (n.config) {
+        delete n.config.context;
+        if (!Object.keys(n.config).length) delete n.config;
+      }
+      markDirty(); render();
+    };
+    ['ctx-tier', 'ctx-max', 'ctx-just', 'ctx-strategy', 'ctx-iso'].forEach(id => {
+      const el = $('#' + id, panel);
+      if (el) el.addEventListener('change', write);
+    });
+  }
+
   function renderInspector() {
     const panel = $('#panel-node');
     const g = G();
@@ -1037,9 +1101,10 @@
     if (!s) { panel.innerHTML = ''; return; }
     if (n.kind === 'agent' && window.BP2Team) {
       const agCost = window.BP2Cost ? BP2Cost.nodeRows(n, specOf) : '';
-      panel.innerHTML = BP2Team.inspector(n) + agCost + `
+      panel.innerHTML = BP2Team.inspector(n) + agCost + contextSectionHtml(n) + `
       <button class="at-btn sm acc" id="ag-config">CONFIGURER L'AGENT →</button>
       <button class="at-btn sm ghost" id="del-node">SUPPRIMER</button>`;
+      bindContextSection(panel, n);
       $('#ag-config').addEventListener('click', () => openFiche(n));
       $('#del-node').addEventListener('click', deleteSelection);
       return;
@@ -1093,8 +1158,10 @@
         ${s.in.map(c2 => pinRow('in', c2)).join('')}${s.out.map(c2 => pinRow('out', c2)).join('')}</div>
       ${docsList}
       ${costRows}
+      ${contextSectionHtml(n)}
       <button class="at-btn sm" id="open-fiche">OUVRIR LE DOSSIER DU NODE →</button>
       <button class="at-btn sm ghost" id="del-node">SUPPRIMER LE NODE</button>`;
+    bindContextSection(panel, n);
     $('#open-fiche').addEventListener('click', () => openFiche(n));
     $('#del-node').addEventListener('click', deleteSelection);
     $$('[data-doc-open]', panel).forEach(el => el.addEventListener('click', () => {
@@ -1289,6 +1356,25 @@
         } else {
           verdict += `<div class="bp-verdict" style="margin-top:8px"><div class="t">vérifié par l'API locale ✓</div>
             <p>${esc(r.verdict)} · ${(r.steps || []).length} étapes ordonnées${(r.warnings || []).length ? '<br>avertissements : ' + r.warnings.map(esc).join(' · ') : ''}</p></div>`;
+        }
+        /* pression de contexte (C1) : verdicts par node, nodes critical colorés */
+        ctxPressure = {};
+        (r.contextPressure || []).forEach(p => { ctxPressure[p.nodeId] = p.verdict; });
+        const tension = (r.contextPressure || []).filter(p => p.verdict !== 'ok');
+        if (tension.length) {
+          const nameOf = idn => {
+            const nn = findNodeDeep(idn);
+            const ss = nn && specOf(nn);
+            return nn ? (nn.kind === 'group' ? (nn.name || 'sous-flow') : (nn.name || (ss && (ss.kind === 'ext' || ss.kind === 'agent') ? ss.name : nn.ref) || idn)) : idn;
+          };
+          verdict += `<div class="bp-verdict${tension.some(p => p.verdict === 'critical') ? ' warn' : ''}" style="margin-top:8px"><div class="t">pression de contexte — ${tension.length} node${tension.length > 1 ? 's' : ''} sous tension</div>
+            <p>${tension.map(p => `<span class="ctx-vd ${p.verdict}">${p.verdict}</span> ${esc(nameOf(p.nodeId))} — ${p.windowPct} % de la fenêtre (~${Math.round(p.estimatedTokens / 1000)}k tokens)`).join('<br>')}
+            <br>remède : compaction digest ou isolation en amont.</p></div>`;
+          tension.forEach(p => {
+            if (p.verdict !== 'critical') return;
+            const el = items.querySelector(`.bp-node[data-id="${p.nodeId}"]`);
+            if (el) el.classList.add('ctx-critical');
+          });
         }
         $('#sim-verdict').innerHTML = verdict;
       } catch (e) { /* API indisponible en cours de route : verdict local seul */ }
