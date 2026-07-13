@@ -42,6 +42,17 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
 BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
 
+# Hypothèse de promotion beta→stable de la stigmergie (QUA-13 : la mesure
+# sert une décision). Exposée telle quelle par /api/stigmergy (bloc behavior)
+# pour que les ratios soient lus contre la thèse qu'ils testent.
+STIGMERGY_TARGET_USEFUL_RATIO = 0.4
+STIGMERGY_PROMOTION_MIN_EMITTED = 20
+STIGMERGY_PROMOTION_HYPOTHESIS = (
+    "Le board coordonne réellement si au moins 40 % des signaux émis "
+    "produisent une coordination utile (résolution ou relais), mesuré "
+    "sur au moins 20 émissions."
+)
+
 # Pins par famille pour les blueprints du Studio (v2) : même heuristique que
 # web/atelier-nav.js — à remplacer par une curation par pattern dans le
 # catalogue quand elle existera. `handoff-packet` circule partout.
@@ -794,7 +805,8 @@ class ForgeAPI:
         denominator = board.total_emitted or 1
         useful_ratio = round(useful / denominator, 3)
         # Seuil de promotion beta→stable (QUA-13) : la mesure sert une décision.
-        target_ratio = 0.4
+        target_ratio = STIGMERGY_TARGET_USEFUL_RATIO
+        min_emitted = STIGMERGY_PROMOTION_MIN_EMITTED
         return {
             "active": signals,
             "trails": trails,
@@ -820,7 +832,9 @@ class ForgeAPI:
                 "relays": relays,
                 "usefulRatio": useful_ratio,
                 "targetUsefulRatio": target_ratio,
-                "promotionReady": bool(board.total_emitted >= 20 and useful_ratio >= target_ratio),
+                "minEmitted": min_emitted,
+                "hypothesis": STIGMERGY_PROMOTION_HYPOTHESIS,
+                "promotionReady": bool(board.total_emitted >= min_emitted and useful_ratio >= target_ratio),
             },
         }
 
@@ -986,7 +1000,9 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             try:
                 if path.startswith("/api/blueprints/"):
                     bp_id = path.rsplit("/", 1)[1]
-                    self._json(api.blueprint_put(bp_id, self._body()))
+                    saved = api.blueprint_put(bp_id, self._body())
+                    self._governed_event("blueprint.put", id=bp_id)
+                    self._json(saved)
                 else:
                     self._error("route inconnue", 404)
             except (ValueError, json.JSONDecodeError) as exc:
