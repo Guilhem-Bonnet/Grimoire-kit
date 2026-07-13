@@ -61,8 +61,7 @@ La détection ne lit pas les secrets. Elle ne remonte que des signaux non sensib
 ## Installation dans un projet cible
 
 ```bash
-grimoire init . --archetype minimal
-grimoire-init.sh install --archetype agentic-standard
+grimoire init . -a minimal,agentic-standard
 ```
 
 Ensuite, générer les artefacts selon le profil :

@@ -42,6 +42,9 @@ jobs:
       - name: Lint
         run: ruff check src/ tests/unit/ framework/memory/ --output-format=github
 
+      - name: Code-size ratchet
+        run: python scripts/check-code-ratchet.py
+
   typecheck:
     name: "mypy --strict"
     runs-on: ubuntu-latest

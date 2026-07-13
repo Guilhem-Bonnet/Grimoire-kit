@@ -20,26 +20,18 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.tools._common import GrimoireTool, estimate_tokens
+from grimoire.tools.model_windows import (
+    DEFAULT_MODEL as DEFAULT_MODEL,
+)
+from grimoire.tools.model_windows import (
+    MODEL_WINDOWS as MODEL_WINDOWS,
+)
+from grimoire.tools.model_windows import (
+    resolve_window,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-MODEL_WINDOWS: dict[str, int] = {
-    "claude-opus-4": 200_000,
-    "claude-sonnet-4": 200_000,
-    "claude-haiku": 200_000,
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "o3": 200_000,
-    "codex": 192_000,
-    "gemini-1.5-pro": 1_000_000,
-    "gemini-2.0-flash": 1_000_000,
-    "copilot": 200_000,
-    "codestral": 32_000,
-    "llama3": 8_000,
-    "mistral": 32_000,
-}
-
-DEFAULT_MODEL = "copilot"
 THRESHOLD_WARN = 40  # %
 THRESHOLD_CRIT = 70  # %
 
@@ -230,7 +222,7 @@ def find_agents(project_root: Path) -> list[Path]:
 def compute_budget(agent_path: Path, project_root: Path,
                    model: str = DEFAULT_MODEL) -> AgentBudget:
     """Compute the full context budget for one agent."""
-    window = MODEL_WINDOWS.get(model, MODEL_WINDOWS[DEFAULT_MODEL])
+    window = resolve_window(model)
     loads = resolve_agent_loads(agent_path, project_root)
     return AgentBudget(
         agent_id=agent_path.stem, model=model,

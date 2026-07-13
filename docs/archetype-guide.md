@@ -10,6 +10,8 @@ Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA d
 > `grimoire init . -a <archetype>`. Les commandes `grimoire-init.sh` ci-dessous
 > restent valides (chemin shell en mode maintenance) et couvrent quelques
 > opérations sans équivalent SDK (`install --inspect`, `validate --all`).
+> Le chemin shell sera retiré en 4.0.0 ; chaque opération encore sans
+> équivalent SDK sera portée avant ce retrait.
 
 ```bash
 # Chemin recommandé (SDK)

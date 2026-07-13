@@ -26,26 +26,18 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from grimoire.tools._common import GrimoireTool, estimate_tokens
+from grimoire.tools.model_windows import (
+    DEFAULT_MODEL as DEFAULT_MODEL,
+)
+from grimoire.tools.model_windows import (
+    MODEL_WINDOWS as MODEL_WINDOWS,
+)
+from grimoire.tools.model_windows import (
+    resolve_window,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-MODEL_WINDOWS: dict[str, int] = {
-    "claude-opus-4": 200_000,
-    "claude-sonnet-4": 200_000,
-    "claude-haiku": 200_000,
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "o3": 200_000,
-    "codex": 192_000,
-    "gemini-1.5-pro": 1_000_000,
-    "gemini-2.0-flash": 1_000_000,
-    "copilot": 200_000,
-    "codestral": 32_000,
-    "llama3": 8_000,
-    "mistral": 32_000,
-}
-
-DEFAULT_MODEL = "copilot"
 CHARS_PER_TOKEN = 4
 WARNING_THRESHOLD = 0.60
 CRITICAL_THRESHOLD = 0.80
@@ -268,7 +260,7 @@ def calculate_plan(
     max_priority: int = Priority.P2_TASK,
 ) -> LoadPlan:
     """Calculate the optimal loading plan for an agent."""
-    model_window = MODEL_WINDOWS.get(model, MODEL_WINDOWS[DEFAULT_MODEL])
+    model_window = resolve_window(model)
     entries = discover_context_files(project_root, agent_tag)
 
     if task_query:
