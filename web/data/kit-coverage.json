@@ -1,0 +1,188 @@
+{
+  "generated_by": "scripts/gen-kit-coverage.py",
+  "source": "framework/agentic-standard/capability-map.yaml",
+  "verified_pattern_count": 36,
+  "verified_patterns": [
+    {
+      "id": "advanced-context-orchestrator",
+      "category": "context",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "agent-privilege-boundary",
+      "category": "security",
+      "profile_min": "governed"
+    },
+    {
+      "id": "browser-tool-contract",
+      "category": "quality",
+      "profile_min": "governed"
+    },
+    {
+      "id": "cluster-action-dry-run",
+      "category": "governance",
+      "profile_min": "production"
+    },
+    {
+      "id": "code-graph-projection",
+      "category": "memory",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "context-compression-gate",
+      "category": "context",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "decision-council-gate",
+      "category": "governance",
+      "profile_min": "governed"
+    },
+    {
+      "id": "doc-to-graph-pipeline",
+      "category": "knowledge",
+      "profile_min": "production"
+    },
+    {
+      "id": "evidence-gated-fsm",
+      "category": "workflow",
+      "profile_min": "starter"
+    },
+    {
+      "id": "flow-dsl-minimal",
+      "category": "orchestration",
+      "profile_min": "production"
+    },
+    {
+      "id": "governed-agent-orchestration",
+      "category": "orchestration",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "governed-hook-gateway",
+      "category": "governance",
+      "profile_min": "governed"
+    },
+    {
+      "id": "governed-knowledge-indexing",
+      "category": "knowledge",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "governed-memory-policy",
+      "category": "memory",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "governed-observability-cockpit",
+      "category": "observability",
+      "profile_min": "governed"
+    },
+    {
+      "id": "guardrail-contract",
+      "category": "security",
+      "profile_min": "controlled"
+    },
+    {
+      "id": "k8s-agent-manifest",
+      "category": "runtime",
+      "profile_min": "production"
+    },
+    {
+      "id": "llm-cost-registry",
+      "category": "provider",
+      "profile_min": "production"
+    },
+    {
+      "id": "memory-integrity-validator",
+      "category": "memory",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "merge-lane-fault-classifier",
+      "category": "governance",
+      "profile_min": "governed"
+    },
+    {
+      "id": "mission-evidence-ledger",
+      "category": "workflow",
+      "profile_min": "governed"
+    },
+    {
+      "id": "policy-by-environment",
+      "category": "governance",
+      "profile_min": "governed"
+    },
+    {
+      "id": "prompt-injection-firewall",
+      "category": "security",
+      "profile_min": "controlled"
+    },
+    {
+      "id": "prompt-version-observability",
+      "category": "observability",
+      "profile_min": "controlled"
+    },
+    {
+      "id": "provider-cost-slo",
+      "category": "provider",
+      "profile_min": "production"
+    },
+    {
+      "id": "provider-routing-contract",
+      "category": "provider",
+      "profile_min": "controlled"
+    },
+    {
+      "id": "redis-hot-memory-soft-gate",
+      "category": "memory",
+      "profile_min": "governed"
+    },
+    {
+      "id": "remote-hygiene-guard",
+      "category": "governance",
+      "profile_min": "controlled"
+    },
+    {
+      "id": "runtime-journal",
+      "category": "runtime",
+      "profile_min": "governed"
+    },
+    {
+      "id": "runtime-provider-contract",
+      "category": "runtime",
+      "profile_min": "orchestrated"
+    },
+    {
+      "id": "skill-classification-matrix",
+      "category": "orchestration",
+      "profile_min": "governed"
+    },
+    {
+      "id": "tool-blast-radius-limiter",
+      "category": "security",
+      "profile_min": "starter"
+    },
+    {
+      "id": "tool-mediation-gate",
+      "category": "security",
+      "profile_min": "governed"
+    },
+    {
+      "id": "visual-evidence-gate",
+      "category": "quality",
+      "profile_min": "governed"
+    },
+    {
+      "id": "workflow-state-manifest",
+      "category": "workflow",
+      "profile_min": "starter"
+    },
+    {
+      "id": "workspace-isolation",
+      "category": "security",
+      "profile_min": "governed"
+    }
+  ],
+  "note": "Patterns vérifiés mécaniquement par `grimoire standard verify` (capability-map du kit). L'ancrage normatif se fait par source_normative ; il n'existe pas de correspondance pattern-par-pattern avec les références du catalogue (ORG-xx, ORC-xx…) — le compteur compare des périmètres, pas des identités."
+}
