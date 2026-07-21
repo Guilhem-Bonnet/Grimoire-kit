@@ -29,6 +29,19 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
+from grimoire.tools.blueprint_context import (
+    CONTEXT_WINDOW_TOKENS,
+    DEFAULT_EDGE_CHANNEL,
+    DIGEST_CONTRACTS,
+    DIGEST_TOKENS,
+    EDGE_CHANNELS,
+    NODE_BASE_TOKENS,
+)
+from grimoire.tools.blueprint_context import as_dict as _as_dict
+from grimoire.tools.blueprint_context import context_policy as _context_policy
+from grimoire.tools.blueprint_context import (
+    context_shape_errors as _context_shape_errors,
+)
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
@@ -75,108 +88,6 @@ STUDIO_FAMILY_PINS: dict[str, dict[str, list[str]]] = {
     },
     "RUN": {"in": ["handoff-packet"], "out": ["telemetry-event"]},
 }
-
-# Ingénierie de contexte (tranche C1) : politique déclarative par node
-# (`config.context`), validée, lintée, simulée et compilée. Constantes du
-# modèle de pression — volontairement simples, calibrables par P2.3.
-CONTEXT_WINDOW_TOKENS = 200_000
-NODE_BASE_TOKENS = 8_000
-DIGEST_TOKENS = 2_000
-DIGEST_CONTRACTS = ("handoff-packet", "context-pack")
-CONTEXT_TIERS = ("tiny", "small", "medium", "deep")
-COMPACTION_STRATEGIES = ("digest", "selective", "index-guided", "full")
-ISOLATION_MODES = ("shared", "isolated")
-
-
-def _context_policy(node: dict[str, Any]) -> dict[str, Any]:
-    """`config.context` d'un node, ou {} si absent/mal formé (lint tolérant)."""
-    config = node.get("config")
-    if not isinstance(config, dict):
-        return {}
-    ctx = config.get("context")
-    return ctx if isinstance(ctx, dict) else {}
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    """`value` si c'est un dict, sinon {} — narrowing pour mypy strict."""
-    return value if isinstance(value, dict) else {}
-
-
-def _context_shape_errors(node: dict[str, Any]) -> list[str]:
-    """Erreurs de forme de `config.context` (enums, types) + règle R-C4."""
-    errors: list[str] = []
-    nid = node.get("id")
-    config = node.get("config")
-    if config is None:
-        return errors
-    if not isinstance(config, dict):
-        return [f"config invalide (objet attendu) : node {nid}"]
-    ctx = config.get("context")
-    if ctx is None:
-        return errors
-    if not isinstance(ctx, dict):
-        return [f"config.context invalide (objet attendu) : node {nid}"]
-    unknown = sorted(set(ctx) - {"budget", "compaction", "isolation"})
-    if unknown:
-        errors.append(
-            f"config.context : clés inconnues {', '.join(unknown)} (node {nid})"
-        )
-    isolation = ctx.get("isolation")
-    if isolation is not None and isolation not in ISOLATION_MODES:
-        errors.append(
-            f"config.context.isolation invalide : {isolation} "
-            f"(attendu {' | '.join(ISOLATION_MODES)}) — node {nid}"
-        )
-    budget = ctx.get("budget")
-    if budget is not None and not isinstance(budget, dict):
-        errors.append(f"config.context.budget invalide (objet attendu) : node {nid}")
-    elif isinstance(budget, dict):
-        tier = budget.get("tier")
-        if tier is not None and tier not in CONTEXT_TIERS:
-            errors.append(
-                f"config.context.budget.tier invalide : {tier} "
-                f"(attendu {' | '.join(CONTEXT_TIERS)}) — node {nid}"
-            )
-        max_tokens = budget.get("maxTokens")
-        if max_tokens is not None and (
-            not isinstance(max_tokens, int)
-            or isinstance(max_tokens, bool)
-            or max_tokens < 1
-        ):
-            errors.append(
-                f"config.context.budget.maxTokens invalide "
-                f"(entier >= 1 attendu) : node {nid}"
-            )
-        elif isinstance(max_tokens, int) and max_tokens > CONTEXT_WINDOW_TOKENS:
-            errors.append(
-                f"R-C4 : budget.maxTokens ({max_tokens}) dépasse la fenêtre du "
-                f"modèle cible ({CONTEXT_WINDOW_TOKENS} tokens) — node {nid}"
-            )
-        justification = budget.get("justification")
-        if justification is not None and not isinstance(justification, str):
-            errors.append(
-                f"config.context.budget.justification invalide "
-                f"(chaîne attendue) : node {nid}"
-            )
-    compaction = ctx.get("compaction")
-    if compaction is not None and not isinstance(compaction, dict):
-        errors.append(
-            f"config.context.compaction invalide (objet attendu) : node {nid}"
-        )
-    elif isinstance(compaction, dict):
-        strategy = compaction.get("strategy")
-        if strategy is not None and strategy not in COMPACTION_STRATEGIES:
-            errors.append(
-                f"config.context.compaction.strategy invalide : {strategy} "
-                f"(attendu {' | '.join(COMPACTION_STRATEGIES)}) — node {nid}"
-            )
-        contract = compaction.get("digestContract")
-        if contract is not None and contract not in DIGEST_CONTRACTS:
-            errors.append(
-                f"config.context.compaction.digestContract invalide : {contract} "
-                f"(attendu {' | '.join(DIGEST_CONTRACTS)}) — node {nid}"
-            )
-    return errors
 
 
 ARTIFACT_SURFACES = {
@@ -535,6 +446,12 @@ class ForgeAPI:
                     f"edge {edge['from']} -> {edge['to']} : contrat déclaré "
                     f"({edge['contract']}) != contrat des pins ({c_from})"
                 )
+            channel = edge.get("channel")
+            if channel is not None and channel not in EDGE_CHANNELS:
+                errors.append(
+                    f"edge {edge['from']} -> {edge['to']} : channel invalide "
+                    f"({channel}) — attendu {' | '.join(EDGE_CHANNELS)}"
+                )
 
         catalogue = self._catalogue()
         if catalogue:
@@ -743,9 +660,18 @@ class ForgeAPI:
         blockers: list[str] = list(lint["errors"])
         nodes = {str(n["id"]): n for n in blueprint.get("nodes", [])}
 
-        # Ordre topologique (Kahn) sur les connexions node -> node
+        # Ordre topologique (Kahn) sur les connexions node -> node. Seuls les
+        # edges du canal nominal ``happy`` portent l'ordre et l'accumulation de
+        # contexte (P0.2) ; ``failure``/``escalation`` sont des routes
+        # alternatives, hors du chemin nominal.
+        channels = dict.fromkeys(EDGE_CHANNELS, 0)
         deps: dict[str, set[str]] = {node_id: set() for node_id in nodes}
         for edge in blueprint.get("edges", []):
+            channel = edge.get("channel", DEFAULT_EDGE_CHANNEL)
+            if channel in channels:
+                channels[channel] += 1
+            if channel != DEFAULT_EDGE_CHANNEL:
+                continue
             src = str(edge.get("from", "")).split(".")[0]
             dst = str(edge.get("to", "")).split(".")[0]
             if src in nodes and dst in nodes:
@@ -872,6 +798,9 @@ class ForgeAPI:
             "exitNodes": exits,
             "steps": steps,
             "contextPressure": pressure,
+            # Répartition des edges par canal (P0.2) : le graphe montre ses
+            # chemins d'échec et d'escalade, pas seulement le chemin nominal.
+            "channels": channels,
         }
 
     @staticmethod

@@ -265,7 +265,7 @@
 
     svg.innerHTML = g.edges.map(e => `
       <path class="edge-hit" data-eid="${e.id}" d="${edgePath(e)}"></path>
-      <path class="edge${selection.edge === e.id ? ' sel' : ''}" data-e="${e.id}" d="${edgePath(e)}" stroke="${Atelier.contractColor(e.contract)}"></path>`).join('')
+      <path class="edge${e.channel && e.channel !== 'happy' ? ' edge-' + e.channel : ''}${selection.edge === e.id ? ' sel' : ''}" data-e="${e.id}" d="${edgePath(e)}" stroke="${Atelier.contractColor(e.contract)}"></path>`).join('')
       + '<path class="ghost" id="ghost-wire" d="" style="display:none"></path>';
 
     $$('.edge-label', world).forEach(el => el.remove());

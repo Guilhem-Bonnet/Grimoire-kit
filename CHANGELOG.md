@@ -9,6 +9,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Typage d'edge `channel`** (blueprint, P0.2) : chaque edge porte un canal
+  `happy` (défaut) `| failure | escalation`. Additif et rétro-compatible —
+  l'absence vaut `happy`, les blueprints existants migrent sans perte. La
+  simulation ne suit que le canal nominal pour l'ordre et la pression de
+  contexte (les chemins d'échec/escalade sont des routes alternatives), expose
+  la répartition `channels`, et l'éditeur distingue visuellement ces chemins.
+  Débloque la famille résilience (edges `failure`) sans nouveau `kind`.
 - **Modèle de coût calibré** (ingénierie de contexte, tranche C2) : la table de
   coût par pattern, jusqu'ici en dur dans `web/bp2-cost.js`, devient une source
   de vérité serveur (`grimoire.tools.cost_model`) exposée par
