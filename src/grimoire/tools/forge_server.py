@@ -73,6 +73,109 @@ STUDIO_FAMILY_PINS: dict[str, dict[str, list[str]]] = {
     "RUN": {"in": ["handoff-packet"], "out": ["telemetry-event"]},
 }
 
+# Ingénierie de contexte (tranche C1) : politique déclarative par node
+# (`config.context`), validée, lintée, simulée et compilée. Constantes du
+# modèle de pression — volontairement simples, calibrables par P2.3.
+CONTEXT_WINDOW_TOKENS = 200_000
+NODE_BASE_TOKENS = 8_000
+DIGEST_TOKENS = 2_000
+DIGEST_CONTRACTS = ("handoff-packet", "context-pack")
+CONTEXT_TIERS = ("tiny", "small", "medium", "deep")
+COMPACTION_STRATEGIES = ("digest", "selective", "index-guided", "full")
+ISOLATION_MODES = ("shared", "isolated")
+
+
+def _context_policy(node: dict[str, Any]) -> dict[str, Any]:
+    """`config.context` d'un node, ou {} si absent/mal formé (lint tolérant)."""
+    config = node.get("config")
+    if not isinstance(config, dict):
+        return {}
+    ctx = config.get("context")
+    return ctx if isinstance(ctx, dict) else {}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """`value` si c'est un dict, sinon {} — narrowing pour mypy strict."""
+    return value if isinstance(value, dict) else {}
+
+
+def _context_shape_errors(node: dict[str, Any]) -> list[str]:
+    """Erreurs de forme de `config.context` (enums, types) + règle R-C4."""
+    errors: list[str] = []
+    nid = node.get("id")
+    config = node.get("config")
+    if config is None:
+        return errors
+    if not isinstance(config, dict):
+        return [f"config invalide (objet attendu) : node {nid}"]
+    ctx = config.get("context")
+    if ctx is None:
+        return errors
+    if not isinstance(ctx, dict):
+        return [f"config.context invalide (objet attendu) : node {nid}"]
+    unknown = sorted(set(ctx) - {"budget", "compaction", "isolation"})
+    if unknown:
+        errors.append(
+            f"config.context : clés inconnues {', '.join(unknown)} (node {nid})"
+        )
+    isolation = ctx.get("isolation")
+    if isolation is not None and isolation not in ISOLATION_MODES:
+        errors.append(
+            f"config.context.isolation invalide : {isolation} "
+            f"(attendu {' | '.join(ISOLATION_MODES)}) — node {nid}"
+        )
+    budget = ctx.get("budget")
+    if budget is not None and not isinstance(budget, dict):
+        errors.append(f"config.context.budget invalide (objet attendu) : node {nid}")
+    elif isinstance(budget, dict):
+        tier = budget.get("tier")
+        if tier is not None and tier not in CONTEXT_TIERS:
+            errors.append(
+                f"config.context.budget.tier invalide : {tier} "
+                f"(attendu {' | '.join(CONTEXT_TIERS)}) — node {nid}"
+            )
+        max_tokens = budget.get("maxTokens")
+        if max_tokens is not None and (
+            not isinstance(max_tokens, int)
+            or isinstance(max_tokens, bool)
+            or max_tokens < 1
+        ):
+            errors.append(
+                f"config.context.budget.maxTokens invalide "
+                f"(entier >= 1 attendu) : node {nid}"
+            )
+        elif isinstance(max_tokens, int) and max_tokens > CONTEXT_WINDOW_TOKENS:
+            errors.append(
+                f"R-C4 : budget.maxTokens ({max_tokens}) dépasse la fenêtre du "
+                f"modèle cible ({CONTEXT_WINDOW_TOKENS} tokens) — node {nid}"
+            )
+        justification = budget.get("justification")
+        if justification is not None and not isinstance(justification, str):
+            errors.append(
+                f"config.context.budget.justification invalide "
+                f"(chaîne attendue) : node {nid}"
+            )
+    compaction = ctx.get("compaction")
+    if compaction is not None and not isinstance(compaction, dict):
+        errors.append(
+            f"config.context.compaction invalide (objet attendu) : node {nid}"
+        )
+    elif isinstance(compaction, dict):
+        strategy = compaction.get("strategy")
+        if strategy is not None and strategy not in COMPACTION_STRATEGIES:
+            errors.append(
+                f"config.context.compaction.strategy invalide : {strategy} "
+                f"(attendu {' | '.join(COMPACTION_STRATEGIES)}) — node {nid}"
+            )
+        contract = compaction.get("digestContract")
+        if contract is not None and contract not in DIGEST_CONTRACTS:
+            errors.append(
+                f"config.context.compaction.digestContract invalide : {contract} "
+                f"(attendu {' | '.join(DIGEST_CONTRACTS)}) — node {nid}"
+            )
+    return errors
+
+
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
     "workflows": (".github/prompts", "*.prompt.md"),
@@ -296,14 +399,15 @@ class ForgeAPI:
         def walk(graph: dict[str, Any]) -> None:
             for n in graph.get("nodes", []):
                 if n.get("kind") == "group":
-                    flat_nodes.append(
-                        {
-                            "id": n.get("id"),
-                            "kind": "composite-inline",
-                            "ref": n.get("name", "sous-flow"),
-                            "label": n.get("name", "sous-flow"),
-                        }
-                    )
+                    group_node: dict[str, Any] = {
+                        "id": n.get("id"),
+                        "kind": "composite-inline",
+                        "ref": n.get("name", "sous-flow"),
+                        "label": n.get("name", "sous-flow"),
+                    }
+                    if isinstance(n.get("config"), dict):
+                        group_node["config"] = n["config"]
+                    flat_nodes.append(group_node)
                     walk(n.get("sub", {}))
                     continue
                 ref = str(n.get("ref", ""))
@@ -316,7 +420,12 @@ class ForgeAPI:
                     kind, label = "pattern", names.get(ref, ref)
                 else:
                     kind, label = "artifact", ref
-                flat_nodes.append({"id": n.get("id"), "kind": kind, "ref": ref, "label": label})
+                flat: dict[str, Any] = {
+                    "id": n.get("id"), "kind": kind, "ref": ref, "label": label,
+                }
+                if isinstance(n.get("config"), dict):
+                    flat["config"] = n["config"]
+                flat_nodes.append(flat)
             for e in graph.get("edges", []):
                 flat_edges.append(dict(e))
 
@@ -337,7 +446,10 @@ class ForgeAPI:
                 family = str(n["ref"])[:3]
                 heur = STUDIO_FAMILY_PINS.get(family, {})
                 pins_in[str(n["id"])].update(heur.get("in", []))
-                pins_out[str(n["id"])].update(heur.get("out", []))
+                # Un node isolé ne sort que par digest : pas de pins de sortie
+                # heuristiques, seuls les contrats de ses edges font foi (R-C5).
+                if _context_policy(n).get("isolation") != "isolated":
+                    pins_out[str(n["id"])].update(heur.get("out", []))
             n["pins"] = [
                 {"id": f"in-{c}", "direction": "in", "contract": c}
                 for c in sorted(pins_in[str(n["id"])])
@@ -443,6 +555,30 @@ class ForgeAPI:
                         f"ref composite invalide (use-case:<id> ou "
                         f"chemin .blueprint.json) : {ref}"
                     )
+
+        # ── politique de contexte (C1) : forme + R-C4 + R-C5 ──
+        for n in nodes:
+            errors.extend(_context_shape_errors(n))
+        for n in nodes:
+            if _context_policy(n).get("isolation") != "isolated":
+                continue
+            nid = str(n.get("id"))
+            bad: set[str] = set()
+            for p in n.get("pins", []):
+                if p.get("direction") == "out" and p.get("contract") not in DIGEST_CONTRACTS:
+                    bad.add(str(p.get("contract")))
+            for edge in blueprint.get("edges", []):
+                if str(edge.get("from", "")).split(".")[0] != nid:
+                    continue
+                contract = edge.get("contract")
+                if contract and contract not in DIGEST_CONTRACTS:
+                    bad.add(str(contract))
+            for contract in sorted(bad):
+                errors.append(
+                    f"R-C5 : node isolé {nid} exporte un contrat non-digest "
+                    f"({contract}) — sortir via handoff-packet ou context-pack, "
+                    f"ou lever l'isolation"
+                )
         return errors
 
     def blueprint_lint(self, blueprint: dict[str, Any]) -> dict[str, Any]:
@@ -501,7 +637,85 @@ class ForgeAPI:
             if len(nodes) >= 2 and n.get("id") not in connected:
                 warnings.append(f"node isolé : {n.get('id')} ({n.get('label')})")
 
+        warnings.extend(self._context_warnings(blueprint))
+
         return {"errors": errors, "warnings": warnings}
+
+    @staticmethod
+    def _context_warnings(blueprint: dict[str, Any]) -> list[str]:
+        """Lint de la politique de contexte (C1) : R-C1, R-C2, R-C3."""
+        warnings: list[str] = []
+        nodes = blueprint.get("nodes", [])
+        node_by_id = {str(n.get("id")): n for n in nodes}
+        edge_pairs = [
+            (
+                str(e.get("from", "")).split(".")[0],
+                str(e.get("to", "")).split(".")[0],
+            )
+            for e in blueprint.get("edges", [])
+        ]
+
+        # R-C1 : contenu externe (extension) injecté dans une fenêtre partagée
+        seen: set[str] = set()
+        for src, dst in edge_pairs:
+            s_n, d_n = node_by_id.get(src), node_by_id.get(dst)
+            if not s_n or not d_n or dst in seen:
+                continue
+            if s_n.get("kind") != "extension-node":
+                continue
+            if _context_policy(d_n).get("isolation", "shared") == "shared":
+                seen.add(dst)
+                warnings.append(
+                    f"R-C1 : node {dst} alimenté par l'extension "
+                    f"{s_n.get('ref')} en fenêtre partagée — passer en "
+                    f'isolation:"isolated" (quarantaine du contenu externe)'
+                )
+
+        # R-C2 : chaîne de 4 nodes ou plus sans compaction digest ni ORC-03.
+        # Plus longue chaîne « sans digest » terminant sur chaque node,
+        # calculée en ordre topologique (un cycle est signalé ailleurs).
+        plain: dict[str, bool] = {}
+        for nid, n in node_by_id.items():
+            compaction = _context_policy(n).get("compaction")
+            strategy = (
+                compaction.get("strategy") if isinstance(compaction, dict) else None
+            )
+            plain[nid] = strategy != "digest" and str(n.get("ref", "")) != "ORC-03"
+        preds: dict[str, set[str]] = {nid: set() for nid in node_by_id}
+        succs: dict[str, set[str]] = {nid: set() for nid in node_by_id}
+        for src, dst in edge_pairs:
+            if src in preds and dst in preds and src != dst:
+                preds[dst].add(src)
+                succs[src].add(dst)
+        indeg = {nid: len(p) for nid, p in preds.items()}
+        queue = sorted(nid for nid, d in indeg.items() if not d)
+        run: dict[str, int] = {}
+        while queue:
+            nid = queue.pop(0)
+            upstream = max((run.get(p, 0) for p in preds[nid]), default=0)
+            run[nid] = upstream + 1 if plain[nid] else 0
+            for nxt in sorted(succs[nid]):
+                indeg[nxt] -= 1
+                if not indeg[nxt]:
+                    queue.append(nxt)
+        longest = max(run.values(), default=0)
+        if longest >= 4:
+            warnings.append(
+                f"R-C2 : chaîne de {longest} nodes consécutifs sans compaction "
+                f'"digest" ni node ORC-03 — insérer un handoff digest'
+            )
+
+        # R-C3 : escalade deep sans justification (discipline ORC-08)
+        for nid, n in node_by_id.items():
+            budget = _context_policy(n).get("budget")
+            if not isinstance(budget, dict):
+                continue
+            if budget.get("tier") == "deep" and not budget.get("justification"):
+                warnings.append(
+                    f'R-C3 : budget.tier "deep" sans justification — node {nid} '
+                    f"(justifier ou redescendre de tier, discipline ORC-08)"
+                )
+        return warnings
 
     def blueprint_simulate(self, blueprint: dict[str, Any]) -> dict[str, Any]:
         """Simulation pré-exécution (H4) : dry-run du flow avant apply.
@@ -575,6 +789,55 @@ class ForgeAPI:
                 step["action"] = "expansion du composite"
             steps.append(step)
 
+        # ── pression de contexte (C1) : charge estimée par fenêtre ──
+        # charge = base du node (ou budget.maxTokens) + report d'amont ;
+        # le report dépend de la compaction du node amont, un node isolé
+        # remet le report à zéro pour son aval (seul le digest sort).
+        pressure: list[dict[str, Any]] = []
+        carry: dict[str, float] = {}
+        for node_id in order:
+            ctx = _context_policy(nodes[node_id])
+            budget = _as_dict(ctx.get("budget"))
+            max_tokens = budget.get("maxTokens")
+            base = (
+                max_tokens
+                if isinstance(max_tokens, int) and not isinstance(max_tokens, bool)
+                else NODE_BASE_TOKENS
+            )
+            inherited = sum(carry.get(p, 0.0) for p in deps.get(node_id, ()))
+            estimated = int(base + inherited)
+            pct = round(estimated / CONTEXT_WINDOW_TOKENS * 100, 1)
+            verdict = "ok" if pct < 60 else ("warn" if pct <= 85 else "critical")
+            pressure.append(
+                {
+                    "nodeId": node_id,
+                    "estimatedTokens": estimated,
+                    "windowPct": pct,
+                    "verdict": verdict,
+                }
+            )
+            compaction = ctx.get("compaction")
+            strategy = (
+                compaction.get("strategy") if isinstance(compaction, dict) else None
+            ) or "full"
+            if ctx.get("isolation") == "isolated":
+                carry[node_id] = 0.0
+            elif strategy == "digest":
+                carry[node_id] = float(DIGEST_TOKENS)
+            elif strategy in ("selective", "index-guided"):
+                carry[node_id] = estimated * 0.5
+            else:
+                carry[node_id] = float(estimated)
+
+        warnings = list(lint["warnings"])
+        critical = [p["nodeId"] for p in pressure if p["verdict"] == "critical"]
+        if critical:
+            warnings.append(
+                "R-C6 : pression de contexte critique sur "
+                + ", ".join(critical)
+                + " — ajouter compaction ou isolation en amont"
+            )
+
         exits = [
             nid for nid in order if not any(nid in d for d in deps.values())
         ]
@@ -585,10 +848,12 @@ class ForgeAPI:
             "blockerDetails": [
                 {"message": b, "hint": self._blocker_hint(b)} for b in blockers
             ],
-            "warnings": lint["warnings"],
+            # warnings = lint R-C1/R-C2/R-C3 + R-C6 (pression de contexte, C1)
+            "warnings": warnings,
             "entryNodes": [nid for nid in order if not deps.get(nid)],
             "exitNodes": exits,
             "steps": steps,
+            "contextPressure": pressure,
         }
 
     @staticmethod
@@ -681,6 +946,7 @@ class ForgeAPI:
             "## Plan d'exécution",
             "",
         ]
+        nodes_by_id = {str(n.get("id")): n for n in blueprint.get("nodes", [])}
         for step in report["steps"]:
             lines.append(f"### {step['order']}. {step['label']}")
             lines.append("")
@@ -694,6 +960,9 @@ class ForgeAPI:
                 )
             if "ready" in step:
                 lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
+            lines.extend(
+                self._context_section(nodes_by_id.get(str(step["id"]), {}))
+            )
             lines.append("")
 
         edges = blueprint.get("edges", [])
@@ -741,6 +1010,46 @@ class ForgeAPI:
             "hash": f"sha256:{digest}",
             "warnings": report["warnings"],
         }
+
+    @staticmethod
+    def _context_section(node: dict[str, Any]) -> list[str]:
+        """Sous-section « Contexte » d'un step compilé (C1, texte stable).
+
+        Chaque déclaration mappe une pour une sur un mécanisme que l'hôte
+        exécute déjà : stratégies `discover_inputs` du moteur de workflow
+        (FULL_LOAD, SELECTIVE_LOAD, INDEX_GUIDED), handoff digest ORC-03 et
+        capsule minimale d'injection subagent.
+        """
+        ctx = _context_policy(node)
+        if not ctx:
+            return []
+        budget = _as_dict(ctx.get("budget"))
+        compaction = _as_dict(ctx.get("compaction"))
+        tier = budget.get("tier", "medium")
+        max_tokens = budget.get("maxTokens")
+        strategy = compaction.get("strategy", "full")
+        contract = compaction.get("digestContract", "handoff-packet")
+        directives = {
+            "digest": f"produire un `{contract}` (ORC-03) avant de passer la main",
+            "selective": "chargement `SELECTIVE_LOAD` (variables ciblées) "
+            "du moteur de workflow",
+            "index-guided": "chargement `INDEX_GUIDED` (index puis shards pertinents)",
+            "full": "chargement `FULL_LOAD` (contexte amont complet)",
+        }
+        lines = ["", "#### Contexte", ""]
+        budget_line = f"- Budget : tier `{tier}`"
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+            budget_line += f", plafond {max_tokens} tokens"
+        lines.append(budget_line)
+        if budget.get("justification"):
+            lines.append(f"- Justification du tier : {budget['justification']}")
+        lines.append(f"- Compaction : {directives.get(strategy, directives['full'])}")
+        if ctx.get("isolation") == "isolated":
+            lines.append(
+                "- Isolation : dispatch en sous-agent à capsule minimale ; "
+                f"retour exclusivement via le contrat `{contract}`"
+            )
+        return lines
 
     def _extension_node_patterns(self, ref: str) -> list[str]:
         ext_id = str(ref).split("/")[0]

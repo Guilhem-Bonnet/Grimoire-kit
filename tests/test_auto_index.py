@@ -16,6 +16,7 @@ Fonctions testées :
 import importlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -271,11 +272,16 @@ class TestGitHook(unittest.TestCase):
         self.mod = _import_mod()
         self.tmpdir = Path(tempfile.mkdtemp())
         _make_project(self.tmpdir)
+        # Purger l'env GIT_* hérité quand la suite tourne dans un hook git
+        # (GIT_DIR ferait pointer install_hook hors du repo temporaire)
+        self._git_env = {k: os.environ.pop(k)
+                         for k in list(os.environ) if k.startswith("GIT_")}
         # Init a git repo
         subprocess.run(["git", "init"], cwd=self.tmpdir,
                        capture_output=True, timeout=5)
 
     def tearDown(self):
+        os.environ.update(self._git_env)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_install_hook(self):

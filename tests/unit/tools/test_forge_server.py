@@ -568,6 +568,285 @@ class TestStudioBridge:
         assert saved["nodes"][2]["kind"] == "group"
 
 
+def with_context(node: dict, context: dict) -> dict:
+    return {**node, "config": {"context": context}}
+
+
+class TestContextPolicy:
+    """Ingénierie de contexte (tranche C1) : validation, lint, simulation, compile."""
+
+    # ── forme + R-C4 (bloquants) ──
+
+    def test_invalid_enum_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(make_node("a", "ORC-01"),
+                                   {"budget": {"tier": "gigantic"}})],
+            "edges": [],
+        }
+        errors = api.blueprint_validate(bp)
+        assert any("budget.tier invalide" in e for e in errors)
+
+    def test_invalid_types_are_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [
+                with_context(make_node("a", "ORC-01"),
+                             {"budget": {"maxTokens": "beaucoup"},
+                              "compaction": {"strategy": "zip"},
+                              "isolation": "airgap"}),
+            ],
+            "edges": [],
+        }
+        errors = api.blueprint_validate(bp)
+        assert any("maxTokens invalide" in e for e in errors)
+        assert any("compaction.strategy invalide" in e for e in errors)
+        assert any("isolation invalide" in e for e in errors)
+
+    def test_unknown_context_key_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(make_node("a", "ORC-01"), {"cache": True})],
+            "edges": [],
+        }
+        errors = api.blueprint_validate(bp)
+        assert any("clés inconnues" in e for e in errors)
+
+    def test_r_c4_max_tokens_over_window_is_blocking(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(make_node("a", "ORC-01"),
+                                   {"budget": {"maxTokens": 300000}})],
+            "edges": [],
+        }
+        errors = api.blueprint_validate(bp)
+        assert any("R-C4" in e for e in errors)
+
+    def test_valid_context_passes(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(
+                make_node("a", "ORC-01"),
+                {"budget": {"tier": "small", "maxTokens": 12000},
+                 "compaction": {"strategy": "digest",
+                                "digestContract": "context-pack"},
+                 "isolation": "shared"})],
+            "edges": [],
+        }
+        assert api.blueprint_validate(bp) == []
+
+    # ── R-C5 (bloquant) : node isolé à sortie non-digest ──
+
+    def test_r_c5_isolated_with_non_digest_output_is_blocking(
+        self, api: ForgeAPI
+    ) -> None:
+        bp = {
+            "nodes": [
+                with_context(make_node("a", "ORC-01"), {"isolation": "isolated"}),
+                make_node("b", "GOV-01"),
+            ],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
+        }
+        errors = api.blueprint_validate(bp)
+        assert any("R-C5" in e for e in errors)
+
+    def test_r_c5_isolated_with_digest_output_passes(self, api: ForgeAPI) -> None:
+        node_a = {
+            "id": "a", "kind": "pattern", "ref": "ORC-01", "label": "ORC-01",
+            "config": {"context": {"isolation": "isolated"}},
+            "pins": [{"id": "out", "direction": "out", "contract": "handoff-packet"}],
+        }
+        node_b = {
+            "id": "b", "kind": "pattern", "ref": "GOV-01", "label": "GOV-01",
+            "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
+        }
+        bp = {
+            "nodes": [node_a, node_b],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "handoff-packet"}],
+        }
+        assert not [e for e in api.blueprint_validate(bp) if "R-C5" in e]
+
+    def test_r_c5_blocks_compilation_from_studio(self, api: ForgeAPI) -> None:
+        bp = {
+            "blueprintVersion": 2,
+            "id": "flow-iso",
+            "nodes": [
+                {"id": "n1", "ref": "ORC-01", "x": 0, "y": 0,
+                 "config": {"context": {"isolation": "isolated"}}},
+                {"id": "n2", "ref": "GOV-01", "x": 300, "y": 0},
+            ],
+            "edges": [{"id": "e1", "from": "n1", "to": "n2",
+                       "contract": "task-envelope"}],
+        }
+        with pytest.raises(ValueError, match="R-C5"):
+            api.blueprint_compile(bp)
+
+    # ── R-C1 / R-C2 / R-C3 (avertissements) ──
+
+    def test_r_c1_extension_feeding_shared_node_warns(self, api: ForgeAPI) -> None:
+        ext = {
+            "id": "x", "kind": "extension-node", "ref": "demo-ext/crew",
+            "label": "crew",
+            "pins": [{"id": "out", "direction": "out", "contract": "handoff-packet"}],
+        }
+        dst = {
+            "id": "b", "kind": "pattern", "ref": "GOV-01", "label": "GOV-01",
+            "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
+        }
+        bp = {
+            "blueprintVersion": 1,
+            "nodes": [ext, dst],
+            "edges": [{"from": "x.out", "to": "b.in", "contract": "handoff-packet"}],
+        }
+        lint = api.blueprint_lint(bp)
+        assert any("R-C1" in w for w in lint["warnings"])
+        # Le node aval isolé quarantine le contenu externe : plus de R-C1
+        bp["nodes"][1] = with_context(dst, {"isolation": "isolated"})
+        lint = api.blueprint_lint(bp)
+        assert not any("R-C1" in w for w in lint["warnings"])
+
+    def _chain(self, n: int, digest_on: str | None = None) -> dict:
+        nodes, edges = [], []
+        for i in range(n):
+            node = make_node(f"n{i}", "ORC-01")
+            if digest_on == f"n{i}":
+                node = with_context(node, {"compaction": {"strategy": "digest"}})
+            nodes.append(node)
+            if i:
+                edges.append({"from": f"n{i - 1}.out", "to": f"n{i}.in",
+                              "contract": "task-envelope"})
+        return {"blueprintVersion": 1, "nodes": nodes, "edges": edges}
+
+    def test_r_c2_chain_of_four_without_digest_warns(self, api: ForgeAPI) -> None:
+        lint = api.blueprint_lint(self._chain(4))
+        assert any("R-C2" in w for w in lint["warnings"])
+
+    def test_r_c2_digest_in_chain_silences(self, api: ForgeAPI) -> None:
+        lint = api.blueprint_lint(self._chain(4, digest_on="n1"))
+        assert not any("R-C2" in w for w in lint["warnings"])
+
+    def test_r_c2_short_chain_is_silent(self, api: ForgeAPI) -> None:
+        lint = api.blueprint_lint(self._chain(3))
+        assert not any("R-C2" in w for w in lint["warnings"])
+
+    def test_r_c3_deep_without_justification_warns(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(make_node("a", "ORC-01"),
+                                   {"budget": {"tier": "deep"}})],
+            "edges": [],
+        }
+        lint = api.blueprint_lint(bp)
+        assert any("R-C3" in w for w in lint["warnings"])
+        bp["nodes"][0]["config"]["context"]["budget"]["justification"] = (
+            "audit multi-fichiers"
+        )
+        lint = api.blueprint_lint(bp)
+        assert not any("R-C3" in w for w in lint["warnings"])
+
+    # ── pression de contexte en simulation ──
+
+    def test_context_pressure_full_accumulates(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._chain(3))
+        pressure = {p["nodeId"]: p for p in report["contextPressure"]}
+        assert pressure["n0"]["estimatedTokens"] == 8000
+        assert pressure["n1"]["estimatedTokens"] == 16000
+        assert pressure["n2"]["estimatedTokens"] == 24000
+        assert all(p["verdict"] == "ok" for p in report["contextPressure"])
+
+    def test_context_pressure_digest_reduces_carry(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._chain(3, digest_on="n0"))
+        pressure = {p["nodeId"]: p for p in report["contextPressure"]}
+        assert pressure["n1"]["estimatedTokens"] == 10000  # 8000 + digest 2000
+        assert pressure["n2"]["estimatedTokens"] == 18000
+
+    def test_context_pressure_isolated_resets_carry(self, api: ForgeAPI) -> None:
+        bp = self._chain(2)
+        bp["nodes"][0] = with_context(bp["nodes"][0], {"isolation": "isolated"})
+        # sortie digest pour respecter R-C5
+        bp["nodes"][0]["pins"] = [
+            {"id": "in", "direction": "in", "contract": "task-envelope"},
+            {"id": "out", "direction": "out", "contract": "handoff-packet"},
+        ]
+        bp["nodes"][1]["pins"][0]["contract"] = "handoff-packet"
+        bp["edges"][0]["contract"] = "handoff-packet"
+        report = api.blueprint_simulate(bp)
+        pressure = {p["nodeId"]: p for p in report["contextPressure"]}
+        assert pressure["n1"]["estimatedTokens"] == 8000
+
+    def test_context_pressure_critical_and_r_c6(self, api: ForgeAPI) -> None:
+        bp = {
+            "nodes": [with_context(make_node("a", "ORC-01"),
+                                   {"budget": {"maxTokens": 190000}})],
+            "edges": [],
+        }
+        report = api.blueprint_simulate(bp)
+        pressure = report["contextPressure"][0]
+        assert pressure["estimatedTokens"] == 190000
+        assert pressure["verdict"] == "critical"
+        assert any("R-C6" in w for w in report["warnings"])
+
+    def test_no_context_behaves_as_before(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._chain(2))
+        assert report["verdict"] == "prêt à appliquer"
+        assert [p["verdict"] for p in report["contextPressure"]] == ["ok", "ok"]
+        lint = api.blueprint_lint(self._chain(2))
+        assert not any(w.startswith("R-C") for w in lint["warnings"])
+
+    # ── compilation : section « Contexte » ──
+
+    def test_compile_emits_context_section(
+        self, api_with_catalogue: ForgeAPI, project_root: Path
+    ) -> None:
+        node_a = with_context(
+            make_node("a", "ORC-01", out_contract="handoff-packet"),
+            {"budget": {"tier": "deep", "maxTokens": 12000,
+                        "justification": "analyse transverse"},
+             "compaction": {"strategy": "digest"},
+             "isolation": "isolated"},
+        )
+        node_b = {
+            "id": "b", "kind": "pattern", "ref": "QUA-04", "label": "QUA-04",
+            "config": {"context": {"compaction": {"strategy": "selective"}}},
+            "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
+        }
+        bp = {
+            "blueprintVersion": 1,
+            "id": "flow-ctx",
+            "name": "Flow contexte",
+            "catalogRef": {"version": "1.0.0"},
+            "nodes": [node_a, node_b],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "handoff-packet"}],
+        }
+        result = api_with_catalogue.blueprint_compile(bp)
+        content = (project_root / result["artifact"]).read_text(encoding="utf-8")
+        assert "#### Contexte" in content
+        assert "tier `deep`, plafond 12000 tokens" in content
+        assert "analyse transverse" in content
+        assert "`handoff-packet` (ORC-03)" in content
+        assert "SELECTIVE_LOAD" in content
+        assert "sous-agent à capsule minimale" in content
+
+    def test_compile_without_context_has_no_section(
+        self, api_with_catalogue: ForgeAPI, project_root: Path
+    ) -> None:
+        bp = {
+            "id": "flow-noctx",
+            "name": "Sans contexte",
+            "catalogRef": {"version": "1.0.0"},
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "QUA-04")],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
+        }
+        result = api_with_catalogue.blueprint_compile(bp)
+        content = (project_root / result["artifact"]).read_text(encoding="utf-8")
+        assert "#### Contexte" not in content
+
+    def test_studio_projection_carries_config(self, api: ForgeAPI) -> None:
+        bp = {
+            "blueprintVersion": 2,
+            "id": "flow-cfg",
+            "nodes": [{"id": "n1", "ref": "ORC-01", "x": 0, "y": 0,
+                       "config": {"context": {"budget": {"tier": "small"}}}}],
+            "edges": [],
+        }
+        v1 = api._studio_to_v1(bp)
+        assert v1["nodes"][0]["config"] == {"context": {"budget": {"tier": "small"}}}
+
+
 class TestStigmergyView:
     def test_empty_board(self, api: ForgeAPI) -> None:
         view = api.stigmergy_view()
