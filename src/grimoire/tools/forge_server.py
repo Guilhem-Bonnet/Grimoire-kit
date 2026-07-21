@@ -94,6 +94,11 @@ def _context_policy(node: dict[str, Any]) -> dict[str, Any]:
     return ctx if isinstance(ctx, dict) else {}
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """`value` si c'est un dict, sinon {} — narrowing pour mypy strict."""
+    return value if isinstance(value, dict) else {}
+
+
 def _context_shape_errors(node: dict[str, Any]) -> list[str]:
     """Erreurs de forme de `config.context` (enums, types) + règle R-C4."""
     errors: list[str] = []
@@ -792,7 +797,7 @@ class ForgeAPI:
         carry: dict[str, float] = {}
         for node_id in order:
             ctx = _context_policy(nodes[node_id])
-            budget = ctx.get("budget") if isinstance(ctx.get("budget"), dict) else {}
+            budget = _as_dict(ctx.get("budget"))
             max_tokens = budget.get("maxTokens")
             base = (
                 max_tokens
@@ -1018,10 +1023,8 @@ class ForgeAPI:
         ctx = _context_policy(node)
         if not ctx:
             return []
-        budget = ctx.get("budget") if isinstance(ctx.get("budget"), dict) else {}
-        compaction = (
-            ctx.get("compaction") if isinstance(ctx.get("compaction"), dict) else {}
-        )
+        budget = _as_dict(ctx.get("budget"))
+        compaction = _as_dict(ctx.get("compaction"))
         tier = budget.get("tier", "medium")
         max_tokens = budget.get("maxTokens")
         strategy = compaction.get("strategy", "full")
