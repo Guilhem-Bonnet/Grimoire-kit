@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,22 +31,54 @@ from grimoire.core.scanner import ScanResult, StackScanner
 
 console = Console(stderr=True)
 
-# Valid values — keep in sync with config.py
-KNOWN_ARCHETYPES = frozenset({
-    "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering", "agentic-standard",
-})
+
+# ── Archetype catalog — single source of truth ──────────────────────────────
+#
+# Every valid archetype id lives here exactly once.  ``KNOWN_ARCHETYPES`` (flag
+# validation) and ``_ARCHETYPE_INFO`` (wizard display) are both derived from
+# this catalog so they can never diverge again.
+#
+# Keep ids in sync with config.py / core/validator.py / core/schema.py.
+
+@dataclass(frozen=True)
+class ArchetypeSpec:
+    """Metadata for one archetype id."""
+
+    id: str
+    label: str
+    agents: str
+    traits: str
+    base: bool = False      # always included — not offered in the multi-select
+    internal: bool = False  # deployment category (meta/stack/features), valid
+                            # as a flag value but never offered in the wizard
+
+
+# Order = wizard display order.
+ARCHETYPE_CATALOG: tuple[ArchetypeSpec, ...] = (
+    ArchetypeSpec("minimal", "Minimal", "3 meta-agents", "base layer — always included", base=True),
+    ArchetypeSpec("web-app", "Web App", "2 agents", "TDD, type-safety, API-first"),
+    ArchetypeSpec("infra-ops", "Infra & DevOps", "7 agents", "IaC, security-first, observability"),
+    ArchetypeSpec("platform-engineering", "Platform Eng.", "4 agents", "architecture-first, contract-driven"),
+    ArchetypeSpec("agentic-standard", "Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
+    ArchetypeSpec("creative-studio", "Creative Studio", "5 agents", "visual-consistency, brand-voice"),
+    ArchetypeSpec("fix-loop", "Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
+    ArchetypeSpec("meta", "Meta agents", "3 agents", "internal category — deployed with every archetype", internal=True),
+    ArchetypeSpec("stack", "Stack experts", "per stack", "internal category — auto-selected from stack scan", internal=True),
+    ArchetypeSpec("features", "Feature agents", "per feature", "internal category — auto-selected from scan", internal=True),
+)
+
+# Valid values for --archetype (flags accept every id, including internal ones,
+# for backward compatibility).
+KNOWN_ARCHETYPES = frozenset(spec.id for spec in ARCHETYPE_CATALOG)
 
 KNOWN_BACKENDS = frozenset({"auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
-# Archetype human descriptions for the wizard (order = display order)
+# Archetype human descriptions for the wizard (order = display order).
+# Derived from the catalog: every selectable (non-internal, non-base) archetype.
 _ARCHETYPE_INFO: dict[str, tuple[str, str, str]] = {
-    "web-app": ("Web App", "2 agents", "TDD, type-safety, API-first"),
-    "infra-ops": (" Infra & DevOps", "7 agents", "IaC, security-first, observability"),
-    "platform-engineering": (" Platform Eng.", "4 agents", "architecture-first, contract-driven"),
-    "agentic-standard": (" Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
-    "creative-studio": ("Creative Studio", "5 agents", "visual-consistency, brand-voice"),
-    "fix-loop": ("Fix Loop", "1 agent", "proof-of-execution, severity-adaptive"),
+    spec.id: (spec.label, spec.agents, spec.traits)
+    for spec in ARCHETYPE_CATALOG
+    if not spec.internal and not spec.base
 }
 # Minimal is always base — not shown in multi-select
 _ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())

@@ -79,7 +79,7 @@ def setup(project_root: Path | str | None = None, level: str = DEFAULT_LEVEL) ->
 
     Args:
         project_root: Racine du projet (pour localiser le dossier de logs).
-                       Si None, détecte via $Grimoire_PROJECT_ROOT ou cwd.
+                       Si None, détecte via $GRIMOIRE_PROJECT_ROOT ou cwd.
         level: Niveau de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL).
 
     Returns:
@@ -93,7 +93,7 @@ def setup(project_root: Path | str | None = None, level: str = DEFAULT_LEVEL) ->
 
     # Resolve project root
     if project_root is None:
-        project_root = Path(os.environ.get("Grimoire_PROJECT_ROOT", "."))
+        project_root = Path(os.environ.get("GRIMOIRE_PROJECT_ROOT", os.environ.get("Grimoire_PROJECT_ROOT", ".")))
     project_root = Path(project_root)
 
     log_dir = project_root / LOG_DIR

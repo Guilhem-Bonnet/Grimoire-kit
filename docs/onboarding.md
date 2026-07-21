@@ -11,49 +11,52 @@
 
 ## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> J1 — Premier Jour (10 min)
 
-### 1. Installation
+### 1. Installation et setup en une commande
 
 ```bash
 # Chemin recommandé (SDK, aucun clone nécessaire)
 pipx install grimoire-kit
 cd votre-projet
-grimoire init . --name "Mon Projet" --archetype minimal
+grimoire up . --name "Mon Projet" --user "Votre Nom" --archetype minimal
 ```
 
+`grimoire up` enchaîne : init express, propagation de l'identité, standard
+agentique gouverné (profil `starter`), puis diagnostic. Idempotent — relancez-le
+quand vous voulez, il ne touche que ce qui manque. Pour le wizard complet :
+`grimoire up . --interactive`.
+
 <details>
-<summary>Chemin shell legacy (mode maintenance)</summary>
+<summary>Chemin shell legacy (mode maintenance, nécessite --legacy)</summary>
 
 ```bash
-git clone <url-grimoire-kit> grimoire-kit
-cd votre-projet
-bash path/to/grimoire-kit/grimoire-init.sh \
+curl -fsSL <url-install.sh> | bash -s -- --legacy \
   --name "Mon Projet" \
   --user "Votre Nom" \
   --archetype minimal
 ```
 
+Sans `--legacy`, `install.sh` affiche les instructions SDK et s'arrête.
+
 </details>
 
-### 2. Configurer votre identité
+### 2. Vérifier l'installation
 
 ```bash
-# Propager votre nom et langue dans tous les fichiers config
-bash grimoire-kit/grimoire.sh setup --user "Votre Nom" --lang "Français"
-
-# Ou via pip si installé
-grimoire setup --user "Votre Nom" --lang "Français"
+grimoire doctor
 ```
 
-Cette commande synchronise `project-context.yaml` vers les instructions Copilot.
+Attendu : tous les checks `OK`, y compris l'environnement (uv, docker, Qdrant,
+Ollama — optionnels, avec remédiation affichée si absents). Pour régénérer des
+wrappers agents ou un `.mcp.json` manquants : `grimoire doctor . --fix`.
 
-### 3. Vérifier l'installation
+### 3. Enrôler vos autres projets (optionnel)
 
 ```bash
-# Le doctor vérifie tout
-bash grimoire-kit/grimoire.sh doctor
+grimoire cockpit scan ~/dev --yes
 ```
 
-Attendu : tous les checks en &#x2713;.
+Détecte récursivement les projets Grimoire de votre machine et les enrôle dans
+le cockpit multi-projets (`grimoire cockpit`).
 
 ### 4. Première interaction
 

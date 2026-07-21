@@ -21,17 +21,21 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli.cmd_blueprint import blueprint_app
 from grimoire.cli.cmd_cockpit import cockpit_app
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
+from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
+from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
 from grimoire.cli.cmd_memory import memory_app
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
+from grimoire.cli.cmd_up import up as up_command
 from grimoire.core.config import GrimoireConfig
-from grimoire.core.exceptions import GrimoireConfigError, GrimoireError, GrimoireProjectError
+from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.log import configure_logging
 from grimoire.data import framework_path
 
@@ -235,14 +239,8 @@ def version_cmd(ctx: typer.Context) -> None:
 
 
 # ── grimoire init ─────────────────────────────────────────────────────────────────
-
-_KNOWN_ARCHETYPES = frozenset({
-    "minimal", "web-app", "creative-studio", "fix-loop",
-    "infra-ops", "meta", "stack", "features", "platform-engineering",
-    "agentic-standard",
-})
-
-_KNOWN_BACKENDS = frozenset({"auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
+# _KNOWN_ARCHETYPES / _KNOWN_BACKENDS are imported at the top of this module
+# from cmd_init.py — the archetype catalog there is the single source of truth.
 
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
@@ -355,7 +353,7 @@ def init(
 # ── grimoire doctor ───────────────────────────────────────────────────────────────
 
 _doctor_path_arg = typer.Argument(Path(), help="Project root to diagnose.")
-_doctor_fix_opt = typer.Option(False, "--fix", help="Auto-fix recoverable issues (missing directories).")
+_doctor_fix_opt = typer.Option(False, "--fix", help="Auto-fix recoverable issues (missing directories, agent wrappers, .mcp.json).")
 
 
 @app.command(rich_help_panel="Project")
@@ -424,7 +422,22 @@ def doctor(
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
-    # 4bis. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
+    # 4bis. --fix: regenerate missing VS Code agent wrappers and .mcp.json
+    # (reuses ProjectScaffolder logic — idempotent, never overwrites).
+    if fix:
+        with _timed_phase("artifact_fix"):
+            from grimoire.cli.cmd_up import repair_project_artifacts
+
+            try:
+                regenerated = repair_project_artifacts(target)
+            except OSError as exc:
+                regenerated = []
+                _record("artifact_fix", passed=False, detail=f"could not regenerate artifacts: {exc}")
+            for label in regenerated:
+                fixed.append(label)
+                _record(f"fix_{label}", passed=True, detail=f"{label} regenerated (--fix)")
+
+    # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
     with _timed_phase("agents_discoverable"):
         agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
         agent_files = [f for f in agents_dir.glob("*.md") if not f.name.endswith(".tpl.md")] if agents_dir.is_dir() else []
@@ -443,7 +456,7 @@ def doctor(
                     passed=False,
                     detail=(
                         f"{len(agent_files)} agent(s) deployed but .github/agents/ has no *.agent.md wrapper — "
-                        "VS Code cannot discover them; run `grimoire init . --force` to regenerate"
+                        "VS Code cannot discover them; run `grimoire doctor . --fix` to regenerate"
                     ),
                 )
 
@@ -467,10 +480,37 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [dim]○[/dim]  Optional: {pkg_name} not installed")
 
-    # 7. Python version
+    # 7. Environment checks — fast probes (socket 0.5s, subprocess 2s), never blocking
+    with _timed_phase("env_scan"):
+        from grimoire.cli.cmd_up import run_env_checks
+
+        for chk in run_env_checks(target):
+            entry: dict[str, Any] = {
+                "name": chk.name,
+                "passed": chk.passed,
+                "detail": chk.detail,
+                "level": chk.level,
+                "optional": chk.optional,
+            }
+            if chk.remedy:
+                entry["remedy"] = chk.remedy
+            results.append(entry)
+            if fmt != "json":
+                if not chk.passed:
+                    console.print(f"  [red]FAIL[/red]  {chk.detail}")
+                elif chk.level == "warn":
+                    console.print(f"  [yellow]WARN[/yellow]  {chk.detail}")
+                elif chk.level == "info":
+                    console.print(f"  [dim]○[/dim]  {chk.detail}")
+                else:
+                    console.print(f"  [green]OK[/green]  {chk.detail}")
+                if chk.remedy and (not chk.passed or chk.level == "warn"):
+                    console.print(f"        [dim]remedy:[/dim] [cyan]{chk.remedy}[/cyan]")
+
+    # 8. Python version
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
-    # 8. Summary
+    # 9. Summary
     ok_count = sum(1 for r in results if r["passed"])
     fail_count = sum(1 for r in results if not r["passed"])
 
@@ -841,81 +881,10 @@ def update_cmd() -> None:
 
 
 # ── grimoire up ───────────────────────────────────────────────────────────────────
+# Full one-command bring-up (init → identity → standard → doctor summary).
+# Implementation lives in cmd_up.py; registered here.
 
-_up_path_arg = typer.Argument(Path(), help="Project root.")
-_up_dry_run_opt = typer.Option(False, "--dry-run", help="Show plan without applying.")
-
-
-@app.command("up", rich_help_panel="Project")
-def up(
-    ctx: typer.Context,
-    path: Path = _up_path_arg,
-    dry_run: bool = _up_dry_run_opt,
-) -> None:
-    """Reconcile the project state with project-context.yaml."""
-    from grimoire.core.project import GrimoireProject
-
-    target = path.resolve()
-    try:
-        project = GrimoireProject(target)
-    except GrimoireProjectError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from None
-
-    cfg = project.config
-    status = project.status()
-    fmt = _get_fmt(ctx)
-
-    if fmt != "json":
-        if dry_run:
-            console.print("[bold]grimoire up --dry-run[/bold]\n")
-        else:
-            console.print("[bold]grimoire up[/bold]\n")
-
-    actions: list[str] = []
-
-    # Ensure standard directories exist
-    for d in (*_REQUIRED_DIRS, _MEMORY_DIR):
-        dp = target / d
-        if not dp.is_dir():
-            actions.append(f"Create directory: {d}/")
-            if not dry_run:
-                dp.mkdir(parents=True, exist_ok=True)
-
-    # Ensure agents dir exists
-    agents_dir = target / "_grimoire" / "agents"
-    if not agents_dir.is_dir():
-        actions.append("Create directory: _grimoire/agents/")
-        if not dry_run:
-            agents_dir.mkdir(parents=True, exist_ok=True)
-
-    # Summary
-    if fmt != "json":
-        if actions:
-            for a in actions:
-                icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
-                console.print(f"  {icon}  {a}")
-        else:
-            console.print("  [green]Everything up to date.[/green]")
-
-    # Output
-    if fmt == "json":
-        typer.echo(json.dumps({
-            "ok": True, "project": cfg.project.name,
-            "actions": actions, "dry_run": dry_run,
-            "agents_count": status.agents_count,
-            "directories_missing": list(status.directories_missing),
-        }, indent=2))
-    else:
-        # Health summary
-        console.print(f"\n[bold]Project:[/bold] {cfg.project.name}")
-        console.print(f"  Archetype: {cfg.agents.archetype}")
-        console.print(f"  Memory: {cfg.memory.backend}")
-        console.print(f"  Agents: {status.agents_count}")
-
-        if status.directories_missing:
-            missing = ", ".join(status.directories_missing)
-            console.print(f"\n[yellow]Missing dirs (after up):[/yellow] {missing}")
+app.command("up", rich_help_panel="Project")(up_command)
 
 
 # ── grimoire memory ───────────────────────────────────────────────────────────────
@@ -947,6 +916,7 @@ app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
 app.add_typer(workflows_app, name="wf", hidden=True)
 app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 app.add_typer(ext_app, name="ext", rich_help_panel="Project")
+app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")

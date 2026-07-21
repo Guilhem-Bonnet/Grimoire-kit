@@ -443,9 +443,10 @@ class TestUp:
         assert result.exit_code == 0
         assert "plan" in result.output.lower() or "dry-run" in result.output.lower()
 
-    def test_up_no_project(self, tmp_path: Path) -> None:
+    def test_up_no_project_runs_express_init(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["up", str(tmp_path)])
-        assert result.exit_code == 1
+        assert result.exit_code == 0
+        assert (tmp_path / "project-context.yaml").exists()
 
     def test_in_help(self) -> None:
         result = runner.invoke(app, ["--help"])
@@ -2771,7 +2772,7 @@ class TestR30VersionNarrowException:
         """version should handle GrimoireConfigError gracefully."""
         from grimoire.core.exceptions import GrimoireConfigError
 
-        with patch("grimoire.cli.app._find_config", side_effect=GrimoireConfigError("bad")):
+        with patch("grimoire.cli.app._find_config_quiet", side_effect=GrimoireConfigError("bad")):
             result = runner.invoke(app, ["-o", "json", "version"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -2800,7 +2801,7 @@ class TestR31EnvCmdNarrowException:
         """env should handle GrimoireProjectError gracefully."""
         from grimoire.core.exceptions import GrimoireProjectError
 
-        with patch("grimoire.cli.app._find_config", side_effect=GrimoireProjectError("bad")):
+        with patch("grimoire.cli.app._find_config_quiet", side_effect=GrimoireProjectError("bad")):
             result = runner.invoke(app, ["-o", "json", "env"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -2810,7 +2811,7 @@ class TestR31EnvCmdNarrowException:
         """env should handle GrimoireConfigError gracefully."""
         from grimoire.core.exceptions import GrimoireConfigError
 
-        with patch("grimoire.cli.app._find_config", side_effect=GrimoireConfigError("bad")):
+        with patch("grimoire.cli.app._find_config_quiet", side_effect=GrimoireConfigError("bad")):
             result = runner.invoke(app, ["-o", "json", "env"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -2826,7 +2827,7 @@ class TestR31VersionCmdGrimoireError:
         """version should handle GrimoireProjectError gracefully (sibling of ConfigError)."""
         from grimoire.core.exceptions import GrimoireProjectError
 
-        with patch("grimoire.cli.app._find_config", side_effect=GrimoireProjectError("missing")):
+        with patch("grimoire.cli.app._find_config_quiet", side_effect=GrimoireProjectError("missing")):
             result = runner.invoke(app, ["-o", "json", "version"])
         assert result.exit_code == 0
         data = json.loads(result.output)

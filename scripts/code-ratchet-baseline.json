@@ -136,7 +136,7 @@
     "framework/tools/workflow-adapt.py": 499,
     "grimoire-init.sh": 3823,
     "grimoire.sh": 342,
-    "install.sh": 150
+    "install.sh": 186
   },
   "src_oversized": {
     "src/grimoire/cli/app.py": 2997,

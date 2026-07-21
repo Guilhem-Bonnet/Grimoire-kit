@@ -125,6 +125,7 @@ module = [
     "sentence_transformers.*",
     "redis.*",
     "ollama.*",
+    "jsonschema.*",
 ]
 ignore_missing_imports = true
 

@@ -48,8 +48,8 @@ def get_backend(config_override: dict | None = None) -> tuple:
     Retourne (backend_instance, backend_name).
 
     Ordre de priorité :
-    1. ENV Grimoire_OLLAMA_URL → ollama
-    2. ENV Grimoire_QDRANT_URL → qdrant-server
+    1. ENV GRIMOIRE_OLLAMA_URL → ollama
+    2. ENV GRIMOIRE_QDRANT_URL → qdrant-server
     3. project-context.yaml memory.backend
     4. Auto-détection
     5. Fallback local
@@ -58,8 +58,8 @@ def get_backend(config_override: dict | None = None) -> tuple:
     mem_cfg = ctx.get("memory", {})
 
     # ENV vars priment toujours
-    env_ollama = os.environ.get("Grimoire_OLLAMA_URL", "")
-    env_qdrant = os.environ.get("Grimoire_QDRANT_URL", "")
+    env_ollama = os.environ.get("GRIMOIRE_OLLAMA_URL", os.environ.get("Grimoire_OLLAMA_URL", ""))
+    env_qdrant = os.environ.get("GRIMOIRE_QDRANT_URL", os.environ.get("Grimoire_QDRANT_URL", ""))
 
     backend_name = mem_cfg.get("backend", "auto")
 
@@ -82,8 +82,8 @@ def _auto_detect(mem_cfg: dict) -> str:
     import urllib.error
 
     # 1. Qdrant distant configuré ?
-    qdrant_url = mem_cfg.get("qdrant_url", os.environ.get("Grimoire_QDRANT_URL", ""))
-    ollama_url = mem_cfg.get("ollama_url", os.environ.get("Grimoire_OLLAMA_URL", "http://localhost:11434"))
+    qdrant_url = mem_cfg.get("qdrant_url", os.environ.get("GRIMOIRE_QDRANT_URL", os.environ.get("Grimoire_QDRANT_URL", "")))
+    ollama_url = mem_cfg.get("ollama_url", os.environ.get("GRIMOIRE_OLLAMA_URL", os.environ.get("Grimoire_OLLAMA_URL", "http://localhost:11434")))
 
     # 2. Ollama accessible avec nomic-embed-text ?
     try:
@@ -176,5 +176,5 @@ def _warn_install(backend: str, packages: str) -> None:
 def _warn_connection(backend: str, url: str, err: Exception) -> None:
     print(f"⚠️  Backend {backend} inaccessible ({err})")
     print(f"   → URL tentée : {url}")
-    print(f"   → Vérifier Grimoire_OLLAMA_URL / Grimoire_QDRANT_URL ou lancer le service")
+    print(f"   → Vérifier GRIMOIRE_OLLAMA_URL / GRIMOIRE_QDRANT_URL ou lancer le service")
     print(f"   → Fallback backend local JSON (fonctionnel, recherche par mots-clés)")

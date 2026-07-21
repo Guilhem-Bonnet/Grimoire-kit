@@ -33,6 +33,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from grimoire.core.scanner import _is_excluded_dir
 from grimoire.data import site_script, web_path
 
 cockpit_app = typer.Typer(
@@ -488,6 +489,112 @@ def status() -> None:
     if state:
         _clear_state()
     console.print("[dim]○ Cockpit arrêté — démarre-le : [b]grimoire cockpit start[/b][/dim]")
+
+
+# ── Project discovery (cockpit scan) ─────────────────────────────────────────
+
+@dataclass(frozen=True)
+class _Candidate:
+    """A project directory discovered by ``cockpit scan``."""
+
+    path: Path
+    managed: bool  # grimoire-managed (project-context.yaml / _grimoire) vs bare git
+
+
+def _is_grimoire_managed(p: Path) -> bool:
+    return (p / "project-context.yaml").exists() or (p / "_grimoire").exists()
+
+
+def _crawl_projects(root: Path, max_depth: int) -> list[_Candidate]:
+    """Find candidate projects under ``root``, bounded by ``max_depth``.
+
+    A candidate is a directory containing ``.git``, ``project-context.yaml``
+    or ``_grimoire/``. A detected project is a leaf (never descended into);
+    dependency/build directories are skipped, symlinks are never followed and
+    unreadable directories are ignored.
+    """
+    found: list[_Candidate] = []
+
+    def _walk(directory: Path, depth: int) -> None:
+        managed = _is_grimoire_managed(directory)
+        if managed or (directory / ".git").exists():
+            found.append(_Candidate(path=directory, managed=managed))
+            return  # one repo = one leaf
+        if depth >= max_depth:
+            return
+        try:
+            children = sorted(
+                (p for p in directory.iterdir() if not p.is_symlink() and p.is_dir()),
+                key=lambda p: p.name,
+            )
+        except (PermissionError, OSError):
+            return
+        for child in children:
+            if _is_excluded_dir(child.name):
+                continue
+            _walk(child, depth + 1)
+
+    _walk(root, 0)
+    return found
+
+
+@cockpit_app.command("scan")
+def scan(
+    root: Annotated[Path, typer.Argument(help="Root directory to crawl for local projects.")],
+    depth: Annotated[int, typer.Option("--depth", help="Maximum crawl depth.")] = 4,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Enrol all grimoire-managed projects without prompting.")] = False,
+    include_uninitialized: Annotated[bool, typer.Option(
+        "--include-uninitialized",
+        help="Also enrol bare git repos that are not grimoire-initialized.",
+    )] = False,
+) -> None:
+    """Discover projects under a root directory and enrol them in the cockpit."""
+    base = root.expanduser().resolve()
+    if not base.is_dir():
+        console.print(f"[red]x[/red] Not a directory: {base}")
+        raise typer.Exit(1)
+
+    candidates = _crawl_projects(base, depth)
+    if not candidates:
+        console.print(f"[dim]No candidate project found under {base} (depth {depth}).[/dim]")
+        return
+
+    registered_paths = {p.get("path") for p in _load_registry()}
+
+    def _rel(p: Path) -> str:
+        return "." if p == base else str(p.relative_to(base))
+
+    table = Table(title=f"Cockpit scan — {base}", title_style="bold")
+    table.add_column("Path", style="cyan")
+    table.add_column("Type")
+    table.add_column("Registered", justify="center")
+    for cand in candidates:
+        kind = "grimoire-managed" if cand.managed else "git repo (uninitialized)"
+        reg = "yes" if str(cand.path) in registered_paths else "no"
+        table.add_row(_rel(cand.path), kind, reg)
+    console.print(table)
+
+    to_enrol = [
+        c for c in candidates
+        if (c.managed or include_uninitialized) and str(c.path) not in registered_paths
+    ]
+    uninitialized = [c for c in candidates if not c.managed]
+
+    if to_enrol:
+        if yes or typer.confirm(f"Enrol {len(to_enrol)} project(s) in the cockpit?"):
+            for cand in to_enrol:
+                slug = register_project(cand.path)
+                if slug is not None:
+                    console.print(f"[green]+[/green] {cand.path.name} [dim]({slug})[/dim] -> {cand.path}")
+        else:
+            console.print("[dim]Nothing enrolled.[/dim]")
+    else:
+        console.print("[dim]Nothing new to enrol.[/dim]")
+
+    if uninitialized and not include_uninitialized:
+        console.print("[dim]Git repos not initialized for Grimoire (skipped):[/dim]")
+        for cand in uninitialized:
+            console.print(f"  [yellow]o[/yellow] {_rel(cand.path)}  [dim]hint: grimoire up {cand.path}[/dim]")
 
 
 @cockpit_app.command("open")

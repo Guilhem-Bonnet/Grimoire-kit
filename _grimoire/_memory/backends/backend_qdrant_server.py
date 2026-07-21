@@ -5,8 +5,8 @@ Se connecte à un serveur Qdrant existant (local ou réseau).
 Circuit breaker : timeout 500ms sur connect, 2s sur opérations.
 
 Variables d'environnement :
-  Grimoire_QDRANT_URL  — URL du serveur (ex: http://localhost:6333)
-  Grimoire_QDRANT_API_KEY — Clé API optionnelle (Qdrant Cloud)
+  GRIMOIRE_QDRANT_URL  — URL du serveur (ex: http://localhost:6333)
+  GRIMOIRE_QDRANT_API_KEY — Clé API optionnelle (Qdrant Cloud)
 
 Dépendances : qdrant-client sentence-transformers
   pip install qdrant-client sentence-transformers
@@ -56,8 +56,8 @@ class QdrantServerBackend:
         self._collection = collection
         self._timeout = timeout
 
-        _api_key = api_key or os.environ.get("Grimoire_QDRANT_API_KEY")
-        _url = os.environ.get("Grimoire_QDRANT_URL", qdrant_url)
+        _api_key = api_key or (os.environ.get("GRIMOIRE_QDRANT_API_KEY") or os.environ.get("Grimoire_QDRANT_API_KEY"))
+        _url = os.environ.get("GRIMOIRE_QDRANT_URL", os.environ.get("Grimoire_QDRANT_URL", qdrant_url))
 
         # Connexion avec circuit breaker (timeout courte)
         self._client = QdrantClient(
@@ -137,7 +137,7 @@ class QdrantServerBackend:
         info = self._client.get_collection(self._collection)
         return {
             "backend": "qdrant-server",
-            "url": os.environ.get("Grimoire_QDRANT_URL", "configured"),
+            "url": os.environ.get("GRIMOIRE_QDRANT_URL", os.environ.get("Grimoire_QDRANT_URL", "configured")),
             "collection": self._collection,
             "entries": self.count(),
             "vectors_config": str(info.config.params.vectors),

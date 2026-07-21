@@ -61,19 +61,34 @@ uv tool install grimoire-kit
 # Or with pipx
 pipx install grimoire-kit
 
-# New project
-grimoire init my-project --archetype web-app
+# One command: init + identity + governed standard + health check
+grimoire up my-project --archetype web-app
 
-# Existing project
+# Existing project (idempotent — re-running only fills the gaps)
 cd your-project/
-grimoire init . --name "My Project"
+grimoire up . --name "My Project"
 
-# Health check
-grimoire doctor
+# Detect and enroll existing projects on your machine
+grimoire cockpit scan ~/dev
+
+# Health check + repair (regenerates missing wrappers and .mcp.json)
+grimoire doctor . --fix
 
 # Local multi-project dashboard (background + browser)
 grimoire cockpit
 ```
+
+<details>
+<summary>Step-by-step path (what <code>grimoire up</code> chains for you)</summary>
+
+```bash
+grimoire init . --name "My Project"   # scaffold: context, agents, memory, entrypoints
+grimoire setup                        # propagate identity into instructions
+grimoire standard init . --needs ...  # governed standard artifacts
+grimoire doctor                       # health check
+```
+
+</details>
 
 > **Multi-assistant** — `grimoire init` writes portable assistant entrypoints pointing
 > to a single canonical instruction file, and registers the Grimoire MCP server in

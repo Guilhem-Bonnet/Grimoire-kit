@@ -699,12 +699,12 @@ def cmd_status(args):
             semantic_ok = True
         else:
             import os as _os
-            has_env = _os.environ.get("Grimoire_OLLAMA_URL") or _os.environ.get("Grimoire_QDRANT_URL")
+            has_env = (_os.environ.get("GRIMOIRE_OLLAMA_URL") or _os.environ.get("Grimoire_OLLAMA_URL")) or (_os.environ.get("GRIMOIRE_QDRANT_URL") or _os.environ.get("Grimoire_QDRANT_URL"))
             if has_env:
                 print(f"   Sémantique: ⚠️  backend non disponible (voir logs ci-dessus)")
             else:
                 print(f"   Sémantique: ⚠️  non configuré")
-                print(f"              → Définir Grimoire_OLLAMA_URL ou Grimoire_QDRANT_URL")
+                print(f"              → Définir GRIMOIRE_OLLAMA_URL ou GRIMOIRE_QDRANT_URL")
                 print(f"              → Ou configurer memory: dans project-context.yaml")
             print(f"              → Mode fallback JSON actif automatiquement")
     except Exception as e:
@@ -714,7 +714,7 @@ def cmd_status(args):
     print(f"   Mode actif: {'🚀' if semantic_ok else '📁'} {mode}")
     if not semantic_ok:
         print(f"   ℹ️  Mode JSON fonctionnel — recherche sémantique non active.")
-        print(f"      → Activer : Grimoire_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
+        print(f"      → Activer : GRIMOIRE_OLLAMA_URL=http://localhost:11434 python mem0-bridge.py status")
 
     # Afficher les agents détectés
     print(f"\n   Agents configurés ({len(AGENT_PROFILES)}):")

@@ -92,9 +92,9 @@ Sans infrastructure :
 ## <img src="../../../docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Variables d'environnement gérées
 
 ```bash
-Grimoire_OLLAMA_URL=http://localhost:11434   # Serveur Ollama (prioritaire sur config)
-Grimoire_QDRANT_URL=http://localhost:6333   # Serveur Qdrant (prioritaire sur config)
-Grimoire_QDRANT_API_KEY=                    # Clé API (Qdrant Cloud)
+GRIMOIRE_OLLAMA_URL=http://localhost:11434   # Serveur Ollama (prioritaire sur config)
+GRIMOIRE_QDRANT_URL=http://localhost:6333   # Serveur Qdrant (prioritaire sur config)
+GRIMOIRE_QDRANT_API_KEY=                    # Clé API (Qdrant Cloud)
 ```
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">

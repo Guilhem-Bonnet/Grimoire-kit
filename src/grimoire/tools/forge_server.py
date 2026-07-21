@@ -581,11 +581,51 @@ class ForgeAPI:
         return {
             "verdict": "prêt à appliquer" if not blockers else "bloqué",
             "blockers": blockers,
+            # Champ additif (rétro-compatible) : chaque blocker avec sa remédiation.
+            "blockerDetails": [
+                {"message": b, "hint": self._blocker_hint(b)} for b in blockers
+            ],
             "warnings": lint["warnings"],
             "entryNodes": [nid for nid in order if not deps.get(nid)],
             "exitNodes": exits,
             "steps": steps,
         }
+
+    @staticmethod
+    def _blocker_hint(blocker: str) -> str:
+        """Remédiation concrète pour un blocker de simulation/compilation."""
+        if blocker.startswith("extension non installée dans le projet : "):
+            ext_id = blocker.removeprefix(
+                "extension non installée dans le projet : "
+            ).split()[0]
+            return (
+                f"installer l'extension : grimoire ext add {ext_id} "
+                "--registry <registry-dir> (ou grimoire ext add <dossier-extension>)"
+            )
+        if blocker.startswith("cycle détecté"):
+            return "retirer une connexion du cycle : le flow doit être acyclique pour compiler"
+        if blocker.startswith("artefact absent du projet : "):
+            ref = blocker.removeprefix("artefact absent du projet : ")
+            return f"créer {ref} dans le projet ou corriger le ref du node"
+        if blocker.startswith(("edge from inconnu", "edge to inconnu")):
+            return "chaque extrémité doit être <nodeId>.<pinId> avec un pin déclaré sur le node"
+        if "contrats incompatibles" in blocker:
+            return "aligner le contrat des deux pins connectés (ou insérer un node adaptateur)"
+        if "contrat déclaré" in blocker:
+            return "faire correspondre edge.contract au contrat des pins connectés (ou le retirer)"
+        if blocker.startswith("pattern inconnu du catalogue"):
+            return "utiliser un id de pattern du catalogue (web/data/catalogue-export.json)"
+        if blocker.startswith("contrat inconnu"):
+            return "utiliser un contrat déclaré dans le catalogue (ex. task-envelope, handoff-packet)"
+        if blocker.startswith("use-case inconnu"):
+            return "référencer un use-case du catalogue (ref use-case:<id>)"
+        if blocker.startswith("sous-blueprint absent"):
+            return "créer le sous-blueprint référencé ou corriger son chemin"
+        if blocker.startswith("ref composite invalide"):
+            return "ref attendu : use-case:<id> ou chemin vers un .blueprint.json du projet"
+        if blocker.startswith("ids de nodes non uniques"):
+            return "renommer les nodes pour que chaque id soit unique"
+        return ""
 
     def blueprint_compile(self, blueprint: dict[str, Any]) -> dict[str, Any]:
         """Compilation v1 (H4) : le blueprint devient un mission pack gouverné.
@@ -603,10 +643,16 @@ class ForgeAPI:
         blueprint = self._studio_to_v1(blueprint)
         report = self.blueprint_simulate(blueprint)
         if report["blockers"]:
-            raise ValueError(
-                "compilation refusée, blueprint bloqué : "
-                + " ; ".join(report["blockers"])
+            # Fail-closed inchangé : on enrichit seulement le diagnostic
+            # (chaque blocker avec sa remédiation).
+            details = report.get("blockerDetails") or [
+                {"message": b, "hint": ""} for b in report["blockers"]
+            ]
+            rendered = " ; ".join(
+                d["message"] + (f" [fix : {d['hint']}]" if d.get("hint") else "")
+                for d in details
             )
+            raise ValueError(f"compilation refusée, blueprint bloqué : {rendered}")
 
         bp_id = str(blueprint.get("id", "blueprint"))
         name = blueprint.get("name", bp_id)

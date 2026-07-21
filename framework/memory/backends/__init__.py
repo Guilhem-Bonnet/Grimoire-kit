@@ -56,8 +56,8 @@ def get_backend(config_override: dict | None = None) -> tuple:
     Retourne (backend_instance, backend_name).
 
     Ordre de priorité :
-    1. ENV GRIMOIRE_OLLAMA_URL (repli Grimoire_OLLAMA_URL) → ollama
-    2. ENV GRIMOIRE_QDRANT_URL (repli Grimoire_QDRANT_URL) → qdrant-server
+    1. ENV GRIMOIRE_OLLAMA_URL (repli GRIMOIRE_OLLAMA_URL) → ollama
+    2. ENV GRIMOIRE_QDRANT_URL (repli GRIMOIRE_QDRANT_URL) → qdrant-server
     3. project-context.yaml memory.backend
     4. Auto-détection
     5. Fallback local

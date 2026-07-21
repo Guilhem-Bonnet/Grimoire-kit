@@ -482,7 +482,7 @@ MCP_CONFIG_TEMPLATE = """\
       "command": "python3",
       "args": ["{tools_dir}/grimoire-mcp-tools.py"],
       "env": {
-        "Grimoire_PROJECT_ROOT": "{project_root}"
+        "GRIMOIRE_PROJECT_ROOT": "{project_root}"
       }
     }
   }

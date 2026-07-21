@@ -37,6 +37,25 @@ class ScanResult:
     root: Path
 
 
+@dataclass(frozen=True, slots=True)
+class TreeScanResult:
+    """Aggregated scan of a directory tree (monorepo support).
+
+    ``root_result`` is the plain :meth:`StackScanner.scan` of the root itself;
+    ``subprojects`` holds one :class:`ScanResult` per marker-bearing
+    subdirectory found within ``max_depth`` levels.
+    """
+
+    root: Path
+    root_result: ScanResult
+    subprojects: tuple[ScanResult, ...]
+
+    @property
+    def is_monorepo(self) -> bool:
+        """True when the root carries no markers but subdirectories do."""
+        return not self.root_result.stacks and bool(self.subprojects)
+
+
 # ── Marker definitions ────────────────────────────────────────────────────────
 
 # Each entry: (stack_name, [(marker_glob, weight), ...])
@@ -143,6 +162,20 @@ _TYPE_RULES: list[tuple[frozenset[str], str]] = [
 ]
 
 
+# ── Tree walk exclusions ──────────────────────────────────────────────────────
+
+# Directory names never descended into during a recursive (tree) scan.
+_EXCLUDED_DIR_NAMES: frozenset[str] = frozenset({
+    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+    ".tox", ".ruff_cache", ".pytest_cache", "target", "vendor", "site",
+    ".next", "coverage",
+})
+
+
+def _is_excluded_dir(name: str) -> bool:
+    return name in _EXCLUDED_DIR_NAMES or name.startswith("_grimoire")
+
+
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
 
@@ -182,7 +215,48 @@ class StackScanner:
             root=self._root,
         )
 
+    def scan_tree(self, max_depth: int = 2) -> TreeScanResult:
+        """Scan the root plus its subdirectories for stack markers (monorepo).
+
+        Walks at most ``max_depth`` directory levels below the root, skipping
+        well-known dependency/build directories (see ``_EXCLUDED_DIR_NAMES``)
+        and never following symlinks. A subdirectory whose own root-level
+        markers yield detections is reported as a subproject and is treated as
+        a leaf (its children are not visited).
+        """
+        root_result = self.scan()
+        subprojects: list[ScanResult] = []
+        if max_depth >= 1:
+            self._walk_subprojects(self._root, 1, max_depth, subprojects)
+        return TreeScanResult(
+            root=self._root,
+            root_result=root_result,
+            subprojects=tuple(subprojects),
+        )
+
     # ── Private helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _walk_subprojects(
+        directory: Path, depth: int, max_depth: int, out: list[ScanResult],
+    ) -> None:
+        """Collect marker-bearing subdirectories, bounded by ``max_depth``."""
+        try:
+            children = sorted(
+                (p for p in directory.iterdir() if not p.is_symlink() and p.is_dir()),
+                key=lambda p: p.name,
+            )
+        except (PermissionError, OSError):
+            return
+        for child in children:
+            if _is_excluded_dir(child.name):
+                continue
+            result = StackScanner(child).scan()
+            if result.stacks:
+                out.append(result)
+                continue  # a detected subproject is a leaf
+            if depth < max_depth:
+                StackScanner._walk_subprojects(child, depth + 1, max_depth, out)
 
     def _matches(self, pattern: str) -> bool:
         """Check if a marker pattern is present in the project root."""
