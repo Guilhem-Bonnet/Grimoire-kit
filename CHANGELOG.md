@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Classe sémantique de node `role`** (blueprint, P0.3) : algèbre de 7
+  primitives orthogonales — `Unit` (la seule « qui fait »), `Route`, `Scatter`,
+  `Gather`, `Gate`, `Boundary`, `Reference`. `role` est orthogonal à `kind`
+  (d'où vient le node vs ce qu'il fait), additif et optionnel. Les ~20 cases de
+  la palette XXL deviennent des **paramètres** de ces 7 primitives (source de
+  vérité `grimoire.tools.blueprint_primitives`, exposée par
+  `GET /api/primitives`) : plus de bestiaire de `kind`, un tableau de
+  configurations éprouvées. Validation du `role` à la sauvegarde.
 - **Typage d'edge `channel`** (blueprint, P0.2) : chaque edge porte un canal
   `happy` (défaut) `| failure | escalation`. Additif et rétro-compatible —
   l'absence vaut `happy`, les blueprints existants migrent sans perte. La

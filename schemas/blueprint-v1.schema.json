@@ -108,6 +108,10 @@
           "enum": ["pattern", "artifact", "extension-node", "composite", "composite-inline", "agent-spec"],
           "description": "Node kind. `pattern`: catalogue pattern (ref = pattern id). `artifact`: governed project file (ref = project-relative path, must exist at validation time). `extension-node`: node provided by an extension (ref = `<extId>/<nodeId>`, the extension must be installed to compile). `composite`: sub-flow (ref = `use-case:<id>` or a `.blueprint.json` path). `composite-inline`: flattened Studio group (informational). `agent-spec`: agent/trigger sketch from the Studio (informational)."
         },
+        "role": {
+          "enum": ["Unit", "Route", "Scatter", "Gather", "Gate", "Boundary", "Reference"],
+          "description": "Semantic class of the node (P0.3), orthogonal to `kind`. One of the 7 primitives: `kind` says where the node comes from, `role` says what it does structurally. Optional and additive; the palette's 20+ cases are parameter configurations of these 7 (see /api/primitives)."
+        },
         "ref": {
           "type": "string",
           "description": "Target reference; shape depends on `kind` (see the per-kind constraints below)."

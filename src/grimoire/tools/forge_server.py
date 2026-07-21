@@ -42,6 +42,10 @@ from grimoire.tools.blueprint_context import context_policy as _context_policy
 from grimoire.tools.blueprint_context import (
     context_shape_errors as _context_shape_errors,
 )
+from grimoire.tools.blueprint_primitives import PRIMITIVE_NAMES, is_valid_role
+from grimoire.tools.blueprint_primitives import (
+    primitives_catalogue as _primitives_catalogue,
+)
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
@@ -147,6 +151,13 @@ class ForgeAPI:
         Remplace la table statique ``NODE_COST`` de ``web/bp2-cost.js``.
         """
         return _cost_model(model)
+
+    def primitives_view(self) -> dict[str, Any]:
+        """Les 7 primitives de node (`role`) + mapping des cases XXL (P0.3).
+
+        Source de vérité de la re-catégorisation de la palette.
+        """
+        return _primitives_catalogue()
 
     # ── wizard ────────────────────────────────────────────────────────────
 
@@ -421,6 +432,13 @@ class ForgeAPI:
         node_ids = [n.get("id") for n in nodes]
         if len(node_ids) != len(set(node_ids)):
             errors.append("ids de nodes non uniques")
+        for n in nodes:
+            role = n.get("role")
+            if not is_valid_role(role):
+                errors.append(
+                    f"role invalide ({role}) sur node {n.get('id')} — attendu "
+                    f"l'une des 7 primitives : {' | '.join(PRIMITIVE_NAMES)}"
+                )
         pin_contracts = {
             f"{n.get('id')}.{p.get('id')}": p.get("contract")
             for n in nodes
@@ -1228,6 +1246,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/cost-model":
                     model = parse_qs(urlparse(self.path).query).get("model", [None])[0]
                     self._json(api.cost_model_view(model))
+                elif path == "/api/primitives":
+                    self._json(api.primitives_view())
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":
