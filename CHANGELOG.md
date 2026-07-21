@@ -18,6 +18,35 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - **Plan de résorption bash** : inventaire complet des 28 sous-commandes de
   `grimoire-init.sh` (couvert / wrapper mince / gap) et séquence de port
   dans `docs/resorption-bash.md`.
+- **Backend mémoire `lexical`** : implémentation SQLite FTS5 avec classement
+  BM25 et matching insensible aux diacritiques (`unicode61 remove_diacritics 2`),
+  zéro dépendance externe. Honore le contrat `backend: lexical` /
+  `retrieval_mode: lexical` déjà déclaré dans le schéma de configuration mais
+  jamais implémenté. Migration automatique du store JSON local historique
+  (IDs et timestamps préservés).
+- **Backend mémoire `tantivy-local`** (extra `search`) : moteur full-text
+  embarqué Tantivy (Rust, classe Lucene) avec BM25 et stemming français +
+  anglais — `harmonisé` matche `harmonisation`. Prévu pour les corpus
+  volumineux (code, docs). Installation : `pip install grimoire-kit[search]`.
+- **Retrieval hybride** : module `grimoire.memory.retrieval` avec fusion
+  reciprocal rank fusion (`rrf_fuse`) et `HybridRetriever` multi-backends
+  tolérant aux pannes. `MemoryManager.hybrid_search()` fusionne le classement
+  vectoriel et un index compagnon lexical FTS5, mirroré automatiquement à
+  chaque écriture ; `reindex_lexical_companion()` pour le backfill.
+- **Surface CLI retrieval** : `grimoire memory search --hybrid` (fusion RRF)
+  et `grimoire memory reindex-lexical` (backfill du compagnon).
+- **Projection docs** : `grimoire memory vector sync-docs` indexe les pages
+  markdown (`docs/`, `README.md` par défaut) dans le backend mémoire actif —
+  scope `docs` interrogeable via la recherche BM25/hybride. Le scope `code`
+  est couvert par la projection backend-agnostique existante
+  (`memory vector sync-code`), compatible avec les nouveaux backends.
+- **Evals retrieval** : gold set recall@k
+  (`tests/unit/memory/test_retrieval_quality.py`) gardant l'échelle de
+  qualité — lexical jamais sous local, stemming tantivy complet sur les
+  requêtes morphologiques françaises, fusion RRF récupérant les deux
+  classements.
+- **Tantivy insensible aux diacritiques** : champ `text_folded` (NFD) — les
+  requêtes accentuées et non accentuées matchent dans les deux sens.
 
 ### Corrigé
 
@@ -28,6 +57,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   layout correcte (kit direct `framework/tools/` ou kit nested
   `grimoire-kit/framework/tools/`) — l'ancien hook installé cherchait un
   chemin valable uniquement depuis un projet hôte.
+
+### Modifié
+
+- **Résolution `backend: auto`** : sans serveur vectoriel configuré, le défaut
+  local devient `lexical` (FTS5 BM25) quand SQLite le supporte, avec repli sur
+  le backend JSON `local` sinon. `retrieval_mode: lexical` ou
+  `vector_database: false` forcent désormais le backend lexical même si une
+  URL serveur est présente.
 
 ## [3.23.0] - 2026-07-08
 

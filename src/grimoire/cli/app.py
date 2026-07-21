@@ -29,7 +29,7 @@ from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
 from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
-from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_memory_lexical import memory_app
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
@@ -292,7 +292,7 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, tantivy-local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
 ) -> None:

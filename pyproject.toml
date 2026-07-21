@@ -37,7 +37,8 @@ neo4j = ["neo4j>=5.0"]
 redis = ["redis>=5.0"]
 mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
-all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama]"]
+search = ["tantivy>=0.26"]
+all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama,search]"]
 dev = [
     "grimoire-kit[all]",
     "pytest>=8.0",
@@ -126,6 +127,7 @@ module = [
     "redis.*",
     "ollama.*",
     "jsonschema.*",
+    "tantivy.*",
 ]
 ignore_missing_imports = true
 

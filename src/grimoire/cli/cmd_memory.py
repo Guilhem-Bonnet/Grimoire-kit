@@ -18,7 +18,7 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
 from grimoire.memory.architecture import build_memory_architecture_status
 from grimoire.memory.manager import MemoryManager
-from grimoire.memory.taxonomy import flatten_taxonomy
+from grimoire.memory.taxonomy import flatten_taxonomy, run_memory_search
 
 memory_app = typer.Typer(help="Inspect and manage the memory subsystem.")
 facts_app = typer.Typer(help="Inspect the temporal fact graph sidecar.")
@@ -991,10 +991,10 @@ def memory_search(
     wing: str = typer.Option("", "--wing", help="Filter by palace wing."),
     hall: str = typer.Option("", "--hall", help="Filter by palace hall."),
     room: str = typer.Option("", "--room", help="Filter by palace room."),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Fuse vector and lexical BM25 rankings (RRF)."),
 ) -> None:
     """Search memories by keyword or semantic similarity."""
-    mgr = _load_manager()
-    results = mgr.search_taxonomy(query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+    results = run_memory_search(_load_manager(), query, hybrid=hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
     fmt = _get_fmt(ctx)
 
     if fmt == "json":

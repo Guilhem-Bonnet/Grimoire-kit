@@ -22,11 +22,13 @@ __all__ = [
     "DEFAULT_CODE_VECTOR_GRANULARITY",
     "build_code_graph",
     "build_code_vector_entries",
+    "build_docs_entries",
     "build_task_code_reference_projection",
     "build_task_vector_entries",
     "graph_projection_verify",
     "sync_code_graph_projection",
     "sync_code_vector_projection",
+    "sync_docs_projection",
     "sync_task_memory_projection",
     "sync_task_vector_projection",
     "vector_projection_verify",
@@ -776,6 +778,102 @@ def vector_projection_verify(
         "stale": stale[:20],
         "extra": extra[:20],
         "issues": issues,
+    }
+
+
+# ── Docs projection (scope docs — markdown knowledge base) ───────────────────
+
+# Cap per-entry text so oversized pages do not blow up embedding backends.
+_DOCS_TEXT_MAX_CHARS = 8000
+
+
+def _docs_page_title(content: str, rel_path: str) -> str:
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip() or rel_path
+    return rel_path
+
+
+def build_docs_entries(
+    project_root: Path,
+    paths: Iterable[Path],
+    *,
+    exclude: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build deterministic memory documents for markdown documentation pages.
+
+    One entry per ``*.md`` file found under ``paths`` (files or directories,
+    relative to ``project_root``), skipping any path component in ``exclude``.
+    """
+    excluded = exclude or set()
+    root = project_root.resolve()
+    files: set[Path] = set()
+    for path in paths:
+        target = (root / path).resolve() if not path.is_absolute() else path
+        if target.is_file() and target.suffix == ".md":
+            files.add(target)
+        elif target.is_dir():
+            files.update(p for p in target.rglob("*.md") if p.is_file())
+
+    entries: list[dict[str, Any]] = []
+    for file_path in sorted(files):
+        rel_path = _relative_path(root, str(file_path))
+        if any(part in excluded for part in Path(rel_path).parts):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not content.strip():
+            continue
+        title = _docs_page_title(content, rel_path)
+        text = f"{title}\n{rel_path}\n\n{content[:_DOCS_TEXT_MAX_CHARS]}"
+        entry_id = f"docs:{rel_path}"
+        entries.append(_projection_entry(
+            entry_id,
+            text,
+            tags=("projection", "docs", "docs-page"),
+            metadata={
+                "memory_type": "docs_page",
+                "projection_group": "docs",
+                "projection_kind": "docs_page",
+                "projection_source_id": entry_id,
+                "file_path": rel_path,
+                "title": title,
+                "truncated": len(content) > _DOCS_TEXT_MAX_CHARS,
+            },
+        ))
+    return entries
+
+
+def sync_docs_projection(
+    memory: MemoryManager,
+    *,
+    project_root: Path,
+    paths: Iterable[Path],
+    exclude: set[str] | None = None,
+) -> dict[str, int]:
+    """Upsert deterministic docs pages into the active memory backend."""
+    entries = build_docs_entries(project_root, paths, exclude=exclude)
+    actual_by_id = _actual_projection_entries(memory, groups={"docs"})
+    upserted = 0
+    for entry in entries:
+        existing = actual_by_id.get(str(entry["id"]))
+        if existing is not None and existing.metadata.get("content_hash") == entry["metadata"]["content_hash"]:
+            continue
+        memory.upsert(
+            str(entry["id"]),
+            str(entry["text"]),
+            user_id=str(entry["user_id"]),
+            tags=tuple(entry["tags"]),
+            metadata=dict(entry["metadata"]),
+        )
+        upserted += 1
+    return {
+        "expected": len(entries),
+        "upserted": upserted,
+        "unchanged": len(entries) - upserted,
     }
 
 

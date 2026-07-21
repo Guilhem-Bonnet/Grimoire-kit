@@ -71,7 +71,7 @@ ARCHETYPE_CATALOG: tuple[ArchetypeSpec, ...] = (
 # for backward compatibility).
 KNOWN_ARCHETYPES = frozenset(spec.id for spec in ARCHETYPE_CATALOG)
 
-KNOWN_BACKENDS = frozenset({"auto", "local", "lexical", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
+KNOWN_BACKENDS = frozenset({"auto", "local", "lexical", "tantivy-local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"})
 
 # Archetype human descriptions for the wizard (order = display order).
 # Derived from the catalog: every selectable (non-internal, non-base) archetype.

@@ -269,3 +269,49 @@ def test_graph_projection_verify_detects_missing_counts(tmp_path: Path) -> None:
 
     assert stats["ok"] is False
     assert stats["issues"]
+
+
+# ── Docs projection ───────────────────────────────────────────────────────────
+
+def test_build_docs_entries(tmp_path: Path) -> None:
+    from grimoire.memory.projections import build_docs_entries
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("# Guide d'installation\n\nContenu du guide.\n", encoding="utf-8")
+    (docs / "empty.md").write_text("", encoding="utf-8")
+    (docs / "node_modules").mkdir()
+    (docs / "node_modules" / "vendored.md").write_text("# Vendored\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Projet\n\nPrésentation.\n", encoding="utf-8")
+
+    entries = build_docs_entries(tmp_path, [Path("docs"), Path("README.md")], exclude={"node_modules"})
+
+    ids = {entry["id"] for entry in entries}
+    assert ids == {"docs:docs/guide.md", "docs:README.md"}
+    guide = next(entry for entry in entries if entry["id"] == "docs:docs/guide.md")
+    assert guide["metadata"]["title"] == "Guide d'installation"
+    assert guide["metadata"]["projection_group"] == "docs"
+    assert guide["metadata"]["truncated"] is False
+    assert "Contenu du guide." in guide["text"]
+
+
+def test_sync_docs_projection_is_idempotent(tmp_path: Path) -> None:
+    from grimoire.memory.projections import sync_docs_projection
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    page = docs / "page.md"
+    page.write_text("# Page\n\nVersion initiale.\n", encoding="utf-8")
+    manager = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memory.json"))
+
+    first = sync_docs_projection(manager, project_root=tmp_path, paths=[Path("docs")])
+    second = sync_docs_projection(manager, project_root=tmp_path, paths=[Path("docs")])
+    assert first == {"expected": 1, "upserted": 1, "unchanged": 0}
+    assert second == {"expected": 1, "upserted": 0, "unchanged": 1}
+
+    page.write_text("# Page\n\nVersion modifiée.\n", encoding="utf-8")
+    third = sync_docs_projection(manager, project_root=tmp_path, paths=[Path("docs")])
+    assert third["upserted"] == 1
+    results = manager.search("modifiée")
+    assert len(results) == 1
+    assert results[0].id == "docs:docs/page.md"
