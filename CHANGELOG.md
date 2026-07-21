@@ -15,6 +15,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   changement de HEAD), sous l'ordre d'autorité ORC-06. Capacité produit rapatriée
   depuis un hook d'atelier vers `grimoire.tools.context_pack` — testée et
   couverte par la CI.
+- **`grimoire.tools.handoff`** : dérive de façon déterministe un `handoff-packet`
+  conforme au contrat catalogue (ORC-03) depuis une capsule de SubagentStop —
+  champs dérivables (`task_id`, `summary`, `evidence`, `next_trigger`, statut)
+  remplis, champs d'analyse (`changes`, `assumptions`, `risks`,
+  `memory_candidates`) marqués « à enrichir » plutôt qu'inventés. Capacité
+  produit rapatriée d'un hook d'atelier, testée.
 - **Régions d'isolation** (blueprint, C3) : un tableau `boundaries` déclare des
   régions `{id, mode: isolation, members}` — plusieurs nodes partageant une
   fenêtre quarantinée (patron orchestrateur-worker), le cas multi-nodes de
