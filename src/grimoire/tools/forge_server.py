@@ -36,9 +36,12 @@ from grimoire.tools.blueprint_context import (
     DIGEST_TOKENS,
     EDGE_CHANNELS,
     NODE_BASE_TOKENS,
+    isolation_regions,
+    region_membership,
 )
 from grimoire.tools.blueprint_context import as_dict as _as_dict
 from grimoire.tools.blueprint_context import context_policy as _context_policy
+from grimoire.tools.blueprint_context import context_section as _context_section
 from grimoire.tools.blueprint_context import (
     context_shape_errors as _context_shape_errors,
 )
@@ -471,6 +474,31 @@ class ForgeAPI:
                     f"({channel}) — attendu {' | '.join(EDGE_CHANNELS)}"
                 )
 
+        # Régions d'isolation (C3) : membres existants + quarantaine (R-C7).
+        regions = isolation_regions(blueprint)
+        if regions:
+            id_set = set(node_ids)
+            membership = region_membership(regions)
+            for region in regions:
+                if not region["members"]:
+                    errors.append(f"région {region['id']} : aucun membre")
+                for m in region["members"]:
+                    if m not in id_set:
+                        errors.append(f"région {region['id']} : membre inconnu {m}")
+            for edge in blueprint.get("edges", []):
+                src = str(edge.get("from", "")).split(".")[0]
+                dst = str(edge.get("to", "")).split(".")[0]
+                src_region = membership.get(src)
+                if src_region and membership.get(dst) != src_region:
+                    contract = pin_contracts.get(edge.get("from")) or edge.get("contract")
+                    if contract not in DIGEST_CONTRACTS:
+                        errors.append(
+                            f"R-C7 : la région {src_region} exporte via "
+                            f"{edge.get('from')} -> {edge.get('to')} un contrat "
+                            f"non-digest ({contract}) — sortir via "
+                            f"{' ou '.join(DIGEST_CONTRACTS)} (quarantaine)"
+                        )
+
         catalogue = self._catalogue()
         if catalogue:
             known = {p["id"] for p in catalogue.get("patterns", [])}
@@ -803,6 +831,22 @@ class ForgeAPI:
         exits = [
             nid for nid in order if not any(nid in d for d in deps.values())
         ]
+        # Régions d'isolation (C3) : pression agrégée par région quarantinée.
+        regions_out: list[dict[str, Any]] = []
+        by_node = {p["nodeId"]: p["estimatedTokens"] for p in pressure}
+        for region in isolation_regions(blueprint):
+            total = sum(by_node.get(m, 0) for m in region["members"])
+            pct = round(total / CONTEXT_WINDOW_TOKENS * 100, 1)
+            regions_out.append(
+                {
+                    "id": region["id"],
+                    "mode": region["mode"],
+                    "members": region["members"],
+                    "estimatedTokens": total,
+                    "windowPct": pct,
+                    "verdict": "ok" if pct < 60 else ("warn" if pct <= 85 else "critical"),
+                }
+            )
         return {
             "verdict": "prêt à appliquer" if not blockers else "bloqué",
             "blockers": blockers,
@@ -819,6 +863,8 @@ class ForgeAPI:
             # Répartition des edges par canal (P0.2) : le graphe montre ses
             # chemins d'échec et d'escalade, pas seulement le chemin nominal.
             "channels": channels,
+            # Régions d'isolation (C3) : chaque région = une fenêtre quarantinée.
+            "regions": regions_out,
         }
 
     @staticmethod
@@ -926,7 +972,7 @@ class ForgeAPI:
             if "ready" in step:
                 lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
             lines.extend(
-                self._context_section(nodes_by_id.get(str(step["id"]), {}))
+                _context_section(nodes_by_id.get(str(step["id"]), {}))
             )
             lines.append("")
 
@@ -945,6 +991,23 @@ class ForgeAPI:
             f"- Sorties : {', '.join(report['exitNodes']) or '—'}",
             "",
         ]
+        if report.get("regions"):
+            lines += ["## Régions d'isolation", ""]
+            for region in report["regions"]:
+                members = ", ".join(f"`{m}`" for m in region["members"])
+                lines += [
+                    f"### Région `{region['id']}` — dispatch quarantiné unique",
+                    "",
+                    f"- Membres ({len(region['members'])}) : {members}",
+                    "- Dispatch : un seul sous-agent à capsule minimale exécute "
+                    "toute la région dans une fenêtre partagée quarantinée.",
+                    "- Sortie : exclusivement via un contrat de digest "
+                    "(`handoff-packet` / `context-pack`) — le contenu interne ne "
+                    "fuit pas vers l'aval (R-C7).",
+                    f"- Pression estimée : {region['estimatedTokens']} tokens "
+                    f"({region['windowPct']} % de la fenêtre) — {region['verdict']}.",
+                    "",
+                ]
         if report["warnings"]:
             lines += ["## Avertissements du lint normatif", ""]
             lines += [f"- {w}" for w in report["warnings"]]
@@ -975,46 +1038,6 @@ class ForgeAPI:
             "hash": f"sha256:{digest}",
             "warnings": report["warnings"],
         }
-
-    @staticmethod
-    def _context_section(node: dict[str, Any]) -> list[str]:
-        """Sous-section « Contexte » d'un step compilé (C1, texte stable).
-
-        Chaque déclaration mappe une pour une sur un mécanisme que l'hôte
-        exécute déjà : stratégies `discover_inputs` du moteur de workflow
-        (FULL_LOAD, SELECTIVE_LOAD, INDEX_GUIDED), handoff digest ORC-03 et
-        capsule minimale d'injection subagent.
-        """
-        ctx = _context_policy(node)
-        if not ctx:
-            return []
-        budget = _as_dict(ctx.get("budget"))
-        compaction = _as_dict(ctx.get("compaction"))
-        tier = budget.get("tier", "medium")
-        max_tokens = budget.get("maxTokens")
-        strategy = compaction.get("strategy", "full")
-        contract = compaction.get("digestContract", "handoff-packet")
-        directives = {
-            "digest": f"produire un `{contract}` (ORC-03) avant de passer la main",
-            "selective": "chargement `SELECTIVE_LOAD` (variables ciblées) "
-            "du moteur de workflow",
-            "index-guided": "chargement `INDEX_GUIDED` (index puis shards pertinents)",
-            "full": "chargement `FULL_LOAD` (contexte amont complet)",
-        }
-        lines = ["", "#### Contexte", ""]
-        budget_line = f"- Budget : tier `{tier}`"
-        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
-            budget_line += f", plafond {max_tokens} tokens"
-        lines.append(budget_line)
-        if budget.get("justification"):
-            lines.append(f"- Justification du tier : {budget['justification']}")
-        lines.append(f"- Compaction : {directives.get(strategy, directives['full'])}")
-        if ctx.get("isolation") == "isolated":
-            lines.append(
-                "- Isolation : dispatch en sous-agent à capsule minimale ; "
-                f"retour exclusivement via le contrat `{contract}`"
-            )
-        return lines
 
     def _extension_node_patterns(self, ref: str) -> list[str]:
         ext_id = str(ref).split("/")[0]
