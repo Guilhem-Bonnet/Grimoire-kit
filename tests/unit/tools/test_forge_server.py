@@ -908,3 +908,55 @@ class TestEdgeChannel:
         # tous deux des entrées.
         assert set(report["entryNodes"]) == {"a", "b"}
         assert report["channels"] == {"happy": 0, "failure": 1, "escalation": 0}
+
+
+class TestIsolationRegion:
+    """C3 — régions d'isolation (boundaries) : un dispatch quarantiné unique."""
+
+    def _region_bp(self, out_contract: str = "handoff-packet") -> dict:
+        # a -> b dans une région ; b exporte vers c (hors région).
+        a = make_node("a", "ORC-01", out_contract="handoff-packet")
+        b = make_node("b", "COG-01", out_contract=out_contract)
+        c = make_node("c", "GOV-01")
+        b["pins"][0]["contract"] = "handoff-packet"  # in de b
+        c["pins"][0]["contract"] = out_contract       # in de c
+        return {
+            "blueprintVersion": 1,
+            "nodes": [a, b, c],
+            "edges": [
+                {"from": "a.out", "to": "b.in", "contract": "handoff-packet"},
+                {"from": "b.out", "to": "c.in", "contract": out_contract},
+            ],
+            "boundaries": [{"id": "quarantine", "mode": "isolation",
+                            "members": ["a", "b"]}],
+        }
+
+    def test_unknown_member_rejected(self, api: ForgeAPI) -> None:
+        bp = self._region_bp()
+        bp["boundaries"][0]["members"] = ["a", "ghost"]
+        errors = api.blueprint_validate(bp)
+        assert any("membre inconnu ghost" in e for e in errors)
+
+    def test_r_c7_non_digest_export_rejected(self, api: ForgeAPI) -> None:
+        # b (dans la région) exporte un contrat non-digest vers c (dehors).
+        errors = api.blueprint_validate(self._region_bp(out_contract="task-envelope"))
+        assert any("R-C7" in e for e in errors)
+
+    def test_r_c7_digest_export_accepted(self, api: ForgeAPI) -> None:
+        errors = api.blueprint_validate(self._region_bp(out_contract="handoff-packet"))
+        assert not any("R-C7" in e for e in errors)
+
+    def test_simulate_exposes_region_pressure(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._region_bp())
+        regions = {r["id"]: r for r in report["regions"]}
+        assert "quarantine" in regions
+        assert set(regions["quarantine"]["members"]) == {"a", "b"}
+        assert regions["quarantine"]["estimatedTokens"] > 0
+
+    def test_compile_single_quarantined_dispatch(self, api: ForgeAPI) -> None:
+        # Preuve C3 : une région multi-nodes compile en un seul dispatch.
+        result = api.blueprint_compile({**self._region_bp(), "id": "bp-region"})
+        content = (api.project_root / result["artifact"]).read_text(encoding="utf-8")
+        assert "## Régions d'isolation" in content
+        assert content.count("dispatch quarantiné unique") == 1
+        assert "`a`" in content and "`b`" in content

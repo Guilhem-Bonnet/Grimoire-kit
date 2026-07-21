@@ -24,6 +24,35 @@ COMPACTION_STRATEGIES = ("digest", "selective", "index-guided", "full")
 EDGE_CHANNELS = ("happy", "failure", "escalation")
 DEFAULT_EDGE_CHANNEL = "happy"
 ISOLATION_MODES = ("shared", "isolated")
+# Régions d'isolation (C3) : une Boundary transversale groupe plusieurs nodes
+# dans une même fenêtre quarantinée (patron orchestrateur-worker). Le cas
+# dégénéré à un node est l'isolation de node C1.
+BOUNDARY_MODES = ("isolation",)
+
+
+def isolation_regions(blueprint: dict[str, Any]) -> list[dict[str, Any]]:
+    """Régions d'isolation déclarées (``boundaries`` top-level, mode isolation).
+
+    Chaque région : ``{id, mode, members}``. Additif — un blueprint sans
+    ``boundaries`` n'a aucune région (comportement inchangé).
+    """
+    regions: list[dict[str, Any]] = []
+    for b in blueprint.get("boundaries", []):
+        if not isinstance(b, dict) or b.get("mode") != "isolation":
+            continue
+        members = [m for m in b.get("members", []) if isinstance(m, str)]
+        regions.append({"id": b.get("id"), "mode": "isolation", "members": members})
+    return regions
+
+
+def region_membership(regions: list[dict[str, Any]]) -> dict[str, str]:
+    """Carte ``node_id -> region_id`` (première région qui contient le node)."""
+    membership: dict[str, str] = {}
+    for region in regions:
+        rid = str(region.get("id"))
+        for nid in region.get("members", []):
+            membership.setdefault(nid, rid)
+    return membership
 
 
 def context_policy(node: dict[str, Any]) -> dict[str, Any]:
@@ -115,3 +144,43 @@ def context_shape_errors(node: dict[str, Any]) -> list[str]:
                 f"(attendu {' | '.join(DIGEST_CONTRACTS)}) — node {nid}"
             )
     return errors
+
+
+def context_section(node: dict[str, Any]) -> list[str]:
+    """Sous-section « Contexte » d'un step compilé (C1, texte stable).
+
+    Chaque déclaration mappe une pour une sur un mécanisme que l'hôte exécute
+    déjà : stratégies ``discover_inputs`` du moteur de workflow (FULL_LOAD,
+    SELECTIVE_LOAD, INDEX_GUIDED), handoff digest ORC-03 et capsule minimale
+    d'injection subagent.
+    """
+    ctx = context_policy(node)
+    if not ctx:
+        return []
+    budget = as_dict(ctx.get("budget"))
+    compaction = as_dict(ctx.get("compaction"))
+    tier = budget.get("tier", "medium")
+    max_tokens = budget.get("maxTokens")
+    strategy = compaction.get("strategy", "full")
+    contract = compaction.get("digestContract", "handoff-packet")
+    directives = {
+        "digest": f"produire un `{contract}` (ORC-03) avant de passer la main",
+        "selective": "chargement `SELECTIVE_LOAD` (variables ciblées) "
+        "du moteur de workflow",
+        "index-guided": "chargement `INDEX_GUIDED` (index puis shards pertinents)",
+        "full": "chargement `FULL_LOAD` (contexte amont complet)",
+    }
+    lines = ["", "#### Contexte", ""]
+    budget_line = f"- Budget : tier `{tier}`"
+    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+        budget_line += f", plafond {max_tokens} tokens"
+    lines.append(budget_line)
+    if budget.get("justification"):
+        lines.append(f"- Justification du tier : {budget['justification']}")
+    lines.append(f"- Compaction : {directives.get(strategy, directives['full'])}")
+    if ctx.get("isolation") == "isolated":
+        lines.append(
+            "- Isolation : dispatch en sous-agent à capsule minimale ; "
+            f"retour exclusivement via le contrat `{contract}`"
+        )
+    return lines

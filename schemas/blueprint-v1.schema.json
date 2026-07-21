@@ -45,6 +45,23 @@
       "description": "Typed connections between pins. Required (may be empty for a single-node flow). Each endpoint is `<nodeId>.<pinId>` and both pins must declare the same contract.",
       "items": { "$ref": "#/$defs/edge" }
     },
+    "boundaries": {
+      "type": "array",
+      "description": "Isolation regions (C3). A boundary is a transversal annotation grouping several nodes into one quarantined window (orchestrator-worker); the region compiles to a single sub-agent dispatch. Optional and additive — absence means no region. A single-member region is the degenerate case of node-level `config.context.isolation`.",
+      "items": {
+        "type": "object",
+        "required": ["id", "mode", "members"],
+        "properties": {
+          "id": { "type": "string", "description": "Region identifier." },
+          "mode": { "enum": ["isolation"], "description": "Region kind. `isolation`: quarantined shared window." },
+          "members": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Node ids inside the region. Every id must exist. Edges leaving the region must carry a digest contract (R-C7)."
+          }
+        }
+      }
+    },
     "extensions": {
       "type": "array",
       "description": "Extensions the blueprint depends on. `grimoire ext add-blueprint` compares these ids against the installed extensions and reports the missing ones (with the install command to run).",

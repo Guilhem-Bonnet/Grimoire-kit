@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Régions d'isolation** (blueprint, C3) : un tableau `boundaries` déclare des
+  régions `{id, mode: isolation, members}` — plusieurs nodes partageant une
+  fenêtre quarantinée (patron orchestrateur-worker), le cas multi-nodes de
+  l'isolation de node C1. La compilation émet **un seul dispatch quarantiné par
+  région** (preuve : une région multi-nodes → un dispatch), la simulation
+  expose la pression agrégée par région, et le lint **R-C7** refuse qu'une
+  région exporte un contrat non-digest (quarantaine : seul un digest sort).
+  Additif — sans `boundaries`, comportement inchangé.
 - **Classe sémantique de node `role`** (blueprint, P0.3) : algèbre de 7
   primitives orthogonales — `Unit` (la seule « qui fait »), `Route`, `Scatter`,
   `Gather`, `Gate`, `Boundary`, `Reference`. `role` est orthogonal à `kind`
