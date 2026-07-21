@@ -23,6 +23,7 @@ from rich.table import Table
 from grimoire.__version__ import __version__
 from grimoire.cli.cmd_blueprint import blueprint_app
 from grimoire.cli.cmd_cockpit import cockpit_app
+from grimoire.cli.cmd_context_pack import context_pack_command
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
@@ -885,6 +886,7 @@ def update_cmd() -> None:
 # Implementation lives in cmd_up.py; registered here.
 
 app.command("up", rich_help_panel="Project")(up_command)
+app.command("context-pack", rich_help_panel="Data")(context_pack_command)
 
 
 # ── grimoire memory ───────────────────────────────────────────────────────────────

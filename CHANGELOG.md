@@ -9,6 +9,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **`grimoire context-pack`** : matérialise un context-pack durable de repo,
+  conforme au contrat `context-pack` du catalogue (sources incluses/exclues avec
+  statut et confiance, scorecard de suffisance, expiry avec invalidation sur
+  changement de HEAD), sous l'ordre d'autorité ORC-06. Capacité produit rapatriée
+  depuis un hook d'atelier vers `grimoire.tools.context_pack` — testée et
+  couverte par la CI.
 - **Régions d'isolation** (blueprint, C3) : un tableau `boundaries` déclare des
   régions `{id, mode: isolation, members}` — plusieurs nodes partageant une
   fenêtre quarantinée (patron orchestrateur-worker), le cas multi-nodes de
