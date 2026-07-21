@@ -55,7 +55,10 @@ with **verifiable governance**:
 <img src="docs/assets/demo-quickstart.svg" width="100%" alt="Animated demo: grimoire init, standard init --needs, verify OK, compliance score 81/70, gate check OK">
 
 ```bash
-# Install (pipx recommended)
+# Install (uv recommended)
+uv tool install grimoire-kit
+
+# Or with pipx
 pipx install grimoire-kit
 
 # New project
