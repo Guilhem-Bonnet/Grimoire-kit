@@ -21,7 +21,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="{{agent_tag}}.agent.yaml" name="{{agent_name}}" title="{{agent_role}}" icon="{{agent_icon}}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base.md with:
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG={{agent_tag}} | AGENT_NAME={{agent_name}} | LEARNINGS_FILE={{learnings_file}} | DOMAIN_WORD={{domain_word}}
       </step>
       <step n="3">Remember: user's name is {user_name}</step>

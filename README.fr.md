@@ -99,7 +99,10 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
 <img src="docs/assets/demo-quickstart.svg" width="100%" alt="Démo animée : grimoire init, standard init --needs, verify OK, score de conformité 81/70, gate check OK">
 
 ```bash
-# Installation via pipx (recommandé)
+# Installation via uv (recommandé)
+uv tool install grimoire-kit
+
+# Ou via pipx
 pipx install grimoire-kit
 
 # Ou via pip dans un venv

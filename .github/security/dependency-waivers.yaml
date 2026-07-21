@@ -15,6 +15,8 @@ waivers:
       Dependance transitive (sentence-transformers, extras qdrant/weaviate),
       aucune version corrigee publiee en amont, et grimoire-kit n'exerce pas
       torch.jit.script (surface vulnerable). Risque accepte en attendant un fix.
+      Re-verification 2026-07-12 (OSV GHSA-rrmf-rvhw-rf47, severite LOW) :
+      last_affected 2.12.0, toujours aucun correctif upstream.
     approved_by: "Guilhem-Bonnet"
     expires_at: "2026-09-30"
     evidence_refs:

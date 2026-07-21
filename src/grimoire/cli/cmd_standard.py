@@ -39,6 +39,11 @@ from grimoire.core.agentic_standard import (
     verify_knowledge_index,
     verify_standard_profile,
 )
+from grimoire.core.claude_activation import (
+    ClaudeActivationResult,
+    activation_context_text,
+    install_claude_activation,
+)
 
 standard_app = typer.Typer(
     help="Apply and verify the agentic standard bridge.",
@@ -593,6 +598,11 @@ def init_profile(
     provider_policy: str = typer.Option("hosted-safe", "--provider-policy", help="hosted-safe | local-first | mixed."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing standard artifacts."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show generated paths without writing files."),
+    claude_hook: bool = typer.Option(
+        True,
+        "--claude-hook/--no-claude-hook",
+        help="Install the Claude Code SessionStart activation hook (.claude/settings.json). Mechanism validated 40/40 by the 2026-07-09 evals campaign.",
+    ),
 ) -> None:
     """Generate standard-aware artifacts for a project.
 
@@ -663,6 +673,10 @@ def init_profile(
     if plan is not None and install_extras and plan.tech_extras and not dry_run:
         installed_extras_ok = _run_pip_install(plan.pip_target)
 
+    activation: ClaudeActivationResult | None = None
+    if claude_hook and not dry_run:
+        activation = install_claude_activation(result.project_root, task_id=task_id)
+
     if _get_fmt(ctx) == "json":
         payload: dict[str, object] = {
             "ok": True,
@@ -677,6 +691,12 @@ def init_profile(
         if plan is not None:
             payload["plan"] = _plan_to_json(plan)
             payload["install_extras_ran"] = installed_extras_ok
+        if activation is not None:
+            payload["claude_activation"] = {
+                "status": activation.status,
+                "written": _paths(activation.written),
+                "message": activation.message,
+            }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
@@ -688,6 +708,23 @@ def init_profile(
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
     if provider_ids:
         console.print(f"  [cyan]providers[/cyan] {', '.join(provider_ids)} ({provider_policy})")
+    if activation is not None:
+        if activation.status == "installed":
+            console.print(
+                "  [green][OK][/green] hook d'activation Claude Code installé "
+                "(SessionStart -> grimoire standard activation-context)"
+            )
+            for path in activation.written:
+                console.print(f"    [green][OK][/green] {path}")
+        elif activation.status == "already-installed":
+            console.print("  [dim]hook d'activation Claude Code déjà en place[/dim]")
+        else:
+            console.print(f"  [yellow][!][/yellow] {activation.message}")
+    elif claude_hook and dry_run:
+        console.print(
+            "  [dim]dry-run : hook d'activation Claude Code non installé "
+            "(.claude/settings.json + .claude/activation-context.md)[/dim]"
+        )
     if plan is not None:
         console.print()
         _print_plan(plan)
@@ -698,6 +735,21 @@ def init_profile(
                 console.print("  [red][x][/red] extra install failed; run the command above manually")
             else:
                 console.print(f"  [cyan]next[/cyan] install technology extras: [green]{plan.pip_command}[/green]")
+
+
+@standard_app.command("activation-context")
+def activation_context(
+    project_root: Path = typer.Argument(Path(), help="Project root holding .claude/."),  # noqa: B008
+    task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id referenced by the built-in directive."),
+) -> None:
+    """Print the session activation directive (consumed by the Claude Code SessionStart hook).
+
+    Prefers the project's .claude/activation-context.md when present so teams
+    can tailor the directive; falls back to the built-in one validated by the
+    2026-07-09 evals campaign. Raw output on purpose: stdout is injected as
+    session context by the hook.
+    """
+    typer.echo(activation_context_text(project_root, task_id=task_id), nl=False)
 
 
 def _run_pip_install(pip_target: str) -> bool:
