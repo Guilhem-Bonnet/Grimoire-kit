@@ -331,3 +331,8 @@
   .bp-toolbar #bp-saved { display: none; }
   .bp-toolbar .at-sp { flex: 1 1 0; min-width: 8px; }
 }
+
+/* Canaux d'edge (P0.2) : les chemins non nominaux (échec, escalade) sont
+   visibles d'un coup d'œil, sans masquer la couleur de contrat. */
+#bp-edges path.edge-failure { stroke-dasharray: 6 4; }
+#bp-edges path.edge-escalation { stroke-dasharray: 2 3; }

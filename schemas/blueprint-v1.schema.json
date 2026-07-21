@@ -202,6 +202,11 @@
         "contract": {
           "type": "string",
           "description": "Optional explicit contract. When present it must equal the contract of both connected pins (mismatch is a blocking error)."
+        },
+        "channel": {
+          "enum": ["happy", "failure", "escalation"],
+          "default": "happy",
+          "description": "Execution channel of the edge (P0.2). `happy` (default) is the nominal path; `failure` carries retry/fallback/compensation/dead-letter routing; `escalation` routes to human or higher-authority handling. Absence equals `happy` — existing blueprints migrate without loss."
         }
       },
       "additionalProperties": true

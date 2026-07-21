@@ -870,3 +870,41 @@ class TestStigmergyView:
         assert {s["type"] for s in view["active"]} == {"NEED", "ALERT"}
         assert any(t["type"] == "convergence" for t in view["trails"])
         assert view["stats"]["byType"]["NEED"] == 1
+
+
+class TestEdgeChannel:
+    """P0.2 — typage d'edge : channel happy | failure | escalation."""
+
+    def _bp(self, channel: str | None = None) -> dict:
+        edge: dict = {"from": "a.out", "to": "b.in", "contract": "task-envelope"}
+        if channel is not None:
+            edge["channel"] = channel
+        return {
+            "blueprintVersion": 1,
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "GOV-01")],
+            "edges": [edge],
+        }
+
+    def test_absent_channel_validates_as_happy(self, api: ForgeAPI) -> None:
+        # Migration sans perte : un blueprint existant (sans channel) reste valide.
+        assert api.blueprint_validate(self._bp()) == []
+
+    def test_valid_channels_accepted(self, api: ForgeAPI) -> None:
+        for ch in ("happy", "failure", "escalation"):
+            assert api.blueprint_validate(self._bp(ch)) == []
+
+    def test_invalid_channel_rejected(self, api: ForgeAPI) -> None:
+        errors = api.blueprint_validate(self._bp("bogus"))
+        assert any("channel invalide" in e for e in errors)
+
+    def test_happy_edge_defines_nominal_order(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._bp())
+        assert report["entryNodes"] == ["a"]
+        assert report["channels"] == {"happy": 1, "failure": 0, "escalation": 0}
+
+    def test_failure_edge_excluded_from_nominal_order(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._bp("failure"))
+        # Le chemin failure ne crée pas de dépendance nominale : a et b sont
+        # tous deux des entrées.
+        assert set(report["entryNodes"]) == {"a", "b"}
+        assert report["channels"] == {"happy": 0, "failure": 1, "escalation": 0}
