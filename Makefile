@@ -33,6 +33,10 @@ lint: ## Run ruff linter
 lint-fix: ## Run ruff linter with auto-fix
 	$(PYTHON) -m ruff check src/ tests/ framework/tools/ framework/memory/ --fix
 
+.PHONY: ratchet
+ratchet: ## Code-size ratchet (framework frozen, src oversize guard)
+	$(PYTHON) scripts/check-code-ratchet.py
+
 .PHONY: format
 format: ## Run ruff formatter
 	$(PYTHON) -m ruff format src/ tests/
@@ -74,7 +78,7 @@ clean: ## Remove build artifacts and caches
 
 ## ─── Compound ──────────────────────────────────────────────────
 .PHONY: check
-check: lint typecheck test ## Run lint + typecheck + tests
+check: lint ratchet typecheck test ## Run lint + ratchet + typecheck + tests
 
 .PHONY: pre-push
 pre-push: lint format-check typecheck test-cov ## Full pre-push validation

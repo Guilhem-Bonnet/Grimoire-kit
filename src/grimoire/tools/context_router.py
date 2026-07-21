@@ -26,26 +26,18 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from grimoire.tools._common import GrimoireTool, estimate_tokens
+from grimoire.tools.model_windows import (
+    DEFAULT_MODEL as DEFAULT_MODEL,
+)
+from grimoire.tools.model_windows import (
+    MODEL_WINDOWS as MODEL_WINDOWS,
+)
+from grimoire.tools.model_windows import (
+    resolve_window,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-MODEL_WINDOWS: dict[str, int] = {
-    "claude-opus-4": 200_000,
-    "claude-sonnet-4": 200_000,
-    "claude-haiku": 200_000,
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "o3": 200_000,
-    "codex": 192_000,
-    "gemini-1.5-pro": 1_000_000,
-    "gemini-2.0-flash": 1_000_000,
-    "copilot": 200_000,
-    "codestral": 32_000,
-    "llama3": 8_000,
-    "mistral": 32_000,
-}
-
-DEFAULT_MODEL = "copilot"
 CHARS_PER_TOKEN = 4
 WARNING_THRESHOLD = 0.60
 CRITICAL_THRESHOLD = 0.80
@@ -154,14 +146,25 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     mem = project_root / "_grimoire" / "_memory"
     cfg = project_root / "_grimoire" / "_config"
 
-    # P0: Agent base + agent persona
-    agent_base = cfg / "custom" / "agent-base.md"
+    # P0: Agent base + agent persona — the planner recommends the compact
+    # protocol when scaffolded (sheets load it by default since 3.24); the
+    # full agent-base.md stays available on demand (P4).
+    compact_base = cfg / "custom" / "agent-base-compact.md"
+    full_base = cfg / "custom" / "agent-base.md"
+    agent_base = compact_base if compact_base.exists() else full_base
     if agent_base.exists():
         entries.append(FileEntry(
             path=str(agent_base.relative_to(project_root)),
             priority=Priority.P0_ALWAYS,
             estimated_tokens=_file_tokens(agent_base),
             reason="Base protocol",
+        ))
+    if agent_base == compact_base and full_base.exists():
+        entries.append(FileEntry(
+            path=str(full_base.relative_to(project_root)),
+            priority=Priority.P4_ON_REQUEST,
+            estimated_tokens=_file_tokens(full_base),
+            reason="Full base protocol (on demand)",
         ))
 
     # Find agent file matching tag
@@ -268,7 +271,7 @@ def calculate_plan(
     max_priority: int = Priority.P2_TASK,
 ) -> LoadPlan:
     """Calculate the optimal loading plan for an agent."""
-    model_window = MODEL_WINDOWS.get(model, MODEL_WINDOWS[DEFAULT_MODEL])
+    model_window = resolve_window(model)
     entries = discover_context_files(project_root, agent_tag)
 
     if task_query:

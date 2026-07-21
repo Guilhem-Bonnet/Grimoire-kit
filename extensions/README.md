@@ -34,11 +34,19 @@ artefacts gouvernés — les deux mécanismes sont complémentaires.
 
 ## Extensions disponibles
 
-| Extension | Description | Patterns |
-| --- | --- | --- |
-| [crewai](crewai/extension.json) | Pont CrewAI : crews importés en Recipes gouvernées via `grimoire.runtime.crewai_adapter` | ORC-01, ORC-02, ORC-03 |
-| [langfuse](langfuse/extension.json) | Observabilité : export best-effort de la télémétrie locale vers Langfuse, conventions de traces | QUA-02, QUA-08, QUA-10 |
-| [langgraph](langgraph/extension.json) | Pont LangGraph : StateGraphs à état explicite, checkpoints audités, flow déclaré | ORC-09, ORC-10 |
-| [autogen](autogen/extension.json) | Pont AutoGen : conversations multi-agents à rôles bornés, terminaison explicite, tours tracés | ORC-01, ORC-03 |
-| [browser-use](browser-use/extension.json) | Navigation web gouvernée : preuve par action UI, allowlist, simulation avant irréversible | QUA-11, GOV-07 |
-| [haystack](haystack/extension.json) | RAG gouverné : indexation avec provenance, rappel vérifiable — contre le RAG aveugle | KNO-06, KNO-02 |
+Tableau généré depuis les manifestes — ne pas éditer à la main :
+`python scripts/gen-extensions-table.py` (drift bloqué par
+`tests/unit/test_extensions_readme.py`).
+
+<!-- extensions-table:start (généré par scripts/gen-extensions-table.py) -->
+| Extension | Kind | Description | Patterns |
+| --- | --- | --- | --- |
+| [autogen](autogen/extension.json) | `flow-adapter` | Pont AutoGen (Microsoft) : conversations multi-agents exposées comme orchestrations Grimoire gouvernées — rôles bornés, tours de parole tracés, sortie en handoff packet | ORC-01, ORC-03 |
+| [browser-use](browser-use/extension.json) | `capability` | Agents de navigation web gouvernés : chaque action UI produit une preuve (screenshot, DOM, URL), périmètre de navigation borné par allowlist, actions irréversibles simulées avant exécution | QUA-11, GOV-07 |
+| [crewai](crewai/extension.json) | `flow-adapter` | Expose les crews CrewAI comme artefacts Grimoire gouvernés via l'adaptateur grimoire.runtime.crewai_adapter : import de flows en Recipes, exécution bornée, traces normalisées | ORC-01, ORC-02, ORC-03 |
+| [fennara-godot](fennara-godot/extension.json) | `mcp-toolbox` | Boucle de feedback Godot réelle pour les agents via le serveur MCP Fennara : diagnostics, contexte scène/nœuds, screenshots, logs runtime et état éditeur — des preuves branchables sur les gates evidence-gated de l'archétype game-dev | QUA-12, QUA-04, RUN-08 |
+| [grimoire-mcp](grimoire-mcp/extension.json) | `mcp-toolbox` | Le serveur MCP du kit comme toolbox gouvernée : accès outillé aux missions, preuves et mémoire du projet depuis tout client MCP, qualifié par le MCP Trust Gate (GOV-09) — permissions déclarées, surfaces bornées | GOV-09, GOV-07 |
+| [haystack](haystack/extension.json) | `capability` | Pipelines RAG Haystack gouvernés : indexation documentaire déclarée (sources, fraîcheur, propriétaire), rappel avec provenance obligatoire — contre le RAG aveugle | KNO-06, KNO-02 |
+| [langfuse](langfuse/extension.json) | `observability` | Pont d'observabilité Langfuse : exporte la télémétrie agentique locale (events.jsonl) vers Langfuse en mode best-effort, avec conventions de traces et guide d'installation | QUA-02, QUA-08, QUA-10 |
+| [langgraph](langgraph/extension.json) | `flow-adapter` | Pont LangGraph : graphes d'agents à état persistant exposés comme workflows Grimoire gouvernés — état explicite, reprises auditées, checkpoints tracés | ORC-09, ORC-10 |
+<!-- extensions-table:end -->

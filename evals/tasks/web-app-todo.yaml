@@ -13,7 +13,16 @@ pinned:
         Grille de jugement `completed` pré-enregistrée avant campagne
         (witnesses/web-app-todo/JUDGING.md) ; critère de succès du protocole
         §Critère confirmé tel quel. Suite au pilote 12 runs du 2026-07-03.
-arms: [governed, baseline]
+    - date: "2026-07-09"
+      note: >-
+        Ajout du bras `activated` (recommandation 1 du rapport 2026-07-03) :
+        mécanisme d'activation pré-enregistré dans
+        witnesses/web-app-todo/ACTIVATION.md (hook SessionStart, prompt de
+        tâche inchangé). Comptage secondaire des régressions pré-enregistré
+        (cassé/supprimé vs adapté vert). Kit toujours pinné 3.18.0 via
+        evals/.venv (le CLI global a évolué vers 3.22.0) ; comparaison
+        contre les bras 2026-07-03 (mêmes pins, runner 2.1.101 identique).
+arms: [governed, baseline, activated]
 repetitions_min: 5
 tasks:
   - id: feat-due-dates

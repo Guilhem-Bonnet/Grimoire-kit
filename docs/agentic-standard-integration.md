@@ -61,8 +61,7 @@ La détection ne lit pas les secrets. Elle ne remonte que des signaux non sensib
 ## Installation dans un projet cible
 
 ```bash
-grimoire init . --archetype minimal
-grimoire-init.sh install --archetype agentic-standard
+grimoire init . -a minimal,agentic-standard
 ```
 
 Ensuite, générer les artefacts selon le profil :
@@ -92,6 +91,23 @@ _grimoire/standard/pattern-catalog.yaml
 _grimoire-output/evidence/{task-id}/task-envelope.md
 _grimoire-output/evidence/{task-id}/evidence-pack.md
 ```
+
+### Activation de session (Claude Code)
+
+`grimoire standard init` installe par défaut un hook `SessionStart`
+Claude Code (`.claude/settings.json`) qui injecte la directive
+d'activation au démarrage de chaque session — le mécanisme validé
+40/40 par la campagne d'évals du 2026-07-09 (`evals/reports/`), là où
+les artefacts seuls produisaient 0/40 d'engagement :
+
+- la directive vit dans `.claude/activation-context.md` (éditable par
+  projet, jamais écrasée si présente) ;
+- le hook exécute `grimoire standard activation-context`, portable et
+  versionné avec le kit ;
+- fusion non destructive dans un `settings.json` existant ; un fichier
+  malformé est laissé intact (le hook est alors sauté avec un
+  avertissement) ;
+- opt-out : `grimoire standard init . --no-claude-hook`.
 
 ## Commandes runtime normatives
 

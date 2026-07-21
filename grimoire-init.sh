@@ -24,6 +24,7 @@ if [[ -z "${GRIMOIRE_SUPPRESS_INIT_NOTICE:-}" ]]; then
     printf '%s\n' \
         "[i] grimoire-init.sh est en mode maintenance — le chemin recommandé est le SDK :" \
         "    pipx install grimoire-kit && grimoire init . " \
+        "    Retrait prevu en 4.0.0 (les operations sans equivalent SDK seront portees avant)." \
         "    (avis supprimable : GRIMOIRE_SUPPRESS_INIT_NOTICE=1)" >&2
 fi
 

@@ -69,6 +69,28 @@ class TestFeaturesVersioned:
         ids = {e["id"] for e in feat.list_features(tmp_path)}
         assert "schemaVersion" not in ids
 
+    def test_old_format_read_as_v1(self, tmp_path: Path) -> None:
+        """Un état pré-versionnage (sans schemaVersion) se lit comme du v1."""
+        path = tmp_path / "_grimoire" / "features.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"stigmergy-hooks": {"enabled": True}}), encoding="utf-8")
+        assert feat.is_enabled(tmp_path, "stigmergy-hooks") is True
+        # La migration est silencieuse : la prochaine sauvegarde pose le champ
+        # sans perdre l'état existant.
+        feat.set_enabled(tmp_path, "stigmergy-hooks", False)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        assert state["schemaVersion"] == feat.STATE_SCHEMA_VERSION
+        assert state["stigmergy-hooks"] == {"enabled": False}
+
+    def test_new_format_read(self, tmp_path: Path) -> None:
+        path = tmp_path / "_grimoire" / "features.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps({"schemaVersion": 1, "stigmergy-hooks": {"enabled": True}}),
+            encoding="utf-8",
+        )
+        assert feat.is_enabled(tmp_path, "stigmergy-hooks") is True
+
 
 class TestInstallRollback:
     def test_partial_failure_rolls_back(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,6 +123,8 @@ class TestBehaviorThreshold:
         view = api.stigmergy_view()
         b = view["behavior"]
         assert b["targetUsefulRatio"] == 0.4
+        assert b["minEmitted"] == 20
+        assert isinstance(b["hypothesis"], str) and b["hypothesis"]
         assert b["promotionReady"] is False
 
 
@@ -158,3 +182,22 @@ class TestServeGuard:
         entry = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
         assert entry["action"] == "feature.toggle"
         assert entry["source"] == "serve"
+
+    def test_blueprint_put_is_journaled(self, tmp_path: Path) -> None:
+        kit = tmp_path / "kit"
+        (kit / "extensions").mkdir(parents=True)
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        server = serve(proj, kit, ui_dir=None, port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            assert self._put(url + "/api/blueprints/x", {}) == 200
+        finally:
+            server.shutdown()
+        ledger = proj / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+        assert ledger.is_file()
+        entry = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+        assert entry["action"] == "blueprint.put"
+        assert entry["id"] == "x"

@@ -3,7 +3,10 @@
 # <img src="../docs/assets/icons/hexagon.svg" width="32" height="32" alt=""> Grimoire Agent Base Protocol v2
 
 > Ce fichier contient le protocole d'activation et les règles communes à tous les agents custom.
-> Chargé par chaque agent via la directive `BASE PROTOCOL` dans leur activation step 2.
+> **Référence complète, chargée à la demande.** Depuis 3.24, les fiches d'agents
+> chargent par défaut `agent-base-compact.md` (~1,2k tokens au lieu de ~10k, mêmes
+> règles condensées) ; ce document reste la source détaillée des deux versions —
+> toute modification de règle se répercute dans la version compacte.
 > Variables substituées par l'agent : `{AGENT_TAG}`, `{AGENT_NAME}`, `{LEARNINGS_FILE}`, `{DOMAIN_WORD}`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

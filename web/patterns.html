@@ -58,11 +58,12 @@
         <div class="at-row" style="gap:8px;margin:14px 0 20px;flex-wrap:wrap">
           <span class="at-chip" id="pt-count">…</span>
           <span class="at-chip" id="pt-contracts">…</span>
+          <span class="at-chip" id="pt-kit" hidden>…</span>
           <span class="at-sp"></span>
           <input class="at-search" id="pt-search" placeholder="rechercher — ref, nom, contrat…" style="max-width:280px" />
         </div>
         <div id="pt-body"></div>
-        <p style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted);margin-top:28px">catalogue complet — exporté depuis <span style="color:var(--ink-soft)">processus-developpement-agentique</span> (source de vérité versionnée)</p>
+        <p style="font-family:var(--font-mono);font-size:0.58rem;color:var(--ink-muted);margin-top:28px">catalogue complet — exporté depuis <span style="color:var(--ink-soft)">processus-developpement-agentique</span> (source de vérité versionnée) · le kit en vérifie mécaniquement une partie (<span style="color:var(--ink-soft)">grimoire standard verify</span>, compteur ci-dessus) — le reste est normatif, non encore outillé</p>
       </div></div>
       <div class="at-status" id="atelier-status"></div>
     </div>
@@ -89,6 +90,26 @@
 
     $('#pt-count').textContent = CAT.patterns.length + ' patterns · ' + CAT.categories.length + ' familles';
     $('#pt-contracts').textContent = CAT.contracts.length + ' contrats documentés';
+
+    /* Couverture kit : combien du catalogue normatif est vérifié mécaniquement
+       (web/data/kit-coverage.json, généré depuis capability-map.yaml). Les
+       périmètres sont comparés, pas mappés pattern-par-pattern — voir la note
+       du fichier. Dégradation silencieuse si l'export est absent. */
+    (async () => {
+      let kc = null;
+      for (const url of ['data/kit-coverage.json', '/data/kit-coverage.json']) {
+        try {
+          const r = await fetch(url, { cache: 'no-store' });
+          if (r.ok) { kc = await r.json(); break; }
+        } catch (e) { /* fichier absent : chip masquée */ }
+      }
+      if (!kc || !kc.verified_pattern_count) return;
+      const el = $('#pt-kit');
+      const pct = Math.round(100 * kc.verified_pattern_count / CAT.patterns.length);
+      el.textContent = kc.verified_pattern_count + ' vérifiés par le kit · ' + pct + ' % du catalogue';
+      el.title = kc.note || '';
+      el.hidden = false;
+    })();
 
     function implementedBy(ref) {
       return EXT.extensions.filter(e => (e.patterns || []).includes(ref));

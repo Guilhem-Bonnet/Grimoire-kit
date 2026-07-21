@@ -90,11 +90,18 @@ def _state_path(project_root: Path) -> Path:
 
 
 def _load_state(project_root: Path) -> dict[str, Any]:
+    """Lit l'état, en migrant silencieusement l'ancien format.
+
+    Les états écrits avant le versionnage du schéma n'ont pas de champ
+    ``schemaVersion`` : ils sont lus comme du v1 implicite et le champ est
+    posé à la lecture (donc persisté à la prochaine sauvegarde).
+    """
     path = _state_path(project_root)
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
+                data.setdefault("schemaVersion", STATE_SCHEMA_VERSION)
                 return data
         except (json.JSONDecodeError, OSError):
             pass

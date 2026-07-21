@@ -180,10 +180,10 @@ Les archétypes sont des configurations pré-packagées pour différents types d
 
 ```bash
 # Installer un archétype
-bash grimoire-init.sh install --archetype web-app
+grimoire init . -a web-app
 
 # Lister les archétypes disponibles
-bash grimoire-init.sh install --list
+grimoire registry list
 ```
 
 ### Semaine 4 : NSO et Intelligence Layer
