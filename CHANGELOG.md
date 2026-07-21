@@ -9,6 +9,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Modèle de coût calibré** (ingénierie de contexte, tranche C2) : la table de
+  coût par pattern, jusqu'ici en dur dans `web/bp2-cost.js`, devient une source
+  de vérité serveur (`grimoire.tools.cost_model`) exposée par
+  `GET /api/cost-model`. La simulation de pression de contexte calibre le coût
+  d'entrée de chaque node sur son pattern (au lieu d'un forfait plat), la vue
+  COÛT du Studio bascule sur « calibrée » quand le serveur répond (repli
+  statique sinon), et l'assertion d'éval `cost-under` (`estimate_usd` /
+  `cost_under`) se vérifie contre les mêmes taux — une seule source pour design,
+  gate et éval.
 - **`grimoire hooks`** (install/list/status) : port Python de
   `grimoire-init.sh hooks` — première étape du plan de résorption bash
   (`docs/resorption-bash.md`). Résolution correcte dans les worktrees git

@@ -741,18 +741,19 @@ class TestContextPolicy:
     # ── pression de contexte en simulation ──
 
     def test_context_pressure_full_accumulates(self, api: ForgeAPI) -> None:
+        # ORC-01 : coût d'entrée calibré (C2) = in 4.5k × runs 3 = 13500 tokens.
         report = api.blueprint_simulate(self._chain(3))
         pressure = {p["nodeId"]: p for p in report["contextPressure"]}
-        assert pressure["n0"]["estimatedTokens"] == 8000
-        assert pressure["n1"]["estimatedTokens"] == 16000
-        assert pressure["n2"]["estimatedTokens"] == 24000
+        assert pressure["n0"]["estimatedTokens"] == 13500
+        assert pressure["n1"]["estimatedTokens"] == 27000
+        assert pressure["n2"]["estimatedTokens"] == 40500
         assert all(p["verdict"] == "ok" for p in report["contextPressure"])
 
     def test_context_pressure_digest_reduces_carry(self, api: ForgeAPI) -> None:
         report = api.blueprint_simulate(self._chain(3, digest_on="n0"))
         pressure = {p["nodeId"]: p for p in report["contextPressure"]}
-        assert pressure["n1"]["estimatedTokens"] == 10000  # 8000 + digest 2000
-        assert pressure["n2"]["estimatedTokens"] == 18000
+        assert pressure["n1"]["estimatedTokens"] == 15500  # 13500 + digest 2000
+        assert pressure["n2"]["estimatedTokens"] == 29000
 
     def test_context_pressure_isolated_resets_carry(self, api: ForgeAPI) -> None:
         bp = self._chain(2)
@@ -766,7 +767,7 @@ class TestContextPolicy:
         bp["edges"][0]["contract"] = "handoff-packet"
         report = api.blueprint_simulate(bp)
         pressure = {p["nodeId"]: p for p in report["contextPressure"]}
-        assert pressure["n1"]["estimatedTokens"] == 8000
+        assert pressure["n1"]["estimatedTokens"] == 13500  # report remis à zéro
 
     def test_context_pressure_critical_and_r_c6(self, api: ForgeAPI) -> None:
         bp = {
