@@ -7,8 +7,8 @@
     "framework/hooks/mnemo-consolidate.sh": 61,
     "framework/hooks/post-checkout.sh": 104,
     "framework/hooks/post-commit.sh": 118,
-    "framework/hooks/pre-commit-cc.sh": 42,
-    "framework/hooks/pre-push.sh": 73,
+    "framework/hooks/pre-commit-cc.sh": 45,
+    "framework/hooks/pre-push.sh": 92,
     "framework/hooks/prepare-commit-msg.sh": 83,
     "framework/memory/backends/__init__.py": 217,
     "framework/memory/backends/backend_lexical.py": 137,
@@ -139,7 +139,7 @@
     "install.sh": 150
   },
   "src_oversized": {
-    "src/grimoire/cli/app.py": 2991,
+    "src/grimoire/cli/app.py": 2997,
     "src/grimoire/cli/cmd_memory.py": 1610,
     "src/grimoire/core/agentic_standard.py": 2980
   }
