@@ -122,11 +122,13 @@ class TestGetAllCount:
 class TestCrud:
     def test_delete_existing(self, backend: TantivyMemoryBackend) -> None:
         entry = backend.store("to delete")
-        assert backend.delete(entry.id) is True
+        deleted = backend.delete(entry.id)
+        assert deleted is True
         assert backend.recall(entry.id) is None
 
     def test_delete_missing(self, backend: TantivyMemoryBackend) -> None:
-        assert backend.delete("nonexistent") is False
+        deleted = backend.delete("nonexistent")
+        assert deleted is False
 
     def test_update_text_reindexes(self, backend: TantivyMemoryBackend) -> None:
         entry = backend.store("original wording")

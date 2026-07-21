@@ -21,7 +21,30 @@ from typing import TYPE_CHECKING, Any
 from grimoire.memory.backends.base import MemoryEntry
 
 if TYPE_CHECKING:
-    from grimoire.memory.manager import MemoryManager
+    from typing import Protocol
+
+    class _SearchableManager(Protocol):
+        """Sous-ensemble de MemoryManager requis par run_memory_search.
+
+        Typer par un Protocol structurel plutôt qu'importer MemoryManager
+        évite le cycle d'import taxonomy <-> manager (manager importe déjà
+        taxonomy) — un vrai MemoryManager le satisfait par structure.
+        """
+
+        def search_taxonomy(
+            self,
+            query: str,
+            *,
+            user_id: str,
+            limit: int,
+            wing: str,
+            hall: str,
+            room: str,
+        ) -> list[MemoryEntry]: ...
+
+        def hybrid_search(
+            self, query: str, *, user_id: str, limit: int
+        ) -> list[MemoryEntry]: ...
 
 __all__ = [
     "DEFAULT_HALL",
@@ -206,7 +229,7 @@ def entry_matches_filters(
 
 
 def run_memory_search(
-    mgr: MemoryManager,
+    mgr: _SearchableManager,
     query: str,
     *,
     hybrid: bool,
