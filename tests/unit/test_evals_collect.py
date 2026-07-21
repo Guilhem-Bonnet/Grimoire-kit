@@ -64,14 +64,27 @@ def test_invalid_arm_rejected(tmp_path: Path) -> None:
         mod.collect_record(tmp_path, "w", "t", "experimental")
 
 
+# Registre conscient des bras pré-enregistrés par témoin. Toute évolution
+# d'une suite (ex. ajout du bras `activated` par la campagne du 2026-07-09,
+# PR #71) doit être répercutée ici dans le même commit — c'est le pin.
+_PINNED_ARMS = {
+    "web-app-todo": ["governed", "baseline", "activated"],
+    "terraform-houseserver": ["governed", "baseline"],
+}
+
+
 def test_task_suites_parse_and_are_pinned() -> None:
     from ruamel.yaml import YAML
 
     yaml = YAML(typ="safe")
-    for suite_path in sorted((_REPO_ROOT / "evals" / "tasks").glob("*.yaml")):
+    suite_paths = sorted((_REPO_ROOT / "evals" / "tasks").glob("*.yaml"))
+    assert {p.stem for p in suite_paths} == set(_PINNED_ARMS), (
+        "suite ajoutée ou retirée sans mise à jour du registre _PINNED_ARMS"
+    )
+    for suite_path in suite_paths:
         suite = yaml.load(suite_path.read_text(encoding="utf-8"))
         assert suite["$schema"] == "grimoire-evals-task-suite/v1"
-        assert suite["arms"] == ["governed", "baseline"]
+        assert suite["arms"] == _PINNED_ARMS[suite_path.stem]
         assert suite["repetitions_min"] >= 5
         assert "amendments" in suite["pinned"]
         assert len(suite["tasks"]) >= 8

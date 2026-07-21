@@ -9,6 +9,11 @@ on:
       - "tests/test_agentic_standard.py"
       - "pyproject.toml"
       - ".github/workflows/ci-sdk.yml"
+      # Lus par tests/unit/test_evals_collect.py : une PR evals-only qui
+      # modifie les suites doit exécuter le SDK CI (cf. main rouge du
+      # 2026-07-13 — la #71 path-filtrée n'avait jamais lancé ces tests).
+      - "evals/tasks/**"
+      - "evals/collect.py"
   pull_request:
     branches: [main]
     paths:
@@ -16,6 +21,8 @@ on:
       - "tests/unit/**"
       - "tests/test_agentic_standard.py"
       - "pyproject.toml"
+      - "evals/tasks/**"
+      - "evals/collect.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
