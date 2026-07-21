@@ -10,6 +10,7 @@ Infrastructure de la campagne définie par [docs/evals-protocol.md](../docs/eval
 |---|---|
 | `tasks/web-app-todo.yaml` | Suite de tâches pré-enregistrée — témoin web (React + Go + PostgreSQL) |
 | `tasks/terraform-houseserver.yaml` | Suite de tâches pré-enregistrée — témoin infra (Proxmox/Terraform/K3s) |
+| `witnesses/web-app-todo/activated/` | Mécanisme d'activation du bras `activated` (hook SessionStart seul + installateur, voir `ACTIVATION.md`) |
 | `collect.py` | Collecteur de run-record (verify/score/gate depuis les artefacts du kit ; métriques externes à `null`, renseignées par l'opérateur) |
 | `runs/` | Sorties brutes par exécution (non committées) |
 | `reports/` | Rapports agrégés par campagne |

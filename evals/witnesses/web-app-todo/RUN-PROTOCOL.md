@@ -21,12 +21,16 @@ evals/runs/<date>/<task-id>/<arm>/rep-<n>/    # non committé (dans .gitignore)
 cp -r evals/witnesses/web-app-todo/app "$RUN_DIR"
 cd "$RUN_DIR"
 
-# 2. Enrôlement — SEULEMENT pour le bras governed
+# 2. Enrôlement — pour les bras governed ET activated
 #    (bras baseline : sauter cette étape, aucun artefact standard)
 #    NB : `--yes` n'existe pas dans le CLI 3.18.0 ; archétype et backend
 #    explicites pour un enrôlement déterministe et non interactif.
 grimoire init . -a web-app -b local                 # projet Grimoire minimal
 grimoire standard init . --needs solo-prototyping   # profil starter + gates
+
+# 3. Activation — SEULEMENT pour le bras activated (voir ACTIVATION.md)
+#    Installe .claude/settings.json + hook SessionStart dans la copie.
+evals/witnesses/web-app-todo/activated/install.sh "$RUN_DIR"
 ```
 
 Le bras `baseline` ne reçoit **aucun** artefact du standard. C'est la seule
@@ -50,7 +54,7 @@ identiques entre les deux bras d'une même tâche).
 ## Collecte (fin de run)
 
 ```bash
-# Métriques standard (verify / score / gate) — null hors bras governed
+# Métriques standard (verify / score / gate) — null pour le bras baseline
 python evals/collect.py \
   --project "$RUN_DIR" --witness web-app-todo \
   --task "$TASK_ID" --arm "$ARM" \

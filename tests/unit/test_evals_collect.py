@@ -35,13 +35,39 @@ def governed_project(tmp_path: Path) -> Path:
 def test_governed_record_has_standard_metrics(governed_project: Path) -> None:
     mod = _load_module()
     record = mod.collect_record(governed_project, "web-app-todo", "bootstrap", "governed")
-    assert record["$schema"] == "grimoire-evals-run-record/v1"
+    assert record["$schema"] == "grimoire-evals-run-record/v2"
     assert record["arm"] == "governed"
     std = record["standard"]
     assert std["verify_ok"] is True
     assert std["profile"] == "starter"
     assert isinstance(std["score"], int)
     assert std["gate_ok"] is not None
+
+
+def test_activated_uses_standard_task_id_and_review_gate(governed_project: Path) -> None:
+    mod = _load_module()
+    # Bug v1 : verify/gate étaient évalués sous le label de tâche d'éval
+    # (artefacts inexistants) au lieu de l'id standard `bootstrap` — cf.
+    # evals/reports/2026-07-03/ERRATA.md.
+    record = mod.collect_record(governed_project, "web-app-todo", "feat-due-dates", "activated")
+    assert record["task_id"] == "feat-due-dates"
+    std = record["standard"]
+    assert std is not None
+    assert std["verify_ok"] is True  # artefacts lus sous `bootstrap`
+    # Gate évalué à l'état cible `review` : un enrôlement pristine ne doit
+    # pas le passer trivialement.
+    assert std["gate_ok"] is False
+    assert std["gate_missing"]
+
+
+def test_external_schema_keeps_primary_regressions_rule(governed_project: Path) -> None:
+    mod = _load_module()
+    record = mod.collect_record(governed_project, "web-app-todo", "bootstrap", "governed")
+    external = record["external"]
+    # Règle primaire 2026-07-03 conservée, split secondaire ajouté (v2).
+    assert "regressions" in external
+    assert "regressions_hard" in external
+    assert "regressions_adapted" in external
 
 
 def test_baseline_record_on_bare_project(tmp_path: Path) -> None:
@@ -76,6 +102,7 @@ _PINNED_ARMS = {
 def test_task_suites_parse_and_are_pinned() -> None:
     from ruamel.yaml import YAML
 
+    mod = _load_module()
     yaml = YAML(typ="safe")
     suite_paths = sorted((_REPO_ROOT / "evals" / "tasks").glob("*.yaml"))
     assert {p.stem for p in suite_paths} == set(_PINNED_ARMS), (
@@ -84,7 +111,10 @@ def test_task_suites_parse_and_are_pinned() -> None:
     for suite_path in suite_paths:
         suite = yaml.load(suite_path.read_text(encoding="utf-8"))
         assert suite["$schema"] == "grimoire-evals-task-suite/v1"
+        # Pin exact par suite (registre _PINNED_ARMS, PR #80) ; tous les bras
+        # doivent aussi être connus du collecteur (mécanisme activated, PR #79).
         assert suite["arms"] == _PINNED_ARMS[suite_path.stem]
+        assert set(suite["arms"]) <= set(mod.ARMS)
         assert suite["repetitions_min"] >= 5
         assert "amendments" in suite["pinned"]
         assert len(suite["tasks"]) >= 8
