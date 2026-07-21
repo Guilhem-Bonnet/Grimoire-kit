@@ -59,6 +59,25 @@ if [[ "$DNA_FILES" -gt 0 ]]; then
     fi
 fi
 
+# ── 2bis. Quickcheck local (layout kit direct ou kit nested) ─────────────────
+QUICKCHECK=""
+for candidate in "$GIT_ROOT/framework/tools/quick-check.sh" \
+                 "$GIT_ROOT/grimoire-kit/framework/tools/quick-check.sh"; do
+    if [[ -x "$candidate" ]]; then
+        QUICKCHECK="$candidate"
+        break
+    fi
+done
+if [[ -n "$QUICKCHECK" ]]; then
+    KIT_ROOT="$(dirname "$(dirname "$(dirname "$QUICKCHECK")")")"
+    if (cd "$KIT_ROOT" && "$QUICKCHECK"); then
+        echo "   ✓ quickcheck local OK"
+    else
+        echo "   ✗ quickcheck local en échec"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── 3. Résumé ─────────────────────────────────────────────────────────────────
 if [[ $ERRORS -eq 0 ]]; then
     echo "   ✅ Tous les checks Grimoire passent — push autorisé"
