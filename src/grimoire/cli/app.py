@@ -29,7 +29,7 @@ from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
 from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
-from grimoire.cli.cmd_memory import memory_app
+from grimoire.cli.cmd_memory_lexical import memory_app
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app

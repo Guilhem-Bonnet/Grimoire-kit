@@ -16,9 +16,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.memory.backends.base import MemoryEntry
+
+if TYPE_CHECKING:
+    from grimoire.memory.manager import MemoryManager
 
 __all__ = [
     "DEFAULT_HALL",
@@ -200,6 +203,38 @@ def entry_matches_filters(
     if hall and metadata.get("hall") != hall:
         return False
     return not (room and metadata.get("room") != room)
+
+
+def run_memory_search(
+    mgr: MemoryManager,
+    query: str,
+    *,
+    hybrid: bool,
+    user_id: str = "",
+    limit: int = 10,
+    wing: str = "",
+    hall: str = "",
+    room: str = "",
+) -> list[MemoryEntry]:
+    """Resolve a memory search, optionally fusing vector and lexical rankings.
+
+    When ``hybrid`` is set, results come from the RRF fusion of the vector and
+    lexical BM25 backends; palace filters are then applied post-hoc because the
+    fusion layer is filter-agnostic. Otherwise the taxonomy-aware backend query
+    is used directly.
+    """
+    if not hybrid:
+        return mgr.search_taxonomy(query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+
+    has_filters = bool(wing or hall or room)
+    fetch = max(limit * 10, limit) if has_filters else limit
+    results = mgr.hybrid_search(query, user_id=user_id, limit=fetch)
+    if has_filters:
+        results = [
+            entry for entry in results
+            if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
+        ][:limit]
+    return results
 
 
 def build_taxonomy(entries: Iterable[MemoryEntry]) -> dict[str, Any]:
