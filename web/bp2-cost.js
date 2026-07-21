@@ -7,8 +7,11 @@
   'use strict';
   const $ = s => document.querySelector(s);
 
+  /* Table de repli statique. Remplacée à l'init par /api/cost-model quand le
+     serveur répond (modèle calibré, source de vérité unique — SPEC C2). */
+  let calibrated = false;
   /* k-tokens par run : { in, out, runs } — hypothèses moyennes par pattern */
-  const NODE_COST = {
+  let NODE_COST = {
     'ORC-02': { in: 2.4, out: 1.2, runs: 1 },
     'ORC-01': { in: 4.5, out: 2.4, runs: 3 },
     'ORC-03': { in: 1.6, out: 0.8, runs: 1 },
@@ -29,8 +32,8 @@
     'KNO-06': { in: 5.0, out: 1.6, runs: 1 },
     'QUA-14': { in: 3.0, out: 0.5, runs: 1 }
   };
-  const EXT_DEFAULT = { in: 18.0, out: 7.0, runs: 1 };   // un crew/graph externe
-  const CAT_DEFAULT = { in: 5.0, out: 2.0, runs: 1 };
+  let EXT_DEFAULT = { in: 18.0, out: 7.0, runs: 1 };   // un crew/graph externe
+  let CAT_DEFAULT = { in: 5.0, out: 2.0, runs: 1 };
   /* agents concrets : coût par rôle, modèle propre à l'agent */
   const ROLE_COST = { orchestrateur: { in: 4.0, out: 1.5, runs: 1 }, agent: { in: 10.0, out: 4.5, runs: 2 }, sub: { in: 5.5, out: 2.2, runs: 1 } };
 
@@ -219,7 +222,7 @@
           </div>`).join('') || '<p class="empty">reliez vos nodes — les chemins apparaîtront ici.</p>'}
       </div>
 
-      <div class="cost-note">Estimation <b>statique</b> : contexte moyen × itérations typiques + sorties — documents édités et équipement des agents inclus dans le prompt (±35 %). Les agents utilisent <b>leur</b> modèle ; les patterns, le modèle par défaut. Ce n'est jamais une facture — c'est un ordre de grandeur pour arbitrer <i>avant</i> de compiler.</div>`;
+      <div class="cost-note">Estimation <b>${calibrated ? 'calibrée' : 'statique'}</b> : contexte moyen × itérations typiques + sorties — documents édités et équipement des agents inclus dans le prompt (±35 %). Les agents utilisent <b>leur</b> modèle ; les patterns, le modèle par défaut. Ce n'est jamais une facture — c'est un ordre de grandeur pour arbitrer <i>avant</i> de compiler.</div>`;
 
     const sel = panel.querySelector('#cost-model-sel');
     if (sel) sel.addEventListener('change', () => {
@@ -245,6 +248,17 @@
       core = c;
       const chip = $('#bp-cost-chip');
       if (chip) chip.addEventListener('click', () => core.setTab('cout'));
+      // Modèle calibré (SPEC C2) : /api/cost-model est la source de vérité.
+      // Repli silencieux sur la table statique hors serveur local.
+      fetch('/api/cost-model').then(r => r.ok ? r.json() : null).then(m => {
+        if (m && m.calibrated) {
+          if (m.patterns) NODE_COST = m.patterns;
+          if (m.extDefault) EXT_DEFAULT = m.extDefault;
+          if (m.catDefault) CAT_DEFAULT = m.catDefault;
+          calibrated = true;
+          refresh(); renderTab();
+        }
+      }).catch(() => {});
       refresh();
     },
     refresh, renderTab, nodeK, flowK, heatClass, nodeRows, summaryLine, fmtK,

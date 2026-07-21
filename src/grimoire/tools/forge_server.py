@@ -27,7 +27,10 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs, urlparse
 
+from grimoire.tools.cost_model import cost_model as _cost_model
+from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
     MANIFEST_NAME,
     ExtensionError,
@@ -223,6 +226,16 @@ class ForgeAPI:
             "extensions": list_installed(self.project_root),
             "blueprints": [b["id"] for b in self.blueprints_list()],
         }
+
+    # ── modèle de coût calibré (C2) ─────────────────────────────────────────
+
+    def cost_model_view(self, model: str | None = None) -> dict[str, Any]:
+        """Modèle de coût calibré — source de vérité unique de la vue COÛT,
+        de la pression de contexte, du Gate(budget) et de ``cost-under``.
+
+        Remplace la table statique ``NODE_COST`` de ``web/bp2-cost.js``.
+        """
+        return _cost_model(model)
 
     # ── wizard ────────────────────────────────────────────────────────────
 
@@ -796,14 +809,19 @@ class ForgeAPI:
         pressure: list[dict[str, Any]] = []
         carry: dict[str, float] = {}
         for node_id in order:
-            ctx = _context_policy(nodes[node_id])
+            node = nodes[node_id]
+            ctx = _context_policy(node)
             budget = _as_dict(ctx.get("budget"))
             max_tokens = budget.get("maxTokens")
-            base = (
-                max_tokens
-                if isinstance(max_tokens, int) and not isinstance(max_tokens, bool)
-                else NODE_BASE_TOKENS
-            )
+            if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+                base = max_tokens
+            elif node.get("ref"):
+                # Coût d'entrée calibré du pattern (C2) ; défaut générique sinon.
+                base = node_entry_tokens(
+                    str(node.get("ref")), is_ext=node.get("kind") == "ext"
+                )
+            else:
+                base = NODE_BASE_TOKENS
             inherited = sum(carry.get(p, 0.0) for p in deps.get(node_id, ()))
             estimated = int(base + inherited)
             pct = round(estimated / CONTEXT_WINDOW_TOKENS * 100, 1)
@@ -1278,6 +1296,9 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json(api.stigmergy_view())
                 elif path == "/api/features":
                     self._json(api.features_view())
+                elif path == "/api/cost-model":
+                    model = parse_qs(urlparse(self.path).query).get("model", [None])[0]
+                    self._json(api.cost_model_view(model))
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":
