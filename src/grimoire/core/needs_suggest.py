@@ -117,12 +117,23 @@ def suggest_needs(
         )
 
     suggestions = [s for s in raw if s.need_id in known]
-    if not suggestions and "solo-prototyping" in known:
-        suggestions.append(
-            NeedSuggestion(
-                "solo-prototyping",
-                "aucun signal particulier — le point d'entrée recommandé",
-                (scan.project_type,),
+    if not suggestions:
+        # Projet vierge : cadrer avant de foncer, puis le point d'entrée.
+        if "project-discovery" in known:
+            suggestions.append(
+                NeedSuggestion(
+                    "project-discovery",
+                    "projet vierge — cadrez avant de construire "
+                    "(grimoire cadrage : brief → exigences → cahier des charges)",
+                    (scan.project_type,),
+                )
             )
-        )
+        if "solo-prototyping" in known:
+            suggestions.append(
+                NeedSuggestion(
+                    "solo-prototyping",
+                    "aucun signal particulier — le point d'entrée recommandé",
+                    (scan.project_type,),
+                )
+            )
     return suggestions

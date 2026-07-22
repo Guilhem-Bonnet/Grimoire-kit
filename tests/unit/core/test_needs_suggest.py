@@ -80,3 +80,8 @@ class TestSuggestNeeds:
         (docs / "a.md").write_text("x\n", encoding="utf-8")
         for s in suggest_needs(_scan(tmp_path), catalog):
             assert s.need_id in known
+
+    def test_empty_project_suggests_discovery_first(self, tmp_path: Path) -> None:
+        catalog = {"needs": [{"id": "project-discovery"}, {"id": "solo-prototyping"}]}
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), catalog)]
+        assert ids == ["project-discovery", "solo-prototyping"]
