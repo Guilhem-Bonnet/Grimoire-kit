@@ -30,6 +30,20 @@ needs:
     extra_tech_extras: []
     rationale: "A lightweight evidence-gated flow with no external services."
 
+  - id: project-discovery
+    label: "Cadrage produit / cahier des charges (comprendre avant de construire)"
+    tier: essential
+    recommended_profile: starter
+    patterns: [evidence-gated-fsm, mission-evidence-ledger]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: >
+      Le flux `grimoire cadrage` (brief -> brainstorm -> comprehension ->
+      exigences -> cahier des charges) produit des artefacts gouvernes et un
+      gate de completude : on ne construit pas sur un engagement flou. Les
+      faits sont separes des hypotheses, les exigences portent leurs criteres
+      d'acceptation.
+
   - id: provider-neutral
     label: "Provider-neutral / local-first LLM routing"
     tier: essential

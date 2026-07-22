@@ -9,6 +9,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **`grimoire cadrage`** (B4) — comprendre avant de construire : un flux guidé
+  en cinq phases (brief → brainstorm → compréhension → exigences → cahier des
+  charges) matérialisé en artefacts gouvernés sous `_grimoire/cadrage/`.
+  Discipline embarquée : brainstorm qui note ce qu'il écarte, faits séparés
+  des hypothèses, exigences MoSCoW avec critères d'acceptation, périmètre ET
+  hors-périmètre. `cadrage status` mesure la progression ; `cadrage check` est
+  un **gate de complétude** (exigences + CDC exigés — on ne construit pas sur
+  un engagement flou). Nouveau need `project-discovery` au catalogue.
+
 - **Suggestions de needs pilotées par le projet** (B3) : `grimoire up` sans
   `--needs` analyse le projet réel (docs, CI + conteneurs, hooks/skills,
   configs MCP, agents déclarés, multi-stack) et suggère les needs du catalogue
