@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.24.0] - 2026-07-22
+
 ### Ajouté
 
 - **`grimoire context-pack`** : matérialise un context-pack durable de repo,
