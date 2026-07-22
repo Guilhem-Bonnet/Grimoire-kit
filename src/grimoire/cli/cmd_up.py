@@ -501,6 +501,33 @@ def _step_identity(state: _UpState, target: Path, *, user: str, dry_run: bool, b
         state.steps.append(StepResult("identity", "failed", f"identity propagation error: {exc}"))
 
 
+def _print_needs_suggestions(target: Path) -> None:
+    """B3 — suggérer des needs adaptés au projet détecté (informatif).
+
+    Best-effort : la suggestion ne bloque jamais l'install (le défaut
+    ``starter`` s'applique) ; elle montre comment obtenir une install sur
+    mesure avec ``--needs``.
+    """
+    try:
+        from grimoire.core.agentic_standard import load_needs_catalog
+        from grimoire.core.needs_suggest import suggest_needs
+        from grimoire.core.scanner import StackScanner
+
+        scan = StackScanner(target).scan()
+        suggestions = suggest_needs(scan, load_needs_catalog())
+    except (OSError, ValueError, KeyError, ImportError):
+        return
+    if not suggestions:
+        return
+    console.print("[dim]Needs suggérés pour ce projet :[/dim]")
+    for s in suggestions:
+        console.print(f"  [cyan]--needs {s.need_id}[/cyan]  [dim]{s.reason}[/dim]")
+    flags = " ".join(f"--needs {s.need_id}" for s in suggestions)
+    console.print(
+        f"[dim]Install sur mesure : [/dim][cyan]grimoire up . {flags}[/cyan]"
+    )
+
+
 def _step_standard(
     state: _UpState,
     target: Path,
@@ -510,6 +537,7 @@ def _step_standard(
     project_name: str,
     dry_run: bool,
     blocked: bool,
+    quiet: bool = False,
 ) -> None:
     """Initialise the governed agentic standard (cmd_standard logic, defaults)."""
     if no_standard:
@@ -537,6 +565,8 @@ def _step_standard(
         else:
             profile_id = "starter"
             extra_artifacts = []
+            if not quiet:
+                _print_needs_suggestions(target)
 
         result = setup_standard_profile(
             target,
@@ -702,6 +732,7 @@ def up(
         state, target,
         no_standard=no_standard, needs=_split_csv(needs),
         project_name=project_name, dry_run=dry_run, blocked=blocked,
+        quiet=fmt != "text",
     )
 
     # 5. Short doctor summary.

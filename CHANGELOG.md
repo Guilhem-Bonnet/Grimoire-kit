@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Suggestions de needs pilotées par le projet** (B3) : `grimoire up` sans
+  `--needs` analyse le projet réel (docs, CI + conteneurs, hooks/skills,
+  configs MCP, agents déclarés, multi-stack) et suggère les needs du catalogue
+  qui collent — avec la raison et la preuve de chaque suggestion, et la
+  commande d'install sur mesure prête à copier. Best-effort : le défaut
+  `starter` s'applique toujours, la suggestion n'interrompt jamais l'install
+  (`grimoire.core.needs_suggest`).
+
 - **Lien projet ↔ base mémoire visible et piloté** (B1) : nouveau
   `GET /api/memory/status` (backend configuré, backend résolu, disponibilité,
   volumétrie — best-effort, ne casse jamais si un serveur est éteint) et
