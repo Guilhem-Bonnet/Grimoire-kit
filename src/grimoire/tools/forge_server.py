@@ -935,12 +935,15 @@ class ForgeAPI:
         now = datetime.now(UTC).isoformat()
         catalog_version = blueprint.get("catalogRef", {}).get("version", "inconnue")
 
+        # P0.1 — compilation reproductible : AUCUN horodatage dans le contenu
+        # hashé. La date de compilation vit dans les métadonnées du blueprint
+        # (``compiled.at``), jamais dans le mission pack : même blueprint +
+        # même catalogue => même contenu => même hash.
         lines = [
             "---",
             f"name: {bp_id}-blueprint",
             f"description: Mission pack compilé depuis le blueprint {name}",
             f"generatedFrom: _grimoire/blueprints/{bp_id}.blueprint.json",
-            f"generatedAt: {now}",
             f"catalogVersion: {catalog_version}",
             "---",
             "",
