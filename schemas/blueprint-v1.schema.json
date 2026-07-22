@@ -231,6 +231,26 @@
         }
       },
       "additionalProperties": true
+    },
+    "gatePolicy": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "description": "Universal parameterized Gate (P2.1), carried as `config.gate` on a node. One primitive, six modes: a Gate asserts a precondition and governs flow — it never transforms. Its presence derives `role: \"Gate\"`. Rejection reuses the typed edges of P0.2.",
+      "properties": {
+        "mode": {
+          "enum": ["human", "budget", "evidence", "output-contract", "guardrail", "mcp-trust"]
+        },
+        "onReject": {
+          "enum": ["escalation", "failure", "block"],
+          "default": "block",
+          "description": "How rejection propagates: `escalation` edge, `failure` edge, or hard stop."
+        },
+        "params": {
+          "type": "object",
+          "description": "Mode-specific parameters — human: action/approvers/confidenceThreshold/pct; budget: maxTokens/maxUsd/scope; evidence: require/format; output-contract: schema; guardrail: direction/checks; mcp-trust: server/allowedTools/permissions."
+        }
+      }
     }
   }
 }
