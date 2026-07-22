@@ -54,6 +54,11 @@ from grimoire.tools.blueprint_primitives import PRIMITIVE_NAMES, is_valid_role
 from grimoire.tools.blueprint_primitives import (
     primitives_catalogue as _primitives_catalogue,
 )
+from grimoire.tools.blueprint_resilience import (
+    compile_resilience_section,
+    resilience_lint,
+    resilience_shape_errors,
+)
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
@@ -478,6 +483,13 @@ class ForgeAPI:
         gate_errors, _ = gate_lint(nodes, blueprint.get("edges", []))
         errors.extend(gate_errors)
 
+        # Famille résilience (P2.2) : forme (R-F1) + plan de défaillance
+        # (R-F2 contrat d'erreur, R-F4 escalation terminale).
+        for n in nodes:
+            errors.extend(resilience_shape_errors(n))
+        res_errors, _ = resilience_lint(nodes, blueprint.get("edges", []))
+        errors.extend(res_errors)
+
         catalogue = self._catalogue()
         if catalogue:
             known = {p["id"] for p in catalogue.get("patterns", [])}
@@ -597,6 +609,9 @@ class ForgeAPI:
         # (sortie sans guardrail out) — non bloquants.
         _, gate_warnings = gate_lint(nodes, blueprint.get("edges", []))
         warnings.extend(gate_warnings)
+        # Résilience (P2.2) : R-F3 (node externe sans chemin de défaillance).
+        _, res_warnings = resilience_lint(nodes, blueprint.get("edges", []))
+        warnings.extend(res_warnings)
 
         return {"errors": errors, "warnings": warnings}
 
@@ -959,6 +974,9 @@ class ForgeAPI:
                 lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
             step_node = nodes_by_id.get(str(step["id"]), {})
             lines.extend(compile_gate_section(step_node))
+            lines.extend(
+                compile_resilience_section(step_node, blueprint.get("edges", []))
+            )
             lines.extend(_context_section(step_node))
             lines.append("")
 

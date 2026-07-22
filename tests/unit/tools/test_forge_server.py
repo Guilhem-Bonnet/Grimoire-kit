@@ -879,14 +879,18 @@ class TestEdgeChannel:
     """P0.2 — typage d'edge : channel happy | failure | escalation."""
 
     def _bp(self, channel: str | None = None) -> dict:
-        edge: dict = {"from": "a.out", "to": "b.in", "contract": "task-envelope"}
+        # Un plan de défaillance (failure/escalation) transporte error-envelope
+        # (R-F2) ; le plan nominal reste task-envelope.
+        contract = (
+            "error-envelope" if channel in ("failure", "escalation") else "task-envelope"
+        )
+        a = make_node("a", "ORC-01", out_contract=contract)
+        b = make_node("b", "GOV-01")
+        b["pins"][0]["contract"] = contract  # in de b
+        edge: dict = {"from": "a.out", "to": "b.in", "contract": contract}
         if channel is not None:
             edge["channel"] = channel
-        return {
-            "blueprintVersion": 1,
-            "nodes": [make_node("a", "ORC-01"), make_node("b", "GOV-01")],
-            "edges": [edge],
-        }
+        return {"blueprintVersion": 1, "nodes": [a, b], "edges": [edge]}
 
     def test_absent_channel_validates_as_happy(self, api: ForgeAPI) -> None:
         # Migration sans perte : un blueprint existant (sans channel) reste valide.

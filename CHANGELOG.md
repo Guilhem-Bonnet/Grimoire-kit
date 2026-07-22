@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Famille résilience** (blueprint, P2.2) — comment un flow échoue, en format :
+  politique node-local `config.resilience` (retry **borné** `max` 1-10 +
+  `backoffMs`/`strategy`, `timeoutMs`, `onExhaustion`) et les quatre motifs
+  (retry, fallback, compensation, dead-letter/escalade) exprimés via les edges
+  `failure`/`escalation` de P0.2 portant le contrat `error-envelope`. Lint
+  opposable : **R-F1** (retry sans `max` refuse de compiler), **R-F2** (edge de
+  défaillance dont le contrat n'est pas `error-envelope`), **R-F4** (escalation
+  non terminale) — bloquants ; **R-F3** (node externe sans chemin de
+  défaillance ni résilience) — avertissement. La compilation émet une section
+  `on_failure` par node résilient ; l'hôte reste l'exécutant. `$def
+  resiliencePolicy` documenté au schéma.
+
 ### Corrigé
 
 - **Robustesse des payloads de setup et du cadrage** : `POST /api/setup` avec

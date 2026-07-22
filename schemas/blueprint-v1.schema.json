@@ -232,6 +232,28 @@
       },
       "additionalProperties": true
     },
+    "resiliencePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Node-local resilience policy (P2.2), carried as `config.resilience`. Bounded retry and timeout live here (they don't need an edge); fallback/compensation/escalation are typed `failure`/`escalation` edges carrying `error-envelope`. Additive; absence = no policy.",
+      "properties": {
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max"],
+          "properties": {
+            "max": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Bounded attempt count (R-F1: retry without max does not compile)." },
+            "backoffMs": { "type": "integer", "minimum": 0 },
+            "strategy": { "enum": ["fixed", "linear", "exponential"] }
+          }
+        },
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "onExhaustion": {
+          "enum": ["escalate", "deadletter", "compensate"],
+          "description": "What to do when retry is exhausted — routes to a failure/escalation edge."
+        }
+      }
+    },
     "gatePolicy": {
       "type": "object",
       "required": ["mode"],
