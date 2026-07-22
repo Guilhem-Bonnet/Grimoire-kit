@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Gate universel paramétré** (blueprint, P2.1) : une primitive, six modes —
+  `human` (HITL riche : approve/edit/input/sample/escalate-on-uncertainty),
+  `budget`, `evidence`, `output-contract`, `guardrail`, `mcp-trust` — déclarés
+  en `config.gate {mode, onReject, params}`. Un seul compilateur (switch
+  unique) ; le rejet réutilise les edges typés de P0.2 (`escalation`,
+  `failure`, ou arrêt dur). Frontière de confiance opposable : **R-G1**
+  (bloquant — node externe sans `Gate(mcp-trust)` en amont) et **R-G2**
+  (bloquant — contenu externe atteignant une sortie sans `Gate(guardrail, in)`),
+  plus R-G3 (block sans alternative), R-G4 (schéma non résolu), R-G5
+  (sortie sans guardrail out). `$def gatePolicy` documenté au schéma.
+
 ### Modifié
 
 - **Compilation reproductible** (blueprint, P0.1) : plus aucun horodatage dans

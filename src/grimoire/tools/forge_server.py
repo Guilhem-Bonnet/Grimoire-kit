@@ -45,6 +45,11 @@ from grimoire.tools.blueprint_context import context_section as _context_section
 from grimoire.tools.blueprint_context import (
     context_shape_errors as _context_shape_errors,
 )
+from grimoire.tools.blueprint_gate import (
+    compile_gate_section,
+    gate_lint,
+    gate_shape_errors,
+)
 from grimoire.tools.blueprint_primitives import PRIMITIVE_NAMES, is_valid_role
 from grimoire.tools.blueprint_primitives import (
     primitives_catalogue as _primitives_catalogue,
@@ -499,6 +504,16 @@ class ForgeAPI:
                             f"{' ou '.join(DIGEST_CONTRACTS)} (quarantaine)"
                         )
 
+        # Gate universel (P2.1) : forme des politiques (dont R-G4, schéma
+        # résolu contre le projet) + frontière de confiance R-G1/R-G2.
+        def _schema_resolves(rel: str) -> bool:
+            return (self.project_root / rel).is_file()
+
+        for n in nodes:
+            errors.extend(gate_shape_errors(n, resolve_schema=_schema_resolves))
+        gate_errors, _ = gate_lint(nodes, blueprint.get("edges", []))
+        errors.extend(gate_errors)
+
         catalogue = self._catalogue()
         if catalogue:
             known = {p["id"] for p in catalogue.get("patterns", [])}
@@ -614,6 +629,10 @@ class ForgeAPI:
                 warnings.append(f"node isolé : {n.get('id')} ({n.get('label')})")
 
         warnings.extend(self._context_warnings(blueprint))
+        # Gate universel (P2.1) : R-G3 (block sans alternative) et R-G5
+        # (sortie sans guardrail out) — non bloquants.
+        _, gate_warnings = gate_lint(nodes, blueprint.get("edges", []))
+        warnings.extend(gate_warnings)
 
         return {"errors": errors, "warnings": warnings}
 
@@ -974,9 +993,9 @@ class ForgeAPI:
                 )
             if "ready" in step:
                 lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
-            lines.extend(
-                _context_section(nodes_by_id.get(str(step["id"]), {}))
-            )
+            step_node = nodes_by_id.get(str(step["id"]), {})
+            lines.extend(compile_gate_section(step_node))
+            lines.extend(_context_section(step_node))
             lines.append("")
 
         edges = blueprint.get("edges", [])
