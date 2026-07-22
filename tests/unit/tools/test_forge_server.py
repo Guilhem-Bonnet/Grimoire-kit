@@ -1034,3 +1034,27 @@ class TestMemoryLinkAndModernSetup:
     def test_setup_plan_rejects_unknown_backend(self, api: ForgeAPI) -> None:
         with pytest.raises(ValueError, match="backend mémoire inconnu"):
             api.setup_plan({"name": "p", "backend": "postgres"})
+
+
+class TestSetupPlanRobustness:
+    """Payloads clients hostiles sur build_setup_plan (cas non pris en charge)."""
+
+    def test_needs_null_does_not_crash(self, api: ForgeAPI) -> None:
+        plan = api.setup_plan({"name": "p", "backend": "auto", "needs": None})
+        assert plan["needs"] == []
+
+    def test_extensions_string_is_not_iterated_char_by_char(
+        self, api: ForgeAPI
+    ) -> None:
+        # "demo" ne doit PAS déclencher l'installation de d/e/m/o.
+        plan = api.setup_plan(
+            {"name": "p", "backend": "auto", "extensions": "demo"}
+        )
+        assert plan["extensionsInstalled"] == []
+        assert plan["extensionErrors"] == []
+
+    def test_none_name_and_user_are_coerced(self, api: ForgeAPI) -> None:
+        plan = api.setup_plan({"name": None, "user": None, "backend": "auto"})
+        assert plan["name"] == "" and plan["user"] == ""
+        assert '--name "None"' not in plan["initCommand"]
+        assert '--name ""' in plan["initCommand"]
