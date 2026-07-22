@@ -9,6 +9,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Lien projet ↔ base mémoire visible et piloté** (B1) : nouveau
+  `GET /api/memory/status` (backend configuré, backend résolu, disponibilité,
+  volumétrie — best-effort, ne casse jamais si un serveur est éteint) et
+  `GET /api/backends` (catalogue des backends avec descriptions humaines).
+  Le hub de l'atelier affiche l'état du lien mémoire du projet.
+- **Wizard de setup modernisé** (B2) : une étape « Mémoire / BDD » (choix du
+  backend, validé côté serveur) et le plan compile désormais vers
+  **`grimoire up`** — plus jamais vers l'installeur shell legacy. Logique
+  extraite dans `grimoire.tools.project_setup`, testée.
 - **Gate universel paramétré** (blueprint, P2.1) : une primitive, six modes —
   `human` (HITL riche : approve/edit/input/sample/escalate-on-uncertainty),
   `budget`, `evidence`, `output-contract`, `guardrail`, `mcp-trust` — déclarés
