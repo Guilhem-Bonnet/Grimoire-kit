@@ -91,3 +91,12 @@ class TestNeedsCatalogEntry:
         assert any(n["id"] == "project-discovery" for n in catalog["needs"])
         plan = resolve_install_plan(needs=["project-discovery"])
         assert plan.profile  # un profil est résolu, pas d'exception
+
+
+class TestCadrageRobustness:
+    def test_non_utf8_file_does_not_crash_check(self, tmp_path: Path) -> None:
+        c.scaffold(tmp_path, project_name="demo")
+        (tmp_path / c.CADRAGE_DIR / "04-exigences.md").write_bytes(b"\xff\xfe x")
+        errors, _ = c.check(tmp_path)  # ne lève pas
+        assert any("Exigences" in e for e in errors)
+        assert c.status(tmp_path)["initialized"] is True

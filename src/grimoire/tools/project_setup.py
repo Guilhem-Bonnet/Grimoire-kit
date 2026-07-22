@@ -53,7 +53,7 @@ def build_setup_plan(
     **backend mémoire** (validé contre :data:`KNOWN_BACKENDS`) et besoins
     éventuels. Les extensions demandées sont installées immédiatement.
     """
-    archetype = payload.get("archetype", "minimal")
+    archetype = str(payload.get("archetype") or "minimal")
     backend = str(payload.get("backend") or "auto")
     if backend not in KNOWN_BACKENDS:
         msg = (
@@ -61,18 +61,26 @@ def build_setup_plan(
             f"(attendu : {', '.join(sorted(KNOWN_BACKENDS))})"
         )
         raise ValueError(msg)
-    needs = [str(n) for n in payload.get("needs", []) if n]
+    # Défenses sur les payloads clients : `null` explicite (get renvoie None,
+    # pas le défaut) et types non-listes (une string s'itèrerait caractère par
+    # caractère — un `"demo"` installerait d/e/m/o).
+    name = str(payload.get("name") or "")
+    user = str(payload.get("user") or "")
+    needs_raw = payload.get("needs")
+    needs = [str(n) for n in needs_raw if n] if isinstance(needs_raw, list) else []
+    ext_raw = payload.get("extensions")
+    ext_ids = [e for e in ext_raw if e] if isinstance(ext_raw, list) else []
     installed, errors = [], []
-    for ext_id in payload.get("extensions", []):
+    for ext_id in ext_ids:
         try:
-            result = install(ext_id)
+            result = install(str(ext_id))
             installed.append(f"{result.extension_id} v{result.version}")
         except ExtensionError as exc:
             errors.append(f"{ext_id} : {exc}")
 
     up_command = (
-        f'grimoire up . --name "{payload.get("name", "")}" '
-        f'--user "{payload.get("user", "")}" '
+        f'grimoire up . --name "{name}" '
+        f'--user "{user}" '
         f"--archetype {archetype} --backend {backend}"
     )
     if needs:
@@ -80,8 +88,8 @@ def build_setup_plan(
 
     plan = {
         "plannedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "name": payload.get("name", ""),
-        "user": payload.get("user", ""),
+        "name": name,
+        "user": user,
         "archetype": archetype,
         "backend": backend,
         "needs": needs,

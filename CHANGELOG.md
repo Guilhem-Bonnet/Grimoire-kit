@@ -7,6 +7,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Robustesse des payloads de setup et du cadrage** : `POST /api/setup` avec
+  `needs: null` ne plante plus (`TypeError`), et `extensions` en chaîne n'est
+  plus itéré caractère par caractère (un `"demo"` installait `d/e/m/o`) ;
+  `name`/`user` `null` ne produisent plus `--name "None"`. Les suggestions de
+  needs tolèrent un catalogue `needs: null` ou des entrées non-dict.
+  `grimoire cadrage status`/`check` ne plantent plus sur un fichier de phase
+  non-UTF8 (octets invalides remplacés).
+
 ### Ajouté
 
 - **`grimoire cadrage`** (B4) — comprendre avant de construire : un flux guidé

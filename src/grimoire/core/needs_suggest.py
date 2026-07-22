@@ -50,7 +50,11 @@ def suggest_needs(
     scan: ScanResult, catalog: dict[str, Any]
 ) -> list[NeedSuggestion]:
     """Suggestions déterministes, validées contre le needs-catalog."""
-    known = {str(n.get("id")) for n in catalog.get("needs", [])}
+    known = {
+        str(n.get("id"))
+        for n in (catalog.get("needs") or [])
+        if isinstance(n, dict)
+    }
     root = scan.root
     raw: list[NeedSuggestion] = []
 

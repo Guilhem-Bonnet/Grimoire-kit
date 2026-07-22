@@ -85,3 +85,11 @@ class TestSuggestNeeds:
         catalog = {"needs": [{"id": "project-discovery"}, {"id": "solo-prototyping"}]}
         ids = [s.need_id for s in suggest_needs(_scan(tmp_path), catalog)]
         assert ids == ["project-discovery", "solo-prototyping"]
+
+    def test_catalog_needs_null_does_not_crash(self, tmp_path: Path) -> None:
+        assert suggest_needs(_scan(tmp_path), {"needs": None}) == []
+
+    def test_catalog_non_dict_entries_skipped(self, tmp_path: Path) -> None:
+        catalog = {"needs": ["solo-prototyping", None, {"id": "solo-prototyping"}]}
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), catalog)]
+        assert ids == ["solo-prototyping"]

@@ -170,7 +170,9 @@ def phase_report(root: Path, phase: Phase) -> dict[str, Any]:
     }
     if not path.is_file():
         return report
-    text = path.read_text(encoding="utf-8")
+    # Un fichier corrompu ou sauvé dans un autre encodage ne doit pas casser
+    # `cadrage status`/`check` : on remplace les octets invalides.
+    text = path.read_text(encoding="utf-8", errors="replace")
     current: str | None = None
     bodies: dict[str, list[str]] = {}
     for line in text.splitlines():
