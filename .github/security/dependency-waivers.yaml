@@ -6,18 +6,8 @@ metadata:
     Chaque waiver est borne dans le temps (expires_at). Un waiver expire =
     scripts/depaudit-waivers.py cesse de l'emettre = le job dep-audit redevient
     strict et repasse rouge tant que le risque n'est pas re-evalue.
-waivers:
-  - waiver_id: "DEPAUDIT-2026-001"
-    check_id: "pip-audit"
-    vulnerability_id: "CVE-2025-3000"
-    package: "torch"
-    reason: >-
-      Dependance transitive (sentence-transformers, extras qdrant/weaviate),
-      aucune version corrigee publiee en amont, et grimoire-kit n'exerce pas
-      torch.jit.script (surface vulnerable). Risque accepte en attendant un fix.
-      Re-verification 2026-07-12 (OSV GHSA-rrmf-rvhw-rf47, severite LOW) :
-      last_affected 2.12.0, toujours aucun correctif upstream.
-    approved_by: "Guilhem-Bonnet"
-    expires_at: "2026-09-30"
-    evidence_refs:
-      - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
+# DEPAUDIT-2026-001 (CVE-2025-3000, torch) : RESOLU le 2026-07-22.
+# OSV GHSA-rrmf-rvhw-rf47 modifie le 2026-07-17 : fixed = 2.13.0, publie sur
+# PyPI. Plancher torch>=2.13.0 ajoute aux extras qdrant/weaviate dans
+# pyproject.toml — le waiver n'est plus necessaire.
+waivers: []
