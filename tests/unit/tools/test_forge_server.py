@@ -960,3 +960,24 @@ class TestIsolationRegion:
         assert "## Régions d'isolation" in content
         assert content.count("dispatch quarantiné unique") == 1
         assert "`a`" in content and "`b`" in content
+
+
+class TestReproducibleCompile:
+    """P0.1 — compilation reproductible : 2 compilations => hashes identiques."""
+
+    def test_double_compile_identical_hashes(self, api: ForgeAPI) -> None:
+        bp = {
+            "blueprintVersion": 1,
+            "id": "bp-repro",
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "GOV-01")],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
+        }
+        r1 = api.blueprint_compile(dict(bp))
+        c1 = (api.project_root / r1["artifact"]).read_text(encoding="utf-8")
+        r2 = api.blueprint_compile(dict(bp))
+        c2 = (api.project_root / r2["artifact"]).read_text(encoding="utf-8")
+        assert r1["hash"] == r2["hash"]
+        assert c1 == c2
+        # L'horodatage vit dans les métadonnées (compiled.at), pas dans le
+        # contenu hashé.
+        assert "generatedAt" not in c1

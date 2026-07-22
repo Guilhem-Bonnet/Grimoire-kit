@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Modifié
+
+- **Compilation reproductible** (blueprint, P0.1) : plus aucun horodatage dans
+  le contenu compilé — `generatedAt` sort du mission pack, la date de
+  compilation vit dans les métadonnées (`compiled.at`). Même blueprint + même
+  catalogue ⇒ même contenu ⇒ même hash (preuve : test de double compilation).
+
 ## [3.24.0] - 2026-07-22
 
 ### Ajouté
