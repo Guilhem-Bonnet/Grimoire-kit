@@ -537,6 +537,7 @@ def _step_standard(
     project_name: str,
     dry_run: bool,
     blocked: bool,
+    quiet: bool = False,
 ) -> None:
     """Initialise the governed agentic standard (cmd_standard logic, defaults)."""
     if no_standard:
@@ -564,7 +565,8 @@ def _step_standard(
         else:
             profile_id = "starter"
             extra_artifacts = []
-            _print_needs_suggestions(target)
+            if not quiet:
+                _print_needs_suggestions(target)
 
         result = setup_standard_profile(
             target,
@@ -730,6 +732,7 @@ def up(
         state, target,
         no_standard=no_standard, needs=_split_csv(needs),
         project_name=project_name, dry_run=dry_run, blocked=blocked,
+        quiet=fmt != "text",
     )
 
     # 5. Short doctor summary.
