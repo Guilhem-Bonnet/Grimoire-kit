@@ -22,6 +22,7 @@ from rich.table import Table
 
 from grimoire.__version__ import __version__
 from grimoire.cli.cmd_blueprint import blueprint_app
+from grimoire.cli.cmd_cadrage import cadrage_app
 from grimoire.cli.cmd_cockpit import cockpit_app
 from grimoire.cli.cmd_context_pack import context_pack_command
 from grimoire.cli.cmd_debugger import debugger_app
@@ -897,6 +898,7 @@ app.add_typer(memory_app, name="memory", rich_help_panel="Data")
 # ── grimoire hooks ────────────────────────────────────────────────────────────────
 
 app.add_typer(hooks_app, name="hooks", rich_help_panel="Project")
+app.add_typer(cadrage_app, name="cadrage", rich_help_panel="Project")
 
 
 # ── grimoire debugger ─────────────────────────────────────────────────────────────
