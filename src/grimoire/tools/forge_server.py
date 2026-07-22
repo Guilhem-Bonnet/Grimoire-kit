@@ -65,6 +65,8 @@ from grimoire.tools.ext_manager import (
     load_manifest,
     remove_extension,
 )
+from grimoire.tools.memory_link import backend_catalogue, memory_link_status
+from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
@@ -167,57 +169,19 @@ class ForgeAPI:
         """
         return _primitives_catalogue()
 
-    # ── wizard ────────────────────────────────────────────────────────────
+    # ── wizard (logique dans project_setup — B2, compile vers grimoire up) ──
 
     def archetypes(self) -> list[dict[str, Any]]:
-        from ruamel.yaml import YAML
-
-        yaml = YAML(typ="safe")
-        result: list[dict[str, Any]] = []
-        base = self.kit_root / "archetypes"
-        if not base.is_dir():
-            return result
-        for dna in sorted(base.glob("*/archetype.dna.yaml")):
-            data = yaml.load(dna.read_text(encoding="utf-8")) or {}
-            result.append(
-                {
-                    "id": data.get("id", dna.parent.name),
-                    "name": data.get("name", dna.parent.name),
-                    "description": data.get("description", ""),
-                    "tags": data.get("tags", []),
-                }
-            )
-        return result
+        return archetypes_catalogue(self.kit_root)
 
     def setup_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        archetype = payload.get("archetype", "minimal")
-        extensions = payload.get("extensions", [])
-        installed, errors = [], []
-        for ext_id in extensions:
-            try:
-                result = self.extension_add(ext_id)
-                installed.append(f"{result.extension_id} v{result.version}")
-            except ExtensionError as exc:
-                errors.append(f"{ext_id} : {exc}")
-        plan = {
-            "plannedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "name": payload.get("name", ""),
-            "user": payload.get("user", ""),
-            "archetype": archetype,
-            "extensionsInstalled": installed,
-            "extensionErrors": errors,
-            "initCommand": (
-                f'bash {self.kit_root / "grimoire-init.sh"} '
-                f'--name "{payload.get("name", "")}" --user "{payload.get("user", "")}" '
-                f"--archetype {archetype}"
-            ),
-        }
-        plan_path = self.project_root / "_grimoire" / "setup-plan.json"
-        plan_path.parent.mkdir(parents=True, exist_ok=True)
-        plan_path.write_text(
-            json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        return build_setup_plan(
+            self.project_root, payload, install=self.extension_add
         )
-        return plan
+
+    def memory_link_view(self) -> dict[str, Any]:
+        """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume."""
+        return memory_link_status(self.project_root)
 
     # ── extensions ────────────────────────────────────────────────────────
 
@@ -1293,6 +1257,10 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json(api.cost_model_view(model))
                 elif path == "/api/primitives":
                     self._json(api.primitives_view())
+                elif path == "/api/backends":
+                    self._json(backend_catalogue())
+                elif path == "/api/memory/status":
+                    self._json(api.memory_link_view())
                 elif path.startswith("/api/blueprints/"):
                     self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 elif path == "/api/events":

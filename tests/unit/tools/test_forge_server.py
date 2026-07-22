@@ -269,7 +269,10 @@ class TestExtensionsAndPlan:
         )
         assert plan["extensionsInstalled"] == ["demo-ext v0.1.0"]
         assert plan["extensionErrors"] == []
-        assert "grimoire-init.sh" in plan["initCommand"]
+        # B2 : le plan compile vers le parcours moderne, plus jamais le legacy.
+        assert plan["initCommand"].startswith("grimoire up ")
+        assert "grimoire-init.sh" not in plan["initCommand"]
+        assert plan["backend"] == "auto"  # B1 : le backend fait partie du plan
         assert (project_root / "_grimoire" / "setup-plan.json").is_file()
         api.extension_remove("demo-ext")
         assert api.extensions_view()["installed"] == {}
@@ -981,3 +984,53 @@ class TestReproducibleCompile:
         # L'horodatage vit dans les métadonnées (compiled.at), pas dans le
         # contenu hashé.
         assert "generatedAt" not in c1
+
+
+class TestMemoryLinkAndModernSetup:
+    """B1+B2 — lien projet <-> BDD et setup moderne, via l'API et HTTP."""
+
+    @pytest.fixture
+    def base_url(self, project_root: Path, kit_root: Path):
+        server = serve(project_root, kit_root, ui_dir=None, port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+        server.shutdown()
+
+    def _get(self, url: str) -> dict:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 - test local
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_api_backends(self, base_url: str) -> None:
+        payload = self._get(f"{base_url}/api/backends")
+        ids = {b["id"] for b in payload["backends"]}
+        assert "auto" in ids and "lexical" in ids
+
+    def test_api_memory_status_uninitialized(self, base_url: str) -> None:
+        st = self._get(f"{base_url}/api/memory/status")
+        assert st["state"] == "uninitialized"
+
+    def test_api_memory_status_initialized(
+        self, base_url: str, project_root: Path
+    ) -> None:
+        (project_root / "project-context.yaml").write_text(
+            "project:\n  name: demo\nmemory:\n  backend: local\n",
+            encoding="utf-8",
+        )
+        st = self._get(f"{base_url}/api/memory/status")
+        assert st["state"] == "ok"
+        assert st["resolvedBackend"] == "local"
+
+    def test_setup_plan_includes_backend_and_modern_command(
+        self, api: ForgeAPI
+    ) -> None:
+        plan = api.setup_plan(
+            {"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical"}
+        )
+        assert plan["backend"] == "lexical"
+        assert "--backend lexical" in plan["initCommand"]
+        assert plan["initCommand"].startswith("grimoire up ")
+
+    def test_setup_plan_rejects_unknown_backend(self, api: ForgeAPI) -> None:
+        with pytest.raises(ValueError, match="backend mémoire inconnu"):
+            api.setup_plan({"name": "p", "backend": "postgres"})
