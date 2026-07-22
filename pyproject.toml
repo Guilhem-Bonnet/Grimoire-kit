@@ -31,8 +31,8 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
-qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0"]
-weaviate = ["sentence-transformers>=3.0"]
+qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0", "torch>=2.13.0"]
+weaviate = ["sentence-transformers>=3.0", "torch>=2.13.0"]
 neo4j = ["neo4j>=5.0"]
 redis = ["redis>=5.0"]
 mempalace = ["chromadb>=0.6,<0.7"]
