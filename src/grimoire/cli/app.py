@@ -2055,67 +2055,9 @@ def self_version(ctx: typer.Context) -> None:
 @self_app.command("update")
 def self_update() -> None:
     """Update grimoire-kit to the latest version from PyPI."""
-    import shutil
-    import subprocess
+    from grimoire.cli.updater import run_update
 
-    installed = __version__
-    console.print(f"[bold]grimoire-kit[/bold]  {installed}\n")
-
-    # Check connectivity
-    if not is_online():
-        console.print("[red]No internet connection — cannot check for updates.[/red]")
-        raise typer.Exit(1)
-
-    # Check PyPI for latest version
-    latest: str | None = None
-    try:
-        from urllib.request import urlopen
-
-        url = "https://pypi.org/pypi/grimoire-kit/json"
-        with urlopen(url, timeout=5) as resp:  # noqa: S310
-            pypi_data = json.loads(resp.read())
-            latest = pypi_data.get("info", {}).get("version")
-    except Exception:
-        console.print("[red]Could not reach PyPI.[/red]")
-        raise typer.Exit(1) from None
-
-    if latest == installed:
-        console.print(f"  [green]Already up to date ({installed})[/green]")
-        raise typer.Exit(0)
-
-    console.print(f"  [yellow]Updating:[/yellow] {installed} → {latest}\n")
-
-    # Detect install method: pipx vs pip
-    use_pipx = False
-    pipx_bin = shutil.which("pipx")
-    if pipx_bin:
-        try:
-            result = subprocess.run(
-                [pipx_bin, "list", "--short"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if "grimoire-kit" in result.stdout:
-                use_pipx = True
-        except Exception:  # noqa: S110
-            pass  # pipx detection is best-effort
-
-    cmd: list[str]
-    if use_pipx and pipx_bin is not None:
-        cmd = [pipx_bin, "upgrade", "grimoire-kit"]
-        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
-    else:
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "grimoire-kit"]
-        console.print(f"  [dim]$ {' '.join(cmd)}[/dim]")
-
-    update_result = subprocess.run(cmd, timeout=120)
-    if update_result.returncode != 0:
-        console.print("\n[red]Update failed.[/red] Try manually:")
-        hint = "pipx upgrade grimoire-kit" if use_pipx else "pip install --upgrade grimoire-kit"
-        console.print(f"  [dim]{hint}[/dim]")
-        raise typer.Exit(1)
-
-    console.print(f"\n[green][OK] Updated to {latest}[/green]", highlight=False)
-    console.print("[dim]Run 'grimoire self version' to verify.[/dim]")
+    run_update(__version__, online=is_online(), console=console)
 
 
 @self_app.command("diagnose")

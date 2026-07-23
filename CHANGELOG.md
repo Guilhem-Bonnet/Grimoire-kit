@@ -18,6 +18,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   plan happy (`failureInjection: null`). Déterministe ; l'hôte reste
   l'exécutant.
 
+### Corrigé
+
+- **`grimoire update` échouait sur les installations `uv tool`** — la commande
+  ne connaissait que `pipx` et `pip`, alors qu'un environnement `uv tool`
+  (voie d'installation recommandée) n'expose pas `pip` : le repli
+  `python -m pip install --upgrade` échouait. La détection de méthode teste
+  désormais `uv tool` en premier, puis `pipx`, puis `pip`, et affiche la
+  commande manuelle correspondante en cas d'échec.
+- **`grimoire update` pouvait rester bloqué sur une version périmée** — la
+  version cible venait de `info.version`, qui accuse un retard de propagation
+  CDN de quelques minutes après une publication (« already up to date » à tort,
+  ou montée vers une version périmée). La résolution prend maintenant le max
+  des clés `releases` (hors versions retirées et pré-versions) et compare en
+  sémantique stricte. La logique de mise à jour est extraite dans
+  `grimoire/cli/updater.py`.
+
 ## [3.25.0] - 2026-07-23
 
 ### Ajouté
