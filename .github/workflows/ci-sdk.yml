@@ -44,7 +44,11 @@ jobs:
           cache: "pip"
 
       - name: Install ruff
-        run: pip install ruff
+        # Pin to the version locked in uv.lock — an unpinned `pip install ruff`
+        # floats to the latest release and silently changes lint behaviour
+        # (e.g. 0.16 dropped S310 on literal https URLs, breaking existing
+        # `# noqa: S310`). Keep in sync with the ruff version in uv.lock.
+        run: pip install ruff==0.15.20
 
       - name: Lint
         run: ruff check src/ tests/unit/ framework/memory/ --output-format=github
