@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.25.0] - 2026-07-23
+
 ### Ajouté
 
 - **Famille résilience** (blueprint, P2.2) — comment un flow échoue, en format :
