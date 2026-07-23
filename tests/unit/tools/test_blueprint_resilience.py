@@ -161,3 +161,55 @@ class TestResilienceCompileAndReproducible:
         del bp["nodes"][0]["config"]["resilience"]["retry"]["max"]
         errors = api.blueprint_validate(bp)
         assert any("R-F1" in e for e in errors)
+
+
+class TestFailureInjection:
+    """P3.1 — injection d'échec : le what-if de résilience."""
+
+    def _bp(self) -> dict:
+        crew = {
+            "id": "crew", "kind": "pattern", "ref": "COG-01",
+            "config": {"resilience": {"retry": {"max": 3}, "onExhaustion": "escalate"}},
+            "pins": [
+                {"id": "in", "direction": "in", "contract": "task-envelope"},
+                {"id": "result", "direction": "out", "contract": "handoff-packet"},
+                {"id": "error", "direction": "out", "contract": "error-envelope"},
+            ],
+        }
+        secours = _unit("secours")
+        human = _unit("human")
+        return {
+            "blueprintVersion": 1, "id": "bp",
+            "nodes": [crew, secours, human],
+            "edges": [
+                {"from": "crew.error", "to": "secours.in", "contract": "error-envelope",
+                 "channel": "failure"},
+                {"from": "crew.error", "to": "human.in", "contract": "error-envelope",
+                 "channel": "escalation"},
+            ],
+        }
+
+    def test_injected_failure_follows_failure_edges(self) -> None:
+        # Preuve RAFFINEMENT P3.1 : un échec injecté suit le failure-edge attendu.
+        trace = r.trace_failure(self._bp(), "crew", "timeout")
+        assert trace["valid"] is True
+        assert trace["path"] == ["crew", "secours", "human"]
+        kinds = [s["kind"] for s in trace["steps"]]
+        assert kinds == ["attempt", "fallback", "escalation", "onExhaustion"]
+        assert trace["steps"][0]["attempts"] == 3  # retry borné respecté
+
+    def test_unknown_node_is_invalid(self) -> None:
+        trace = r.trace_failure(self._bp(), "ghost", "timeout")
+        assert trace["valid"] is False
+        assert any("inconnu" in n for n in trace["notes"])
+
+    def test_unknown_class_noted(self) -> None:
+        trace = r.trace_failure(self._bp(), "crew", "cosmic-ray")
+        assert any("classe d'erreur inconnue" in n for n in trace["notes"])
+
+    def test_node_without_failure_path_noted(self) -> None:
+        bp = self._bp()
+        bp["edges"] = []  # crew n'a plus aucun chemin de défaillance
+        trace = r.trace_failure(bp, "crew", "timeout")
+        assert trace["path"] == ["crew"]
+        assert any("aucun chemin de défaillance" in n for n in trace["notes"])
