@@ -1166,13 +1166,79 @@ class TestSelfUpdate:
                 return pipx_list_result
             return fake_upgrade
 
+        # uv absent, pipx present → pipx path.
+        def which(name: str) -> str | None:
+            return "/usr/bin/pipx" if name == "pipx" else None
+
         with patch("urllib.request.urlopen", return_value=fake_resp), \
-             patch("shutil.which", return_value="/usr/bin/pipx"), \
-             patch("subprocess.run", side_effect=side_effect):
+             patch("shutil.which", side_effect=which), \
+             patch("subprocess.run", side_effect=side_effect) as mock_run:
             result = runner.invoke(app, ["self", "update"])
 
         assert result.exit_code == 0
         assert "Updated to 99.0.0" in result.output
+        upgrade_cmd = mock_run.call_args[0][0]
+        assert upgrade_cmd == ["/usr/bin/pipx", "upgrade", "grimoire-kit"]
+
+    @patch("grimoire.cli.app.is_online", return_value=True)
+    def test_self_update_detects_uv_tool(self, _mock_online: MagicMock) -> None:
+        # Regression: a `uv tool install` env has no pip — `python -m pip
+        # install --upgrade` fails. update must route through `uv tool upgrade`.
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        uv_list_result = MagicMock()
+        uv_list_result.stdout = "grimoire-kit v99.0.0\n- grimoire\n"
+
+        fake_upgrade = MagicMock()
+        fake_upgrade.returncode = 0
+
+        def side_effect(cmd, **kwargs):
+            if "list" in cmd:
+                return uv_list_result
+            return fake_upgrade
+
+        def which(name: str) -> str | None:
+            return "/usr/bin/uv" if name == "uv" else None
+
+        with patch("urllib.request.urlopen", return_value=fake_resp), \
+             patch("shutil.which", side_effect=which), \
+             patch("subprocess.run", side_effect=side_effect) as mock_run:
+            result = runner.invoke(app, ["self", "update"])
+
+        assert result.exit_code == 0
+        assert "Updated to 99.0.0" in result.output
+        upgrade_cmd = mock_run.call_args[0][0]
+        assert upgrade_cmd == ["/usr/bin/uv", "tool", "upgrade", "grimoire-kit"]
+
+    def test_resolve_latest_prefers_releases_over_stale_info(self) -> None:
+        # info.version lags the CDN; releases carries the real newest version.
+        from grimoire.cli.updater import resolve_latest_version
+
+        data = {
+            "info": {"version": "3.24.0"},
+            "releases": {
+                "3.24.0": [{"yanked": False}],
+                "3.25.0": [{"yanked": False}],
+                "3.26.0rc1": [{"yanked": False}],
+                "3.23.0": [{"yanked": True}],
+            },
+        }
+        assert resolve_latest_version(data) == "3.25.0"
+
+    def test_resolve_latest_falls_back_to_info_without_releases(self) -> None:
+        from grimoire.cli.updater import resolve_latest_version
+
+        assert resolve_latest_version({"info": {"version": "3.24.0"}}) == "3.24.0"
+
+    def test_is_newer_semver_and_equal(self) -> None:
+        from grimoire.cli.updater import is_newer
+
+        assert is_newer("3.25.0", "3.24.0") is True
+        assert is_newer("3.24.0", "3.24.0") is False
+        assert is_newer("3.24.0", "3.25.0") is False
 
     def test_top_level_update_command_exists(self) -> None:
         result = runner.invoke(app, ["update", "--help"])
