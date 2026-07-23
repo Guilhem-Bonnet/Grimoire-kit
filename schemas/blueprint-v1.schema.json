@@ -273,6 +273,41 @@
           "description": "Mode-specific parameters — human: action/approvers/confidenceThreshold/pct; budget: maxTokens/maxUsd/scope; evidence: require/format; output-contract: schema; guardrail: direction/checks; mcp-trust: server/allowedTools/permissions."
         }
       }
+    },
+    "evalSuite": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Behavioural eval suite (P1.2), carried as `config.evals` on a node or as top-level `evals` on the blueprint. Attaches versioned proof of behaviour (executed by the host — agent-test — not the Studio). Additive; absence = no suite.",
+      "required": ["version", "cases"],
+      "properties": {
+        "version": { "type": "string", "description": "Suite version, tracked with the .blueprint.json (R-E1)." },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "input", "assert"],
+            "properties": {
+              "id": { "type": "string" },
+              "input": { "type": "object", "description": "Eval input case." },
+              "assert": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": {
+                      "enum": ["contract", "cost", "no-refusal", "verdict", "path-taken"],
+                      "description": "contract: output honours a named contract; cost: under a token/USD threshold; no-refusal: the agent must not refuse; verdict: expected verdict; path-taken: under injected failure, the traversed path (joins P3.1)."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

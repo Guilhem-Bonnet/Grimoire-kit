@@ -9,6 +9,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Évals comportementaux first-class** (blueprint, P1.2) — une suite d'évals
+  versionnée s'attache à un node (`config.evals`) ou au blueprint entier
+  (`evals` top-level) : cas d'entrée + assertions typées (`contract`, `cost`,
+  `no-refusal`, `verdict`, `path-taken`). Le lint valide la forme (R-E1 :
+  versionnée) et **recoupe `path-taken` avec le plan de défaillance déclaré**
+  (R-E3, jonction P3.1) ; un node externe sans preuve est signalé (R-E2). Le
+  panneau santé expose un **taux de réussite d'éval par node** (`blueprint_lint`
+  renvoie un champ `evals` additif), et la compilation émet une section « Évals
+  (preuve comportementale) » — checks exécutés par l'hôte (`agent-test`), jamais
+  par le Studio. Nouveau module `grimoire.tools.blueprint_evals` ; `$def`
+  `evalSuite` au schéma.
+
 - **Injection d'échec en simulation** (blueprint, P3.1) — le what-if de
   résilience : `blueprint_simulate` accepte une cible `{nodeId, class}` (ou
   `GET/POST …/simulate?injectNode=&injectClass=`) et trace le plan de
