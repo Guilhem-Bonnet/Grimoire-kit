@@ -173,6 +173,76 @@ def resilience_lint(
     return errors, warnings
 
 
+def trace_failure(
+    blueprint: dict[str, Any], target: str, error_class: str
+) -> dict[str, Any]:
+    """Injection d'échec (P3.1) : suit le plan de défaillance depuis *target*.
+
+    What-if de résilience — déterministe. Retrace le chemin réel quand *target*
+    échoue sur *error_class* : retry (borné par ``config.resilience``), puis
+    fallback (edge ``failure``), puis escalade (edge ``escalation``), puis la
+    terminaison ``onExhaustion``. ``path`` liste les nodes traversés (pour
+    l'assertion ``path-taken`` des évals).
+    """
+    nodes = {str(n.get("id")): n for n in blueprint.get("nodes", [])}
+    edges = blueprint.get("edges", [])
+    steps: list[dict[str, Any]] = []
+    notes: list[str] = []
+    result: dict[str, Any] = {
+        "target": target,
+        "class": error_class,
+        "valid": target in nodes,
+        "steps": steps,
+        "path": [],
+        "notes": notes,
+    }
+    if target not in nodes:
+        notes.append(f"node cible inconnu : {target}")
+        return result
+    if error_class not in ERROR_CLASSES:
+        notes.append(
+            f"classe d'erreur inconnue : {error_class} "
+            f"(attendu {' | '.join(ERROR_CLASSES)})"
+        )
+
+    path: list[str] = [target]
+    pol = resilience_policy(nodes[target])
+    retry = as_dict(pol.get("retry"))
+    max_attempts = retry.get("max") if isinstance(retry.get("max"), int) else 1
+    steps.append(
+        {"kind": "attempt", "nodeId": target, "attempts": max_attempts,
+         "detail": f"échec {error_class} — {max_attempts} tentative(s)"}
+    )
+
+    def _target_via(channel: str) -> str | None:
+        for e in edges:
+            if (
+                str(e.get("from", "")).split(".")[0] == target
+                and e.get("channel", DEFAULT_EDGE_CHANNEL) == channel
+            ):
+                return str(e.get("to", "")).split(".")[0]
+        return None
+
+    fallback = _target_via("failure")
+    if fallback:
+        steps.append({"kind": "fallback", "nodeId": fallback, "via": "failure"})
+        path.append(fallback)
+    escalation = _target_via("escalation")
+    if escalation:
+        steps.append({"kind": "escalation", "nodeId": escalation, "via": "escalation"})
+        path.append(escalation)
+    on_exh = pol.get("onExhaustion")
+    if on_exh:
+        steps.append({"kind": "onExhaustion", "policy": on_exh})
+    if not fallback and not escalation:
+        notes.append(
+            f"aucun chemin de défaillance depuis {target} — l'échec {error_class} "
+            f"n'est pas géré (dead-letter implicite)"
+        )
+    result["path"] = path
+    return result
+
+
 def compile_resilience_section(
     node: dict[str, Any], edges: list[dict[str, Any]]
 ) -> list[str]:

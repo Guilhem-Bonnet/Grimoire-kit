@@ -1062,3 +1062,37 @@ class TestSetupPlanRobustness:
         assert plan["name"] == "" and plan["user"] == ""
         assert '--name "None"' not in plan["initCommand"]
         assert '--name ""' in plan["initCommand"]
+
+
+class TestFailureInjectionSimulate:
+    """P3.1 — injection d'échec via blueprint_simulate + endpoint."""
+
+    def _bp(self) -> dict:
+        crew = {
+            "id": "crew", "kind": "pattern", "ref": "COG-01",
+            "config": {"resilience": {"retry": {"max": 2}}},
+            "pins": [
+                {"id": "in", "direction": "in", "contract": "task-envelope"},
+                {"id": "error", "direction": "out", "contract": "error-envelope"},
+            ],
+        }
+        human = make_node("human", "GOV-15")
+        human["pins"][0]["contract"] = "error-envelope"
+        return {
+            "blueprintVersion": 1, "id": "bp",
+            "nodes": [crew, human],
+            "edges": [{"from": "crew.error", "to": "human.in",
+                       "contract": "error-envelope", "channel": "escalation"}],
+        }
+
+    def test_nominal_simulate_has_null_injection(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(self._bp())
+        assert report["failureInjection"] is None
+
+    def test_injected_failure_traced(self, api: ForgeAPI) -> None:
+        report = api.blueprint_simulate(
+            self._bp(), inject_failure={"nodeId": "crew", "class": "timeout"}
+        )
+        fi = report["failureInjection"]
+        assert fi["valid"] is True
+        assert fi["path"] == ["crew", "human"]

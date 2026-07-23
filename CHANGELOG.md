@@ -7,6 +7,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Injection d'échec en simulation** (blueprint, P3.1) — le what-if de
+  résilience : `blueprint_simulate` accepte une cible `{nodeId, class}` (ou
+  `GET/POST …/simulate?injectNode=&injectClass=`) et trace le plan de
+  défaillance réellement suivi — retry borné → fallback (edge `failure`) →
+  escalade (edge `escalation`) → terminaison `onExhaustion` —, avec le `path`
+  des nodes traversés (assertion `path-taken`). La simulation nominale reste le
+  plan happy (`failureInjection: null`). Déterministe ; l'hôte reste
+  l'exécutant.
+
 ## [3.25.0] - 2026-07-23
 
 ### Ajouté

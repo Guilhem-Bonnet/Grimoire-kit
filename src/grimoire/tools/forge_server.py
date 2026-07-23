@@ -58,6 +58,7 @@ from grimoire.tools.blueprint_resilience import (
     compile_resilience_section,
     resilience_lint,
     resilience_shape_errors,
+    trace_failure,
 )
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
@@ -691,13 +692,21 @@ class ForgeAPI:
                 )
         return warnings
 
-    def blueprint_simulate(self, blueprint: dict[str, Any]) -> dict[str, Any]:
+    def blueprint_simulate(
+        self,
+        blueprint: dict[str, Any],
+        inject_failure: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Simulation pré-exécution (H4) : dry-run du flow avant apply.
 
         Ne produit aucun effet : ordonne le graphe, vérifie les prérequis
         de chaque node (artefact présent, extension installée, contrôles du
         pattern) et rend un verdict. Le runtime existant reste le seul
         exécutant.
+
+        ``inject_failure`` (P3.1) : ``{"nodeId": ..., "class": ...}`` — mode
+        what-if de résilience ; la simulation nominale reste le plan happy, et
+        le champ ``failureInjection`` trace le plan de défaillance suivi.
         """
         blueprint = self._studio_to_v1(blueprint)
         lint = self.blueprint_lint(blueprint)
@@ -845,6 +854,16 @@ class ForgeAPI:
                     "verdict": "ok" if pct < 60 else ("warn" if pct <= 85 else "critical"),
                 }
             )
+        # Injection d'échec (P3.1) : what-if de résilience. La simulation
+        # nominale ci-dessus reste le plan happy ; ce champ trace le plan de
+        # défaillance suivi quand le node ciblé échoue.
+        failure_injection = None
+        if inject_failure:
+            failure_injection = trace_failure(
+                blueprint,
+                str(inject_failure.get("nodeId", "")),
+                str(inject_failure.get("class", "unknown")),
+            )
         return {
             "verdict": "prêt à appliquer" if not blockers else "bloqué",
             "blockers": blockers,
@@ -863,6 +882,8 @@ class ForgeAPI:
             "channels": channels,
             # Régions d'isolation (C3) : chaque région = une fenêtre quarantinée.
             "regions": regions_out,
+            # Injection d'échec (P3.1) : null en mode nominal.
+            "failureInjection": failure_injection,
         }
 
     @staticmethod
@@ -1332,7 +1353,14 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 elif path.startswith("/api/blueprints/") and path.endswith("/simulate"):
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
-                    self._json(api.blueprint_simulate(blueprint))
+                    qs = parse_qs(urlparse(self.path).query)
+                    inject = None
+                    if qs.get("injectNode"):
+                        inject = {
+                            "nodeId": qs["injectNode"][0],
+                            "class": qs.get("injectClass", ["unknown"])[0],
+                        }
+                    self._json(api.blueprint_simulate(blueprint, inject_failure=inject))
                 elif path.startswith("/api/blueprints/") and path.endswith("/compile"):
                     bp_id = path.split("/")[3]
                     blueprint = body or api.blueprint_get(bp_id)
