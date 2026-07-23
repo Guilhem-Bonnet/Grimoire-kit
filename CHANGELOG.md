@@ -9,6 +9,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Verdict de sécurité — surface d'attaque agrégée** (blueprint, P2.4) — la
+  couche guardrails (`Gate(guardrail, in|out)`, `Gate(mcp-trust)`) était déjà
+  déclarable et lintée (R-G1/R-G2/R-G5) ; on ajoute la **vue de synthèse** :
+  `security_verdict` agrège points d'entrée (sources externes + couverture
+  mcp-trust/guardrail d'entrée), points de sortie (couverture guardrail de
+  sortie), points de filtrage déclarés et expositions résiduelles, avec un
+  verdict global `secure|exposed`. `blueprint_lint` renvoie un champ `security`
+  additif et la compilation émet une section « Surface d'attaque (sécurité) ».
+  Cohérent par construction avec `gate_lint` (mêmes helpers) — le flow où un
+  node externe alimente une sortie sans guardrail refuse toujours de compiler
+  (R-G2). Nouveau module `grimoire.tools.blueprint_security`.
+
 - **Évals comportementaux first-class** (blueprint, P1.2) — une suite d'évals
   versionnée s'attache à un node (`config.evals`) ou au blueprint entier
   (`evals` top-level) : cas d'entrée + assertions typées (`contract`, `cost`,

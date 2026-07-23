@@ -52,6 +52,17 @@ REINFORCEMENT_BOOST = 0.2
 MAX_INTENSITY = 1.0
 DEFAULT_INTENSITY = 0.7
 
+# Hypothèse de promotion beta→stable de la stigmergie (QUA-13 : la mesure sert
+# une décision). Exposée telle quelle par /api/stigmergy (bloc behavior) pour
+# que les ratios soient lus contre la thèse qu'ils testent.
+STIGMERGY_TARGET_USEFUL_RATIO = 0.4
+STIGMERGY_PROMOTION_MIN_EMITTED = 20
+STIGMERGY_PROMOTION_HYPOTHESIS = (
+    "Le board coordonne réellement si au moins 40 % des signaux émis "
+    "produisent une coordination utile (résolution ou relais), mesuré "
+    "sur au moins 20 émissions."
+)
+
 TYPE_ICONS = {
     "NEED":        "[i]",
     "ALERT":       "[!!]",

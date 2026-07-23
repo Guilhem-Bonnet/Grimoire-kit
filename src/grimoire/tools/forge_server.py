@@ -70,6 +70,10 @@ from grimoire.tools.blueprint_resilience import (
     resilience_shape_errors,
     trace_failure,
 )
+from grimoire.tools.blueprint_security import (
+    compile_security_section,
+    security_verdict,
+)
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
@@ -87,17 +91,6 @@ from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
 BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
-
-# Hypothèse de promotion beta→stable de la stigmergie (QUA-13 : la mesure
-# sert une décision). Exposée telle quelle par /api/stigmergy (bloc behavior)
-# pour que les ratios soient lus contre la thèse qu'ils testent.
-STIGMERGY_TARGET_USEFUL_RATIO = 0.4
-STIGMERGY_PROMOTION_MIN_EMITTED = 20
-STIGMERGY_PROMOTION_HYPOTHESIS = (
-    "Le board coordonne réellement si au moins 40 % des signaux émis "
-    "produisent une coordination utile (résolution ou relais), mesuré "
-    "sur au moins 20 émissions."
-)
 
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
@@ -612,9 +605,15 @@ class ForgeAPI:
         _, ev_warnings = evals_lint(blueprint)
         warnings.extend(ev_warnings)
 
-        # `evals` (P1.2) : panneau santé — taux par node/blueprint. Additif :
-        # les consommateurs existants lisent errors/warnings.
-        return {"errors": errors, "warnings": warnings, "evals": evals_summary(blueprint)}
+        # `evals` (P1.2) + `security` (P2.4) : panneaux additifs (taux d'éval,
+        # surface d'attaque agrégée). Les consommateurs existants lisent
+        # errors/warnings ; le verdict sécurité recoupe R-G1/R-G2/R-G5.
+        return {
+            "errors": errors,
+            "warnings": warnings,
+            "evals": evals_summary(blueprint),
+            "security": security_verdict(nodes, blueprint.get("edges", [])),
+        }
 
     @staticmethod
     def _context_warnings(blueprint: dict[str, Any]) -> list[str]:
@@ -1010,6 +1009,7 @@ class ForgeAPI:
                 for e in edges
             ]
             lines.append("")
+        lines.extend(compile_security_section(blueprint.get("nodes", []), edges))
         lines += [
             "## Entrées / sorties du flow",
             "",
@@ -1174,8 +1174,8 @@ class ForgeAPI:
         denominator = board.total_emitted or 1
         useful_ratio = round(useful / denominator, 3)
         # Seuil de promotion beta→stable (QUA-13) : la mesure sert une décision.
-        target_ratio = STIGMERGY_TARGET_USEFUL_RATIO
-        min_emitted = STIGMERGY_PROMOTION_MIN_EMITTED
+        target_ratio = stig.STIGMERGY_TARGET_USEFUL_RATIO
+        min_emitted = stig.STIGMERGY_PROMOTION_MIN_EMITTED
         return {
             "active": signals,
             "trails": trails,
@@ -1202,7 +1202,7 @@ class ForgeAPI:
                 "usefulRatio": useful_ratio,
                 "targetUsefulRatio": target_ratio,
                 "minEmitted": min_emitted,
-                "hypothesis": STIGMERGY_PROMOTION_HYPOTHESIS,
+                "hypothesis": stig.STIGMERGY_PROMOTION_HYPOTHESIS,
                 "promotionReady": bool(board.total_emitted >= min_emitted and useful_ratio >= target_ratio),
             },
         }
