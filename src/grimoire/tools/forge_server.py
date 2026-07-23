@@ -45,12 +45,22 @@ from grimoire.tools.blueprint_context import context_section as _context_section
 from grimoire.tools.blueprint_context import (
     context_shape_errors as _context_shape_errors,
 )
+from grimoire.tools.blueprint_evals import (
+    compile_evals_section,
+    evals_lint,
+    evals_shape_errors,
+    evals_summary,
+)
 from grimoire.tools.blueprint_gate import (
     compile_gate_section,
     gate_lint,
     gate_shape_errors,
 )
-from grimoire.tools.blueprint_primitives import PRIMITIVE_NAMES, is_valid_role
+from grimoire.tools.blueprint_primitives import (
+    PRIMITIVE_NAMES,
+    STUDIO_FAMILY_PINS,
+    is_valid_role,
+)
 from grimoire.tools.blueprint_primitives import (
     primitives_catalogue as _primitives_catalogue,
 )
@@ -88,27 +98,6 @@ STIGMERGY_PROMOTION_HYPOTHESIS = (
     "produisent une coordination utile (résolution ou relais), mesuré "
     "sur au moins 20 émissions."
 )
-
-# Pins par famille pour les blueprints du Studio (v2) : même heuristique que
-# web/atelier-nav.js — à remplacer par une curation par pattern dans le
-# catalogue quand elle existera. `handoff-packet` circule partout.
-STUDIO_FAMILY_PINS: dict[str, dict[str, list[str]]] = {
-    "ORG": {"in": ["handoff-packet"], "out": ["task-envelope"]},
-    "ORC": {"in": ["task-envelope"], "out": ["task-envelope", "handoff-packet"]},
-    "GOV": {"in": ["task-envelope"], "out": ["task-envelope"]},
-    "MOD": {"in": ["task-envelope"], "out": ["handoff-packet"]},
-    "COG": {"in": ["task-envelope", "context-pack"], "out": ["handoff-packet"]},
-    "QUA": {
-        "in": ["handoff-packet", "evidence-pack"],
-        "out": ["evidence-pack", "verification-verdict"],
-    },
-    "KNO": {
-        "in": ["handoff-packet", "evidence-pack"],
-        "out": ["context-pack", "memory-record"],
-    },
-    "RUN": {"in": ["handoff-packet"], "out": ["telemetry-event"]},
-}
-
 
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
@@ -491,6 +480,12 @@ class ForgeAPI:
         res_errors, _ = resilience_lint(nodes, blueprint.get("edges", []))
         errors.extend(res_errors)
 
+        # Évals (P1.2) : forme des suites (R-E1) + path-taken vs plan déclaré.
+        for n in nodes:
+            errors.extend(evals_shape_errors(n))
+        ev_errors, _ = evals_lint(blueprint)
+        errors.extend(ev_errors)
+
         catalogue = self._catalogue()
         if catalogue:
             known = {p["id"] for p in catalogue.get("patterns", [])}
@@ -613,8 +608,13 @@ class ForgeAPI:
         # Résilience (P2.2) : R-F3 (node externe sans chemin de défaillance).
         _, res_warnings = resilience_lint(nodes, blueprint.get("edges", []))
         warnings.extend(res_warnings)
+        # Évals (P1.2) : R-E2 (effectful sans preuve) + R-E3 (path-taken divergent).
+        _, ev_warnings = evals_lint(blueprint)
+        warnings.extend(ev_warnings)
 
-        return {"errors": errors, "warnings": warnings}
+        # `evals` (P1.2) : panneau santé — taux par node/blueprint. Additif :
+        # les consommateurs existants lisent errors/warnings.
+        return {"errors": errors, "warnings": warnings, "evals": evals_summary(blueprint)}
 
     @staticmethod
     def _context_warnings(blueprint: dict[str, Any]) -> list[str]:
@@ -999,6 +999,7 @@ class ForgeAPI:
                 compile_resilience_section(step_node, blueprint.get("edges", []))
             )
             lines.extend(_context_section(step_node))
+            lines.extend(compile_evals_section(step_node))
             lines.append("")
 
         edges = blueprint.get("edges", [])

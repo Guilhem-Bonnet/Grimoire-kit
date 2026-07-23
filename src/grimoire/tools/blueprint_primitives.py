@@ -111,3 +111,24 @@ def primitives_catalogue() -> dict[str, Any]:
         "primitives": PRIMITIVES,
         "xxlMapping": XXL_MAPPING,
     }
+
+
+# Pins par famille pour les blueprints du Studio (v2) : même heuristique que
+# web/atelier-nav.js — à remplacer par une curation par pattern dans le
+# catalogue quand elle existera. `handoff-packet` circule partout.
+STUDIO_FAMILY_PINS: dict[str, dict[str, list[str]]] = {
+    "ORG": {"in": ["handoff-packet"], "out": ["task-envelope"]},
+    "ORC": {"in": ["task-envelope"], "out": ["task-envelope", "handoff-packet"]},
+    "GOV": {"in": ["task-envelope"], "out": ["task-envelope"]},
+    "MOD": {"in": ["task-envelope"], "out": ["handoff-packet"]},
+    "COG": {"in": ["task-envelope", "context-pack"], "out": ["handoff-packet"]},
+    "QUA": {
+        "in": ["handoff-packet", "evidence-pack"],
+        "out": ["evidence-pack", "verification-verdict"],
+    },
+    "KNO": {
+        "in": ["handoff-packet", "evidence-pack"],
+        "out": ["context-pack", "memory-record"],
+    },
+    "RUN": {"in": ["handoff-packet"], "out": ["telemetry-event"]},
+}
