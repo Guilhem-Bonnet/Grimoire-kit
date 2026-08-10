@@ -11,7 +11,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
   <a href="#-tests"><img src="https://img.shields.io/badge/tests-5990+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-108-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
+  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-46-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
   <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
   <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
   <a href="https://codecov.io/gh/Guilhem-Bonnet/Grimoire-kit"><img src="https://img.shields.io/codecov/c/github/Guilhem-Bonnet/Grimoire-kit?style=for-the-badge&logo=codecov&logoColor=white" alt="Codecov"></a>
@@ -80,7 +80,7 @@ Grimoire Kit déploie des **équipes d'agents IA** qui fonctionnent comme une vr
     │ agents/ │  ← Les employés spécialisés
     │ memory/ │  ← La mémoire collective
     │ config/ │  ← Le règlement intérieur
-    │ tools/  │  ← La boîte à outils (93+)
+    │ tools/  │  ← La boîte à outils (46)
     └─────────┘
          │
     ┌────┴────────────┐
@@ -205,15 +205,6 @@ firewall d'injection de prompt, council de décision, intégrité mémoire, regi
 contrat de guardrails (input/output/tool/model), preuve visuelle, isolation workspace, policy par
 environnement. Voir [docs/agentic-standard-integration.md](docs/agentic-standard-integration.md).
 
-<details>
-<summary><b>Installation classique (clone)</b></summary>
-
-```bash
-git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git
-cd Grimoire-kit/
-pip install -e ".[dev]"
-```
-</details>
 
 > **Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
 
@@ -365,30 +356,6 @@ Boucle d'innovation : **bandit ε-greedy** à reward closed-loop, prototypage au
 </tr>
 </table>
 
-<details>
-<summary><b>Et bien plus encore... (15+ features avancées expérimentales)</b></summary>
-<br>
-
-| Feature | Description |
-|:--------|:-----------|
-| **Installation par besoins** | Déclarez le besoin du projet → profil, patterns et technos résolus ; commencer petit, grandir au besoin (`grimoire standard needs`) |
-| **Adversarial Consensus** | Quorum à 3 votants + 1 avocat du diable pour les décisions critiques |
-| **Anti-Fragile Score** | Mesure la résilience adaptative (recovery, learning velocity, signal trend) |
-| **Reasoning Stream** | Flux structuré : HYPOTHESIS, DOUBT, ASSUMPTION, ALTERNATIVE |
-| **Cross-Project Migration** | Exporte/importe learnings, rules, DNA, agents entre projets |
-| **Digital Twin** | Jumeau numérique : snapshot, simulation d'impact, scénarios "what if" |
-| **Quantum Branch** | Timelines parallèles : fork, compare, merge de configurations alternatives |
-| **Time-Travel** | Archéologie temporelle : checkpoints, replay, restore, bisect |
-| **CRISPR** | Édition chirurgicale de workflows : scan, splice, excise, transplant |
-| **Decision Log** | Journal de décisions architecturales **hash-chaîné** (sha256, `prev_hash`) avec vérification d'intégrité |
-| **Mirror Agent** | Neurones miroirs : observation et transfert de patterns inter-agents |
-| **Sensory Buffer** | Mémoire sensorielle court terme à décroissance exponentielle |
-| **Self-Improvement Loop** | Analyse les patterns d'échec → améliore le framework automatiquement |
-| **Context Budget Guard** | Mesure le budget LLM consommé par chaque agent |
-| **Harmony Check** | Score d'harmonie architecturale et détection de dissonances |
-| **Dashboard** | Santé, entropie Shannon, Pareto Gini, activité git — en un coup d'œil |
-
-</details>
 
 <br>
 
@@ -569,86 +536,51 @@ bash grimoire-init.sh --auto   # détecte le stack → choisit les bons agents
 
 ## <img src="docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Outils CLI
 
-**93 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
+**46 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
 
 <details>
-<summary><b><img src="docs/assets/icons/brain.svg" width="18" height="18" alt=""> Cognition & Mémoire</b> — 12 outils</summary>
+<summary><b><img src="docs/assets/icons/brain.svg" width="18" height="18" alt=""> Cognition & Mémoire</b> — 6 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
 | `dream.py` | Consolidation hors-session, insights émergents |
 | `reasoning-stream.py` | Hypothèses, doutes, alternatives structurées |
-| `sensory-buffer.py` | Mémoire court terme à décroissance exponentielle |
-| `procedural-memory.py` | Mémoire procédurale persistante |
-| `semantic-cache.py` | Cache sémantique intelligent |
-| `semantic-chain.py` | Chaînes de pensée sémantiques |
 | `memory-lint.py` | Validation de cohérence mémoire |
 | `memory-sync.py` | Synchronisation mémoire multi-agents |
 | `context-guard.py` | Garde-fou du budget contexte LLM |
-| `context-router.py` | Routage intelligent du contexte |
-| `context-merge.py` | Fusion de contextes multi-sources |
 | `context-summarizer.py` | Résumé intelligent de contexte |
 
 </details>
 
 <details>
-<summary><b><img src="docs/assets/icons/dna.svg" width="18" height="18" alt=""> Évolution & Innovation</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/dna.svg" width="18" height="18" alt=""> Évolution & Innovation</b> — 5 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
-| `r-and-d.py` | Moteur R&D v2.1 avec reinforcement learning |
 | `agent-darwinism.py` | Sélection naturelle, fitness, hybridation |
 | `dna-evolve.py` | Évolution du DNA depuis l'usage réel |
 | `incubator.py` | Incubateur d'idées et de prototypes |
 | `agent-forge.py` | Génération de squelettes d'agents |
 | `agent-bench.py` | Benchmarks de performance agents |
-| `mirror-agent.py` | Observation et transfert de patterns |
-| `cognitive-flywheel.py` | Boucle d'auto-amélioration continue |
-| `fitness-tracker.py` | Suivi de fitness des agents |
-| `new-game-plus.py` | Redémarrage enrichi de sessions |
 
 </details>
 
 <details>
-<summary><b><img src="docs/assets/icons/resilience.svg" width="18" height="18" alt=""> Résilience & Qualité</b> — 11 outils</summary>
+<summary><b><img src="docs/assets/icons/resilience.svg" width="18" height="18" alt=""> Résilience & Qualité</b> — 5 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
 | `agent-debugger.py` | Vérification reality-first des preuves runtime agentiques |
-| `self-healing.py` | Diagnostic et réparation automatique |
-| `immune-system.py` | Détection d'anomalies et auto-réparation |
 | `antifragile-score.py` | Score de résilience adaptative |
-| `early-warning.py` | Système d'alerte précoce |
-| `harmony-check.py` | Score d'harmonie architecturale |
 | `preflight-check.py` | Validation pre-flight du projet |
 | `failure-museum.py` | Catalogue structuré des échecs |
-| `bug-finder.py` | Détection automatique de bugs |
-| `quality-score.py` | Score de qualité multi-dimensionnel |
 | `schema-validator.py` | Validation des fichiers YAML |
 
 </details>
 
-<details>
-<summary><b><img src="docs/assets/icons/workflow.svg" width="18" height="18" alt=""> Architecture & Workflows</b> — 11 outils</summary>
-
-| Outil | Description |
-|:------|:-----------|
-| `crispr.py` | Édition chirurgicale de workflows |
-| `digital-twin.py` | Simulation d'impact "what if" |
-| `quantum-branch.py` | Timelines parallèles |
-| `time-travel.py` | Checkpoints, replay, bisect |
-| `decision-log.py` | Blockchain de décisions |
-| `project-graph.py` | Graphe de dépendances |
-| `dashboard.py` | Tableau de bord santé projet |
-| `oracle.py` | CTO virtuel : SWOT, maturité |
-| `dark-matter.py` | Détection de patterns cachés |
-| `desire-paths.py` | Chemins de désir émergents |
-| `workflow-adapt.py` | Adaptation dynamique de workflows |
-
-</details>
 
 <details>
-<summary><b><img src="docs/assets/icons/network.svg" width="18" height="18" alt=""> Coordination & Communication</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/network.svg" width="18" height="18" alt=""> Coordination & Communication</b> — 5 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
@@ -656,36 +588,29 @@ bash grimoire-init.sh --auto   # détecte le stack → choisit les bons agents
 | `adversarial-consensus.py` | Consensus BFT avec avocat du diable |
 | `swarm-consensus.py` | Consensus en essaim |
 | `nso.py` | Nervous System Orchestrator |
-| `orchestrator.py` | Orchestration multi-agents |
-| `nudge-engine.py` | Nudges comportementaux doux |
-| `bias-toolkit.py` | 12 biais cognitifs documentés |
-| `mycelium.py` | Réseau mycelium inter-agents |
 | `message-bus.py` | Bus de messages inter-agents |
-| `rosetta.py` | Traduction cross-format |
 
 </details>
 
 <details>
-<summary><b><img src="docs/assets/icons/plug.svg" width="18" height="18" alt=""> Intégrations & DevTools</b> — 10 outils</summary>
+<summary><b><img src="docs/assets/icons/plug.svg" width="18" height="18" alt=""> Intégrations & DevTools</b> — 8 outils</summary>
 
 | Outil | Description |
 |:------|:-----------|
 | `grimoire-mcp-tools.py` | Serveur MCP Grimoire |
-| `mcp-proxy.py` | Proxy MCP multi-server |
 | `cross-migrate.py` | Migration cross-projet |
 | `auto-doc.py` | Synchronisation README ↔ code |
 | `gen-tests.py` | Générateur de tests automatique |
 | `llm-router.py` | Routage intelligent LLM |
 | `token-budget.py` | Gestion budget tokens |
 | `tool-registry.py` | Registre des outils disponibles |
-| `tool-advisor.py` | Conseiller d'outils contextuel |
 | `observatory.py` | Observatoire de métriques |
 
 </details>
 
 <br>
 
-Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète des 93 outils.
+Voir [framework/tools/README.md](framework/tools/README.md) pour la référence complète des 46 outils.
 
 <br>
 
@@ -800,7 +725,7 @@ grimoire-kit/
 │   ├── cc-verify.sh                    # Completion Contract verifier (multi-stack)
 │   ├── sil-collect.sh                  # Self-Improvement Loop collector
 │   ├── teams/                          # Team manifests (Vision, Build, Ops)
-│   ├── tools/                          # 93 outils Python CLI
+│   ├── tools/                          # 46 outils Python CLI
 │   ├── memory/                         # Système de mémoire à 4 niveaux
 │   ├── mcp/                            # MCP Server spec
 │   ├── sessions/                       # Session Branching
@@ -867,69 +792,6 @@ bash _grimoire/_config/custom/cc-verify.sh
 bash _grimoire/_config/custom/sil-collect.sh
 ```
 
-<details>
-<summary><b>Commandes avancées complètes</b></summary>
-
-```bash
-# Bench — mesurer les scores de performance des agents
-bash grimoire-init.sh bench --summary
-bash grimoire-init.sh bench --report
-bash grimoire-init.sh bench --improve
-
-# Forge — générer des squelettes d'agents
-bash grimoire-init.sh forge --from "migrations DB PostgreSQL"
-bash grimoire-init.sh forge --from-gap
-
-# Guard — budget de contexte LLM
-bash grimoire-init.sh guard
-bash grimoire-init.sh guard --agent atlas --detail --model gpt-4o
-bash grimoire-init.sh guard --suggest
-
-# Evolve — DNA vivante
-bash grimoire-init.sh evolve
-bash grimoire-init.sh evolve --apply
-
-# Dream — consolidation hors-session
-bash grimoire-init.sh dream
-bash grimoire-init.sh dream --agent dev
-bash grimoire-init.sh dream --multi-project ../proj-a ../proj-b
-
-# Consensus — protocole adversarial
-bash grimoire-init.sh consensus --proposal "Utiliser PostgreSQL pour le cache sessions"
-bash grimoire-init.sh consensus --history
-
-# Anti-Fragile Score
-bash grimoire-init.sh antifragile
-bash grimoire-init.sh antifragile --detail --trend
-
-# Reasoning Stream
-bash grimoire-init.sh reasoning log --agent dev --type HYPOTHESIS --text "Redis > memcached"
-bash grimoire-init.sh reasoning analyze
-
-# Cross-Project Migration
-bash grimoire-init.sh migrate export --only learnings,rules
-bash grimoire-init.sh migrate import --bundle migration-bundle.json --dry-run
-
-# Agent Darwinism
-bash grimoire-init.sh darwinism evaluate
-bash grimoire-init.sh darwinism leaderboard
-bash grimoire-init.sh darwinism evolve
-
-# Stigmergy
-bash grimoire-init.sh stigmergy emit --type NEED --location "src/auth" --text "review sécurité"
-bash grimoire-init.sh stigmergy landscape
-bash grimoire-init.sh stigmergy trails
-
-# NSO — Nervous System Orchestrator
-bash grimoire-init.sh nso run
-bash grimoire-init.sh nso retro
-
-# Digital Twin / Quantum Branch / Time-Travel / CRISPR / Decision Log
-# Mirror Agent / Sensory Buffer / R&D Engine
-# → Voir framework/tools/README.md pour la doc complète
-```
-
-</details>
 
 <br>
 

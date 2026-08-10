@@ -22,7 +22,6 @@ Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via
 | `cross-migrate.py` | `migrate` | Migration cross-projet d'artefacts Grimoire (learnings, rules, DNA, agents) |
 | `agent-darwinism.py` | `darwinism` | Sélection naturelle des agents — fitness, évolution, leaderboard |
 | `stigmergy.py` | `stigmergy` | Coordination stigmergique — phéromones numériques entre agents |
-| `r-and-d.py` | *(direct)* | Innovation Engine v2.1 — RL + closed-loop + anti-mutation + prototypes |
 | `gen-tests.py` | *(direct)* | Génère des templates de tests pour les agents |
 | `grimoire-completion.zsh` | *(source)* | Autocomplétion zsh pour `grimoire-init.sh` |
 
@@ -383,85 +382,6 @@ python framework/tools/stigmergy.py landscape
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/flask.svg" width="28" height="28" alt=""> `r-and-d.py` — Innovation Engine v2.1
-
-Moteur d'innovation autonome avec reinforcement learning, **closed-loop reward** et **filtre anti-chaînes de mutations**.
-Exécute des cycles R&D (harvest → evaluate → challenge → simulate → select → converge),
-mesure la santé réelle du projet avant/après, et module le reward par ce signal empirique.
-Les mutations de mutations sont détectées et pénalisées progressivement (v2.1).
-
-### Commandes
-
-```bash
-# Cycle & entraînement
-python3 r-and-d.py --project-root . cycle                          # 1 cycle complet
-python3 r-and-d.py --project-root . train --epochs 5               # 5 cycles intensifs
-python3 r-and-d.py --project-root . train --epochs 10 --auto-stop  # avec auto-stop
-python3 r-and-d.py --project-root . train --epochs 20 --budget 3   # 20 epochs, 3 idées/cycle
-python3 r-and-d.py --project-root . harvest                        # récolte seule
-python3 r-and-d.py --project-root . evaluate                       # harvest + scoring
-
-# Closed-loop & santé
-python3 r-and-d.py --project-root . health                         # santé du projet (composite score)
-python3 r-and-d.py --project-root . seed                           # ensemencer les sources réelles
-
-# Prototypage
-python3 r-and-d.py --project-root . prototype                      # générer des squelettes Python
-python3 r-and-d.py --project-root . prototype --idea-id RND-0001-01 # prototype pour une idée
-
-# Monitoring
-python3 r-and-d.py --project-root . dashboard                      # tableau de bord markdown
-python3 r-and-d.py --project-root . status                         # état du moteur
-python3 r-and-d.py --project-root . history                        # historique des cycles
-python3 r-and-d.py --project-root . tune --epsilon 0.3             # ajuster exploration
-python3 r-and-d.py --project-root . reset                          # reset policy (garde mémoire)
-```
-
-### Architecture v2.1
-
-**7 phases par cycle :** HARVEST (13 sources : dream, oracle-swot, oracle-attract, early-warning,
-harmony, incubator, stigmergy, dna-drift, workflow-adapt, antifragile, synthetic, mutation,
-gap-analysis) → EVALUATE (scoring 6D adaptatif) → CHALLENGE (**durci + anti-mutation** : seuil GO 0.60,
-quota 20% rejet, médiane-based, pénalité chaîne de mutations, filtre actionnabilité) → SIMULATE (digital-twin) →
-QUALITY GATES (tests+harmony+antifragile) → SELECT (tournament + health delta) → CONVERGE
-
-### Nouveautés v2.1
-
-| Feature | Description |
-|---|---|
-| **Anti-mutation chains** | `mutation_depth` tracking — pénalité progressive depth > 1 (-0.12/level, max -0.30) |
-| **Filtre actionnabilité** | Détecte les titres imbriqués ("Transposer 'Transposer'") → -0.20 |
-| **Résultat mesuré** | v2.0 : 60% mutations merged → v2.1 : 0% mutations merged, 100% idées actionnables |
-
-### Acquis v2.0
-
-| Feature | Description |
-|---|---|
-| **Closed-loop reward** | Snapshot santé projet (before/after), health delta module le reward réel |
-| **Challenge durci** | Seuil GO 0.50→0.60, quota ≥20% rejet, médiane-based, check historique source |
-| **Seed memory** | Commande `seed` : ensemence incubator + stigmergy + mémoire baseline |
-| **Mutation** | `_mutate_past_winners()` : transpose/escalade/inverse les gagnants passés |
-| **Gap-analysis** | `_gap_driven_ideas()` : tests manquants, docs, domaines sous-représentés |
-| **Prototype** | `prototype` : génère des squelettes Python (argparse, --project-root, --json) |
-| **Health** | `health` : affiche la santé composite du projet (score /100) |
-
-### Reinforcement Learning
-
-Policy à poids adaptatifs (13 sources × 10 domaines × 6 actions),
-epsilon-greedy exploration (decay 0.95/epoch), learning rate décroissant,
-convergence par rendement décroissant + oscillation detection.
-
-### Health Metrics (closed-loop)
-
-- Nombre d'outils, tests, docs
-- Ratio tests/outils
-- Dissonances harmony (count + severity)
-- Score antifragile
-- Score composite de santé (0-100)
-
-**Sortie :** `.grimoire-rnd/` — policy, mémoire d'innovation, historique, prototypes, dashboard.
-
-<img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 ## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture commune
 

@@ -6,6 +6,12 @@
 > **Statut** : Accepté 
 > **Contexte** : Grimoire Kit v2.4 
 > **Auteur** : Party-mode — Winston (Architecte) + Amelia (Dev)
+>
+> **Statut au 2026-08-10** : la décision tient, ses supports ont disparu.
+> `orchestrator.py`, `mcp-proxy.py` et `background-tasks.py` ont été drainés
+> lors de la résorption de `framework/` (cf. framework/FREEZE.md) — aucun
+> chemin d'accès ne les atteignait. Le texte ci-dessous est conservé tel quel :
+> il consigne pourquoi le multi-LLM a été écarté, ce qui reste valable.
 
 ## <img src="../assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
 
