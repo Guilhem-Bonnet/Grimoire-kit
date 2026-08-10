@@ -239,10 +239,7 @@ class TestAutoDiscovery(unittest.TestCase):
 
     def test_discover_finds_known_tools(self):
         tools = self.mod.discover_synapse_tools()
-        expected = [
-            "grimoire_orchestrate", "grimoire_synapse_config", "grimoire_synapse_trace",
-            "grimoire_agent_worker", "grimoire_context_budget",
-        ]
+        expected = ["grimoire_synapse_trace", "grimoire_agent_worker"]
         for name in expected:
             self.assertIn(name, tools, f"Missing discovered tool: {name}")
 
@@ -278,9 +275,9 @@ class TestAutoDiscovery(unittest.TestCase):
     def test_extract_tool_info(self):
         tools = self.mod.discover_synapse_tools()
         # Check a known tool with parameters
-        if "grimoire_synapse_config" in tools:
-            info = tools["grimoire_synapse_config"]["info"]
-            self.assertEqual(info["tool_name"], "grimoire_synapse_config")
+        if "grimoire_synapse_trace" in tools:
+            info = tools["grimoire_synapse_trace"]["info"]
+            self.assertEqual(info["tool_name"], "grimoire_synapse_trace")
             self.assertIn("project_root", info["properties"])
 
     def test_get_all_tool_names(self):
@@ -288,21 +285,12 @@ class TestAutoDiscovery(unittest.TestCase):
         self.assertIsInstance(all_tools, list)
         # Legacy (8) + discovered
         self.assertGreaterEqual(len(all_tools), 8)
-        self.assertIn("grimoire_route_request", all_tools)  # legacy
-        self.assertIn("grimoire_orchestrate", all_tools)    # discovered
+        self.assertIn("grimoire_route_request", all_tools)   # legacy
+        self.assertIn("grimoire_synapse_trace", all_tools)   # discovered
 
     def test_call_discovered_tool_unknown(self):
         result = self.mod._call_discovered_tool("grimoire_nonexistent", {})
         self.assertIn("Unknown discovered tool", result)
-
-    def test_call_discovered_synapse_config(self):
-        result = self.mod._call_discovered_tool("grimoire_synapse_config", {
-            "project_root": str(KIT_DIR),
-        })
-        self.assertIsInstance(result, str)
-        # Should be JSON (either valid result or error dict)
-        data = json.loads(result)
-        self.assertIsInstance(data, dict)
 
     def test_call_discovered_synapse_trace(self):
         result = self.mod._call_discovered_tool("grimoire_synapse_trace", {
@@ -318,8 +306,9 @@ class TestAutoDiscovery(unittest.TestCase):
 
     def test_handle_tool_dispatches_to_discovered(self):
         """_handle_tool should dispatch unknown legacy names to discovery."""
-        result = self.mod._handle_tool("grimoire_synapse_config", {
+        result = self.mod._handle_tool("grimoire_synapse_trace", {
             "project_root": str(KIT_DIR),
+            "action": "status",
         })
         self.assertIsInstance(result, str)
         # Should NOT be the unknown tool error
@@ -348,7 +337,7 @@ class TestAutoDiscovery(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("Auto-Discovered", result.stdout)
-        self.assertIn("grimoire_orchestrate", result.stdout)
+        self.assertIn("grimoire_synapse_trace", result.stdout)
 
     def test_help_shows_discovered_count(self):
         result = subprocess.run(
