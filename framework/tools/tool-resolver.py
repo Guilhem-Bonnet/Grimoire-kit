@@ -246,21 +246,6 @@ CAPABILITY_CATALOG: dict[str, dict[str, Any]] = {
             },
         ],
     },
-    # ── Task Management ──────────────────────────────────────────
-    "task-management": {
-        "description": "Gestion de tâches agents — DAG, scheduling, delivery",
-        "providers": [
-            {
-                "id": "agent-task-system",
-                "type": "grimoire_tool",
-                "name": "agent-task-system.py",
-                "tools": ["create_task", "schedule", "status", "graph"],
-                "provision": {"method": "none"},
-                "check": {"method": "grimoire_tool", "tool": "agent-task-system.py"},
-                "priority": 1,
-            },
-        ],
-    },
     # ── Documentation ────────────────────────────────────────────
     "documentation": {
         "description": "Génération et maintenance de documentation",
@@ -312,15 +297,6 @@ CAPABILITY_CATALOG: dict[str, dict[str, Any]] = {
                 "provision": {"method": "none"},
                 "check": {"method": "grimoire_tool", "tool": "agent-watch.py"},
                 "priority": 1,
-            },
-            {
-                "id": "fitness-tracker",
-                "type": "grimoire_tool",
-                "name": "fitness-tracker.py",
-                "tools": ["check_fitness", "trend"],
-                "provision": {"method": "none"},
-                "check": {"method": "grimoire_tool", "tool": "fitness-tracker.py"},
-                "priority": 2,
             },
         ],
     },

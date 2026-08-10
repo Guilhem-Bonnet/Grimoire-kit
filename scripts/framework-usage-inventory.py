@@ -8,6 +8,8 @@ references to its basename and classifies it:
                  _grimoire/, extensions/, scripts/, .github/, Makefile,
                  root shell entrypoints, framework/ outside tools/)
 - TEST_ONLY    — only referenced from tests/
+- TRANSITIVE   — loaded at runtime by a REFERENCED tool (importlib on a file
+                 path); drainable only after its caller
 - DOCS_ONLY    — only referenced from docs/, web/ or markdown files
 - INTERNAL     — only referenced by other framework/tools/ files
 - UNREFERENCED — no reference anywhere outside itself
@@ -23,8 +25,10 @@ Writes ``docs/framework-tools-inventory.md``. Regenerate with:
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
+from collections import deque
 from datetime import date
 from pathlib import Path
 
@@ -102,6 +106,54 @@ def classify(rel: str) -> tuple[str, dict[str, int]]:
     return "UNREFERENCED", counts
 
 
+# Marqueurs d'un chargement réel : les outils de l'ère shell s'appellent entre
+# eux par chemin de fichier (importlib, subprocess), jamais par import Python —
+# une simple mention en docstring ne compte pas comme une dépendance.
+LOADER_MARKERS = re.compile(
+    r"spec_from_file_location|import_module|_import_tool|sys\.executable"
+    r"|subprocess|__file__|Path\(|parent\s*/"
+)
+
+
+def load_edges(tools: list[str]) -> dict[str, set[str]]:
+    """Qui charge qui, à l'intérieur de framework/tools/."""
+    by_name = {Path(rel).name: rel for rel in tools}
+    edges: dict[str, set[str]] = {}
+    for rel in tools:
+        try:
+            lines = (ROOT / rel).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            edges[rel] = set()
+            continue
+        found: set[str] = set()
+        for i, line in enumerate(lines):
+            context = line + " " + (lines[i - 1] if i else "")
+            if not LOADER_MARKERS.search(context):
+                continue
+            for name, target in by_name.items():
+                if target != rel and name in line:
+                    found.add(target)
+        edges[rel] = found
+    return edges
+
+
+def reachable_from(roots: list[str], edges: dict[str, set[str]]) -> dict[str, str]:
+    """Fermeture transitive : outil atteint -> outil qui l'a fait atteindre.
+
+    Sans cette passe, un outil chargé au runtime par un outil référencé est
+    classé TEST_ONLY et part à la suppression, ce qui casse son appelant.
+    """
+    seen = dict.fromkeys(roots, "")
+    queue = deque(roots)
+    while queue:
+        current = queue.popleft()
+        for target in sorted(edges.get(current, ())):
+            if target not in seen:
+                seen[target] = current
+                queue.append(target)
+    return {k: v for k, v in seen.items() if v}
+
+
 def main() -> None:
     tools = sorted(
         rel for rel in git("ls-files", "--", "framework/tools").splitlines()
@@ -113,13 +165,20 @@ def main() -> None:
     for missing in check_generated_indexes():
         print(f"warning: GENERATED_INDEXES entry no longer exists: {missing}", file=sys.stderr)
 
+    verdicts = {rel: classify(rel) for rel in tools}
+    roots = [rel for rel, (cls, _) in verdicts.items() if cls == "REFERENCED"]
+    via = reachable_from(roots, load_edges(tools))
+
     rows: dict[str, list[tuple[str, int, dict[str, int]]]] = {}
     for rel in tools:
         lines = len((ROOT / rel).read_bytes().splitlines())
-        cls, counts = classify(rel)
+        cls, counts = verdicts[rel]
+        if cls != "REFERENCED" and rel in via:
+            cls = "TRANSITIVE"
+            counts = {**counts, "via": Path(via[rel]).name}
         rows.setdefault(cls, []).append((rel, lines, counts))
 
-    order = ["UNREFERENCED", "INTERNAL", "DOCS_ONLY", "TEST_ONLY", "REFERENCED"]
+    order = ["UNREFERENCED", "INTERNAL", "DOCS_ONLY", "TEST_ONLY", "TRANSITIVE", "REFERENCED"]
     total_lines = sum(n for group in rows.values() for _, n, _ in group)
 
     out = [
@@ -134,8 +193,9 @@ def main() -> None:
         " priorité de traitement : UNREFERENCED (suppression candidate),"
         " INTERNAL (référencé uniquement par d'autres outils de tools/),"
         " DOCS_ONLY (réécrire la doc ou porter), TEST_ONLY (test hérité"
-        " sans usage runtime), REFERENCED (à porter vers src/ à la"
-        " demande).",
+        " sans usage runtime), TRANSITIVE (chargé au runtime par un outil"
+        " référencé — supprimer l'appelant d'abord), REFERENCED (à porter"
+        " vers src/ à la demande).",
         "",
     ]
     for cls in order:
@@ -146,13 +206,13 @@ def main() -> None:
         out += [
             f"## {cls} — {len(group)} fichiers, {group_lines} lignes",
             "",
-            "| Fichier | Lignes | runtime | tests | docs | interne |",
-            "| --- | ---: | ---: | ---: | ---: | ---: |",
+            "| Fichier | Lignes | runtime | tests | docs | interne | chargé par |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
         for rel, lines, c in sorted(group, key=lambda r: -r[1]):
             out.append(
                 f"| {rel} | {lines} | {c['runtime']} | {c['tests']} |"
-                f" {c['docs']} | {c['internal']} |"
+                f" {c['docs']} | {c['internal']} | {c.get('via', '—')} |"
             )
         out.append("")
 
