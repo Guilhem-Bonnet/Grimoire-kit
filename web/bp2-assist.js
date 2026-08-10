@@ -95,7 +95,7 @@
     const specCache = {}; const sp = n => specCache[n.id] || (specCache[n.id] = specOf(n));
     const hasCat = cat => nodes.some(n => { const s = sp(n); return s && s.cat === cat; });
     const hasRef = ref => nodes.some(n => n.ref === ref);
-    const nameOf = n => { const s = sp(n); return n.kind === 'group' ? '◇ ' + (n.name || 'sous-flow') : (n.kind === 'agent' ? esc(n.name) : (s.kind === 'ext' ? s.name : s.ref)); };
+    const nameOf = n => { const s = sp(n); return n.kind === 'group' ? '◇ ' + (n.name || 'sous-flow') : (n.kind === 'agent' ? esc(n.name) : s.name); };
 
     /* R-01 · une preuve doit franchir une porte */
     nodes.forEach(n => {
@@ -104,16 +104,16 @@
       const consumed = edges.some(e => e.from === n.id && e.contract === 'evidence-pack') || drained.has('evidence-pack');
       if (consumed) return;
       out.push({ level: 'warn', rule: 'R-01 · preuve → porte', node: n.id, path, ref: nameOf(n),
-        text: `${where}sa preuve (evidence-pack) ne franchit aucune porte — un « fini » se décide fail-closed.`,
-        fix: { label: 'AJOUTER QUA-05 ET RELIER', run: () => { const gov = placeAfter(n, 'QUA-05', 0); wire(n, gov, specOf); } } });
+        text: `${where}personne ne relit sa preuve : reliez-la à une porte, sinon « c'est fini » reste une affirmation.`,
+        fix: { label: 'POSER LA PORTE (QUA-05) ET RELIER', run: () => { const gov = placeAfter(n, 'QUA-05', 0); wire(n, gov, specOf); } } });
     });
 
     /* R-02 · pas de dispatch sans mission cadrée */
     nodes.filter(n => n.ref === 'ORC-01' || (n.kind === 'agent' && n.role === 'orchestrateur')).forEach(n => {
       if (edges.some(e => e.to === n.id && e.contract === 'task-envelope') || fed.has('task-envelope')) return;
-      out.push({ level: 'warn', rule: 'R-02 · cadrer avant de router', node: n.id, path, ref: n.ref || esc(n.name),
-        text: `${where}le dispatch reçoit une intention non cadrée — posez un Mission Brief en amont.`,
-        fix: { label: 'AJOUTER ORC-02 EN AMONT', run: () => {
+      out.push({ level: 'warn', rule: 'R-02 · cadrer avant de router', node: n.id, path, ref: nameOf(n),
+        text: `${where}il reçoit une intention floue : posez un cadrage de mission en amont, sinon il devine.`,
+        fix: { label: 'POSER LE CADRAGE (ORC-02) EN AMONT', run: () => {
           const p = core.addNode('ORC-02', n.x - 300, n.y, { silent: true });
           core.addEdge(p.id, n.id, 'task-envelope');
         } } });
@@ -123,16 +123,16 @@
     const dec = nodes.find(n => { const s = sp(n); return s && s.out.includes('verification-verdict'); });
     if (dec && !hasCat('KNO')) {
       out.push({ level: 'info', rule: 'R-03 · anti-amnésie', node: dec.id, path, ref: nameOf(dec),
-        text: `${where}des décisions sont produites mais rien ne les persiste — les agents suivants repartiront de zéro.`,
-        fix: { label: 'AJOUTER KNO-02 ET RELIER', run: () => { const m = placeAfter(dec, 'KNO-02', 60); wire(dec, m, specOf); } } });
+        text: `${where}des décisions sont prises mais rien ne les garde — la prochaine mission repartira de zéro.`,
+        fix: { label: 'POSER LA MÉMOIRE (KNO-02) ET RELIER', run: () => { const m = placeAfter(dec, 'KNO-02', 60); wire(dec, m, specOf); } } });
     }
 
     /* R-04 · déploiement gated */
     nodes.filter(n => n.ref === 'GOV-02').forEach(n => {
       if (hasRef('QUA-05')) return;
-      out.push({ level: 'err', rule: 'R-04 · pas de déploiement sans verdict', node: n.id, path, ref: 'GOV-02',
-        text: `${where}la CI consomme un verdict — aucune porte QUA-05 n'existe pour l'émettre.`,
-        fix: { label: 'AJOUTER QUA-05 EN AMONT', run: () => {
+      out.push({ level: 'err', rule: 'R-04 · pas de déploiement sans verdict', node: n.id, path, ref: nameOf(n),
+        text: `${where}cette étape attend un verdict, mais aucune porte ne l'émet — elle déploierait à l'aveugle.`,
+        fix: { label: 'POSER LA PORTE (QUA-05) EN AMONT', run: () => {
           const gov = core.addNode('QUA-05', n.x - 300, n.y, { silent: true });
           core.addEdge(gov.id, n.id, 'verification-verdict');
         } } });
@@ -142,42 +142,42 @@
     const exec = nodes.find(n => { const s = sp(n); return s && (s.kind === 'ext' || n.ref === 'ORC-11'); });
     if (exec && !hasRef('QUA-14') && !path.length) {
       out.push({ level: 'info', rule: 'R-05 · sortie validée', node: exec.id, path, ref: nameOf(exec),
-        text: `${where}de l'exécution sans validateur de sortie — une sortie hors contrat doit fermer la porte, pas passer.`,
-        fix: { label: 'AJOUTER QUA-14', run: () => { const s2 = placeAfter(exec, 'QUA-14', -70); wire(exec, s2, specOf); } } });
+        text: `${where}du travail produit sans contrôle de sortie — une sortie hors format doit bloquer, pas passer.`,
+        fix: { label: 'POSER LE CONTRÔLE DE SORTIE (QUA-14)', run: () => { const s2 = placeAfter(exec, 'QUA-14', -70); wire(exec, s2, specOf); } } });
     }
 
     /* R-06 · orchestration sans journal de mission */
     if (hasRef('ORC-01') && !hasRef('QUA-03')) {
       const fo = nodes.find(n => n.ref === 'ORC-01');
-      out.push({ level: 'info', rule: 'R-06 · mission journalisée', node: fo.id, path, ref: 'ORC-01',
-        text: `${where}de l'orchestration sans Mission Ledger — ce qui est délégué doit être tracé, pas supposé.`,
-        fix: { label: 'AJOUTER QUA-03', run: () => { const q = placeAfter(fo, 'QUA-03', 70); wire(fo, q, specOf); } } });
+      out.push({ level: 'info', rule: 'R-06 · mission journalisée', node: fo.id, path, ref: nameOf(fo),
+        text: `${where}on délègue sans rien journaliser — ce qui est confié doit être tracé, pas supposé.`,
+        fix: { label: 'POSER LE JOURNAL DE MISSION (QUA-03)', run: () => { const q = placeAfter(fo, 'QUA-03', 70); wire(fo, q, specOf); } } });
     }
 
     /* R-07 · orchestrateur sans équipe */
     nodes.filter(n => n.kind === 'agent' && n.role === 'orchestrateur').forEach(n => {
       if (edges.some(e => e.from === n.id && e.contract === 'task-envelope') || drained.has('task-envelope')) return;
       out.push({ level: 'warn', rule: 'R-07 · orchestrateur sans équipe', node: n.id, path, ref: esc(n.name),
-        text: `${where}il ne délègue à personne — un orchestrateur sans agents ne produit rien.`,
-        fix: { label: 'AJOUTER UN AGENT ET RELIER', run: () => { const a = placeAfter(n, 'team:agent', 0); core.addEdge(n.id, a.id, 'task-envelope'); } } });
+        text: `${where}il ne délègue à personne — un orchestrateur sans équipe ne produit rien.`,
+        fix: { label: 'LUI DONNER UN AGENT ET RELIER', run: () => { const a = placeAfter(n, 'team:agent', 0); core.addEdge(n.id, a.id, 'task-envelope'); } } });
     });
 
     /* R-08 · agent sans accès */
     nodes.filter(n => n.kind === 'agent' && n.role !== 'orchestrateur').forEach(n => {
       if ((n.tools || []).length || (n.mcp || []).length) return;
       out.push({ level: 'warn', rule: 'R-08 · agent sans accès', node: n.id, path, ref: esc(n.name),
-        text: `${where}il n'a accès à aucun outil ni branchement MCP — il ne peut rien faire.`,
+        text: `${where}il n'a le droit de rien faire : aucun outil, aucun service branché.`,
         fix: { label: 'OUVRIR SA FICHE POUR L\u2019ÉQUIPER', run: () => core.openFiche(n) } });
     });
 
     /* R-09 · équipement risqué sans garde-fou */
     if (window.BP2Team) nodes.filter(n => n.kind === 'agent' && BP2Team.risky(n) && !BP2Team.guarded(n)).forEach(n => {
       out.push({ level: 'warn', rule: 'R-09 · risqué sans garde', node: n.id, path, ref: esc(n.name),
-        text: `${where}équipement risqué (écriture, commandes ou MCP large) sans hook de garde.`,
-        fix: { label: 'POSER UN HOOK « SCANNER LES SECRETS »', run: () => {
+        text: `${where}il peut écrire ou lancer des commandes sans garde-fou automatique.`,
+        fix: { label: 'POSER UN GARDE-FOU « SCANNER LES SECRETS »', run: () => {
           n.hooks.push({ when: 'after-tool', then: 'scan-secrets' });
           core.markDirty();
-          Atelier.toast('Hook posé sur <b>' + esc(n.name) + '</b> — après chaque outil → scanner les secrets.');
+          Atelier.toast('Hook posé sur <b>' + esc(n.name) + '</b> — après chaque outil, les secrets sont scannés automatiquement.');
         } } });
     });
 
@@ -193,7 +193,7 @@
     const trigs = nodes.filter(n => n.kind === 'trigger');
     if (trigs.length > 1) {
       out.push({ level: 'warn', rule: 'R-11 · départ unique', node: trigs[1].id, path, ref: esc(trigs[1].name || 'déclencheur'),
-        text: `${where}${trigs.length} déclencheurs — un flow part d'un seul endroit ; gardez le plus clair.` });
+        text: `${where}${trigs.length} départs différents — un flow part d'un seul endroit ; gardez le plus clair.` });
     }
 
     return out;

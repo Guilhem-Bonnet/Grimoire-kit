@@ -13,7 +13,8 @@
     project:    'grimoire.atelier.project',
     onboarded:  'grimoire.atelier.onboarded',
     artifacts:  'grimoire.atelier.artifacts',
-    bpCurrent:  'grimoire.atelier.bp.current'
+    bpCurrent:  'grimoire.atelier.bp.current',
+    journal:    'grimoire.atelier.studio.journal'
   };
 
   function lsRead(key, fallback) {
@@ -51,6 +52,43 @@
     RUN: { in: ['handoff-packet'], out: ['telemetry-event'] }
   };
   const DEFAULT_PINS = { in: ['task-envelope'], out: ['handoff-packet'] };
+
+  /* Glose humaine des contrats — le mot courant d'abord, l'identifiant du
+     standard ensuite. Indexée par contrat (et non par famille) pour survivre
+     à la curation des pins par le catalogue. */
+  const CONTRACT_GLOSS = {
+    'task-envelope': 'la mission à faire',
+    'handoff-packet': 'le travail rendu',
+    'evidence-pack': 'la preuve du travail',
+    'verification-verdict': 'le verdict : ça passe ou non',
+    'context-pack': 'le contexte fourni',
+    'memory-record': 'ce qui est mémorisé',
+    'telemetry-event': 'ce qui est observé',
+    'incident-record': 'ce qui a cassé',
+    'pattern-record': 'la pratique retenue',
+    'control-record': 'le contrôle appliqué',
+    'decomposition-record': 'le découpage de la mission',
+    'reasoning-scratchpad': 'le raisonnement intermédiaire',
+    'revision-record': 'la correction apportée',
+    'replay-record': 'la session rejouable'
+  };
+
+  /* Regroupement de palette par intention plutôt que par code de famille. */
+  const FAMILY_INTENT = {
+    ORG: 'organiser le travail',
+    ORC: 'cadrer et router',
+    GOV: 'encadrer',
+    MOD: 'choisir les modèles',
+    COG: 'raisonner',
+    QUA: 'prouver et décider',
+    KNO: 'se souvenir',
+    RUN: 'exécuter et observer'
+  };
+
+  /* Socle de départ : cadrer, router, prouver, décider, relire, journaliser,
+     se souvenir — de quoi composer un flow gouverné complet, et rien de plus.
+     Une liste d'essentiels ne vaut que par ce qu'elle refuse. */
+  const ESSENTIAL_REFS = ['ORC-02', 'ORC-01', 'QUA-04', 'QUA-05', 'QUA-15', 'QUA-03', 'KNO-02'];
 
   async function fetchJson(url, opts) {
     const r = await fetch(url, opts);
@@ -154,6 +192,20 @@
       lsWrite(LS.artifacts, list.slice(0, 20));
     },
 
+    /* ── Journal du studio ──
+       Trois indicateurs seulement, locaux, sans identifiant : sans eux, une
+       refonte d'accueil reste une opinion. Rien ne sort du navigateur. */
+    journalEvent(name) {
+      const j = lsRead(LS.journal, null) || { startedAt: Date.now(), counts: {}, firstEdgeMs: null, reachedSim: false, tourSkipped: 0 };
+      j.counts[name] = (j.counts[name] || 0) + 1;
+      if (name === 'edge-added' && j.firstEdgeMs === null) j.firstEdgeMs = Date.now() - j.startedAt;
+      if (name === 'sim-done') j.reachedSim = true;
+      if (name === 'tour-skipped') j.tourSkipped++;
+      lsWrite(LS.journal, j);
+      return j;
+    },
+    studioJournal() { return lsRead(LS.journal, null); },
+
     /* ── Onboarding ── */
     onboarded() { return localStorage.getItem(LS.onboarded) === '1'; },
     setOnboarded(v) {
@@ -229,6 +281,23 @@
     contractColor(id) {
       const c = Atelier.contractById && Atelier.contractById[id];
       return c ? c.color : '#9BA0A8';
+    },
+    /* Mot courant pour un contrat ; repli sur le nom du catalogue, puis l'id. */
+    contractGloss(id) {
+      if (CONTRACT_GLOSS[id]) return CONTRACT_GLOSS[id];
+      const c = Atelier.contractById && Atelier.contractById[id];
+      return c && c.name ? c.name.toLowerCase() : String(id || '').replace(/-/g, ' ');
+    },
+    catIntent(catId) { return FAMILY_INTENT[catId] || null; },
+    isEssential(ref) { return ESSENTIAL_REFS.includes(ref); },
+    ESSENTIAL_REFS,
+    /* Coupe un texte à la longueur utile d'une carte, sans couper un mot. */
+    clamp(txt, max) {
+      const s = String(txt == null ? '' : txt).trim();
+      if (s.length <= max) return s;
+      const cut = s.slice(0, max);
+      const sp = cut.lastIndexOf(' ');
+      return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[,;:.—-]+$/, '') + '…';
     },
 
     /* ── Toast ── */

@@ -19,7 +19,11 @@
 
   /* ══ Mini event-emitter ══ */
   const listeners = {};
-  const emit = (ev, data) => (listeners[ev] || []).forEach(cb => cb(data));
+  const JOURNALED = ['node-added', 'edge-added', 'sim-done', 'compiled', 'tour-skipped'];
+  const emit = (ev, data) => {
+    if (JOURNALED.includes(ev)) Atelier.journalEvent(ev);
+    (listeners[ev] || []).forEach(cb => cb(data));
+  };
   const on = (ev, cb) => { (listeners[ev] = listeners[ev] || []).push(cb); };
 
   /* ══ État ══ */
@@ -30,6 +34,7 @@
   let heatMode = false;
   let ctxPressure = {};        // nodeId → verdict de pression (simulation serveur)
   let selection = { nodes: new Set(), edge: null, comment: null };
+  let builtSummary = null;     // débriefing du composer : ce qui a été posé, et pourquoi
   const uid = () => 'x' + Math.random().toString(36).slice(2, 8);
 
   const wrap = $('#bp-canvas'), world = $('#bp-world'), svg = $('#bp-edges'), items = $('#bp-items');
@@ -174,6 +179,8 @@
 
   /* ══ Rendu ══ */
   const PIN_TOP = 38, PIN_GAP = 22;
+  /* Offset mesuré à l'écran ; PIN_TOP n'est plus qu'un repli avant mesure. */
+  const pinTopOf = n => n._pinTop || PIN_TOP;
 
   function nodeHtml(n) {
     const s = specOf(n);
@@ -183,11 +190,17 @@
     const isTrg = n.kind === 'trigger';
     const color = isGrp ? '#A78BFA' : (isAg ? BP2Team.COLOR : (isTrg ? '#FDBA74' : Atelier.catColor(s.cat)));
     const locked = isExtLocked(n);
+    /* Le libellé de pin dit le mot courant d'abord, l'identifiant du standard
+       ensuite : le vocabulaire s'apprend au moment du branchement. */
+    const pinLbl = c => `<span class="bp-pin-lbl"><b>${esc(Atelier.contractGloss(c))}</b> <i>${esc(c)}</i></span>`;
+    /* Le premier pin se pose sous l'en-tête réel : un titre sur deux lignes
+       l'agrandit, et un pin figé viendrait chevaucher la bordure. */
+    const top = pinTopOf(n);
     const ins = s.in.map((c, i) =>
-      `<div class="bp-pin in" data-node="${n.id}" data-dir="in" data-contract="${c}" style="top:${PIN_TOP + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}"><span class="bp-pin-lbl">${esc(c)}</span></div>`).join('');
+      `<div class="bp-pin in" data-node="${n.id}" data-dir="in" data-contract="${c}" style="top:${top + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
     const outs = s.out.map((c, i) =>
-      `<div class="bp-pin out" data-node="${n.id}" data-dir="out" data-contract="${c}" style="top:${PIN_TOP + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}"><span class="bp-pin-lbl">${esc(c)}</span></div>`).join('');
-    const minH = PIN_TOP + Math.max(s.in.length, s.out.length, 1) * PIN_GAP - 14;
+      `<div class="bp-pin out" data-node="${n.id}" data-dir="out" data-contract="${c}" style="top:${top + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
+    const minH = top + Math.max(s.in.length, s.out.length, 1) * PIN_GAP - 14;
     const warns = (state._warnByNode && state._warnByNode[n.id]) || null;
     const badge = window.BP2Docs ? BP2Docs.badgeFor(n) : null;
     let cost = '';
@@ -198,18 +211,28 @@
     const heatCls = heatMode && window.BP2Cost ? BP2Cost.heatClass(n, G(), specOf) : '';
     const ctxIso = ctxOf(n).isolation === 'isolated';
     const ctxCrit = ctxPressure[n.id] === 'critical';
+    /* Un node se lit par son nom ; sa référence du standard reste visible,
+       en second plan — c'est une identité machine, pas un titre. */
+    const isPat = !isGrp && !isAg && !isTrg && s.kind !== 'ext';
+    const title = isGrp ? (n.name || 'sous-flow')
+      : (isAg || isTrg ? (n.name || s.name) : s.name);
+    const body = isGrp ? s.desc
+      : (isAg || isTrg ? s.desc
+        : (s.kind === 'ext' ? (locked ? 'extension non installée' : s.desc.split('—')[0])
+          : Atelier.clamp(s.desc || s.name, 88)));
     return `<div class="bp-node${isGrp ? ' group' : ''}${isAg ? ' agent' : ''}${isTrg ? ' trigger' : ''}${selection.nodes.has(n.id) ? ' sel' : ''}${heatCls}${ctxIso ? ' ctx-isolated' : ''}${ctxCrit ? ' ctx-critical' : ''}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px${locked ? ';border-style:dashed;opacity:.75' : ''}">
       ${warns ? `<span class="warn-badge" data-warn="${n.id}">⚠ ${esc(warns)}</span>` : ''}
       ${cost}
       <div class="head" style="background:${color}14">
         ${isGrp ? '<span class="g-ico">◇</span>' : (isAg ? `<span class="ag-ava">${BP2Team.initials(n.name)}</span>` : (isTrg ? '<span class="ag-ava trg">▶</span>' : `<span class="cat" style="background:${color}"></span>`))}
-        <span class="ref" style="color:${color}">${esc(isGrp ? (n.name || 'sous-flow') : (isAg || isTrg ? (n.name || s.name) : (s.kind === 'ext' ? s.name : s.ref)))}</span>
+        <span class="ref" style="color:${color}" title="${esc(title)}">${esc(title)}</span>
+        ${isPat ? `<span class="ref-tag" title="référence du standard">${esc(s.ref)}</span>` : ''}
         ${s.kind === 'ext' ? `<span class="ext-tag">ext · ${esc(s.ext)}</span>` : ''}
         ${isAg ? `<span class="ag-role-tag">${n.role === 'orchestrateur' ? 'orchestre' : (n.sub ? 'sous-agent' : 'agent')}</span>` : ''}
         ${isTrg ? `<span class="ag-role-tag">${esc(n.trig || 'manuel')}</span>` : ''}
         ${isGrp ? `<span class="ext-tag" style="margin-left:auto">N${curPath.length + 2}</span>` : ''}
       </div>
-      <div class="body" style="min-height:${minH}px">${esc(isGrp ? s.desc : (isAg || isTrg ? s.desc : (s.kind === 'ext' ? (locked ? 'extension non installée' : s.desc.split('—')[0]) : s.name)))}${isGrp ? '<span class="g-meta">sous-flow · double-clic pour entrer</span>' : ''}${isAg ? BP2Team.bodyMeta(n) : ''}${isTrg ? '<span class="g-meta">double-clic : configurer le départ</span>' : ''}</div>
+      <div class="body" style="min-height:${minH}px">${esc(body)}${isGrp ? '<span class="g-meta">sous-flow · double-clic pour entrer</span>' : ''}${isAg ? BP2Team.bodyMeta(n) : ''}${isTrg ? '<span class="g-meta">double-clic : configurer le départ</span>' : ''}</div>
       ${isGrp ? '<span class="enter-hint">entrer ↵</span>' : ''}
       ${badge && badge.n ? `<span class="doc-badge${badge.edited ? ' edited' : ''}" data-docs="${n.id}" title="Documents du node — ouvrir le dossier">▤ ${badge.n} doc${badge.n > 1 ? 's' : ''}${badge.edited ? ' ·' + badge.edited + ' édité' + (badge.edited > 1 ? 's' : '') : ''}</span>` : ''}
       ${ins}${outs}
@@ -222,7 +245,7 @@
     if (!s) return { x: 0, y: 0 };
     const list = dir === 'in' ? s.in : s.out;
     const i = Math.max(0, list.indexOf(contract));
-    return { x: n.x + (dir === 'in' ? 0 : (n._w || (n.kind === 'group' ? 210 : 190))), y: n.y + PIN_TOP + i * PIN_GAP + 6 };
+    return { x: n.x + (dir === 'in' ? 0 : (n._w || (n.kind === 'group' ? 210 : 190))), y: n.y + pinTopOf(n) + i * PIN_GAP + 6 };
   }
   function edgePath(e) {
     const a = pinPos(e.from, 'out', e.contract);
@@ -260,7 +283,23 @@
 
     $$('.bp-node', items).forEach(el => {
       const n = g.nodes.find(x => x.id === el.dataset.id);
-      if (n) { n._w = el.offsetWidth; n._h = el.offsetHeight; }
+      if (!n) return;
+      n._w = el.offsetWidth; n._h = el.offsetHeight;
+      /* Recale les pins sur la hauteur réelle de l'en-tête, avant que les
+         liens ne soient tracés — sinon les fils viseraient l'ancien offset. */
+      const head = el.querySelector('.head');
+      if (!head) return;
+      const want = Math.round(head.offsetHeight) + 7;
+      if (n._pinTop === want) return;
+      n._pinTop = want;
+      $$('.bp-pin', el).forEach(p => {
+        const list = p.dataset.dir === 'in' ? specOf(n).in : specOf(n).out;
+        const i = Math.max(0, list.indexOf(p.dataset.contract));
+        p.style.top = (want + i * PIN_GAP) + 'px';
+      });
+      const body = el.querySelector('.body');
+      if (body) body.style.minHeight = (want + Math.max(specOf(n).in.length, specOf(n).out.length, 1) * PIN_GAP - 14) + 'px';
+      n._h = el.offsetHeight;
     });
 
     svg.innerHTML = g.edges.map(e => `
@@ -282,7 +321,8 @@
           const src = g.nodes.find(x => x.id === e.from);
           if (src) flow = ` <span class="flowtok">· ~${BP2Cost.fmtK(BP2Cost.flowK(src, specOf))}</span>`;
         }
-        lbl.innerHTML = esc(e.contract) + flow;
+        lbl.title = e.contract;
+        lbl.innerHTML = esc(Atelier.contractGloss(e.contract)) + ` <span class="cid">${esc(e.contract)}</span>` + flow;
         world.appendChild(lbl);
       } catch (err) { /* path pas encore mesurable */ }
     });
@@ -292,6 +332,8 @@
     applyView();
     renderInspector();
     renderPalette();
+    applyNoviceUI();
+    renderCoachBar();
   }
 
   /* ── Fil d'Ariane ── */
@@ -366,8 +408,27 @@
     emit('level-changed', { depth: curPath.length });
   }
 
+  /* ══ Révélation progressive ══
+     Pas de bascule débutant/expert : l'interface s'ouvre d'elle-même dès que
+     l'utilisateur a fait ses premiers gestes (visite passée ou flow amorcé). */
+  function novice() {
+    /* Se juge sur ce qui a été fait, pas sur ce qui a été déclaré : passer la
+       visite marque `onboarded` sans rien apprendre — seule la visite menée à
+       son terme, ou un flow réellement amorcé, ouvre l'interface. */
+    const j = Atelier.studioJournal();
+    if (j && j.counts && j.counts['tour-done']) return false;
+    const g = state ? G() : null;
+    return !g || g.nodes.length < 3;
+  }
+  function applyNoviceUI() {
+    const app = document.querySelector('.bp-app');
+    if (app) app.classList.toggle('novice', novice());
+  }
+
   /* ══ Palette ══ */
   let palQ = '';
+  let palAll = false;        // catalogue complet déplié
+  let palAllManual = false;  // …sauf si l'utilisateur a tranché lui-même
   function paletteItems() {
     let list = Atelier.paletteNodes();
     if (palQ) {
@@ -386,6 +447,7 @@
   }
   function renderPalette() {
     const listEl = $('#pal-list');
+    if (!palAllManual) palAll = !novice();   // le catalogue s'ouvre de lui-même à la sortie du premier flow
     const all = paletteItems();
     const ctx = selectedOutContracts();
     let html = '';
@@ -401,9 +463,11 @@
     const item = (n, hot) => `
       <div class="bp-pal-item${hot ? ' hot' : ''}${n.locked ? ' locked' : ''}" data-ref="${esc(n.ref)}" title="${esc(n.desc || '')}">
         <div class="r1"><span class="cat" style="background:${Atelier.catColor(n.cat)}"></span>
-        <span class="ref">${esc(n.kind === 'ext' ? n.name : n.ref)}</span>
-        ${n.kind === 'ext' ? `<span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-muted);margin-left:auto">ext · ${esc(n.ext)}</span>` : ''}</div>
-        <span class="nm">${esc(n.kind === 'ext' ? n.desc.split('—')[0] : n.name)}</span>
+        <span class="ref">${esc(n.name)}</span>
+        ${n.kind === 'ext'
+          ? `<span class="ref-tag">ext · ${esc(n.ext)}</span>`
+          : `<span class="ref-tag">${esc(n.ref)}</span>`}</div>
+        <span class="nm">${esc(Atelier.clamp(n.kind === 'ext' ? n.desc.split('—')[0] : (n.desc || n.name), 96))}</span>
         ${n.locked ? `<span class="lock-cta" data-install-ext="${esc(n.ext)}">requiert l'extension → installer · 1 clic</span>` : ''}
       </div>`;
     if (ctx) {
@@ -419,14 +483,36 @@
         html += compat.map(n => item(n, true)).join('');
       }
     }
+    /* Essentiels : le socle qui suffit à composer un flow gouverné complet.
+       Toujours en tête, hors recherche — le catalogue entier vient après. */
+    if (!palQ) {
+      const ess = Atelier.ESSENTIAL_REFS.map(r => all.find(n => n.ref === r)).filter(Boolean);
+      if (ess.length) {
+        html += `<div class="bp-pal-sec ess">Essentiels · de quoi composer un flow complet</div>`
+          + ess.map(n => item(n, false)).join('');
+      }
+    }
     const groups = {};
     all.forEach(n => { (groups[n.cat] = groups[n.cat] || []).push(n); });
-    CAT.categories.forEach(c => {
-      if (!groups[c.id]) return;
-      html += `<div class="bp-pal-sec">${esc(c.id)} · ${esc(c.name)}</div>` + groups[c.id].map(n => item(n, false)).join('');
-    });
-    if (groups.EXT) html += `<div class="bp-pal-sec">Extensions</div>` + groups.EXT.map(n => item(n, false)).join('');
+    const catCount = all.filter(n => n.cat !== 'EXT').length;
+    const showAll = !!palQ || palAll;
+    if (!palQ) {
+      html += `<div class="bp-pal-sec fold${showAll ? ' open' : ''}" id="pal-fold">
+        <span class="arr">${showAll ? '▾' : '▸'}</span> Tout le catalogue · ${catCount} pratiques</div>`;
+    }
+    if (showAll) {
+      CAT.categories.forEach(c => {
+        if (!groups[c.id]) return;
+        const intent = Atelier.catIntent(c.id);
+        html += `<div class="bp-pal-sec sub">${esc(intent || c.name)}<span class="fam">${esc(c.id)}</span></div>`
+          + groups[c.id].map(n => item(n, false)).join('');
+      });
+      if (groups.EXT) html += `<div class="bp-pal-sec sub">apporté par les extensions<span class="fam">EXT</span></div>`
+        + groups.EXT.map(n => item(n, false)).join('');
+    }
     listEl.innerHTML = html || '<p class="at-sub" style="padding:12px 2px">aucun résultat.</p>';
+    const fold = $('#pal-fold', listEl);
+    if (fold) fold.addEventListener('click', () => { palAll = !palAll; palAllManual = true; renderPalette(); });
 
     $$('.bp-pal-item', listEl).forEach(el => {
       el.addEventListener('click', ev => {
@@ -1044,10 +1130,10 @@
       const src = g.nodes.find(x => x.id === e.from);
       const flowK = window.BP2Cost && src ? BP2Cost.flowK(src, specOf) : 0;
       panel.innerHTML = `
-        <div class="bp-prop"><div class="k">Lien — contrat</div>
-          <div class="v" style="font-family:var(--font-mono);display:flex;align-items:center;gap:8px">
-            <span style="width:9px;height:9px;border-radius:50%;background:${Atelier.contractColor(e.contract)}"></span>${esc(e.contract)}</div></div>
-        <div class="bp-prop"><div class="k">Ce que ce contrat transporte</div><div class="v soft">${esc(c ? c.desc : '')}</div></div>
+        <div class="bp-prop"><div class="k">Ce que ce lien transporte</div>
+          <div class="v" style="display:flex;align-items:center;gap:8px">
+            <span style="width:9px;height:9px;border-radius:50%;background:${Atelier.contractColor(e.contract)}"></span>${esc(Atelier.contractGloss(e.contract))} <span class="cid">${esc(e.contract)}</span></div></div>
+        <div class="bp-prop"><div class="k">Dans le standard</div><div class="v soft">${esc(c ? c.desc : '')}</div></div>
         ${flowK ? `<div class="bp-prop"><div class="k">Volume estimé</div><div class="np-cost"><span>tokens émis par run</span><b>~${BP2Cost.fmtK(flowK)} tok</b></div></div>` : ''}
         <button class="at-btn sm" id="del-edge">SUPPRIMER LE LIEN</button>`;
       $('#del-edge').addEventListener('click', deleteSelection);
@@ -1091,6 +1177,26 @@
           <button class="at-btn sm acc" id="do-group">◇ REGROUPER EN SOUS-FLOW <span class="at-kbd" style="margin-left:6px">⌘G</span></button>
           <p class="empty" style="margin-top:10px">⌘D duplique · suppr efface · C encadre d'un commentaire.</p>`;
         $('#do-group').addEventListener('click', groupSelection);
+      } else if (builtSummary && builtSummary.length) {
+        /* Débriefing : ce qui vient d'être construit, et pourquoi. Le
+           vocabulaire s'apprend en relisant ce qu'on a déjà obtenu. */
+        panel.innerHTML = `
+          <div class="bp-prop"><div class="k">Ce qui vient d'être construit</div>
+            <div class="v soft">${builtSummary.length} éléments posés et reliés. Cliquez une ligne pour aller voir.</div></div>
+          <div class="bp-built">${builtSummary.map((b, i) => `
+            <button class="b-row" data-built="${i}">
+              <span class="b-dot" style="background:${b.color || 'var(--accent)'}"></span>
+              <span><span class="b-nm">${esc(b.name)}</span><span class="b-why">${esc(b.why)}</span></span>
+            </button>`).join('')}</div>
+          <button class="at-btn sm ghost" id="built-close" style="margin-top:10px">MASQUER CE RÉSUMÉ</button>`;
+        $$('[data-built]', panel).forEach(el => el.addEventListener('click', () => {
+          const b = builtSummary[parseInt(el.dataset.built, 10)];
+          const target = G().nodes.find(x => x.id === b.id);
+          if (!target) return;
+          clearSelection(); selection.nodes.add(target.id);
+          centerOn(target); render();
+        }));
+        $('#built-close').addEventListener('click', () => { builtSummary = null; render(); });
       } else {
         panel.innerHTML = `<p class="empty">sélectionnez un node, un lien ou une zone.<br><br>clic droit : ajouter un node<br>fil lâché dans le vide : nodes compatibles<br>⌘G : regrouper en sous-flow</p>`;
       }
@@ -1120,8 +1226,8 @@
     const pinRow = (dir, c2) => {
       const connected = g.edges.some(e2 => dir === 'in' ? (e2.to === n.id && e2.contract === c2) : (e2.from === n.id && e2.contract === c2));
       return `<div class="at-row sb" style="padding:4px 0">
-        <span style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);display:flex;align-items:center;gap:7px">
-          <span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c2)}"></span>${dir} · ${esc(c2)}</span>
+        <span style="font-size:0.73rem;color:var(--ink-soft);display:flex;align-items:center;gap:7px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c2)}"></span>${dir === 'in' ? 'reçoit' : 'produit'} · ${esc(Atelier.contractGloss(c2))} <span class="cid">${esc(c2)}</span></span>
         <span style="font-family:var(--font-mono);font-size:0.67rem;color:${connected ? 'var(--data-green)' : 'var(--ink-muted)'}">${connected ? 'connecté ✓' : 'libre'}</span>
       </div>`;
     };
@@ -1189,8 +1295,8 @@
         }
         s.in.forEach(c => {
           if (!graph.edges.some(e => e.to === n.id && e.contract === c) && !fed.has(c)) {
-            const nm = n.kind === 'group' ? (n.name || 'sous-flow') : (s.kind === 'ext' || s.kind === 'agent' ? s.name : s.ref);
-            out.push({ level: 'warn', node: n.id, path, ref: nm, text: `${where}${nm} — entrée ${c} non connectée.` });
+            const nm = n.kind === 'group' ? (n.name || 'sous-flow') : s.name;
+            out.push({ level: 'warn', node: n.id, path, ref: nm, text: `${where}rien ne lui fournit « ${Atelier.contractGloss(c)} » (${c}) — son entrée reste vide.` });
             if (samePath(path)) state._warnByNode[n.id] = 'entrée non connectée';
           }
         });
@@ -1220,8 +1326,43 @@
     return { n, e, g };
   }
 
+  /* ══ Bandeau de guidage ══
+     Les règles de bonnes pratiques portent déjà un « pourquoi » rédigé et un
+     correctif en un clic ; elles ne doivent pas rester cachées derrière un
+     onglet. Le bandeau remonte la plus prioritaire, sans jamais bloquer. */
+  let lastValidation = null;
+  const dismissedRules = new Set();
+  const LEVEL_RANK = { err: 0, warn: 1, info: 2 };
+  function coachKey(r) { return (r.rule || r.text) + '|' + (r.node || ''); }
+  function renderCoachBar() {
+    let el = $('#bp-coachbar');
+    /* la visite gestuelle a la priorité : un seul guide à la fois */
+    const busy = !!$('#bp-coach');
+    const res = lastValidation || [];
+    const cands = res
+      .filter(r => r.fix && samePath(r.path || []) && !dismissedRules.has(coachKey(r)))
+      .sort((a, b) => (LEVEL_RANK[a.level] ?? 3) - (LEVEL_RANK[b.level] ?? 3));
+    const r = busy ? null : cands[0];
+    if (!r) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'bp-coachbar';
+      wrap.appendChild(el);
+    }
+    el.className = 'bp-coachbar ' + (r.level === 'err' ? 'err' : r.level === 'warn' ? 'warn' : 'info');
+    el.innerHTML = `
+      <span class="cb-lvl">${r.level === 'err' ? 'à corriger' : r.level === 'warn' ? 'conseil' : 'suggestion'}</span>
+      <span class="cb-txt">${r.ref ? `<b>${esc(r.ref)}</b> · ` : ''}${lexify(r.text)}</span>
+      <button class="at-btn sm acc" id="cb-fix">⚡ ${esc(r.fix.label)}</button>
+      <button class="cb-x" id="cb-skip" title="Ignorer ce conseil" aria-label="Ignorer ce conseil">✕</button>
+      ${cands.length > 1 ? `<span class="cb-n" title="conseils restants">1 / ${cands.length}</span>` : ''}`;
+    $('#cb-fix').addEventListener('click', () => { r.fix.run(); runValidation(true); render(); });
+    $('#cb-skip').addEventListener('click', () => { dismissedRules.add(coachKey(r)); renderCoachBar(); });
+  }
+
   function runValidation(silent) {
     const res = computeValidation();
+    lastValidation = res;
     const problems = res.filter(r => r.level === 'warn' || r.level === 'err');
     const badge = $('#val-count');
     badge.style.display = problems.length ? '' : 'none';
@@ -1230,7 +1371,7 @@
     $('#panel-validation').innerHTML = res.map((r, i) => `
       <div class="bp-vitem ${r.level === 'err' ? 'err' : r.level === 'ok' ? 'okv' : ''}" ${r.node ? `data-goto="${i}"` : ''}>
         ${r.rule ? `<span class="v-rule">${esc(r.rule)} · pratique agentique</span>` : ''}
-        ${r.ref ? `<b>${esc(r.ref)}</b> · ` : ''}${r.text}
+        ${r.ref ? `<b>${esc(r.ref)}</b> · ` : ''}${lexify(r.text)}
         ${r.fix && samePath(r.path || []) ? `<br><button class="v-fix" data-fix="${i}">⚡ ${esc(r.fix.label)}</button>` : (r.fix ? `<br><button class="v-fix" data-goto2="${i}">→ ALLER AU NIVEAU CONCERNÉ</button>` : '')}
       </div>`).join('');
     const goto_ = r => {
@@ -1241,7 +1382,8 @@
       centerOn(n); render();
     };
     $$('#panel-validation [data-goto]').forEach(el => el.addEventListener('click', e => {
-      if (e.target.closest('.v-fix')) return;
+      /* un terme de lexique ouvre le lexique, il ne déplace pas la vue */
+      if (e.target.closest('.v-fix') || e.target.closest('.lex')) return;
       goto_(res[parseInt(el.dataset.goto, 10)]);
     }));
     $$('#panel-validation [data-fix]').forEach(el => el.addEventListener('click', e => {
@@ -1253,6 +1395,7 @@
       e.stopPropagation();
       goto_(res[parseInt(el.dataset.goto2, 10)]);
     }));
+    renderCoachBar();
     if (!silent) setTab('validation');
     return res;
   }
@@ -1508,9 +1651,9 @@
         <p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.6">${esc(s.desc)}</p>
         ${docsHtml}
         <div>
-          <div class="at-lbl" style="margin-bottom:6px">Contrats</div>
-          ${s.in.map(c => `<div style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>in · ${esc(c)} — ${esc((Atelier.contractById[c] || {}).desc || '')}</div>`).join('')}
-          ${s.out.map(c => `<div style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>out · ${esc(c)} — ${esc((Atelier.contractById[c] || {}).desc || '')}</div>`).join('')}
+          <div class="at-lbl" style="margin-bottom:6px">Ce qu'il reçoit et ce qu'il produit</div>
+          ${s.in.map(c => `<div style="font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>reçoit · ${esc(Atelier.contractGloss(c))} <span class="cid">${esc(c)}</span></div>`).join('')}
+          ${s.out.map(c => `<div style="font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>produit · ${esc(Atelier.contractGloss(c))} <span class="cid">${esc(c)}</span></div>`).join('')}
         </div>
         ${p ? `<div><div class="at-lbl" style="margin-bottom:6px">Checks</div>${p.checks.map(c => `<div style="font-size:0.77rem;color:var(--ink-soft);padding:2px 0">✓ ${esc(c)}</div>`).join('')}</div>
         <div><div class="at-lbl" style="margin-bottom:6px">Agents</div><div class="at-row" style="gap:5px;flex-wrap:wrap">${p.agents.map(a => `<span class="at-chip" style="font-size:0.64rem">${esc(a)}</span>`).join('')}</div></div>` : ''}
@@ -1530,38 +1673,111 @@
   }
   function closeFiche() { $('#bp-fiche').classList.remove('open'); }
 
-  /* ══ Lexique / aide ══ */
-  $('#bp-help').addEventListener('click', () => {
+  /* ══ Lexique / aide ══
+     Le lexique n'est pas une page à aller chercher : chaque terme devient
+     cliquable là où il apparaît, et s'explique sans quitter la toile. */
+  const LEX = [
+    ['agent', 'un travailleur concret du flow : il reçoit une tâche, travaille avec ses outils, rend une preuve — sa fiche se règle au double-clic'],
+    ['orchestrateur', 'l’agent qui ne produit pas : il reçoit la mission, la découpe et délègue aux spécialistes'],
+    ['déclencheur ▶', 'ce qui lance le flow : manuel, planifié, webhook ou pull request — un seul par flow'],
+    ['outil', 'ce qu’un agent a le droit de FAIRE (lire, écrire, exécuter…) — tout le reste lui est refusé'],
+    ['branchement MCP', 'un service extérieur (GitHub, base de données…) branché à un agent, avec un périmètre déclaré'],
+    ['hook', 'un réflexe automatique : « quand il se passe ça → fais ça » — tourne tout seul, à chaque fois'],
+    ['skill', 'un savoir-faire réutilisable ajouté au bagage d’un agent — compilé en fichier'],
+    ['prompt système', 'le document qui définit un agent : rôle, mission, refus — éditable avec coloration'],
+    ['pattern', 'une pratique normée du standard — chacune avec ses contrôles ; la référence (QUA-04…) est son identifiant'],
+    ['preuve', 'ce qu’un agent joint pour montrer que le travail est fait : tests, sorties, traces. Dans le standard : evidence-pack'],
+    ['porte', 'le point de passage qui décide sur preuve : tant que la preuve ne tient pas, rien ne passe (fail-closed)'],
+    ['mission brief', 'le cadrage donné à un agent avant qu’il commence : ce qu’il doit faire, dans quelles limites'],
+    ['blueprint', 'un flow composé d’agents et de patterns ; il se valide, se simule, se compile — n’exécute jamais'],
+    ['blueprint actif ●', 'LE flow du projet — un seul à la fois ; les autres sont des brouillons ou des dérives'],
+    ['template', 'un flow préfait du catalogue Grimoire — instancié en copie locale que vous dérivez librement'],
+    ['sous-flow ◇', 'un conteneur C4 : une partie du flow encapsulée, avec ses ports — ⌘G pour grouper, double-clic pour entrer'],
+    ['pin', 'la prise typée d’un node : entrée (ce qu’il accepte), sortie (ce qu’il produit)'],
+    ['contrat', 'la forme des données qu’un lien transporte — des types d’artefacts réels : task envelope, evidence pack…'],
+    ['document', 'un artefact éditable porté par un node : mission brief, contrat de complétion, prompt système…'],
+    ['coût (tokens)', 'estimation statique par node et par chemin : contexte consommé + sorties, × itérations — jamais une facture'],
+    ['compilation', 'la transformation d’un blueprint en artefacts dans le projet — sans exécution'],
+    ['artefact', 'ce que la compilation produit : agents, skills, workflows, hooks — versionnés, tracés']
+  ];
+  /* Termes auto-liés dans les textes de l'interface. Volontairement court :
+     seulement le vocabulaire qu'un débutant ne peut pas deviner. */
+  const LEX_AUTO = ['orchestrateur', 'sous-flow', 'blueprint', 'pattern', 'hook', 'skill',
+    'prompt système', 'mission brief', 'contrat', 'artefact', 'porte', 'preuve', 'pin'];
+  const LEX_ALIAS = {
+    'evidence-pack': 'preuve', 'task-envelope': 'mission brief',
+    'handoff-packet': 'contrat', 'verification-verdict': 'porte',
+    'context-pack': 'contrat', 'memory-record': 'contrat',
+    'hooks': 'hook', 'skills': 'skill', 'patterns': 'pattern',
+    'contrats': 'contrat', 'artefacts': 'artefact', 'portes': 'porte',
+    'preuves': 'preuve', 'sous-flows': 'sous-flow', 'blueprints': 'blueprint'
+  };
+  const lexBase = k => k.replace(/\s*[◇●▶].*$/, '').replace(/\s*\(.*\)$/, '').trim();
+  function lexEntry(key) {
+    const want = (LEX_ALIAS[key] || key).toLowerCase();
+    return LEX.find(([k]) => lexBase(k).toLowerCase() === want) || null;
+  }
+  let lexRe;
+  function lexPattern() {
+    if (lexRe !== undefined) return lexRe;
+    const terms = LEX_AUTO.concat(Object.keys(LEX_ALIAS))
+      .sort((a, b) => b.length - a.length)
+      .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    /* Le lookbehind manque aux moteurs anciens : sans lui on renonce aux
+       liens de lexique, jamais au rendu du texte. */
+    try {
+      lexRe = new RegExp('(?<![\\w\\u00C0-\\u024F-])(' + terms.join('|') + ')(?![\\w\\u00C0-\\u024F-])', 'gi');
+    } catch (e) { lexRe = null; }
+    return lexRe;
+  }
+  /* Enveloppe la première occurrence de chaque terme, hors balises HTML. */
+  function lexify(html) {
+    const re = lexPattern();
+    if (!re) return String(html == null ? '' : html);
+    const seen = new Set();
+    return String(html == null ? '' : html).split(/(<[^>]*>)/).map(seg => {
+      if (seg.startsWith('<')) return seg;
+      return seg.replace(re, (m) => {
+        const key = m.toLowerCase();
+        if (seen.has(LEX_ALIAS[key] || key)) return m;
+        if (!lexEntry(key)) return m;
+        seen.add(LEX_ALIAS[key] || key);
+        /* Un bouton, pas un <abbr> : le terme s'ouvre aussi au clavier. */
+        return `<button type="button" class="lex" data-lex="${esc(key)}" title="Voir « ${esc(key)} » au lexique">${m}</button>`;
+      });
+    }).join('');
+  }
+  /* Trois indicateurs de prise en main, lisibles par la personne concernée —
+     ils restent dans ce navigateur et ne partent nulle part. */
+  function journalHtml() {
+    const j = Atelier.studioJournal();
+    if (!j) return '';
+    const c = j.counts || {};
+    const sec = j.firstEdgeMs === null ? '—' : Math.round(j.firstEdgeMs / 1000) + ' s';
+    return `<div style="border-top:1px solid var(--line);padding-top:14px">
+      <div class="at-lbl" style="margin-bottom:8px">Votre prise en main</div>
+      <p style="font-size:0.77rem;color:var(--ink-soft);line-height:1.8">
+        premier lien posé après <b>${sec}</b><br>
+        ${c['node-added'] || 0} nodes · ${c['edge-added'] || 0} liens · ${c['sim-done'] || 0} simulations · ${c['compiled'] || 0} compilations<br>
+        premier flow simulé : <b>${j.reachedSim ? 'oui' : 'pas encore'}</b>${j.tourSkipped ? ' · visite passée ' + j.tourSkipped + '×' : ''}
+      </p>
+      <p class="at-sub" style="margin-top:6px">Ces chiffres restent dans ce navigateur.</p>
+    </div>`;
+  }
+
+  function openLex(focusKey) {
     const f = $('#bp-fiche');
-    const LEX = [
-      ['agent', 'un travailleur concret du flow : il reçoit une tâche, travaille avec ses outils, rend une preuve — sa fiche se règle au double-clic'],
-      ['orchestrateur', 'l\u2019agent qui ne produit pas : il reçoit la mission, la découpe et délègue aux spécialistes'],
-      ['déclencheur ▶', 'ce qui lance le flow : manuel, planifié, webhook ou pull request — un seul par flow'],
-      ['outil', 'ce qu\u2019un agent a le droit de FAIRE (lire, écrire, exécuter…) — tout le reste lui est refusé'],
-      ['branchement MCP', 'un service extérieur (GitHub, base de données…) branché à un agent, avec un périmètre déclaré'],
-      ['hook', 'un réflexe automatique : « quand il se passe ça → fais ça » — tourne tout seul, à chaque fois'],
-      ['skill', 'un savoir-faire réutilisable ajouté au bagage d\u2019un agent — compilé en fichier'],
-      ['prompt système', 'le document qui définit un agent : rôle, mission, refus — éditable avec coloration'],
-      ['pattern', 'une pratique normée du standard — 36, en 11 catégories, chacune avec ses checks'],
-      ['blueprint', 'un flow composé d\u2019agents et de patterns ; il se valide, se simule, se compile — n\u2019exécute jamais'],
-      ['blueprint actif ●', 'LE flow du projet — un seul à la fois ; les autres sont des brouillons ou des dérives'],
-      ['template', 'un flow préfait du catalogue Grimoire — instancié en copie locale que vous dérivez librement'],
-      ['sous-flow ◇', 'un conteneur C4 : une partie du flow encapsulée, avec ses ports — ⌘G pour grouper, double-clic pour entrer'],
-      ['pin', 'la prise typée d\u2019un node : entrée (ce qu\u2019il accepte), sortie (ce qu\u2019il produit)'],
-      ['contrat', 'la forme des données qu\u2019un lien transporte — des types d\u2019artefacts réels : task envelope, evidence pack…'],
-      ['document', 'un artefact éditable porté par un node : mission brief, contrat de complétion, prompt système…'],
-      ['coût (tokens)', 'estimation statique par node et par chemin : contexte consommé + sorties, × itérations — jamais une facture'],
-      ['compilation', 'la transformation d\u2019un blueprint en artefacts dans le projet — sans exécution'],
-      ['artefact', 'ce que la compilation produit : agents, skills, workflows, hooks — versionnés, tracés']
-    ];
+    const entry = focusKey ? lexEntry(focusKey) : null;
+    const focusBase = entry ? lexBase(entry[0]).toLowerCase() : null;
     f.innerHTML = `
       <div class="f-head"><div class="at-row sb"><h2 style="font-size:1rem">Lexique</h2><button class="at-btn sm ghost" id="fiche-close">✕</button></div></div>
       <div class="f-body">
-        ${LEX.map(([k, v]) => `<div><b style="font-family:var(--font-mono);font-size:0.77rem;color:var(--accent)">${k}</b><p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.55;margin-top:2px">${v}</p></div>`).join('')}
+        ${LEX.map(([k, v]) => `<div class="lex-entry${lexBase(k).toLowerCase() === focusBase ? ' on' : ''}" data-lex-entry="${esc(lexBase(k).toLowerCase())}"><b style="font-family:var(--font-mono);font-size:0.77rem;color:var(--accent)">${k}</b><p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.55;margin-top:2px">${v}</p></div>`).join('')}
         <div style="border-top:1px solid var(--line);padding-top:14px">
           <div class="at-lbl" style="margin-bottom:8px">Gestes</div>
           <p style="font-size:0.77rem;color:var(--ink-soft);line-height:1.8">clic droit — ajouter un node<br>fil lâché dans le vide — menu des nodes compatibles<br>double-clic — entrer (sous-flow) ou dossier (node)<br><span class="at-kbd">⌘G</span> grouper · <span class="at-kbd">⌘⇧G</span> dégrouper · <span class="at-kbd">Échap</span> remonter<br><span class="at-kbd">C</span> commentaire · <span class="at-kbd">F</span> recadrer · <span class="at-kbd">⌘Z</span> annuler · <span class="at-kbd">⌘D</span> dupliquer</p>
         </div>
+        ${journalHtml()}
       </div>
       <div class="f-foot">
         <button class="at-btn sm acc" id="replay-tour">REJOUER LA VISITE GUIDÉE</button>
@@ -1571,6 +1787,17 @@
     $('#fiche-close').addEventListener('click', closeFiche);
     $('#replay-tour').addEventListener('click', () => { closeFiche(); emit('tour-replay'); });
     $('#replay-news').addEventListener('click', () => { closeFiche(); emit('news-replay'); });
+    if (focusBase) {
+      const el = f.querySelector(`[data-lex-entry="${focusBase}"]`);
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+  $('#bp-help').addEventListener('click', () => openLex(null));
+  document.addEventListener('click', e => {
+    const a = e.target.closest('[data-lex]');
+    if (!a) return;
+    e.preventDefault(); e.stopPropagation();
+    openLex(a.dataset.lex);
   });
 
   /* ══ Vue chaleur ══ */
@@ -1682,6 +1909,7 @@
 
   function loadBp(id, preset) {
     bpId = id;
+    builtSummary = null;   // le débriefing ne suit pas d'un flow à l'autre
     state = preset || Atelier.loadBp(id) || blankState();
     state.meta = state.meta || blankState().meta;
     curPath = (state.meta.path || []).slice();
@@ -1735,7 +1963,12 @@
     },
     loadExample: () => loadBp('onboarding-crew', instantiateExample()),
     loadStudioExample,
-    countAll
+    countAll,
+    openLex,
+    lexify,
+    /* Débriefing affiché dans l'inspecteur tant que rien n'est sélectionné. */
+    setBuiltSummary(list) { builtSummary = (list && list.length) ? list : null; clearSelection(); render(); setTab('node'); },
+    journal: () => Atelier.studioJournal()
   };
   window.BPEditor = core;
   if (window.BP2Team) BP2Team.init(core);
