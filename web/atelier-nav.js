@@ -85,9 +85,10 @@
     RUN: 'exécuter et observer'
   };
 
-  /* Socle de départ : ce qui suffit à composer un flow gouverné complet.
-     Aligné sur les adjacences recommandées de bp2-assist.js (NEXT). */
-  const ESSENTIAL_REFS = ['ORC-02', 'ORC-01', 'QUA-04', 'QUA-05', 'QUA-15', 'QUA-03', 'KNO-02', 'GOV-02'];
+  /* Socle de départ : cadrer, router, prouver, décider, relire, journaliser,
+     se souvenir — de quoi composer un flow gouverné complet, et rien de plus.
+     Une liste d'essentiels ne vaut que par ce qu'elle refuse. */
+  const ESSENTIAL_REFS = ['ORC-02', 'ORC-01', 'QUA-04', 'QUA-05', 'QUA-15', 'QUA-03', 'KNO-02'];
 
   async function fetchJson(url, opts) {
     const r = await fetch(url, opts);

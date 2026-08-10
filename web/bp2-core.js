@@ -192,7 +192,7 @@
     const locked = isExtLocked(n);
     /* Le libellé de pin dit le mot courant d'abord, l'identifiant du standard
        ensuite : le vocabulaire s'apprend au moment du branchement. */
-    const pinLbl = c => `<span class="bp-pin-lbl"><b>${esc(Atelier.contractGloss(c))}</b><i>${esc(c)}</i></span>`;
+    const pinLbl = c => `<span class="bp-pin-lbl"><b>${esc(Atelier.contractGloss(c))}</b> <i>${esc(c)}</i></span>`;
     /* Le premier pin se pose sous l'en-tête réel : un titre sur deux lignes
        l'agrandit, et un pin figé viendrait chevaucher la bordure. */
     const top = pinTopOf(n);
@@ -322,7 +322,7 @@
           if (src) flow = ` <span class="flowtok">· ~${BP2Cost.fmtK(BP2Cost.flowK(src, specOf))}</span>`;
         }
         lbl.title = e.contract;
-        lbl.innerHTML = esc(Atelier.contractGloss(e.contract)) + `<span class="cid">${esc(e.contract)}</span>` + flow;
+        lbl.innerHTML = esc(Atelier.contractGloss(e.contract)) + ` <span class="cid">${esc(e.contract)}</span>` + flow;
         world.appendChild(lbl);
       } catch (err) { /* path pas encore mesurable */ }
     });
@@ -1130,10 +1130,10 @@
       const src = g.nodes.find(x => x.id === e.from);
       const flowK = window.BP2Cost && src ? BP2Cost.flowK(src, specOf) : 0;
       panel.innerHTML = `
-        <div class="bp-prop"><div class="k">Lien — contrat</div>
-          <div class="v" style="font-family:var(--font-mono);display:flex;align-items:center;gap:8px">
-            <span style="width:9px;height:9px;border-radius:50%;background:${Atelier.contractColor(e.contract)}"></span>${esc(e.contract)}</div></div>
-        <div class="bp-prop"><div class="k">Ce que ce contrat transporte</div><div class="v soft">${esc(c ? c.desc : '')}</div></div>
+        <div class="bp-prop"><div class="k">Ce que ce lien transporte</div>
+          <div class="v" style="display:flex;align-items:center;gap:8px">
+            <span style="width:9px;height:9px;border-radius:50%;background:${Atelier.contractColor(e.contract)}"></span>${esc(Atelier.contractGloss(e.contract))} <span class="cid">${esc(e.contract)}</span></div></div>
+        <div class="bp-prop"><div class="k">Dans le standard</div><div class="v soft">${esc(c ? c.desc : '')}</div></div>
         ${flowK ? `<div class="bp-prop"><div class="k">Volume estimé</div><div class="np-cost"><span>tokens émis par run</span><b>~${BP2Cost.fmtK(flowK)} tok</b></div></div>` : ''}
         <button class="at-btn sm" id="del-edge">SUPPRIMER LE LIEN</button>`;
       $('#del-edge').addEventListener('click', deleteSelection);
@@ -1186,7 +1186,7 @@
           <div class="bp-built">${builtSummary.map((b, i) => `
             <button class="b-row" data-built="${i}">
               <span class="b-dot" style="background:${b.color || 'var(--accent)'}"></span>
-              <span><span class="b-nm">${esc(b.name)}</span><span class="b-why">${lexify(b.why)}</span></span>
+              <span><span class="b-nm">${esc(b.name)}</span><span class="b-why">${esc(b.why)}</span></span>
             </button>`).join('')}</div>
           <button class="at-btn sm ghost" id="built-close" style="margin-top:10px">MASQUER CE RÉSUMÉ</button>`;
         $$('[data-built]', panel).forEach(el => el.addEventListener('click', () => {
@@ -1226,8 +1226,8 @@
     const pinRow = (dir, c2) => {
       const connected = g.edges.some(e2 => dir === 'in' ? (e2.to === n.id && e2.contract === c2) : (e2.from === n.id && e2.contract === c2));
       return `<div class="at-row sb" style="padding:4px 0">
-        <span style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);display:flex;align-items:center;gap:7px">
-          <span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c2)}"></span>${dir} · ${esc(c2)}</span>
+        <span style="font-size:0.73rem;color:var(--ink-soft);display:flex;align-items:center;gap:7px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c2)}"></span>${dir === 'in' ? 'reçoit' : 'produit'} · ${esc(Atelier.contractGloss(c2))} <span class="cid">${esc(c2)}</span></span>
         <span style="font-family:var(--font-mono);font-size:0.67rem;color:${connected ? 'var(--data-green)' : 'var(--ink-muted)'}">${connected ? 'connecté ✓' : 'libre'}</span>
       </div>`;
     };
@@ -1354,8 +1354,8 @@
       <span class="cb-lvl">${r.level === 'err' ? 'à corriger' : r.level === 'warn' ? 'conseil' : 'suggestion'}</span>
       <span class="cb-txt">${r.ref ? `<b>${esc(r.ref)}</b> · ` : ''}${lexify(r.text)}</span>
       <button class="at-btn sm acc" id="cb-fix">⚡ ${esc(r.fix.label)}</button>
-      <button class="cb-x" id="cb-skip" title="Ignorer ce conseil">✕</button>
-      ${cands.length > 1 ? `<span class="cb-n">1 / ${cands.length}</span>` : ''}`;
+      <button class="cb-x" id="cb-skip" title="Ignorer ce conseil" aria-label="Ignorer ce conseil">✕</button>
+      ${cands.length > 1 ? `<span class="cb-n" title="conseils restants">1 / ${cands.length}</span>` : ''}`;
     $('#cb-fix').addEventListener('click', () => { r.fix.run(); runValidation(true); render(); });
     $('#cb-skip').addEventListener('click', () => { dismissedRules.add(coachKey(r)); renderCoachBar(); });
   }
@@ -1382,7 +1382,8 @@
       centerOn(n); render();
     };
     $$('#panel-validation [data-goto]').forEach(el => el.addEventListener('click', e => {
-      if (e.target.closest('.v-fix')) return;
+      /* un terme de lexique ouvre le lexique, il ne déplace pas la vue */
+      if (e.target.closest('.v-fix') || e.target.closest('.lex')) return;
       goto_(res[parseInt(el.dataset.goto, 10)]);
     }));
     $$('#panel-validation [data-fix]').forEach(el => el.addEventListener('click', e => {
@@ -1650,9 +1651,9 @@
         <p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.6">${esc(s.desc)}</p>
         ${docsHtml}
         <div>
-          <div class="at-lbl" style="margin-bottom:6px">Contrats</div>
-          ${s.in.map(c => `<div style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>in · ${esc(c)} — ${esc((Atelier.contractById[c] || {}).desc || '')}</div>`).join('')}
-          ${s.out.map(c => `<div style="font-family:var(--font-mono);font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>out · ${esc(c)} — ${esc((Atelier.contractById[c] || {}).desc || '')}</div>`).join('')}
+          <div class="at-lbl" style="margin-bottom:6px">Ce qu'il reçoit et ce qu'il produit</div>
+          ${s.in.map(c => `<div style="font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>reçoit · ${esc(Atelier.contractGloss(c))} <span class="cid">${esc(c)}</span></div>`).join('')}
+          ${s.out.map(c => `<div style="font-size:0.73rem;color:var(--ink-soft);padding:3px 0;display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${Atelier.contractColor(c)}"></span>produit · ${esc(Atelier.contractGloss(c))} <span class="cid">${esc(c)}</span></div>`).join('')}
         </div>
         ${p ? `<div><div class="at-lbl" style="margin-bottom:6px">Checks</div>${p.checks.map(c => `<div style="font-size:0.77rem;color:var(--ink-soft);padding:2px 0">✓ ${esc(c)}</div>`).join('')}</div>
         <div><div class="at-lbl" style="margin-bottom:6px">Agents</div><div class="at-row" style="gap:5px;flex-wrap:wrap">${p.agents.map(a => `<span class="at-chip" style="font-size:0.64rem">${esc(a)}</span>`).join('')}</div></div>` : ''}
@@ -1741,7 +1742,8 @@
         if (seen.has(LEX_ALIAS[key] || key)) return m;
         if (!lexEntry(key)) return m;
         seen.add(LEX_ALIAS[key] || key);
-        return `<abbr class="lex" data-lex="${esc(key)}">${m}</abbr>`;
+        /* Un bouton, pas un <abbr> : le terme s'ouvre aussi au clavier. */
+        return `<button type="button" class="lex" data-lex="${esc(key)}" title="Voir « ${esc(key)} » au lexique">${m}</button>`;
       });
     }).join('');
   }

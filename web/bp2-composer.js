@@ -167,7 +167,7 @@ refus:
       const sog = { id: uid(), ref: 'ORC-01', x: 410, y: 320 };
       const a1 = mkAgent(preset, 720, 320);
       nodes.push(sog, a1);
-      why(sog, 'le routage : une seule porte d\u2019entrée, qui envoie au bon agent');
+      why(sog, 'le routage : un seul point d\u2019entrée, qui envoie au bon agent');
       why(a1, 'il fait le travail et joint la preuve de ce qu\u2019il avance');
       wire(prd, sog, 'task-envelope');
       wire(sog, a1, 'task-envelope');
