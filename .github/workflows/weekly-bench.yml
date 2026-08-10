@@ -44,6 +44,20 @@ jobs:
       - name: Install deps
         run: pip install pyyaml
 
+      # ── Reconstruire le TRACE ─────────────────────────────────────────────
+      # Grimoire_TRACE.md est gitignoré (alimenté en local par le hook
+      # post-commit) : un checkout CI ne peut pas l'avoir. Sans cette étape le
+      # benchmark lisait un fichier absent et publiait chaque semaine un
+      # rapport à zéro entrée conclu par « aucune anomalie détectée ».
+      - name: Reconstruire Grimoire_TRACE depuis l'historique git
+        run: |
+          SINCE="${{ github.event.inputs.since || '' }}"
+          ARGS="--branch ${GITHUB_REF_NAME} --min-entries 1"
+          [[ -n "$SINCE" ]] && ARGS="$ARGS --since $SINCE"
+
+          python3 scripts/trace-from-git.py $ARGS \
+            --out _grimoire-output/Grimoire_TRACE.md
+
       # ── Générer le rapport ────────────────────────────────────────────────
       - name: Run agent-bench --report
         id: bench
@@ -62,6 +76,15 @@ jobs:
             --out _grimoire-output/bench-reports/latest.md \
             --trace _grimoire-output/Grimoire_TRACE.md \
             2>&1 | tee bench-output.txt
+
+          # Un rapport sans entrée ne mesure rien — on échoue au lieu de
+          # publier un vert qui n'en est pas un.
+          ENTRIES=$(grep -oE "Entrées TRACE analysées : [0-9]+" \
+            _grimoire-output/bench-reports/latest.md | grep -oE "[0-9]+$" || echo "0")
+          if [[ "$ENTRIES" -eq 0 ]]; then
+            echo "::error::Rapport vide — 0 entrée TRACE analysée. Rien n'est mesuré."
+            exit 1
+          fi
 
           # Copie historisée avec date
           DATE=$(date +%Y-%m-%d)
