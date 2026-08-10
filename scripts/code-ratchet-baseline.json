@@ -75,9 +75,6 @@
     "framework/tools/grimoire-mcp-tools.py": 885,
     "framework/tools/grimoire-setup.py": 470,
     "framework/tools/harmony-check.py": 567,
-    "framework/tools/hpe-executors.py": 754,
-    "framework/tools/hpe-monitor.py": 1030,
-    "framework/tools/hpe-runner.py": 1102,
     "framework/tools/image-prompt.py": 406,
     "framework/tools/immune-system.py": 558,
     "framework/tools/incubator.py": 394,
@@ -139,7 +136,7 @@
     "install.sh": 186
   },
   "src_oversized": {
-    "src/grimoire/cli/app.py": 2997,
+    "src/grimoire/cli/app.py": 2913,
     "src/grimoire/cli/cmd_memory.py": 1610,
     "src/grimoire/core/agentic_standard.py": 2980
   }
