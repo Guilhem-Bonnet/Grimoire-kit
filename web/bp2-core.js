@@ -179,6 +179,8 @@
 
   /* ══ Rendu ══ */
   const PIN_TOP = 38, PIN_GAP = 22;
+  /* Offset mesuré à l'écran ; PIN_TOP n'est plus qu'un repli avant mesure. */
+  const pinTopOf = n => n._pinTop || PIN_TOP;
 
   function nodeHtml(n) {
     const s = specOf(n);
@@ -191,11 +193,14 @@
     /* Le libellé de pin dit le mot courant d'abord, l'identifiant du standard
        ensuite : le vocabulaire s'apprend au moment du branchement. */
     const pinLbl = c => `<span class="bp-pin-lbl"><b>${esc(Atelier.contractGloss(c))}</b><i>${esc(c)}</i></span>`;
+    /* Le premier pin se pose sous l'en-tête réel : un titre sur deux lignes
+       l'agrandit, et un pin figé viendrait chevaucher la bordure. */
+    const top = pinTopOf(n);
     const ins = s.in.map((c, i) =>
-      `<div class="bp-pin in" data-node="${n.id}" data-dir="in" data-contract="${c}" style="top:${PIN_TOP + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
+      `<div class="bp-pin in" data-node="${n.id}" data-dir="in" data-contract="${c}" style="top:${top + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
     const outs = s.out.map((c, i) =>
-      `<div class="bp-pin out" data-node="${n.id}" data-dir="out" data-contract="${c}" style="top:${PIN_TOP + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
-    const minH = PIN_TOP + Math.max(s.in.length, s.out.length, 1) * PIN_GAP - 14;
+      `<div class="bp-pin out" data-node="${n.id}" data-dir="out" data-contract="${c}" style="top:${top + i * PIN_GAP}px;border-color:${Atelier.contractColor(c)}">${pinLbl(c)}</div>`).join('');
+    const minH = top + Math.max(s.in.length, s.out.length, 1) * PIN_GAP - 14;
     const warns = (state._warnByNode && state._warnByNode[n.id]) || null;
     const badge = window.BP2Docs ? BP2Docs.badgeFor(n) : null;
     let cost = '';
@@ -240,7 +245,7 @@
     if (!s) return { x: 0, y: 0 };
     const list = dir === 'in' ? s.in : s.out;
     const i = Math.max(0, list.indexOf(contract));
-    return { x: n.x + (dir === 'in' ? 0 : (n._w || (n.kind === 'group' ? 210 : 190))), y: n.y + PIN_TOP + i * PIN_GAP + 6 };
+    return { x: n.x + (dir === 'in' ? 0 : (n._w || (n.kind === 'group' ? 210 : 190))), y: n.y + pinTopOf(n) + i * PIN_GAP + 6 };
   }
   function edgePath(e) {
     const a = pinPos(e.from, 'out', e.contract);
@@ -278,7 +283,23 @@
 
     $$('.bp-node', items).forEach(el => {
       const n = g.nodes.find(x => x.id === el.dataset.id);
-      if (n) { n._w = el.offsetWidth; n._h = el.offsetHeight; }
+      if (!n) return;
+      n._w = el.offsetWidth; n._h = el.offsetHeight;
+      /* Recale les pins sur la hauteur réelle de l'en-tête, avant que les
+         liens ne soient tracés — sinon les fils viseraient l'ancien offset. */
+      const head = el.querySelector('.head');
+      if (!head) return;
+      const want = Math.round(head.offsetHeight) + 7;
+      if (n._pinTop === want) return;
+      n._pinTop = want;
+      $$('.bp-pin', el).forEach(p => {
+        const list = p.dataset.dir === 'in' ? specOf(n).in : specOf(n).out;
+        const i = Math.max(0, list.indexOf(p.dataset.contract));
+        p.style.top = (want + i * PIN_GAP) + 'px';
+      });
+      const body = el.querySelector('.body');
+      if (body) body.style.minHeight = (want + Math.max(specOf(n).in.length, specOf(n).out.length, 1) * PIN_GAP - 14) + 'px';
+      n._h = el.offsetHeight;
     });
 
     svg.innerHTML = g.edges.map(e => `
@@ -391,7 +412,11 @@
      Pas de bascule débutant/expert : l'interface s'ouvre d'elle-même dès que
      l'utilisateur a fait ses premiers gestes (visite passée ou flow amorcé). */
   function novice() {
-    if (Atelier.onboarded()) return false;
+    /* Se juge sur ce qui a été fait, pas sur ce qui a été déclaré : passer la
+       visite marque `onboarded` sans rien apprendre — seule la visite menée à
+       son terme, ou un flow réellement amorcé, ouvre l'interface. */
+    const j = Atelier.studioJournal();
+    if (j && j.counts && j.counts['tour-done']) return false;
     const g = state ? G() : null;
     return !g || g.nodes.length < 3;
   }
@@ -1691,21 +1716,27 @@
     const want = (LEX_ALIAS[key] || key).toLowerCase();
     return LEX.find(([k]) => lexBase(k).toLowerCase() === want) || null;
   }
-  let lexRe = null;
+  let lexRe;
   function lexPattern() {
-    if (lexRe) return lexRe;
+    if (lexRe !== undefined) return lexRe;
     const terms = LEX_AUTO.concat(Object.keys(LEX_ALIAS))
       .sort((a, b) => b.length - a.length)
       .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    lexRe = new RegExp('(?<![\\w\\u00C0-\\u024F-])(' + terms.join('|') + ')(?![\\w\\u00C0-\\u024F-])', 'gi');
+    /* Le lookbehind manque aux moteurs anciens : sans lui on renonce aux
+       liens de lexique, jamais au rendu du texte. */
+    try {
+      lexRe = new RegExp('(?<![\\w\\u00C0-\\u024F-])(' + terms.join('|') + ')(?![\\w\\u00C0-\\u024F-])', 'gi');
+    } catch (e) { lexRe = null; }
     return lexRe;
   }
   /* Enveloppe la première occurrence de chaque terme, hors balises HTML. */
   function lexify(html) {
+    const re = lexPattern();
+    if (!re) return String(html == null ? '' : html);
     const seen = new Set();
     return String(html == null ? '' : html).split(/(<[^>]*>)/).map(seg => {
       if (seg.startsWith('<')) return seg;
-      return seg.replace(lexPattern(), (m) => {
+      return seg.replace(re, (m) => {
         const key = m.toLowerCase();
         if (seen.has(LEX_ALIAS[key] || key)) return m;
         if (!lexEntry(key)) return m;

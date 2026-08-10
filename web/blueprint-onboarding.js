@@ -100,6 +100,7 @@
       tour = null;
       $('#bp-progress-slot').innerHTML = '';
       Atelier.setOnboarded(true);
+      Atelier.journalEvent('tour-done');
       const el = coachEl();
       el.innerHTML = `
         <span class="step" style="color:var(--data-green)">Premier flow simulé ✓</span>
