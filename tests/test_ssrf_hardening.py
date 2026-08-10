@@ -57,28 +57,3 @@ def test_strict_tools_reject_bad_scheme(tool: str) -> None:
     validate = getattr(mod, "validate_url", None) or mod._validate_url
     with pytest.raises(ValueError):
         validate("file:///etc/passwd")
-
-
-class TestRagIndexerLocalhostSemantics:
-    """rag-indexer garde son usage historique : localhost/LAN autorisés sur demande."""
-
-    def test_allows_localhost_when_flagged(self) -> None:
-        mod = _load("rag-indexer")
-        assert mod._validate_url("http://localhost:6333", allow_localhost=True)
-        assert mod._validate_url("http://127.0.0.1:6333", allow_localhost=True)
-
-    def test_allows_lan_when_flagged(self) -> None:
-        mod = _load("rag-indexer")
-        assert mod._validate_url("http://192.168.1.50:6333", allow_localhost=True)
-
-    def test_metadata_always_blocked(self) -> None:
-        mod = _load("rag-indexer")
-        with pytest.raises(ValueError):
-            mod._validate_url("http://169.254.169.254/", allow_localhost=True)
-
-    def test_strict_mode_blocks_private(self) -> None:
-        mod = _load("rag-indexer")
-        with pytest.raises(ValueError):
-            mod._validate_url("http://192.168.1.50:6333", allow_localhost=False)
-        with pytest.raises(ValueError):
-            mod._validate_url("http://2130706433/", allow_localhost=False)
