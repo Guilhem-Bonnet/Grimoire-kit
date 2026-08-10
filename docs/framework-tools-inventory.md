@@ -1,6 +1,6 @@
 # Inventaire d'usage — framework/tools/
 
-> Généré le 2026-07-12 par `python scripts/framework-usage-inventory.py`. Instantané de décision pour le portage/suppression (cf. framework/FREEZE.md) — régénérer avant tout arbitrage.
+> Généré le 2026-08-10 par `python scripts/framework-usage-inventory.py`. Instantané de décision pour le portage/suppression (cf. framework/FREEZE.md) — régénérer avant tout arbitrage.
 
 **109 fichiers, 71604 lignes.** Classes par priorité de traitement : UNREFERENCED (suppression candidate), INTERNAL (référencé uniquement par d'autres outils de tools/), DOCS_ONLY (réécrire la doc ou porter), TEST_ONLY (test hérité sans usage runtime), REFERENCED (à porter vers src/ à la demande).
 
@@ -53,7 +53,7 @@
 | framework/tools/fitness-tracker.py | 536 | 0 | 3 | 1 | 3 |
 | framework/tools/time-travel.py | 536 | 0 | 1 | 1 | 0 |
 | framework/tools/sensory-buffer.py | 535 | 0 | 1 | 1 | 0 |
-| framework/tools/decision-log.py | 532 | 0 | 1 | 2 | 0 |
+| framework/tools/decision-log.py | 532 | 0 | 1 | 1 | 0 |
 | framework/tools/grimoire-daemon.py | 526 | 0 | 1 | 0 | 0 |
 | framework/tools/tool-advisor.py | 516 | 0 | 1 | 1 | 0 |
 | framework/tools/rosetta.py | 502 | 0 | 1 | 1 | 0 |
@@ -81,7 +81,7 @@
 
 | Fichier | Lignes | runtime | tests | docs | interne |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| framework/tools/observatory.py | 1939 | 2 | 1 | 8 | 0 |
+| framework/tools/observatory.py | 1939 | 2 | 1 | 7 | 0 |
 | framework/tools/dream.py | 1347 | 2 | 4 | 2 | 8 |
 | framework/tools/tool-resolver.py | 1236 | 6 | 2 | 0 | 2 |
 | framework/tools/context-guard.py | 1105 | 2 | 3 | 2 | 1 |

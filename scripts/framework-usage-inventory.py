@@ -12,6 +12,10 @@ references to its basename and classifies it:
 - INTERNAL     — only referenced by other framework/tools/ files
 - UNREFERENCED — no reference anywhere outside itself
 
+Generated indexes that enumerate the whole frozen zone (see
+``GENERATED_INDEXES``) are excluded: they cite every tool without calling any,
+so counting them collapses every file into REFERENCED.
+
 Writes ``docs/framework-tools-inventory.md``. Regenerate with:
 
     python scripts/framework-usage-inventory.py
@@ -36,6 +40,21 @@ TEST_PATHS = ["tests"]
 DOCS_PATHS = ["docs", "web", "README.md", "README.fr.md", "ARCHITECTURE.md", "CONTRIBUTING.md"]
 TOOLS_PATHS = ["framework"]
 
+# Artefacts générés qui énumèrent la zone gelée fichier par fichier. Ils citent
+# chaque outil sans en être un appelant : les compter comme référence classe
+# tout en REFERENCED et neutralise l'instrument de décision.
+#
+# Cas vécu : `scripts/code-ratchet-baseline.json` (mécanisme d'application du
+# gel, 3.24.0) liste les 113 fichiers gelés avec leur plafond de lignes. Comme
+# `scripts` est une surface runtime, chaque outil héritait d'un hit runtime et
+# l'inventaire est devenu aveugle — 0 candidat à la suppression pendant que le
+# gel était censé drainer la zone.
+GENERATED_INDEXES = {
+    "scripts/code-ratchet-baseline.json",  # plafonds du gel — scripts/check-code-ratchet.py
+    "web/data/architecture.json",          # données du site — scripts/gen-site-data.py
+    "docs/framework-tools-inventory.md",   # cet inventaire lui-même
+}
+
 
 def git(*args: str) -> str:
     return subprocess.run(
@@ -45,7 +64,16 @@ def git(*args: str) -> str:
 
 def grep_hits(needle: str, paths: list[str]) -> set[str]:
     out = git("grep", "-l", "-F", needle, "--", *paths)
-    return set(out.splitlines())
+    return {h for h in out.splitlines() if h not in GENERATED_INDEXES}
+
+
+def check_generated_indexes() -> list[str]:
+    """Retourne les entrées de GENERATED_INDEXES qui n'existent plus.
+
+    Un renommage silencieux ferait réapparaître le biais sans rien casser :
+    on préfère le signaler bruyamment.
+    """
+    return [rel for rel in sorted(GENERATED_INDEXES) if not (ROOT / rel).exists()]
 
 
 def classify(rel: str) -> tuple[str, dict[str, int]]:
@@ -81,6 +109,9 @@ def main() -> None:
     )
     if not tools:
         sys.exit("no framework/tools/*.py files found")
+
+    for missing in check_generated_indexes():
+        print(f"warning: GENERATED_INDEXES entry no longer exists: {missing}", file=sys.stderr)
 
     rows: dict[str, list[tuple[str, int, dict[str, int]]]] = {}
     for rel in tools:
