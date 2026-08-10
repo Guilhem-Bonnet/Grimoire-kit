@@ -22,7 +22,6 @@ Le mode `concurrent-cpu` utilise `ThreadPoolExecutor` pour paralléliser des tra
 | `orchestrator.py` mode `concurrent-cpu` | ThreadPoolExecutor local — pas d'appel API LLM |
 | `agent-worker.py` | Charge une persona depuis un fichier, produit un résultat string |
 | `message-bus.py` | Seul `InProcessBus` (queue mémoire) est implémenté ; Redis/NATS sont des stubs |
-| `background-tasks.py` | Écrit des JSON sur disque, ne lance pas de vrais processus background |
 | Party Mode | Un seul LLM simule plusieurs personas — c'est le pattern IDE correct |
 
 <img src="../assets/divider.svg" width="100%" alt="">

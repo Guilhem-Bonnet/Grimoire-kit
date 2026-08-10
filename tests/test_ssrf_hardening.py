@@ -29,7 +29,7 @@ def _load(tool: str):
     return module
 
 
-STRICT_TOOLS = ["web-browser", "docs-fetcher", "doc-fetcher"]
+STRICT_TOOLS = ["web-browser"]
 
 BLOCKED_URLS = [
     "http://2130706433/",          # 127.0.0.1 en décimal
