@@ -89,17 +89,39 @@ def _is_grimoire_hook(path: Path) -> bool:
         return False
 
 
-def _hook_states(hooks_dir: Path) -> dict[str, str]:
-    """Per-hook state: installed | third-party | missing."""
+def _is_current(dst: Path, src: Path) -> bool:
+    """Is the installed hook still the one shipped by this version?
+
+    ``install`` copies the source verbatim, then may append the Mnemo block to
+    ``pre-commit`` — a trailing addition is expected, a divergent body is not.
+    """
+    try:
+        installed = dst.read_text(encoding="utf-8", errors="replace")
+        source = src.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return installed.startswith(source)
+
+
+def _hook_states(hooks_dir: Path, sources: Path) -> dict[str, str]:
+    """Per-hook state: installed | stale | third-party | missing.
+
+    ``stale`` matters: a hook installed by an older version keeps running
+    silently after an upgrade. Reporting it as installed turned the check into
+    a green light for hooks that no longer match what they ship.
+    """
     states: dict[str, str] = {}
-    for hook_name in _HOOK_MAP:
+    for hook_name, src_name in _HOOK_MAP.items():
         dst = hooks_dir / hook_name
+        src = sources / src_name
         if not dst.is_file():
             states[hook_name] = "missing"
-        elif _is_grimoire_hook(dst):
-            states[hook_name] = "installed"
-        else:
+        elif not _is_grimoire_hook(dst):
             states[hook_name] = "third-party"
+        elif src.is_file() and not _is_current(dst, src):
+            states[hook_name] = "stale"
+        else:
+            states[hook_name] = "installed"
     return states
 
 
@@ -126,7 +148,7 @@ _force_opt = typer.Option(False, "--force", "-f", help="Overwrite third-party ho
 def hooks_list(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
     """List available Grimoire hooks and their installation state."""
     _, hooks_dir, sources = _resolve_dirs(path)
-    states = _hook_states(hooks_dir)
+    states = _hook_states(hooks_dir, sources)
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
             "hooks_dir": str(hooks_dir),
@@ -141,7 +163,7 @@ def hooks_list(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
     tbl.add_column("Hook")
     tbl.add_column("Source")
     tbl.add_column("State")
-    style = {"installed": "green", "third-party": "yellow", "missing": "red"}
+    style = {"installed": "green", "stale": "yellow", "third-party": "yellow", "missing": "red"}
     for name, src in _HOOK_MAP.items():
         tbl.add_row(name, src, f"[{style[states[name]]}]{states[name]}[/{style[states[name]]}]")
     console.print(tbl)
@@ -150,16 +172,25 @@ def hooks_list(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
 @hooks_app.command("status")
 def hooks_status(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
     """Summarize hook installation state (exit 1 when incomplete)."""
-    _, hooks_dir, _ = _resolve_dirs(path)
-    states = _hook_states(hooks_dir)
+    _, hooks_dir, sources = _resolve_dirs(path)
+    states = _hook_states(hooks_dir, sources)
     installed = sum(1 for state in states.values() if state == "installed")
+    stale = sum(1 for state in states.values() if state == "stale")
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"installed": installed, "total": len(states), "states": states}, indent=2))
+        typer.echo(json.dumps({
+            "installed": installed, "stale": stale, "total": len(states), "states": states,
+        }, indent=2))
     else:
+        icons = {
+            "installed": "[green][OK][/green]",
+            "stale": "[yellow][~][/yellow]",
+            "third-party": "[yellow][!][/yellow]",
+            "missing": "[red][x][/red]",
+        }
         for name, state in states.items():
-            icon = {"installed": "[green][OK][/green]", "third-party": "[yellow][!][/yellow]", "missing": "[red][x][/red]"}[state]
-            console.print(f"  {icon} {name}")
-        console.print(f"  {installed}/{len(states)} hooks installés")
+            suffix = " (version obsolète)" if state == "stale" else ""
+            console.print(f"  {icons[state]} {name}{suffix}")
+        console.print(f"  {installed}/{len(states)} hooks à jour")
         if installed < len(states):
             console.print("  → grimoire hooks install")
     raise typer.Exit(0 if installed == len(states) else 1)

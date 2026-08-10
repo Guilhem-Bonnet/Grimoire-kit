@@ -101,3 +101,59 @@ class TestHooksStatusList:
         states = {h["name"]: h["state"] for h in payload["hooks"]}
         assert states["pre-push"] == "installed"
         assert states["commit-msg"] == "missing"
+
+
+class TestHooksStaleness:
+    """Un hook installé par une version antérieure continue de tourner en
+    silence après une mise à jour. Le signaler est le seul moyen de ne pas
+    présenter comme sain un cycle agent qui ne correspond plus à ce qui est
+    livré."""
+
+    def test_outdated_hook_is_reported_stale(self, kit_repo: Path) -> None:
+        runner.invoke(app, ["hooks", "install", str(kit_repo)])
+        # La source évolue (nouvelle version du kit), l'installé reste l'ancien.
+        source = kit_repo / "framework" / "hooks" / "pre-push.sh"
+        source.write_text(
+            "#!/usr/bin/env bash\n# Grimoire hook pre-push.sh\n# nouvelle garde\nexit 0\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["-o", "json", "hooks", "list", str(kit_repo)])
+        states = {h["name"]: h["state"] for h in json.loads(result.stdout)["hooks"]}
+        assert states["pre-push"] == "stale"
+        assert states["commit-msg"] == "installed"
+
+    def test_status_fails_when_a_hook_is_stale(self, kit_repo: Path) -> None:
+        runner.invoke(app, ["hooks", "install", str(kit_repo)])
+        assert runner.invoke(app, ["hooks", "status", str(kit_repo)]).exit_code == 0
+
+        (kit_repo / "framework" / "hooks" / "commit-msg.sh").write_text(
+            "#!/usr/bin/env bash\n# Grimoire hook commit-msg.sh\n# v2\nexit 0\n", encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["-o", "json", "hooks", "status", str(kit_repo)])
+        assert result.exit_code == 1, "un hook obsolète ne doit pas passer pour installé"
+        payload = json.loads(result.stdout)
+        assert payload["stale"] == 1
+        assert payload["installed"] == payload["total"] - 1
+
+    def test_install_refreshes_a_stale_hook(self, kit_repo: Path) -> None:
+        runner.invoke(app, ["hooks", "install", str(kit_repo)])
+        (kit_repo / "framework" / "hooks" / "pre-push.sh").write_text(
+            "#!/usr/bin/env bash\n# Grimoire hook pre-push.sh\n# v2\nexit 0\n", encoding="utf-8",
+        )
+        runner.invoke(app, ["hooks", "install", str(kit_repo)])
+
+        result = runner.invoke(app, ["-o", "json", "hooks", "status", str(kit_repo)])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["stale"] == 0
+
+    def test_mnemo_suffix_is_not_mistaken_for_drift(self, kit_repo: Path) -> None:
+        """`install` ajoute le bloc mnemo à pre-commit — c'est attendu."""
+        runner.invoke(app, ["hooks", "install", str(kit_repo)])
+        content = (kit_repo / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+        assert "mnemo-consolidate.sh" in content
+
+        result = runner.invoke(app, ["-o", "json", "hooks", "list", str(kit_repo)])
+        states = {h["name"]: h["state"] for h in json.loads(result.stdout)["hooks"]}
+        assert states["pre-commit"] == "installed"
