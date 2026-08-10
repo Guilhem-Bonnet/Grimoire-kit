@@ -26,7 +26,9 @@
     { id: 'mem', q: 'Le système doit-il se souvenir ?', sub: 'décisions et contexte réutilisables la prochaine fois', opts: [
       { id: 'yes', t: 'Oui, garder la mémoire', s: 'les agents suivants repartent du réel' },
       { id: 'no',  t: 'Non, chaque mission repart à neuf', s: 'plus simple, moins de contexte' }
-    ] }
+    ] },
+    { id: 'brief', type: 'text', q: 'Dites-le en une phrase.', sub: 'facultatif — ce texte devient le cadrage donné aux agents',
+      placeholder: 'ex. : reprendre les tickets de support ouverts et proposer un correctif testé' }
   ];
 
   const PRESETS = {
@@ -63,14 +65,18 @@
         <h2>${esc(s.q)}</h2>
         <p class="cp-sub">${esc(s.sub)}</p>
         <div class="cp-opts">
-          ${s.opts.map(o => `<button class="cp-opt${answers[s.id] === o.id ? ' on' : ''}" data-v="${o.id}">
+          ${s.type === 'text'
+            ? `<textarea id="cp-text" class="at-search" rows="3" spellcheck="false"
+                 style="width:100%;resize:vertical;padding:10px;line-height:1.5"
+                 placeholder="${esc(s.placeholder)}">${esc(answers[s.id] || '')}</textarea>`
+            : s.opts.map(o => `<button class="cp-opt${answers[s.id] === o.id ? ' on' : ''}" data-v="${o.id}">
             <span><b>${esc(o.t)}</b><span>${esc(o.s)}</span></span><span class="arr">${answers[s.id] === o.id ? '✓' : '→'}</span>
           </button>`).join('')}
         </div>
         <div class="cp-foot">
           ${idx > 0 ? '<button class="at-btn sm ghost" id="cp-back">← retour</button>' : '<span></span>'}
           <span class="cp-dots">${STEPS.map((_, i) => `<i class="${i <= idx ? 'on' : ''}"></i>`).join('')}</span>
-          <button class="at-btn sm acc" id="cp-next" ${answers[s.id] ? '' : 'disabled'}>${idx === STEPS.length - 1 ? 'CRÉER MON FLOW →' : 'CONTINUER →'}</button>
+          <button class="at-btn sm acc" id="cp-next" ${(answers[s.id] || s.type === 'text') ? '' : 'disabled'}>${idx === STEPS.length - 1 ? 'CRÉER MON FLOW →' : 'CONTINUER →'}</button>
         </div>
       </div>`;
     overlay.querySelector('#cp-close').addEventListener('click', close);
@@ -79,10 +85,15 @@
       if (idx < STEPS.length - 1) { idx++; draw(); }
       else draw();
     }));
+    const ta = overlay.querySelector('#cp-text');
+    if (ta) {
+      ta.addEventListener('input', () => { answers[s.id] = ta.value.trim(); });
+      ta.focus();
+    }
     const back = overlay.querySelector('#cp-back');
     if (back) back.addEventListener('click', () => { idx--; draw(); });
     overlay.querySelector('#cp-next').addEventListener('click', () => {
-      if (!answers[s.id]) return;
+      if (!answers[s.id] && s.type !== 'text') return;
       if (idx === STEPS.length - 1) { close(); build(); }
       else { idx++; draw(); }
     });
@@ -118,11 +129,26 @@ refus:
       docs: promptDoc(p.name, p.mission || preset.mission), x, y, ...(extra || {})
     });
 
-    const nodes = [], edges = [];
+    const nodes = [], edges = [], reasons = [];
     const wire = (a, b, c) => edges.push({ id: uid(), from: a.id, to: b.id, contract: c });
+    /* Chaque élément posé sait dire pourquoi il est là : le débriefing est
+       la vraie leçon de vocabulaire, pas le formulaire. */
+    const why = (n, txt) => {
+      const sp = n.kind === 'agent' ? null : (window.Atelier ? Atelier.nodeSpec(n.ref) : null);
+      reasons.push({
+        id: n.id, why: txt,
+        name: n.kind === 'agent' ? n.name : (sp ? sp.name : n.ref),
+        color: n.kind === 'agent' ? (window.BP2Team ? BP2Team.COLOR : null) : (sp && window.Atelier ? Atelier.catColor(sp.cat) : null)
+      });
+      return n;
+    };
 
     const prd = { id: uid(), ref: 'ORC-02', x: 110, y: 320 };
+    if (answers.brief) prd.docs = { 'mission-brief.md': { at: Date.now(), content: '# Mission brief\n\n' + answers.brief + '\n' } };
     nodes.push(prd);
+    why(prd, answers.brief
+      ? 'le cadrage de la mission — votre phrase y est déjà écrite, ouvrez-le pour la compléter'
+      : 'le cadrage : ce que la mission demande et ses limites, avant que quiconque commence');
     let producers = [];
 
     if (orch) {
@@ -130,6 +156,9 @@ refus:
       const a1 = mkAgent(preset, 730, 210);
       const a2 = mkAgent({ ...preset.second, mission: 'vérifier et compléter le travail de ' + preset.name }, 730, 430);
       nodes.push(chef, a1, a2);
+      why(chef, 'il découpe la mission et délègue — il ne produit rien lui-même');
+      why(a1, 'il fait le travail et joint la preuve de ce qu\u2019il avance');
+      why(a2, 'il vérifie le travail du premier — celui qui produit n\u2019est jamais celui qui valide');
       wire(prd, chef, 'task-envelope');
       wire(chef, a1, 'task-envelope');
       wire(chef, a2, 'task-envelope');
@@ -138,6 +167,8 @@ refus:
       const sog = { id: uid(), ref: 'ORC-01', x: 410, y: 320 };
       const a1 = mkAgent(preset, 720, 320);
       nodes.push(sog, a1);
+      why(sog, 'le routage : une seule porte d\u2019entrée, qui envoie au bon agent');
+      why(a1, 'il fait le travail et joint la preuve de ce qu\u2019il avance');
       wire(prd, sog, 'task-envelope');
       wire(sog, a1, 'task-envelope');
       producers = [a1];
@@ -148,28 +179,35 @@ refus:
     if (armored) {
       const sec = { id: uid(), ref: 'QUA-14', x: px, y: 320 };
       nodes.push(sec);
+      why(sec, 'il contrôle la sortie avant qu\u2019elle serve à décider — hors format, ça bloque');
       producers.forEach(a => wire(a, sec, 'evidence-pack'));
       proofSrc = [sec];
     }
     const gov = { id: uid(), ref: 'QUA-05', x: px + 300, y: 250 };
     nodes.push(gov);
+    why(gov, 'la porte : elle ne laisse passer que si la preuve tient — sinon rien ne passe');
     proofSrc.forEach(a => wire(a, gov, 'evidence-pack'));
 
     if (care !== 'fast') {
       const rev = { id: uid(), ref: 'QUA-15', x: px + 300, y: 450 };
       const jr = { id: uid(), ref: 'QUA-03', x: px + 600, y: 450 };
       nodes.push(rev, jr);
+      why(rev, 'une relecture par un tiers, jamais par celui qui a produit');
+      why(jr, 'le journal : ce qui a été décidé reste consultable après coup');
       proofSrc.forEach(a => wire(a, rev, 'evidence-pack'));
       wire(rev, jr, 'evidence-pack');
       if (mem) {
         const m = { id: uid(), ref: 'KNO-02', x: px + 900, y: 450 };
         nodes.push(m);
+        why(m, 'la mémoire : la prochaine mission repart du réel, pas de zéro');
         wire(rev, m, 'evidence-pack');
       }
     } else if (mem) {
       const rev = { id: uid(), ref: 'QUA-15', x: px + 300, y: 450 };
       const m = { id: uid(), ref: 'KNO-02', x: px + 600, y: 450 };
       nodes.push(rev, m);
+      why(rev, 'une relecture par un tiers, jamais par celui qui a produit');
+      why(m, 'la mémoire : la prochaine mission repart du réel, pas de zéro');
       proofSrc.forEach(a => wire(a, rev, 'evidence-pack'));
       wire(rev, m, 'evidence-pack');
     }
@@ -181,7 +219,7 @@ refus:
       w: Math.max(...xs) - Math.min(...xs) + 300, h: Math.max(...ys) - Math.min(...ys) + 220,
       label: 'composé — ' + goalTxt + (armored ? ' · blindé' : care === 'proven' ? ' · prouvé' : '') };
 
-    return { nodes, edges, comments: [comment], orch, armored };
+    return { nodes, edges, comments: [comment], orch, armored, reasons };
   }
 
   function build() {
@@ -196,12 +234,13 @@ refus:
     E.render();
     E.fitView();
     const agentNames = r.nodes.filter(n => n.kind === 'agent').map(n => n.name);
+    /* Le résumé ne tient pas dans un toast de neuf secondes : il s'installe
+       dans l'inspecteur, ligne par ligne, jusqu'à ce qu'on le masque. */
+    if (E.setBuiltSummary) E.setBuiltSummary(r.reasons);
     Atelier.toast(
-      'Votre flow est construit : <b>' + esc(agentNames.join(', ')) + '</b>' +
-      (r.orch ? ' — le chef délègue, les spécialistes prouvent.' : ' reçoit les tâches routées.') +
-      ' Chaque agent est déjà <b>équipé</b> (double-clic pour voir sa fiche) et son prompt est écrit. ' +
-      (r.armored ? 'Des <b>hooks</b> scannent les secrets automatiquement. ' : '') +
-      'Ensuite : <b>SIMULER</b>.', { good: true, ms: 9000 });
+      'Votre équipe est posée : <b>' + esc(agentNames.join(', ')) + '</b>. ' +
+      'Le détail de ce qui a été construit est à droite — ensuite : <b>SIMULER</b>.',
+      { good: true, ms: 6000 });
   }
 
   window.BP2Composer = { open, makeGraph };

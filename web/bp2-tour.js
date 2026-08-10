@@ -129,21 +129,10 @@
     const btn = $('#bp-tour-btn');
     if (btn) btn.addEventListener('click', start);
     BPEditor.on('news-replay', start);
-    if (seen()) return;
-    if (btn) btn.classList.add('fresh');
-
-    const st = BPEditor.state();
-    const canStart = Atelier.onboarded() || (st && st.nodes.length);
-    if (canStart) { setTimeout(start, 900); return; }
-    /* toile vierge + visite gestuelle jamais faite : on laisse la priorité
-       au premier flow, puis on présente les nouveautés. */
-    let armed = false;
-    const arm = () => { if (armed || seen()) return; armed = true; setTimeout(() => { if (!seen()) start(); }, 1600); };
-    BPEditor.on('sim-done', arm);
-    const poll = setInterval(() => {
-      if (seen()) { clearInterval(poll); return; }
-      if (Atelier.onboarded()) { clearInterval(poll); arm(); }
-    }, 1800);
+    /* Cette visite est un changelog, pas un accueil : elle ne se déclenche
+       jamais seule. Le badge signale la nouveauté, l'utilisateur décide.
+       (Un seul guide à la fois — la visite du premier flow a la main.) */
+    if (!seen() && btn) btn.classList.add('fresh');
   }
   boot();
 })();

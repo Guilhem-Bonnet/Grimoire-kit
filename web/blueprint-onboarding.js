@@ -19,28 +19,30 @@
     let dismissedFor = null;  // bpId où l'état vide a été volontairement fermé
 
     /* ══ Étapes ══ */
+    /* Le geste d'abord, le mot ensuite : chaque étape nomme la carte par ce
+       qu'elle fait ; sa référence du standard suit, entre parenthèses. */
     const STEPS = [
       {
         label: '1/4 · ~15 s',
-        html: 'Tout flow gouverné finit par <b>une preuve et une porte</b>. Posez la preuve : <b>QUA-04 — Evidence pack et verification verdict</b>. La recherche est déjà remplie — cliquez la carte dans la palette.',
+        html: 'Un flow sérieux finit toujours par <b>une preuve, puis une porte</b>. Posez la preuve : la carte <b>Evidence pack et verification verdict</b> — celle qui transforme un « c’est fini » en décision vérifiable. La recherche est déjà remplie, cliquez la carte dans la palette.',
         setup() { E.palette.search('QUA-04'); E.pulsePalette('QUA-04'); },
         done: ev => ev.type === 'node-added' && ev.data.ref === 'QUA-04'
       },
       {
         label: '2/4 · ~20 s',
-        html: 'Une preuve sans porte ne décide rien. La palette montre maintenant <b>ce qui se branche</b> sur sa sortie — posez <b>QUA-05 — Evidence-driven transition</b>, la porte qui décide sur preuve.',
+        html: 'Une preuve que personne ne lit ne décide rien. La palette montre maintenant <b>ce qui se branche</b> sur sa sortie — posez <b>Evidence-driven transition</b>, la porte qui laisse passer seulement si la preuve tient.',
         setup() { E.palette.search('QUA-05'); E.pulsePalette('QUA-05'); },
         done: ev => ev.type === 'node-added' && ev.data.ref === 'QUA-05'
       },
       {
         label: '3/4 · ~15 s',
-        html: 'Reliez : attrapez le pin <b>sortie ○ evidence-pack</b> de QUA-04 et lâchez-le sur l\u2019<b>entrée ○</b> de QUA-05. (Lâché dans le vide, le fil ouvre le menu des nodes compatibles.)',
+        html: 'Reliez les deux : attrapez le point <b>○ de droite</b> de la première carte (« la preuve du travail ») et lâchez-le sur le <b>○ de gauche</b> de la seconde. Lâché dans le vide, le fil propose les cartes compatibles.',
         setup() { E.pulsePin('out', 'evidence-pack'); },
         done: ev => ev.type === 'edge-added'
       },
       {
         label: '4/4 · ~20 s',
-        html: 'Simulez : le plan des contrats se déroule, étape par étape, dans l\u2019inspecteur. <b>Rien ne s\u2019exécute</b> — c\u2019est tout l\u2019intérêt.',
+        html: 'Simulez : le parcours se déroule étape par étape dans le panneau de droite. <b>Rien ne s’exécute</b> — c’est tout l’intérêt, vous voyez le plan avant de le lancer.',
         setup() { E.pulse('#bp-simulate'); },
         done: ev => ev.type === 'sim-done'
       }
@@ -90,6 +92,7 @@
       removeCoach();
       $('#bp-progress-slot').innerHTML = '';
       Atelier.setOnboarded(true);
+      if (silent !== true) Atelier.journalEvent('tour-skipped');
       if (silent !== true) Atelier.toast('Visite fermée — rejouable à tout moment via <b>?</b>');
     }
 
@@ -115,30 +118,38 @@
       const onboarded = Atelier.onboarded();
       emptyOverlay = document.createElement('div');
       emptyOverlay.className = 'bp-empty';
+      /* Deux portes au premier contact : les autres départs sont des variantes
+         de « partir d'un préfait » — ils attendent sous le pli. */
       emptyOverlay.innerHTML = `
         <div class="bp-empty-card">
           <h2 style="font-size:1.15rem;text-align:center;margin-bottom:6px">Par où commencer ?</h2>
           <p style="font-size:0.82rem;color:var(--ink-soft);text-align:center;margin-bottom:18px;line-height:1.6">
-            Un blueprint <b style="color:var(--ink)">compose</b> des patterns ; il se valide, se simule, se compile — il n\u2019exécute jamais rien.</p>
+            Un blueprint décrit <b style="color:var(--ink)">qui fait quoi</b> dans votre projet. Il se valide, se simule, se compile — il n’exécute jamais rien.</p>
           <div class="at-col" style="gap:9px">
             ${window.BP2Composer ? `<button class="bp-start acc" id="start-composer">
-              <span><b>Décrire ce que je veux</b><span>4 questions, zéro jargon — votre équipe se construit</span></span>
-              <span class="arr">→</span></button>` : ''}
-            ${window.BP2Library ? `<button class="bp-start" id="start-template">
-              <span><b>Partir d\u2019un template Grimoire</b><span>6 flows préfaits — instanciés en copie, à dériver</span></span>
+              <span><b>Décrire ce que je veux</b><span>4 questions, zéro jargon — votre équipe se construit toute seule</span></span>
               <span class="arr">→</span></button>` : ''}
             <button class="bp-start" id="start-example">
-              <span><b>Partir du modèle</b><span>délégation gouvernée · 5 nodes · requiert crewai</span></span>
-              <span class="arr">→</span></button>
-            <button class="bp-start" id="start-uc">
-              <span><b>Partir d\u2019un use-case</b><span>des squelettes typés, issus du catalogue</span></span>
-              <span class="arr">→</span></button>
-            <button class="bp-start guided" id="start-guided">
-              <span><b>${onboarded ? 'Rejouer la visite guidée' : 'Toile vide, guidée'}</b><span>4 gestes · moins de 2 minutes</span></span>
+              <span><b>Voir un exemple</b><span>un flow complet et relié — à lire, puis à modifier</span></span>
               <span class="arr">→</span></button>
           </div>
-          <p style="text-align:center;margin-top:14px">
-            <button class="at-btn sm ghost" id="start-blank">commencer à vide, sans guide ✕</button></p>
+          <details class="bp-more" style="margin-top:14px">
+            <summary style="font-size:0.75rem;color:var(--ink-muted);cursor:pointer;text-align:center">autres départs</summary>
+            <div class="at-col" style="gap:9px;margin-top:10px">
+              ${window.BP2Library ? `<button class="bp-start" id="start-template">
+                <span><b>Partir d’un template Grimoire</b><span>6 flows préfaits — instanciés en copie, à dériver</span></span>
+                <span class="arr">→</span></button>` : ''}
+              <button class="bp-start" id="start-uc">
+                <span><b>Partir d’un use-case</b><span>des squelettes typés, issus du catalogue</span></span>
+                <span class="arr">→</span></button>
+              <button class="bp-start guided" id="start-guided">
+                <span><b>${onboarded ? 'Rejouer la visite guidée' : 'Toile vide, guidée'}</b><span>4 gestes · moins de 2 minutes</span></span>
+                <span class="arr">→</span></button>
+              <button class="bp-start" id="start-blank">
+                <span><b>Commencer à vide</b><span>sans guide — la palette et le clic droit suffisent</span></span>
+                <span class="arr">→</span></button>
+            </div>
+          </details>
         </div>`;
       canvas.appendChild(emptyOverlay);
       const sc = $('#start-composer');
@@ -147,6 +158,9 @@
       if (stpl) stpl.addEventListener('click', () => { hideEmpty(); window.BP2Library.openGallery(); });
       $('#start-example').addEventListener('click', () => {
         hideEmpty();
+        /* L'exemple du studio (équipe, sous-flow, documents remplis) ne
+           réclame aucune extension : première lecture sans installation. */
+        if (E.loadStudioExample) { E.loadStudioExample(); return; }
         const crewInstalled = Atelier.installedExts().includes('crewai');
         if (!crewInstalled) E.installExtInline('crewai', () => E.loadExample());
         else E.loadExample();
@@ -163,7 +177,7 @@
         const s = STEPS[tour.step];
         if (s.done({ type, data })) {
           if (type === 'edge-added') {
-            Atelier.toast('Connecté via contrat <b>evidence-pack</b> ✓ — vous venez d\u2019apprendre le mot le plus important du standard.', { good: true, ms: 4200 });
+            Atelier.toast('Relié : la seconde carte reçoit <b>la preuve du travail</b> ✓ — dans le standard, cette preuve s’appelle un <b>evidence-pack</b>.', { good: true, ms: 4600 });
           }
           tour.step++;
           if (tour.step >= STEPS.length) successCard();
