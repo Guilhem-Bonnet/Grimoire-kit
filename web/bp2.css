@@ -396,7 +396,9 @@
 
 /* ── Bandeau de guidage : la règle la plus prioritaire, jamais bloquante ── */
 .bp-coachbar {
-  position: absolute; left: 14px; right: 14px; bottom: 44px; z-index: 7;
+  /* Au-dessus du HUD de zoom (bottom 42–68px, z-index 15) et devant lui :
+     posé plus bas et derrière, il en perdait le compteur et le bouton. */
+  position: absolute; left: 14px; right: 14px; bottom: 76px; z-index: 16;
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px 8px 12px;
   background: var(--elev-2); border: 1px solid var(--line-strong);
@@ -418,7 +420,12 @@
   flex: 1 1 auto; min-width: 0;
 }
 .bp-coachbar .cb-txt b { color: var(--ink); }
-.bp-coachbar .at-btn { flex: none; }
+/* Le libellé du correctif peut être long : il rétrécit avant de chasser le
+   bouton d'abandon hors du bandeau, que l'overflow de la toile rognerait. */
+.bp-coachbar .at-btn {
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .bp-coachbar .cb-n { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); flex: none; }
 .bp-coachbar .cb-x {
   flex: none; background: none; border: none; color: var(--ink-muted);

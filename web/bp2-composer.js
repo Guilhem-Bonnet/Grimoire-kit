@@ -1,5 +1,5 @@
 /* bp2-composer.js — « Décrire ce que je veux »
-   4 questions en langage courant → une équipe équipée + la gouvernance
+   4 questions en langage courant, plus une phrase libre facultative → une équipe équipée + la gouvernance
    qui va bien. Zéro jargon requis : le vocabulaire s'apprend APRÈS,
    en regardant ce qui a été construit.
    ========================================================================== */

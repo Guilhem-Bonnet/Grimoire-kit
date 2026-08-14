@@ -95,7 +95,7 @@
     const specCache = {}; const sp = n => specCache[n.id] || (specCache[n.id] = specOf(n));
     const hasCat = cat => nodes.some(n => { const s = sp(n); return s && s.cat === cat; });
     const hasRef = ref => nodes.some(n => n.ref === ref);
-    const nameOf = n => { const s = sp(n); return n.kind === 'group' ? '◇ ' + (n.name || 'sous-flow') : (n.kind === 'agent' ? esc(n.name) : s.name); };
+    const nameOf = n => { const s = sp(n); return n.kind === 'group' ? '◇ ' + esc(n.name || 'sous-flow') : (n.kind === 'agent' ? esc(n.name) : s.name); };
 
     /* R-01 · une preuve doit franchir une porte */
     nodes.forEach(n => {

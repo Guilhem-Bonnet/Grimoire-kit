@@ -128,7 +128,7 @@
             Un blueprint décrit <b style="color:var(--ink)">qui fait quoi</b> dans votre projet. Il se valide, se simule, se compile — il n’exécute jamais rien.</p>
           <div class="at-col" style="gap:9px">
             ${window.BP2Composer ? `<button class="bp-start acc" id="start-composer">
-              <span><b>Décrire ce que je veux</b><span>4 questions, zéro jargon — votre équipe se construit toute seule</span></span>
+              <span><b>Décrire ce que je veux</b><span>4 questions et une phrase, zéro jargon — votre équipe se construit toute seule</span></span>
               <span class="arr">→</span></button>` : ''}
             <button class="bp-start" id="start-example">
               <span><b>Voir un exemple</b><span>un flow complet et relié — à lire, puis à modifier</span></span>
@@ -160,11 +160,11 @@
       $('#start-example').addEventListener('click', () => {
         hideEmpty();
         /* L'exemple du studio (équipe, sous-flow, documents remplis) ne
-           réclame aucune extension : première lecture sans installation. */
-        if (E.loadStudioExample) { E.loadStudioExample(); return; }
-        const crewInstalled = Atelier.installedExts().includes('crewai');
-        if (!crewInstalled) E.installExtInline('crewai', () => E.loadExample());
-        else E.loadExample();
+           réclame aucune extension : première lecture sans installation.
+           S'il a déjà été ouvert et retravaillé, on le rouvre tel quel —
+           le régénérer écraserait le travail sans prévenir. */
+        if (Atelier.loadBp('studio-demo')) E.loadBp('studio-demo');
+        else E.loadStudioExample();
       });
       $('#start-uc').addEventListener('click', () => { location.href = 'patterns.html'; });
       $('#start-guided').addEventListener('click', startTour);
