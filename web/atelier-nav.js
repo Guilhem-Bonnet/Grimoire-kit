@@ -110,6 +110,8 @@
   let STATUS = null;          // /api/status
   let SETUP = null;           // /api/setup (artifacts par surface)
   let PROJECT = lsRead(LS.project, null);
+  const SESSION_STARTED_AT = Date.now();
+  const JOURNAL_CACHE = {};   // .v : journal en mémoire, undefined = pas encore lu
   let INSTALLED = [];         // ids d'extensions installées
   const BP_CACHE = new Map(); // id -> état studio
 
@@ -196,15 +198,24 @@
        Trois indicateurs seulement, locaux, sans identifiant : sans eux, une
        refonte d'accueil reste une opinion. Rien ne sort du navigateur. */
     journalEvent(name) {
-      const j = lsRead(LS.journal, null) || { startedAt: Date.now(), counts: {}, firstEdgeMs: null, reachedSim: false, tourSkipped: 0 };
+      const j = JOURNAL_CACHE.v || lsRead(LS.journal, null)
+        || { startedAt: Date.now(), counts: {}, firstEdgeMs: null, reachedSim: false, tourSkipped: 0 };
       j.counts[name] = (j.counts[name] || 0) + 1;
-      if (name === 'edge-added' && j.firstEdgeMs === null) j.firstEdgeMs = Date.now() - j.startedAt;
+      /* Mesuré depuis l'ouverture de CETTE session : compté depuis le premier
+         événement jamais journalisé, le chiffre grossissait d'un jour à
+         l'autre et ne disait plus rien du temps de prise en main. */
+      if (name === 'edge-added' && j.firstEdgeMs === null) j.firstEdgeMs = Date.now() - SESSION_STARTED_AT;
       if (name === 'sim-done') j.reachedSim = true;
-      if (name === 'tour-skipped') j.tourSkipped++;
+      if (name === 'tour-skipped') j.tourSkipped = (j.tourSkipped || 0) + 1;
+      JOURNAL_CACHE.v = j;
       lsWrite(LS.journal, j);
       return j;
     },
-    studioJournal() { return lsRead(LS.journal, null); },
+    /* Lu à chaque render : servi depuis le cache, pas depuis localStorage. */
+    studioJournal() {
+      if (JOURNAL_CACHE.v === undefined) JOURNAL_CACHE.v = lsRead(LS.journal, null);
+      return JOURNAL_CACHE.v;
+    },
 
     /* ── Onboarding ── */
     onboarded() { return localStorage.getItem(LS.onboarded) === '1'; },
@@ -289,7 +300,6 @@
       return c && c.name ? c.name.toLowerCase() : String(id || '').replace(/-/g, ' ');
     },
     catIntent(catId) { return FAMILY_INTENT[catId] || null; },
-    isEssential(ref) { return ESSENTIAL_REFS.includes(ref); },
     ESSENTIAL_REFS,
     /* Coupe un texte à la longueur utile d'une carte, sans couper un mot. */
     clamp(txt, max) {

@@ -19,9 +19,12 @@
 
   /* ══ Mini event-emitter ══ */
   const listeners = {};
-  const JOURNALED = ['node-added', 'edge-added', 'sim-done', 'compiled', 'tour-skipped'];
+  const JOURNALED = ['node-added', 'edge-added', 'sim-done', 'compiled'];
+  let applyingFix = false;   // vrai pendant qu'un correctif pose des artefacts
   const emit = (ev, data) => {
-    if (JOURNALED.includes(ev)) Atelier.journalEvent(ev);
+    /* Ne journaliser que ce que l'utilisateur a fait lui-même : les nodes et
+       liens posés par un correctif ne mesurent pas sa prise en main. */
+    if (!applyingFix && JOURNALED.includes(ev)) Atelier.journalEvent(ev);
     (listeners[ev] || []).forEach(cb => cb(data));
   };
   const on = (ev, cb) => { (listeners[ev] = listeners[ev] || []).push(cb); };
@@ -292,13 +295,15 @@
       const want = Math.round(head.offsetHeight) + 7;
       if (n._pinTop === want) return;
       n._pinTop = want;
+      /* specOf() reconstruit le catalogue à chaque appel : une seule fois. */
+      const sp = specOf(n);
       $$('.bp-pin', el).forEach(p => {
-        const list = p.dataset.dir === 'in' ? specOf(n).in : specOf(n).out;
+        const list = p.dataset.dir === 'in' ? sp.in : sp.out;
         const i = Math.max(0, list.indexOf(p.dataset.contract));
         p.style.top = (want + i * PIN_GAP) + 'px';
       });
       const body = el.querySelector('.body');
-      if (body) body.style.minHeight = (want + Math.max(specOf(n).in.length, specOf(n).out.length, 1) * PIN_GAP - 14) + 'px';
+      if (body) body.style.minHeight = (want + Math.max(sp.in.length, sp.out.length, 1) * PIN_GAP - 14) + 'px';
       n._h = el.offsetHeight;
     });
 
@@ -414,11 +419,14 @@
   function novice() {
     /* Se juge sur ce qui a été fait, pas sur ce qui a été déclaré : passer la
        visite marque `onboarded` sans rien apprendre — seule la visite menée à
-       son terme, ou un flow réellement amorcé, ouvre l'interface. */
+       son terme, ou un flow réellement amorcé, ouvre l'interface.
+       Le compte porte sur le blueprint ENTIER : juger le niveau courant
+       ferait rebasculer en habillage débutant à l'entrée d'un sous-flow, en
+       masquant le fil d'Ariane — c'est-à-dire la sortie. */
+    if (curPath.length) return false;
     const j = Atelier.studioJournal();
     if (j && j.counts && j.counts['tour-done']) return false;
-    const g = state ? G() : null;
-    return !g || g.nodes.length < 3;
+    return !state || countAll().n < 3;
   }
   function applyNoviceUI() {
     const app = document.querySelector('.bp-app');
@@ -485,7 +493,9 @@
     }
     /* Essentiels : le socle qui suffit à composer un flow gouverné complet.
        Toujours en tête, hors recherche — le catalogue entier vient après. */
-    if (!palQ) {
+    /* Quand la palette montre déjà les nodes compatibles, le bloc générique
+       ferait doublon : le contexte prime. */
+    if (!palQ && !ctx) {
       const ess = Atelier.ESSENTIAL_REFS.map(r => all.find(n => n.ref === r)).filter(Boolean);
       if (ess.length) {
         html += `<div class="bp-pal-sec ess">Essentiels · de quoi composer un flow complet</div>`
@@ -1289,18 +1299,20 @@
         const s = specOf(n);
         if (!s) return;
         if (isExtLocked(n)) {
-          out.push({ level: 'err', node: n.id, path, ref: s.name, text: `${where}« ${s.name} » requiert l'extension ${s.ext} — non installée.` });
+          out.push({ level: 'err', node: n.id, path, ref: s.name, text: `${where}« ${esc(s.name)} » requiert l'extension ${esc(s.ext)} — non installée.` });
           if (samePath(path)) state._warnByNode[n.id] = 'extension manquante';
           return;
         }
         s.in.forEach(c => {
           if (!graph.edges.some(e => e.to === n.id && e.contract === c) && !fed.has(c)) {
-            const nm = n.kind === 'group' ? (n.name || 'sous-flow') : s.name;
+            const nm = n.kind === 'group' ? esc(n.name || 'sous-flow') : s.name;
             out.push({ level: 'warn', node: n.id, path, ref: nm, text: `${where}rien ne lui fournit « ${Atelier.contractGloss(c)} » (${c}) — son entrée reste vide.` });
             if (samePath(path)) state._warnByNode[n.id] = 'entrée non connectée';
           }
         });
-        if (n.kind === 'group') visit(n.sub, path.concat(n.id), '◇ ' + (n.name || 'sous-flow') + ' · ',
+        /* `where` finit dans de l'innerHTML : le nom vient d'un blueprint
+           importé, donc il s'échappe ici, à la source. */
+        if (n.kind === 'group') visit(n.sub, path.concat(n.id), '◇ ' + esc(n.name || 'sous-flow') + ' · ',
           new Set(graph.edges.filter(e => e.to === n.id).map(e => e.contract)),
           new Set(graph.edges.filter(e => e.from === n.id).map(e => e.contract)));
       });
@@ -1347,17 +1359,33 @@
     if (!el) {
       el = document.createElement('div');
       el.id = 'bp-coachbar';
+      /* Le bandeau vit dans la toile mais n'est pas la toile : sans cette
+         coupure, le pointerdown remonte à #bp-canvas, qui arme un pan et
+         re-rend au pointerup — le bouton serait détruit avant le clic. */
+      el.addEventListener('pointerdown', ev => ev.stopPropagation());
       wrap.appendChild(el);
     }
+    /* Rendu idempotent : re-générer un HTML identique détacherait les
+       écouteurs et effacerait le focus clavier à chaque render(). */
+    const key = coachKey(r) + '|' + cands.length;
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
     el.className = 'bp-coachbar ' + (r.level === 'err' ? 'err' : r.level === 'warn' ? 'warn' : 'info');
     el.innerHTML = `
       <span class="cb-lvl">${r.level === 'err' ? 'à corriger' : r.level === 'warn' ? 'conseil' : 'suggestion'}</span>
       <span class="cb-txt">${r.ref ? `<b>${esc(r.ref)}</b> · ` : ''}${lexify(r.text)}</span>
       <button class="at-btn sm acc" id="cb-fix">⚡ ${esc(r.fix.label)}</button>
       <button class="cb-x" id="cb-skip" title="Ignorer ce conseil" aria-label="Ignorer ce conseil">✕</button>
-      ${cands.length > 1 ? `<span class="cb-n" title="conseils restants">1 / ${cands.length}</span>` : ''}`;
-    $('#cb-fix').addEventListener('click', () => { r.fix.run(); runValidation(true); render(); });
+      ${cands.length > 1 ? `<span class="cb-n" title="conseils en attente">+${cands.length - 1}</span>` : ''}`;
+    $('#cb-fix').addEventListener('click', () => { applyFix(r); });
     $('#cb-skip').addEventListener('click', () => { dismissedRules.add(coachKey(r)); renderCoachBar(); });
+  }
+  /* Un correctif est une pose de l'outil, pas un geste de l'utilisateur :
+     le journal ne doit pas se l'attribuer. */
+  function applyFix(r) {
+    applyingFix = true;
+    try { r.fix.run(); } finally { applyingFix = false; }
+    runValidation(true); render();
   }
 
   function runValidation(silent) {
@@ -1389,7 +1417,7 @@
     $$('#panel-validation [data-fix]').forEach(el => el.addEventListener('click', e => {
       e.stopPropagation();
       const r = res[parseInt(el.dataset.fix, 10)];
-      if (r && r.fix) { r.fix.run(); runValidation(false); }
+      if (r && r.fix) { applyingFix = true; try { r.fix.run(); } finally { applyingFix = false; } runValidation(false); }
     }));
     $$('#panel-validation [data-goto2]').forEach(el => el.addEventListener('click', e => {
       e.stopPropagation();
@@ -1961,7 +1989,6 @@
       const el = $$('.bp-pin').find(p => p.dataset.dir === dir && p.dataset.contract === contract);
       if (el) { el.classList.add('bp-pulse'); setTimeout(() => el.classList.remove('bp-pulse'), 2600); }
     },
-    loadExample: () => loadBp('onboarding-crew', instantiateExample()),
     loadStudioExample,
     countAll,
     openLex,
