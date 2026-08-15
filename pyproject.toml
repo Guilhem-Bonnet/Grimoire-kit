@@ -52,9 +52,11 @@ mcp = ["mcp>=1.0,<2"]
 qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0", "torch>=2.13.0"]
 weaviate = ["sentence-transformers>=3.0", "torch>=2.13.0"]
 neo4j = ["neo4j>=5.0"]
-# Aucun module de src/grimoire/ n'importe redis : le seul consommateur est
-# framework/tools/message-bus.py, en zone gelée. L'extra suit donc le sort
-# de cet outil — à retirer quand il sera drainé.
+# Consommé par src/grimoire/memory/hot.py (RedisHotMemory, cache chaud du
+# Memory OS) via un import dynamique — invisible à un grep `import redis`,
+# d'où une affirmation erronée dans le commit d'audit initial. Également
+# utilisé par framework/tools/message-bus.py, en zone gelée. L'extra reste
+# nécessaire tant que la couche chaude existe.
 redis = ["redis>=5.0"]
 # Borne d'origine, jamais revue : chromadb en est à la 1.5.x. La lever
 # demande de vérifier la rupture d'API 0.6 → 1.0, chantier distinct.
