@@ -364,14 +364,30 @@ class ForgeAPI:
                 for c in sorted(pins_out[str(n["id"])])
             ]
 
-        edges_v1 = [
-            {
-                "from": f"{e.get('from')}.out-{e.get('contract') or 'handoff-packet'}",
-                "to": f"{e.get('to')}.in-{e.get('contract') or 'handoff-packet'}",
-                "contract": e.get("contract") or "handoff-packet",
+        edges_v1 = []
+        for e in flat_edges:
+            contract = e.get("contract") or "handoff-packet"
+            edge_v1: dict[str, Any] = {
+                "from": f"{e.get('from')}.out-{contract}",
+                "to": f"{e.get('to')}.in-{contract}",
+                "contract": contract,
             }
-            for e in flat_edges
+            # Le canal (P0.2) était dessiné par le Studio puis perdu ici : les
+            # règles de résilience ne voyaient jamais les chemins d'échec.
+            if e.get("channel") and e["channel"] != "happy":
+                edge_v1["channel"] = e["channel"]
+            edges_v1.append(edge_v1)
+        # Points de reprise (P3.2) : le Studio les marque par node, le format
+        # compilable les attend en frontières de haut niveau.
+        checkpoints = [
+            n["id"] for n in flat_nodes
+            if _as_dict(_as_dict(n.get("config")).get("checkpoint"))
         ]
+        boundaries = list(blueprint.get("boundaries") or [])
+        if checkpoints:
+            boundaries.append(
+                {"id": "ck-studio", "mode": "checkpoint", "members": checkpoints, "scope": "state"}
+            )
         meta = blueprint.get("meta") or {}
         return {
             "blueprintVersion": 1,
@@ -383,6 +399,7 @@ class ForgeAPI:
             },
             "nodes": flat_nodes,
             "edges": edges_v1,
+            **({"boundaries": boundaries} if boundaries else {}),
         }
 
     def _catalogue(self) -> dict[str, Any] | None:

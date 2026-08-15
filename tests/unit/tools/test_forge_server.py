@@ -1096,3 +1096,84 @@ class TestFailureInjectionSimulate:
         fi = report["failureInjection"]
         assert fi["valid"] is True
         assert fi["path"] == ["crew", "human"]
+
+
+class TestPontStudioDeclarations:
+    """Le pont v2 → v1 doit transmettre ce que le Studio sait désormais écrire.
+
+    Trois tranches (P0.2 canal, P2.1 porte, P3.2 reprise) lintaient des champs
+    que l'interface ne produisait pas — et, pour le canal, que le pont laissait
+    tomber en silence.
+    """
+
+    def test_le_canal_d_un_lien_survit_au_pont(self, api: ForgeAPI) -> None:
+        studio = {
+            "blueprintVersion": 2,
+            "id": "b",
+            "nodes": [{"id": "a", "ref": "ORC-02"}, {"id": "b", "ref": "QUA-04"}],
+            "edges": [
+                {"from": "a", "to": "b", "contract": "task-envelope", "channel": "failure"}
+            ],
+        }
+        v1 = api._studio_to_v1(studio)
+        assert v1["edges"][0]["channel"] == "failure"
+
+    def test_le_canal_nominal_reste_implicite(self, api: ForgeAPI) -> None:
+        """`happy` est le défaut : l'écrire alourdirait chaque lien et chaque diff."""
+        studio = {
+            "blueprintVersion": 2,
+            "id": "b",
+            "nodes": [{"id": "a", "ref": "ORC-02"}, {"id": "b", "ref": "QUA-04"}],
+            "edges": [
+                {"from": "a", "to": "b", "contract": "task-envelope", "channel": "happy"}
+            ],
+        }
+        assert "channel" not in api._studio_to_v1(studio)["edges"][0]
+
+    def test_les_points_de_reprise_deviennent_une_frontiere(self, api: ForgeAPI) -> None:
+        studio = {
+            "blueprintVersion": 2,
+            "id": "b",
+            "nodes": [
+                {"id": "a", "ref": "ORC-02", "config": {"checkpoint": {"scope": "state"}}},
+                {"id": "b", "ref": "QUA-04"},
+            ],
+            "edges": [{"from": "a", "to": "b", "contract": "task-envelope"}],
+        }
+        boundaries = api._studio_to_v1(studio).get("boundaries")
+        assert boundaries == [
+            {"id": "ck-studio", "mode": "checkpoint", "members": ["a"], "scope": "state"}
+        ]
+
+    def test_sans_declaration_le_format_est_inchange(self, api: ForgeAPI) -> None:
+        studio = {
+            "blueprintVersion": 2,
+            "id": "b",
+            "nodes": [{"id": "a", "ref": "ORC-02"}],
+            "edges": [],
+        }
+        v1 = api._studio_to_v1(studio)
+        assert "boundaries" not in v1
+
+    def test_une_porte_declaree_dans_le_studio_est_lintee(self, api: ForgeAPI) -> None:
+        """La boucle se ferme : déclarer dans l'interface, être vérifié par R-K1."""
+        studio = {
+            "blueprintVersion": 2,
+            "id": "b",
+            "nodes": [
+                {"id": "a", "ref": "ORC-02"},
+                {
+                    "id": "g",
+                    "ref": "QUA-05",
+                    "role": "Gate",
+                    "config": {"gate": {"mode": "human", "params": {"action": "approve"}}},
+                },
+            ],
+            "edges": [{"from": "a", "to": "g", "contract": "task-envelope"}],
+        }
+        errors = api.blueprint_validate(api._studio_to_v1(studio))
+        assert any("R-K1" in e for e in errors)
+
+        studio["nodes"][0]["config"] = {"checkpoint": {"scope": "state"}}
+        errors = api.blueprint_validate(api._studio_to_v1(studio))
+        assert not any("R-K1" in e for e in errors)
