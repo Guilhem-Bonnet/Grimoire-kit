@@ -420,12 +420,11 @@
   flex: 1 1 auto; min-width: 0;
 }
 .bp-coachbar .cb-txt b { color: var(--ink); }
-/* Le libellé du correctif peut être long : il rétrécit avant de chasser le
-   bouton d'abandon hors du bandeau, que l'overflow de la toile rognerait. */
-.bp-coachbar .at-btn {
-  flex: 0 1 auto; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+/* Un libellé d'action ne se tronque pas : plutôt que de couper « POSER LA
+   PORTE (QUA-05) ET RELIER » en plein mot, le bandeau passe à la ligne. */
+.bp-coachbar { flex-wrap: wrap; row-gap: 7px; }
+.bp-coachbar .at-btn { flex: 0 0 auto; }
+.bp-coachbar .cb-txt { flex: 1 1 240px; }
 .bp-coachbar .cb-n { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); flex: none; }
 .bp-coachbar .cb-x {
   flex: none; background: none; border: none; color: var(--ink-muted);

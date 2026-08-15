@@ -378,9 +378,13 @@ button.at-chip.on:hover { background: var(--ink); color: var(--bg); }
   font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted);
   white-space: nowrap; pointer-events: none; opacity: 0;
   transition: opacity 120ms;
+  /* Posé HORS de la carte : depuis que le libellé porte une glose, le
+     laisser à l'intérieur recouvrait le texte du node au survol. */
+  background: var(--elev-2); border: 1px solid var(--line);
+  border-radius: 3px; padding: 2px 7px;
 }
-.bp-pin.in  .bp-pin-lbl { left: 18px; }
-.bp-pin.out .bp-pin-lbl { right: 18px; }
+.bp-pin.in  .bp-pin-lbl { right: 18px; }
+.bp-pin.out .bp-pin-lbl { left: 18px; }
 .bp-node:hover .bp-pin-lbl, .bp-pin.compat .bp-pin-lbl { opacity: 1; }
 
 /* ── Comment boxes ── */
