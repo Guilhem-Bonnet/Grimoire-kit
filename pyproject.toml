@@ -30,7 +30,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0"]
+# Borne haute délibérée : mcp 2.0 a retiré `mcp.server.fastmcp`, sur
+# lequel repose grimoire.mcp.server. Sans elle, `pip install
+# grimoire-kit[mcp]` livre un serveur MCP qui ne démarre pas.
+# Lever la borne demande de porter le serveur sur l'API 2.x.
+mcp = ["mcp>=1.0,<2"]
 qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0", "torch>=2.13.0"]
 weaviate = ["sentence-transformers>=3.0", "torch>=2.13.0"]
 neo4j = ["neo4j>=5.0"]
