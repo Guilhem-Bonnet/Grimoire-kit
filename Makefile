@@ -46,8 +46,12 @@ format-check: ## Check formatting without modifying files
 	$(PYTHON) -m ruff format src/ tests/ --check
 
 .PHONY: typecheck
-typecheck: ## Run mypy strict type checking (src + tests)
-	$(PYTHON) -m mypy --strict src/grimoire/ tests/
+typecheck: ## Run mypy strict type checking (src — même périmètre que le pre-commit et la CI)
+	$(PYTHON) -m mypy --strict src/grimoire/
+
+.PHONY: typecheck-tests
+typecheck-tests: ## Typecheck les tests — hors gate, dette connue (~7300 erreurs)
+	$(PYTHON) -m mypy --strict tests/
 
 ## ─── Tests ─────────────────────────────────────────────────────
 .PHONY: test

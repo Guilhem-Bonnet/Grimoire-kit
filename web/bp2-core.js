@@ -1303,13 +1303,24 @@
           if (samePath(path)) state._warnByNode[n.id] = 'extension manquante';
           return;
         }
-        s.in.forEach(c => {
-          if (!graph.edges.some(e => e.to === n.id && e.contract === c) && !fed.has(c)) {
-            const nm = n.kind === 'group' ? esc(n.name || 'sous-flow') : s.name;
-            out.push({ level: 'warn', node: n.id, path, ref: nm, text: `${where}rien ne lui fournit « ${Atelier.contractGloss(c)} » (${c}) — son entrée reste vide.` });
-            if (samePath(path)) state._warnByNode[n.id] = 'entrée non connectée';
-          }
-        });
+        /* Les contrats d'entrée d'un node sont des ALTERNATIVES, pas des
+           exigences cumulées : une case de preuve accepte le travail rendu
+           OU une preuve existante. Signaler chaque contrat non relié faisait
+           donc crier un flow parfaitement câblé — huit avertissements sur une
+           équipe fraîchement composée. Seul l'isolement est une faute. */
+        const aUneEntree = graph.edges.some(e => e.to === n.id) || s.in.some(c => fed.has(c));
+        const aUneSortie = graph.edges.some(e => e.from === n.id) || s.out.some(c => drained.has(c));
+        if (!aUneEntree && !aUneSortie && graph.nodes.length > 1 && n.kind !== 'trigger') {
+          const nm = n.kind === 'group' ? esc(n.name || 'sous-flow') : s.name;
+          out.push({ level: 'warn', node: n.id, path, ref: nm,
+            text: `${where}il n'est relié à rien — posé sur la toile, il ne participe à aucun flow.`,
+            fix: { label: 'LE SUPPRIMER', run: () => {
+              const g2 = levelGraph(path) || graph;
+              g2.nodes = g2.nodes.filter(x => x.id !== n.id);
+              markDirty();
+            } } });
+          if (samePath(path)) state._warnByNode[n.id] = 'relié à rien';
+        }
         /* `where` finit dans de l'innerHTML : le nom vient d'un blueprint
            importé, donc il s'échappe ici, à la source. */
         if (n.kind === 'group') visit(n.sub, path.concat(n.id), '◇ ' + esc(n.name || 'sous-flow') + ' · ',
