@@ -27,7 +27,9 @@ ISOLATION_MODES = ("shared", "isolated")
 # Régions d'isolation (C3) : une Boundary transversale groupe plusieurs nodes
 # dans une même fenêtre quarantinée (patron orchestrateur-worker). Le cas
 # dégénéré à un node est l'isolation de node C1.
-BOUNDARY_MODES = ("isolation",)
+# ``checkpoint`` (P3.2) : frontière où l'état est persisté, donc où le flow
+# est reprenable après suspension — voir blueprint_checkpoint.
+BOUNDARY_MODES = ("isolation", "checkpoint")
 
 
 def isolation_regions(blueprint: dict[str, Any]) -> list[dict[str, Any]]:
