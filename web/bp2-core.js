@@ -432,6 +432,17 @@
     emit('level-changed', { depth: curPath.length });
   }
 
+  /* ══ Vocabulaire déclarable (P0.2 / P2.1 / C3 / P3.2) ══
+     Ces tranches ont livré des règles que le Studio ne savait pas alimenter.
+     Les listes viennent du serveur : les recopier ici les ferait diverger. */
+  let VOCAB = null;
+  (async () => {
+    try { VOCAB = (await Atelier.api('/api/primitives')).enums || null; }
+    catch (e) { VOCAB = null; }   /* hors atelier : rien a declarer */
+    if (VOCAB) renderInspector();
+  })();
+  const vocab = (key, fallback) => (VOCAB && VOCAB[key]) || fallback;
+
   /* ══ Révélation progressive ══
      Pas de bascule débutant/expert : l'interface s'ouvre d'elle-même dès que
      l'utilisateur a fait ses premiers gestes (visite passée ou flow amorcé). */
@@ -1100,6 +1111,87 @@
     }
     return null;
   }
+  /* ══ Déclarer une porte (P2.1) ══
+     Le Gate universel et la reprise (P3.2) lintent `config.gate` ; jusqu'ici
+     rien dans le Studio ne l'écrivait, donc leurs règles ne pouvaient ni
+     s'appliquer ni se corriger depuis l'interface. */
+  const gateOf = n => (n.config && n.config.gate) || null;
+  const GATE_LABEL = {
+    'human': 'humaine — une personne décide',
+    'budget': 'budget — plafond de dépense',
+    'evidence': 'preuve — exige un evidence-pack',
+    'output-contract': 'contrat de sortie — valide un schéma',
+    'guardrail': 'garde-fou — filtre entrée ou sortie',
+    'mcp-trust': 'confiance MCP — qualifie un service externe'
+  };
+  const HUMAN_LABEL = {
+    'approve': 'approuver',
+    'edit': 'corriger la sortie',
+    'input': 'fournir ce qui manque',
+    'sample': 'échantillonner un % des runs',
+    'escalate-on-uncertainty': 'escalader si incertain'
+  };
+  function gateSectionHtml(n) {
+    if (!VOCAB) return '';
+    const g = gateOf(n);
+    const opt = (list, cur, labels) => list.map(v =>
+      `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc((labels && labels[v]) || v)}</option>`).join('');
+    const human = g && g.mode === 'human';
+    return `
+      <div class="bp-prop"><div class="k">Porte — ce qui doit tenir pour passer</div>
+        <select class="ctx-sel" id="gate-mode" style="width:100%">
+          <option value=""${!g ? ' selected' : ''}>ce node n'est pas une porte</option>
+          ${opt(vocab('gateModes', []), g ? g.mode : '', GATE_LABEL)}
+        </select>
+        ${human ? `<div class="ctx-grid" style="margin-top:8px">
+          <label class="ctx-field"><span>action attendue</span>
+            <select class="ctx-sel" id="gate-action">${opt(vocab('humanActions', []), (g.params || {}).action || 'approve', HUMAN_LABEL)}</select></label>
+          <label class="ctx-field"><span>si refus</span>
+            <select class="ctx-sel" id="gate-reject">${opt(vocab('onReject', []), g.onReject || 'escalation', null)}</select></label>
+        </div>
+        <div class="v soft" style="margin-top:6px">Une porte humaine <b>suspend</b> le flow. Reprendre après l'attente exige un point de reprise en amont, sinon le travail déjà fait est perdu.</div>` : ''}
+      </div>
+      <div class="bp-prop"><div class="k">Point de reprise</div>
+        <label class="ctx-field" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" id="gate-ckpt"${(n.config && n.config.checkpoint) ? ' checked' : ''} />
+          <span>l'état est persisté ici</span></label>
+        <div class="v soft" style="margin-top:6px">Ce que le flow peut reprendre après une suspension. Une porte humaine sans point de reprise, ici ou en amont, perd le travail déjà fait.</div>
+      </div>`;
+  }
+  function bindGateSection(panel, n) {
+    if (!VOCAB) return;
+    const mode = $('#gate-mode', panel);
+    if (!mode) return;
+    const write = () => {
+      const m = mode.value;
+      if (!m) {
+        if (n.config) delete n.config.gate;
+        markDirty(); render(); return;
+      }
+      n.config = n.config || {};
+      const prev = n.config.gate || {};
+      const gate = { mode: m, params: prev.params || {} };
+      const act = $('#gate-action', panel), rej = $('#gate-reject', panel);
+      if (m === 'human') {
+        gate.params = { ...gate.params, action: act ? act.value : 'approve' };
+        if (gate.params.action === 'sample' && !gate.params.pct) gate.params.pct = 10;
+        if (rej) gate.onReject = rej.value;
+      }
+      n.config.gate = gate;
+      n.role = 'Gate';        /* le rôle suit la déclaration (P0.3) */
+      markDirty(); render();
+    };
+    [mode, $('#gate-action', panel), $('#gate-reject', panel)]
+      .forEach(el => { if (el) el.addEventListener('change', write); });
+    const ck = $('#gate-ckpt', panel);
+    if (ck) ck.addEventListener('change', () => {
+      n.config = n.config || {};
+      if (ck.checked) n.config.checkpoint = { scope: 'state' };
+      else delete n.config.checkpoint;
+      markDirty(); render();
+    });
+  }
+
   function contextSectionHtml(n) {
     const ctx = ctxOf(n);
     const budget = ctx.budget || {};
@@ -1164,7 +1256,22 @@
             <span style="width:9px;height:9px;border-radius:50%;background:${Atelier.contractColor(e.contract)}"></span>${esc(Atelier.contractGloss(e.contract))} <span class="cid">${esc(e.contract)}</span></div></div>
         <div class="bp-prop"><div class="k">Dans le standard</div><div class="v soft">${esc(c ? c.desc : '')}</div></div>
         ${flowK ? `<div class="bp-prop"><div class="k">Volume estimé</div><div class="np-cost"><span>tokens émis par run</span><b>~${BP2Cost.fmtK(flowK)} tok</b></div></div>` : ''}
+        ${VOCAB ? `<div class="bp-prop"><div class="k">Canal — nature du chemin</div>
+          <select class="ctx-sel" id="edge-channel" style="width:100%">
+            ${vocab('edgeChannels', ['happy']).map(ch => `<option value="${ch}"${(e.channel || 'happy') === ch ? ' selected' : ''}>${
+              ch === 'happy' ? 'happy — chemin nominal'
+              : ch === 'failure' ? 'failure — ce qui se passe quand ça rate'
+              : ch === 'escalation' ? 'escalation — remontée vers un humain'
+              : ch}</option>`).join('')}
+          </select>
+          <div class="v soft" style="margin-top:6px">Un flow se définit autant par sa façon d'échouer que de réussir. Les chemins non nominaux se tracent en pointillé sur la toile.</div></div>` : ''}
         <button class="at-btn sm" id="del-edge">SUPPRIMER LE LIEN</button>`;
+      const chSel = $('#edge-channel', panel);
+      if (chSel) chSel.addEventListener('change', () => {
+        const v = chSel.value;
+        if (v === 'happy') delete e.channel; else e.channel = v;
+        markDirty(); render();
+      });
       $('#del-edge').addEventListener('click', deleteSelection);
       return;
     }
@@ -1293,10 +1400,12 @@
         ${s.in.map(c2 => pinRow('in', c2)).join('')}${s.out.map(c2 => pinRow('out', c2)).join('')}</div>
       ${docsList}
       ${costRows}
+      ${gateSectionHtml(n)}
       ${contextSectionHtml(n)}
       <button class="at-btn sm" id="open-fiche">OUVRIR LE DOSSIER DU NODE →</button>
       <button class="at-btn sm ghost" id="del-node">SUPPRIMER LE NODE</button>`;
     bindContextSection(panel, n);
+    bindGateSection(panel, n);
     $('#open-fiche').addEventListener('click', () => openFiche(n));
     $('#del-node').addEventListener('click', deleteSelection);
     $$('[data-doc-open]', panel).forEach(el => el.addEventListener('click', () => {

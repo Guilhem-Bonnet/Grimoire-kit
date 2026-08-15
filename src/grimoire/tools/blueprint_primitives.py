@@ -104,12 +104,45 @@ def is_valid_role(role: str | None) -> bool:
     return role is None or role in PRIMITIVES
 
 
+def declarable_enums() -> dict[str, list[str]]:
+    """Le vocabulaire que le Studio a le droit d'écrire.
+
+    Les tranches P0.2, P2.1, C3 et P3.2 ont livré des règles côté serveur sans
+    que l'interface sache déclarer ce qu'elles vérifient. Exposer ici les
+    énumérations — plutôt que de les recopier en JavaScript — évite la seule
+    façon dont cet écart se reforme : deux listes qui divergent en silence.
+    """
+    from grimoire.tools.blueprint_checkpoint import CHECKPOINT_SCOPES
+    from grimoire.tools.blueprint_context import (
+        BOUNDARY_MODES,
+        COMPACTION_STRATEGIES,
+        CONTEXT_TIERS,
+        EDGE_CHANNELS,
+        ISOLATION_MODES,
+    )
+    from grimoire.tools.blueprint_gate import GATE_MODES, HUMAN_ACTIONS, ON_REJECT
+
+    return {
+        "edgeChannels": list(EDGE_CHANNELS),
+        "gateModes": list(GATE_MODES),
+        "humanActions": list(HUMAN_ACTIONS),
+        "onReject": list(ON_REJECT),
+        "boundaryModes": list(BOUNDARY_MODES),
+        "checkpointScopes": list(CHECKPOINT_SCOPES),
+        "contextTiers": list(CONTEXT_TIERS),
+        "compactionStrategies": list(COMPACTION_STRATEGIES),
+        "isolationModes": list(ISOLATION_MODES),
+        "roles": list(PRIMITIVES),
+    }
+
+
 def primitives_catalogue() -> dict[str, Any]:
-    """Charge utile de ``/api/primitives`` : les 7 primitives + mapping XXL."""
+    """Charge utile de ``/api/primitives`` : primitives, mapping XXL, vocabulaire."""
     return {
         "schemaVersion": PRIMITIVES_SCHEMA_VERSION,
         "primitives": PRIMITIVES,
         "xxlMapping": XXL_MAPPING,
+        "enums": declarable_enums(),
     }
 
 

@@ -115,10 +115,20 @@ def suspending_gates(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _predecessors(edges: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Prédécesseurs par node, tous canaux confondus.
+
+    Les extrémités d'un lien v1 sont qualifiées par pin (``a.out-contrat``) :
+    on retient le node, comme le fait déjà ``blueprint_gate``.
+
+    Contrairement au lint des portes, on ne filtre pas sur le canal nominal :
+    un état persisté en amont l'est quel que soit le chemin qui a mené là.
+    Restreindre au chemin nominal refuserait une reprise pourtant possible.
+    """
     pred: dict[str, set[str]] = {}
     for edge in edges:
         e = as_dict(edge)
-        target, source = str(e.get("to", "")), str(e.get("from", ""))
+        target = str(e.get("to", "")).split(".")[0]
+        source = str(e.get("from", "")).split(".")[0]
         if target and source:
             pred.setdefault(target, set()).add(source)
     return pred
