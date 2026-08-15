@@ -267,7 +267,7 @@
     const baseX = n.x + (n._w || 190) + 86;
     return sugg.map((g, i) => `
       <div class="bp-ghost" data-gref="${esc(g.ref)}" data-gcontract="${esc(g.contract)}" data-gfrom="${n.id}"
-           style="left:${baseX}px;top:${n.y + i * 70 - 6}px">
+           style="left:${baseX}px;top:${n.y + i * 96 - 6}px">
         <span class="r1"><span class="plus">＋</span><span class="cat" style="background:${Atelier.catColor(g.cat)}"></span>${esc(g.label)}</span>
         <span class="why">${esc(g.why)}</span>
         <span class="src">suggestion · pratique agentique</span>
