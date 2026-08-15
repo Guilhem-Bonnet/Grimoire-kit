@@ -113,12 +113,28 @@
 
   /* ══ Persistance ══ */
   let saveT = null;
+  /* Mesures de rendu (_w, _h, _pinTop) : calculées à l'affichage, écrites sur
+     le node pour le tracé des liens — elles n'ont rien à faire dans le fichier.
+     Persistées, elles polluaient chaque diff git de valeurs qui changent à la
+     moindre variation de police ou de zoom, ce qui ruine « le diff git est la
+     revue ». Retirées à l'écriture, recalculées au rendu suivant. */
+  function withoutScratch(node) {
+    const clean = {};
+    Object.keys(node).forEach(k => { if (k[0] !== '_') clean[k] = node[k]; });
+    if (clean.sub) clean.sub = stripScratch(clean.sub);
+    return clean;
+  }
+  function stripScratch(graph) {
+    if (!graph || typeof graph !== 'object') return graph;
+    return { ...graph, nodes: (graph.nodes || []).map(withoutScratch) };
+  }
+
   function persist() {
     clearTimeout(saveT);
     saveT = setTimeout(() => {
       storeView();
       state.meta.path = curPath.slice();
-      Atelier.saveBp(bpId, state);
+      Atelier.saveBp(bpId, stripScratch(state));
       localStorage.setItem('grimoire.atelier.bp.current', bpId);
       $('#bp-saved').textContent = 'sauvegardé ✓ auto';
     }, 250);
@@ -339,6 +355,9 @@
     renderPalette();
     applyNoviceUI();
     renderCoachBar();
+    /* Les surcouches qui teintent la toile (diff visuel) se re-posent ici :
+       le rendu réécrit les nodes, leurs classes ne survivent pas seules. */
+    emit('rendered');
   }
 
   /* ── Fil d'Ariane ── */

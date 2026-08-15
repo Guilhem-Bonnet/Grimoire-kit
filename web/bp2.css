@@ -475,3 +475,33 @@
 .bp-built .b-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; margin-top: 4px; }
 .bp-built .b-nm { font-size: 0.78rem; font-weight: 600; color: var(--ink); display: block; }
 .bp-built .b-why { font-size: 0.73rem; color: var(--ink-soft); line-height: 1.45; display: block; margin-top: 2px; }
+
+/* ══ Diff visuel git du graphe (P3.4) ══
+   Le relecteur doit voir le changement là où il regarde — sur la toile —
+   pas seulement dans une liste. */
+.bp-node.df-add { border-color: var(--data-green) !important; box-shadow: 0 0 0 2px rgba(52,211,153,0.25); }
+.bp-node.df-mod { border-color: var(--data-amber) !important; box-shadow: 0 0 0 2px rgba(252,211,77,0.22); }
+.bp-node.df-add::after, .bp-node.df-mod::after {
+  position: absolute; top: -9px; right: 8px;
+  font-family: var(--font-mono); font-size: 0.58rem; font-weight: 600;
+  padding: 0 5px; border-radius: 2px; background: var(--elev-2);
+}
+.bp-node.df-add::after { content: 'ajouté'; color: var(--data-green); border: 1px solid var(--data-green); }
+.bp-node.df-mod::after { content: 'modifié'; color: var(--data-amber); border: 1px solid var(--data-amber); }
+
+.bp-diff { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.df-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 6px 8px; border-radius: var(--r-sm, 4px);
+  background: var(--elev-1); border: 1px solid var(--line);
+  font-size: 0.77rem; line-height: 1.4;
+}
+.df-row .df-ico { font-family: var(--font-mono); font-weight: 700; flex: none; width: 12px; text-align: center; }
+.df-row.add { border-left: 2px solid var(--data-green); }
+.df-row.add .df-ico { color: var(--data-green); }
+.df-row.del { border-left: 2px solid #F87171; }
+.df-row.del .df-ico { color: #F87171; }
+.df-row.mod { border-left: 2px solid var(--data-amber); }
+.df-row.mod .df-ico { color: var(--data-amber); }
+.df-row b { color: var(--ink); font-weight: 600; }
+.df-det { display: block; color: var(--ink-muted); font-size: 0.71rem; margin-top: 1px; }

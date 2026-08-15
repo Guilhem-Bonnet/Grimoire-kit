@@ -653,3 +653,86 @@ class Stigmergy(GrimoireTool):
             save_board(self._project_root, board)
 
         return board
+
+
+# ── vue agrégée pour le serveur de forge ──
+# Extraite de forge_server (P3.4) : le hub avait atteint son plafond de
+# lignes, et cette vue appartient de toute façon au module qui possède le
+# domaine plutôt qu'au routeur HTTP.
+def board_view(project_root: Path) -> dict[str, Any]:
+    """Vue live du tableau phéromonique du projet (signaux actifs + trails).
+
+    Lit ``_grimoire-output/pheromone-board.json`` via le module SDK ;
+    l'intensité est décroissante (calculée à la lecture). Rien n'est écrit.
+    """
+
+    board = load_board(project_root)
+    active = sense_pheromones(board)
+    signals = [
+        {
+            "id": p.pheromone_id,
+            "type": p.pheromone_type,
+            "location": p.location,
+            "text": p.text,
+            "emitter": p.emitter,
+            "intensity": round(inten, 4),
+            "reinforcements": p.reinforcements,
+        }
+        for p, inten in active
+    ]
+    trails = [
+        {
+            "type": t.pattern_type,
+            "location": t.location,
+            "description": t.description,
+            "agents": list(t.involved_agents),
+        }
+        for t in analyze_trails(board)
+    ]
+    by_type: dict[str, int] = {}
+    for p, _ in active:
+        by_type[p.pheromone_type] = by_type.get(p.pheromone_type, 0) + 1
+
+    # Métriques comportementales (base de la promotion beta→stable) :
+    # le journal dit si le board coordonne réellement ou tourne à vide.
+    events = read_events(project_root)
+    actions = [str(e.get("action", "")) for e in events]
+    resolved = sum(1 for p in board.pheromones if p.resolved)
+    reinforcements = sum(p.reinforcements for p in board.pheromones)
+    relays = sum(1 for t in trails if t["type"] == "relay")
+    useful = resolved + relays
+    denominator = board.total_emitted or 1
+    useful_ratio = round(useful / denominator, 3)
+    # Seuil de promotion beta→stable (QUA-13) : la mesure sert une décision.
+    target_ratio = STIGMERGY_TARGET_USEFUL_RATIO
+    min_emitted = STIGMERGY_PROMOTION_MIN_EMITTED
+    return {
+        "active": signals,
+        "trails": trails,
+        "stats": {
+            "active": len(signals),
+            "emitted": board.total_emitted,
+            "evaporated": board.total_evaporated,
+            "halfLifeHours": board.half_life_hours,
+            "byType": by_type,
+        },
+        "behavior": {
+            "senseInjections": actions.count("sense-injected"),
+            "autoEmits": sum(
+                1 for e in events
+                if e.get("source") == "hook" and e.get("action") in ("emit", "reinforce")
+            ),
+            "manualEmits": sum(
+                1 for e in events
+                if e.get("source") != "hook" and e.get("action") in ("emit", "reinforce")
+            ),
+            "resolved": resolved,
+            "reinforcements": reinforcements,
+            "relays": relays,
+            "usefulRatio": useful_ratio,
+            "targetUsefulRatio": target_ratio,
+            "minEmitted": min_emitted,
+            "hypothesis": STIGMERGY_PROMOTION_HYPOTHESIS,
+            "promotionReady": bool(board.total_emitted >= min_emitted and useful_ratio >= target_ratio),
+        },
+    }
