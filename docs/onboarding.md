@@ -143,8 +143,8 @@ Le système de mémoire à 4 couches :
 # Vérifier la santé de la mémoire
 python3 framework/memory/maintenance.py health-check
 
-# Voir les patterns procéduraux enregistrés
-python3 framework/tools/procedural-memory.py --project-root . list
+# Voir l'état de la mémoire
+grimoire memory status
 ```
 
 ### Semaine 2-3 : Outils CLI
@@ -162,7 +162,7 @@ bash grimoire.sh doctor
 bash grimoire.sh tools
 
 # Qualité des artefacts
-python3 framework/tools/quality-score.py --project-root . batch _grimoire-output/
+grimoire standard score
 
 # Dépendances inter-outils
 python3 framework/tools/dep-check.py --project-root . graph
@@ -225,8 +225,7 @@ python3 framework/tools/nso.py --project-root . retro
 | Diagnostic | `bash grimoire.sh doctor` |
 | Sync config | `grimoire setup --check` |
 | État mémoire | `python3 framework/memory/maintenance.py status` |
-| Qualité sortie | `python3 framework/tools/quality-score.py --project-root . score fichier.md` |
-| Recherche web | `python3 framework/tools/mcp-web-search.py --project-root . search "query"` |
+| Qualité sortie | `grimoire standard score` |
 
 
 *Grimoire Kit — Documentation progressive. Pour les détails, voir `docs/`.*

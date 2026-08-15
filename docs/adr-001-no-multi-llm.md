@@ -6,6 +6,12 @@
 > **Statut** : Accepté 
 > **Contexte** : Grimoire Kit v2.4 
 > **Auteur** : Party-mode — Winston (Architecte) + Amelia (Dev)
+>
+> **Statut au 2026-08-10** : la décision tient, ses supports ont disparu.
+> `orchestrator.py`, `mcp-proxy.py` et `background-tasks.py` ont été drainés
+> lors de la résorption de `framework/` (cf. framework/FREEZE.md) — aucun
+> chemin d'accès ne les atteignait. Le texte ci-dessous est conservé tel quel :
+> il consigne pourquoi le multi-LLM a été écarté, ce qui reste valable.
 
 ## <img src="../assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
 
@@ -22,7 +28,6 @@ Le mode `concurrent-cpu` utilise `ThreadPoolExecutor` pour paralléliser des tra
 | `orchestrator.py` mode `concurrent-cpu` | ThreadPoolExecutor local — pas d'appel API LLM |
 | `agent-worker.py` | Charge une persona depuis un fichier, produit un résultat string |
 | `message-bus.py` | Seul `InProcessBus` (queue mémoire) est implémenté ; Redis/NATS sont des stubs |
-| `background-tasks.py` | Écrit des JSON sur disque, ne lance pas de vrais processus background |
 | Party Mode | Un seul LLM simule plusieurs personas — c'est le pattern IDE correct |
 
 <img src="../assets/divider.svg" width="100%" alt="">

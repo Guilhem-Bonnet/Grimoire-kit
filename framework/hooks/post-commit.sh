@@ -55,7 +55,7 @@ fi
 # Construire l'entrée TRACE
 AGENT_TAG="${ACTIVE_AGENT:-system}"
 TRACE_ENTRY="
-## $(date -u +"%Y-%m-%d %H:%M") | git-commit | $AGENT_TAG
+## $(date -u +"%Y-%m-%d %H:%M") | $AGENT_TAG | git-commit
 
 [GIT-COMMIT] hash:$COMMIT_HASH branch:$BRANCH
 **Message :** $COMMIT_MSG

@@ -9,7 +9,7 @@
 | Type | Format | Exécuteur | Exemple |
 |------|--------|-----------|---------|
 | **Playbook** | Markdown (.md) | Le LLM lit et suit les instructions | party-mode, brainstorming, advanced-elicitation |
-| **Pipeline** | Python (.py) | Exécution CPU directe (stdlib) | dream.py, stigmergy.py, r-and-d.py, session-lifecycle.py |
+| **Pipeline** | Python (.py) | Exécution CPU directe (stdlib) | dream.py, stigmergy.py, session-lifecycle.py |
 | **Orchestration** | Python + workers | ThreadPoolExecutor CPU (PAS multi-LLM) | orchestrator.py mode concurrent-cpu |
 
 <img src="../assets/divider.svg" width="100%" alt="">

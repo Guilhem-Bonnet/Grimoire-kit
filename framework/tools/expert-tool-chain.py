@@ -25,7 +25,7 @@ Usage :
   python3 expert-tool-chain.py --project-root . catalog
   python3 expert-tool-chain.py --project-root . history --last 5
 
-Stdlib only — invoque vision-judge.py et mcp-proxy.py via importlib.
+Stdlib only — invoque vision-judge.py via importlib.
 """
 from __future__ import annotations
 

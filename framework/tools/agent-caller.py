@@ -21,7 +21,7 @@ Usage :
   python3 agent-caller.py --project-root . history --last 10
   python3 agent-caller.py --project-root . schema --agent architect
 
-Stdlib only — importe llm-router.py et context-router.py par importlib.
+Stdlib only — importe llm-router.py par importlib.
 
 Références :
   - Anthropic Agentic Tool Use: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview

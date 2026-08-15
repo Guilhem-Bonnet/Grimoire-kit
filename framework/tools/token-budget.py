@@ -18,12 +18,12 @@ Usage :
   python3 token-budget.py --project-root . enforce --agent dev --model claude-sonnet-4-20250514
   python3 token-budget.py --project-root . report --json
 
-Stdlib only — importe context-router.py et context-summarizer.py par importlib.
+Stdlib only — importe context-summarizer.py par importlib.
 
 Références :
   - MemGPT/Letta: https://github.com/letta-ai/letta — tiered memory & eviction
   - LlamaIndex Memory: https://docs.llamaindex.ai/en/stable/module_guides/deploying/agents/memory/
-  - Context Router BM-07: framework/tools/context-router.py
+  - Context Budget BM-07 — historique, la gestion de contexte vit dans le SDK
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ TOKEN_BUDGET_VERSION = "1.2.0"
 
 CHARS_PER_TOKEN = 4
 
-# Thresholds — aligned with context-router.py
+# Thresholds
 WARNING_THRESHOLD = 0.60
 CRITICAL_THRESHOLD = 0.80
 EMERGENCY_THRESHOLD = 0.95
@@ -66,7 +66,7 @@ PRIORITY_NAMES = {
     4: "P4 — Supplementary",
 }
 
-# Model windows (subset — full list in context-router.py)
+# Model windows
 MODEL_WINDOWS: dict[str, int] = {
     "claude-sonnet-4-20250514": 200_000,
     "claude-3-5-sonnet-20241022": 200_000,
@@ -232,22 +232,7 @@ class EnforcementReport:
     errors: list[str] = field(default_factory=list)
 
 
-# ── Context Router Bridge ──────────────────────────────────────────────────
-
-def _load_context_router():
-    """Importe context-router.py par importlib."""
-    mod_name = "context_router"
-    if mod_name in sys.modules:
-        return sys.modules[mod_name]
-    router_path = Path(__file__).parent / "context-router.py"
-    if not router_path.exists():
-        return None
-    spec = importlib.util.spec_from_file_location(mod_name, router_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[mod_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
+# ── Context Summarizer Bridge ──────────────────────────────────────────────
 
 def _load_context_summarizer():
     """Importe context-summarizer.py par importlib."""
@@ -290,13 +275,10 @@ class TokenBudgetEnforcer:
         self.warning_threshold = warning_threshold
         self.critical_threshold = critical_threshold
         self.emergency_threshold = emergency_threshold
-        self._router_mod = _load_context_router()
         self._summarizer_mod = _load_context_summarizer()
 
     def _get_window(self) -> int:
         """Récupère la fenêtre token du modèle."""
-        if self._router_mod and hasattr(self._router_mod, "MODEL_WINDOWS"):
-            return self._router_mod.MODEL_WINDOWS.get(self.model, 200_000)
         return MODEL_WINDOWS.get(self.model, 200_000)
 
     def _discover_files(self) -> list[tuple[str, int, int]]:
@@ -306,24 +288,7 @@ class TokenBudgetEnforcer:
         """
         files: list[tuple[str, int, int]] = []
 
-        if self._router_mod:
-            try:
-                # Use context router's discovery
-                ctx_files = self._router_mod.discover_context_files(
-                    self.project_root, self.agent
-                )
-                for cf in ctx_files:
-                    tokens = getattr(cf, "estimated_tokens", 0) or getattr(cf, "tokens", 0)
-                    prio = getattr(cf, "priority", 4)
-                    if hasattr(prio, "value"):
-                        prio = prio.value
-                    path = getattr(cf, "path", str(cf))
-                    files.append((str(path), tokens, prio))
-                return files
-            except Exception as _exc:
-                _log.debug("Exception suppressed: %s", _exc)
-
-        # Fallback: scan memory / agent files manually
+        # Scan memory / agent files
         for pattern, prio in [
             ("_grimoire/_memory/*.md", 1),
             ("_grimoire/_memory/agent-learnings/*.md", 1),
