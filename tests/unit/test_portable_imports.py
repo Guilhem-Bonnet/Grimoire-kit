@@ -65,14 +65,19 @@ def _unguarded_posix_imports(source: str) -> list[str]:
 
 @pytest.mark.parametrize("path", _python_files(), ids=lambda p: str(p.relative_to(ROOT)))
 def test_pas_d_import_posix_only_sans_repli(path: Path) -> None:
+    # Le `return` après chaque skip explicite que rien ne continue : pytest.skip
+    # lève, mais un analyseur statique ne le déduit pas de sa signature — et
+    # CodeQL a eu raison de signaler des variables potentiellement non liées.
     try:
         source = path.read_text(encoding="utf-8")
-    except OSError:  # pragma: no cover - fichier illisible
-        pytest.skip(f"illisible : {path}")
+    except OSError as exc:  # pragma: no cover - fichier illisible
+        pytest.skip(f"illisible : {path} ({exc})")
+        return
     try:
         unguarded = _unguarded_posix_imports(source)
-    except SyntaxError:  # pragma: no cover - fixture volontairement invalide
+    except SyntaxError:  # pragma: no cover - source non parsable
         pytest.skip(f"non parsable : {path}")
+        return
     assert not unguarded, (
         f"{path.relative_to(ROOT)} importe {', '.join(unguarded)} sans repli — "
         f"le fichier devient inimportable sous Windows. Envelopper dans un "
