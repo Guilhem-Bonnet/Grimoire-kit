@@ -29,6 +29,11 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
+from grimoire.tools.blueprint_checkpoint import (
+    checkpoint_lint,
+    checkpoint_shape_errors,
+    compile_checkpoint_section,
+)
 from grimoire.tools.blueprint_context import (
     CONTEXT_WINDOW_TOKENS,
     DEFAULT_EDGE_CHANNEL,
@@ -479,6 +484,12 @@ class ForgeAPI:
         res_errors, _ = resilience_lint(nodes, blueprint.get("edges", []))
         errors.extend(res_errors)
 
+        # Reprise (P3.2) : R-K2 forme des frontières, R-K1 porte humaine sans
+        # checkpoint — suspendre sans pouvoir reprendre perd le travail fait.
+        errors.extend(checkpoint_shape_errors(blueprint))
+        ck_errors, _ = checkpoint_lint(blueprint)
+        errors.extend(ck_errors)
+
         # Évals (P1.2) : forme des suites (R-E1) + path-taken vs plan déclaré.
         for n in nodes:
             errors.extend(evals_shape_errors(n))
@@ -607,6 +618,9 @@ class ForgeAPI:
         # Résilience (P2.2) : R-F3 (node externe sans chemin de défaillance).
         _, res_warnings = resilience_lint(nodes, blueprint.get("edges", []))
         warnings.extend(res_warnings)
+        # Reprise (P3.2) : checkpoints déclarés sans rien à reprendre.
+        _, ck_warnings = checkpoint_lint(blueprint)
+        warnings.extend(ck_warnings)
         # Évals (P1.2) : R-E2 (effectful sans preuve) + R-E3 (path-taken divergent).
         _, ev_warnings = evals_lint(blueprint)
         warnings.extend(ev_warnings)
@@ -1016,6 +1030,8 @@ class ForgeAPI:
             ]
             lines.append("")
         lines.extend(compile_security_section(blueprint.get("nodes", []), edges))
+        # Reprise (P3.2) : où l'état survit, et quelles portes en dépendent.
+        lines.extend(compile_checkpoint_section(blueprint))
         lines += [
             "## Entrées / sorties du flow",
             "",
