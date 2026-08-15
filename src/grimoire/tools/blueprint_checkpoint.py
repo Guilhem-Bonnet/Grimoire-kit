@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from grimoire.tools.blueprint_context import as_dict
+from grimoire.tools.blueprint_context import as_dict, predecessors, upstream_nodes
 from grimoire.tools.blueprint_gate import gate_policy, is_gate
 
 __all__ = [
@@ -114,46 +114,13 @@ def suspending_gates(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _predecessors(edges: list[dict[str, Any]]) -> dict[str, set[str]]:
-    """Prédécesseurs par node, tous canaux confondus.
-
-    Les extrémités d'un lien v1 sont qualifiées par pin (``a.out-contrat``) :
-    on retient le node, comme le fait déjà ``blueprint_gate``.
-
-    Contrairement au lint des portes, on ne filtre pas sur le canal nominal :
-    un état persisté en amont l'est quel que soit le chemin qui a mené là.
-    Restreindre au chemin nominal refuserait une reprise pourtant possible.
-    """
-    pred: dict[str, set[str]] = {}
-    for edge in edges:
-        e = as_dict(edge)
-        target = str(e.get("to", "")).split(".")[0]
-        source = str(e.get("from", "")).split(".")[0]
-        if target and source:
-            pred.setdefault(target, set()).add(source)
-    return pred
-
-
-def _upstream_closure(node_id: str, pred: dict[str, set[str]]) -> set[str]:
-    """Tous les ancêtres de `node_id`, cycles compris sans boucler."""
-    seen: set[str] = set()
-    stack = list(pred.get(node_id, ()))
-    while stack:
-        current = stack.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        stack.extend(pred.get(current, ()))
-    return seen
-
-
 def checkpoints_covering(
     node_id: str, blueprint: dict[str, Any]
 ) -> list[str]:
     """Ids des checkpoints qui couvrent `node_id`, lui-même ou en amont."""
     edges = blueprint.get("edges", [])
-    pred = _predecessors(edges if isinstance(edges, list) else [])
-    reachable = {node_id} | _upstream_closure(node_id, pred)
+    pred = predecessors(edges if isinstance(edges, list) else [])
+    reachable = {node_id} | upstream_nodes(node_id, pred)
     return [
         str(region["id"])
         for region in checkpoint_regions(blueprint)

@@ -75,6 +75,11 @@ from grimoire.tools.blueprint_resilience import (
     resilience_shape_errors,
     trace_failure,
 )
+from grimoire.tools.blueprint_scatter import (
+    compile_scatter_section,
+    scatter_lint,
+    scatter_shape_errors,
+)
 from grimoire.tools.blueprint_security import (
     compile_security_section,
     security_verdict,
@@ -501,6 +506,13 @@ class ForgeAPI:
         res_errors, _ = resilience_lint(nodes, blueprint.get("edges", []))
         errors.extend(res_errors)
 
+        # Éclatement parallèle (P4.1) : R-S1 plafond, R-S2 garde de budget —
+        # un fan-out non borné est le premier facteur d'explosion de coût.
+        for n in nodes:
+            errors.extend(scatter_shape_errors(n))
+        sc_errors, _ = scatter_lint(nodes, blueprint.get("edges", []))
+        errors.extend(sc_errors)
+
         # Reprise (P3.2) : R-K2 forme des frontières, R-K1 porte humaine sans
         # checkpoint — suspendre sans pouvoir reprendre perd le travail fait.
         errors.extend(checkpoint_shape_errors(blueprint))
@@ -635,6 +647,9 @@ class ForgeAPI:
         # Résilience (P2.2) : R-F3 (node externe sans chemin de défaillance).
         _, res_warnings = resilience_lint(nodes, blueprint.get("edges", []))
         warnings.extend(res_warnings)
+        # Éclatement (P4.1) : R-S3 branches qui ne rejoignent aucun Gather.
+        _, sc_warnings = scatter_lint(nodes, blueprint.get("edges", []))
+        warnings.extend(sc_warnings)
         # Reprise (P3.2) : checkpoints déclarés sans rien à reprendre.
         _, ck_warnings = checkpoint_lint(blueprint)
         warnings.extend(ck_warnings)
@@ -1031,6 +1046,7 @@ class ForgeAPI:
                 lines.append(f"- Prêt : {'oui' if step['ready'] else 'NON'}")
             step_node = nodes_by_id.get(str(step["id"]), {})
             lines.extend(compile_gate_section(step_node))
+            lines.extend(compile_scatter_section(step_node))
             lines.extend(
                 compile_resilience_section(step_node, blueprint.get("edges", []))
             )
