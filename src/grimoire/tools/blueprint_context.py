@@ -57,6 +57,37 @@ def region_membership(regions: list[dict[str, Any]]) -> dict[str, str]:
     return membership
 
 
+def predecessors(edges: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Prédécesseurs par node, tous canaux confondus.
+
+    Les extrémités d'un lien v1 sont qualifiées par pin (``a.out-contrat``) :
+    on retient le node. Partagé par les règles qui raisonnent « en amont de »
+    — reprise (P3.2), parallélisme borné (P4.1) — pour qu'une troisième copie
+    de ce parcours ne vienne pas diverger des deux premières.
+    """
+    pred: dict[str, set[str]] = {}
+    for edge in edges:
+        e = as_dict(edge)
+        target = str(e.get("to", "")).split(".")[0]
+        source = str(e.get("from", "")).split(".")[0]
+        if target and source:
+            pred.setdefault(target, set()).add(source)
+    return pred
+
+
+def upstream_nodes(node_id: str, pred: dict[str, set[str]]) -> set[str]:
+    """Tous les ancêtres de `node_id`, cycles compris sans boucler."""
+    seen: set[str] = set()
+    stack = list(pred.get(node_id, ()))
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(pred.get(current, ()))
+    return seen
+
+
 def context_policy(node: dict[str, Any]) -> dict[str, Any]:
     """`config.context` d'un node, ou {} si absent/mal formé (lint tolérant)."""
     config = node.get("config")

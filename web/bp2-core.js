@@ -1151,6 +1151,18 @@
         </div>
         <div class="v soft" style="margin-top:6px">Une porte humaine <b>suspend</b> le flow. Reprendre après l'attente exige un point de reprise en amont, sinon le travail déjà fait est perdu.</div>` : ''}
       </div>
+      <div class="bp-prop"><div class="k">Éclatement parallèle</div>
+        <label class="ctx-field" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" id="sc-on"${(n.config && n.config.scatter) ? ' checked' : ''} />
+          <span>ce node éclate le travail en branches</span></label>
+        ${(n.config && n.config.scatter) ? `<div class="ctx-grid" style="margin-top:8px">
+          <label class="ctx-field"><span>éclate sur</span>
+            <input class="grp-name-input" id="sc-over" value="${esc(n.config.scatter.over || '')}" placeholder="ex. : fichiers à analyser" /></label>
+          <label class="ctx-field"><span>branches simultanées (max)</span>
+            <input class="grp-name-input" id="sc-max" type="number" min="1" value="${esc(String(n.config.scatter.maxParallel || 4))}" /></label>
+        </div>
+        <div class="v soft" style="margin-top:6px">Le plafond n'est pas une option : douze branches, c'est douze fois le contexte et douze fois les sorties. Il faut aussi une garde de budget en amont — le plafond borne la largeur, la garde borne la dépense.</div>` : ''}
+      </div>
       <div class="bp-prop"><div class="k">Point de reprise</div>
         <label class="ctx-field" style="flex-direction:row;align-items:center;gap:8px">
           <input type="checkbox" id="gate-ckpt"${(n.config && n.config.checkpoint) ? ' checked' : ''} />
@@ -1183,6 +1195,23 @@
     };
     [mode, $('#gate-action', panel), $('#gate-reject', panel)]
       .forEach(el => { if (el) el.addEventListener('change', write); });
+    const scOn = $('#sc-on', panel);
+    if (scOn) scOn.addEventListener('change', () => {
+      n.config = n.config || {};
+      if (scOn.checked) { n.config.scatter = { over: '', maxParallel: 4 }; n.role = 'Scatter'; }
+      else { delete n.config.scatter; if (n.role === 'Scatter') delete n.role; }
+      markDirty(); render();
+    });
+    const scOver = $('#sc-over', panel), scMax = $('#sc-max', panel);
+    const scWrite = () => {
+      if (!n.config || !n.config.scatter) return;
+      n.config.scatter.over = scOver ? scOver.value.trim() : '';
+      const m = parseInt(scMax ? scMax.value : '', 10);
+      n.config.scatter.maxParallel = (!isNaN(m) && m > 0) ? m : 1;
+      markDirty();
+    };
+    [scOver, scMax].forEach(el => { if (el) el.addEventListener('change', scWrite); });
+
     const ck = $('#gate-ckpt', panel);
     if (ck) ck.addEventListener('change', () => {
       n.config = n.config || {};
