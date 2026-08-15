@@ -71,6 +71,7 @@ nav:
   - Signaux & nouveautés: signaux.md
   - Démarrage:
       - Quick Start: getting-started.md
+      - Quick Start (English): getting-started.en.md
       - Setup VS Code: vscode-setup.md
       - Onboarding: onboarding.md
   - Concepts:

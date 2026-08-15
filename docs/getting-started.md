@@ -1,5 +1,7 @@
 # Getting Started — Grimoire Kit v3
 
+<sub>Version française — <a href="getting-started.en.md">English version</a></sub>
+
 > Ce guide vous accompagne de l'installation à votre premier projet Grimoire.
 
 ## Prérequis
