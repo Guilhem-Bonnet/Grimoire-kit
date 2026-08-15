@@ -84,6 +84,8 @@ from grimoire.tools.blueprint_security import (
     compile_security_section,
     security_verdict,
 )
+from grimoire.tools.blueprint_telemetry import event_files as telemetry_event_files
+from grimoire.tools.blueprint_telemetry import otel_spans, read_events
 from grimoire.tools.cost_model import cost_model as _cost_model
 from grimoire.tools.cost_model import node_entry_tokens
 from grimoire.tools.ext_manager import (
@@ -110,10 +112,7 @@ ARTIFACT_SURFACES = {
     "hooks": (".github/hooks", "*.json"),
 }
 
-EVENT_SOURCES = (
-    ("hook-runtime", Path("_grimoire-runtime-output") / "hook-runtime" / "events.jsonl"),
-    ("task-flow", Path("_grimoire-runtime-output") / "task-flow" / "events.jsonl"),
-)
+
 
 
 class ForgeAPI:
@@ -1158,28 +1157,19 @@ class ForgeAPI:
     # ── télémétrie ────────────────────────────────────────────────────────
 
     def event_files(self) -> list[tuple[str, Path]]:
-        return [
-            (name, self.project_root / rel)
-            for name, rel in EVENT_SOURCES
-            if (self.project_root / rel).is_file()
-        ]
+        return telemetry_event_files(self.project_root)
 
     def events_log(self, limit: int = 200) -> dict[str, Any]:
-        """Dernières lignes des flux events.jsonl, pour le replay blueprint."""
-        log: dict[str, list[Any]] = {}
-        for name, path in self.event_files():
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            entries = []
-            for line in lines[-limit:]:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    entries.append({"raw": line})
-            log[name] = entries
-        return log
+        """Dernières lignes des flux events.jsonl — moteur dans blueprint_telemetry."""
+        return dict(read_events(self.project_root, limit))
+
+    def otel_export(self, limit: int = 200) -> dict[str, Any]:
+        """Spans OpenTelemetry GenAI (P3.3) : la porte de sortie standard.
+
+        Le replay natif reste la vue du Studio ; ceci découple l'observabilité
+        d'``events.jsonl`` pour n'importe quel backend.
+        """
+        return {"spans": otel_spans(self.project_root, limit)}
 
     # ── coordination stigmergique (expérimental) ──────────────────────────
 
@@ -1277,6 +1267,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/cost-model":
                     model = parse_qs(urlparse(self.path).query).get("model", [None])[0]
                     self._json(api.cost_model_view(model))
+                elif path == "/api/otel":
+                    self._json(api.otel_export())
                 elif path == "/api/primitives":
                     self._json(api.primitives_view())
                 elif path == "/api/backends":
