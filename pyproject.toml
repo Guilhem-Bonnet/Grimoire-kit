@@ -35,10 +35,29 @@ dependencies = [
 # grimoire-kit[mcp]` livre un serveur MCP qui ne démarre pas.
 # Lever la borne demande de porter le serveur sur l'API 2.x.
 mcp = ["mcp>=1.0,<2"]
+# Les extras ci-dessous restent volontairement sans borne haute. Audit du
+# 2026-08-15, mené après la panne mcp : chacun n'est utilisé qu'à travers un
+# point d'entrée canonique de haut niveau, celui qui survit aux majeures.
+# C'est ce qui les distingue de mcp, qui importait le sous-module
+# `mcp.server.fastmcp` — déplacé en 2.0, d'où la rupture.
+#
+#   neo4j                  neo4j.GraphDatabase.driver      testé OK sur 6.2.0
+#   qdrant-client          QdrantClient                    testé OK sur 1.19.0
+#   ollama                 module de premier niveau        testé OK sur 0.6.2
+#   tantivy                SchemaBuilder                   testé OK sur 0.26.0
+#   sentence-transformers  SentenceTransformer             exporté en 5.7.0
+#
+# Borner par réflexe aurait créé des conflits de résolution chez les
+# utilisateurs sans rien protéger. Re-tester avant d'ajouter une borne.
 qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0", "torch>=2.13.0"]
 weaviate = ["sentence-transformers>=3.0", "torch>=2.13.0"]
 neo4j = ["neo4j>=5.0"]
+# Aucun module de src/grimoire/ n'importe redis : le seul consommateur est
+# framework/tools/message-bus.py, en zone gelée. L'extra suit donc le sort
+# de cet outil — à retirer quand il sera drainé.
 redis = ["redis>=5.0"]
+# Borne d'origine, jamais revue : chromadb en est à la 1.5.x. La lever
+# demande de vérifier la rupture d'API 0.6 → 1.0, chantier distinct.
 mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
 search = ["tantivy>=0.26"]
