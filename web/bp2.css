@@ -505,3 +505,30 @@
 .df-row.mod .df-ico { color: var(--data-amber); }
 .df-row b { color: var(--ink); font-weight: 600; }
 .df-det { display: block; color: var(--ink-muted); font-size: 0.71rem; margin-top: 1px; }
+
+/* ══ Évals — preuve de comportement (P1.2) ══
+   Le backend savait lire et compiler ces suites ; il manquait de quoi les
+   écrire. Affichage compact : un cas se lit d'un coup d'œil, sinon personne
+   n'en déclare. */
+.bp-evals { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.ev-case {
+  padding: 7px 9px; border-radius: var(--r-sm, 4px);
+  background: var(--elev-1); border: 1px solid var(--line);
+  border-left: 2px solid var(--data-green);
+}
+.ev-head { display: flex; align-items: center; gap: 6px; }
+.ev-head b { font-size: 0.76rem; color: var(--ink); flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-in {
+  font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-muted);
+  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-as { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ev-a {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 1px 6px; border-radius: 2px;
+  background: var(--elev-2); border: 1px solid var(--line);
+  font-size: 0.68rem; color: var(--ink-soft);
+}
+.ev-a b { font-weight: 500; color: var(--ink-soft); }
+.ev-a i { font-family: var(--font-mono); font-size: 0.6rem; font-style: normal; color: var(--ink-muted); }
