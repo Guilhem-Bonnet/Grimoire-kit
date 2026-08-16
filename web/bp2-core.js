@@ -1430,11 +1430,13 @@
       ${docsList}
       ${costRows}
       ${gateSectionHtml(n)}
+      ${window.BP2Evals ? BP2Evals.html(n) : ''}
       ${contextSectionHtml(n)}
       <button class="at-btn sm" id="open-fiche">OUVRIR LE DOSSIER DU NODE →</button>
       <button class="at-btn sm ghost" id="del-node">SUPPRIMER LE NODE</button>`;
     bindContextSection(panel, n);
     bindGateSection(panel, n);
+    if (window.BP2Evals) BP2Evals.bind(panel, n);
     $('#open-fiche').addEventListener('click', () => openFiche(n));
     $('#del-node').addEventListener('click', deleteSelection);
     $$('[data-doc-open]', panel).forEach(el => el.addEventListener('click', () => {
@@ -2161,6 +2163,7 @@
     countAll,
     openLex,
     lexify,
+    vocab,
     /* Débriefing affiché dans l'inspecteur tant que rien n'est sélectionné. */
     setBuiltSummary(list) { builtSummary = (list && list.length) ? list : null; clearSelection(); render(); setTab('node'); },
     journal: () => Atelier.studioJournal()
