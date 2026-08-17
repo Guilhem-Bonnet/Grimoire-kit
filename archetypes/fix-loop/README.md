@@ -50,7 +50,10 @@ archetypes/fix-loop/
 ## <img src="../../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> Installation dans votre projet
 
 ```bash
-# Depuis la racine du kit
+# Chemin recommandé — SDK
+grimoire init . --archetype fix-loop
+
+# Script de maintenance
 ./grimoire-init.sh --archetype fix-loop --name "Mon Projet" --user "Alice"
 
 # Ou manuellement :
@@ -58,8 +61,10 @@ cp archetypes/fix-loop/agents/fix-loop-orchestrator.tpl.md \
    [projet]/_grimoire/_config/custom/agents/fix-loop-orchestrator.md
 
 cp archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md \
-   [projet]/_grimoire/bmb/workflows/fix-loop/workflow-closed-loop-fix.md
+   [projet]/_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md
 ```
+
+Le suffixe `.tpl` est retiré à l'installation : il marque une source du kit, pas un fichier de projet. L'agent charge son workflow depuis `_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md`.
 
 Puis remplacer les `{{placeholders}}` :
 

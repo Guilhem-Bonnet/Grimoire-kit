@@ -7,6 +7,25 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Les workflows d'archétype n'étaient jamais installés** — `grimoire init`
+  (chemin recommandé) et `grimoire-init.sh --archetype` copiaient les agents
+  d'un archétype, sa DNA et son `shared-context`, mais pas son dossier
+  `workflows/`. Seul `framework/workflows/` atterrissait dans le projet. Le
+  workflow `closed-loop-fix` de `fix-loop` — le seul workflow porté par un
+  archétype — n'existait donc dans aucun projet initialisé, et le menu `[FX]`
+  de son agent pointait vers `_grimoire/bmb/workflows/fix-loop/…`, un chemin
+  qu'aucun installeur ne crée. La cible est désormais
+  `_grimoire/_config/custom/workflows/`, là où vivent déjà les workflows du
+  framework, sur les trois chemins (SDK, init bash, `install --archetype`).
+- **Le suffixe `.tpl` fuitait dans les projets** — `fix-loop-orchestrator.tpl.md`
+  et `workflow-closed-loop-fix.tpl.md` étaient copiés tels quels. `.tpl` marque
+  une source du kit ; il est retiré à l'installation, ce qui aligne le nom
+  installé sur celui que la documentation et les références utilisaient déjà.
+- Test de contrat associé : toute cible `exec=` d'un agent qui désigne un
+  workflow livré par le kit doit correspondre à un fichier réellement installé.
+
 ### Ajouté
 
 - **Bornes du gauntlet** (archétype `fix-loop` 1.1.0, workflow closed-loop-fix

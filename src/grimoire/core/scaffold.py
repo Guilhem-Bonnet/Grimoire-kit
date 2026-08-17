@@ -36,6 +36,19 @@ def _is_agent_markdown(path: PurePath) -> bool:
     return path.suffix == ".md" and "agents" in path.parts
 
 
+def _strip_tpl_suffix(name: str) -> str:
+    """``workflow-x.tpl.md`` -> ``workflow-x.md``; other names pass through.
+
+    ``.tpl`` marks a source template inside the kit. Carrying the marker into
+    an installed project leaks kit internals into the user's tree and breaks
+    every reference written against the plain name.
+    """
+    stem, dot, suffix = name.rpartition(".")
+    if dot and stem.endswith(".tpl"):
+        return f"{stem[: -len('.tpl')]}.{suffix}"
+    return name
+
+
 # ── Data models ───────────────────────────────────────────────────────────────
 
 
@@ -352,6 +365,9 @@ class ProjectScaffolder:
     def _memory_dir(self) -> Path:
         return self._target / "_grimoire" / "_memory"
 
+    def _workflows_dir(self) -> Path:
+        return self._target / "_grimoire" / "_config" / "custom" / "workflows"
+
     def _tpl_vars(self) -> dict[str, str]:
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
         stack_list = ", ".join(f'"{s}"' for s in stacks) if stacks else ""
@@ -457,13 +473,31 @@ class ProjectScaffolder:
             if agents_src.is_dir():
                 agents_dst = self._agents_dir()
                 for md in sorted(agents_src.glob("*.md")):
+                    dst = agents_dst / _strip_tpl_suffix(md.name)
                     # Skip if already planned (from a previous archetype layer)
-                    if any(fc.dst == agents_dst / md.name for fc in p.copies):
+                    if any(fc.dst == dst for fc in p.copies):
                         continue
                     p.copies.append(FileCopy(
                         src=md,
-                        dst=agents_dst / md.name,
-                        label=f"{arch}/{md.stem}",
+                        dst=dst,
+                        label=f"{arch}/{dst.stem}",
+                    ))
+
+            # Workflows — an archetype's workflows are as installable as its agents.
+            # Without this, an agent menu pointing at its own workflow resolves to nothing.
+            workflows_src = arch_dir / "workflows"
+            if workflows_src.is_dir():
+                workflows_dst = self._workflows_dir()
+                for wf in sorted(workflows_src.iterdir()):
+                    if not wf.is_file():
+                        continue
+                    dst = workflows_dst / _strip_tpl_suffix(wf.name)
+                    if any(fc.dst == dst for fc in p.copies):
+                        continue
+                    p.copies.append(FileCopy(
+                        src=wf,
+                        dst=dst,
+                        label=f"{arch}/workflows/{dst.name}",
                     ))
 
             # Archetype DNA — merge multiple into composite

@@ -81,7 +81,7 @@ You must fully embody this agent's persona and follow all activation instruction
   <menu>
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec Loop</item>
-    <item cmd="FX or fuzzy match on fix, problème, bug, erreur, issue" exec="{project-root}/_grimoire/bmb/workflows/fix-loop/workflow-closed-loop-fix.md">[FX] Lancer une boucle de fix certifiée (Closed-Loop Fix)</item>
+    <item cmd="FX or fuzzy match on fix, problème, bug, erreur, issue" exec="{project-root}/_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md">[FX] Lancer une boucle de fix certifiée (Closed-Loop Fix)</item>
     <item cmd="RP or fuzzy match on rapport, patterns, historique, mémoire" action="#show-patterns">[RP] Voir les patterns de fix mémorisés</item>
     <item cmd="CF or fuzzy match on configure, seuil, iterations, timeout" action="#configure-loop">[CF] Configurer la boucle (max iterations, seuils)</item>
     <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
