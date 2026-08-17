@@ -175,7 +175,7 @@ platform:
 
 **Cas d'usage** : Tout projet avec bugs récurrents — zéro "done" sans preuve d'exécution.
 
-**Traits DNA :** Proof of Execution, FER Isolation, Severity Adaptive S1/S2/S3, Never-Assume-Fixed 
+**Traits DNA :** Proof of Execution, FER Isolation, Severity Adaptive S1/S2/S3, Never-Assume-Fixed, Oracle-Before-Gauntlet, Gauntlet-On-Trigger, Stop-On-Sterile-Loop 
 **Tools requis :** bash, python3 (recommandé)
 
 **Agents inclus :**
@@ -187,10 +187,15 @@ platform:
 - `fer-created-before-fix` — FER YAML créé avant d'écrire du code (**hard**)
 - `all-tests-rerun-after-fix` — toute la suite relancée après fix (**hard**)
 - `fer-closed-with-cc-pass` — CC PASS attaché au FER (**hard**)
+- `oracle-fails-before-fix` — l'oracle de la DoD échoue sur l'état avant fix (**hard**)
+- `gauntlet-trigger-traced` — toute escalade de sévérité trace son déclencheur (**hard**)
 
 **Concepts clés :**
 - **FER** (Fix Evidence Record) : fichier YAML isolant chaque cycle de fix
 - **Sévérité** : S3 = 3 phases, S2 = 6, S1 = 9 phases obligatoires
+- **Gauntlet** : CHALLENGER + GATEKEEPER, le passage adversarial — déclenché par signal objectif (T1-repeat, T2-security, T3-prod, T4-surface, T5-data), jamais actif par défaut
+- **Oracle** : commande qui échoue avant le fix et passe après — condition d'existence du gauntlet et du mot « certifié »
+- **Boucle stérile** : deux échecs à signature identique → escalade sans épuiser `max_iterations`
 - **META-REVIEW** : auto-amélioration du workflow après cycle certifié
 
 

@@ -2,11 +2,11 @@ $schema: "grimoire-archetype-dna/v1"
 
 id: fix-loop
 name: "Fix Loop"
-version: "1.0.0"
-description: "Boucle de correction certifiée — zéro 'done' sans preuve d'exécution. FER sessions isolées, sévérité adaptative S1/S2/S3"
+version: "1.1.0"
+description: "Boucle de correction certifiée — zéro 'done' sans preuve d'exécution. FER sessions isolées, sévérité adaptative S1/S2/S3, gauntlet sur déclencheur"
 icon: "boomerang"
 author: "grimoire-kit"
-tags: [fix, loop, tdd, certification, regression, evidence, quality]
+tags: [fix, loop, tdd, certification, regression, evidence, quality, gauntlet]
 
 inherits: minimal
 
@@ -27,6 +27,18 @@ traits:
     description: "Ne jamais supposer qu'un fix est passé sans preuve"
     rule: "Après chaque fix : re-exécuter TOUS les tests liés, pas seulement le test ciblé. Un fix qui casse un autre test = FER non clos."
     agents_affected: "*"
+  - name: oracle-before-gauntlet
+    description: "Le passage adversarial n'a lieu que s'il existe un critère de sortie exécutable"
+    rule: "Avant d'activer CHALLENGER et GATEKEEPER, exiger un oracle machine : une commande avec exit_code attendu qui ÉCHOUE avant le fix et PASSE après. Sans oracle, désactiver les deux phases et marquer le fix 'appliqué, non certifié'. Un fix sans oracle n'entre jamais dans les patterns. Une boucle adversariale sans oracle ne converge pas vers la correction, elle converge vers la satisfaction des critiques."
+    agents_affected: [fix-loop-orchestrator]
+  - name: gauntlet-on-trigger
+    description: "Le gauntlet est déclenché par des signaux objectifs, pas activé par défaut"
+    rule: "Ne pas faire tourner CHALLENGER + GATEKEEPER sur tout. Les activer par escalade de sévérité quand un déclencheur objectif est présent : deuxième tentative sur le même symptôme, surface sécurité, cible production, surface d'impact >= 3 composants, écriture de données non réversible. Tracer le déclencheur dans gauntlet_trigger. La sévérité ne redescend jamais en cours de cycle."
+    agents_affected: [fix-loop-orchestrator]
+  - name: stop-on-sterile-loop
+    description: "Arrêt de la boucle dès qu'un tour n'apporte plus d'information neuve"
+    rule: "Enregistrer une signature d'échec par itération (commande + exit_code + première ligne de stderr). Deux signatures consécutives identiques = boucle stérile : escalader à l'humain sans consommer le budget restant. Seule exception : un tour supplémentaire si la root cause n'a pas encore été re-challengée, et en passant obligatoirement par la re-analyse."
+    agents_affected: [fix-loop-orchestrator]
 
 constraints:
   - id: no-done-without-proof
@@ -41,6 +53,18 @@ constraints:
     description: "Vérification anti-régression obligatoire en fin de session"
     enforcement: hard
     checked_by: fix-loop-orchestrator
+  - id: no-gauntlet-without-oracle
+    description: "CHALLENGER et GATEKEEPER ne s'exécutent pas si oracle_available est false"
+    enforcement: hard
+    checked_by: fix-loop-orchestrator
+  - id: no-certified-label-without-oracle
+    description: "Le mot 'certifié' est interdit dans un rapport dont oracle_available est false"
+    enforcement: hard
+    checked_by: fix-loop-orchestrator
+  - id: no-silent-severity-downgrade
+    description: "La sévérité ne redescend jamais en cours de cycle, seulement à l'ouverture d'un nouveau FER"
+    enforcement: hard
+    checked_by: fix-loop-orchestrator
 
 values:
   - name: evidence-over-trust
@@ -51,6 +75,9 @@ values:
     priority: 1
   - name: isolated-context
     description: "Chaque cycle FER est isolé du contexte des autres cycles"
+    priority: 2
+  - name: proportionate-rigor
+    description: "La rigueur coûteuse se déclenche sur signal, elle ne s'applique pas partout par défaut"
     priority: 2
 
 tools_required:
@@ -88,6 +115,24 @@ acceptance_criteria:
     context: "Trait severity-adaptive"
     triggers_on: ["**/*"]
     checked_by: fix-loop-orchestrator
+  - id: oracle-fails-before-fix
+    description: "L'oracle de la DoD doit échouer sur l'état avant fix, avec la sortie capturée dans evidence[]"
+    enforcement: hard
+    context: "Trait oracle-before-gauntlet — un oracle qui passe déjà avant le fix ne discrimine rien et ne prouve rien"
+    triggers_on: ["**/*"]
+    checked_by: fix-loop-orchestrator
+  - id: gauntlet-trigger-traced
+    description: "Toute escalade de sévérité renseigne severity_escalated_from et gauntlet_trigger dans le FER"
+    enforcement: hard
+    context: "Trait gauntlet-on-trigger — sans trace du déclencheur, la META-REVIEW ne peut pas mesurer si l'escalade a servi"
+    triggers_on: ["**/*"]
+    checked_by: fix-loop-orchestrator
+  - id: failure-signature-per-iteration
+    description: "Chaque itération échouée ajoute une signature d'échec dans failure_signatures[]"
+    enforcement: hard
+    context: "Trait stop-on-sterile-loop — la détection de boucle stérile compare la signature courante à la précédente"
+    triggers_on: ["**/*"]
+    checked_by: fix-loop-orchestrator
 
 agents:
   - path: "../../archetypes/fix-loop/agents/fix-loop-orchestrator.tpl.md"
@@ -113,6 +158,14 @@ auto_detect:
   exclusive: false
 
 changelog:
+  - version: "1.1.0"
+    date: "2026-08-17"
+    changes:
+      - "Trait gauntlet-on-trigger — CHALLENGER + GATEKEEPER activés par escalade de sévérité sur déclencheur objectif (T1-repeat, T2-security, T3-prod, T4-surface, T5-data), pas par défaut"
+      - "Trait oracle-before-gauntlet — gate bloquant : pas de passage adversarial sans oracle exécutable qui échoue avant le fix"
+      - "Trait stop-on-sterile-loop — arrêt sur signature d'échec répétée, avant épuisement de max_iterations"
+      - "Valeur proportionate-rigor + 3 contraintes hard + 3 acceptance criteria associés"
+      - "Workflow closed-loop-fix v2.6 → v2.7 : phases 1.5, 2.4bis, 4.6 ; champs FER severity_escalated_from, gauntlet_trigger, oracle_available, failure_signatures"
   - version: "1.0.0"
     date: "2026-02-27"
     changes:
