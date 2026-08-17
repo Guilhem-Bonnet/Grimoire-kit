@@ -1,7 +1,7 @@
 ---
 name: closed-loop-fix
-version: 2.6
-description: Orchestre une boucle de correction fermée avec validation automatique bout-en-bout. Aucun "done" sans preuve d'exécution. Sévérité adaptative, guardrails destructifs, rollback par context_type, délégation agents experts, META-REVIEW auto-amélioration.
+version: 2.7
+description: Orchestre une boucle de correction fermée avec validation automatique bout-en-bout. Aucun "done" sans preuve d'exécution. Sévérité adaptative, escalade gauntlet sur déclencheur, gate oracle, borne de convergence, guardrails destructifs, rollback par context_type, délégation agents experts, META-REVIEW auto-amélioration.
 ---
 
 <!--
@@ -17,7 +17,7 @@ PLACEHOLDERS — à remplacer avant utilisation :
   {{tech_stack_list}}     - Liste des technologies du projet (ex: ansible, terraform, docker)
 -->
 
-# Closed-Loop Fix Workflow v2.6
+# Closed-Loop Fix Workflow v2.7
 
 **Goal:** Résoudre un problème TI de manière certifiée — zéro déclaration "done" sans test réel et preuve d'exécution attachée.
 
@@ -44,6 +44,16 @@ Tu peux aussi déléguer le rôle **Fixer** à l'agent expert du domaine (voir s
 **Boucle bornée par `max_iterations` (configurable, défaut S1=3, S2=5, S3=2).**
 **Après 2 itérations consécutives échouées → [ANALYST] re-challenge sa root cause.**
 **`current_phase` mis à jour dans le FER à CHAQUE annonce de phase, avant d'en commencer les étapes.**
+
+### Les trois bornes du gauntlet
+
+CHALLENGER + GATEKEEPER forment le *gauntlet* : le passage adversarial coûteux du cycle. Trois règles décident quand il tourne et quand il s'arrête.
+
+| Borne | Rôle | Où |
+|---|---|---|
+| **Déclencheur** | Le gauntlet ne tourne pas partout : S3 le skippe. Certains signaux escaladent la sévérité et le rallument. | Phase 1.5 |
+| **Gate oracle** | Le gauntlet n'a de sens qu'avec un critère de sortie exécutable. Sans oracle, il ne converge pas vers la correction mais vers « les critiques sont satisfaits ». | Phase 2.4 |
+| **Convergence** | Un tour qui n'apporte aucun *nouveau* symptôme n'apportera rien au tour suivant. Arrêt avant épuisement du budget. | Phase 4.5 |
 
 ---
 
@@ -78,7 +88,7 @@ Tu peux aussi déléguer le rôle **Fixer** à l'agent expert du domaine (voir s
      ```
 
 ```yaml
-# Fix Evidence Record (FER) v3.0
+# Fix Evidence Record (FER) v3.1
 # ⚠️ Règle PP : ce fichier YAML doit rester ≤ 100 lignes (état courant uniquement).
 # Si l'historique (iteration_lessons, evidence verbose) dépasse l'espace :
 # → externaliser dans fer-history-{session-id}.yaml et référencer ici.
@@ -87,6 +97,9 @@ session_start: ""          # ISO 8601 — horodatage au démarrage de la session
 current_phase: "PRE-INTAKE"
 problem: ""
 severity: ""               # S1 | S2 | S3
+severity_escalated_from: "" # "" si classification d'origine ; sinon sévérité initiale (Phase 1.5)
+gauntlet_trigger: ""       # ID du déclencheur ayant escaladé la sévérité (Phase 1.5)
+oracle_available: null     # true | false — renseigné en Phase 2.4, gate du gauntlet
 context_type: ""           # ansible|terraform|docker|script|api|ui|config|system|mix
 context_type_previous: ""  # rempli par Phase 2.2 si context_type change en cours de cycle
 context_type_components: []# si mix: liste des context_types composants
@@ -96,6 +109,8 @@ iteration: 0
 max_iterations: null       # surchargé par severity en Phase 1.2 : S1=3, S2=5, S3=2
 consecutive_failures: 0    # trigger re-analyse root cause si >= 2
 challenger_failures: 0     # borne de sortie boucle Challenger : si >= 3 → ESCALADE
+failure_signatures: []     # borne de convergence — 1 signature par itération échouée (Phase 4.5)
+                           # format : [{iteration, signature}] — signature = commande + exit_code + 1re ligne stderr
 dod_checklist: []
 dod_timestamp: ""          # ISO 8601
 dod_test_commands: []      # commandes exactes de la DoD — alignées avec test_suite
@@ -239,6 +254,8 @@ Stocker `severity` et `max_iterations` dans le FER.
 Si `severity = S3` → écrire `meta_review_enabled: false` dans le FER.
 Annoncer : *"Sévérité classifiée : **[S1/S2/S3]** — [explication]. Processus adapté."*
 
+> Cette classification n'est pas définitive : la Phase 1.5 la relit contre des déclencheurs objectifs et peut l'escalader.
+
 ### 1.3 Surface d'impact — auto-discovery
 
 Consulter `dependency-graph.md` section "Matrice d'Impact" pour le composant touché.
@@ -249,6 +266,37 @@ Pré-remplir `surface_impact[]` avec les dépendances connues → demander valid
 Si la description ou les fichiers mentionnés contiennent : `password`, `token`, `secret`, `key`, `SOPS`, `age`, `vault`, `cert`, `.pem` :
 → Activer sanitisation automatique avant écriture dans le FER (`secrets_sanitized: true`)
 → Notifier : *"🔐 Contexte sensible détecté — outputs sanitisés avant persistance."*
+
+### 1.5 Escalade automatique de sévérité — déclencheurs du gauntlet
+
+La classification 1.2 décide si CHALLENGER + GATEKEEPER tournent. Un S3 les skippe entièrement. Cette étape corrige les classifications trop optimistes : elle relit la sévérité contre des signaux objectifs et l'escalade si l'un d'eux est présent.
+
+Appliquer la table **après** la classification 1.2, dans l'ordre. Le premier déclencheur qui matche impose son plancher de sévérité ; ne jamais descendre.
+
+| ID | Déclencheur | Signal observable | Plancher imposé |
+|---|---|---|---|
+| `T1-repeat` | Deuxième tentative sur le même symptôme | Un FER `.abandoned` ou `.escalated` existe avec le même `context_type` et un symptôme équivalent, **ou** {user_name} signale que le problème avait déjà été « corrigé » | S2 |
+| `T2-security` | Surface sécurité | Phase 1.4 a détecté un contexte sensible **et** le fix touche un des fichiers concernés | S1 |
+| `T3-prod` | Cible production | `environment = prod` | S2 |
+| `T4-surface` | Surface d'impact large | `surface_impact[]` contient ≥ 3 composants | S2 |
+| `T5-data` | Écriture de données non réversible | Le fix implique migration, suppression, ou écriture sur un état persistant sans `.bak` possible | S1 |
+
+Si aucun déclencheur ne matche → la classification 1.2 tient, ne rien écrire.
+
+Si un déclencheur matche et impose un plancher **strictement supérieur** à la sévérité courante :
+
+1. Écrire la sévérité d'origine dans `severity_escalated_from`
+2. Écrire l'ID du déclencheur dans `gauntlet_trigger`
+3. Remplacer `severity` par le plancher, recalculer `max_iterations` et `meta_review_enabled` selon la table 1.2
+4. Annoncer :
+
+```
+[INTAKE] Sévérité escaladée : [S_origine] → [S_final]
+   Déclencheur : [ID] — [signal constaté]
+   Conséquence : CHALLENGER + GATEKEEPER activés pour ce cycle.
+```
+
+**Règle GG — Pas d'escalade silencieuse à la baisse :** la sévérité ne redescend jamais en cours de cycle, même si la root cause s'avère bénigne. Un cycle démarré en gauntlet finit en gauntlet. Une révision à la baisse ne se décide qu'à l'ouverture d'un nouveau FER.
 
 **Persister le FER. Checkpoint : `[INTAKE] terminé → [ANALYST] en cours...`**
 Enregistrer `phase_timestamps.intake` à la fin de cette phase.
@@ -315,6 +363,37 @@ Avant de présenter, vérifier automatiquement :
 - [ ] Root cause rédigée en cause technique, pas en symptôme
 
 Si vérification échoue → améliorer la DoD avant présentation. Ne jamais soumettre une DoD insuffisante.
+
+### 2.4bis Gate oracle — condition d'existence du gauntlet
+
+Le gauntlet ne vaut que s'il existe un **oracle machine** : une commande dont le résultat tranche, sans jugement, si le fix tient. Sans oracle, CHALLENGER et GATEKEEPER ne convergent pas vers la correction — ils convergent vers « les critiques n'ont plus rien à dire », un point fixe rhétorique qui coûte cher et certifie du vide.
+
+Vérifier :
+
+- [ ] Au moins un test de la DoD est une commande exécutable avec un `exit_code` attendu explicite
+- [ ] Ce test **échoue** sur l'état actuel du système (avant fix) — un oracle qui passe déjà ne prouve rien
+
+Le second point est bloquant : exécuter le test avant le fix et capturer la sortie dans `evidence[]` avec `source: "dod"` et `passed: false`. C'est la preuve que l'oracle discrimine.
+
+**Si les deux cases sont cochées** → `oracle_available: true` dans le FER → le cycle continue normalement.
+
+**Si l'oracle est impossible à construire** (problème purement visuel, comportement non instrumentable, symptôme non reproductible en commande) :
+
+1. Écrire `oracle_available: false` dans le FER
+2. **Ne pas exécuter CHALLENGER ni GATEKEEPER** — quelle que soit la sévérité
+3. Annoncer :
+
+```
+[ANALYST] Aucun oracle exécutable pour ce problème.
+   Le fix peut être appliqué, mais il ne pourra pas être *certifié*.
+   CHALLENGER + GATEKEEPER désactivés — ils n'auraient aucun critère de sortie.
+   Validation humaine requise avant clôture.
+```
+
+4. Poursuivre FIXER → VALIDATOR (tests partiels si disponibles) → REPORTER, avec le rapport marqué **« Fix non certifié — pas d'oracle »**
+5. Le REPORTER n'écrit **aucun pattern** dans `fix-loop-patterns.md` : un fix non certifié ne doit pas être rejoué automatiquement
+
+**Règle HH — Un fix sans oracle n'est jamais « certifié ».** Le vocabulaire du rapport doit le refléter : « appliqué », « validé par {user_name} », jamais « certifié ».
 
 ### 2.5 Alignement DoD ↔ Test Suite
 
@@ -522,19 +601,54 @@ Si un commit a été effectué + projet avec CI configurée :
 - **Au moins 1 test échoue** :
   - Incrémenter `iteration` (**SEUL endroit où iteration est incrémenté**)
   - Incrémenter `consecutive_failures`
+  - Calculer la **signature d'échec** (voir 4.6) et l'ajouter à `failure_signatures[]`
   - Enregistrer `phase_timestamps.validator`
   - Persister FER
   - Si `iteration >= max_iterations` → **ESCALADE HUMAINE**
+  - Si la borne de convergence 4.6 se déclenche → **ESCALADE HUMAINE**
   - Si `consecutive_failures >= 2` → signaler à ANALYST de re-challenger root cause
   - Sinon → retour FIXER avec log d'échec complet injecté
 
-**Checkpoint : `[VALIDATOR] terminé → [CHALLENGER] en cours...`** (ou REPORTER si S3)
+### 4.6 Borne de convergence — arrêt sur tour stérile
+
+Un tour qui reproduit exactement l'échec du tour précédent n'apporte aucune information neuve. Continuer consomme le budget restant sans changer l'issue.
+
+**Signature d'échec** — pour le premier test échoué de l'itération, concaténer :
+
+```
+[commande exacte] | exit_code=[N] | [première ligne non vide de stderr, sanitisée, 120 chars max]
+```
+
+Stocker dans `failure_signatures[]` :
+
+```yaml
+failure_signatures:
+  - iteration: 1
+    signature: "pytest tests/test_auth.py | exit_code=1 | AssertionError: expected 200, got 401"
+```
+
+**Déclenchement :** si la signature de l'itération courante est **identique** à celle de l'itération précédente → la boucle est stérile.
+
+```
+[VALIDATOR] Boucle stérile détectée.
+   Itération [N-1] et [N] échouent sur la même signature :
+   [signature]
+   Deux fixes différents produisent le même échec — la root cause est fausse,
+   ou le test n'observe pas ce que le fix modifie.
+   Arrêt avant épuisement du budget ([N]/[max_iterations] itérations consommées).
+```
+
+Action : **ESCALADE HUMAINE**. Archiver `fer-{session-id}.escalated` avec `escalated: true`.
+
+**Exception unique :** si `consecutive_failures = 1` et que l'ANALYST n'a **pas encore** re-challengé sa root cause, autoriser un seul tour supplémentaire — mais en passant obligatoirement par la re-analyse Phase 2.2 d'abord, jamais par un retour direct au FIXER. Une signature répétée ne se traite pas en retentant un fix.
+
+**Checkpoint : `[VALIDATOR] terminé → [CHALLENGER] en cours...`** (ou REPORTER si S3 ou `oracle_available: false`)
 
 ---
 
 ## PHASE 5 — CHALLENGER 👿
 
-*Automatiquement skippée si S3.*
+*Automatiquement skippée si S3, ou si `oracle_available: false` (Phase 2.4bis) — sans oracle, le Challenger n'a pas de critère de sortie.*
 *Annonce : `[CHALLENGER] — Tentative de casser le fix...`*
 
 > **Reset obligatoire au début de chaque exécution Phase 5 :**
@@ -606,13 +720,15 @@ Enregistrer `phase_timestamps.challenger`.
 
 ## PHASE 6 — GATEKEEPER 🚦
 
-*Automatiquement skippée si S3.*
+*Automatiquement skippée si S3, ou si `oracle_available: false` (Phase 2.4bis).*
 *Annonce : `[GATEKEEPER] — Vérification DoD...`*
 
 ### Checklist mécanique
 
 ```
 □ Root cause documentée et adressée
+□ oracle_available = true (sinon cette phase ne devait pas s'exécuter)
+□ L'oracle échouait avant le fix et passe après (evidence[] contient les deux exécutions)
 □ DoD horodatée (dod_timestamp non vide)
 □ fix_applied.description non vide et non générique
 □ fix_applied.file non vide
@@ -628,6 +744,7 @@ Enregistrer `phase_timestamps.challenger`.
 □ Tests sécurité effectués si contexte sensible
 □ CI verte si applicable
 □ iteration <= max_iterations
+□ Aucune signature d'échec répétée restée sans re-analyse de root cause (Phase 4.6)
 ```
 
 **Si TOUTES cochées** → `gatekeeper_verdict: approved` → REPORTER
@@ -661,10 +778,16 @@ Enregistrer `phase_timestamps.challenger`.
 
 ### Rapport final
 
+> **Titre conditionné par `oracle_available` :**
+> `true` → `# ✅ Fix Certifié — [Titre]`
+> `false` → `# ⚠️ Fix appliqué, non certifié (pas d'oracle) — [Titre]`
+> Ne jamais employer « certifié » quand `oracle_available: false` (Règle HH).
+
 ```markdown
 # ✅ Fix Certifié — [Titre du problème]
 
 **Date :** [timestamp] | **Sévérité :** [S1/S2/S3] | **Iterations :** [N] | **Environnement :** [environment]
+**Sévérité escaladée :** [severity_escalated_from → severity via gauntlet_trigger] — *(ligne omise si pas d'escalade)*
 
 ## Problème résolu
 [Symptôme original]
@@ -731,7 +854,8 @@ Alimentation automatique `fix-loop-patterns.md` : si `iteration > 1`, copier `it
 
 ### Actions post-rapport
 
-1. **Si `severity` est S1 ou S2** → Enrichir `fix-loop-patterns.md` :
+1. **Si `severity` est S1 ou S2 ET `oracle_available: true`** → Enrichir `fix-loop-patterns.md` :
+   *(Un fix non certifié n'entre jamais dans les patterns : le fast-path le rejouerait sans preuve.)*
    ```
    - [YYYY-MM-DD] context_type=[X] | severity=[S] | root_cause=[résumé] | fix=[résumé] | iterations=[N] | test_suite=[liste] | surface_impact=[liste] | valid_until=[date+90j]
    ```
@@ -774,9 +898,9 @@ Extraire les propositions avec statut `accepted` / `refused` / `deferred` pour :
 - Éviter de proposer ce qui a déjà été refusé
 - Mentionner si une proposition similaire est en attente (`deferred`)
 
-### 8.2 Six questions d'auto-analyse
+### 8.2 Sept questions d'auto-analyse
 
-Sur la base du FER complet (`evidence`, `iteration`, `phase_timestamps`, `consecutive_failures`, `iteration_lessons`) :
+Sur la base du FER complet (`evidence`, `iteration`, `phase_timestamps`, `consecutive_failures`, `iteration_lessons`, `gauntlet_trigger`, `failure_signatures`) :
 
 1. **Efficacité globale** : `iteration > 1` → quelles phases ont consommé le plus de temps ? (delta `phase_timestamps`)
 2. **Qualité DoD** : les tests DoD étaient-ils suffisamment précis ? Un test qui a échoué aurait-il pu être formulé plus tôt ?
@@ -784,6 +908,9 @@ Sur la base du FER complet (`evidence`, `iteration`, `phase_timestamps`, `consec
 4. **Pre-flight** : des blocages pre-flight ont-ils eu lieu ? Seraient-ils évitables par un pré-check en Phase 1 ?
 5. **Timeouts** : `retry_count > 0` ? → le timeout configuré est peut-être trop court pour ce `context_type`
 6. **Patterns** : ce fix mériterait-il un pattern enrichi ? Le pattern utilisé (fast-path) était-il pertinent ?
+7. **Bornes du gauntlet** : si `gauntlet_trigger` non vide → l'escalade a-t-elle servi (le Challenger a-t-il trouvé quelque chose) ou coûté pour rien ? Si `failure_signatures[]` contient une répétition → l'arrêt sur boucle stérile a-t-il économisé des itérations, ou coupé un cycle qui allait aboutir ?
+
+> La question 7 alimente la décision d'ajuster les déclencheurs de la Phase 1.5. Un déclencheur qui escalade souvent sans que le Challenger ne trouve jamais rien est un déclencheur à resserrer — proposition de type `threshold`.
 
 ### 8.3 Classification des propositions
 
