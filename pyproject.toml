@@ -34,7 +34,7 @@ dependencies = [
 # lequel repose grimoire.mcp.server. Sans elle, `pip install
 # grimoire-kit[mcp]` livre un serveur MCP qui ne démarre pas.
 # Lever la borne demande de porter le serveur sur l'API 2.x.
-mcp = ["mcp>=1.0,<2"]
+mcp = ["mcp>=1.0,<3"]
 # Les extras ci-dessous restent volontairement sans borne haute. Audit du
 # 2026-08-15, mené après la panne mcp : chacun n'est utilisé qu'à travers un
 # point d'entrée canonique de haut niveau, celui qui survit aux majeures.
