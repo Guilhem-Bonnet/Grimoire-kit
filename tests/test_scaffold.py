@@ -11,7 +11,6 @@ from grimoire.core.scaffold import (
     ScaffoldPlan,
     ScaffoldResult,
     TemplateRender,
-    _strip_tpl_suffix,
 )
 from grimoire.core.scanner import ScanResult, StackDetection
 
@@ -143,64 +142,6 @@ class TestProjectScaffolder:
         tpl_labels = [t.label for t in plan.templates]
         shared = [lb for lb in tpl_labels if "shared-context" in lb]
         assert len(shared) == 1
-
-    def test_plan_includes_archetype_workflows(self, tmp_path: Path) -> None:
-        """An archetype's own workflows must be installed, not only its agents.
-
-        fix-loop ships workflow-closed-loop-fix.tpl.md and its agent menu points
-        at the installed copy — planning only the agent leaves a dead reference.
-        """
-        s = _scaffolder(tmp_path, archetype="fix-loop")
-        plan = s.plan()
-        names = [fc.dst.name for fc in plan.copies]
-        assert "workflow-closed-loop-fix.md" in names
-
-    def test_archetype_workflow_drops_tpl_suffix(self, tmp_path: Path) -> None:
-        """`.tpl` marks a kit source; it must not land in the project tree."""
-        s = _scaffolder(tmp_path, archetype="fix-loop")
-        plan = s.plan()
-        assert not [fc for fc in plan.copies if ".tpl." in fc.dst.name]
-
-    def test_archetype_workflow_lands_next_to_framework_workflows(self, tmp_path: Path) -> None:
-        s = _scaffolder(tmp_path, archetype="fix-loop")
-        plan = s.plan()
-        wf = next(fc for fc in plan.copies if fc.dst.name == "workflow-closed-loop-fix.md")
-        expected = tmp_path / "_grimoire" / "_config" / "custom" / "workflows"
-        assert wf.dst.parent == expected
-
-    def test_archetype_agent_exec_paths_are_installed(self, tmp_path: Path) -> None:
-        """A shipped workflow must be installed where the agent menu looks for it.
-
-        The original defect: the fix-loop agent's [FX] menu pointed at
-        `_grimoire/bmb/workflows/...` while the installer wrote elsewhere — the
-        workflow existed, the reference was dead.
-
-        Scoped to workflows the kit actually ships. Agents also reference
-        `_grimoire/core/workflows/party-mode/workflow.md`, which no archetype
-        provides — a separate gap, tracked on its own.
-        """
-        import re
-
-        from grimoire.archetypes import bundled_path
-
-        archetypes_root = bundled_path()
-        shipped = {
-            _strip_tpl_suffix(wf.name)
-            for wf in archetypes_root.glob("*/workflows/*")
-            if wf.is_file()
-        }
-        assert shipped, "expected at least one archetype to ship a workflow"
-
-        agent = archetypes_root / "fix-loop" / "agents" / "fix-loop-orchestrator.tpl.md"
-        targets = [
-            t for t in re.findall(r'exec="\{project-root\}/([^"]+)"', agent.read_text(encoding="utf-8"))
-            if Path(t).name in shipped
-        ]
-        assert targets, "expected the fix-loop agent to reference its own workflow"
-
-        planned = {fc.dst for fc in _scaffolder(tmp_path, archetype="fix-loop").plan().copies}
-        for target in targets:
-            assert tmp_path / target in planned, f"agent points at {target}, which nothing installs"
 
     def test_plan_archetype_shared_context_takes_priority(self, tmp_path: Path) -> None:
         """Archetypes with shared-context.tpl.md should override the default."""

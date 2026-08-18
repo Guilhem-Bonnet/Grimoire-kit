@@ -597,17 +597,10 @@ STACKEOF
                 [[ $count -eq 0 ]] || ok "${count} agent(s) installé(s)"
             fi
 
-            # Copier les workflows — le suffixe .tpl marque une source du kit,
-            # il ne doit pas atterrir dans l'arbre du projet
+            # Copier les workflows (.tpl retiré : marqueur de source du kit)
             if [[ -d "${arch_dir}/workflows/" ]]; then
                 mkdir -p "$workflows_dst"
-                for wf_file in "${arch_dir}/workflows/"*; do
-                    [[ -f "$wf_file" ]] || continue
-                    local wf_name
-                    wf_name="$(basename "$wf_file")"
-                    wf_name="${wf_name/.tpl./.}"
-                    cp "$wf_file" "${workflows_dst}/${wf_name}"
-                done
+                for wf_f in "${arch_dir}/workflows/"*; do [[ -f "$wf_f" ]] && cp "$wf_f" "${workflows_dst}/$(basename "${wf_f/.tpl./.}")"; done
                 ok "  Workflows installés"
             fi
 
@@ -3435,20 +3428,6 @@ ok "Agents meta installés"
 if [[ "$ARCHETYPE" != "meta" ]]; then
     info "Installation de l'archétype '$ARCHETYPE'..."
     cp "$ARCHETYPE_DIR/agents/"*.md "$GRIMOIRE_DIR/_config/custom/agents/" 2>/dev/null || true
-
-    # Workflows de l'archétype — sans ça, un agent dont le menu pointe vers son
-    # propre workflow résout un chemin inexistant. Le suffixe .tpl est retiré :
-    # il marque une source du kit, pas un fichier de projet.
-    if [[ -d "$ARCHETYPE_DIR/workflows" ]]; then
-        mkdir -p "$GRIMOIRE_DIR/_config/custom/workflows"
-        for _awf in "$ARCHETYPE_DIR/workflows/"*; do
-            [[ -f "$_awf" ]] || continue
-            _awf_name="$(basename "$_awf")"
-            _awf_name="${_awf_name/.tpl./.}"
-            cp "$_awf" "$GRIMOIRE_DIR/_config/custom/workflows/$_awf_name"
-        done
-        ok "Workflows de l'archétype installés"
-    fi
 
     # Copier le template shared-context si disponible
     if [[ -f "$ARCHETYPE_DIR/shared-context.tpl.md" ]]; then
