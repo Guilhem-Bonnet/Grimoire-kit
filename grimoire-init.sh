@@ -597,10 +597,10 @@ STACKEOF
                 [[ $count -eq 0 ]] || ok "${count} agent(s) installé(s)"
             fi
 
-            # Copier les workflows
+            # Copier les workflows (.tpl retiré : marqueur de source du kit)
             if [[ -d "${arch_dir}/workflows/" ]]; then
                 mkdir -p "$workflows_dst"
-                cp -r "${arch_dir}/workflows/"* "${workflows_dst}/" 2>/dev/null || true
+                for wf_f in "${arch_dir}/workflows/"*; do [[ -f "$wf_f" ]] && cp "$wf_f" "${workflows_dst}/$(basename "${wf_f/.tpl./.}")"; done
                 ok "  Workflows installés"
             fi
 
