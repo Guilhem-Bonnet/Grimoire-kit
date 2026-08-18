@@ -63,7 +63,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DR or fuzzy match on disaster-recovery or plan" action="#dr-plan">[DR] Plan DR — disaster recovery</item>
     <item cmd="TR or fuzzy match on test-restore" action="#test-restore">[TR] Test Restauration — valider un backup</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Longhorn, Rétention, Clés</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

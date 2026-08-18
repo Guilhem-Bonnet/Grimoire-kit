@@ -7,7 +7,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Workflow `party-mode`** — 25 agents livrés exposaient un menu `[PM] Party Mode`
+  pointant vers `_grimoire/core/workflows/party-mode/workflow.md`, un chemin que
+  le kit ne fournissait nulle part et qu'aucun installeur ne crée : la capacité
+  était déclarée dans `framework/agent-base.md`, générée dans chaque nouvel agent
+  par `agent-forge.py` et citée par la taxonomie, sans implémentation. Le playbook
+  existe désormais (`framework/workflows/party-mode.md`) et toutes les références
+  pointent vers son emplacement réel, `_grimoire/_config/custom/workflows/party-mode.md`.
+  Panel de 3 à 5 agents, premier tour sans lecture croisée pour éviter la
+  convergence, second tour limité aux désaccords, aucun vote, arbitrage rendu à
+  l'utilisateur et tracé dans `decisions-log.md`.
+
 ### Corrigé
+
+- **Les placeholders `{{…}}` n'étaient jamais résolus** — les agents et workflows
+  arrivaient dans le projet avec leurs marqueurs bruts là où les noms d'agents de
+  l'utilisateur devaient apparaître (25 dans le seul `closed-loop-fix`). Une passe
+  de rendu résout à l'installation ce qui est connaissable : rôles de délégation
+  (`{{ops_agent_name}}`, `{{debug_agent}}`, …) résolus depuis les agents réellement
+  installés — un rôle sans agent rend « aucun » et laisse le workflow en mode SOLO,
+  son défaut documenté —, plus `{{tech_stack_list}}`, `{{user_name}}`, `{{project_name}}`.
+  La substitution est **opt-in par clé**, jamais un balayage : les trois autres
+  familles de placeholders du kit survivent intactes — les slots runtime que le LLM
+  remplit à chaque exécution (`{{current_step}}`, `{{progress_bar}}`), l'infra que
+  le kit ne peut pas deviner (`{{lxc_id}}`, `{{host_ip}}`), et l'agent vierge de
+  l'archétype `minimal`.
 
 - **Les workflows d'archétype n'étaient jamais installés** — `grimoire init`
   (chemin recommandé) et `grimoire-init.sh --archetype` copiaient les agents

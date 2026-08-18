@@ -61,7 +61,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DF or fuzzy match on dockerfile or container" action="#containerize">[DF] Containerize — Dockerfile + Compose pour un service</item>
     <item cmd="HM or fuzzy match on helm or chart" action="#helm-chart">[HM] Helm Chart — packager un service pour K8s</item>
     <item cmd="FF or fuzzy match on feature-flag" action="#feature-flags">[FF] Feature Flags — déploiement progressif par flag</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

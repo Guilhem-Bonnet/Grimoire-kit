@@ -80,31 +80,85 @@ class TestArchetypeWorkflowsAreInstalled:
         assert not {dst for dst in installed if dst.name in shipped}
 
 
-class TestAgentReferencesResolve:
-    def test_agent_exec_targets_are_installed(self, tmp_path: Path) -> None:
-        """Scoped to workflows the kit ships.
+class TestPlaceholderRendering:
+    """Install-time placeholders are resolved; the other three families are not."""
 
-        Agents also reference `_grimoire/core/workflows/party-mode/workflow.md`,
-        which no archetype provides — a separate gap, tracked on its own. Widening
-        this assertion to every exec target would fail permanently and hide the
-        regression it is meant to catch.
+    def _installed(self, tmp_path: Path, archetypes: tuple[str, ...]) -> Path:
+        scaffolder = _scaffolder(tmp_path)
+        scaffolder._resolved = ResolvedArchetype(
+            archetype=archetypes[0], archetypes=archetypes, stack_agents=(), feature_agents=(), reason="test",
+        )
+        scaffolder.execute(scaffolder.plan())
+        return tmp_path
+
+    def test_expert_roles_resolve_to_installed_agents(self, tmp_path: Path) -> None:
+        root = self._installed(tmp_path, ("fix-loop", "infra-ops"))
+        wf = (root.joinpath(*WORKFLOWS_DIR) / "workflow-closed-loop-fix.md").read_text(encoding="utf-8")
+        assert "Forge (ops-engineer)" in wf
+        assert "Probe (systems-debugger)" in wf
+
+    def test_unfilled_role_reads_as_absent_not_as_a_marker(self, tmp_path: Path) -> None:
+        root = self._installed(tmp_path, ("fix-loop",))
+        wf = (root.joinpath(*WORKFLOWS_DIR) / "workflow-closed-loop-fix.md").read_text(encoding="utf-8")
+        assert "{{ops_agent_name}}" not in wf
+        assert "aucun" in wf
+
+    def test_no_install_time_marker_survives(self, tmp_path: Path) -> None:
+        root = self._installed(tmp_path, ("fix-loop", "infra-ops"))
+        resolved_keys = ("ops_agent", "debug_agent", "tech_stack_list", "user_name", "project_name")
+        for wf in root.joinpath(*WORKFLOWS_DIR).iterdir():
+            text = wf.read_text(encoding="utf-8", errors="ignore")
+            leaked = [k for k in resolved_keys if "{{" + k + "}}" in text]
+            assert not leaked, f"{wf.name} still carries {leaked}"
+
+    def test_runtime_slots_survive_installation(self, tmp_path: Path) -> None:
+        """`{{current_step}}` & co are filled per run by the LLM, not at install."""
+        root = self._installed(tmp_path, ("minimal",))
+        status = (root.joinpath(*WORKFLOWS_DIR) / "workflow-status.md").read_text(encoding="utf-8")
+        assert "{{current_step}}" in status
+        assert "{{progress_bar}}" in status
+
+    def test_blank_agent_template_keeps_its_blanks(self, tmp_path: Path) -> None:
+        """The `minimal` archetype ships a fill-in-the-blank agent on purpose."""
+        root = self._installed(tmp_path, ("minimal",))
+        blank = root / "_grimoire" / "_config" / "custom" / "agents" / "custom-agent.md"
+        assert "{{agent_name}}" in blank.read_text(encoding="utf-8")
+
+    def test_infrastructure_placeholders_are_left_to_the_user(self, tmp_path: Path) -> None:
+        """The kit cannot know `{{lxc_id}}` or `{{host_ip}}` — it must not guess."""
+        root = self._installed(tmp_path, ("infra-ops",))
+        agent = root / "_grimoire" / "_config" / "custom" / "agents" / "k8s-navigator.md"
+        assert "{{vm_id}}" in agent.read_text(encoding="utf-8")
+
+
+class TestAgentReferencesResolve:
+    def test_every_shipped_agent_exec_target_is_installed(self, tmp_path: Path) -> None:
+        """No shipped agent may point at a workflow nothing installs.
+
+        Two defects this locks down: the fix-loop [FX] menu pointed at
+        `_grimoire/bmb/workflows/…`, and 25 agents' [PM] menu pointed at
+        `_grimoire/core/workflows/party-mode/workflow.md` — neither path was
+        ever created by any installer.
+
+        Installing every archetype at once is what makes the assertion total:
+        a target satisfied only by an archetype the user did not pick is still
+        a dead reference for that user, but it is a different failure, covered
+        by the per-archetype tests above.
         """
         archetypes_root = bundled_path()
-        shipped = {
-            _strip_tpl_suffix(wf.name)
-            for wf in archetypes_root.glob("*/workflows/*")
-            if wf.is_file()
-        }
-        assert shipped, "expected at least one archetype to ship a workflow"
+        every = tuple(sorted(d.name for d in archetypes_root.iterdir() if (d / "agents").is_dir()))
 
-        agent = archetypes_root / "fix-loop" / "agents" / "fix-loop-orchestrator.tpl.md"
-        targets = [
-            t
-            for t in re.findall(r'exec="\{project-root\}/([^"]+)"', agent.read_text(encoding="utf-8"))
-            if Path(t).name in shipped
-        ]
-        assert targets, "expected the fix-loop agent to reference its own workflow"
+        targets: dict[str, str] = {}
+        for agent in sorted(archetypes_root.glob("*/agents/*.md")):
+            for target in re.findall(r'exec="\{project-root\}/([^"]+)"', agent.read_text(encoding="utf-8")):
+                targets.setdefault(target, agent.name)
+        assert targets, "expected shipped agents to reference workflows"
 
-        planned = {fc.dst for fc in _scaffolder(tmp_path).plan().copies}
-        for target in targets:
-            assert tmp_path / target in planned, f"agent points at {target}, which nothing installs"
+        scaffolder = _scaffolder(tmp_path)
+        scaffolder._resolved = ResolvedArchetype(
+            archetype=every[0], archetypes=every, stack_agents=(), feature_agents=(), reason="test",
+        )
+        planned = {fc.dst for fc in scaffolder.plan().copies}
+
+        dead = {t: a for t, a in targets.items() if tmp_path / t not in planned}
+        assert not dead, f"agents point at workflows nothing installs: {dead}"

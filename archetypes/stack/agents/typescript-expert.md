@@ -61,7 +61,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="TS or fuzzy match on test or coverage or rtl" action="#improve-tests">[TS] Tests RTL — audit + ajout tests</item>
     <item cmd="RF or fuzzy match on refactor or split or decompose" action="#refactor">[RF] Refactoring — split composants, extract hooks</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Types, Perf, A11y, Bug Hunt</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

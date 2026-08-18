@@ -629,7 +629,7 @@ Budget par session :
 
 - `[MH]` Afficher le Menu
 - `[CH]` Discuter avec {AGENT_NAME}
-- `[PM]` Party Mode → exec=`{project-root}/_grimoire/core/workflows/party-mode/workflow.md`
+- `[PM]` Party Mode → exec=`{project-root}/_grimoire/_config/custom/workflows/party-mode.md`
 - `[DA]` Quitter
 
 ### Règle de Chunking des Menus (7±2)

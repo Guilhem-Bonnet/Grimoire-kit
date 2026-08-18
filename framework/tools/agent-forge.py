@@ -534,7 +534,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
   <menu>
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec {agent_name}</item>
-{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

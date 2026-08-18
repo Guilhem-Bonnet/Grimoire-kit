@@ -1,7 +1,7 @@
 <!-- ARCHETYPE: fix-loop — Agent Loop, orchestrateur de boucle de correction certifiée.
      Version: 2.7 (86 cycles d'amélioration + bornes du gauntlet)
      
-     Placeholders à remplacer :
+     Placeholders — résolus à l'installation depuis les agents présents :
      - {{ops_agent_name}} : Nom de l'agent ops/infra (ex: "Forge") — ou supprimer la ligne si pas d'agent ops
      - {{ops_agent_tag}} : Tag de l'agent ops (ex: "ops-engineer")  
      - {{debug_agent_name}} : Nom de l'agent debug (ex: "Probe") — ou supprimer si absent
@@ -84,7 +84,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="FX or fuzzy match on fix, problème, bug, erreur, issue" exec="{project-root}/_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md">[FX] Lancer une boucle de fix certifiée (Closed-Loop Fix)</item>
     <item cmd="RP or fuzzy match on rapport, patterns, historique, mémoire" action="#show-patterns">[RP] Voir les patterns de fix mémorisés</item>
     <item cmd="CF or fuzzy match on configure, seuil, iterations, timeout" action="#configure-loop">[CF] Configurer la boucle (max iterations, seuils)</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

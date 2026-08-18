@@ -58,7 +58,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="IN or fuzzy match on inventory" action="#inventory-ops">[IN] Inventaire — gérer les hosts et groupes</item>
     <item cmd="SC or fuzzy match on secret or vault" action="#vault-ops">[SC] Secrets — ansible-vault, chiffrement variables</item>
     <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit Ansible systématique</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

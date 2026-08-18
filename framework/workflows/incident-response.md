@@ -8,7 +8,8 @@ triggers:
  - incident sécurité détecté
 
 <!--
-TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
+Ces {{placeholders}} sont résolus à l'installation depuis les agents réellement
+présents dans le projet ; un rôle sans agent installé rend « aucun ».
  {{ops_agent}} - Agent infrastructure/provisioning (ex: Forge)
  {{security_agent}} - Agent sécurité (ex: Vault)
  {{monitoring_agent}} - Agent observabilité (ex: Hawk)

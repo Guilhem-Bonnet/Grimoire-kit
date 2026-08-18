@@ -61,7 +61,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="C4 or fuzzy match on c4 or diagram" action="#c4-diagram">[C4] Diagrammes C4 — Context, Container, Component</item>
     <item cmd="NF or fuzzy match on nfr or performance or scalability" action="#nfr-analysis">[NF] NFR Analysis — latency, throughput, availability, scaling</item>
     <item cmd="AU or fuzzy match on audit or review" action="#architecture-review">[AU] Architecture Review — auditer l'architecture existante</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 
