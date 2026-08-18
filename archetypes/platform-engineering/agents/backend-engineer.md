@@ -61,7 +61,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DB or fuzzy match on database or migration or schema" action="#database-ops">[DB] Database — migrations, queries, repository pattern</item>
     <item cmd="WS or fuzzy match on websocket or realtime" action="#websocket-impl">[WS] WebSocket — serveur temps réel, pub/sub, rooms</item>
     <item cmd="BH or fuzzy match on bug-hunt or debug" action="#bug-hunt">[BH] Bug Hunt — diagnostic backend systématique</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

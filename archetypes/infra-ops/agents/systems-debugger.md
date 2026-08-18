@@ -64,7 +64,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="NT or fuzzy match on network or tcpdump or iptables" action="#network-ops">[NT] Réseau — tcpdump, ss, iptables, DNS</item>
     <item cmd="IO or fuzzy match on storage or io or disk or nfs" action="#storage-ops">[IO] Storage &amp; I/O — iostat, fio, NFS</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Kernel, Hardware, Proxmox</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

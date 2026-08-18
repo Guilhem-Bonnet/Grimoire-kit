@@ -57,7 +57,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DK or fuzzy match on docker" action="#docker-ops">[DK] Opérations Docker (compose/stack/debug)</item>
     <item cmd="MO or fuzzy match on monitoring" action="#monitoring-ops">[MO] Monitoring (Prometheus/Grafana/Loki/alertes)</item>
     <item cmd="QD or fuzzy match on quick-deploy" action="#quick-deploy">[QD] Quick Deploy — déploiement rapide sur un LXC</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

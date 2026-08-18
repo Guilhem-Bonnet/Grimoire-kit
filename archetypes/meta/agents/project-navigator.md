@@ -59,7 +59,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DP or fuzzy match on dispatch or plan or route" action="#dispatch">[DP] Dispatch — recommander un plan multi-agents</item>
     <item cmd="RM or fuzzy match on repo-map or map or repomap or carte code" action="#repo-map">[RM] Repo Map — carte du dépôt</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus d'options — Registre, Réseau, ADR, Mémoire, Impact, Learnings</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

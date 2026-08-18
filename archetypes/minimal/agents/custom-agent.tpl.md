@@ -66,7 +66,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="AA or fuzzy match on {{menu_keyword_1}}" action="#prompt-1">[AA] {{menu_item_1}}</item>
     <item cmd="BB or fuzzy match on {{menu_keyword_2}}" action="#prompt-2">[BB] {{menu_item_2}}</item>
     <item cmd="CC or fuzzy match on {{menu_keyword_3}}" action="#prompt-3">[CC] {{menu_item_3}}</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

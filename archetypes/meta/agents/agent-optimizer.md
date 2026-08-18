@@ -59,7 +59,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="QR or fuzzy match on quality-report or health" action="#quality-report">[QR] Health Report — rapport de qualité</item>
     <item cmd="OP or fuzzy match on optimize or améliorer" action="#optimize-prompt">[OP] Optimiser Prompt</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Scope, Protocoles, Failures, Bench</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

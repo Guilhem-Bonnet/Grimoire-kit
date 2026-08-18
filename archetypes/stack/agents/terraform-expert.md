@@ -58,7 +58,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="ST or fuzzy match on state or drift" action="#state-ops">[ST] State &amp; Drift — import, mv, rm, drift detection</item>
     <item cmd="VA or fuzzy match on variable or variables or inputs" action="#variable-ops">[VA] Variables &amp; Outputs — validation, types, documentation</item>
     <item cmd="BH or fuzzy match on bug-hunt" action="#bug-hunt">[BH] Bug Hunt — audit Terraform systématique</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

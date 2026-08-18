@@ -5,7 +5,9 @@ description: Orchestre une boucle de correction fermée avec validation automati
 ---
 
 <!--
-PLACEHOLDERS — à remplacer avant utilisation :
+PLACEHOLDERS — résolus à l'installation depuis les agents réellement présents
+dans le projet ; un rôle sans agent installé rend « aucun » et le workflow
+reste en mode SOLO :
   {{ops_agent_name}}      - Nom de l'agent ops/infra (ex: Forge)
   {{ops_agent_tag}}       - Tag/ID de l'agent ops/infra (ex: forge)
   {{debug_agent_name}}    - Nom de l'agent de débogage système (ex: Probe)

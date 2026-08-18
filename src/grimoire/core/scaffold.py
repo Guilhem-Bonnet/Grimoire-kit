@@ -17,6 +17,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from string import Template
+from typing import ClassVar
 
 from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
@@ -34,6 +35,18 @@ def _is_agent_markdown(path: PurePath) -> bool:
     Windows (backslashes) — see issue #33 — hence the component-based check.
     """
     return path.suffix == ".md" and "agents" in path.parts
+
+
+def _render_placeholders(text: str, variables: dict[str, str]) -> str:
+    """Substitute ``{{key}}`` for known keys only.
+
+    Unknown placeholders are left intact on purpose: the blank agent template
+    of the ``minimal`` archetype ships ``{{agent_name}}`` as a fill-in-the-blank,
+    and blanking it would destroy what the file is for.
+    """
+    for key, value in variables.items():
+        text = text.replace("{{" + key + "}}", value)
+    return text
 
 
 def _strip_tpl_suffix(name: str) -> str:
@@ -54,11 +67,18 @@ def _strip_tpl_suffix(name: str) -> str:
 
 @dataclass
 class FileCopy:
-    """A file to copy from *src* to *dst*."""
+    """A file to copy from *src* to *dst*.
+
+    When *render_vars* is set, ``{{key}}`` occurrences are substituted on the
+    way out instead of copying the bytes verbatim. Kept on FileCopy rather than
+    TemplateRender so agent files stay in ``plan.copies``, where the manifest,
+    the Copilot wrappers and the assistant bridges all look for them.
+    """
 
     src: Path
     dst: Path
     label: str = ""
+    render_vars: dict[str, str] | None = None
 
 
 @dataclass
@@ -332,6 +352,7 @@ class ProjectScaffolder:
         self._plan_assistant_bridges(p)
         self._plan_mcp_config(p)
         self._plan_gitignore(p)
+        self._plan_placeholder_rendering(p)
         return p
 
     def execute(self, plan: ScaffoldPlan) -> ScaffoldResult:
@@ -346,6 +367,11 @@ class ProjectScaffolder:
             fc.dst.parent.mkdir(parents=True, exist_ok=True)
             if fc.src.is_dir():
                 shutil.copytree(fc.src, fc.dst, dirs_exist_ok=True)
+            elif fc.render_vars:
+                fc.dst.write_text(
+                    _render_placeholders(fc.src.read_text(encoding="utf-8"), fc.render_vars),
+                    encoding="utf-8",
+                )
             else:
                 shutil.copy2(fc.src, fc.dst)
             result.copied_files.append(fc.label or str(fc.dst.relative_to(self._target)))
@@ -367,6 +393,63 @@ class ProjectScaffolder:
 
     def _workflows_dir(self) -> Path:
         return self._target / "_grimoire" / "_config" / "custom" / "workflows"
+
+    # Delegation roles a template may reference, each mapped to the agent tags
+    # that can fill it, most specific first.
+    #
+    # Only roles resolvable from the installed agent set belong here. The kit
+    # ships three other families of ``{{…}}`` that must survive installation:
+    # runtime slots the LLM fills per run (``{{current_step}}``, ``{{run_id}}``),
+    # infrastructure the kit cannot know (``{{lxc_id}}``, ``{{host_ip}}``), and
+    # the blank-agent template of the ``minimal`` archetype. Substitution is
+    # therefore opt-in per key, never a blanket sweep.
+    _EXPERT_ROLES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "ops": ("ops-engineer", "deploy-orchestrator", "platform-architect"),
+        "debug": ("systems-debugger", "reliability-engineer"),
+        "dev": ("fullstack-dev", "backend-engineer", "python-expert", "go-expert", "typescript-expert"),
+        "ux": ("frontend-specialist", "illustration-expert"),
+        "security": ("security-hardener",),
+        "monitoring": ("monitoring-specialist",),
+        "k8s": ("k8s-navigator", "k8s-expert"),
+        "backup": ("backup-dr-specialist",),
+        "cicd": ("pipeline-architect", "deploy-orchestrator"),
+    }
+
+    def _archetype_render_vars(self, planned_agents: dict[str, str]) -> dict[str, str]:
+        """Resolve the install-time placeholders for this project.
+
+        A role with no installed agent renders as "aucun" rather than staying a
+        raw ``{{…}}`` marker: the delegation tables then read honestly and the
+        orchestrator stays in SOLO mode, which is its documented default.
+        """
+        variables: dict[str, str] = {}
+        for role, candidates in self._EXPERT_ROLES.items():
+            tag = next((c for c in candidates if c in planned_agents), None)
+            name = planned_agents[tag] if tag else "aucun"
+            # Two spellings ship in the kit: `{{ops_agent_name}}` + `{{ops_agent_tag}}`
+            # in the archetype templates, the short `{{ops_agent}}` in the framework ones.
+            variables[f"{role}_agent_name"] = name
+            variables[f"{role}_agent_tag"] = tag or "—"
+            variables[f"{role}_agent"] = name
+
+        stacks = [d.name for d in self._scan.stacks] if self._scan else []
+        variables["tech_stack_list"] = ", ".join(stacks) if stacks else "stack non détectée"
+        variables["user_name"] = self._user_name
+        variables["project_name"] = self._project_name
+        return variables
+
+    @staticmethod
+    def _agent_identity(path: Path) -> tuple[str, str] | None:
+        """Return ``(tag, persona name)`` for an agent file, or None if unreadable."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        tag = re.search(r"^name:\s*\"?([\w-]+)\"?", text, re.MULTILINE)
+        persona = re.search(r'<agent[^>]*\bname="([^"]+)"', text)
+        if not tag:
+            return None
+        return tag.group(1), (persona.group(1) if persona else tag.group(1))
 
     def _tpl_vars(self) -> dict[str, str]:
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
@@ -448,6 +531,34 @@ class ProjectScaffolder:
             base / "_grimoire-output" / "contracts",
         ]
         p.directories.extend(dirs)
+
+    def _plan_placeholder_rendering(self, p: ScaffoldPlan) -> None:
+        """Resolve template placeholders in the agents and workflows being installed.
+
+        Runs last, once every agent is planned: which expert fills a delegation
+        role depends on the whole set, not on the archetype that declared the
+        placeholder. Without this pass the files ship with raw ``{{…}}`` markers
+        where the user's agent names should be.
+        """
+        planned_agents: dict[str, str] = {}
+        for fc in p.copies:
+            if not fc.src.is_file() or not _is_agent_markdown(fc.dst):
+                continue
+            identity = self._agent_identity(fc.src)
+            if identity:
+                planned_agents.setdefault(*identity)
+
+        variables = self._archetype_render_vars(planned_agents)
+        renderable = {self._agents_dir(), self._workflows_dir()}
+        for fc in p.copies:
+            if not fc.src.is_file() or fc.dst.parent not in renderable:
+                continue
+            try:
+                text = fc.src.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if any("{{" + key + "}}" in text for key in variables):
+                fc.render_vars = variables
 
     def _plan_meta_agents(self, p: ScaffoldPlan) -> None:
         meta_dir = self._archetypes / "meta" / "agents"
@@ -581,14 +692,18 @@ class ProjectScaffolder:
                 label="framework/prompt-templates/",
             ))
 
-        # Workflows
+        # Workflows — file by file rather than as a directory, so the placeholder
+        # pass can reach them and the `.tpl` marker gets stripped like everywhere else.
         wf_src = fw / "workflows"
         if wf_src.is_dir():
-            p.copies.append(FileCopy(
-                src=wf_src,
-                dst=dst_custom / "workflows",
-                label="framework/workflows/",
-            ))
+            for wf in sorted(wf_src.iterdir()):
+                if not wf.is_file():
+                    continue
+                p.copies.append(FileCopy(
+                    src=wf,
+                    dst=dst_custom / "workflows" / _strip_tpl_suffix(wf.name),
+                    label=f"framework/workflows/{_strip_tpl_suffix(wf.name)}",
+                ))
 
         # Memory system
         mem_dst = self._memory_dir()

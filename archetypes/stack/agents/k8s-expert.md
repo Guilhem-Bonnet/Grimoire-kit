@@ -58,7 +58,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="TB or fuzzy match on troubleshoot or debug or crashloop" action="#troubleshoot">[TB] Troubleshooting — debug pods, crashloop, OOM</item>
     <item cmd="NP or fuzzy match on network or ingress or policy" action="#network-ops">[NP] Réseau — Services, Ingress, NetworkPolicies</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Stockage, Sécurité, Bug Hunt</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

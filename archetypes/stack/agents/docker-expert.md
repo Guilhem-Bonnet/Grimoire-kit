@@ -59,7 +59,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="CP or fuzzy match on compose or service" action="#compose-ops">[CP] Docker Compose — services, networks, volumes</item>
     <item cmd="TB or fuzzy match on troubleshoot or debug or logs" action="#troubleshoot">[TB] Troubleshooting — logs, exec, inspect</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Sécurité, Optimisation, Bug Hunt</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

@@ -60,7 +60,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="LQ or fuzzy match on loki or logql" action="#loki-ops">[LQ] Loki &amp; LogQL — requêtes de logs, pipelines</item>
     <item cmd="AU or fuzzy match on audit or health" action="#observability-audit">[AU] Audit Observabilité — scanner les trous</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Alertmanager, Blackbox, SLO</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

@@ -62,7 +62,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="RB or fuzzy match on runbook" action="#runbook">[RB] Runbook — créer un guide de remédiation</item>
     <item cmd="LT or fuzzy match on load-test or capacity" action="#load-testing">[LT] Load Testing — k6/Locust, capacity planning</item>
     <item cmd="CH or fuzzy match on chaos" action="#chaos-engineering">[CE] Chaos Engineering — tests de résilience</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/core/workflows/party-mode/workflow.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 
