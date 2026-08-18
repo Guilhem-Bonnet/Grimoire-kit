@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.32.0] - 2026-08-18
+
 ### Ajouté
 
 - **Workflow `party-mode`** — 25 agents livrés exposaient un menu `[PM] Party Mode`
@@ -19,6 +21,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Panel de 3 à 5 agents, premier tour sans lecture croisée pour éviter la
   convergence, second tour limité aux désaccords, aucun vote, arbitrage rendu à
   l'utilisateur et tracé dans `decisions-log.md`.
+- **Bornes du gauntlet** (archétype `fix-loop` 1.1.0, workflow closed-loop-fix
+  v2.7) — CHALLENGER + GATEKEEPER restent opt-in, mais gagnent trois règles qui
+  décident quand ils tournent et quand ils s'arrêtent. **Déclencheurs**
+  (Phase 1.5) : cinq signaux objectifs escaladent la sévérité et rallument le
+  passage adversarial sur un cycle classé trop bas — `T1-repeat` (2e tentative
+  sur le même symptôme), `T2-security`, `T3-prod`, `T4-surface` (≥ 3 composants
+  impactés), `T5-data` (écriture non réversible) ; la sévérité ne redescend
+  jamais en cours de cycle. **Gate oracle** (Phase 2.4bis) : le gauntlet exige
+  une commande avec `exit_code` attendu qui échoue avant le fix et passe après,
+  les deux exécutions capturées ; sans oracle les deux phases sont désactivées,
+  le rapport est marqué « appliqué, non certifié » et aucun pattern n'est écrit.
+  **Arrêt sur boucle stérile** (Phase 4.6) : deux itérations dont la signature
+  d'échec (commande + `exit_code` + 1re ligne `stderr`) est identique escaladent
+  à l'humain sans consommer `max_iterations`. Nouveaux champs FER (v3.1) :
+  `severity_escalated_from`, `gauntlet_trigger`, `oracle_available`,
+  `failure_signatures[]`. La question 7 de la META-REVIEW mesure si un
+  déclencheur a servi ou coûté pour rien, de quoi resserrer les seuils sur
+  données réelles plutôt qu'à l'intuition.
 
 ### Corrigé
 
@@ -56,26 +76,37 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Test de contrat associé : toute cible `exec=` d'un agent qui désigne un
   workflow livré par le kit doit correspondre à un fichier réellement installé.
 
+## [3.31.0] - 2026-08-15
+
+Aucune entrée n'a été consignée pour cette publication. Le détail est dans
+l'historique git (`git log v3.30.0..v3.31.0`) et dans les notes de release
+GitHub ; il n'est pas reconstitué ici, pour ne pas attribuer après coup des
+changements à une version au jugé.
+
+## [3.30.0] - 2026-08-15
+
+Aucune entrée consignée — voir `git log v3.29.0..v3.30.0`.
+
+## [3.29.0] - 2026-08-15
+
+Aucune entrée consignée — voir `git log v3.28.0..v3.29.0`.
+
+## [3.28.0] - 2026-08-15
+
+Aucune entrée consignée — voir `git log v3.27.0..v3.28.0`.
+
+## [3.27.0] - 2026-08-15
+
+Aucune entrée consignée — voir `git log v3.26.1..v3.27.0`.
+
+## [3.26.1] - 2026-08-15
+
+Aucune entrée consignée — voir `git log v3.26.0..v3.26.1`.
+
+## [3.26.0] - 2026-08-14
+
 ### Ajouté
 
-- **Bornes du gauntlet** (archétype `fix-loop` 1.1.0, workflow closed-loop-fix
-  v2.7) — CHALLENGER + GATEKEEPER restent opt-in, mais gagnent trois règles qui
-  décident quand ils tournent et quand ils s'arrêtent. **Déclencheurs**
-  (Phase 1.5) : cinq signaux objectifs escaladent la sévérité et rallument le
-  passage adversarial sur un cycle classé trop bas — `T1-repeat` (2e tentative
-  sur le même symptôme), `T2-security`, `T3-prod`, `T4-surface` (≥ 3 composants
-  impactés), `T5-data` (écriture non réversible) ; la sévérité ne redescend
-  jamais en cours de cycle. **Gate oracle** (Phase 2.4bis) : le gauntlet exige
-  une commande avec `exit_code` attendu qui échoue avant le fix et passe après,
-  les deux exécutions capturées ; sans oracle les deux phases sont désactivées,
-  le rapport est marqué « appliqué, non certifié » et aucun pattern n'est écrit.
-  **Arrêt sur boucle stérile** (Phase 4.6) : deux itérations dont la signature
-  d'échec (commande + `exit_code` + 1re ligne `stderr`) est identique escaladent
-  à l'humain sans consommer `max_iterations`. Nouveaux champs FER (v3.1) :
-  `severity_escalated_from`, `gauntlet_trigger`, `oracle_available`,
-  `failure_signatures[]`. La question 7 de la META-REVIEW mesure si un
-  déclencheur a servi ou coûté pour rien, de quoi resserrer les seuils sur
-  données réelles plutôt qu'à l'intuition.
 - **Verdict de sécurité — surface d'attaque agrégée** (blueprint, P2.4) — la
   couche guardrails (`Gate(guardrail, in|out)`, `Gate(mcp-trust)`) était déjà
   déclarable et lintée (R-G1/R-G2/R-G5) ; on ajoute la **vue de synthèse** :
