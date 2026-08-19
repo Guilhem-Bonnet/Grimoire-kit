@@ -540,3 +540,57 @@ def blueprint_compile(
     typer.echo(f"  source saved : {root / '_grimoire' / 'blueprints' / (result['compiled'] + '.blueprint.json')}")
     for warning in result.get("warnings", []):
         typer.secho(f"  warning: {warning}", fg=typer.colors.YELLOW)
+
+
+_RECORD_OPTION = typer.Option(
+    ...,
+    "--record",
+    "-r",
+    help="Execution record produced by the host (see grimoire.tools.blueprint_eval_runner).",
+)
+
+
+@blueprint_app.command("evals")
+def blueprint_evals(
+    file: Path = _FILE_ARGUMENT,
+    record: Path = _RECORD_OPTION,
+) -> None:
+    """Replay a blueprint's declared evals against an execution record.
+
+    The Studio never executes: the host runs the flow once and records what
+    happened, this command verifies the recording. A case with no entry in the
+    record is reported as *not executed* — never as failed.
+    """
+    from grimoire.tools.blueprint_eval_runner import run_evals, run_record_shape_errors
+    from grimoire.tools.blueprint_evals import evals_summary
+
+    blueprint = json.loads(file.read_text(encoding="utf-8"))
+    trace = json.loads(record.read_text(encoding="utf-8"))
+
+    shape = run_record_shape_errors(trace)
+    if shape:
+        for err in shape:
+            typer.secho(f"  - {err}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    outcome = run_evals(blueprint, trace)
+    summary = evals_summary(blueprint, outcome["results"])
+    totals = summary.get("totals", {})
+
+    for detail in outcome["details"]:
+        mark = "OK  " if detail["passed"] else "FAIL"
+        colour = typer.colors.GREEN if detail["passed"] else typer.colors.RED
+        typer.secho(f"  {mark} {detail['scope']}/{detail['case']}", fg=colour)
+        for reason in detail["reasons"]:
+            typer.echo(f"       {reason}")
+
+    for missing in outcome["missing"]:
+        typer.secho(f"  --   {missing} (non exécuté)", fg=typer.colors.YELLOW)
+
+    typer.echo("")
+    typer.echo(
+        f"{totals.get('passed', 0)}/{totals.get('executed', 0)} réussis "
+        f"sur {totals.get('declared', 0)} déclarés"
+    )
+    if any(not d["passed"] for d in outcome["details"]):
+        raise typer.Exit(code=1)
