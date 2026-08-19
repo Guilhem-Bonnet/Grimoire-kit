@@ -249,9 +249,12 @@ class TestEvalsAcceptance:
         content = (api.project_root / result["artifact"]).read_text(encoding="utf-8")
         assert "#### Évals (preuve comportementale, v1)" in content
         assert "honore le contrat `handoff-packet`" in content
-        # La section ne nomme aucun exécutant : aucun outil livré ne lit les
-        # suites d'un blueprint, et promettre `agent-test` envoyait l'hôte
-        # lancer une commande sans effet. Verrouillé par
-        # tests/unit/tools/test_executor_coherence.py.
+        # La section nomme un exécutant qui lit réellement le format. Elle a
+        # d'abord promis `agent-test`, qui n'en connaissait rien : l'hôte
+        # partait lancer une commande sans effet. Tout nom apparaissant ici est
+        # désormais verrouillé par tests/unit/tools/test_executor_coherence.py,
+        # qui exige la preuve, dans la source de l'exécutant, qu'il consomme ce
+        # format.
         assert "agent-test" not in content
-        assert "déclarés, pas encore exécutables" in content
+        assert "grimoire blueprint evals" in content
+        assert "non exécuté" in content

@@ -220,7 +220,14 @@ into a mission pack. The CLI covers the whole cycle:
 grimoire blueprint new mon-pipeline            # scaffold a valid .blueprint.json
 grimoire blueprint validate mon-pipeline.blueprint.json
 grimoire blueprint compile mon-pipeline.blueprint.json
+grimoire blueprint evals mon-pipeline.blueprint.json --record trace.json
 ```
+
+Evals attached to a blueprint describe what the flow must produce, not just the
+shape it must have. The Studio never runs them: your host runs the flow once and
+records what happened (contract returned, tokens spent, verdict, path taken),
+then `blueprint evals` checks the recording. A case missing from the record is
+reported as "not executed" — never as a failure.
 
 - Reference schema: `schemas/blueprint-v1.schema.json`
 - Ready-to-use examples: `registry/blueprints/` (`minimal`, `web-pipeline`)

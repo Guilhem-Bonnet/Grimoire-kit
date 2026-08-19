@@ -216,7 +216,15 @@ mission pack. Le CLI couvre tout le cycle :
 grimoire blueprint new mon-pipeline            # scaffold un .blueprint.json valide
 grimoire blueprint validate mon-pipeline.blueprint.json
 grimoire blueprint compile mon-pipeline.blueprint.json
+grimoire blueprint evals mon-pipeline.blueprint.json --record trace.json
 ```
+
+Les évals attachées à un blueprint décrivent ce que le flow doit produire, pas
+seulement la forme qu'il doit avoir. Le Studio ne les exécute jamais : votre
+hôte fait tourner le flow une fois et consigne ce qui s'est passé (contrat rendu,
+tokens consommés, verdict, chemin suivi), puis `blueprint evals` vérifie la
+consignation. Un cas absent de la trace est rapporté « non exécuté » — jamais
+comme un échec.
 
 - Schéma de référence : `schemas/blueprint-v1.schema.json`
 - Exemples prêts à l'emploi : `registry/blueprints/` (`minimal`, `web-pipeline`)

@@ -331,9 +331,9 @@ def compile_evals_section(node: dict[str, Any]) -> list[str]:
         checks = " ; ".join(_assertion_label(a) for a in asserts)
         lines.append(f"- `{cid}` — {checks}")
     lines.append(
-        "- Ces cas sont **déclarés, pas encore exécutables** : aucun outil "
-        "livré ne lit les suites d'un blueprint. Les exécuter demande un "
-        "exécutant qui consomme ce format ; le taux de réussite alimentera "
-        "alors le panneau santé."
+        "- Gate CI : `grimoire blueprint evals <flow> --record <trace>`. "
+        "Le Studio n'exécute jamais : l'hôte fait tourner le flow et consigne "
+        "ce qui s'est passé, la commande vérifie la consignation. Un cas sans "
+        "entrée dans la trace est rapporté **non exécuté**, jamais en échec."
     )
     return lines
