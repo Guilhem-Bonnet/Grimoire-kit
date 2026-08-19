@@ -20,8 +20,9 @@ Or configure in your MCP client (Claude Desktop, VS Code, etc.)::
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from grimoire.__version__ import __version__
 from grimoire.core.config import GrimoireConfig
@@ -32,13 +33,30 @@ from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 # des deux côtés — constructeur `name`/`instructions`, décorateur `.tool()`,
 # `.run()` en stdio par défaut — donc un adaptateur suffit et évite d'enfermer
 # les utilisateurs sous la 2.0. Vérifié contre 2.0.0, pas supposé.
-# Seule la sélection est dynamique : l'analyse statique continue de voir la
-# façade 1.x, dont les stubs typent le décorateur `.tool()`. Passer par `Any`
-# ferait taire mypy sur les douze outils d'un coup.
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+_INSTRUCTIONS = (
+    "Grimoire Kit — Composable AI agent platform. "
+    "Use these tools to inspect and manage Grimoire projects."
+)
 
-    _Server: type[FastMCP]
+if TYPE_CHECKING:
+    # L'analyse statique ne s'attache à aucune des deux versions : elle décrit
+    # la surface qu'on utilise, et rien d'autre. Un premier jet visait les
+    # stubs de `FastMCP` ; la CI installe l'extra complet, donc désormais mcp
+    # 2.x, où ce module n'existe plus — mypy retombait sur `Any` et détypait
+    # les douze outils d'un coup. Ce protocole est exactement ce que le test
+    # `test_surface_utilisee_toujours_presente` vérifie au runtime.
+    _F = TypeVar("_F", bound=Callable[..., Any])
+
+    class _ServerFacade(Protocol):
+        """Ce que `FastMCP` (mcp 1.x) et `MCPServer` (mcp 2.x) ont en commun."""
+
+        name: str
+
+        def tool(self, *args: Any, **kwargs: Any) -> Callable[[_F], _F]: ...
+
+        def run(self, *args: Any, **kwargs: Any) -> None: ...
+
+    mcp: _ServerFacade
 else:
     try:                                      # mcp >= 2
         from mcp.server.mcpserver import MCPServer as _Server
@@ -49,11 +67,7 @@ else:
             msg = "MCP SDK not installed. Run: pip install grimoire-kit[mcp]"
             raise ImportError(msg) from _exc
 
-mcp = _Server(
-    name="grimoire",
-    instructions="Grimoire Kit — Composable AI agent platform. "
-    "Use these tools to inspect and manage Grimoire projects.",
-)
+    mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS)
 
 
 def _find_config() -> GrimoireConfig:
