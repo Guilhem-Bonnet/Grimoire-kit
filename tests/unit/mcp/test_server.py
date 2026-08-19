@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
+from grimoire.mcp import server as server_module
 from grimoire.mcp.server import (
     _find_kit_root,
     grimoire_add_agent,
@@ -58,6 +62,61 @@ class TestServerInstance:
     def test_has_tools(self) -> None:
         # FastMCP should have registered tools
         assert mcp is not None
+
+    def test_facade_connue(self) -> None:
+        """Le SDK a renommé sa façade en 2.0 (`FastMCP` → `MCPServer`), et
+        l'extra `grimoire-kit[mcp]` a livré un serveur mort avant qu'on borne.
+        Un troisième nom doit se voir ici, pas à l'installation d'un
+        utilisateur."""
+        assert type(mcp).__name__ in {"FastMCP", "MCPServer"}
+
+    def test_surface_utilisee_toujours_presente(self) -> None:
+        """Les trois seuls points d'API dont dépend ce module. Les vérifier
+        version par version coûte moins qu'un serveur qui ne démarre pas."""
+        assert mcp.name == "grimoire"
+        assert callable(mcp.tool)
+        assert callable(mcp.run)
+
+
+def _load_server_isolated(name: str) -> ModuleType:
+    """Charger une copie neuve du module, sans toucher à celle déjà importée."""
+    spec = importlib.util.spec_from_file_location(name, Path(server_module.__file__))
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+class TestFacadeFallback:
+    """La chaîne de repli ne s'exécute que chez l'utilisateur : une seule
+    version du SDK est installée à la fois, donc l'environnement de test n'en
+    voit jamais qu'une branche. La simuler est le seul moyen de savoir que
+    l'autre marche avant qu'un utilisateur ne le découvre."""
+
+    @staticmethod
+    def _hide(monkeypatch: pytest.MonkeyPatch, *modules: str) -> None:
+        # `None` dans sys.modules fait lever ImportError à l'import, ce qui
+        # reproduit exactement l'absence du sous-module.
+        for name in modules:
+            monkeypatch.setitem(sys.modules, name, None)
+
+    def test_repli_sur_la_facade_1_x(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pytest.importorskip("mcp.server.fastmcp")
+        self._hide(monkeypatch, "mcp.server.mcpserver")
+        module = _load_server_isolated("_srv_fallback_1x")
+        assert type(module.mcp).__name__ == "FastMCP"
+        assert module.mcp.name == "grimoire"
+
+    def test_sans_sdk_le_message_dit_quoi_installer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._hide(monkeypatch, "mcp.server.mcpserver", "mcp.server.fastmcp")
+        with pytest.raises(ImportError, match=r"grimoire-kit\[mcp\]"):
+            _load_server_isolated("_srv_sans_sdk")
 
 
 # ── grimoire_project_context ──────────────────────────────────────────────────────
