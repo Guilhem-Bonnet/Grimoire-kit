@@ -1,4 +1,4 @@
-"""Tests for grimoire.cli.cmd_blueprint — CLI blueprints (new / validate / compile)."""
+"""Tests for grimoire.cli.cmd_blueprint — CLI blueprints (new / validate / compile / evals)."""
 
 from __future__ import annotations
 
@@ -241,3 +241,79 @@ def test_install_blueprint_reports_exact_install_commands(tmp_path: Path) -> Non
         f"grimoire ext add crewai --registry {registry.resolve()} --project-root {project.resolve()}",
         f"grimoire ext add langgraph --registry {registry.resolve()} --project-root {project.resolve()}",
     ]
+
+
+# ── evals ─────────────────────────────────────────────────────────────────────
+
+
+def _flow(path: Path, cases: list[dict[str, object]]) -> Path:
+    path.write_text(
+        json.dumps({
+            "id": "f", "version": "1.0.0",
+            "nodes": [{"id": "crew", "config": {"evals": {"version": "1.0", "cases": cases}}}],
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _trace(path: Path, runs: dict[str, object]) -> Path:
+    path.write_text(json.dumps({"recordVersion": 1, "runs": runs}), encoding="utf-8")
+    return path
+
+
+def test_evals_rejoue_une_trace_conforme(tmp_path: Path) -> None:
+    flow = _flow(tmp_path / "f.blueprint.json", [
+        {"id": "c1", "input": {}, "assert": [{"kind": "contract", "contract": "evidence-pack"}]}
+    ])
+    trace = _trace(tmp_path / "t.json", {"crew": {"c1": {"contract": "evidence-pack"}}})
+    result = runner.invoke(blueprint_app, ["evals", str(flow), "--record", str(trace)])
+    assert result.exit_code == 0, result.output
+    assert "OK" in result.output
+    assert "1/1 réussis sur 1 déclarés" in result.output
+
+
+def test_evals_signale_l_echec_et_sa_raison(tmp_path: Path) -> None:
+    flow = _flow(tmp_path / "f.blueprint.json", [
+        {"id": "c1", "input": {}, "assert": [{"kind": "contract", "contract": "evidence-pack"}]}
+    ])
+    trace = _trace(tmp_path / "t.json", {"crew": {"c1": {"contract": "handoff-packet"}}})
+    result = runner.invoke(blueprint_app, ["evals", str(flow), "--record", str(trace)])
+    assert result.exit_code == 1
+    assert "FAIL" in result.output
+    assert "handoff-packet" in result.output
+
+
+def test_evals_ne_confond_pas_non_execute_et_echoue(tmp_path: Path) -> None:
+    """Un cas absent de la trace n'est pas réfuté : la commande sort en 0."""
+    flow = _flow(tmp_path / "f.blueprint.json", [
+        {"id": "jamais-joue", "input": {}, "assert": [{"kind": "no-refusal"}]}
+    ])
+    trace = _trace(tmp_path / "t.json", {})
+    result = runner.invoke(blueprint_app, ["evals", str(flow), "--record", str(trace)])
+    assert result.exit_code == 0, result.output
+    assert "non exécuté" in result.output
+    assert "0/0 réussis sur 1 déclarés" in result.output
+
+
+def test_evals_refuse_une_trace_de_version_inconnue(tmp_path: Path) -> None:
+    flow = _flow(tmp_path / "f.blueprint.json", [
+        {"id": "c1", "input": {}, "assert": [{"kind": "no-refusal"}]}
+    ])
+    trace = tmp_path / "t.json"
+    trace.write_text(json.dumps({"recordVersion": 99, "runs": {}}), encoding="utf-8")
+    result = runner.invoke(blueprint_app, ["evals", str(flow), "--record", str(trace)])
+    assert result.exit_code == 1
+    assert "recordVersion" in result.output
+
+
+def test_evals_sur_le_blueprint_de_reference(tmp_path: Path) -> None:
+    """L'exemple livré déclare 5 cas sur 4 portées ; sans trace, aucun n'est
+    exécuté et rien n'est compté comme échoué."""
+    trace = _trace(tmp_path / "t.json", {})
+    result = runner.invoke(
+        blueprint_app,
+        ["evals", str(EXAMPLES / "web-pipeline.blueprint.json"), "--record", str(trace)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "sur 5 déclarés" in result.output
