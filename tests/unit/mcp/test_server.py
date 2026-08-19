@@ -59,6 +59,20 @@ class TestServerInstance:
         # FastMCP should have registered tools
         assert mcp is not None
 
+    def test_facade_connue(self) -> None:
+        """Le SDK a renommé sa façade en 2.0 (`FastMCP` → `MCPServer`), et
+        l'extra `grimoire-kit[mcp]` a livré un serveur mort avant qu'on borne.
+        Un troisième nom doit se voir ici, pas à l'installation d'un
+        utilisateur."""
+        assert type(mcp).__name__ in {"FastMCP", "MCPServer"}
+
+    def test_surface_utilisee_toujours_presente(self) -> None:
+        """Les trois seuls points d'API dont dépend ce module. Les vérifier
+        version par version coûte moins qu'un serveur qui ne démarre pas."""
+        assert mcp.name == "grimoire"
+        assert callable(mcp.tool)
+        assert callable(mcp.run)
+
 
 # ── grimoire_project_context ──────────────────────────────────────────────────────
 

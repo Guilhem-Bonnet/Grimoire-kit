@@ -21,19 +21,35 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.__version__ import __version__
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 
-try:
+# Le SDK a renommé sa façade en 2.0 : `mcp.server.fastmcp.FastMCP` est devenu
+# `mcp.server.mcpserver.MCPServer`. La surface qu'on utilise ici est identique
+# des deux côtés — constructeur `name`/`instructions`, décorateur `.tool()`,
+# `.run()` en stdio par défaut — donc un adaptateur suffit et évite d'enfermer
+# les utilisateurs sous la 2.0. Vérifié contre 2.0.0, pas supposé.
+# Seule la sélection est dynamique : l'analyse statique continue de voir la
+# façade 1.x, dont les stubs typent le décorateur `.tool()`. Passer par `Any`
+# ferait taire mypy sur les douze outils d'un coup.
+if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-except ImportError as _exc:
-    msg = "MCP SDK not installed. Run: pip install grimoire-kit[mcp]"
-    raise ImportError(msg) from _exc
 
-mcp = FastMCP(
+    _Server: type[FastMCP]
+else:
+    try:                                      # mcp >= 2
+        from mcp.server.mcpserver import MCPServer as _Server
+    except ImportError:
+        try:                                  # mcp 1.x
+            from mcp.server.fastmcp import FastMCP as _Server
+        except ImportError as _exc:
+            msg = "MCP SDK not installed. Run: pip install grimoire-kit[mcp]"
+            raise ImportError(msg) from _exc
+
+mcp = _Server(
     name="grimoire",
     instructions="Grimoire Kit — Composable AI agent platform. "
     "Use these tools to inspect and manage Grimoire projects.",

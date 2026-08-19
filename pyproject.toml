@@ -30,11 +30,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Borne haute délibérée : mcp 2.0 a retiré `mcp.server.fastmcp`, sur
-# lequel repose grimoire.mcp.server. Sans elle, `pip install
-# grimoire-kit[mcp]` livre un serveur MCP qui ne démarre pas.
+# Borne haute maintenue, mais élargie : mcp 2.0 avait retiré
+# `mcp.server.fastmcp`, et sans borne `grimoire-kit[mcp]` livrait un serveur
+# qui ne démarrait pas. grimoire.mcp.server accepte désormais les deux façades
+# (`MCPServer` en 2.x, `FastMCP` en 1.x), donc la 2 passe. La borne reste
+# fermée sur la 3 : une majeure non parue ne peut pas être déclarée compatible.
 # Lever la borne demande de porter le serveur sur l'API 2.x.
-mcp = ["mcp>=1.0,<2"]
+mcp = ["mcp>=1.0,<3"]
 # Les extras ci-dessous restent volontairement sans borne haute. Audit du
 # 2026-08-15, mené après la panne mcp : chacun n'est utilisé qu'à travers un
 # point d'entrée canonique de haut niveau, celui qui survit aux majeures.
