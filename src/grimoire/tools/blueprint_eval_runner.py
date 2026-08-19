@@ -71,6 +71,11 @@ def _total_tokens(entry: dict[str, Any]) -> int | None:
     return sum(nums) if nums else None
 
 
+def _is_threshold(value: object) -> bool:
+    """Un plafond exploitable : un nombre, et pas un booléen déguisé en 1."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def evaluate_case(
     assertions: list[dict[str, Any]], entry: dict[str, Any]
 ) -> tuple[bool, list[str]]:
@@ -93,6 +98,14 @@ def evaluate_case(
 
         elif kind == "cost":
             max_tokens, max_usd = a.get("maxTokens"), a.get("maxUsd")
+            # Un plafond illisible ne contraint rien. Le laisser passer rendrait
+            # l'éval verte parce qu'elle n'a rien vérifié — le contraire de ce
+            # que fait le reste de ce module.
+            if not _is_threshold(max_tokens) and not _is_threshold(max_usd):
+                reasons.append(
+                    f"coût : plafond illisible (maxTokens={max_tokens!r}, "
+                    f"maxUsd={max_usd!r}) — l'assertion ne contraint rien"
+                )
             if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
                 total = _total_tokens(entry)
                 if total is None:
