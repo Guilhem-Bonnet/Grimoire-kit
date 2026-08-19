@@ -38,8 +38,12 @@ ROOT = Path(__file__).resolve().parents[3]
 #: qu'ils consomment vraiment le format qu'on leur confie. Un exécutant absent
 #: de cette table ne peut pas être nommé dans une compilation.
 EXECUTORS: dict[str, tuple[Path, tuple[str, ...]]] = {
-    # (aucun pour l'instant — voir le module blueprint_evals : la section des
-    #  évals ne nomme volontairement personne tant qu'aucun outil ne les lit)
+    # Rejeu des évals déclarées. Les marqueurs sont les genres d'assertion du
+    # format : un exécutant qui ne les nomme pas ne peut pas les vérifier.
+    "grimoire blueprint evals": (
+        Path("src/grimoire/tools/blueprint_eval_runner.py"),
+        ("no-refusal", "path-taken", "recordVersion"),
+    ),
 }
 
 #: Mots entre accents graves qui ne désignent pas un exécutant : contrats,
@@ -54,9 +58,18 @@ NOT_EXECUTORS = frozenset({
     "rate-limit", "unknown",
 })
 
-#: Motif d'une commande plausible : un mot en minuscules, éventuellement
-#: composé, éventuellement suivi d'un sous-commande (« standard gate »).
-_COMMANDLIKE = re.compile(r"^[a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)?$")
+#: Un mot pouvant faire partie d'un nom de commande : minuscules ASCII,
+#: chiffres, tirets. Volontairement strict — la prose française porte des
+#: accents et tombe donc d'elle-même.
+_WORD = re.compile(r"^[a-z][a-z0-9-]*$")
+
+#: Ce qui, dans un token entre accents graves, est un argument plutôt qu'un
+#: nom : un placeholder `<flow>`, un drapeau `--record`, un chemin.
+_ARGLIKE = re.compile(r"^(?:<[^>]*>|--?[a-z0-9-]+|[./~$][^\s]*)$")
+
+#: Profondeur maximale d'un nom de commande. `grimoire blueprint evals` en
+#: fait trois ; au-delà on lit de la prose, pas une invocation.
+_MAX_DEPTH = 3
 
 
 def _sections() -> list[tuple[str, list[str]]]:
@@ -93,6 +106,36 @@ def _sections() -> list[tuple[str, list[str]]]:
 _ACTION = re.compile(r"\b(exécuter|exécut|lancer|via|commande|gate ci|run)\b", re.IGNORECASE)
 
 
+def _command_name(token: str) -> str | None:
+    """Nom de commande porté par un token, arguments retirés.
+
+    « grimoire blueprint evals <flow> --record <trace> » donne « grimoire
+    blueprint evals ». Un token qui n'est pas une invocation donne ``None`` —
+    sans quoi chaque bout de prose entre accents graves serait pris pour une
+    promesse d'exécution.
+    """
+    words = token.strip().split()
+    if not words:
+        return None
+    head: list[str] = []
+    for word in words:
+        if _WORD.match(word):
+            head.append(word)
+            continue
+        if _ARGLIKE.match(word):
+            break          # les arguments commencent : le nom est complet
+        return None        # ni mot de commande ni argument → ce n'est pas ça
+    if not head:
+        return None
+    # Un exécutant déclaré est reconnu même si le token continue au-delà de la
+    # profondeur maximale — c'est la table qui fait autorité, pas l'heuristique.
+    for depth in range(min(len(head), _MAX_DEPTH), 0, -1):
+        candidate = " ".join(head[:depth])
+        if candidate in EXECUTORS:
+            return candidate
+    return " ".join(head[:_MAX_DEPTH]) if len(head) <= _MAX_DEPTH else None
+
+
 def _claimed_executors(lines: list[str]) -> set[str]:
     """Exécutants nommés dans une ligne qui demande de lancer quelque chose."""
     found: set[str] = set()
@@ -100,10 +143,11 @@ def _claimed_executors(lines: list[str]) -> set[str]:
         if not _ACTION.search(line):
             continue
         for token in re.findall(r"`([^`]+)`", line):
-            t = token.strip()
-            if t in NOT_EXECUTORS or not _COMMANDLIKE.match(t):
+            if token.strip() in NOT_EXECUTORS:
                 continue
-            found.add(t)
+            name = _command_name(token)
+            if name and name not in NOT_EXECUTORS:
+                found.add(name)
     return found
 
 
@@ -145,3 +189,16 @@ def test_le_detecteur_repere_une_promesse() -> None:
 
 def test_le_detecteur_ignore_le_vocabulaire_du_format() -> None:
     assert _claimed_executors(["- contrat `evidence-pack`, canal `failure`"]) == set()
+
+
+def test_le_detecteur_voit_une_commande_avec_ses_arguments() -> None:
+    """Le piège du premier jet : la ligne réellement compilée porte des
+    arguments, et un détecteur limité à deux mots nus l'aurait ignorée — donc
+    validée en silence, ce que ce fichier existe précisément pour empêcher."""
+    line = "- Gate CI : `grimoire blueprint evals <flow> --record <trace>`"
+    assert _claimed_executors([line]) == {"grimoire blueprint evals"}
+
+
+def test_le_detecteur_ne_prend_pas_la_prose_pour_une_commande() -> None:
+    assert _claimed_executors(["- exécuter `avec les cas déclarés plus haut`"]) == set()
+    assert _claimed_executors(["- lancer `Analyse Complète`"]) == set()

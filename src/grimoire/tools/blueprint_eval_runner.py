@@ -53,7 +53,7 @@ def run_record_shape_errors(record: dict[str, Any]) -> list[str]:
         )
     runs = record.get("runs")
     if not isinstance(runs, dict):
-        return errors + ["trace : `runs` invalide (objet {scope: {caseId: …}} attendu)"]
+        return [*errors, "trace : `runs` invalide (objet {scope: {caseId: …}} attendu)"]
     for scope, cases in runs.items():
         if not isinstance(cases, dict):
             errors.append(f"trace : runs[{scope!r}] invalide (objet attendu)")
