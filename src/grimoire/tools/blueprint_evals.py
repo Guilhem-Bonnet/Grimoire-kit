@@ -306,10 +306,16 @@ def _assertion_label(assertion: dict[str, Any]) -> str:
 
 
 def compile_evals_section(node: dict[str, Any]) -> list[str]:
-    """Section « Évals » d'un step compilé — checks exécutés par l'hôte.
+    """Section « Évals » d'un step compilé — la preuve à exiger.
 
-    Chaque cas devient un check CI que ``agent-test`` / ``standard gate``
-    exécute ; le Studio n'exécute rien, il déclare la preuve à exiger.
+    Le Studio n'exécute rien : il déclare ce qu'un exécutant devra vérifier.
+
+    Cette section ne nomme **aucun outil**, et c'est délibéré : aucun outil
+    livré ne lit encore les suites attachées à un blueprint. Elle a longtemps
+    renvoyé vers ``agent-test``, qui teste des agents par catégorie et ignore
+    ce format — le mission pack promettait donc une commande sans effet.
+    Nommer un exécutant demande d'abord qu'il consomme le format ; le test
+    tests/unit/tools/test_executor_coherence.py fait respecter cette règle.
     """
     suite = evals_suite(node)
     cases = suite.get("cases")
@@ -325,7 +331,9 @@ def compile_evals_section(node: dict[str, Any]) -> list[str]:
         checks = " ; ".join(_assertion_label(a) for a in asserts)
         lines.append(f"- `{cid}` — {checks}")
     lines.append(
-        "- Gate CI : exécuter via `agent-test` (optionnel puis requis à la "
-        "promotion) ; le taux de réussite alimente le panneau santé."
+        "- Ces cas sont **déclarés, pas encore exécutables** : aucun outil "
+        "livré ne lit les suites d'un blueprint. Les exécuter demande un "
+        "exécutant qui consomme ce format ; le taux de réussite alimentera "
+        "alors le panneau santé."
     )
     return lines

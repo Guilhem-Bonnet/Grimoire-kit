@@ -249,4 +249,9 @@ class TestEvalsAcceptance:
         content = (api.project_root / result["artifact"]).read_text(encoding="utf-8")
         assert "#### Évals (preuve comportementale, v1)" in content
         assert "honore le contrat `handoff-packet`" in content
-        assert "agent-test" in content
+        # La section ne nomme aucun exécutant : aucun outil livré ne lit les
+        # suites d'un blueprint, et promettre `agent-test` envoyait l'hôte
+        # lancer une commande sans effet. Verrouillé par
+        # tests/unit/tools/test_executor_coherence.py.
+        assert "agent-test" not in content
+        assert "déclarés, pas encore exécutables" in content
