@@ -133,6 +133,15 @@ grimoire cockpit             # démarre + ouvre ; 'stop' pour arrêter
 > Codex, Gemini CLI et Cursor sans duplication. Un `.mcp.json` enregistre aussi le
 > serveur MCP Grimoire (OS-neutre, via `grimoire-mcp`).
 
+> **Natif sur chaque hôte** — au-delà des entrypoints en prose, `grimoire host
+> sync` projette le projet sur ce que chaque hôte sait réellement exécuter :
+> sous-agents avec leur propre fenêtre de contexte et leur frontière d'outils,
+> compétences chargées à la demande, commandes utilisateur, et hooks capables de
+> refuser un appel destructeur ou la clôture d'une tâche dont les gates de
+> preuve sont rouges. Ce qu'un hôte ne sait pas exécuter est déclaré comme
+> dégradation explicite, jamais abandonné en silence. Voir
+> [docs/hosts.md](docs/hosts.md).
+
 
 ### <img src="docs/assets/icons/chart.svg" width="24" height="24" alt=""> Cockpit local — gouverne tous tes projets
 

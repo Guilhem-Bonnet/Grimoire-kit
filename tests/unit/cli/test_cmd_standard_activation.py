@@ -40,8 +40,19 @@ class TestStandardInitClaudeHook:
             for entry in settings["hooks"]["SessionStart"]
             for hook in entry["hooks"]
         ]
-        assert "grimoire standard activation-context" in commands
+        # The directive is unchanged; only its carrier is. The session-start
+        # decision reads the same `.claude/activation-context.md`, and routing
+        # it through the shared hook entry point is what lets one rule reach
+        # every host. Two entries would inject the directive twice, so the
+        # legacy command is replaced rather than kept alongside.
+        assert commands == ["grimoire host hook --host claude --event SessionStart"]
         assert (tmp_path / ".claude" / "activation-context.md").is_file()
+
+    def test_init_installs_the_blocking_gate_hook(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed"])
+        assert result.exit_code == 0
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        assert "Stop" in settings["hooks"], "un profil gouverné doit pouvoir refuser une clôture"
 
     def test_no_claude_hook_opt_out(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["standard", "init", str(tmp_path), "--no-claude-hook"])

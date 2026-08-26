@@ -329,7 +329,9 @@ def repair_project_artifacts(target: Path) -> list[str]:
         template.dst.parent.mkdir(parents=True, exist_ok=True)
         template.dst.write_text(template.content, encoding="utf-8")
         written.append(template.label or str(template.dst.relative_to(target)))
-    return written
+    regenerated = written
+    regenerated.extend(_sync_host_surfaces(target))
+    return regenerated
 
 
 def _load_config_quiet(target: Path) -> GrimoireConfig | None:
@@ -770,3 +772,21 @@ def up(
 
     if state.failed:
         raise typer.Exit(1)
+
+
+def _sync_host_surfaces(target: Path) -> list[str]:
+    """Regenerate the per-host surfaces (agents, skills, commands, hooks)."""
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(target)
+        written: list[str] = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            written.extend(apply_plan(emitter.plan(surface, target), target).written)
+        return written
+    except Exception:
+        return []

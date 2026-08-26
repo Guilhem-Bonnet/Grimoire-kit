@@ -29,6 +29,7 @@ from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
+from grimoire.cli.cmd_host import host_app
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
 from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
 from grimoire.cli.cmd_memory_lexical import memory_app
@@ -36,6 +37,7 @@ from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
 from grimoire.cli.cmd_up import up as up_command
+from grimoire.cli.workflow_catalog import WF_DESCRIPTIONS as _WF_DESCRIPTIONS
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.log import configure_logging
@@ -924,18 +926,8 @@ app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")
+app.add_typer(host_app, name="host", rich_help_panel="Project")
 app.command("serve", rich_help_panel="Project")(serve_cmd)
-
-
-_WF_DESCRIPTIONS: dict[str, str] = {
-    "grimoire-session-bootstrap": "Reprendre le travail avec contexte complet",
-    "grimoire-health-check": "Diagnostic global de santé projet",
-    "grimoire-dream": "Consolider les apprentissages inter-sessions",
-    "grimoire-pre-push": "Valider avant push (tests/lint/checks)",
-    "grimoire-changelog": "Générer un changelog depuis l'historique",
-    "grimoire-status": "Obtenir un snapshot rapide du projet",
-    "grimoire-self-heal": "Diagnostiquer et réparer les pannes courantes",
-}
 
 
 def _workflow_source_dirs(project_root: Path) -> list[tuple[str, Path]]:

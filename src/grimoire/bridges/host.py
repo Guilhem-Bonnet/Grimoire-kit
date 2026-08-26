@@ -8,6 +8,8 @@ from grimoire.bridges.schemas import (
     _HOST_REGISTRY,
     CLAUDE_CODE_CLI_MANIFEST,
     CODEX_MANIFEST,
+    CURSOR_MANIFEST,
+    GEMINI_CLI_MANIFEST,
     GITHUB_COPILOT_MANIFEST,
     FallbackMode,
     HostCapabilityManifest,
@@ -49,13 +51,19 @@ class HostBridge:
                 return _HOST_REGISTRY.get(host_id, self._unknown_manifest())
             except ValueError:
                 pass
-        # Heuristic detection
-        if os.environ.get("CLAUDE_CODE_ENTRYPOINT") or os.environ.get("ANTHROPIC_API_KEY"):
+        # Heuristic detection. Markers must identify the *host process*: an API
+        # key says which vendor pays for the tokens, not which host is running,
+        # and keying on one misroutes every session that exports both.
+        if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
             return CLAUDE_CODE_CLI_MANIFEST
-        if os.environ.get("CODEX_ENV") or os.environ.get("OPENAI_API_KEY"):
+        if os.environ.get("CODEX_ENV") or os.environ.get("CODEX_SANDBOX"):
             return CODEX_MANIFEST
-        if os.environ.get("GITHUB_TOKEN") or os.environ.get("COPILOT_AGENT"):
+        if os.environ.get("COPILOT_AGENT") or os.environ.get("GITHUB_COPILOT_AGENT"):
             return GITHUB_COPILOT_MANIFEST
+        if os.environ.get("CURSOR_AGENT") or os.environ.get("CURSOR_TRACE_ID"):
+            return CURSOR_MANIFEST
+        if os.environ.get("GEMINI_CLI") or os.environ.get("GEMINI_CLI_VERSION"):
+            return GEMINI_CLI_MANIFEST
         return self._unknown_manifest()
 
     def get_manifest(self, host_id: HostId) -> HostCapabilityManifest:

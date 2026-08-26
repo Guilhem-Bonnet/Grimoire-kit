@@ -845,6 +845,12 @@ class ProjectScaffolder:
             else:
                 lines.append("> This agent is **internally routed** — it may receive tasks from other agents via `_grimoire/_memory/handoff-log.md`.")
             lines.append("")
+            # Marked as generated: `grimoire host sync` owns this path and
+            # replaces the wrapper with one carrying the agent's resolved tool
+            # boundary. Without the marker the emitter would treat it as
+            # hand-written and preserve it, freezing the coarser version.
+            lines.append("<!-- grimoire:managed -->")
+            lines.append("")
             p.templates.append(TemplateRender(
                 dst=wrapper_dst,
                 content="\n".join(lines),
@@ -938,6 +944,9 @@ class ProjectScaffolder:
                 f"@{canonical}\n"
             ),
             "AGENTS.md": (
+                # Marked as generated: `grimoire host sync` replaces this
+                # pointer with the full catalog on hosts that read AGENTS.md.
+                "<!-- grimoire:managed -->\n"
                 f"# {name} — Agent instructions\n\n"
                 "Ce projet utilise **Grimoire Kit**. Source de vérité des instructions "
                 f"agent : [`{canonical}`]({canonical}).\n\n"
@@ -945,6 +954,7 @@ class ProjectScaffolder:
                 "agents, workflows, mémoire et standard agentique gouverné y sont décrits.\n"
             ),
             "GEMINI.md": (
+                "<!-- grimoire:managed -->\n"
                 f"# {name} — Gemini CLI\n\n"
                 "Ce projet utilise **Grimoire Kit**. Instructions agent canoniques : "
                 f"[`{canonical}`]({canonical}).\n"
