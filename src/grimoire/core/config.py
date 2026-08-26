@@ -137,6 +137,10 @@ class MemoryConfig:
     migration_bundle_path: str = ""
     mempalace_path: str = ""
     ollama_url: str = ""
+    # Memoire transverse : nom de la collection partagee entre projets. Vide =
+    # desactivee. Opt-in deliberement : rien ne doit traverser la frontiere
+    # d'un projet sans declaration explicite.
+    shared_collection: str = ""
     layer_profile: str = "standard"
     short_term_backend: str = "sqlite"
     redis_url: str = ""
@@ -182,6 +186,7 @@ class MemoryConfig:
             migration_bundle_path=str(data.get("migration_bundle_path", "")),
             mempalace_path=str(data.get("mempalace_path", "")),
             ollama_url=str(data.get("ollama_url", "")),
+            shared_collection=str(data.get("shared_collection", "")),
             layer_profile=str(data.get("layer_profile", "standard")),
             short_term_backend=short_term_backend,
             redis_url=str(data.get("redis_url", "")),
