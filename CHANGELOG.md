@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **`grimoire memory bundle`** — transport d'un modèle d'embedding vers un site
+  sans accès sortant. `export` construit une archive depuis un repo Hub ou un
+  répertoire local, `install` refuse toute archive dont un fichier ne correspond
+  pas au SHA-256 déclaré au manifeste, `verify` recontrôle les empreintes puis
+  charge le modèle avec les sockets sortantes bloquées — un moteur qui retombe
+  sur un téléchargement distant échoue au lieu de réussir. `install --configure`
+  renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
+  les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
+  par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
+
 ## [3.32.0] - 2026-08-18
 
 ### Ajouté

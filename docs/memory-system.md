@@ -93,6 +93,57 @@ Pour peupler le store à partir de la connaissance déjà sur disque :
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
 
+## Modèle d'embedding sur site fermé
+
+Le mode lexical ci-dessus ne demande aucun modèle. Pour garder la recherche
+sémantique sans accès sortant, le modèle d'embedding se transporte dans un
+*bundle* : une archive construite sur une machine connectée, vérifiée par
+empreinte à l'arrivée.
+
+Qdrant en auto-hébergement ne génère aucun vecteur — l'inférence est toujours
+côté client. Un bundle transporte donc le modèle, pas un service.
+
+Sur la machine connectée :
+
+```bash
+grimoire memory bundle export \
+  --model sentence-transformers/all-MiniLM-L6-v2 \
+  --out grimoire-embedding-bundle.tar.gz
+```
+
+`--model` accepte aussi un répertoire de modèle déjà téléchargé, ce qui évite
+toute dépendance au Hub si le modèle vient d'un miroir interne.
+
+Sur le site fermé :
+
+```bash
+grimoire memory bundle install grimoire-embedding-bundle.tar.gz --configure
+grimoire memory bundle verify ~/.cache/grimoire/embeddings/<modele>
+```
+
+`install` recalcule le SHA-256 de chaque fichier déclaré au manifeste et refuse
+l'installation au moindre écart : aucun modèle partiel ou altéré n'atterrit sur
+le disque. `--configure` renseigne `memory.embedding_model` dans
+`project-context.yaml` en préservant les commentaires du fichier.
+
+`verify` va plus loin que les empreintes : il charge réellement le modèle avec
+les sockets sortantes bloquées. Un moteur qui retomberait silencieusement sur un
+téléchargement distant échoue au lieu de réussir — c'est ce qui distingue un
+chemin hors-ligne prouvé d'un chemin hors-ligne supposé.
+
+| Commande | Rôle |
+| --- | --- |
+| `memory bundle export` | Construit l'archive depuis un repo Hub ou un répertoire local |
+| `memory bundle install` | Vérifie les empreintes et installe, `--configure` câble le projet |
+| `memory bundle verify` | Recontrôle les empreintes et prouve le chargement hors-ligne |
+| `memory bundle where` | Affiche la racine d'installation par défaut |
+
+La racine d'installation suit `GRIMOIRE_EMBEDDING_CACHE`, puis `XDG_CACHE_HOME`,
+et vaut `~/.cache/grimoire/embeddings` par défaut.
+
+Grimoire ne redistribue aucun poids de modèle : l'archive est produite par
+l'opérateur, depuis la source de son choix.
+
 ## Taxonomie palais
 
 La taxonomie est générée par [memory/taxonomy.py](api-reference.md). Chaque souvenir peut être enrichi automatiquement avec :

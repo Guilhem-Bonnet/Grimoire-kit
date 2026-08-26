@@ -151,6 +151,7 @@ module = [
     "weaviate.*",
     "qdrant_client.*",
     "sentence_transformers.*",
+    "huggingface_hub.*",
     "redis.*",
     "ollama.*",
     "jsonschema.*",
