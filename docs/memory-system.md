@@ -93,6 +93,70 @@ Pour peupler le store à partir de la connaissance déjà sur disque :
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
 
+## Mémoire transverse entre projets
+
+Un agent spécialiste devrait accumuler du savoir réutilisable d'un projet à
+l'autre. Le faire naïvement corrompt la connaissance : confusion entre projets,
+fait périmé servi comme vrai, contamination, auto-confirmation, et fuite entre
+projets cloisonnés.
+
+```yaml
+memory:
+  shared_collection: "GrimoireShared"   # vide = désactivé
+```
+
+Opt-in délibérément : rien ne traverse la frontière d'un projet sans
+déclaration.
+
+### La frontière est physique
+
+Le savoir transverse vit dans un **store séparé**, pas dans une collection
+partagée filtrée par métadonnée. Un filtre oublié ne fuit pas un peu : il
+mélange deux projets sans rien signaler. Sur les backends serveur, c'est une
+autre collection ; sur les backends fichier, une racine au niveau machine
+(`~/.grimoire/shared`, ou `GRIMOIRE_SHARED_HOME`).
+
+### La promotion est refusée par défaut
+
+Un souvenir ne monte que s'il reste vrai **quand on efface le nom du projet**.
+
+| Ne monte pas | Peut monter |
+| --- | --- |
+| « l'app X utilise Postgres 16 » | « les migrations Alembic cassent quand deux heads coexistent » |
+| « le endpoint /auth de Y renvoie 401 » | « FastAPI + OAuth2 : le refresh token doit être httponly » |
+
+La garde refuse un texte qui nomme son projet, cite une URL, un chemin absolu
+ou une adresse locale — autant de marqueurs d'un état particulier plutôt que
+d'un motif reproductible. `--force` passe outre, mais l'inscrit dans la
+provenance : un contournement doit rester visible à la relecture.
+
+```bash
+grimoire memory shared promote "les migrations Alembic cassent quand deux heads coexistent" -d alembic
+grimoire memory shared confirm <id>     # ce motif tient aussi ici
+grimoire memory shared recall "alembic heads"
+```
+
+### La confiance décroît
+
+| Depuis la dernière confirmation | État | Restitution |
+| --- | --- | --- |
+| ≤ 90 jours | `current` | servi comme motif établi |
+| ≤ 270 jours | `aging` | « appris ailleurs, non revérifié récemment » |
+| au-delà, ou contredit | `hypothesis` | « à vérifier avant usage » |
+
+Le calcul se fait **à la lecture**, sans tâche de fond. Une entrée contredite
+ailleurs tombe en hypothèse quel que soit son âge. Rien n'est supprimé,
+seulement déclassé : une connaissance périmée reste utile à qui sait qu'elle
+est périmée. `confirm` est le seul mécanisme qui restaure la confiance.
+
+### Restitution en deux passes
+
+`recall` cherche d'abord dans le projet, puis dans le transverse, et **ne
+fusionne jamais sans étiquette**. Le projet passe en premier : la vérité locale
+prime sur le motif importé, conformément à l'ordre d'autorité ORC-06 (source
+active > preuve vérifiée > mémoire durable > similarité). Chaque résultat
+transverse porte sa provenance (`learned_in`, `confirmed_in`) et sa fraîcheur.
+
 ## Taxonomie palais
 
 La taxonomie est générée par [memory/taxonomy.py](api-reference.md). Chaque souvenir peut être enrichi automatiquement avec :
@@ -185,6 +249,7 @@ La surface publique passe par `grimoire memory`.
 | Domaine | Commandes |
 | --- | --- |
 | Santé et inspection | `grimoire memory status`, `grimoire memory taxonomy` |
+| Mémoire transverse | `grimoire memory shared promote`, `confirm`, `recall` |
 | Recherche et listing | `grimoire memory search`, `grimoire memory list` |
 | Échange JSON | `grimoire memory export`, `grimoire memory import` |
 | Migration Weaviate + Neo4j | `grimoire memory migrate export-bundle`, `import-weaviate`, `import-neo4j`, `verify` |
