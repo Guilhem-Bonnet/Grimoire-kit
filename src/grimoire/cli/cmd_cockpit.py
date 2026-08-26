@@ -28,6 +28,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import parse_qs, urlparse
 
 import typer
 from rich.console import Console
@@ -181,6 +182,64 @@ def _resolve_project_path(slug: str | None) -> Path | None:
     return Path(projects[0]["path"]) if projects else None
 
 
+def _primary_slug() -> str:
+    projects = _load_registry()
+    return str(projects[0].get("slug", "")) if projects else ""
+
+
+def _selected_slug() -> str:
+    """Slug du projet courant : choix explicite s'il est encore valide, sinon primaire."""
+    state = _read_state() or {}
+    chosen = str(state.get("selected_project", ""))
+    if chosen and any(p.get("slug") == chosen for p in _load_registry()):
+        return chosen
+    return _primary_slug()
+
+
+def _set_selected_slug(slug: str) -> bool:
+    """Persiste le projet courant. False si le slug n'est pas au registre."""
+    if not any(p.get("slug") == slug for p in _load_registry()):
+        return False
+    state = _read_state() or {}
+    state["selected_project"] = slug
+    _write_state(state)
+    return True
+
+
+_API_CACHE: dict[Path, Any] = {}
+
+
+def _project_api(proot: Path) -> Any:
+    """Instance ``ForgeAPI`` du projet, mémoïsée par racine.
+
+    ``ForgeAPI`` ne fait que résoudre des chemins à la construction : le cache
+    évite N constructions par page sans jamais figer de l'état métier.
+    """
+    cached = _API_CACHE.get(proot)
+    if cached is None:
+        from grimoire.cli.cmd_blueprint import _kit_root
+        from grimoire.tools.forge_server import ForgeAPI
+
+        cached = ForgeAPI(proot, _kit_root(), None)
+        _API_CACHE[proot] = cached
+    return cached
+
+
+def _projects_payload() -> dict[str, Any]:
+    """Registre tel que servi à l'UI — chaque entrée dit si son chemin existe encore."""
+    projects = [
+        {
+            "slug": str(p.get("slug", "")),
+            "name": str(p.get("name", "")),
+            "path": str(p.get("path", "")),
+            "exists": Path(str(p.get("path", ""))).is_dir(),
+            "is_grimoire": _looks_grimoire(Path(str(p.get("path", "")))),
+        }
+        for p in _load_registry()
+    ]
+    return {"projects": projects, "selected": _selected_slug(), "primary": _primary_slug()}
+
+
 # ── Local API (cockpit only) ──────────────────────────────────────────────────
 # A read-only governance API: dispatches an allowlisted ``grimoire memory``
 # subcommand against a registered project. Bound to 127.0.0.1 only — never the
@@ -216,6 +275,20 @@ _MUTATION_ACTIONS: dict[str, _Mutation] = {
 }
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+# Longueur d'argument bornée : une requête n'a pas à pousser un roman dans argv.
+_MAX_ARGUMENT_LEN = 512
+
+
+def _is_plain_argument(value: str) -> bool:
+    """Vrai si la valeur peut être passée à la CLI comme simple positionnel.
+
+    Le dispatch n'utilise pas de shell, donc il n'y a pas d'injection de shell
+    possible — mais une valeur commençant par ``-`` serait lue comme une option
+    par la sous-commande. On refuse ce cas, les octets nuls et les longueurs
+    déraisonnables, et on passe malgré tout les valeurs après ``--``.
+    """
+    return bool(value) and not value.startswith("-") and "\x00" not in value and len(value) <= _MAX_ARGUMENT_LEN
+
 
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
@@ -231,12 +304,72 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:  # http.server contract
-        if self.path != "/api/memory":
-            self._send_json(404, {"ok": False, "error": "not found"})
+    # ── Lectures : registre + API projet, repli statique ──────────────────
+
+    def _query_slug(self) -> str:
+        """Projet visé par la requête : ``?project=`` explicite, sinon la sélection courante."""
+        asked = parse_qs(urlparse(self.path).query).get("project", [""])[0]
+        return asked or _selected_slug()
+
+    def do_GET(self) -> None:  # http.server contract
+        path = urlparse(self.path).path
+        if not path.startswith("/api/"):
+            super().do_GET()
             return
         if self.client_address[0] not in _LOCAL_HOSTS:
             self._send_json(403, {"ok": False, "error": "cockpit local only"})
+            return
+        if path == "/api/projects":
+            self._send_json(200, _projects_payload())
+            return
+        proot = _resolve_project_path(self._query_slug() or None)
+        if proot is None or not proot.is_dir():
+            self._send_json(404, {"ok": False, "error": "projet inconnu"})
+            return
+        try:
+            from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
+
+            payload = api_get(_project_api(proot), path, parse_qs(urlparse(self.path).query))
+        except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if payload is API_GET_UNHANDLED:
+            self._send_json(404, {"ok": False, "error": "not found"})
+            return
+        # Même forme de réponse que l'atelier : la charge utile brute, pour que
+        # le même code de page fonctionne contre les deux serveurs. Seul
+        # ``/api/status`` est enrichi, pour que l'UI sache qu'elle est sur un
+        # hôte multi-projets en lecture seule et n'y propose pas de mutation.
+        if path == "/api/status" and isinstance(payload, dict):
+            payload = {**payload, "host": "cockpit", "readOnly": True, "project": self._query_slug()}
+        self._send_json(200, payload)
+
+    def do_POST(self) -> None:  # http.server contract
+        if self.client_address[0] not in _LOCAL_HOSTS:
+            self._send_json(403, {"ok": False, "error": "cockpit local only"})
+            return
+        if self.path == "/api/projects/select":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            slug = str(data.get("slug", "")).strip()
+            if not slug:
+                # L'UI envoie historiquement un chemin ; on le tolère.
+                wanted = str(data.get("path", "")).strip()
+                slug = next(
+                    (str(x.get("slug", "")) for x in _load_registry() if x.get("path") == wanted),
+                    "",
+                )
+            if not _set_selected_slug(slug):
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            self._send_json(200, {"ok": True, "selected": slug})
+            return
+        if self.path != "/api/memory":
+            self._send_json(404, {"ok": False, "error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -258,25 +391,33 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
         subcmd = action
+        values: list[str] = []
         if is_read:
-            extra = list(_ALLOWED_ACTIONS[action])
+            flags = list(_ALLOWED_ACTIONS[action])
             if action == "search":
                 query = str(data.get("query", "")).strip()
                 if not query:
                     self._send_json(400, {"ok": False, "error": "query requise"})
                     return
-                extra = [query, *extra]
+                values = [query]
         else:
             spec = _MUTATION_ACTIONS[action]
             subcmd = spec.subcommand or action
-            extra = list(spec.args)
+            flags = list(spec.args)
             if spec.needs_id:
                 entry_id = str(data.get("id", "")).strip()
                 if not entry_id:
                     self._send_json(400, {"ok": False, "error": "id d'entrée requis"})
                     return
-                extra = [entry_id, *extra]
-        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *extra]
+                values = [entry_id]
+        if not all(_is_plain_argument(v) for v in values):
+            self._send_json(400, {"ok": False, "error": "valeur d'argument refusée"})
+            return
+        # Les valeurs venant de la requête passent après ``--`` : la sous-commande
+        # les lit comme des positionnels, jamais comme des options.
+        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *flags]
+        if values:
+            cmd += ["--", *values]
         try:
             res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
@@ -322,6 +463,34 @@ def remove(
         return
     _save_registry(kept)
     console.print(f"[green]−[/green] Removed: {target}")
+
+
+@cockpit_app.command("prune")
+def prune(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be removed, change nothing.")] = False,
+) -> None:
+    """Drop registry entries whose path no longer exists.
+
+    A cockpit registry accumulates dead entries — a moved project, a deleted
+    checkout, a test fixture under ``/tmp``. They pollute every generated view.
+    """
+    projects = _load_registry()
+    dead = [p for p in projects if not Path(str(p.get("path", ""))).is_dir()]
+    if not dead:
+        console.print("[green]OK[/green] Registre propre — aucun chemin mort.")
+        return
+    for p in dead:
+        console.print(f"[yellow]-[/yellow] {p.get('slug', '')} [dim]{p.get('path', '')}[/dim]")
+    if dry_run:
+        console.print(f"[dim]{len(dead)} entree(s) seraient retirees (--dry-run).[/dim]")
+        return
+    kept = [p for p in projects if Path(str(p.get("path", ""))).is_dir()]
+    _save_registry(kept)
+    if _selected_slug() not in {str(p.get("slug", "")) for p in kept}:
+        state = _read_state() or {}
+        state.pop("selected_project", None)
+        _write_state(state)
+    console.print(f"[green]OK[/green] {len(dead)} entree(s) retiree(s), {len(kept)} conservee(s).")
 
 
 @cockpit_app.command("list")
