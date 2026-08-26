@@ -883,16 +883,19 @@ def setup_standard_profile(
         _ensure_inside_root(root, dst, label=f"Artifact {artifact.artifact_type!r}")
         template = artifact.source.read_text(encoding="utf-8")
         content = _render_template(template, project_name=name, profile=profile, generated_at=generated_at)
-        action = sm.decide(root, artifact.destination, content, force=force, refresh=refresh, manifest=manifest)
+        # ``destination`` is a str for some artifacts and a Path for others;
+        # the manifest is JSON, so its keys are always strings.
+        key = str(artifact.destination)
+        action = sm.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
         if action != "write":
             result.skipped.append(artifact.destination)
             if action == "adopt":
-                generated[artifact.destination] = sm.digest(dst)
+                generated[key] = sm.digest(dst)
             continue
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(content, encoding="utf-8")
-            generated[artifact.destination] = sm.digest(dst)
+            generated[key] = sm.digest(dst)
         result.written.append(artifact.destination)
 
     manifest_dst = root / STANDARD_PROFILE_FILE
