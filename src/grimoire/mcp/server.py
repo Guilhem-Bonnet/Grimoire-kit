@@ -468,6 +468,99 @@ def grimoire_standard_gate(
         return json.dumps({"error": str(exc)})
 
 
+# ── Host surfaces ─────────────────────────────────────────────────────────────
+#
+# A host that loads neither skill folders nor slash commands can still reach
+# both over MCP: these three tools are how the surface stays available to a
+# client the kit has no emitter for.
+
+
+@mcp.tool()
+def grimoire_host_status(project_path: str = ".") -> str:
+    """Report, per host, what this project declares and what the host executes.
+
+    Args:
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.hosts.capabilities import gaps_for, profile_for
+    from grimoire.hosts.collect import build_surface
+    from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+    target = Path(project_path).resolve()
+    try:
+        surface = build_surface(target)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return json.dumps({"error": str(exc)})
+
+    hosts = []
+    for host_id in supported_hosts():
+        emitter = emitter_for(host_id)
+        if emitter is None:  # pragma: no cover - registry is complete
+            continue
+        plan = emitter.plan(surface, target)
+        pending = apply_plan(plan, target, dry_run=True)
+        profile = profile_for(host_id)
+        hosts.append({
+            "host": host_id.value,
+            "display_name": profile.display_name,
+            "in_sync": not pending.written and not pending.skipped,
+            "pending": pending.written,
+            "conflicts": pending.skipped,
+            "degradations": [d.to_dict() for d in plan.degradations],
+            "capability_gaps": [g.surface for g in gaps_for(profile)],
+        })
+    return json.dumps({"surface": surface.to_dict(), "hosts": hosts}, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def grimoire_skill(slug: str, project_path: str = ".") -> str:
+    """Return a Grimoire skill body on demand, for hosts without native skills.
+
+    Args:
+        slug: Skill identifier, as listed by grimoire_host_status.
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.hosts.collect import collect_skills
+
+    target = Path(project_path).resolve()
+    skills = collect_skills(target)
+    for skill in skills:
+        if skill.slug == slug:
+            return json.dumps(
+                {"slug": skill.slug, "description": skill.description, "body": skill.body},
+                indent=2,
+                ensure_ascii=False,
+            )
+    return json.dumps({"error": f"Unknown skill: {slug}", "available": [s.slug for s in skills]})
+
+
+@mcp.tool()
+def grimoire_command(slug: str, project_path: str = ".") -> str:
+    """Return a Grimoire command body, for hosts without native slash commands.
+
+    Args:
+        slug: Command identifier, as listed by grimoire_host_status.
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.hosts.collect import collect_commands
+
+    target = Path(project_path).resolve()
+    commands = collect_commands(target)
+    for command in commands:
+        if command.slug == slug:
+            return json.dumps(
+                {
+                    "slug": command.slug,
+                    "description": command.description,
+                    "argument_hint": command.argument_hint,
+                    "body": command.body,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+    return json.dumps({"error": f"Unknown command: {slug}", "available": [c.slug for c in commands]})
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _find_kit_root(start: Path) -> Path | None:

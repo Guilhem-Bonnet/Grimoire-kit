@@ -49,6 +49,13 @@ with **verifiable governance**:
 - **One config, every assistant** — `grimoire init` generates portable entrypoints
   (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`) plus a `.mcp.json`, so the
   same project works with Copilot, Claude Code, Codex, Gemini CLI and Cursor.
+- **Native on each host, not lowest-common-denominator** — one host-neutral
+  description of the project is rendered per host: sub-agents with their own
+  context window and tool boundary, on-demand skills, slash commands, and
+  lifecycle hooks that actually refuse a destructive call, or the closure of a
+  task whose evidence gates are red. What a host cannot execute is reported as
+  an explicit degradation, never dropped in silence. See `grimoire host --help`
+  and [docs/hosts.md](docs/hosts.md).
 
 ## Quick Start
 

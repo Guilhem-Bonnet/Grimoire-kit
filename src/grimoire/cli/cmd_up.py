@@ -463,7 +463,7 @@ def repair_project_artifacts(target: Path) -> list[str]:
     Returns the list of regenerated labels (relative paths).
     """
     from grimoire.core.archetype_resolver import ResolvedArchetype
-    from grimoire.core.scaffold import FileCopy, ProjectScaffolder, ScaffoldPlan
+    from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
 
     target = target.resolve()
     cfg = _load_config_quiet(target)
@@ -486,14 +486,10 @@ def repair_project_artifacts(target: Path) -> list[str]:
     )
 
     plan = ScaffoldPlan()
-    for _stem, agent_file in sorted(layout.layered_files(target, layout.AGENTS_SUBDIR).items()):
-        if agent_file.name.endswith(".tpl.md"):
-            continue
-        # Feed deployed agents to the wrapper planner as pseudo-copies.
-        plan.copies.append(FileCopy(src=agent_file, dst=agent_file, label=agent_file.stem))
     # Intentional reuse of ProjectScaffolder's planning internals so the
-    # regenerated artifacts stay identical to what `grimoire init` produces.
-    scaffolder._plan_agent_wrappers(plan)
+    # regenerated artifact stays identical to what `grimoire init` produces.
+    # Per-host agent files are not planned here: they belong to the host
+    # emitters, and `_sync_host_surfaces` below regenerates them.
     scaffolder._plan_mcp_config(plan)
 
     written: list[str] = []
@@ -504,6 +500,9 @@ def repair_project_artifacts(target: Path) -> list[str]:
         # healthy project even though it regenerates everything.
         if write_text_if_changed(template.dst, template.content):
             written.append(template.label or str(template.dst.relative_to(target)))
+    # Les fichiers par hôte appartiennent aux émetteurs : ils sont régénérés
+    # ici et nulle part ailleurs, pour qu'un seul écrivain possède le chemin.
+    written.extend(_sync_host_surfaces(target))
     return written
 
 
@@ -1054,3 +1053,21 @@ def up(
 
     if state.failed:
         raise typer.Exit(1)
+
+
+def _sync_host_surfaces(target: Path) -> list[str]:
+    """Regenerate the per-host surfaces (agents, skills, commands, hooks)."""
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(target)
+        written: list[str] = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            written.extend(apply_plan(emitter.plan(surface, target), target).written)
+        return written
+    except Exception:
+        return []

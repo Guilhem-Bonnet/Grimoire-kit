@@ -9,6 +9,62 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Surfaces hôtes (`grimoire host`)** — un projet ne se décrivait aux hôtes
+  qu'en prose : `CLAUDE.md` pointait vers `.github/copilot-instructions.md`, et
+  tout ce qu'un hôte sait exécuter — sous-agents à contexte propre, compétences
+  chargées à la demande, commandes utilisateur, hooks capables de refuser,
+  permissions déclaratives — restait inutilisé. Le kit construit désormais une
+  **description host-neutre** du projet (`grimoire.hosts.surface`) et la rend
+  par un émetteur dédié : `.claude/{agents,skills,commands}` et `settings.json`
+  pour Claude Code, `.github/{agents,skills,prompts,hooks}` pour Copilot, un
+  catalogue explicite pour Codex, Cursor et Gemini CLI. Commandes :
+  `grimoire host list | surface | sync | status | run`. La synchronisation est
+  déclenchée automatiquement par `grimoire init`, `grimoire up --fix` et
+  `grimoire standard init`. Voir `docs/hosts.md`.
+- **Gouvernance opposable, identique sur tous les hôtes** — les règles vivent
+  dans un module de décisions host-neutre (`grimoire.hosts.decisions`), traduit
+  dans le JSON de chaque hôte par `grimoire.hosts.runtime`. Un refus sous
+  Copilot est le même texte que sous Claude Code, parce que c'est la même
+  décision. Le hook `stop` refuse la clôture d'une tâche gouvernée dont les
+  gates de preuve sont rouges — la consigne « une clôture sans gates verts est
+  une tâche non terminée » devient une contrainte. Trois garde-fous : pas de
+  blocage répété (`stop_hook_active`), pas de blocage sur un projet non enrôlé
+  ou un profil non gouverné, pas de panne fatale (un projet cassé sort en
+  « autorisé » avec l'erreur en contexte).
+- **`PolicyEngine` branché en production** — le moteur de politique et ses
+  règles OWASP n'étaient instanciés que par les fixtures d'évals. Le hook
+  `pre_tool_use` lui soumet désormais chaque appel mutant, en lisant le
+  vocabulaire d'outils de n'importe quel hôte (`Bash` comme `run_in_terminal`,
+  `Edit` comme `replace_string_in_file`). Suppressions récursives, force push,
+  destructions d'infrastructure et lectures de fichiers de secrets sont
+  refusées ou soumises à confirmation selon le profil de risque.
+- **Frontière d'outils par persona** — le champ `tools:` du frontmatter d'un
+  agent fixe sa frontière ; sans lui, elle est déduite du texte de la persona
+  (lecture et recherche toujours, écriture et exécution sur signal explicite).
+  `grimoire host status` liste les personas dont la frontière est déduite.
+- **Compétences et commandes livrées** — protocole de preuve, dispatch de
+  persona et mémoire projet comme compétences chargées à la demande ; six
+  commandes (`grimoire-status`, `-gate`, `-proof`, `-verify`, `-recall`,
+  `-doctor`) rendues comme commandes natives sur les hôtes qui en ont.
+- **Outils MCP `grimoire_host_status`, `grimoire_skill`, `grimoire_command`** —
+  un client MCP sans émetteur dédié atteint la même surface, compétences et
+  commandes chargeables à la demande comprises.
+- **Hôtes Cursor et Gemini CLI** au registre de capacités, avec leurs manifestes.
+- **`grimoire memory shared`** — mémoire transverse entre projets, pour qu'un
+  agent spécialiste accumule du savoir réutilisable sans corrompre celui des
+  autres. Trois règles traitent les modes de corruption connus :
+  **la frontière est physique** (un store séparé, pas une collection filtrée
+  par métadonnée — un filtre oublié mélange deux projets sans rien signaler),
+  **la promotion est refusée par défaut** (un souvenir ne monte que s'il reste
+  vrai quand on efface le nom du projet : « l'app X utilise Postgres 16 » est
+  un fait de projet, « les migrations Alembic cassent quand deux heads
+  coexistent » est un motif), et **la confiance décroît** (un motif non
+  revérifié est servi comme hypothèse, calcul fait à la lecture — une
+  décroissance qui dépend d'un ordonnanceur est une décroissance qui n'arrive
+  pas). `promote` écrit avec provenance, `confirm` restaure la fraîcheur,
+  `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
+  appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
+  ici. Opt-in via `memory.shared_collection`, vide par défaut.
 - **`grimoire memory up`** — met en place la stack mémoire complète, que
   `grimoire init` laissait à moitié câblée : il détecte un backend vectoriel et
   écrit `memory.backend`, mais `neo4j_uri`, `knowledge_graph`, `memory_graph`,
@@ -38,6 +94,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Modifié
 
+- **`.github/agents/` a un seul propriétaire** — le scaffolder générait un
+  wrapper à frontière d'outils fixe (`read, search` ou `read, search, execute`)
+  pointant vers un chemin d'agent codé en dur, et l'émetteur Copilot réécrivait
+  le même fichier avec la frontière réellement résolue et le vrai chemin de la
+  persona. Deux écrivains pour un chemin : `_plan_agent_wrappers` est retiré du
+  scaffolder, l'émetteur est seul propriétaire. Les garanties que les tests du
+  scaffolder épinglaient (frontmatter, `user-invocable`, référence au fichier
+  d'agent, fichier écrit à la main préservé) sont épinglées sur l'émetteur.
 - **`grimoire memory status` ne sort plus en erreur sur un backend mort.** Un
   diagnostic qui échoue quand son sujet échoue ne sert à rien : la commande
   reporte désormais le contrat des sept couches, calculé depuis la config, plus
@@ -154,6 +218,30 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
   signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
   `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
+
+### Corrigé
+
+- **Détection d'hôte** — `HostBridge.detect()` identifiait Claude Code sur la
+  présence d'`ANTHROPIC_API_KEY` et Codex sur `OPENAI_API_KEY`. Une clé
+  d'API dit qui paie les jetons, pas quel hôte s'exécute : toute session
+  exportant les deux était mal routée. La détection repose désormais sur des
+  marqueurs de processus (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_ENV`…).
+- **`CLAUDE_CODE_CLI_MANIFEST`** déclarait `user_prompt_submit: False`. Claude
+  Code expose bien cet événement ; le manifeste en excluait le seul hook capable
+  d'enrichir un prompt avant que le modèle ne le lise.
+- **Fenêtres de contexte des variantes longues** — `resolve_window` résolvait
+  `claude-opus-5[1m]` vers la fenêtre standard de sa famille, sous-évaluant le
+  budget d'un facteur cinq. Un marqueur explicite (`[1m]`, `-1m`, `:1m`) est
+  désormais lu avant la famille.
+- **Fusion JSON des émetteurs** — une variable de boucle réutilisée faisait
+  passer le texte du fichier précédent à la fonction de fusion quand le fichier
+  cible n'existait pas encore.
+- **Suite de tests rouge sans l'extra `mcp`** — `tests/unit/mcp/test_server.py`
+  importait `grimoire.mcp.server` au niveau module : sans `grimoire-kit[mcp]`
+  installé, pytest remontait une *erreur de collecte* et toute la suite passait
+  au rouge. Un `pytest.importorskip` énonce le même fait sans en faire un échec.
+  C'est ce qui rendait le hook pre-commit systématiquement rouge en local, et
+  donc `--no-verify` systématique.
 
 ## [3.32.0] - 2026-08-18
 

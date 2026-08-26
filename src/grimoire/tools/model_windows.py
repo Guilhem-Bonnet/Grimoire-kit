@@ -50,17 +50,29 @@ DEFAULT_MODEL = "copilot"
 
 _PREFIX_BOUNDARY = "-._ /:"
 
+#: Long-context variants are published as a *suffix on the same family id*
+#: (``claude-opus-5[1m]``), so prefix matching resolves them to the family's
+#: standard window and under-budgets them by a factor of five. The marker is
+#: read before the family, which is the only way a suffix can win over a
+#: prefix. Only explicit markers count: a family id alone keeps its published
+#: standard window.
+_LONG_CONTEXT_MARKERS = ("[1m]", "-1m", ":1m")
+_LONG_CONTEXT_WINDOW = 1_000_000
+
 
 def resolve_window(model: str | None) -> int:
     """Return the context window for *model*.
 
-    Resolution order: exact match, then longest prefix ending on a
-    version/name boundary, then the ``DEFAULT_MODEL`` window. Never
-    raises — planners must always get a budget.
+    Resolution order: an explicit long-context marker, then exact match,
+    then longest prefix ending on a version/name boundary, then the
+    ``DEFAULT_MODEL`` window. Never raises — planners must always get a
+    budget.
     """
     if not model:
         return MODEL_WINDOWS[DEFAULT_MODEL]
     normalized = model.strip().lower()
+    if any(marker in normalized for marker in _LONG_CONTEXT_MARKERS):
+        return _LONG_CONTEXT_WINDOW
     exact = MODEL_WINDOWS.get(normalized)
     if exact is not None:
         return exact

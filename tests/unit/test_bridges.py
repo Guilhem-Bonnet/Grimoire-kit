@@ -32,7 +32,10 @@ def test_github_copilot_manifest_full_hooks():
 
 def test_claude_code_cli_manifest():
     assert CLAUDE_CODE_CLI_MANIFEST.hooks.pre_tool_use is True
-    assert CLAUDE_CODE_CLI_MANIFEST.hooks.user_prompt_submit is False
+    # Claude Code does expose UserPromptSubmit. The manifest claimed otherwise,
+    # which excluded the one hook that can enrich a prompt before the model
+    # reads it; the assertion encoded the mistake and is corrected with it.
+    assert CLAUDE_CODE_CLI_MANIFEST.hooks.user_prompt_submit is True
 
 
 def test_detect_via_env_var(monkeypatch):
@@ -44,13 +47,21 @@ def test_detect_via_env_var(monkeypatch):
 
 def test_detect_unknown_env_var_returns_unknown(monkeypatch):
     monkeypatch.setenv("GRIMOIRE_HOST_ID", "host-totally-unknown")
-    # Clear heuristic vars
-    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("CODEX_ENV", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("COPILOT_AGENT", raising=False)
+    # Clear every heuristic marker, otherwise the test passes or fails
+    # depending on which host happens to run it.
+    for var in (
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CODEX_ENV",
+        "CODEX_SANDBOX",
+        "COPILOT_AGENT",
+        "GITHUB_COPILOT_AGENT",
+        "CURSOR_AGENT",
+        "CURSOR_TRACE_ID",
+        "GEMINI_CLI",
+        "GEMINI_CLI_VERSION",
+    ):
+        monkeypatch.delenv(var, raising=False)
     bridge = HostBridge()
     manifest = bridge.detect()
     assert manifest.host_id == HostId.UNKNOWN
@@ -62,10 +73,28 @@ def test_supports_hook():
     assert bridge.supports_hook("user_prompt_submit", HostId.CODEX) is False
 
 
-def test_all_manifests_returns_three():
+def test_all_manifests_cover_the_registry():
     bridge = HostBridge()
-    manifests = bridge.all_manifests()
-    assert len(manifests) == 3
+    manifests = {m.host_id for m in bridge.all_manifests()}
+    assert manifests == {
+        HostId.CLAUDE_CODE_CLI,
+        HostId.GITHUB_COPILOT,
+        HostId.CODEX,
+        HostId.CURSOR,
+        HostId.GEMINI_CLI,
+    }
+
+
+def test_api_key_alone_does_not_identify_a_host(monkeypatch):
+    """A vendor key says who pays for the tokens, not which host is running."""
+    monkeypatch.delenv("GRIMOIRE_HOST_ID", raising=False)
+    for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_ENV", "CODEX_SANDBOX",
+                "COPILOT_AGENT", "GITHUB_COPILOT_AGENT", "CURSOR_AGENT", "CURSOR_TRACE_ID",
+                "GEMINI_CLI", "GEMINI_CLI_VERSION"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert HostBridge().detect().host_id == HostId.UNKNOWN
 
 
 def test_manifest_serialization():

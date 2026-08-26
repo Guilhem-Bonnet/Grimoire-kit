@@ -10,6 +10,13 @@ from types import ModuleType
 
 import pytest
 
+# `mcp` is an optional extra (`grimoire-kit[mcp]`). Importing the server without
+# it raises at module scope, which pytest reports as a collection *error*: the
+# whole suite goes red on a machine that simply did not install an optional
+# dependency. A skip states the same fact without turning it into a failure —
+# and without teaching everyone to commit with --no-verify.
+pytest.importorskip("mcp", reason="extra optionnel grimoire-kit[mcp] non installé")
+
 from grimoire.mcp import server as server_module
 from grimoire.mcp.server import (
     _find_kit_root,

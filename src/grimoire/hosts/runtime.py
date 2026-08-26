@@ -1,0 +1,256 @@
+"""The wire layer: one hook process, every host's JSON dialect.
+
+:mod:`grimoire.hosts.decisions` decides; this module translates. Hosts agree
+more than they look: all of them hand a hook a JSON payload on stdin and read a
+JSON verdict on stdout. They disagree on key casing (``tool_name`` vs
+``toolName``), on event spelling, on which field carries a refusal, and on what
+a non-zero exit code means.
+
+Keeping that translation in one place is what makes the promise checkable: the
+same rule, the same refusal, the same wording, under Claude Code and under
+Copilot — and a new host costs a table entry, not a second implementation of
+the governance.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+from grimoire.bridges.schemas import HostId
+from grimoire.core.agentic_standard import CONTEXT_DIR
+from grimoire.core.standard_state import active_task_id
+from grimoire.hosts.capabilities import profile_for
+from grimoire.hosts.decisions import (
+    DEFAULT_DECISION_BY_EVENT,
+    Decision,
+    HookInput,
+    Outcome,
+    run_decision,
+)
+from grimoire.hosts.surface import HookEvent
+
+#: Neutral event -> the name a host writes in its configuration and payloads.
+#: Claude Code and VS Code Copilot happen to share the spelling; the table is
+#: still per-host so the next one that does not can be added without a branch.
+_WIRE_EVENT_NAMES: dict[HookEvent, str] = {
+    HookEvent.SESSION_START: "SessionStart",
+    HookEvent.USER_PROMPT_SUBMIT: "UserPromptSubmit",
+    HookEvent.PRE_TOOL_USE: "PreToolUse",
+    HookEvent.POST_TOOL_USE: "PostToolUse",
+    HookEvent.SUBAGENT_STOP: "SubagentStop",
+    HookEvent.PRE_COMPACT: "PreCompact",
+    HookEvent.STOP: "Stop",
+}
+
+_EVENT_BY_WIRE_NAME: dict[str, HookEvent] = {v.lower(): k for k, v in _WIRE_EVENT_NAMES.items()}
+
+
+def wire_event_name(event: HookEvent, host_id: HostId | None = None) -> str:
+    """Name *event* the way *host_id* spells it in configuration files."""
+    del host_id  # single spelling today; parameter keeps call sites future-proof
+    return _WIRE_EVENT_NAMES[event]
+
+
+def parse_event(name: str) -> HookEvent | None:
+    """Accept ``PreToolUse``, ``pre_tool_use`` or ``pre-tool-use`` alike."""
+    key = name.strip().replace("-", "_").replace(" ", "").lower()
+    if key in _EVENT_BY_WIRE_NAME:
+        return _EVENT_BY_WIRE_NAME[key]
+    compact = key.replace("_", "")
+    for wire, event in _EVENT_BY_WIRE_NAME.items():
+        if wire.replace("_", "") == compact:
+            return event
+    try:
+        return HookEvent(key)
+    except ValueError:
+        return None
+
+
+def _pick(payload: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in payload and payload[key] not in (None, ""):
+            return payload[key]
+    return default
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def resolve_project_root(payload: dict[str, Any] | None = None, explicit: Path | None = None) -> Path:
+    """Project root for a hook run.
+
+    Order: an explicit ``--project-root``, then the host's own signal (its
+    payload ``cwd`` or the project-dir variable it exports), then the process
+    working directory. A hook that guesses this wrong evaluates the gates of
+    the wrong project, so every candidate is a value the host actually stated.
+    """
+    if explicit is not None:
+        return explicit.resolve()
+    data = payload or {}
+    candidate = _pick(data, "cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
+    if isinstance(candidate, str) and candidate.strip():
+        return Path(candidate).resolve()
+    for var in ("CLAUDE_PROJECT_DIR", "GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return Path(value).resolve()
+    return Path.cwd().resolve()
+
+
+def normalize_input(
+    payload: dict[str, Any],
+    *,
+    event: HookEvent | None = None,
+    project_root: Path | None = None,
+) -> HookInput:
+    """Flatten a host payload into the neutral :class:`HookInput`."""
+    wire_event = _pick(payload, "hook_event_name", "hookEventName", "event", default="")
+    resolved = event or (parse_event(str(wire_event)) if wire_event else None) or HookEvent.SESSION_START
+    stop_active = bool(_pick(payload, "stop_hook_active", "stopHookActive", default=False))
+    return HookInput(
+        event=resolved,
+        project_root=resolve_project_root(payload, project_root),
+        tool_name=str(_pick(payload, "tool_name", "toolName", "tool", default="") or ""),
+        tool_input=_as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments")),
+        tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "result")),
+        prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
+        agent_name=str(_pick(payload, "agent_name", "agentName", "subagent", default="") or ""),
+        session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
+        stop_active=stop_active,
+        raw=dict(payload),
+    )
+
+
+def _persist_capsule(hook: HookInput, decision: Decision) -> Path | None:
+    """Write the pre-compaction capsule where the next window can find it.
+
+    No host injects context *into* a compaction, so a capsule that only exists
+    in the hook's stdout dies with the old window. On disk it outlives it, and
+    the session-start decision can read it back.
+    """
+    if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
+        return None
+    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root))
+    dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(decision.context + "\n", encoding="utf-8")
+    except OSError:
+        return None
+    return dest
+
+
+def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, Any]:
+    """Render *decision* into the JSON *host_id* understands for this event."""
+    event_name = wire_event_name(hook.event, host_id)
+    payload: dict[str, Any] = {}
+    specific: dict[str, Any] = {"hookEventName": event_name}
+
+    if hook.event is HookEvent.PRE_TOOL_USE:
+        if profile_for(host_id).blocking_hooks:
+            mapping = {Outcome.DENY: "deny", Outcome.ASK: "ask", Outcome.ALLOW: "allow"}
+            specific["permissionDecision"] = mapping.get(decision.outcome, "allow")
+            if decision.reason:
+                specific["permissionDecisionReason"] = decision.reason
+        elif decision.is_refusal and decision.reason:
+            specific["additionalContext"] = decision.reason
+        payload["hookSpecificOutput"] = specific
+        return payload
+
+    if hook.event in {HookEvent.STOP, HookEvent.SUBAGENT_STOP}:
+        if decision.outcome is Outcome.BLOCK and profile_for(host_id).blocking_hooks:
+            payload["decision"] = "block"
+            payload["reason"] = decision.reason
+            return payload
+        if decision.context:
+            specific["additionalContext"] = decision.context
+            payload["hookSpecificOutput"] = specific
+        return payload
+
+    if decision.context:
+        specific["additionalContext"] = decision.context
+        payload["hookSpecificOutput"] = specific
+    if hook.event is HookEvent.PRE_COMPACT and decision.context:
+        # Nothing consumes additionalContext during a compaction; say plainly
+        # where the capsule went instead of pretending it was injected.
+        payload["systemMessage"] = "[Grimoire] capsule de gouvernance écrite avant compaction."
+    return payload
+
+
+def run_hook(
+    payload: dict[str, Any],
+    *,
+    host_id: HostId,
+    event: HookEvent | None = None,
+    project_root: Path | None = None,
+    decision_id: str | None = None,
+) -> tuple[dict[str, Any], Decision, HookInput]:
+    """Full path: normalise, decide, persist side effects, render."""
+    hook = normalize_input(payload, event=event, project_root=project_root)
+    resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
+    decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    capsule = _persist_capsule(hook, decision)
+    if capsule is not None:
+        decision = Decision(
+            outcome=decision.outcome,
+            reason=decision.reason,
+            context=decision.context,
+            detail={**decision.detail, "capsule": str(capsule)},
+        )
+    return render(decision, hook, host_id), decision, hook
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point used by generated hook configurations.
+
+    Reads the host payload on stdin, writes the host verdict on stdout, and
+    always exits 0: the verdict lives in the JSON, and a non-zero exit is how a
+    hook turns a policy decision into an unexplained host error.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    host_name = ""
+    event_name = ""
+    root: Path | None = None
+    decision_id: str | None = None
+    it = iter(range(len(args)))
+    for i in it:
+        arg = args[i]
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if arg == "--host":
+            host_name = nxt
+        elif arg == "--event":
+            event_name = nxt
+        elif arg == "--project-root":
+            root = Path(nxt)
+        elif arg == "--decision":
+            decision_id = nxt
+
+    from grimoire.hosts.capabilities import resolve_host
+
+    host_id = resolve_host(host_name) or HostId.UNKNOWN
+    event = parse_event(event_name) if event_name else None
+    try:
+        raw = sys.stdin.read()
+    except (OSError, ValueError):
+        raw = ""
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    result, _decision, _hook = run_hook(
+        payload, host_id=host_id, event=event, project_root=root, decision_id=decision_id
+    )
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - process entry point
+    raise SystemExit(main())

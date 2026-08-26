@@ -516,4 +516,8 @@ class TestDoctorFix:
         agents.mkdir(parents=True)
         (agents / "custom-agent.tpl.md").write_text("---\ndescription: tpl\n---\n", encoding="utf-8")
         written = repair_project_artifacts(init_project)
-        assert written == [".mcp.json"]
+        # Repair also projects the project onto each host surface, so the list
+        # is no longer a single entry. What must hold is unchanged: a blank
+        # template is not a deployed agent and reaches no host.
+        assert ".mcp.json" in written
+        assert not [label for label in written if "custom-agent" in label]

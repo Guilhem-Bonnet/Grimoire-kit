@@ -11,6 +11,8 @@ class HostId(StrEnum):
     CLAUDE_CODE_CLI = "host-claude-code-cli"
     GITHUB_COPILOT = "host-github-copilot"
     CODEX = "host-codex"
+    CURSOR = "host-cursor"
+    GEMINI_CLI = "host-gemini-cli"
     UNKNOWN = "host-unknown"
 
 
@@ -123,7 +125,7 @@ CLAUDE_CODE_CLI_MANIFEST = HostCapabilityManifest(
     display_name="Claude Code CLI",
     hooks=HostHooks(
         session_start=True,
-        user_prompt_submit=False,
+        user_prompt_submit=True,
         pre_tool_use=True,
         post_tool_use=True,
         subagent_start=True,
@@ -185,8 +187,40 @@ CODEX_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
+# Editor/CLI hosts with an MCP client and an instructions file, but no agent
+# lifecycle hooks: governance can be stated there, never enforced.
+CURSOR_MANIFEST = HostCapabilityManifest(
+    host_id=HostId.CURSOR,
+    display_name="Cursor",
+    hooks=HostHooks(),
+    fallback=HostFallback(
+        mode=FallbackMode.PREVIEW_ONLY,
+        required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
+    ),
+    supports_mcp=True,
+    supports_streaming=True,
+    supports_workspace_mutation=True,
+    tool_policy_native=False,
+)
+
+GEMINI_CLI_MANIFEST = HostCapabilityManifest(
+    host_id=HostId.GEMINI_CLI,
+    display_name="Gemini CLI",
+    hooks=HostHooks(),
+    fallback=HostFallback(
+        mode=FallbackMode.PREVIEW_ONLY,
+        required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
+    ),
+    supports_mcp=True,
+    supports_streaming=True,
+    supports_workspace_mutation=True,
+    tool_policy_native=False,
+)
+
 _HOST_REGISTRY: dict[HostId, HostCapabilityManifest] = {
     HostId.CLAUDE_CODE_CLI: CLAUDE_CODE_CLI_MANIFEST,
     HostId.GITHUB_COPILOT: GITHUB_COPILOT_MANIFEST,
     HostId.CODEX: CODEX_MANIFEST,
+    HostId.CURSOR: CURSOR_MANIFEST,
+    HostId.GEMINI_CLI: GEMINI_CLI_MANIFEST,
 }

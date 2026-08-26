@@ -72,6 +72,12 @@ _EXPECTED_DIRS = ("_grimoire", "_grimoire-output", "_grimoire/_memory")
 # ── Project class ─────────────────────────────────────────────────────────────
 
 
+#: Agent directories under ``_grimoire/``, in resolution order. Published so
+#: every reader of the project's personas — status, host emitters — walks the
+#: same tree.
+AGENT_DIR_NAMES: tuple[str, ...] = ("agents", "_config/agents", "_config/custom/agents")
+
+
 class GrimoireProject:
     """Entry point for interacting with a Grimoire project.
 
@@ -155,7 +161,7 @@ class GrimoireProject:
         agents: list[AgentInfo] = []
 
         # Scan _grimoire/agents/, legacy _grimoire/_config/agents/, and _grimoire/_config/custom/agents/
-        for agents_dir_name in ("agents", "_config/agents", "_config/custom/agents"):
+        for agents_dir_name in AGENT_DIR_NAMES:
             agents_dir = self.grimoire_dir / agents_dir_name
             if agents_dir.is_dir():
                 for f in sorted(agents_dir.iterdir()):
