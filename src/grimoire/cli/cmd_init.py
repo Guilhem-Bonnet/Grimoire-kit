@@ -771,6 +771,7 @@ def run_init(
         resolved=resolved,
         backend=backend,
         offline=offline,
+        force=force,
     )
     plan = scaffolder.plan()
 

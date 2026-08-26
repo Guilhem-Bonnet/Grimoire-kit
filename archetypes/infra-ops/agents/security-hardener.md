@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="security-hardener.agent.yaml" name="Vault" title="Security &amp; Compliance Specialist" icon="🛡️">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=vault | AGENT_NAME=Vault | LEARNINGS_FILE=security | DOMAIN_WORD=sécurité
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -58,7 +58,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="TL or fuzzy match on tls" action="#tls-hardening">[TL] TLS &amp; Certificats — vérifier/configurer HTTPS</item>
     <item cmd="FW or fuzzy match on firewall or fail2ban" action="#firewall-ops">[FW] Firewall &amp; Fail2ban — règles, bannissement, protection</item>
     <item cmd="HD or fuzzy match on hardening" action="#system-hardening">[HD] Hardening Système — CIS benchmarks, permissions, réseau</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

@@ -39,7 +39,7 @@ context_budget:
   strategy: "priority"
   max_tokens_estimate: 50000
   always_load:
-    - "{project-root}/_grimoire/_config/custom/agent-base.md"
+    - "{project-root}/_grimoire/kit/framework/agent-base.md"
     - "{project-root}/_grimoire/_memory/shared-context.md"
   session_load:
     - "{project-root}/_grimoire/_memory/decisions-log.md"

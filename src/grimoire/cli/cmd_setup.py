@@ -121,12 +121,16 @@ def _apply_copilot(path: Path, vals: UserValues) -> bool:
     if not path.exists():
         return False
     text = path.read_text(encoding="utf-8")
+    # ``[^\S\n]*`` — horizontal whitespace only. With ``\s*`` the match ran
+    # past the end of the line, so an empty value swallowed the newline and
+    # overwrote the *next* field. Only visible once a field could legitimately
+    # be empty, which is why it survived this long.
     replacements = [
-        (r"(\*\*Project\*\*:\s*).+", vals.project_name),
-        (r"(\*\*User\*\*:\s*).+", vals.user_name),
-        (r"(\*\*Communication Language\*\*:\s*).+", vals.communication_language),
-        (r"(\*\*Document Output Language\*\*:\s*).+", vals.document_output_language),
-        (r"(\*\*User Skill Level\*\*:\s*).+", vals.user_skill_level),
+        (r"(\*\*Project\*\*:[^\S\n]*).*", vals.project_name),
+        (r"(\*\*User\*\*:[^\S\n]*).*", vals.user_name),
+        (r"(\*\*Communication Language\*\*:[^\S\n]*).*", vals.communication_language),
+        (r"(\*\*Document Output Language\*\*:[^\S\n]*).*", vals.document_output_language),
+        (r"(\*\*User Skill Level\*\*:[^\S\n]*).*", vals.user_skill_level),
     ]
     updated = text
     for pat, value in replacements:

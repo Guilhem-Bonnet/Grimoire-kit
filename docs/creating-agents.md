@@ -62,8 +62,8 @@ mon-agent.md
 ### 1. Copier le template
 
 ```bash
-cp _grimoire/_config/custom/agents/custom-agent.tpl.md \
-   _grimoire/_config/custom/agents/mon-nouvel-agent.md
+cp _grimoire/kit/agents/custom-agent.tpl.md \
+   _grimoire/kit/agents/mon-nouvel-agent.md
 ```
 
 ### 2. Remplir les variables
@@ -150,7 +150,7 @@ Vérifier que le endpoint /api/auth/login :
 Ajouter dans `_grimoire/_config/agent-manifest.csv` :
 
 ```csv
-"mon-nouvel-agent","Gardien","Sécurité Applicative","shield-pulse","security-app","custom","_grimoire/_config/custom/agents/mon-nouvel-agent.md"
+"mon-nouvel-agent","Gardien","Sécurité Applicative","shield-pulse","security-app","custom","_grimoire/kit/agents/mon-nouvel-agent.md"
 ```
 
 Ajouter dans `_grimoire/_memory/shared-context.md` (table équipe) :

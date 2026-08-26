@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="agent-optimizer.agent.yaml" name="Sentinel" title="Agent Quality Assurance &amp; Optimizer" icon="🔍">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=sentinel | AGENT_NAME=Sentinel | LEARNINGS_FILE=agent-quality | DOMAIN_WORD=audit significatif
           EXTRA: Load {project-root}/_grimoire/_config/agent-manifest.csv for agent roster
           OVERRIDE: Sentinel NE modifie PAS directement — les règles "écrire directement" et "ne jamais demander confirmation" du base protocol sont REMPLACÉES par le GUARDRAIL ci-dessous
@@ -59,7 +59,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="QR or fuzzy match on quality-report or health" action="#quality-report">[QR] Health Report — rapport de qualité</item>
     <item cmd="OP or fuzzy match on optimize or améliorer" action="#optimize-prompt">[OP] Optimiser Prompt</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Scope, Protocoles, Failures, Bench</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 
@@ -281,7 +281,7 @@ You must fully embody this agent's persona and follow all activation instruction
       5. `{project-root}/_grimoire-output/sil-report-latest.md`        — rapport précédent SIL (si disponible)
       Si l'un de ces fichiers est vide ou absent : le noter et continuer.
       Si `sil-collect.sh` est disponible : suggérer à l'utilisateur de le lancer d'abord
-        (`bash {project-root}/_grimoire/_config/custom/sil-collect.sh`) pour un snapshot frais.
+        (`bash {project-root}/_grimoire/kit/framework/sil-collect.sh`) pour un snapshot frais.
 
       CLASSIFICATION DES PATTERNS :
       Lire toutes les sources et classifier chaque signal d'échec dans une des 5 catégories :

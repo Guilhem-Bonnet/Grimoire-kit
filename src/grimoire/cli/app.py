@@ -32,10 +32,13 @@ from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
 from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
 from grimoire.cli.cmd_memory_lexical import memory_app
+from grimoire.cli.cmd_migrate import migrate_command
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
 from grimoire.cli.cmd_up import up as up_command
+from grimoire.cli.cmd_upgrade import upgrade_command
+from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.log import configure_logging
@@ -441,8 +444,10 @@ def doctor(
 
     # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
     with _timed_phase("agents_discoverable"):
-        agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
-        agent_files = [f for f in agents_dir.glob("*.md") if not f.name.endswith(".tpl.md")] if agents_dir.is_dir() else []
+        agent_files = [
+            f for f in layout.layered_files(target, layout.AGENTS_SUBDIR).values()
+            if not f.name.endswith(".tpl.md")
+        ]
         if agent_files:
             wrappers_dir = target / ".github" / "agents"
             wrappers = list(wrappers_dir.glob("*.agent.md")) if wrappers_dir.is_dir() else []
@@ -899,6 +904,12 @@ app.add_typer(memory_app, name="memory", rich_help_panel="Data")
 
 app.add_typer(hooks_app, name="hooks", rich_help_panel="Project")
 app.add_typer(cadrage_app, name="cadrage", rich_help_panel="Project")
+
+
+# ── grimoire migrate ──────────────────────────────────────────────────────────────
+
+app.command("migrate", rich_help_panel="Project")(migrate_command)
+app.command("upgrade", rich_help_panel="Utilities")(upgrade_command)
 
 
 # ── grimoire debugger ─────────────────────────────────────────────────────────────
@@ -2172,84 +2183,6 @@ def plugins_list(ctx: typer.Context) -> None:
 
     console.print()
 
-
-# ── grimoire upgrade ──────────────────────────────────────────────────────────────
-
-_upgrade_path_arg = typer.Argument(Path(), help="Path to the v2 project.")
-_upgrade_dry_run_opt = typer.Option(False, "--dry-run", "-n", help="Show plan without applying.")
-
-
-@app.command("upgrade", rich_help_panel="Utilities")
-def upgrade(
-    ctx: typer.Context,
-    path: Path = _upgrade_path_arg,
-    dry_run: bool = _upgrade_dry_run_opt,
-) -> None:
-    """Migrate a v2 project to v3 structure.
-
-    [dim]Examples:[/dim]
-      [cyan]grimoire upgrade . --dry-run[/cyan]  Preview migration
-      [cyan]grimoire upgrade -o json .[/cyan]    JSON output for CI
-    """
-    from grimoire.cli.cmd_upgrade import (
-        detect_version,
-        execute_upgrade,
-        plan_upgrade,
-    )
-
-    fmt = _get_fmt(ctx)
-    target = path.resolve()
-    version = detect_version(target)
-
-    if version == "v3":
-        if fmt == "json":
-            typer.echo(json.dumps({"ok": True, "version": "v3", "status": "already_v3", "actions": []}))
-        else:
-            console.print("[green]Project is already v3 — nothing to do.[/green]")
-        return
-
-    if version == "unknown":
-        if fmt == "json":
-            typer.echo(json.dumps({"ok": False, "error": "No v2 project found"}))
-        else:
-            console.print("[red]No v2 project-context.yaml found at this path.[/red]")
-        raise typer.Exit(1)
-
-    plan = plan_upgrade(target)
-    quiet = (ctx.obj or {}).get("quiet", False)
-    with _status_spinner("Upgrading…", show=(fmt != "json" and not quiet and not dry_run)):
-        completed = execute_upgrade(target, plan, dry_run=dry_run)
-
-    if not dry_run:
-        _log_operation("upgrade", {"from": version, "actions": len(completed)})
-
-    if fmt == "json":
-        typer.echo(json.dumps({
-            "ok": True,
-            "version": version,
-            "dry_run": dry_run,
-            "warnings": plan.warnings,
-            "actions": completed,
-        }, indent=2))
-        return
-
-    if dry_run:
-        console.print("[bold]grimoire upgrade --dry-run[/bold]\n")
-    else:
-        console.print("[bold]grimoire upgrade[/bold]\n")
-
-    if plan.warnings:
-        for w in plan.warnings:
-            console.print(f"  [yellow][!] {w}[/yellow]")
-
-    for desc in completed:
-        icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
-        console.print(f"  {icon}  {desc}")
-
-    if not completed and not plan.warnings:
-        console.print("  [green]Nothing to do.[/green]")
-
-    console.print(f"\n[bold]Migration {'planned' if dry_run else 'complete'}.[/bold]")
 
 
 # ── grimoire merge ────────────────────────────────────────────────────────────────

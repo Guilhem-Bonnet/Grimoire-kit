@@ -49,7 +49,7 @@ python3 _grimoire/_memory/mem0-bridge.py status
 
 **Diagnostic** :
 ```bash
-bash _grimoire/_config/custom/cc-verify.sh  # sans --stack
+bash _grimoire/kit/framework/cc-verify.sh  # sans --stack
 ```
 
 **Causes** :
@@ -62,9 +62,9 @@ bash _grimoire/_config/custom/cc-verify.sh  # sans --stack
 
 **Forcer un stack** :
 ```bash
-bash _grimoire/_config/custom/cc-verify.sh --stack go
-bash _grimoire/_config/custom/cc-verify.sh --stack typescript
-bash _grimoire/_config/custom/cc-verify.sh --stack go,docker
+bash _grimoire/kit/framework/cc-verify.sh --stack go
+bash _grimoire/kit/framework/cc-verify.sh --stack typescript
+bash _grimoire/kit/framework/cc-verify.sh --stack go,docker
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
@@ -139,7 +139,7 @@ Sources attendues (toutes vides sur un projet neuf) :
 
 **Forcer la génération** (pour tester) :
 ```bash
-bash _grimoire/_config/custom/sil-collect.sh --force-empty
+bash _grimoire/kit/framework/sil-collect.sh --force-empty
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
@@ -195,8 +195,8 @@ bash grimoire-init.sh --name "..." --user "..." --archetype web-app
 ## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
 
 ```bash
-chmod +x _grimoire/_config/custom/cc-verify.sh
-chmod +x _grimoire/_config/custom/sil-collect.sh
+chmod +x _grimoire/kit/framework/cc-verify.sh
+chmod +x _grimoire/kit/framework/sil-collect.sh
 chmod +x .git/hooks/pre-commit
 ```
 
@@ -229,7 +229,7 @@ python3 framework/tools/context-guard.py --project-root /chemin/vers/projet
 ```
 
 `guard` cherche des agents dans : 
-- `_grimoire/_config/custom/agents/` 
+- `_grimoire/kit/agents/` 
 - `_grimoire/bmm/agents/` 
 - `archetypes/**/agents/` 
 
@@ -248,7 +248,7 @@ C'est **normal** pour un projet neuf ou le repo kit lui-même (pas de Grimoire_T
 wc -l Grimoire_TRACE.md 2>/dev/null || echo "Pas de Grimoire_TRACE dans ce répertoire"
 
 # Renseigner explicitement le fichier TRACE (si dans un sous-dossier)
-bash grimoire-init.sh evolve --trace _grimoire/_config/custom/Grimoire_TRACE.md
+bash grimoire-init.sh evolve --trace _grimoire/kit/framework/Grimoire_TRACE.md
 
 # Forcer un rapport même sans données
 bash grimoire-init.sh evolve --report
@@ -441,7 +441,7 @@ nordvpn allowlist add app /usr/share/code/code
 Si le problème persiste :
 
 1. `python3 _grimoire/_memory/mem0-bridge.py status` — état complet de la mémoire
-2. `bash _grimoire/_config/custom/cc-verify.sh` — état du CC
+2. `bash _grimoire/kit/framework/cc-verify.sh` — état du CC
 3. `bash grimoire-init.sh doctor` — diagnostic global du kit
 4. `bash grimoire-init.sh guard --json` — budget de contexte agents (JSON pour le partager)
 5. Consulter [docs/vscode-setup.md](vscode-setup.md) pour la configuration VS Code

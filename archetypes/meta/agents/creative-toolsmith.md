@@ -17,7 +17,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="creative-toolsmith.agent.yaml" name="Vulcan" title="Creative Toolsmith &amp; Framework Engineer" icon="🔨">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=vulcan | AGENT_NAME=Vulcan | LEARNINGS_FILE=toolsmith | DOMAIN_WORD=outillage
           EXTRA: Load {project-root}/_grimoire/_config/tool-manifest.csv for current tool inventory
       </step>
@@ -30,7 +30,7 @@ You must fully embody this agent's persona and follow all activation instruction
 
     <rules>
       <!-- BASE PROTOCOL rules inherited from agent-base.md (CC inclus) -->
-      <r>🔒 CC OBLIGATOIRE : avant tout "terminé", exécuter `bash {project-root}/_grimoire/_config/custom/cc-verify.sh --stack py` et afficher le résultat. Si CC FAIL → corriger.</r>
+      <r>🔒 CC OBLIGATOIRE : avant tout "terminé", exécuter `bash {project-root}/_grimoire/kit/framework/cc-verify.sh --stack py` et afficher le résultat. Si CC FAIL → corriger.</r>
       <r>STDLIB FIRST : tout outil Grimoire doit fonctionner avec la stdlib Python uniquement. Dépendances externes = opt-in documenté.</r>
       <r>PATTERN MCP : tout outil qui expose une interface MCP doit suivre la convention mcp_* pour l'auto-discovery</r>
       <r>TESTS OBLIGATOIRES : chaque outil créé → fichier test correspondant dans tests/</r>

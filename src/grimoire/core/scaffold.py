@@ -21,6 +21,7 @@ from typing import ClassVar
 
 from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
+from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
@@ -62,7 +63,76 @@ def _strip_tpl_suffix(name: str) -> str:
     return name
 
 
+def write_text_if_changed(dst: Path, content: str) -> bool:
+    """Write *content* to *dst* only when it differs. True when written.
+
+    Regenerating the kit tier on every update is only tolerable if it is a
+    no-op when nothing changed: no rewritten mtimes, no phantom git diff, and
+    ``doctor --fix`` staying silent on a healthy project.
+    """
+    try:
+        if dst.read_text(encoding="utf-8") == content:
+            return False
+    except (OSError, UnicodeDecodeError):
+        # Absent ou illisible : il n'y a rien à comparer, on écrit.
+        pass
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(content, encoding="utf-8")
+    return True
+
+
+#: Build artifacts that must never be copied into a user's project.
+_JUNK_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache"})
+_JUNK_SUFFIXES = frozenset({".pyc", ".pyo"})
+
+
+def is_build_artifact(path: PurePath) -> bool:
+    """True for compiled/cache files that belong to a build, not to a project."""
+    return path.suffix in _JUNK_SUFFIXES or any(part in _JUNK_DIRS for part in path.parts)
+
+
+def _copy_tree_if_changed(src: Path, dst: Path) -> bool:
+    """Mirror *src* into *dst*, copying only files that differ. True if any was.
+
+    ``shutil.copytree`` would rewrite the whole tree every time and report a
+    change on every run, which is what made ``up`` claim work it had not done.
+    It also copied the kit's own ``__pycache__`` into every project.
+    """
+    wrote = False
+    for entry in sorted(src.rglob("*")):
+        if not entry.is_file() or is_build_artifact(entry.relative_to(src)):
+            continue
+        target = dst / entry.relative_to(src)
+        if _same_bytes(entry, target):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(entry, target)
+        wrote = True
+    return wrote
+
+
+def _same_bytes(src: Path, dst: Path) -> bool:
+    """True when *dst* already holds exactly the bytes of *src*."""
+    try:
+        if src.stat().st_size != dst.stat().st_size:
+            return False
+        return src.read_bytes() == dst.read_bytes()
+    except OSError:
+        return False
+
+
 # ── Data models ───────────────────────────────────────────────────────────────
+
+
+#: Write tiers — see :mod:`grimoire.core.layout` for the full contract.
+#:
+#: ``kit``  : regenerated and overwritten on every update. The project never
+#:            edits it, so a new kit version actually reaches the project.
+#: ``seed`` : written only when missing. Project-owned from the first write on
+#:            (the memory log, the project context) — updating it would destroy
+#:            user content.
+TIER_KIT = "kit"
+TIER_SEED = "seed"
 
 
 @dataclass
@@ -73,21 +143,31 @@ class FileCopy:
     way out instead of copying the bytes verbatim. Kept on FileCopy rather than
     TemplateRender so agent files stay in ``plan.copies``, where the manifest,
     the Copilot wrappers and the assistant bridges all look for them.
+
+    *tier* decides what happens when *dst* already exists: ``kit`` overwrites,
+    ``seed`` keeps what is there. It replaces the ad-hoc ``if dst.is_file():
+    continue`` guards that used to be scattered across the planning methods and
+    silently froze prompts, instructions and bridges at their install version.
     """
 
     src: Path
     dst: Path
     label: str = ""
     render_vars: dict[str, str] | None = None
+    tier: str = TIER_KIT
 
 
 @dataclass
 class TemplateRender:
-    """A template file to render with *variables* and write to *dst*."""
+    """A template file to render with *variables* and write to *dst*.
+
+    *tier* follows the same contract as :class:`FileCopy`.
+    """
 
     dst: Path
     content: str
     label: str = ""
+    tier: str = TIER_KIT
 
 
 @dataclass
@@ -110,6 +190,8 @@ class ScaffoldResult:
     created_dirs: list[str] = field(default_factory=list)
     copied_files: list[str] = field(default_factory=list)
     rendered_files: list[str] = field(default_factory=list)
+    preserved_files: list[str] = field(default_factory=list)
+    unchanged_files: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -288,7 +370,7 @@ project-context.yaml       # Config globale du projet
 ## Conventions
 
 1. **Language**: Always respond in $language
-2. **Completion Contract**: Avant chaque commit, vérifier avec `bash _grimoire/_config/custom/cc-verify.sh`
+2. **Completion Contract**: Avant chaque commit, vérifier avec `bash _grimoire/kit/framework/cc-verify.sh`
 3. **Context**: Charger `_grimoire/_memory/shared-context.md` au démarrage
 4. **Decisions**: Les décisions sont loguées dans `_grimoire/_memory/decisions-log.md`
 5. **Errors**: Les erreurs significatives sont documentées dans `_grimoire/_memory/failure-museum.md`
@@ -322,6 +404,7 @@ class ProjectScaffolder:
         resolved: ResolvedArchetype,
         backend: str,
         offline: bool = False,
+        force: bool = False,
     ) -> None:
         self._offline = offline
         self._target = target.resolve()
@@ -332,6 +415,9 @@ class ProjectScaffolder:
         self._scan = scan
         self._resolved = resolved
         self._backend = backend
+        # ``force`` is the deliberate "overwrite my files too" gesture behind
+        # ``grimoire init --force``; without it the seed tier is inviolable.
+        self._force = force
         self._archetypes = archetypes_path()
         self._framework = framework_path()
 
@@ -362,39 +448,65 @@ class ProjectScaffolder:
         result = ScaffoldResult()
 
         for d in plan.directories:
+            if d.is_dir():
+                continue  # already there: not work this run did
             d.mkdir(parents=True, exist_ok=True)
             result.created_dirs.append(str(d.relative_to(self._target)))
 
         for fc in plan.copies:
+            label = fc.label or str(fc.dst.relative_to(self._target))
+            if fc.tier == TIER_SEED and fc.dst.exists() and not self._force:
+                result.preserved_files.append(label)
+                continue
             fc.dst.parent.mkdir(parents=True, exist_ok=True)
             if fc.src.is_dir():
-                shutil.copytree(fc.src, fc.dst, dirs_exist_ok=True)
+                if not _copy_tree_if_changed(fc.src, fc.dst):
+                    result.unchanged_files.append(label)
+                    continue
             elif fc.render_vars:
-                fc.dst.write_text(
-                    _render_placeholders(fc.src.read_text(encoding="utf-8"), fc.render_vars),
-                    encoding="utf-8",
-                )
+                content = _render_placeholders(fc.src.read_text(encoding="utf-8"), fc.render_vars)
+                if not write_text_if_changed(fc.dst, content):
+                    result.unchanged_files.append(label)
+                    continue
+            elif _same_bytes(fc.src, fc.dst):
+                result.unchanged_files.append(label)
+                continue
             else:
                 shutil.copy2(fc.src, fc.dst)
-            result.copied_files.append(fc.label or str(fc.dst.relative_to(self._target)))
+            result.copied_files.append(label)
 
         for tr in plan.templates:
+            label = tr.label or str(tr.dst.relative_to(self._target))
+            if tr.tier == TIER_SEED and tr.dst.exists() and not self._force:
+                result.preserved_files.append(label)
+                continue
             tr.dst.parent.mkdir(parents=True, exist_ok=True)
-            tr.dst.write_text(tr.content, encoding="utf-8")
-            result.rendered_files.append(tr.label or str(tr.dst.relative_to(self._target)))
+            if not write_text_if_changed(tr.dst, tr.content):
+                result.unchanged_files.append(label)
+                continue
+            result.rendered_files.append(label)
 
         return result
 
     # ── Planning helpers ──────────────────────────────────────────────
 
+    def _kit_dir(self) -> Path:
+        """Root of the regenerated tier — overwritten on every update."""
+        return layout.kit_dir(self._target)
+
     def _agents_dir(self) -> Path:
-        return self._target / "_grimoire" / "_config" / "custom" / "agents"
+        return self._kit_dir() / layout.AGENTS_SUBDIR
 
     def _memory_dir(self) -> Path:
+        """Project-owned memory store. Holds data, never kit code."""
         return self._target / "_grimoire" / "_memory"
 
+    def _memory_code_dir(self) -> Path:
+        """Kit-provided memory helpers — code, so it belongs to the kit tier."""
+        return self._kit_dir() / layout.MEMORY_CODE_SUBDIR
+
     def _workflows_dir(self) -> Path:
-        return self._target / "_grimoire" / "_config" / "custom" / "workflows"
+        return self._kit_dir() / layout.WORKFLOWS_SUBDIR
 
     # Delegation roles a template may reference, each mapped to the agent tags
     # that can fill it, most specific first.
@@ -523,9 +635,11 @@ class ProjectScaffolder:
             base / ".github" / "agents",
             base / ".github" / "prompts",
             base / ".github" / "instructions",
-            base / "_grimoire" / "_config" / "custom" / "agents",
-            base / "_grimoire" / "_config" / "custom" / "prompt-templates",
-            base / "_grimoire" / "_config" / "custom" / "workflows",
+            base / layout.KIT_DIR / layout.AGENTS_SUBDIR,
+            base / layout.KIT_DIR / layout.PROMPT_TEMPLATES_SUBDIR,
+            base / layout.KIT_DIR / layout.WORKFLOWS_SUBDIR,
+            base / layout.KIT_DIR / layout.FRAMEWORK_SUBDIR,
+            base / layout.OVERRIDES_DIR / layout.AGENTS_SUBDIR,
             base / "_grimoire" / "_memory" / "agent-learnings",
             base / "_grimoire" / "_memory" / "session-summaries",
             base / "_grimoire" / "_memory" / "archives",
@@ -622,11 +736,11 @@ class ProjectScaffolder:
             if dna_src.is_file():
                 p.copies.append(FileCopy(
                     src=dna_src,
-                    dst=self._target / "_grimoire" / "_config" / f"archetype.dna.{arch}.yaml",
+                    dst=self._kit_dir() / f"archetype.dna.{arch}.yaml",
                     label=f"{arch}/archetype.dna.yaml",
                 ))
                 # Also keep a primary DNA copy for backward compat (first archetype wins)
-                primary_dst = self._target / "_grimoire" / "_config" / "archetype.dna.yaml"
+                primary_dst = self._kit_dir() / "archetype.dna.yaml"
                 if not any(fc.dst == primary_dst for fc in p.copies):
                     p.copies.append(FileCopy(
                         src=dna_src,
@@ -644,6 +758,7 @@ class ProjectScaffolder:
                     dst=shared_dst,
                     content=rendered,
                     label="shared-context.md (archetype)",
+                    tier=TIER_SEED,
                 ))
 
     def _plan_stack_agents(self, p: ScaffoldPlan) -> None:
@@ -675,7 +790,7 @@ class ProjectScaffolder:
 
     def _plan_framework(self, p: ScaffoldPlan) -> None:
         fw = self._framework
-        dst_custom = self._target / "_grimoire" / "_config" / "custom"
+        dst_custom = self._kit_dir() / layout.FRAMEWORK_SUBDIR
 
         # Core framework files
         for name in ("agent-base.md", "agent-base-compact.md"):
@@ -694,7 +809,7 @@ class ProjectScaffolder:
         if pt_src.is_dir():
             p.copies.append(FileCopy(
                 src=pt_src,
-                dst=dst_custom / "prompt-templates",
+                dst=self._kit_dir() / layout.PROMPT_TEMPLATES_SUBDIR,
                 label="framework/prompt-templates/",
             ))
 
@@ -707,31 +822,37 @@ class ProjectScaffolder:
                     continue
                 p.copies.append(FileCopy(
                     src=wf,
-                    dst=dst_custom / "workflows" / _strip_tpl_suffix(wf.name),
+                    dst=self._workflows_dir() / _strip_tpl_suffix(wf.name),
                     label=f"framework/workflows/{_strip_tpl_suffix(wf.name)}",
                 ))
 
-        # Memory system
-        mem_dst = self._memory_dir()
+        # Memory system — kit code lives in the kit tier so updates reach it.
+        code_dst = self._memory_code_dir()
         for name in ("maintenance.py", "session-save.py"):
             src = fw / "memory" / name
             if src.is_file():
-                p.copies.append(FileCopy(src=src, dst=mem_dst / name, label=f"memory/{name}"))
+                p.copies.append(FileCopy(src=src, dst=code_dst / name, label=f"memory/{name}"))
 
         backends_src = fw / "memory" / "backends"
         if backends_src.is_dir():
             p.copies.append(FileCopy(
                 src=backends_src,
-                dst=mem_dst / "backends",
+                dst=code_dst / "backends",
                 label="memory/backends/",
             ))
 
-        # Memory templates
+        # Memory logs — seeded once, then owned and written by the project.
+        mem_dst = self._memory_dir()
         for tpl_name in ("contradiction-log.tpl.md", "failure-museum.tpl.md"):
             src = fw / "memory" / tpl_name
             if src.is_file():
                 dst_name = tpl_name.replace(".tpl", "")
-                p.copies.append(FileCopy(src=src, dst=mem_dst / dst_name, label=f"memory/{dst_name}"))
+                p.copies.append(FileCopy(
+                    src=src,
+                    dst=mem_dst / dst_name,
+                    label=f"memory/{dst_name}",
+                    tier=TIER_SEED,
+                ))
 
         if self._backend == "qdrant-server":
             src = fw / "memory" / "docker-compose.memory.tpl.yml"
@@ -740,6 +861,7 @@ class ProjectScaffolder:
                     src=src,
                     dst=self._target / "docker-compose.memory.yml",
                     label="memory/docker-compose.memory.yml",
+                    tier=TIER_SEED,
                 ))
         if self._backend == "weaviate-server":
             src = fw / "memory" / "docker-compose.memory-target.tpl.yml"
@@ -748,6 +870,7 @@ class ProjectScaffolder:
                     src=src,
                     dst=self._target / "docker-compose.memory-target.yml",
                     label="memory/docker-compose.memory-target.yml",
+                    tier=TIER_SEED,
                 ))
 
     def _plan_templates(self, p: ScaffoldPlan) -> None:
@@ -758,6 +881,7 @@ class ProjectScaffolder:
             dst=self._target / "project-context.yaml",
             content=Template(_PROJECT_CONTEXT_TPL).safe_substitute(v),
             label="project-context.yaml",
+            tier=TIER_SEED,
         ))
 
         # Memory config
@@ -765,6 +889,7 @@ class ProjectScaffolder:
             dst=self._memory_dir() / "config.yaml",
             content=Template(_MEMORY_CONFIG_TPL).safe_substitute(v),
             label="_grimoire/_memory/config.yaml",
+            tier=TIER_SEED,
         ))
 
         # Shared context (only if archetype didn't provide one)
@@ -774,6 +899,7 @@ class ProjectScaffolder:
                 dst=shared_dst,
                 content=Template(_SHARED_CONTEXT_DEFAULT).safe_substitute(v),
                 label="shared-context.md (default)",
+            tier=TIER_SEED,
             ))
 
         # Decisions log
@@ -781,6 +907,7 @@ class ProjectScaffolder:
             dst=self._memory_dir() / "decisions-log.md",
             content=_DECISIONS_LOG,
             label="decisions-log.md",
+            tier=TIER_SEED,
         ))
 
         # Session state
@@ -788,6 +915,7 @@ class ProjectScaffolder:
             dst=self._memory_dir() / "session-state.md",
             content="# Session State\n\nstatus: idle\nfirst_run: true\n",
             label="session-state.md",
+            tier=TIER_SEED,
         ))
 
         # Agent manifest (enriched with category + description)
@@ -800,7 +928,7 @@ class ProjectScaffolder:
             desc = self._extract_agent_description(fc.src).replace(",", ";")
             manifest_lines.append(f"{name},{name}.md,{category},{desc},\n")
         p.templates.append(TemplateRender(
-            dst=self._target / "_grimoire" / "_config" / "agent-manifest.csv",
+            dst=self._kit_dir() / "agent-manifest.csv",
             content="".join(manifest_lines),
             label="agent-manifest.csv",
         ))
@@ -810,6 +938,7 @@ class ProjectScaffolder:
             dst=self._target / "_grimoire-output" / ".runs" / "main" / "branch.json",
             content='{"name": "main", "created": "auto", "active": true}\n',
             label=".runs/main/branch.json",
+            tier=TIER_SEED,
         ))
 
     def _plan_agent_wrappers(self, p: ScaffoldPlan) -> None:
@@ -821,8 +950,6 @@ class ProjectScaffolder:
                 continue
             name = fc.dst.stem
             wrapper_dst = gh_agents / f"{name}.agent.md"
-            if wrapper_dst.is_file():
-                continue
             desc = self._extract_agent_description(fc.src)
             is_entry = name == concierge_name
             tools = "['read', 'search', 'execute']" if is_entry else "['read', 'search']"
@@ -840,7 +967,8 @@ class ProjectScaffolder:
             lines.append("")
             lines.append("Follow these steps IN ORDER:")
             lines.append("")
-            lines.append(f"1. **Load the full agent definition**: Read `{{{{project-root}}}}/_grimoire/_config/custom/agents/{name}.md` completely — this file contains the persona, capabilities, and all behaviour instructions.")
+            definition = self._agent_definition_ref(name)
+            lines.append(f"1. **Load the full agent definition**: Read `{{{{project-root}}}}/{definition}` completely — this file contains the persona, capabilities, and all behaviour instructions.")
             lines.append("2. **Load project context**: Read `{project-root}/_grimoire/_memory/shared-context.md` to understand the current project.")
             lines.append("3. **Load memory config**: Read `{project-root}/_grimoire/_memory/config.yaml` to get `user_name` and `communication_language`.")
             lines.append("4. **Follow ALL activation steps** defined in the agent file — they specify the greeting, menu, and behaviour.")
@@ -856,6 +984,18 @@ class ProjectScaffolder:
                 content="\n".join(lines),
                 label=f".github/agents/{name}.agent.md",
             ))
+
+    def _agent_definition_ref(self, name: str) -> str:
+        """Project-relative path the wrapper should read for agent *name*.
+
+        Points at the override when the project has one, so customising an
+        agent is a matter of dropping a file in ``_grimoire/overrides/agents/``
+        — no wrapper editing, nothing that a regeneration would undo.
+        """
+        override = layout.overrides_dir(self._target) / layout.AGENTS_SUBDIR / f"{name}.md"
+        if override.is_file():
+            return f"{layout.OVERRIDES_DIR}/{layout.AGENTS_SUBDIR}/{name}.md"
+        return f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/{name}.md"
 
     @staticmethod
     def _extract_agent_description(src: Path) -> str:
@@ -876,13 +1016,11 @@ class ProjectScaffolder:
             return
         gh_prompts = self._target / ".github" / "prompts"
         for prompt_file in sorted(prompts_src.glob("*.prompt.md")):
-            dst = gh_prompts / prompt_file.name
-            if not dst.is_file():  # Don't overwrite customised prompts
-                p.copies.append(FileCopy(
-                    src=prompt_file,
-                    dst=dst,
-                    label=f".github/prompts/{prompt_file.name}",
-                ))
+            p.copies.append(FileCopy(
+                src=prompt_file,
+                dst=gh_prompts / prompt_file.name,
+                label=f".github/prompts/{prompt_file.name}",
+            ))
 
     def _plan_copilot_instruction_files(self, p: ScaffoldPlan) -> None:
         """Copy Grimoire instruction files to .github/instructions/."""
@@ -893,8 +1031,6 @@ class ProjectScaffolder:
         v = self._tpl_vars()
         for instr_file in sorted(instructions_src.glob("*.instructions.md")):
             dst = gh_instructions / instr_file.name
-            if dst.is_file():
-                continue  # Don't overwrite customised instruction files
             content = instr_file.read_text(encoding="utf-8")
             # Substitute project-level variables
             content = content.replace("{{project_name}}", v["project_name"])
@@ -907,8 +1043,6 @@ class ProjectScaffolder:
 
     def _plan_copilot_instructions(self, p: ScaffoldPlan) -> None:
         copilot_file = self._target / ".github" / "copilot-instructions.md"
-        if copilot_file.is_file():
-            return  # Don't overwrite existing instructions
 
         # Build enriched agents table with descriptions
         lines = ["| Agent | Role | Description |", "|-------|------|-------------|",]
@@ -961,24 +1095,34 @@ class ProjectScaffolder:
                 "# Suivre les agents, workflows, mémoire et standard agentique décrits.\n"
             ),
         }
+        # Bridges are pure pointers at the canonical instructions file: there is
+        # nothing in them worth customising, and freezing them stranded projects
+        # on the entrypoint format of their install version.
         for filename, content in bridges.items():
-            dst = self._target / filename
-            if dst.is_file():
-                continue  # don't overwrite a user-customised entrypoint
-            p.templates.append(TemplateRender(dst=dst, content=content, label=filename))
+            p.templates.append(TemplateRender(
+                dst=self._target / filename,
+                content=content,
+                label=filename,
+            ))
 
     def _plan_mcp_config(self, p: ScaffoldPlan) -> None:
         """Register the Grimoire MCP server in a portable ``.mcp.json`` (read by
         Claude Code, Cursor and other MCP clients). OS-neutral: relies on the
         ``grimoire-mcp`` console entrypoint on PATH after ``pip install``."""
         dst = self._target / ".mcp.json"
-        if dst.is_file():
-            return  # don't overwrite an existing MCP configuration
         content = json.dumps(
             {"mcpServers": {"grimoire": {"command": "grimoire-mcp", "args": [], "env": {}}}},
             indent=2,
         )
-        p.templates.append(TemplateRender(dst=dst, content=content + "\n", label=".mcp.json"))
+        # Seed, not kit: the file also carries the project's own MCP servers, so
+        # regenerating it would delete a user's configuration. ``grimoire doctor
+        # --fix`` repairs a broken one; updates never touch a healthy one.
+        p.templates.append(TemplateRender(
+            dst=dst,
+            content=content + "\n",
+            label=".mcp.json",
+            tier=TIER_SEED,
+        ))
 
     def _plan_gitignore(self, p: ScaffoldPlan) -> None:
         """Add grimoire-specific patterns to .gitignore."""

@@ -86,7 +86,7 @@ USER_ID, APP_ID = _get_config()
 def _load_agent_profiles() -> dict:
     """Charge les profils d'agents dynamiquement.
     1. Cherche dans project-context.yaml → agents.custom_agents
-    2. Sinon, scanne les fichiers agents dans _grimoire/_config/custom/agents/
+    2. Sinon, scanne les fichiers agents dans _grimoire/kit/agents/
     3. Fallback: profils meta par défaut
     """
     profiles = {}

@@ -87,6 +87,45 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   seule l'absence du chemin justifie un retrait ; `--stale` élargit aux chemins
   présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
   demande confirmation sauf `--yes`.
+- **Frontière kit/overrides** — un projet Grimoire sépare désormais ce que le kit
+  génère (`_grimoire/kit/`, régénéré à chaque mise à jour) de ce que le projet
+  possède (`_grimoire/overrides/`, jamais écrasé, prioritaire à la résolution).
+  Une customisation se fait en déposant un fichier dans `overrides/` — elle
+  survit à toutes les mises à jour par construction, sans plus dépendre d'une
+  heuristique.
+- **`grimoire migrate`** — opération unique qui fait passer un projet existant
+  sur cette frontière : le contenu que le kit a déjà livré (reconnu par
+  empreinte dans `registry/kit-file-hashes.json`) est régénéré, tout le reste
+  part dans `overrides/`. Snapshot systématique, `--restore <horodatage>` pour
+  revenir en arrière, `--adopt-kit` pour reprendre la version du kit sur les
+  fichiers qui la masquaient sans raison. Après migration, `grimoire up` suffit.
+- **Manifeste de génération du standard** (`_grimoire/standard/.generated.json`)
+  — enregistre l'empreinte de chaque artefact écrit par le kit, ce qui permet de
+  distinguer « policy que le kit a générée » de « décision que le projet a
+  prise ». Les premières suivent les mises à jour, les secondes ne sont jamais
+  touchées.
+
+### Modifié
+
+- **`grimoire up` met réellement à jour un projet existant.** Auparavant il
+  s'arrêtait dès que `project-context.yaml` existait : agents, framework,
+  workflows, prompts et instructions restaient gelés à la version d'installation
+  pour toute la vie du projet. Il régénère maintenant le tier kit et rafraîchit
+  les artefacts standard non modifiés. L'écriture est différentielle : sans
+  nouvelle version, rien n'est réécrit et rien n'est rapporté.
+- Les prompts, fichiers d'instructions, passerelles d'assistants et wrappers
+  d'agents ne sont plus protégés par un `if fichier existe : ne rien faire` —
+  ils appartiennent au kit et suivent sa version. `.mcp.json`, le contexte
+  projet et les journaux mémoire restent, eux, écrits une seule fois.
+- Les wrappers `.github/agents/*.agent.md` pointent vers la définition résolue :
+  l'override du projet quand il existe, la version du kit sinon.
+
+### Corrigé
+
+- La propagation d'identité vers `.github/copilot-instructions.md` écrasait le
+  champ suivant lorsqu'une valeur était vide (`\s*` franchissait le saut de
+  ligne). Un projet sans `user.name` y perdait son réglage de langue.
+- Le kit copiait ses propres `__pycache__` dans les projets.
 
 ### Modifié
 

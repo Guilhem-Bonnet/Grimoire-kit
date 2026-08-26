@@ -112,7 +112,7 @@
 }
 ```
 
-**Implémentation** : Exécute `bash _grimoire/_config/custom/cc-verify.sh`, parse stdout, retourne `{status: "PASS"|"FAIL", output: string, duration_ms: number}`.
+**Implémentation** : Exécute `bash _grimoire/kit/framework/cc-verify.sh`, parse stdout, retourne `{status: "PASS"|"FAIL", output: string, duration_ms: number}`.
 
 
 ### `get_workflow_status`
@@ -306,7 +306,7 @@ server.setRequestHandler("tools/call", async (request) => {
       return { content: [{ type: "text", text: content }] };
     }
     case "run_completion_contract": {
-      const ccScript = join(PROJECT_ROOT, "_grimoire/_config/custom/cc-verify.sh");
+      const ccScript = join(PROJECT_ROOT, "_grimoire/kit/framework/cc-verify.sh");
       if (!existsSync(ccScript)) return { content: [{ type: "text", text: "CC script not found" }] };
       try {
         const output = execSync(`bash ${ccScript}`, { encoding: "utf-8", timeout: 120000 });
