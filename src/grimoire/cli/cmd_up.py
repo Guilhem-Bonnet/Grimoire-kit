@@ -43,6 +43,7 @@ _SUBPROCESS_TIMEOUT = 2.0
 _QDRANT_DEFAULT_URL = "http://localhost:6333"
 _OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
+_MEMORY_TARGET_COMPOSE_FILE = "docker-compose.memory-target.yml"
 _QDRANT_DOCKER_RUN = (
     "docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant"
 )
@@ -143,6 +144,103 @@ def check_qdrant(target: Path | None = None) -> EnvCheck:
         level="warn",
         detail=f"Qdrant not reachable at {url} (optional, semantic memory)",
         remedy=remedy,
+    )
+
+
+def _memory_config(target: Path) -> Any | None:
+    """Best-effort ``memory:`` section of *target*, or ``None`` when unreadable.
+
+    Probes for Weaviate / Neo4j / Redis are emitted only when the project
+    actually declares them, so an unconfigured project never collects three
+    warnings about services it does not use.
+    """
+    config_path = target / "project-context.yaml"
+    if not config_path.is_file():
+        return None
+    try:
+        return GrimoireConfig.from_yaml(config_path).memory
+    except (GrimoireConfigError, OSError):
+        return None
+
+
+def check_weaviate(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Weaviate server reachable?
+
+    Returns ``None`` when the project does not declare Weaviate.
+    """
+    mem = _memory_config(target) if target is not None else None
+    url = (mem.weaviate_url if mem else "").strip()
+    if not url and not (mem and mem.backend == "weaviate-server"):
+        return None
+    url = url or "http://localhost:8080"
+    if _tcp_reachable(url, 8080):
+        return EnvCheck("env_weaviate", passed=True, level="ok", detail=f"Weaviate reachable at {url}")
+    remedy = f"docker compose -f {_MEMORY_TARGET_COMPOSE_FILE} up -d"
+    if target is not None and not (target / _MEMORY_TARGET_COMPOSE_FILE).is_file():
+        remedy = "docker run -d --name weaviate -p 8080:8080 semitechnologies/weaviate"
+    return EnvCheck(
+        "env_weaviate",
+        passed=True,
+        level="warn",
+        detail=f"Weaviate declared but not reachable at {url} (semantic memory is down)",
+        remedy=remedy,
+    )
+
+
+def check_neo4j(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Neo4j graph reachable, with its password set?
+
+    Returns ``None`` when no Memory OS layer is routed to Neo4j.  A missing
+    password environment variable is reported even when the socket answers:
+    every graph write would fail on authentication, silently, at runtime.
+    """
+    mem = _memory_config(target) if target is not None else None
+    if mem is None:
+        return None
+    routed = mem.neo4j_uri.strip() or any(
+        layer == "neo4j"
+        for layer in (mem.knowledge_graph, mem.memory_graph, mem.code_graph, mem.task_memory)
+    )
+    if not routed:
+        return None
+    url = mem.neo4j_uri.strip() or "bolt://localhost:7687"
+    if not _tcp_reachable(url, 7687):
+        return EnvCheck(
+            "env_neo4j",
+            passed=True,
+            level="warn",
+            detail=f"Neo4j declared but not reachable at {url} (graph projections are down)",
+            remedy=f"docker compose -f {_MEMORY_TARGET_COMPOSE_FILE} up -d",
+        )
+    password_env = mem.neo4j_password_env or "GRIMOIRE_NEO4J_PASSWORD"
+    if not os.environ.get(password_env, "").strip():
+        return EnvCheck(
+            "env_neo4j",
+            passed=True,
+            level="warn",
+            detail=f"Neo4j reachable at {url} but ${password_env} is unset — graph writes will fail to authenticate",
+            remedy=f"export {password_env}=<password>",
+        )
+    return EnvCheck("env_neo4j", passed=True, level="ok", detail=f"Neo4j reachable at {url} (${password_env} set)")
+
+
+def check_redis(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Redis hot-memory layer reachable?
+
+    Returns ``None`` when the project does not route short-term memory to Redis.
+    """
+    mem = _memory_config(target) if target is not None else None
+    if mem is None or (mem.short_term_backend != "redis" and not mem.redis_url.strip()):
+        return None
+    url = mem.redis_url.strip() or "redis://localhost:6379/0"
+    if _tcp_reachable(url, 6379):
+        return EnvCheck("env_redis", passed=True, level="ok", detail=f"Redis hot memory reachable at {url}")
+    return EnvCheck(
+        "env_redis",
+        passed=True,
+        level="warn",
+        detail=f"Redis declared but not reachable at {url} (hot memory is down, durable stores unaffected)",
+        remedy="docker run -d --name grimoire-redis -p 6379:6379 redis:7-alpine",
     )
 
 
@@ -332,12 +430,18 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
 
 
 def run_env_checks(target: Path) -> list[EnvCheck]:
-    """Run every fast environment probe for *target*. Never raises."""
+    """Run every fast environment probe for *target*. Never raises.
+
+    The Memory OS probes (Weaviate, Neo4j, Redis) return ``None`` when the
+    project does not declare that layer, so they are filtered out here.
+    """
+    optional_memory = (check_weaviate(target), check_neo4j(target), check_redis(target))
     return [
         check_venv(),
         check_uv(),
         check_docker(),
         check_qdrant(target),
+        *[chk for chk in optional_memory if chk is not None],
         check_ollama(),
         check_embedding_model(target),
         *check_mcp_json(target),
