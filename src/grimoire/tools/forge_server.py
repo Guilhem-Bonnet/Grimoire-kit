@@ -1263,10 +1263,16 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._sse()
                     return
                 payload = api_get(api, path, parse_qs(urlparse(self.path).query))
-                if payload is API_GET_UNHANDLED:
-                    self._static(path)
-                else:
+                if payload is not API_GET_UNHANDLED:
                     self._json(payload)
+                elif path.startswith("/api/blueprints/"):
+                    # Surface atelier : le cockpit multi-projet n'y touche pas.
+                    if path.endswith("/diff"):
+                        self._json(api.blueprint_diff(path.split("/")[3]))
+                    else:
+                        self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
+                else:
+                    self._static(path)
             except FileNotFoundError as exc:
                 self._error(f"introuvable : {exc}", 404)
             except (ValueError, json.JSONDecodeError) as exc:
