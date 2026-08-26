@@ -182,6 +182,26 @@ et vaut `~/.cache/grimoire/embeddings` par défaut.
 Grimoire ne redistribue aucun poids de modèle : l'archive est produite par
 l'opérateur, depuis la source de son choix.
 
+## Choix à l'initialisation
+
+`grimoire init` ne demande plus « veut-on Qdrant ? » mais « cette machine a-t-elle
+un accès réseau sortant ? ». La différence n'est pas cosmétique : proposer un
+conteneur vectoriel à une machine qui ne peut pas atteindre un modèle
+d'embedding produit un store qu'on ne pourra jamais remplir.
+
+- **Pas d'egress** — le projet est généré en `vector_database: false` et
+  `retrieval_mode: lexical`. Aucun modèle, aucun service, aucun réseau. Le
+  passage au sémantique reste ouvert plus tard via `memory bundle install`.
+- **Egress disponible** — Qdrant via Docker est proposé, **par défaut non**.
+  Démarrer un conteneur et son volume persistant au premier lancement n'est pas
+  quelque chose qui se fait dans le dos de l'utilisateur.
+
+`grimoire up` et `grimoire doctor` exposent une sonde `env_embedding_model` qui
+ne télécharge rien et ne contacte personne : elle lit ce que le projet déclare
+et regarde sur le disque. Elle signale un `embedding_model_path` qui ne pointe
+sur rien, un `embedding_offline` sans modèle local, et un bundle installé mais
+non câblé.
+
 ## Taxonomie palais
 
 La taxonomie est générée par [memory/taxonomy.py](api-reference.md). Chaque souvenir peut être enrichi automatiquement avec :

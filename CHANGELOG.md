@@ -39,6 +39,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
   `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
   chargement avec le moteur réellement installé, fastembed compris.
+- **`grimoire init` interroge le réseau, plus le service** — la question porte
+  désormais sur l'egress, et un projet déclaré sans accès sortant est généré en
+  `retrieval_mode: lexical`. Le démarrage de Qdrant via Docker reste proposé
+  quand l'egress existe, mais **par défaut non** au lieu de par défaut oui.
+- **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
+  signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
+  `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
 
 ## [3.32.0] - 2026-08-18
 
