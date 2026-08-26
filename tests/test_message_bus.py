@@ -177,15 +177,33 @@ class TestCreateBus(unittest.TestCase):
 
 
 class TestRedisBusStub(unittest.TestCase):
-    def test_send_returns_false(self):
+    """Behaviour when no backend is reachable.
+
+    ``RedisBus.__init__`` pings the server and falls back to a disconnected
+    stub on any failure, so these tests used to pass only because the machine
+    happened to have no Redis. On a developer box that runs one on the default
+    port they went red, while CI stayed green — the assertion depended on the
+    ambient environment rather than on the contract. The disconnected state is
+    now forced, so the test proves the same thing everywhere.
+    """
+
+    def _disconnected_bus(self):
         bus = mb.RedisBus()
+        bus._redis = None
+        bus._connected = False
+        return bus
+
+    def test_send_returns_false(self):
+        bus = self._disconnected_bus()
         msg = mb.AgentMessage(sender="a", recipient="b", msg_type="task-request", payload={})
         result = bus.send(msg)
         self.assertFalse(result.success)
 
     def test_receive_returns_none(self):
-        bus = mb.RedisBus()
-        self.assertIsNone(bus.receive("a"))
+        self.assertIsNone(self._disconnected_bus().receive("a"))
+
+    def test_reports_itself_as_disconnected(self):
+        self.assertFalse(self._disconnected_bus().connected)
 
 
 class TestNATSBusStub(unittest.TestCase):
