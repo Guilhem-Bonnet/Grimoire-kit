@@ -205,7 +205,7 @@ def resolve_agent_loads(
 
     # 2. agent-base.md (BASE PROTOCOL — step 2 d'activation)
     base_paths = [
-        project_root / "_grimoire/_config/custom/agent-base.md",
+        project_root / "_grimoire/kit/framework/agent-base.md",
         project_root / "framework/agent-base.md",
     ]
     for bp in base_paths:
@@ -286,7 +286,7 @@ def find_agents(project_root: Path) -> list[Path]:
     """Liste tous les fichiers agents Grimoire dans le projet."""
     agents = []
     search_dirs = [
-        project_root / "_grimoire/_config/custom/agents",
+        project_root / "_grimoire/kit/agents",
         project_root / "_grimoire/bmm/agents",
         project_root / "archetypes",
     ]

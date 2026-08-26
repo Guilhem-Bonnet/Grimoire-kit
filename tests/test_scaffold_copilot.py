@@ -13,6 +13,8 @@ import pytest
 
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scaffold import (
+    TIER_KIT,
+    TIER_SEED,
     FileCopy,
     ProjectScaffolder,
     ScaffoldPlan,
@@ -81,12 +83,14 @@ class TestPlanDirectoriesIncludesCopilot:
         assert agents_path in plan.directories
 
     def test_plan_directories_count(self, scaffolder):
-        """Verify expected number of directories are planned."""
+        """The planned directories cover both tiers of the boundary."""
         plan = ScaffoldPlan()
         scaffolder._plan_directories(plan)
-        
-        # Should be 15 directories total
-        assert len(plan.directories) == 15
+
+        assert len(plan.directories) == 17
+        names = {str(d) for d in plan.directories}
+        assert any("_grimoire/kit/agents" in n for n in names)
+        assert any("_grimoire/overrides/agents" in n for n in names)
 
 
 class TestPlanCopilotPrompts:
@@ -141,23 +145,23 @@ class TestPlanCopilotPrompts:
         for expected in expected_stems:
             assert any(expected in n for n in names)
 
-    def test_plan_copilot_prompts_no_overwrite(self, scaffolder, temp_project):
-        """Verify existing prompts are not overwritten."""
-        # Create existing prompt
+    def test_existing_prompt_is_updated_not_frozen(self, scaffolder, temp_project):
+        """A prompt already on disk is refreshed, not skipped.
+
+        Skipping it is what left projects running the prompts of whatever kit
+        version first installed them. Prompts are kit-owned; a project that
+        wants its own puts it in ``_grimoire/overrides/``.
+        """
         prompts_dir = temp_project / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
-        existing = prompts_dir / "grimoire-session-bootstrap.prompt.md"
-        existing.write_text("# Custom\n")
-        
+        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old version\n")
+
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
-        
-        # Should not include the session-bootstrap prompt
-        bootstrap_copies = [
-            c for c in plan.copies 
-            if "session-bootstrap" in str(c.dst)
-        ]
-        assert len(bootstrap_copies) == 0
+
+        bootstrap = [c for c in plan.copies if "session-bootstrap" in str(c.dst)]
+        assert len(bootstrap) == 1
+        assert bootstrap[0].tier == TIER_KIT
 
 
 class TestPlanCopilotInstructions:
@@ -206,23 +210,18 @@ class TestPlanCopilotInstructions:
         assert "English" in render.content
         assert "{{language}}" not in render.content
 
-    def test_plan_copilot_instructions_no_overwrite(self, scaffolder, temp_project):
-        """Verify existing instruction files are not overwritten."""
-        # Create existing instruction
+    def test_existing_instruction_is_updated_not_frozen(self, scaffolder, temp_project):
+        """Instruction files follow the kit for the same reason prompts do."""
         instr_dir = temp_project / ".github" / "instructions"
         instr_dir.mkdir(parents=True)
-        existing = instr_dir / "grimoire-project.instructions.md"
-        existing.write_text("# Custom\n")
-        
+        (instr_dir / "grimoire-project.instructions.md").write_text("# Old version\n")
+
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_instruction_files(plan)
-        
-        # Should not be in the plan
-        grimoire_project_renders = [
-            t for t in plan.templates 
-            if "grimoire-project" in str(t.dst)
-        ]
-        assert len(grimoire_project_renders) == 0
+
+        renders = [tpl for tpl in plan.templates if "grimoire-project" in str(tpl.dst)]
+        assert len(renders) == 1
+        assert renders[0].tier == TIER_KIT
 
 
 class TestAgentWrappers:
@@ -236,7 +235,7 @@ class TestAgentWrappers:
         agent_src.write_text("---\n\n---\n# Test\n")
         plan.copies.append(FileCopy(
             src=agent_src,
-            dst=scaffolder._target / "_grimoire" / "_config" / "custom" / "agents" / "test-agent.md",
+            dst=scaffolder._target / "_grimoire" / "kit" / "agents" / "test-agent.md",
             label="test/test-agent"
         ))
         
@@ -256,7 +255,7 @@ class TestAgentWrappers:
         agent_src.write_text("---\n\n---\n# Test\n")
         plan.copies.append(FileCopy(
             src=agent_src,
-            dst=scaffolder._target / "_grimoire" / "_config" / "custom" / "agents" / "test-agent.md",
+            dst=scaffolder._target / "_grimoire" / "kit" / "agents" / "test-agent.md",
             label="test/test-agent"
         ))
         
@@ -335,33 +334,26 @@ class TestFullScaffoldPlan:
         ]
         assert len(instructions) >= 1
 
-    def test_full_plan_respects_overwrite_protection(self, scaffolder, temp_project):
-        """Verify plan respects existing user files."""
-        # Create existing prompt and instruction
+    def test_full_plan_regenerates_kit_files_and_seeds_project_files(
+        self, scaffolder, temp_project,
+    ):
+        """The full plan updates kit artifacts while sparing project-owned ones."""
         prompts_dir = temp_project / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
-        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Custom\n")
-        
+        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old\n")
+
         instructions_dir = temp_project / ".github" / "instructions"
         instructions_dir.mkdir(parents=True)
-        (instructions_dir / "grimoire-project.instructions.md").write_text("# Custom\n")
-        
-        plan = scaffolder.plan()
-        
-        # should not overwrite bootstrap
-        bootstrap = [
-            c for c in plan.copies 
-            if "session-bootstrap" in str(c.dst)
-        ]
-        assert len(bootstrap) == 0
-        
-        # Should not overwrite grimoire-project instruction
-        grimoire_project = [
-            t for t in plan.templates 
-            if "grimoire-project" in str(t.dst)
-        ]
-        assert len(grimoire_project) == 0
+        (instructions_dir / "grimoire-project.instructions.md").write_text("# Old\n")
 
+        plan = scaffolder.plan()
+
+        assert [c for c in plan.copies if "session-bootstrap" in str(c.dst)]
+        assert [t for t in plan.templates if "grimoire-project" in str(t.dst)]
+
+        # project-context.yaml carries the user's own configuration: seeded once.
+        context = [t for t in plan.templates if t.dst.name == "project-context.yaml"]
+        assert context and context[0].tier == TIER_SEED
 
 class TestTemplateVariableSubstitution:
     """Test that template variables are correctly substituted."""

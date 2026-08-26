@@ -752,6 +752,7 @@ def run_init(
         scan=scan,
         resolved=resolved,
         backend=backend,
+        force=force,
     )
     plan = scaffolder.plan()
 

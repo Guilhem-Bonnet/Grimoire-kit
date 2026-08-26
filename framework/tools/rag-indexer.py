@@ -151,7 +151,7 @@ DISCOVERY_PATTERNS: dict[str, list[str]] = {
     COLLECTION_AGENTS: [
         "_grimoire/*/agents/*.md",
         "_grimoire/*/agents/**/*.md",
-        "_grimoire/_config/custom/*.md",
+        "_grimoire/kit/framework/*.md",
     ],
     COLLECTION_MEMORY: [
         "_grimoire/_memory/*.md",

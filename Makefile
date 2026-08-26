@@ -100,9 +100,13 @@ release: check ## Release — bump version, tag, build
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
 	@echo "$(VERSION)" > version.txt
 	@sed -i 's/^__version__.*/__version__ = "$(VERSION)"/' src/grimoire/__version__.py
+	@# Record this release's files in the shipped-content catalog. Skipping it
+	@# would make `grimoire migrate` read every file this version introduces as
+	@# a user customisation and freeze it out of future updates.
+	$(PYTHON) scripts/gen-kit-hashes.py
 	$(PYTHON) -m build
 	@echo "\n\033[32m✓ Built $(VERSION). Tag and push when ready:\033[0m"
-	@echo "  git add version.txt src/grimoire/__version__.py"
+	@echo "  git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json"
 	@echo "  git commit -m 'chore: release $(VERSION)'"
 	@echo "  git tag -a v$(VERSION) -m 'Release $(VERSION)'"
 	@echo "  git push origin main --tags"

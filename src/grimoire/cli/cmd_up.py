@@ -31,8 +31,10 @@ from rich.table import Table
 
 from grimoire.cli import cmd_setup
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS, run_init
+from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
+from grimoire.core.scaffold import TIER_SEED, write_text_if_changed
 
 console = Console(stderr=True)
 
@@ -312,13 +314,11 @@ def repair_project_artifacts(target: Path) -> list[str]:
     )
 
     plan = ScaffoldPlan()
-    agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
-    if agents_dir.is_dir():
-        for agent_file in sorted(agents_dir.glob("*.md")):
-            if agent_file.name.endswith(".tpl.md"):
-                continue
-            # Feed deployed agents to the wrapper planner as pseudo-copies.
-            plan.copies.append(FileCopy(src=agent_file, dst=agent_file, label=agent_file.stem))
+    for _stem, agent_file in sorted(layout.layered_files(target, layout.AGENTS_SUBDIR).items()):
+        if agent_file.name.endswith(".tpl.md"):
+            continue
+        # Feed deployed agents to the wrapper planner as pseudo-copies.
+        plan.copies.append(FileCopy(src=agent_file, dst=agent_file, label=agent_file.stem))
     # Intentional reuse of ProjectScaffolder's planning internals so the
     # regenerated artifacts stay identical to what `grimoire init` produces.
     scaffolder._plan_agent_wrappers(plan)
@@ -326,9 +326,12 @@ def repair_project_artifacts(target: Path) -> list[str]:
 
     written: list[str] = []
     for template in plan.templates:
-        template.dst.parent.mkdir(parents=True, exist_ok=True)
-        template.dst.write_text(template.content, encoding="utf-8")
-        written.append(template.label or str(template.dst.relative_to(target)))
+        if template.tier == TIER_SEED and template.dst.exists():
+            continue
+        # Report only what actually changed, so --fix stays a no-op on a
+        # healthy project even though it regenerates everything.
+        if write_text_if_changed(template.dst, template.content):
+            written.append(template.label or str(template.dst.relative_to(target)))
     return written
 
 
@@ -455,6 +458,105 @@ def _step_init(
     return True
 
 
+def _infer_resolved(target: Path, cfg: GrimoireConfig | None) -> Any:
+    """Reconstruct what was installed, so a refresh regenerates the same set.
+
+    ``installed_archetypes`` carries the declared ones; the stack and feature
+    agents are recovered from the agents actually present, since the config
+    does not record them. Missing that inference would quietly leave a
+    project's stack agents behind at their install version — the exact freeze
+    this refresh exists to end.
+    """
+    from grimoire.archetypes import bundled_path as archetypes_path
+    from grimoire.core.archetype_resolver import ResolvedArchetype
+
+    declared = tuple(cfg.installed_archetypes) if cfg else ()
+    primary = (cfg.agents.archetype if cfg else "") or "minimal"
+    installed = set(layout.layered_files(target, layout.AGENTS_SUBDIR))
+
+    def _available(kind: str) -> tuple[str, ...]:
+        d = archetypes_path() / kind / "agents"
+        if not d.is_dir():
+            return ()
+        return tuple(sorted(md.stem for md in d.glob("*.md") if md.stem in installed))
+
+    return ResolvedArchetype(
+        archetype=primary,
+        stack_agents=_available("stack"),
+        feature_agents=(),
+        reason="refresh",
+        archetypes=declared or (primary,),
+    )
+
+
+def refresh_kit_tier(target: Path) -> Any:
+    """Regenerate the kit tier of *target* at the installed kit version.
+
+    Returns the :class:`~grimoire.core.scaffold.ScaffoldResult`. Shared by
+    ``up`` and ``migrate`` so a migrated project lands on exactly what a normal
+    update produces.
+    """
+    from grimoire.core.scaffold import ProjectScaffolder
+
+    target = target.resolve()
+    cfg = _load_config_quiet(target)
+    # Identity comes from the same reader ``_step_identity`` uses. Reading it
+    # from the parsed config instead left the two steps disagreeing about
+    # `.github/copilot-instructions.md`, so every `up` rewrote it twice and
+    # reported phantom work.
+    config_path = target / "project-context.yaml"
+    try:
+        vals = cmd_setup.load_user_values(config_path)
+    except OSError:
+        vals = cmd_setup.UserValues()
+    scaffolder = ProjectScaffolder(
+        target,
+        project_name=vals.project_name or (cfg.project.name if cfg else "") or target.name,
+        # No invented fallback for identity: a placeholder here would differ
+        # from what `_step_identity` writes, and the two steps would overwrite
+        # each other on every run. An empty name stays empty.
+        user_name=vals.user_name or (cfg.user.name if cfg else ""),
+        language=vals.communication_language or (cfg.user.language if cfg else ""),
+        skill_level=vals.user_skill_level or (cfg.user.skill_level if cfg else ""),
+        scan=None,
+        resolved=_infer_resolved(target, cfg),
+        backend=(cfg.memory.backend if cfg else "") or "local",
+    )
+    return scaffolder.execute(scaffolder.plan())
+
+
+def _step_refresh(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
+    """Regenerate the kit tier at the installed kit version.
+
+    This is what makes ``grimoire up`` an update command rather than a
+    first-run command: kit files are rewritten, project files (``seed`` tier)
+    are left alone, and ``_grimoire/overrides/`` keeps winning. Writes are
+    content-diffed, so a project already at the current version reports
+    nothing.
+    """
+    if blocked:
+        state.steps.append(StepResult("refresh", "skipped", "no project configuration"))
+        return
+    if dry_run:
+        state.steps.append(StepResult("refresh", "planned", "would refresh the kit tier"))
+        return
+    try:
+        result = refresh_kit_tier(target)
+    except (OSError, GrimoireError) as exc:
+        state.steps.append(StepResult("refresh", "failed", f"refresh failed: {exc}"))
+        return
+
+    changed = len(result.copied_files) + len(result.rendered_files)
+    if changed:
+        state.steps.append(StepResult(
+            "refresh", "done",
+            f"{changed} kit artifact(s) updated, {len(result.preserved_files)} project file(s) preserved",
+        ))
+        state.actions.append(f"Refreshed {changed} kit artifact(s) to the installed version")
+    else:
+        state.steps.append(StepResult("refresh", "done", "kit artifacts already up to date"))
+
+
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:
     """Reconcile required directories (legacy ``up`` behavior, kept for compat)."""
     for rel in _RECONCILE_DIRS:
@@ -546,12 +648,13 @@ def _step_standard(
     if blocked:
         state.steps.append(StepResult("standard", "skipped", "blocked: no project configuration"))
         return
-    if (target / _STANDARD_PROFILE_MARKER).is_file():
-        state.steps.append(StepResult("standard", "skipped", "standard profile already initialized"))
-        return
+    already_initialized = (target / _STANDARD_PROFILE_MARKER).is_file()
     if dry_run:
-        label = f"needs: {', '.join(needs)}" if needs else "profile: starter"
-        state.steps.append(StepResult("standard", "planned", f"standard init ({label})"))
+        if already_initialized:
+            state.steps.append(StepResult("standard", "planned", "refresh untouched standard artifacts"))
+        else:
+            label = f"needs: {', '.join(needs)}" if needs else "profile: starter"
+            state.steps.append(StepResult("standard", "planned", f"standard init ({label})"))
         return
 
     try:
@@ -575,6 +678,11 @@ def _step_standard(
             project_name=project_name,
             extra_artifacts=extra_artifacts,
             force=False,
+            # On an initialized project this is an update pass: artifacts the
+            # kit generated and nobody edited get the current version;
+            # anything the project wrote (waivers, scores, task board) is left
+            # untouched.
+            refresh=already_initialized,
         )
         if plan is not None:
             from grimoire.cli.cmd_standard import _install_manifest_text
@@ -721,6 +829,10 @@ def up(
     # 2. Structure reconciliation (idempotent).
     if not blocked:
         _step_structure(state, target, dry_run=dry_run)
+
+    # 2bis. Refresh the kit tier — this is how an existing project receives a
+    # newer kit. Runs after init so a fresh project simply finds nothing to do.
+    _step_refresh(state, target, dry_run=dry_run, blocked=blocked)
 
     # 3. Identity propagation (cmd_setup logic, non-interactive).
     _step_identity(state, target, user=user, dry_run=dry_run, blocked=blocked)

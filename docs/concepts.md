@@ -299,20 +299,35 @@ grimoire-kit/
 votre-projet/
 ├── votre-code/
 ├── _grimoire/                       ← Créé par `grimoire init`
-│   ├── _config/
-│   │   └── custom/
-│   │       ├── agents/          ← Vos agents (copiés depuis les archétypes)
-│   │       ├── cc-verify.sh     ← Completion Contract
-│   │       └── agent-manifest.csv
-│   ├── _memory/
+│   ├── kit/                     ← AU KIT : régénéré à chaque `grimoire up`
+│   │   ├── agents/              ← Agents installés depuis les archétypes
+│   │   ├── workflows/
+│   │   ├── framework/           ← agent-base.md, cc-verify.sh…
+│   │   └── agent-manifest.csv
+│   ├── overrides/               ← À VOUS : masque le kit, jamais écrasé
+│   │   └── agents/              ← Déposez ici l'agent que vous personnalisez
+│   ├── _memory/                 ← À VOUS : la mémoire du projet
 │   │   ├── shared-context.md
 │   │   ├── decisions-log.md
 │   │   ├── failure-museum.md
 │   │   └── agent-learnings/
 │   └── project-context.yaml     ← L'identité de votre projet
 └── .github/
-    └── copilot-instructions.md  ← Instructions pour GitHub Copilot
+    └── copilot-instructions.md  ← Généré : suit la version du kit
 ```
+
+!!! info "Pourquoi cette séparation"
+    Sans elle, une mise à jour du kit devait choisir entre écraser vos
+    customisations et ne rien mettre à jour du tout — en pratique elle ne
+    mettait rien à jour, et un projet restait figé à sa version d'installation.
+
+    Avec elle, `grimoire up` régénère `kit/` sans hésiter, parce que rien de ce
+    qui vous appartient ne s'y trouve. Pour personnaliser un agent, copiez-le
+    dans `overrides/agents/` : votre version gagne, et le reste continue de
+    suivre les mises à jour.
+
+    Un projet créé avant cette séparation y passe une fois avec
+    `grimoire migrate`.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 

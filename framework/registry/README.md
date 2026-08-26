@@ -88,8 +88,8 @@ Lors d'un `install`, le script :
 
 1. Localise l'archétype dans `archetypes/{id}/`
 2. Lit `archetype.dna.yaml` pour déterminer ce qui doit être copié
-3. **Agents** → copiés dans `_grimoire/_config/custom/agents/`
-4. **Workflows** → copiés dans `_grimoire/_config/custom/workflows/`
+3. **Agents** → copiés dans `_grimoire/kit/agents/`
+4. **Workflows** → copiés dans `_grimoire/kit/workflows/`
 5. **Shared context** → fusionné dans `_grimoire/_memory/shared-context.md` (append, pas écrasement)
 6. **Prompts** → copiés dans `.github/prompts/{archetype}/` si existants
 7. Met à jour `project-context.yaml` → `installed_archetypes: [...]`

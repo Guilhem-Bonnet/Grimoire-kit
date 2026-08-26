@@ -16,7 +16,8 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, _strip_tpl_suffix
 from grimoire.core.scanner import ScanResult
 
-WORKFLOWS_DIR = ("_grimoire", "_config", "custom", "workflows")
+WORKFLOWS_DIR = ("_grimoire", "kit", "workflows")
+AGENTS_DIR = ("_grimoire", "kit", "agents")
 
 
 def _scaffolder(tmp_path: Path, archetype: str = "fix-loop") -> ProjectScaffolder:
@@ -121,13 +122,13 @@ class TestPlaceholderRendering:
     def test_blank_agent_template_keeps_its_blanks(self, tmp_path: Path) -> None:
         """The `minimal` archetype ships a fill-in-the-blank agent on purpose."""
         root = self._installed(tmp_path, ("minimal",))
-        blank = root / "_grimoire" / "_config" / "custom" / "agents" / "custom-agent.md"
+        blank = root.joinpath(*AGENTS_DIR) / "custom-agent.md"
         assert "{{agent_name}}" in blank.read_text(encoding="utf-8")
 
     def test_infrastructure_placeholders_are_left_to_the_user(self, tmp_path: Path) -> None:
         """The kit cannot know `{{lxc_id}}` or `{{host_ip}}` — it must not guess."""
         root = self._installed(tmp_path, ("infra-ops",))
-        agent = root / "_grimoire" / "_config" / "custom" / "agents" / "k8s-navigator.md"
+        agent = root.joinpath(*AGENTS_DIR) / "k8s-navigator.md"
         assert "{{vm_id}}" in agent.read_text(encoding="utf-8")
 
 

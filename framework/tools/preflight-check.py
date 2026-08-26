@@ -124,7 +124,7 @@ def check_grimoire_structure(project_root: Path) -> list[Check]:
     custom_dir = project_root / "_grimoire" / "_config" / "custom"
     if custom_dir.exists():
         critical_files.append(
-            ("_grimoire/_config/custom/agent-base.md", "Agent base protocol")
+            ("_grimoire/kit/framework/agent-base.md", "Agent base protocol")
         )
 
     for path_str, label in critical_files:

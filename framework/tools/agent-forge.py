@@ -497,7 +497,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
 <agent id="{agent_tag}.agent.yaml" name="{agent_name}" title="{agent_role}" icon="{agent_icon}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">BASE PROTOCOL — Load and apply {{{{project-root}}}}/_grimoire/_config/custom/agent-base.md with:
+      <step n="2">BASE PROTOCOL — Load and apply {{{{project-root}}}}/_grimoire/kit/framework/agent-base.md with:
           AGENT_TAG={agent_tag} | AGENT_NAME={agent_name} | LEARNINGS_FILE={agent_tag} | DOMAIN_WORD={domain_word}
       </step>
       <step n="3">Remember: user\'s name is {{{{user_name}}}}</step>
@@ -534,7 +534,7 @@ You must fully embody this agent\'s persona and follow all activation instructio
   <menu>
     <item cmd="MH or fuzzy match on menu or help">[MH] Afficher le Menu</item>
     <item cmd="CH or fuzzy match on chat">[CH] Discuter avec {agent_name}</item>
-{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+{menu_items}    <item cmd="PM or fuzzy match on party-mode" exec="{{{{project-root}}}}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 
@@ -823,7 +823,7 @@ Exemples :
     parser.add_argument("--project-context", metavar="PATH",
                         default="project-context.yaml")
     parser.add_argument("--agents-dir", metavar="PATH",
-                        default="_grimoire/_config/custom/agents")
+                        default="_grimoire/kit/agents")
     parser.add_argument("--out-dir", metavar="PATH",
                         default="_grimoire-output/forge-proposals")
     parser.add_argument("--archetype", metavar="ARCHETYPE",

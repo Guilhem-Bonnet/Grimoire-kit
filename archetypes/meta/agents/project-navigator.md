@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="project-navigator.agent.yaml" name="Atlas" title="Project Knowledge Curator &amp; Navigator" icon="🗺️">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=atlas | AGENT_NAME=Atlas | LEARNINGS_FILE=project-knowledge | DOMAIN_WORD=architecturale
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -59,7 +59,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DP or fuzzy match on dispatch or plan or route" action="#dispatch">[DP] Dispatch — recommander un plan multi-agents</item>
     <item cmd="RM or fuzzy match on repo-map or map or repomap or carte code" action="#repo-map">[RM] Repo Map — carte du dépôt</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus d'options — Registre, Réseau, ADR, Mémoire, Impact, Learnings</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

@@ -58,13 +58,13 @@ grimoire init . --archetype fix-loop
 
 # Ou manuellement :
 cp archetypes/fix-loop/agents/fix-loop-orchestrator.tpl.md \
-   [projet]/_grimoire/_config/custom/agents/fix-loop-orchestrator.md
+   [projet]/_grimoire/kit/agents/fix-loop-orchestrator.md
 
 cp archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md \
-   [projet]/_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md
+   [projet]/_grimoire/kit/workflows/workflow-closed-loop-fix.md
 ```
 
-Le suffixe `.tpl` est retiré à l'installation : il marque une source du kit, pas un fichier de projet. L'agent charge son workflow depuis `_grimoire/_config/custom/workflows/workflow-closed-loop-fix.md`.
+Le suffixe `.tpl` est retiré à l'installation : il marque une source du kit, pas un fichier de projet. L'agent charge son workflow depuis `_grimoire/kit/workflows/workflow-closed-loop-fix.md`.
 
 Les `{{placeholders}}` sont résolus à l'installation depuis les agents réellement présents dans le projet — aucune substitution manuelle n'est requise :
 

@@ -7,11 +7,17 @@ ensures the v3 directory layout, and preserves all memory files.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import typer
+from rich.console import Console
+
 from grimoire.tools._common import load_yaml, save_yaml
+
+console = Console(stderr=True)
 
 # ── Data Models ───────────────────────────────────────────────────────────────
 
@@ -173,3 +179,78 @@ def execute_upgrade(project_root: Path, plan: UpgradePlan,
             completed.append(action.description)
 
     return completed
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
+_upgrade_path_arg = typer.Argument(Path(), help="Path to the v2 project.")
+_upgrade_dry_run_opt = typer.Option(False, "--dry-run", "-n", help="Show plan without applying.")
+
+
+def upgrade_command(
+    ctx: typer.Context,
+    path: Path = _upgrade_path_arg,
+    dry_run: bool = _upgrade_dry_run_opt,
+) -> None:
+    """Migrate a v2 project to v3 structure.
+
+    [dim]Examples:[/dim]
+      [cyan]grimoire upgrade . --dry-run[/cyan]  Preview migration
+      [cyan]grimoire upgrade -o json .[/cyan]    JSON output for CI
+    """
+    fmt = (ctx.obj or {}).get("output", "text")
+    target = path.resolve()
+    version = detect_version(target)
+
+    if version == "v3":
+        if fmt == "json":
+            typer.echo(json.dumps({"ok": True, "version": "v3", "status": "already_v3", "actions": []}))
+        else:
+            console.print("[green]Project is already v3 — nothing to do.[/green]")
+        return
+
+    if version == "unknown":
+        if fmt == "json":
+            typer.echo(json.dumps({"ok": False, "error": "No v2 project found"}))
+        else:
+            console.print("[red]No v2 project-context.yaml found at this path.[/red]")
+        raise typer.Exit(1)
+
+    # Imported here, not at module scope: app.py imports this module, so a
+    # top-level import would close the cycle.
+    from grimoire.cli.app import _log_operation, _status_spinner
+
+    plan = plan_upgrade(target)
+    quiet = (ctx.obj or {}).get("quiet", False)
+    with _status_spinner("Upgrading…", show=(fmt != "json" and not quiet and not dry_run)):
+        completed = execute_upgrade(target, plan, dry_run=dry_run)
+
+    if not dry_run:
+        _log_operation("upgrade", {"from": version, "actions": len(completed)})
+
+    if fmt == "json":
+        typer.echo(json.dumps({
+            "ok": True,
+            "version": version,
+            "dry_run": dry_run,
+            "warnings": plan.warnings,
+            "actions": completed,
+        }, indent=2))
+        return
+
+    if dry_run:
+        console.print("[bold]grimoire upgrade --dry-run[/bold]\n")
+    else:
+        console.print("[bold]grimoire upgrade[/bold]\n")
+
+    if plan.warnings:
+        for w in plan.warnings:
+            console.print(f"  [yellow][!] {w}[/yellow]")
+
+    for desc in completed:
+        icon = "[cyan]plan[/cyan]" if dry_run else "[green]done[/green]"
+        console.print(f"  {icon}  {desc}")
+
+    if not completed and not plan.warnings:
+        console.print("  [green]Nothing to do.[/green]")
+
+    console.print(f"\n[bold]Migration {'planned' if dry_run else 'complete'}.[/bold]")

@@ -79,7 +79,7 @@ class TestInitCLI:
         result = runner.invoke(app, ["-y", "init", str(target)])
         assert result.exit_code == 0
         assert (target / "project-context.yaml").is_file()
-        assert (target / "_grimoire" / "_config" / "custom" / "agents").is_dir()
+        assert (target / "_grimoire" / "kit" / "agents").is_dir()
 
     def test_init_express_sets_project_name(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "cool-app"
@@ -99,7 +99,7 @@ class TestInitCLI:
         content = (target / "project-context.yaml").read_text()
         assert "infra-ops" in content
         # Should have infra-ops agents
-        agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
+        agents_dir = target / "_grimoire" / "kit" / "agents"
         agent_names = {f.stem for f in agents_dir.glob("*.md")}
         assert "ops-engineer" in agent_names
 
@@ -109,7 +109,7 @@ class TestInitCLI:
         assert result.exit_code == 0
         content = (target / "project-context.yaml").read_text()
         assert "agentic-standard" in content
-        assert (target / "_grimoire" / "_config" / "archetype.dna.agentic-standard.yaml").is_file()
+        assert (target / "_grimoire" / "kit" / "archetype.dna.agentic-standard.yaml").is_file()
 
     def test_init_refuses_existing_without_force(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "existing"
@@ -150,7 +150,7 @@ class TestInitCLI:
     def test_init_deploys_meta_agents(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "meta-test"
         runner.invoke(app, ["-y", "init", str(target)])
-        agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
+        agents_dir = target / "_grimoire" / "kit" / "agents"
         agent_names = {f.stem for f in agents_dir.glob("*.md")}
         assert "project-navigator" in agent_names
         assert "memory-keeper" in agent_names
@@ -199,7 +199,7 @@ class TestInitCLI:
         """Init with infra-ops should deploy archetype.dna.yaml."""
         target = tmp_path / "dna-test"
         runner.invoke(app, ["-y", "init", str(target), "--archetype", "infra-ops"])
-        dna = target / "_grimoire" / "_config" / "archetype.dna.yaml"
+        dna = target / "_grimoire" / "kit" / "archetype.dna.yaml"
         assert dna.is_file()
 
     def test_init_creates_gitignore(self, runner, app, tmp_path: Path) -> None:
@@ -219,7 +219,7 @@ class TestInitCLI:
         result = runner.invoke(app, ["-y", "init", str(target), "--archetype", "web-app,infra-ops"])
         assert result.exit_code == 0
         # Should have DNA for primary archetype at least
-        dna = target / "_grimoire" / "_config" / "archetype.dna.yaml"
+        dna = target / "_grimoire" / "kit" / "archetype.dna.yaml"
         assert dna.is_file()
 
     def test_init_multi_archetype_json_output(self, runner, app, tmp_path: Path) -> None:

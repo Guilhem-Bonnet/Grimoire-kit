@@ -107,6 +107,7 @@ packages = ["src/grimoire"]
 "framework" = "grimoire/data/framework"
 "web" = "grimoire/data/web"
 "version.txt" = "grimoire/version.txt"
+"registry/kit-file-hashes.json" = "grimoire/data/kit-file-hashes.json"
 "scripts/gen-site-data.py" = "grimoire/data/site-scripts/gen-site-data.py"
 
 [tool.hatch.build.targets.sdist]
@@ -117,6 +118,7 @@ include = [
     "framework/",
     "web/",
     "version.txt",
+    "registry/kit-file-hashes.json",
     "scripts/gen-site-data.py",
     "LICENSE",
     "README.md",
