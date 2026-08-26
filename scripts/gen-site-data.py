@@ -65,13 +65,26 @@ except ImportError:  # pragma: no cover
 
 
 def _read_version(root: Path) -> str:
-    txt = (root / "src/grimoire/__version__.py").read_text(encoding="utf-8")
-    m = re.search(r'__version__\s*=\s*"([^"]+)"', txt)
-    return m.group(1) if m else "unknown"
+    """Version du projet — jamais fatale.
+
+    Un projet gouverné n'est pas grimoire-kit : il n'a ni
+    ``src/grimoire/__version__.py`` ni ``version.txt``. Le cockpit doit
+    quand même le rendre, donc on dégrade au lieu de lever.
+    """
+    src = root / "src/grimoire/__version__.py"
+    if src.is_file():
+        m = re.search(r'__version__\s*=\s*"([^"]+)"', src.read_text(encoding="utf-8"))
+        if m:
+            return m.group(1)
+    txt = root / "version.txt"
+    if txt.is_file():
+        return txt.read_text(encoding="utf-8").strip() or "unknown"
+    return "unknown"
 
 
 def _count_tools(root: Path) -> int:
-    return len(list((root / "framework/tools").glob("*.py")))
+    base = root / "framework/tools"
+    return len(list(base.glob("*.py"))) if base.is_dir() else 0
 
 
 def _count_agents(root: Path) -> int:
@@ -85,7 +98,10 @@ def _count_agents(root: Path) -> int:
 
 
 def _list_archetypes(root: Path) -> list[str]:
-    return sorted(p.name for p in (root / "archetypes").iterdir() if p.is_dir())
+    base = root / "archetypes"
+    if not base.is_dir():
+        return []
+    return sorted(p.name for p in base.iterdir() if p.is_dir())
 
 
 def _agents_by_archetype(root: Path) -> dict[str, list[str]]:

@@ -97,7 +97,8 @@ from grimoire.tools.ext_manager import (
     load_manifest,
     remove_extension,
 )
-from grimoire.tools.memory_link import backend_catalogue, memory_link_status
+from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
+from grimoire.tools.memory_link import memory_link_status
 from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -219,9 +220,19 @@ class ForgeAPI:
     # ── blueprints ────────────────────────────────────────────────────────
 
     def _blueprint_path(self, bp_id: str) -> Path:
+        """Chemin du blueprint — l'identifiant vient d'une URL, jamais de confiance.
+
+        Deux gardes plutôt qu'une : la forme (``SLUG_RE``, qui exclut déjà les
+        séparateurs et ``..``) puis le confinement du chemin résolu sous le
+        dossier des blueprints. La seconde tient même si la première s'assouplit.
+        """
         if not SLUG_RE.match(bp_id):
             raise ValueError(f"id de blueprint invalide : {bp_id}")
-        return self.project_root / BLUEPRINTS_RELPATH / f"{bp_id}.blueprint.json"
+        base = (self.project_root / BLUEPRINTS_RELPATH).resolve()
+        path = (base / f"{bp_id}.blueprint.json").resolve()
+        if not path.is_relative_to(base):
+            raise ValueError(f"id de blueprint invalide : {bp_id}")
+        return path
 
     def blueprints_list(self) -> list[dict[str, Any]]:
         base = self.project_root / BLUEPRINTS_RELPATH
@@ -1248,39 +1259,18 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             path = self.path.split("?")[0]
             try:
-                if path == "/api/status":
-                    self._json(api.status())
-                elif path == "/api/setup":
-                    self._json(api.setup_view())
-                elif path == "/api/archetypes":
-                    self._json(api.archetypes())
-                elif path == "/api/extensions":
-                    self._json(api.extensions_view())
-                elif path == "/api/blueprints":
-                    self._json(api.blueprints_list())
-                elif path == "/api/events/log":
-                    self._json(api.events_log())
-                elif path == "/api/stigmergy":
-                    self._json(api.stigmergy_view())
-                elif path == "/api/features":
-                    self._json(api.features_view())
-                elif path == "/api/cost-model":
-                    model = parse_qs(urlparse(self.path).query).get("model", [None])[0]
-                    self._json(api.cost_model_view(model))
-                elif path == "/api/otel":
-                    self._json(api.otel_export())
-                elif path == "/api/primitives":
-                    self._json(api.primitives_view())
-                elif path == "/api/backends":
-                    self._json(backend_catalogue())
-                elif path == "/api/memory/status":
-                    self._json(api.memory_link_view())
-                elif path.endswith("/diff") and path.startswith("/api/blueprints/"):
-                    self._json(api.blueprint_diff(path.split("/")[3]))
-                elif path.startswith("/api/blueprints/"):
-                    self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
-                elif path == "/api/events":
+                if path == "/api/events":
                     self._sse()
+                    return
+                payload = api_get(api, path, parse_qs(urlparse(self.path).query))
+                if payload is not API_GET_UNHANDLED:
+                    self._json(payload)
+                elif path.startswith("/api/blueprints/"):
+                    # Surface atelier : le cockpit multi-projet n'y touche pas.
+                    if path.endswith("/diff"):
+                        self._json(api.blueprint_diff(path.split("/")[3]))
+                    else:
+                        self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
                 else:
                     self._static(path)
             except FileNotFoundError as exc:
