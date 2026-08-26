@@ -61,7 +61,7 @@ flowchart TD
 | `auto` | Résolution automatique | Selon la cible choisie | Sélectionne `weaviate-server` si `weaviate_url` est défini, sinon `ollama`, sinon `qdrant-server`, sinon `local` |
 | `local` | Stockage JSON simple | Aucune | Écrit dans `_grimoire/_memory/{collection_prefix}.json` |
 | `lexical` | Recherche lexicale sans vecteur | Aucune | sqlite FTS5 (BM25, accent-insensible) dans `_grimoire/_memory/memory-lexical.sqlite`. Zéro DB vectorielle, zéro service, zéro réseau |
-| `qdrant-local` | Recherche sémantique locale | `grimoire-kit[qdrant]` | Utilise `qdrant-client` et `sentence-transformers` |
+| `qdrant-local` | Recherche sémantique locale | `grimoire-kit[qdrant]` | Utilise `qdrant-client` et fastembed |
 | `qdrant-server` | Recherche sémantique via serveur Qdrant | `grimoire-kit[qdrant]` | Requiert `qdrant_url` |
 | `weaviate-server` | Recherche sémantique via serveur Weaviate | `grimoire-kit[weaviate]` | Requiert `weaviate_url`; peut être couplé à Neo4j |
 | `mempalace` | Backend palais expérimental | `grimoire-kit[mempalace]` | Repose sur ChromaDB et conserve les métadonnées `wing/hall/room` |
@@ -92,6 +92,44 @@ Pour peupler le store à partir de la connaissance déjà sur disque :
 ```bash
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
+
+## Moteur d'embedding
+
+Les backends `qdrant-*` et `weaviate-server` passent par
+[memory/embedding.py](api-reference.md), qui choisit le moteur disponible :
+
+| Moteur | Statut | Poids installé |
+| --- | --- | --- |
+| `fastembed` | Défaut, tiré par les extras | 203 Mo |
+| `sentence-transformers` | Repli, utilisé seulement s'il est déjà présent | 4,8 Go (torch + wheels CUDA) |
+
+Mesure du 2026-08-26, même modèle par défaut dans les deux cas. Les extras
+`[qdrant]` et `[weaviate]` ne tirent plus torch.
+
+La bascule ne demande aucun re-index : sur
+`sentence-transformers/all-MiniLM-L6-v2`, les deux moteurs produisent des
+vecteurs identiques à 2e-7 près par composante, soit un écart de cosinus de
+5e-13. L'export ONNX publié par Qdrant est fidèle, pas quantifié. Vérifié sur
+un corpus de 40 entrées et 10 requêtes : recouvrement top-1 à top-10 de 1,000
+et ordre de classement identique.
+
+La dimension n'est jamais devinée depuis une table de correspondance : elle est
+lue sur un vecteur sonde au chargement, donc juste pour n'importe quel modèle.
+Si une collection Qdrant existante a une autre largeur que le modèle courant,
+le backend refuse de démarrer au lieu d'écrire des vecteurs incohérents.
+
+Clés de `project-context.yaml` :
+
+```yaml
+memory:
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  embedding_model_path: ""     # répertoire local, court-circuite tout réseau
+  embedding_cache_dir: ""      # où le moteur peut stocker ce qu'il télécharge
+  embedding_offline: false     # force les commutateurs hors-ligne du hub
+```
+
+Changer de modèle à dimension égale n'est pas détectable côté serveur : cela
+demande un ré-index explicite des souvenirs existants.
 
 ## Modèle d'embedding sur site fermé
 

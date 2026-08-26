@@ -1,11 +1,12 @@
 """Qdrant-based memory backend — local file or remote server.
 
-Requires ``qdrant-client`` and ``sentence-transformers`` optional deps::
+Requires ``qdrant-client`` plus an embedding engine::
 
     pip install grimoire-kit[qdrant]
 
 Supports local (file-based) and remote (URL-based) Qdrant instances.
-Embeddings are generated via sentence-transformers.
+Embeddings come from :mod:`grimoire.memory.embedding` — fastembed by default,
+sentence-transformers when it is the only engine installed.
 """
 
 from __future__ import annotations
@@ -15,15 +16,8 @@ from typing import Any
 
 from grimoire.memory.backends._qdrant_mixin import QdrantStorageMixin
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend
+from grimoire.memory.embedding import DEFAULT_MODEL, Embedder, EmbeddingEngineError, build_embedder
 
-# Model → vector size mapping
-_VECTOR_SIZES: dict[str, int] = {
-    "all-MiniLM-L6-v2": 384,
-    "all-mpnet-base-v2": 768,
-    "nomic-embed-text": 768,
-}
-
-_DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_COLLECTION = "grimoire"
 
 
@@ -39,20 +33,8 @@ def _require_qdrant() -> Any:
         ) from None
 
 
-def _require_sentence_transformers() -> Any:
-    """Import and return SentenceTransformer, raising a clear error if missing."""
-    try:
-        from sentence_transformers import SentenceTransformer
-
-        return SentenceTransformer
-    except ImportError:
-        raise ImportError(
-            "sentence-transformers is not installed. Run:\n  pip install sentence-transformers"
-        ) from None
-
-
 class QdrantBackend(QdrantStorageMixin, MemoryBackend):
-    """Qdrant vector backend with sentence-transformers embeddings.
+    """Qdrant vector backend with dense embeddings.
 
     Works in two modes:
     - **local**: file-based Qdrant (no server needed)
@@ -70,27 +52,30 @@ class QdrantBackend(QdrantStorageMixin, MemoryBackend):
     def __init__(
         self,
         *,
-        embedding_model: str = _DEFAULT_MODEL,
+        embedding_model: str = DEFAULT_MODEL,
         collection: str = _DEFAULT_COLLECTION,
         qdrant_path: str | None = None,
         qdrant_url: str | None = None,
         qdrant_api_key: str | None = None,
         timeout: float = 5.0,
+        embedding_cache_dir: str = "",
+        embedding_model_path: str = "",
+        embedding_offline: bool = False,
     ) -> None:
         qdrant_client = _require_qdrant()
-        sentence_transformer_cls = _require_sentence_transformers()
 
         from qdrant_client.models import Distance, VectorParams
 
         self._collection = collection
         self._embedding_model_name = embedding_model
 
-        # Resolve model short name for vector size lookup
-        model_short = embedding_model.split("/")[-1]
-        vector_size = _VECTOR_SIZES.get(model_short, 384)
-
-        self._model: Any = sentence_transformer_cls(embedding_model)
-        self._vector_size = vector_size
+        self._embedder: Embedder = build_embedder(
+            embedding_model,
+            cache_dir=embedding_cache_dir,
+            model_path=embedding_model_path,
+            offline=embedding_offline,
+        )
+        self._vector_size = self._embedder.dim
 
         # Resolve mode: explicit params → env vars → local default
         url = qdrant_url or os.environ.get("GRIMOIRE_QDRANT_URL", "")
@@ -108,17 +93,41 @@ class QdrantBackend(QdrantStorageMixin, MemoryBackend):
             self._client = qdrant_client.QdrantClient(path=path)
             self._mode = "local"
 
-        # Create collection if it doesn't exist
+        # Create collection if it doesn't exist, otherwise refuse a geometry clash.
         existing = [c.name for c in self._client.get_collections().collections]
         if self._collection not in existing:
             self._client.create_collection(
                 collection_name=self._collection,
-                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=self._vector_size, distance=Distance.COSINE),
             )
+        else:
+            self._assert_dimension_matches()
+
+    def _assert_dimension_matches(self) -> None:
+        """Fail loudly when the store was written with a different model.
+
+        Writing 384-dim vectors into a 768-dim collection is rejected by Qdrant,
+        but the reverse — a model swap at equal dimension — degrades silently.
+        The dimension is the part we can check, and it catches every model change
+        that would otherwise corrupt the store.
+        """
+        try:
+            info = self._client.get_collection(collection_name=self._collection)
+            params = info.config.params.vectors
+            stored = int(params.size) if hasattr(params, "size") else 0
+        except Exception:  # pragma: no cover - shape varies across server versions
+            return
+        if stored and stored != self._vector_size:
+            msg = (
+                f"Collection '{self._collection}' holds {stored}-dimension vectors but "
+                f"'{self._embedding_model_name}' produces {self._vector_size}.\n"
+                "  → keep the original model, or re-index with:\n"
+                "      grimoire memory export … && grimoire memory import …"
+            )
+            raise EmbeddingEngineError(msg)
 
     def _embed(self, text: str) -> list[float]:
-        vec: Any = self._model.encode(text)
-        return vec.tolist()  # type: ignore[no-any-return]
+        return self._embedder.encode(text)
 
     # ── health_check (backend-specific detail) ────────────────────────────
 
@@ -133,8 +142,9 @@ class QdrantBackend(QdrantStorageMixin, MemoryBackend):
                     "mode": self._mode,
                     "collection": self._collection,
                     "embedding_model": self._embedding_model_name,
+                    "embedding_engine": self._embedder.engine,
                     "vector_size": self._vector_size,
-                    "search": "semantic (sentence-transformers)",
+                    "search": f"semantic ({self._embedder.engine})",
                 },
             )
         except Exception as exc:

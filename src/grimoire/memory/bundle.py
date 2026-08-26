@@ -234,23 +234,6 @@ def no_network() -> Iterator[None]:
         socket.create_connection = original_create
 
 
-@contextlib.contextmanager
-def _offline_env() -> Iterator[None]:
-    """Set the hub offline switches honoured by both embedding engines."""
-    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
-    previous = {k: os.environ.get(k) for k in keys}
-    for key in keys:
-        os.environ[key] = "1"
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
 # ── export ────────────────────────────────────────────────────────────────────
 
 
@@ -404,25 +387,30 @@ def install_bundle(archive: Path, *, dest_root: Path | None = None, force: bool 
 # ── verify ────────────────────────────────────────────────────────────────────
 
 
-def _embed_offline(model_dir: Path) -> tuple[str, int]:
+def _embed_offline(model_dir: Path, model_name: str = "") -> tuple[str, int]:
     """Load *model_dir* with no network and embed one probe string.
+
+    Delegates to :func:`grimoire.memory.embedding.build_embedder`, so whichever
+    engine the site actually has — fastembed or sentence-transformers — is the
+    one being proven. *model_name* carries the manifest's model id, which
+    fastembed needs to resolve pooling and normalisation even when the weights
+    come from a local directory.
 
     Returns ``(engine, dim)``. Raises :class:`BundleError` when no engine is
     installed, and :class:`OfflineViolationError` when one reaches the network.
     """
-    probe = "grimoire offline bundle probe"
+    from grimoire.memory.embedding import DEFAULT_MODEL, EmbeddingEngineError, build_embedder
 
-    with _offline_env(), no_network():
+    with no_network():
         try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            msg = (
-                "No embedding engine installed — cannot prove the model loads.\n"
-                "  → pip install grimoire-kit[qdrant], or re-run with --no-embed"
+            embedder = build_embedder(
+                model_name or DEFAULT_MODEL,
+                model_path=str(model_dir),
+                offline=True,
             )
-            raise BundleError(msg) from None
-        vector = SentenceTransformer(str(model_dir)).encode(probe)
-        return "sentence-transformers", len(vector)
+        except EmbeddingEngineError as exc:
+            raise BundleError(str(exc)) from None
+        return embedder.engine, embedder.dim
 
 
 def verify_bundle(model_dir: Path, *, embed: bool = True) -> VerifyReport:
@@ -439,7 +427,7 @@ def verify_bundle(model_dir: Path, *, embed: bool = True) -> VerifyReport:
 
     if embed and not mismatched and not missing:
         try:
-            engine, dim = _embed_offline(bundle_root / _MODEL_DIR)
+            engine, dim = _embed_offline(bundle_root / _MODEL_DIR, manifest.model)
             embedded = True
         except OfflineViolationError as exc:
             errors.append(f"offline load failed — the engine tried to reach the network: {exc}")

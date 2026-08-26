@@ -291,7 +291,7 @@ def test_verify_reports_engine_reaching_the_network(
     """An engine that silently falls back to a download must fail verification."""
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
 
-    def _sneaky(model_dir: Path) -> tuple[str, int]:
+    def _sneaky(model_dir: Path, model_name: str = "") -> tuple[str, int]:
         with no_network():
             socket.create_connection(("huggingface.co", 443), timeout=0.1)
         return "unreachable", 0
@@ -304,26 +304,12 @@ def test_verify_reports_engine_reaching_the_network(
     assert any("tried to reach the network" in e for e in report.errors)
 
 
-def test_offline_env_sets_and_restores_hub_switches(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
-    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "0")
-    with mod._offline_env():
-        import os
-
-        assert os.environ["HF_HUB_OFFLINE"] == "1"
-        assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
-    import os
-
-    assert "HF_HUB_OFFLINE" not in os.environ
-    assert os.environ["TRANSFORMERS_OFFLINE"] == "0"
-
-
 # ── Verify ────────────────────────────────────────────────────────────────────
 
 
 def test_verify_ok_on_intact_install(tmp_path: Path, bundle_archive: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
-    monkeypatch.setattr(mod, "_embed_offline", lambda _d: ("sentence-transformers", 384))
+    monkeypatch.setattr(mod, "_embed_offline", lambda _d, _m="": ("fastembed", 384))
     report = verify_bundle(installed.model_dir)
 
     assert report.ok
@@ -364,7 +350,7 @@ def test_verify_skips_embed_when_digests_already_broken(
 
     called = False
 
-    def _tracker(model_dir: Path) -> tuple[str, int]:
+    def _tracker(model_dir: Path, model_name: str = "") -> tuple[str, int]:
         nonlocal called
         called = True
         return "x", 1
@@ -376,7 +362,7 @@ def test_verify_skips_embed_when_digests_already_broken(
 
 def test_verify_flags_dimension_mismatch(tmp_path: Path, bundle_archive: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
-    monkeypatch.setattr(mod, "_embed_offline", lambda _d: ("sentence-transformers", 768))
+    monkeypatch.setattr(mod, "_embed_offline", lambda _d, _m="": ("fastembed", 768))
     report = verify_bundle(installed.model_dir)
 
     assert not report.ok
@@ -388,7 +374,7 @@ def test_verify_reports_absent_engine_without_crashing(
 ) -> None:
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
 
-    def _no_engine(model_dir: Path) -> tuple[str, int]:
+    def _no_engine(model_dir: Path, model_name: str = "") -> tuple[str, int]:
         raise BundleError("No embedding engine installed — cannot prove the model loads.")
 
     monkeypatch.setattr(mod, "_embed_offline", _no_engine)

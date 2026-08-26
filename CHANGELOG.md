@@ -19,6 +19,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
   par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
 
+### Modifié
+
+- **fastembed remplace sentence-transformers et torch** dans les extras
+  `[qdrant]` et `[weaviate]`. Mesure : la pile passe de **4,8 Go à 203 Mo** pour
+  le même modèle par défaut, dont 2,7 Go de wheels `nvidia/*` et 689 Mo de
+  triton qui n'avaient aucune raison d'être là — la CI les retéléchargeait à
+  chaque run. Aucun re-index n'est nécessaire : les deux moteurs produisent des
+  vecteurs identiques à 2e-7 près par composante (écart de cosinus 5e-13, top-1
+  à top-10 inchangés sur 40 entrées et 10 requêtes), l'export ONNX de Qdrant
+  étant fidèle et non quantifié. `sentence-transformers` reste utilisé à
+  l'exécution s'il est déjà installé. Nouveau module
+  `grimoire.memory.embedding`, partagé par les backends Qdrant et Weaviate.
+- **La dimension des vecteurs n'est plus lue dans une table** — elle vient d'un
+  vecteur sonde au chargement, donc elle est juste pour tout modèle, y compris
+  inconnu. L'ancienne table retombait silencieusement sur 384.
+- **Le backend Qdrant refuse une collection d'une autre largeur** que le modèle
+  courant, au lieu d'écrire des vecteurs incohérents dans un store existant.
+- Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
+  `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
+  chargement avec le moteur réellement installé, fastembed compris.
+
 ## [3.32.0] - 2026-08-18
 
 ### Ajouté

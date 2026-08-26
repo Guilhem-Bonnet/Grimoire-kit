@@ -35,7 +35,7 @@ def archive(tmp_path: Path, fake_model: Path) -> Path:
 @pytest.fixture(autouse=True)
 def _no_real_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never touch a real embedding engine from CLI tests."""
-    monkeypatch.setattr(mod, "_embed_offline", lambda _d: ("sentence-transformers", 384))
+    monkeypatch.setattr(mod, "_embed_offline", lambda _d, _m="": ("fastembed", 384))
 
 
 # ── export ────────────────────────────────────────────────────────────────────
