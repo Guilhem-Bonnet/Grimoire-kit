@@ -11,19 +11,19 @@ from grimoire.memory.backends import weaviate as weaviate_module
 from grimoire.memory.backends.weaviate import WeaviateBackend
 
 
-class _FakeVector:
-    def tolist(self) -> list[float]:
-        return [0.1, 0.2]
-
-
-class _FakeModel:
-    def encode(self, text: str) -> _FakeVector:
-        assert text
-        return _FakeVector()
-
-
 def _patch_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(weaviate_module, "_require_sentence_transformers", lambda: lambda _: _FakeModel())
+    """Stub the shared embedder: the backend no longer knows about any engine."""
+    from grimoire.memory.embedding import Embedder
+
+    def fake_build(model: str = "", **kwargs: Any) -> Embedder:
+        return Embedder(
+            engine="fake",
+            model_name=model or "fake/model",
+            dim=2,
+            _encode=lambda text: [0.1, 0.2],
+        )
+
+    monkeypatch.setattr(weaviate_module, "build_embedder", fake_build)
 
 
 def test_store_adds_vector_graph_references_and_backfills_schema(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,8 +17,8 @@ from typing import Any
 from urllib import error, parse, request
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.embedding import DEFAULT_MODEL, Embedder, build_embedder
 
-_DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _DEFAULT_COLLECTION = "GrimoireMemory"
 _BATCH_SIZE = 100
 _COLLECTION_PROPERTIES = (
@@ -35,18 +35,6 @@ _COLLECTION_PROPERTIES = (
     {"name": "created_at", "dataType": ["text"]},
     {"name": "updated_at", "dataType": ["text"]},
 )
-
-
-def _require_sentence_transformers() -> Any:
-    """Import SentenceTransformer, raising a clear error if missing."""
-    try:
-        from sentence_transformers import SentenceTransformer
-
-        return SentenceTransformer
-    except ImportError:
-        raise ImportError(
-            "sentence-transformers is not installed. Run:\n  pip install grimoire-kit[weaviate]"
-        ) from None
 
 
 def normalize_weaviate_collection(raw: str) -> str:
@@ -106,16 +94,23 @@ class WeaviateBackend(MemoryBackend):
     def __init__(
         self,
         *,
-        embedding_model: str = _DEFAULT_MODEL,
+        embedding_model: str = DEFAULT_MODEL,
         collection: str = _DEFAULT_COLLECTION,
         weaviate_url: str,
         api_key_env: str = "GRIMOIRE_WEAVIATE_API_KEY",
         timeout: float = 10.0,
+        embedding_cache_dir: str = "",
+        embedding_model_path: str = "",
+        embedding_offline: bool = False,
     ) -> None:
         if not weaviate_url:
             raise ValueError("weaviate_url is required for WeaviateBackend")
-        sentence_transformer_cls = _require_sentence_transformers()
-        self._model: Any = sentence_transformer_cls(embedding_model)
+        self._embedder: Embedder = build_embedder(
+            embedding_model,
+            cache_dir=embedding_cache_dir,
+            model_path=embedding_model_path,
+            offline=embedding_offline,
+        )
         self._embedding_model_name = embedding_model
         self._collection = normalize_weaviate_collection(collection)
         self._base_url = weaviate_url.rstrip("/")
@@ -124,8 +119,7 @@ class WeaviateBackend(MemoryBackend):
         self._ensure_collection()
 
     def _embed(self, text: str) -> list[float]:
-        vec: Any = self._model.encode(text)
-        return vec.tolist()  # type: ignore[no-any-return]
+        return self._embedder.encode(text)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -370,6 +364,7 @@ class WeaviateBackend(MemoryBackend):
                     "url": self._base_url,
                     "collection": self._collection,
                     "embedding_model": self._embedding_model_name,
+                    "embedding_engine": self._embedder.engine,
                     "search": "semantic vector search with Grimoire-controlled embeddings",
                 },
             )

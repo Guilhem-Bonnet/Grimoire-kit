@@ -321,7 +321,9 @@ class ProjectScaffolder:
         scan: ScanResult | None,
         resolved: ResolvedArchetype,
         backend: str,
+        offline: bool = False,
     ) -> None:
+        self._offline = offline
         self._target = target.resolve()
         self._project_name = project_name
         self._user_name = user_name
@@ -457,9 +459,13 @@ class ProjectScaffolder:
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
         memory_extra = ""
-        memory_layers = """  layer_profile: "standard"
-  vector_database: true
-  retrieval_mode: "vector"
+        # A project declared without egress cannot reach an embedding model:
+        # lexical is the only mode that actually works there.
+        vector_line = "false" if self._offline else "true"
+        mode_line = "lexical" if self._offline else "vector"
+        memory_layers = f"""  layer_profile: "standard"
+  vector_database: {vector_line}
+  retrieval_mode: "{mode_line}"
   short_term_backend: "sqlite"
   redis_url: ""
   knowledge_graph: "sqlite-sidecar"
