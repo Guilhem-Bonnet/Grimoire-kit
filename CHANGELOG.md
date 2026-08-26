@@ -54,6 +54,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - `memory up` et `memory status` vivent dans `grimoire.cli.cmd_memory_ops`,
   chaîné depuis `cmd_memory_lexical` : le ratchet R2 interdit à `cmd_memory` de
   grossir, et il rétrécit de 56 lignes.
+- **`grimoire memory shared`** — mémoire transverse entre projets, pour qu'un
+  agent spécialiste accumule du savoir réutilisable sans corrompre celui des
+  autres. Trois règles traitent les modes de corruption connus :
+  **la frontière est physique** (un store séparé, pas une collection filtrée
+  par métadonnée — un filtre oublié mélange deux projets sans rien signaler),
+  **la promotion est refusée par défaut** (un souvenir ne monte que s'il reste
+  vrai quand on efface le nom du projet : « l'app X utilise Postgres 16 » est
+  un fait de projet, « les migrations Alembic cassent quand deux heads
+  coexistent » est un motif), et **la confiance décroît** (un motif non
+  revérifié est servi comme hypothèse, calcul fait à la lecture — une
+  décroissance qui dépend d'un ordonnanceur est une décroissance qui n'arrive
+  pas). `promote` écrit avec provenance, `confirm` restaure la fraîcheur,
+  `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
+  appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
+  ici. Opt-in via `memory.shared_collection`, vide par défaut.
 
 
 ## [3.32.0] - 2026-08-18
