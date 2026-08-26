@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core import layout
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.hosts.capabilities import gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_agents, infer_tools, parse_frontmatter
@@ -89,6 +90,33 @@ def test_an_unrendered_placeholder_name_falls_back_to_the_file_name(project: Pat
     names = {a.name for a in collect_agents(project)}
     assert "custom-agent" in names
     assert not [n for n in names if "{{" in n]
+
+
+def test_an_override_wins_over_the_kit_tier(tmp_path: Path) -> None:
+    """La persona du projet doit gagner sur celle que le kit livre.
+
+    Régression croisée entre la frontière kit/overrides et cette couche : tant
+    que l'émetteur balayait les répertoires en direct, il projetait la
+    définition du tier kit même quand le projet en avait posé une dans
+    ``_grimoire/overrides/agents/``. Le wrapper généré pointait alors le
+    fichier que la prochaine mise à jour réécrit, et la customisation
+    disparaissait sans un mot.
+    """
+    for tier, body in ((layout.KIT_DIR, "Version livrée."), (layout.OVERRIDES_DIR, "Version du projet.")):
+        directory = tmp_path / tier / layout.AGENTS_SUBDIR
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "concierge.md").write_text(
+            '---\nname: "concierge"\ndescription: "tri"\n---\n' + body + "\n", encoding="utf-8"
+        )
+
+    (concierge,) = [a for a in collect_agents(tmp_path) if a.name == "concierge"]
+    assert concierge.definition_ref == f"{layout.OVERRIDES_DIR}/{layout.AGENTS_SUBDIR}/concierge.md"
+
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    apply_plan(emitter.plan(build_surface(tmp_path), tmp_path), tmp_path)
+    wrapper = (tmp_path / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    assert concierge.definition_ref in wrapper
+    assert f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/concierge.md" not in wrapper
 
 
 def test_evidence_skill_appears_only_once_enrolled(project: Path) -> None:

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import layout
 from grimoire.tools._common import GrimoireTool, estimate_tokens
 from grimoire.tools.model_windows import (
     DEFAULT_MODEL as DEFAULT_MODEL,
@@ -154,12 +155,12 @@ def resolve_agent_loads(agent_path: Path, project_root: Path) -> list[FileLoad]:
     # projects whose sheets still reference agent-base.md keep the full
     # protocol in their budget.
     if "agent-base-compact.md" in agent_text:
-        base_candidates = [project_root / "_grimoire/_config/custom/agent-base-compact.md",
-                           project_root / "_grimoire/_config/custom/agent-base.md",
+        base_candidates = [*_layered_base(project_root, "agent-base-compact.md"),
+                           *_layered_base(project_root, "agent-base.md"),
                            project_root / "framework/agent-base-compact.md",
                            project_root / "framework/agent-base.md"]
     else:
-        base_candidates = [project_root / "_grimoire/_config/custom/agent-base.md",
+        base_candidates = [*_layered_base(project_root, "agent-base.md"),
                            project_root / "framework/agent-base.md"]
     for bp in base_candidates:
         if bp.exists():
@@ -218,11 +219,17 @@ def resolve_agent_loads(agent_path: Path, project_root: Path) -> list[FileLoad]:
     return loads
 
 
+def _layered_base(project_root: Path, name: str) -> list[Path]:
+    """Candidate paths for a framework file, overrides before kit before legacy."""
+    return [root / layout.FRAMEWORK_SUBDIR / name for root in layout.search_roots(project_root)] + [
+        root / name for root in layout.search_roots(project_root)
+    ]
+
+
 def find_agents(project_root: Path) -> list[Path]:
     """Find all Grimoire agent files in the project."""
     agents: list[Path] = []
-    for d in [project_root / "_grimoire/_config/custom/agents",
-              project_root / "_grimoire/_config/agents",
+    for d in [*layout.agent_dirs(project_root),
               project_root / "_grimoire/bmm/agents",
               project_root / "_grimoire/core/agents"]:
         if not d.exists():

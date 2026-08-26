@@ -16,13 +16,14 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core import standard_manifest as sm
+from grimoire.core.standard_manifest import STANDARD_DIR, _render_template
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
 NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
 PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
-STANDARD_DIR = Path("_grimoire/standard")
 EVIDENCE_DIR = Path("_grimoire-output/evidence")
 CONTEXT_DIR = Path("_grimoire-output/context")
 DECISION_DIR = Path("_grimoire-output/decisions")
@@ -30,6 +31,7 @@ EVENT_DIR = Path("_grimoire-output/events")
 KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
 SCORE_DIR = Path("_grimoire-output/standard")
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
+
 LLM_PROVIDER_REGISTRY_FILE = STANDARD_DIR / "llm-provider-registry.yaml"
 EVENT_JOURNAL_FILE = EVENT_DIR / "runtime-journal.jsonl"
 APPLIED_FIXES_FILE = EVENT_DIR / "applied-fixes.jsonl"
@@ -700,15 +702,6 @@ def _format_destination(path_template: str, task_id: str) -> Path:
     return Path(path_template.replace("{task-id}", normalize_task_id(task_id)))
 
 
-def _single_line_value(value: str) -> str:
-    normalized = " ".join(str(value).split()).strip()
-    return normalized or "Unnamed project"
-
-
-def _yaml_double_quoted_value(value: str) -> str:
-    return _single_line_value(value).replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _planned_artifacts(
     profile_id: str,
     *,
@@ -736,27 +729,6 @@ def _planned_artifacts(
         ))
 
     return tuple(artifacts)
-
-
-def _render_template(
-    template: str,
-    *,
-    project_name: str,
-    profile: StandardProfile,
-    generated_at: str,
-) -> str:
-    text_project_name = _single_line_value(project_name)
-    yaml_project_name = _yaml_double_quoted_value(project_name)
-    rendered = template
-    rendered = rendered.replace("- Project:\n", f"- Project: {text_project_name}\n")
-    rendered = rendered.replace("- Selected profile: `starter | controlled | orchestrated | governed | production`\n", f"- Selected profile: `{profile.id}`\n")
-    rendered = rendered.replace("- Declared profile: `starter | controlled | orchestrated | governed | production`\n", f"- Declared profile: `{profile.id}`\n")
-    rendered = rendered.replace("- Upstream standard reference:\n", "- Upstream standard reference: processus-developpement-agentique/docs/norme-structure-agentique.md\n")
-    rendered = rendered.replace("- Standard reference:\n", "- Standard reference: processus-developpement-agentique/docs/norme-structure-agentique.md\n")
-    rendered = rendered.replace("- Date:\n", f"- Date: {generated_at}\n")
-    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{yaml_project_name}\"\n")
-    rendered = rendered.replace("  project: \"\"\n", f"  project: \"{yaml_project_name}\"\n")
-    return rendered
 
 
 def _manifest_content(profile: StandardProfile, project_name: str, task_id: str, artifacts: tuple[StandardArtifact, ...]) -> str:
@@ -886,8 +858,16 @@ def setup_standard_profile(
     extra_artifacts: Iterable[str] = (),
     force: bool = False,
     dry_run: bool = False,
+    refresh: bool = False,
 ) -> StandardSetupResult:
-    """Generate standard-aware project artifacts for one profile."""
+    """Generate standard-aware project artifacts for one profile.
+
+    *refresh* updates the artifacts the kit generated and the project never
+    touched, leaving edited ones (and everything predating the generation
+    manifest) alone. It is how ``grimoire up`` carries standard updates into an
+    existing project without ``--force``, which would flatten waivers, scores
+    and task boards along with the policies.
+    """
     root = project_root.resolve()
     profile = get_profile(profile_id)
     artifacts = _planned_artifacts(profile_id, task_id=task_id, extra_artifacts=extra_artifacts)
@@ -895,26 +875,46 @@ def setup_standard_profile(
     generated_at = datetime.now(UTC).date().isoformat()
     result = StandardSetupResult(profile=profile.id, project_root=root, dry_run=dry_run)
 
+    manifest = sm.load_generation_manifest(root)
+    generated: dict[str, str] = {}
+
     for artifact in artifacts:
         dst = root / artifact.destination
         _ensure_inside_root(root, dst, label=f"Artifact {artifact.artifact_type!r}")
-        if dst.exists() and not force:
+        template = artifact.source.read_text(encoding="utf-8")
+        content = _render_template(template, project_name=name, profile=profile, generated_at=generated_at)
+        # ``destination`` is a str for some artifacts and a Path for others;
+        # the manifest is JSON, so its keys are always strings.
+        key = str(artifact.destination)
+        action = sm.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
+        if action != "write":
             result.skipped.append(artifact.destination)
+            if action == "adopt":
+                generated[key] = sm.digest(dst)
             continue
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            template = artifact.source.read_text(encoding="utf-8")
-            dst.write_text(_render_template(template, project_name=name, profile=profile, generated_at=generated_at), encoding="utf-8")
+            dst.write_text(content, encoding="utf-8")
+            generated[key] = sm.digest(dst)
         result.written.append(artifact.destination)
 
     manifest_dst = root / STANDARD_PROFILE_FILE
-    if manifest_dst.exists() and not force:
+    profile_key = str(STANDARD_PROFILE_FILE)
+    profile_content = _manifest_content(profile, name, task_id, artifacts)
+    action = sm.decide(root, profile_key, profile_content, force=force, refresh=refresh, manifest=manifest)
+    if action != "write":
         result.skipped.append(STANDARD_PROFILE_FILE)
+        if action == "adopt":
+            generated[profile_key] = sm.digest(manifest_dst)
     else:
         if not dry_run:
             manifest_dst.parent.mkdir(parents=True, exist_ok=True)
-            manifest_dst.write_text(_manifest_content(profile, name, task_id, artifacts), encoding="utf-8")
+            manifest_dst.write_text(profile_content, encoding="utf-8")
+            generated[profile_key] = sm.digest(manifest_dst)
         result.written.append(STANDARD_PROFILE_FILE)
+
+    if generated and not dry_run:
+        sm.save_generation_manifest(root, generated)
 
     selected_providers = normalize_provider_ids(provider_ids)
     if selected_providers:

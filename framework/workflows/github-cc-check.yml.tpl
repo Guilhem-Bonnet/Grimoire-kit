@@ -63,8 +63,8 @@ jobs:
 
       - name: Grimoire — Completion Contract
         run: |
-          if [[ -f "_grimoire/_config/custom/cc-verify.sh" ]]; then
-            bash _grimoire/_config/custom/cc-verify.sh --changed-only
+          if [[ -f "_grimoire/kit/framework/cc-verify.sh" ]]; then
+            bash _grimoire/kit/framework/cc-verify.sh --changed-only
           else
             echo "[warn] cc-verify.sh introuvable — Grimoire non initialisé dans ce dépôt."
             echo "       Lancez 'grimoire init' pour installer le Completion Contract."

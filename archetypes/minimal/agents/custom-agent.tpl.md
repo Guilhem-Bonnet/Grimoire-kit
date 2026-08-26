@@ -21,7 +21,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="{{agent_tag}}.agent.yaml" name="{{agent_name}}" title="{{agent_role}}" icon="{{agent_icon}}">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG={{agent_tag}} | AGENT_NAME={{agent_name}} | LEARNINGS_FILE={{learnings_file}} | DOMAIN_WORD={{domain_word}}
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -66,7 +66,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="AA or fuzzy match on {{menu_keyword_1}}" action="#prompt-1">[AA] {{menu_item_1}}</item>
     <item cmd="BB or fuzzy match on {{menu_keyword_2}}" action="#prompt-2">[BB] {{menu_item_2}}</item>
     <item cmd="CC or fuzzy match on {{menu_keyword_3}}" action="#prompt-3">[CC] {{menu_item_3}}</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

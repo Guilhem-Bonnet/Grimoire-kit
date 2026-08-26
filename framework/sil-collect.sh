@@ -157,7 +157,7 @@ cat > "$OUTPUT_FILE" <<HEADER
 **Projet** : $PROJECT_ROOT
 
 > ⚠️ Ce fichier est un snapshot BRUT à analyser par Sentinel ([FA]).
-> Ne pas modifier manuellement. Re-générer via : \`bash _grimoire/_config/custom/sil-collect.sh\`
+> Ne pas modifier manuellement. Re-générer via : \`bash _grimoire/kit/framework/sil-collect.sh\`
 
 ---
 

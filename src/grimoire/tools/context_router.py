@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+from grimoire.core import layout
 from grimoire.tools._common import GrimoireTool, estimate_tokens
 from grimoire.tools.model_windows import (
     DEFAULT_MODEL as DEFAULT_MODEL,
@@ -168,7 +169,9 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
         ))
 
     # Find agent file matching tag
-    for pattern in ["_grimoire/_config/agents/*.md", "_grimoire/_config/custom/*.md",
+    for pattern in [f"{layout.OVERRIDES_DIR}/{layout.AGENTS_SUBDIR}/*.md",
+                     f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/*.md",
+                     "_grimoire/_config/agents/*.md", "_grimoire/_config/custom/*.md",
                      "_grimoire/*/agents/*.md"]:
         for af in project_root.glob(pattern):
             if af.name == "agent-base.md":

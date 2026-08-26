@@ -85,11 +85,44 @@ grimoire lint . --format json
 
 ### `grimoire up`
 
-Réconcilie l'état du projet avec la configuration.
+Amène le projet à la version du kit installé — c'est la commande de mise à jour.
 
 ```bash
 grimoire up [PATH] [--dry-run]
 ```
+
+Sur un projet neuf, elle initialise. Sur un projet existant, elle régénère les
+artefacts appartenant au kit (`_grimoire/kit/`, wrappers d'agents, prompts,
+instructions) et rafraîchit les artefacts du standard que le projet n'a pas
+modifiés. Ce que le projet possède — `project-context.yaml`, `.mcp.json`, la
+mémoire, les décisions de conformité, tout `_grimoire/overrides/` — n'est jamais
+réécrit.
+
+L'écriture est différentielle : sans nouvelle version du kit, aucun fichier
+n'est touché et le rapport indique `kit artifacts already up to date`. La
+commande est donc sûre à lancer à tout moment.
+
+### `grimoire migrate`
+
+Fait passer un projet créé avant la frontière kit/overrides sur cette frontière.
+Opération unique : une fois faite, `grimoire up` suffit.
+
+```bash
+grimoire migrate [PATH]              # montre ce qui bougerait, n'écrit rien
+grimoire migrate [PATH] --apply      # exécute, après snapshot
+grimoire migrate [PATH] --adopt-kit  # reprend la version du kit sur les fichiers qui la masquaient
+grimoire migrate [PATH] --restore 20260826T193210Z
+```
+
+Chaque fichier de l'ancien emplacement est classé par son contenu : s'il
+correspond à quelque chose que le kit a livré un jour (catalogue d'empreintes
+embarqué), il est régénéré dans `_grimoire/kit/` ; sinon il est considéré comme
+étant celui du projet et déplacé dans `_grimoire/overrides/`. Un contenu non
+reconnu n'est jamais supprimé.
+
+Le plan signale les fichiers qui vont **masquer** un fichier du kit : ceux-là
+cesseront de recevoir les mises à jour. S'ils ne contiennent aucune
+customisation, `--adopt-kit` les remet sous la responsabilité du kit.
 
 ### `grimoire diff`
 

@@ -18,7 +18,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from grimoire.core.project import AGENT_DIR_NAMES
+from grimoire.core import layout
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.data import framework_path
 from grimoire.hosts.surface import (
@@ -138,9 +138,17 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _agent_files(project_root: Path) -> list[Path]:
+    """Définitions d'agents à projeter, l'override l'emportant sur le kit.
+
+    La résolution passe par :func:`layout.agent_dirs` et non par un balayage
+    de répertoires : la frontière kit/overrides est ce qui rend possible
+    « personnaliser un agent sans forker les trente autres », et un émetteur
+    qui lirait le tier kit en direct projetterait la persona livrée par-dessus
+    celle du projet. Les emplacements d'avant la frontière restent lus, en
+    dernier, pour qu'un projet non migré continue de fonctionner.
+    """
     seen: dict[str, Path] = {}
-    for name in AGENT_DIR_NAMES:
-        directory = project_root / "_grimoire" / name
+    for directory in layout.agent_dirs(project_root):
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.md")):

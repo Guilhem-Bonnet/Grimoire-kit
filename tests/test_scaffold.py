@@ -159,13 +159,13 @@ class TestProjectScaffolder:
         plan = s.plan()
         res = s.execute(plan)
         assert len(res.created_dirs) >= 10
-        assert (tmp_path / "_grimoire" / "_config" / "custom" / "agents").is_dir()
+        assert (tmp_path / "_grimoire" / "kit" / "agents").is_dir()
 
     def test_execute_copies_agents(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        agents_dir = tmp_path / "_grimoire" / "_config" / "custom" / "agents"
+        agents_dir = tmp_path / "_grimoire" / "kit" / "agents"
         assert agents_dir.is_dir()
         md_files = list(agents_dir.glob("*.md"))
         assert len(md_files) >= 3, f"Expected >=3 agent files, got {len(md_files)}"
@@ -194,7 +194,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
+        manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
         assert manifest.is_file()
         content = manifest.read_text()
         assert "name,file,category,description,icon" in content
@@ -219,7 +219,7 @@ class TestProjectScaffolder:
         s.execute(plan)
 
         # Agents directory should have meta + infra-ops + stack + feature agents
-        agents_dir = tmp_path / "_grimoire" / "_config" / "custom" / "agents"
+        agents_dir = tmp_path / "_grimoire" / "kit" / "agents"
         md_files = list(agents_dir.glob("*.md"))
         agent_names = {f.stem for f in md_files}
 
@@ -246,12 +246,19 @@ class TestProjectScaffolder:
         assert "qdrant-local" in ctx
 
     def test_idempotent_execute(self, tmp_path: Path) -> None:
-        """Running execute twice should not fail."""
+        """A second run writes nothing: everything is already current.
+
+        This is the property that makes ``grimoire up`` runnable at any time —
+        it reports work only when a new kit version actually brings some.
+        """
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
         result2 = s.execute(plan)
-        assert result2.total == plan.total_operations
+        assert result2.copied_files == []
+        assert result2.rendered_files == []
+        assert result2.total == 0
+
 
     def test_plan_includes_copilot_instructions(self, tmp_path: Path) -> None:
         """Scaffold must generate .github/copilot-instructions.md."""
@@ -269,16 +276,21 @@ class TestProjectScaffolder:
         assert "| Agent |" in ci
         assert "concierge" in ci
 
-    def test_copilot_instructions_not_overwritten(self, tmp_path: Path) -> None:
-        """Existing copilot-instructions.md should not be overwritten."""
+    def test_copilot_instructions_are_regenerated(self, tmp_path: Path) -> None:
+        """copilot-instructions.md is kit-owned and follows the kit version.
+
+        It lists the installed agents and workflows, so a frozen copy goes
+        stale the moment the agent set changes. Project-specific instructions
+        belong in the files the kit never rewrites.
+        """
         gh = tmp_path / ".github"
         gh.mkdir()
         existing = gh / "copilot-instructions.md"
-        existing.write_text("# Custom instructions\n")
+        existing.write_text("# Stale copy from an older kit\n")
         s = _scaffolder(tmp_path)
-        plan = s.plan()
-        s.execute(plan)
-        assert existing.read_text() == "# Custom instructions\n"
+        s.execute(s.plan())
+        assert existing.read_text() != "# Stale copy from an older kit\n"
+
 
     def test_copilot_instructions_mentions_at_concierge(self, tmp_path: Path) -> None:
         """copilot-instructions.md should tell users about @concierge."""
@@ -356,7 +368,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path, archetype="infra-ops")
         plan = s.plan()
         s.execute(plan)
-        dna = tmp_path / "_grimoire" / "_config" / "archetype.dna.yaml"
+        dna = tmp_path / "_grimoire" / "kit" / "archetype.dna.yaml"
         assert dna.is_file()
         content = dna.read_text()
         assert "infra-ops" in content or "traits" in content
@@ -397,7 +409,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
+        manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
         content = manifest.read_text()
         assert "name,file,category,description,icon" in content
         lines = content.strip().splitlines()

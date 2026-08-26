@@ -17,14 +17,14 @@ Vérifie les points suivants et liste les problèmes trouvés :
 ### Agents
 - `.github/agents/` existe et contient des `.agent.md` ?
 - Les fichiers agents ont tous un frontmatter YAML avec `description:` ?
-- Les agents dans `.github/agents/` pointent vers des fichiers existants dans `_grimoire/_config/custom/agents/` ?
+- Les agents dans `.github/agents/` pointent vers des fichiers existants dans `_grimoire/kit/agents/` ?
 
 ### Mémoire
 - `_grimoire/_memory/shared-context.md` existe et n'est pas vide ?
 - Pas de fichiers JSON malformés dans `_grimoire/_memory/` ?
 
 ### Structure
-- `_grimoire/_config/custom/agents/` contient des agents ?
+- `_grimoire/kit/agents/` contient des agents ?
 - `_grimoire-output/` existe ?
 
 ## 2. Triage des problèmes

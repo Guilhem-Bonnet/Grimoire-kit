@@ -18,10 +18,13 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.agentic_standard import (
-    STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
 )
+
+# ``STANDARD_DIR`` a déménagé dans ``standard_manifest`` avec la frontière
+# kit/overrides : on le prend à sa source plutôt qu'à travers un ré-export.
+from grimoire.core.standard_manifest import STANDARD_DIR
 
 TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 

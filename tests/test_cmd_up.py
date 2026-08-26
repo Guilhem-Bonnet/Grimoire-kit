@@ -77,7 +77,7 @@ class TestUpExpress:
         # init
         assert (target / "project-context.yaml").is_file()
         assert "demo-app" in (target / "project-context.yaml").read_text(encoding="utf-8")
-        assert (target / "_grimoire" / "_config" / "custom" / "agents").is_dir()
+        assert (target / "_grimoire" / "kit" / "agents").is_dir()
         # identity propagation targets exist (init generates them; step reports sync)
         assert (target / ".github" / "copilot-instructions.md").is_file()
         # standard init
@@ -192,7 +192,11 @@ class TestUpJson:
         assert "agents_count" in data
         steps = {s["step"]: s["status"] for s in data["steps"]}
         assert steps["init"] == "skipped"
-        assert steps["standard"] == "skipped"
+        # `up` on an initialized project is an update pass, not a no-op: the
+        # standard step refreshes kit-owned artifacts (leaving project-owned
+        # ones alone) instead of skipping outright.
+        assert steps["standard"] == "done"
+        assert steps["refresh"] == "done"
 
     def test_json_fresh_init_emits_single_document(self, runner, cli_app, tmp_path: Path) -> None:
         target = tmp_path / "proj"

@@ -19,7 +19,7 @@ Avant toute action, charger :
 
 | Dossier | Rôle |
 |---------|------|
-| `_grimoire/_config/custom/agents/` | Agents IA internes (persona + instructions) |
+| `_grimoire/kit/agents/` | Agents IA internes (persona + instructions) |
 | `.github/agents/` | Wrappers VS Code Copilot (auto-générés) |
 | `.github/prompts/` | Workflows disponibles via `/` dans Copilot Chat |
 | `_grimoire/_memory/` | Mémoire persistante inter-sessions |
@@ -41,7 +41,7 @@ Avant toute action, charger :
 
 - L'agent `concierge` est le point d'entrée unique — il route vers les spécialistes
 - Les agents communiquent via `_grimoire/_memory/handoff-log.md`
-- Chaque agent doit charger `_grimoire/_config/custom/agent-base.md` au démarrage
+- Chaque agent doit charger `_grimoire/kit/framework/agent-base.md` au démarrage
 
 ## Anti-patterns
 
@@ -84,7 +84,7 @@ Quand un agent est activé, il doit suivre ce protocole :
 
 1. ✅ **Charger le contexte** : `_grimoire/_memory/shared-context.md`
 2. ✅ **Charger la config** : `_grimoire/_memory/config.yaml`
-3. ✅ **Charger agent-base** : `_grimoire/_config/custom/agent-base.md`
+3. ✅ **Charger agent-base** : `_grimoire/kit/framework/agent-base.md`
 4. ✅ **Suivre les instructions** : de ce fichier exactement
 5. ✅ **Appliquer la persona** : jamais sortir de rôle
 
@@ -93,7 +93,7 @@ Quand un agent est activé, il doit suivre ce protocole :
 Avant chaque commit, valider :
 
 ```bash
-bash _grimoire/_config/custom/cc-verify.sh
+bash _grimoire/kit/framework/cc-verify.sh
 ```
 
 Cela vérifie :

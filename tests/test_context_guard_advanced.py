@@ -36,7 +36,7 @@ class TestResolveAgentLoads(unittest.TestCase):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
         # Créer la structure minimale
-        agents_dir = self.tmpdir / "_grimoire/_config/custom/agents"
+        agents_dir = self.tmpdir / "_grimoire/kit/agents"
         agents_dir.mkdir(parents=True)
         (self.tmpdir / "framework").mkdir(parents=True)
         (self.tmpdir / "_grimoire/_memory").mkdir(parents=True)
@@ -112,7 +112,7 @@ class TestComputeBudget(unittest.TestCase):
     def setUp(self):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
-        agents_dir = self.tmpdir / "_grimoire/_config/custom/agents"
+        agents_dir = self.tmpdir / "_grimoire/kit/agents"
         agents_dir.mkdir(parents=True)
         (self.tmpdir / "framework").mkdir(parents=True)
         (self.tmpdir / "_grimoire/_memory").mkdir(parents=True)
@@ -169,7 +169,7 @@ class TestFindAgents(unittest.TestCase):
     def setUp(self):
         self.cg = _import_cg()
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.custom_dir = self.tmpdir / "_grimoire/_config/custom/agents"
+        self.custom_dir = self.tmpdir / "_grimoire/kit/agents"
         self.custom_dir.mkdir(parents=True)
 
     def tearDown(self):

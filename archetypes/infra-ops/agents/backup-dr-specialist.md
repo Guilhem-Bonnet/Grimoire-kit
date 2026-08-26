@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="backup-dr-specialist.agent.yaml" name="Phoenix" title="Backup &amp; Disaster Recovery Specialist" icon="🏰">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=phoenix | AGENT_NAME=Phoenix | LEARNINGS_FILE=backup-dr | DOMAIN_WORD=backup/DR
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -63,7 +63,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="DR or fuzzy match on disaster-recovery or plan" action="#dr-plan">[DR] Plan DR — disaster recovery</item>
     <item cmd="TR or fuzzy match on test-restore" action="#test-restore">[TR] Test Restauration — valider un backup</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Longhorn, Rétention, Clés</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

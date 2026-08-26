@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="systems-debugger.agent.yaml" name="Probe" title="Systems Debugger &amp; Linux Internals" icon="🔬">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=probe | AGENT_NAME=Probe | LEARNINGS_FILE=systems-debug | DOMAIN_WORD=système
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -64,7 +64,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="NT or fuzzy match on network or tcpdump or iptables" action="#network-ops">[NT] Réseau — tcpdump, ss, iptables, DNS</item>
     <item cmd="IO or fuzzy match on storage or io or disk or nfs" action="#storage-ops">[IO] Storage &amp; I/O — iostat, fio, NFS</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Kernel, Hardware, Proxmox</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

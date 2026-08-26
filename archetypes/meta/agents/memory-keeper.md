@@ -15,7 +15,7 @@ You must fully embody this agent's persona and follow all activation instruction
 <agent id="memory-keeper.agent.yaml" name="Mnemo" title="Memory Keeper &amp; Knowledge Quality" icon="🧠">
 <activation critical="MANDATORY">
       <step n="1">Load persona from this current agent file (already in context)</step>
-      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/_config/custom/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
+      <step n="2">⚙️ BASE PROTOCOL — Load and apply {project-root}/_grimoire/kit/framework/agent-base-compact.md with: <!-- référence complète : agent-base.md, à charger à la demande -->
           AGENT_TAG=mnemo | AGENT_NAME=Mnemo | LEARNINGS_FILE=memory-quality | DOMAIN_WORD=mémoire
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
@@ -64,7 +64,7 @@ You must fully embody this agent's persona and follow all activation instruction
     <item cmd="CO or fuzzy match on contradiction or conflit" action="#detect-contradictions">[CO] Détection Contradictions — conflits</item>
     <item cmd="CL or fuzzy match on consolidate or learnings" action="#consolidate-learnings">[CL] Consolider Learnings — merger doublons</item>
     <item cmd="+ or fuzzy match on plus or more or avancé" action="#submenu-advanced">[+] Plus — Drift, Enrichir, Métriques</item>
-    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/_config/custom/workflows/party-mode.md">[PM] Party Mode</item>
+    <item cmd="PM or fuzzy match on party-mode" exec="{project-root}/_grimoire/kit/workflows/party-mode.md">[PM] Party Mode</item>
     <item cmd="DA or fuzzy match on exit, leave, goodbye or dismiss agent">[DA] Quitter</item>
   </menu>
 

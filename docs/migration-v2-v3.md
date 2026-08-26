@@ -59,7 +59,7 @@ project:
 ```bash
 # Créer les répertoires v3
 mkdir -p _grimoire/_config/agents
-mkdir -p _grimoire/_config/custom
+mkdir -p _grimoire/kit/framework
 mkdir -p _grimoire/core/agents
 mkdir -p _grimoire/core/workflows
 ```
@@ -75,7 +75,7 @@ grimoire doctor
 - `_grimoire/_memory/` — toute la mémoire (shared-context, decisions-log, learnings, etc.)
 - `project-context.yaml` — le contenu existant est conservé, seule la section `grimoire` est ajoutée
 - `.github/copilot-instructions.md` — inchangé
-- Agents personnalisés dans `_grimoire/_config/custom/`
+- Agents personnalisés dans `_grimoire/kit/framework/`
 
 ## Ce qui change
 

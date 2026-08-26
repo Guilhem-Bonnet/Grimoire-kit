@@ -58,6 +58,19 @@ grimoire cockpit scan ~/dev --yes
 Détecte récursivement les projets Grimoire de votre machine et les enrôle dans
 le cockpit multi-projets (`grimoire cockpit`).
 
+Le registre garde une entrée par projet enrôlé. Quand un projet est supprimé ou
+déplacé, son entrée survit et pointe dans le vide :
+
+```bash
+grimoire cockpit prune --dry-run   # voir ce qui partirait
+grimoire cockpit prune             # retirer, après confirmation
+```
+
+Par défaut, seules les entrées dont le chemin a disparu sont retirées : un
+répertoire encore présent a pu être enrôlé délibérément, et supprimer une entrée
+valide coûte plus cher que d'en garder une douteuse. `--stale` élargit aux
+chemins qui existent mais ne portent plus de marqueur Grimoire.
+
 ### 4. Première interaction
 
 Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :

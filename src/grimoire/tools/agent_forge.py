@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import layout
 from grimoire.tools._common import GrimoireTool
 
 # ── Domain Taxonomy ───────────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ def extract_agent_name(text: str, domain_key: str,
 def find_existing_agents(project_root: Path) -> list[str]:
     """List IDs of existing agents."""
     agents: list[str] = []
-    for d in [project_root / "_grimoire/_config/agents",
+    for d in [*layout.agent_dirs(project_root),
               project_root / "_grimoire/_config/custom",
               project_root / "_grimoire/core/agents",
               project_root / "_grimoire/bmm/agents"]:
