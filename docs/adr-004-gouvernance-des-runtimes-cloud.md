@@ -83,6 +83,23 @@ Trois faits établis par cartographie du code et de la cible, le 2026-08-26 :
   l'échéance haut risque de l'Annexe III a glissé au 2027-12-02. L'argument est
   l'ingénierie de la preuve — dette de preuve, incidents, coût de re-run.
 
+## Le schéma des sorties `-o json` entre dans l'API publique
+
+[ADR-002](adr-002-semver-policy.md) déclare publics `grimoire.core.*`, `grimoire.cli.*`
+et les options documentées dans `docs/cli-reference.md`, mais reste muet sur la forme des
+payloads émis par `-o json`. Une CI tierce qui parse un verdict de gate n'avait donc
+aucune garantie SemVer : le schéma pouvait changer en correctif.
+
+**Décision** : les payloads JSON portant une clé `schema` de la forme
+`grimoire.<commande>/vN` font partie de l'API publique au sens d'ADR-002. Leur ensemble
+de clés de premier niveau est verrouillé par test. Retirer ou renommer une clé est une
+rupture majeure ; en ajouter une est mineur, et impose d'incrémenter `N` lorsque la
+sémantique d'une clé existante change. Les sorties sans clé `schema` restent hors
+périmètre et peuvent changer librement.
+
+Cette décision est la condition d'existence de la posture P1 : un gate qu'un tiers ne
+peut pas parser de façon stable n'est pas opposable.
+
 ## Alternatives rejetées
 
 - **Devenir un runtime minimal « juste pour le contrôle »** — une boucle

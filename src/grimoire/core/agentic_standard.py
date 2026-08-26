@@ -18,6 +18,7 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core import standard_manifest as sm
 from grimoire.core.standard_manifest import STANDARD_DIR, _render_template
+from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
@@ -933,15 +934,7 @@ def setup_standard_profile(
 
 
 def _read_manifest_profile(project_root: Path) -> str | None:
-    manifest = project_root / STANDARD_PROFILE_FILE
-    if not manifest.is_file():
-        return None
-    data = _yaml().load(manifest)
-    if not isinstance(data, dict):
-        msg = f"{STANDARD_PROFILE_FILE} must be a YAML mapping."
-        raise ValueError(msg)
-    profile = data.get("profile")
-    return str(profile) if profile else None
+    return read_profile(project_root / STANDARD_PROFILE_FILE)
 
 
 def _load_yaml_file(root: Path, rel_path: Path, result: StandardVerificationResult) -> Any | None:
@@ -2068,6 +2061,10 @@ def verify_standard_profile(
     result = StandardVerificationResult(profile=profile.id, project_root=root)
     required_paths = [artifact.destination for artifact in artifacts]
     required_paths.append(STANDARD_PROFILE_FILE)
+    known = {str(path) for path in required_paths}
+    for recorded in read_artifact_paths(root / STANDARD_PROFILE_FILE):
+        if str(recorded) not in known:
+            required_paths.append(recorded)
 
     for rel_path in required_paths:
         path = root / rel_path

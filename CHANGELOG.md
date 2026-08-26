@@ -29,6 +29,30 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Modifié
 
+- **`grimoire standard verify` ne laisse plus supprimer un artefact activé par un
+  besoin.** La vérification recalculait l'ensemble requis depuis le seul profil,
+  alors que `setup_standard_profile` avait déjà persisté la liste complète —
+  extras compris — dans `_grimoire/standard/standard-profile.yaml`. Après
+  `standard init --needs solo-prototyping`, supprimer
+  `_grimoire/standard/evidence-gates.yaml` laissait `ok=true, missing=[]`. La
+  liste enregistrée fait désormais foi. **Rupture assumée** : un projet dont les
+  artefacts d'extras ont disparu passe de vert à rouge sans qu'une ligne de son
+  code ait bougé — c'est précisément ce que le contrôle doit signaler. La remise
+  en conformité se fait par `grimoire up`, qui régénère le tier kit en préservant
+  waivers, scores et task board.
+- **`grimoire standard gate check --strict` sort en 2 sur les cinq profils.**
+  L'escalade était réservée à `governed` et `production` : un projet `starter`,
+  `controlled` ou `orchestrated` ne pouvait pas casser un pipeline, quel que soit
+  le nombre de preuves manquantes.
+- **Les sorties JSON du standard portent un schéma versionné.** `verify`, `audit`,
+  `score` et `gate check` émettent une clé `schema`
+  (`grimoire.standard-<verbe>/v1`) et leur ensemble de clés de premier niveau est
+  verrouillé par un test : une CI tierce qui les parse dispose enfin d'un contrat,
+  là où le schéma pouvait changer en correctif.
+- Les blocs `paths:` de `ci-sdk.yml` incluent `framework/agentic-standard/**` :
+  une PR qui ne modifie que du YAML du standard déclenchait `agentic-standard.yml`
+  et `ci-validate.yml`, mais pas les tests de `tests/test_agentic_standard.py`.
+
 - **`grimoire up` met réellement à jour un projet existant.** Auparavant il
   s'arrêtait dès que `project-context.yaml` existait : agents, framework,
   workflows, prompts et instructions restaient gelés à la version d'installation
