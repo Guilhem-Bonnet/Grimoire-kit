@@ -397,3 +397,139 @@ def test_sync_site_seeds_demo_and_preserves_generated_data(tmp_path: Path) -> No
     sentinel.write_text('{"generated": true}', encoding="utf-8")
     cmd_cockpit._sync_site(serve)
     assert json.loads(sentinel.read_text(encoding="utf-8")) == {"generated": True}
+
+
+# ── L0 : sélection de projet et API de lecture multi-projets ─────────────────
+
+
+def _get_api(port: int, path: str) -> tuple[int, Any]:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _post_json(port: int, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+@pytest.fixture
+def duo_server(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """Two registered projects, served by the cockpit handler."""
+    alpha, beta = _project(tmp_path, "alpha"), _project(tmp_path, "beta")
+    cmd_cockpit._save_registry([
+        {"name": "Alpha", "path": str(alpha), "slug": "alpha"},
+        {"name": "Beta", "path": str(beta), "slug": "beta"},
+    ])
+    httpd = cmd_cockpit.ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield httpd.server_address[1], alpha, beta
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_projects_endpoint_lists_registry(duo_server: Any) -> None:
+    port, alpha, _beta = duo_server
+    status, body = _get_api(port, "/api/projects")
+    assert status == 200
+    assert [p["slug"] for p in body["projects"]] == ["alpha", "beta"]
+    assert body["primary"] == "alpha"
+    assert body["selected"] == "alpha"
+    assert next(p for p in body["projects"] if p["slug"] == "alpha")["path"] == str(alpha)
+    assert all(p["exists"] for p in body["projects"])
+
+
+def test_select_switches_the_served_project(duo_server: Any) -> None:
+    """The acceptance criterion: selecting another project changes what is served."""
+    port, alpha, beta = duo_server
+
+    status, body = _get_api(port, "/api/status")
+    assert status == 200
+    assert body["projectRoot"] == str(alpha)
+
+    assert _post_json(port, "/api/projects/select", {"slug": "beta"}) == (200, {"ok": True, "selected": "beta"})
+
+    status, body = _get_api(port, "/api/status")
+    assert status == 200
+    assert body["projectRoot"] == str(beta), "la sélection doit changer le projet servi"
+    assert _get_api(port, "/api/projects")[1]["selected"] == "beta"
+
+
+def test_explicit_query_overrides_the_selection(duo_server: Any) -> None:
+    port, alpha, beta = duo_server
+    _post_json(port, "/api/projects/select", {"slug": "beta"})
+    assert _get_api(port, "/api/status?project=alpha")[1]["projectRoot"] == str(alpha)
+    assert _get_api(port, "/api/status")[1]["projectRoot"] == str(beta)
+
+
+def test_select_accepts_a_path_for_the_legacy_ui(duo_server: Any) -> None:
+    port, _alpha, beta = duo_server
+    status, body = _post_json(port, "/api/projects/select", {"path": str(beta)})
+    assert (status, body["selected"]) == (200, "beta")
+
+
+def test_select_rejects_an_unknown_project(duo_server: Any) -> None:
+    port, _alpha, _beta = duo_server
+    status, body = _post_json(port, "/api/projects/select", {"slug": "ghost"})
+    assert status == 404
+    assert body["ok"] is False
+
+
+def test_status_advertises_a_read_only_host(duo_server: Any) -> None:
+    """The UI must know it is on the cockpit, so it stops offering mutations."""
+    port, _alpha, _beta = duo_server
+    _status, body = _get_api(port, "/api/status")
+    assert body["host"] == "cockpit"
+    assert body["readOnly"] is True
+    assert body["project"] == "alpha"
+
+
+def test_unknown_api_path_is_404_not_a_static_probe(duo_server: Any) -> None:
+    port, _alpha, _beta = duo_server
+    assert _get_api(port, "/api/nope")[0] == 404
+
+
+def test_static_files_still_served(duo_server: Any, tmp_path: Path) -> None:
+    port, _alpha, _beta = duo_server
+    (tmp_path / "hello.txt").write_text("bonjour", encoding="utf-8")
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/hello.txt", timeout=5) as resp:
+        assert resp.read().decode() == "bonjour"
+
+
+def test_selection_falls_back_when_the_project_disappears(duo_server: Any) -> None:
+    port, alpha, _beta = duo_server
+    _post_json(port, "/api/projects/select", {"slug": "beta"})
+    cmd_cockpit._save_registry([{"name": "Alpha", "path": str(alpha), "slug": "alpha"}])
+    assert _get_api(port, "/api/status")[1]["projectRoot"] == str(alpha)
+
+
+def test_prune_drops_dead_paths(runner: CliRunner, tmp_path: Path) -> None:
+    alive = _project(tmp_path, "alive")
+    cmd_cockpit._save_registry([
+        {"name": "Alive", "path": str(alive), "slug": "alive"},
+        {"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"},
+    ])
+    result = runner.invoke(app, ["cockpit", "prune"])
+    assert result.exit_code == 0
+    assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["alive"]
+
+
+def test_prune_dry_run_changes_nothing(runner: CliRunner, tmp_path: Path) -> None:
+    cmd_cockpit._save_registry([{"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"}])
+    result = runner.invoke(app, ["cockpit", "prune", "--dry-run"])
+    assert result.exit_code == 0
+    assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["gone"]

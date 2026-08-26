@@ -97,7 +97,8 @@ from grimoire.tools.ext_manager import (
     load_manifest,
     remove_extension,
 )
-from grimoire.tools.memory_link import backend_catalogue, memory_link_status
+from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
+from grimoire.tools.memory_link import memory_link_status
 from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -1248,41 +1249,14 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             path = self.path.split("?")[0]
             try:
-                if path == "/api/status":
-                    self._json(api.status())
-                elif path == "/api/setup":
-                    self._json(api.setup_view())
-                elif path == "/api/archetypes":
-                    self._json(api.archetypes())
-                elif path == "/api/extensions":
-                    self._json(api.extensions_view())
-                elif path == "/api/blueprints":
-                    self._json(api.blueprints_list())
-                elif path == "/api/events/log":
-                    self._json(api.events_log())
-                elif path == "/api/stigmergy":
-                    self._json(api.stigmergy_view())
-                elif path == "/api/features":
-                    self._json(api.features_view())
-                elif path == "/api/cost-model":
-                    model = parse_qs(urlparse(self.path).query).get("model", [None])[0]
-                    self._json(api.cost_model_view(model))
-                elif path == "/api/otel":
-                    self._json(api.otel_export())
-                elif path == "/api/primitives":
-                    self._json(api.primitives_view())
-                elif path == "/api/backends":
-                    self._json(backend_catalogue())
-                elif path == "/api/memory/status":
-                    self._json(api.memory_link_view())
-                elif path.endswith("/diff") and path.startswith("/api/blueprints/"):
-                    self._json(api.blueprint_diff(path.split("/")[3]))
-                elif path.startswith("/api/blueprints/"):
-                    self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
-                elif path == "/api/events":
+                if path == "/api/events":
                     self._sse()
-                else:
+                    return
+                payload = api_get(api, path, parse_qs(urlparse(self.path).query))
+                if payload is API_GET_UNHANDLED:
                     self._static(path)
+                else:
+                    self._json(payload)
             except FileNotFoundError as exc:
                 self._error(f"introuvable : {exc}", 404)
             except (ValueError, json.JSONDecodeError) as exc:
