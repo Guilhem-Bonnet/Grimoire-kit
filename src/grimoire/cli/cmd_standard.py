@@ -783,6 +783,7 @@ def verify_profile(
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
+            "schema": "grimoire.standard-verify/v1",
             "ok": result.ok,
             "profile": result.profile,
             "project_root": str(result.project_root),
@@ -833,6 +834,7 @@ def audit_profile(
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
+            "schema": "grimoire.standard-audit/v1",
             "ok": result.ok,
             "profile": result.profile,
             "project_root": str(result.project_root),
@@ -978,11 +980,12 @@ def gate_check(
     task_id: str = typer.Option("bootstrap", "--task-id", help="Task id to evaluate."),
     target_state: str | None = typer.Option(None, "--target-state", help="Optional target lifecycle state."),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
-    strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when governed/production gates fail."),
+    strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when gates fail, whatever the profile."),
 ) -> None:
     """Check standard evidence gates for a task."""
     result = check_evidence_gates(project_root, task_id=task_id, target_state=target_state, profile_id=profile)
     payload = {
+        "schema": "grimoire.standard-gate-check/v1",
         "ok": result.ok,
         "task_id": result.task_id,
         "profile": result.profile,
@@ -999,7 +1002,7 @@ def gate_check(
         ],
         "strict": strict,
     }
-    strict_failure = strict and result.profile in {"governed", "production"} and not result.ok
+    strict_failure = strict and not result.ok
     exit_code = 2 if strict_failure else 0 if result.ok else 1
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -1120,6 +1123,7 @@ def score(
     """Calculate and persist a standard compliance score."""
     result = calculate_compliance_score(project_root, task_id=task_id, profile_id=profile)
     payload = {
+        "schema": "grimoire.standard-score/v1",
         "ok": result.ok,
         "profile": result.profile,
         "score": result.score,
