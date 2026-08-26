@@ -351,7 +351,8 @@ def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.
     )
     assert status == 200
     assert body["ok"] is True
-    assert captured["cmd"][-3:] == ["delete", "dec-03", "--yes"]
+    # Les valeurs de la requête passent après ``--`` (cf. _is_plain_argument).
+    assert captured["cmd"][-4:] == ["delete", "--yes", "--", "dec-03"]
 
 
 def test_api_sync_maps_to_gate_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:

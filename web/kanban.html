@@ -192,8 +192,11 @@ h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-heig
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   let data = null;
   try {
-    const r = await fetch('data/taskboard.json', { cache: 'no-store' });
-    data = await r.json();
+    /* Résolution partagée : couche du projet courant, puis couche plate. */
+    if (window.Atelier && Atelier.ready) { await Atelier.ready; }
+    data = (window.Atelier && Atelier.fetchData)
+      ? await Atelier.fetchData('taskboard.json')
+      : await (await fetch('data/taskboard.json', { cache: 'no-store' })).json();
   } catch (e) {
     document.getElementById('kb-cols').innerHTML =
       '<p style="font-family:var(--font-mono);font-size:0.7rem;color:var(--ink-muted);padding:20px 2px">données du board indisponibles (data/taskboard.json) — générez-les avec <code>gen-site-data</code> dans un projet gouverné.</p>';

@@ -13,6 +13,9 @@ import json
 
 import typer
 
+# Importe pour son effet de bord d'enregistrement : cable `memory shared`
+# sur memory_app.
+from grimoire.cli import cmd_memory_shared  # noqa: F401
 from grimoire.cli.cmd_memory import (
     _get_fmt,
     _graph_exclude_opt,

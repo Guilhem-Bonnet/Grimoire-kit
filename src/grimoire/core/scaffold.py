@@ -74,6 +74,7 @@ def write_text_if_changed(dst: Path, content: str) -> bool:
         if dst.read_text(encoding="utf-8") == content:
             return False
     except (OSError, UnicodeDecodeError):
+        # Absent ou illisible : il n'y a rien à comparer, on écrit.
         pass
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(content, encoding="utf-8")

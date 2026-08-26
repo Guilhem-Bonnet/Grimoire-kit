@@ -106,6 +106,7 @@ def main() -> int:
         if isinstance(existing, dict):
             catalog.update(existing)
     except (OSError, json.JSONDecodeError):
+        # Pas encore de catalogue, ou illisible : on repart d'un vide.
         pass
 
     if args.history:
