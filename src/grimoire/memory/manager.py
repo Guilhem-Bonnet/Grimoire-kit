@@ -77,6 +77,15 @@ def _resolve_auto(config: GrimoireConfig) -> str:
     return _best_local_backend()
 
 
+def _embedding_kwargs(mem: Any) -> dict[str, Any]:
+    """Embedding options shared by every engine-backed vector backend."""
+    return {
+        "embedding_cache_dir": mem.embedding_cache_dir,
+        "embedding_model_path": mem.embedding_model_path,
+        "embedding_offline": mem.embedding_offline,
+    }
+
+
 def _create_backend(config: GrimoireConfig, project_root: Path | None = None) -> MemoryBackend:
     """Instantiate the right backend from config.
 
@@ -115,6 +124,7 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
         kwargs: dict[str, Any] = {"collection": mem.collection_prefix}
         if mem.embedding_model:
             kwargs["embedding_model"] = mem.embedding_model
+        kwargs.update(_embedding_kwargs(mem))
         return QdrantBackend(**kwargs)
 
     if backend_id == _BACKEND_QDRANT_SERVER:
@@ -126,6 +136,7 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
         }
         if mem.embedding_model:
             kwargs["embedding_model"] = mem.embedding_model
+        kwargs.update(_embedding_kwargs(mem))
         return QdrantBackend(**kwargs)
 
     if backend_id == _BACKEND_WEAVIATE_SERVER:
@@ -138,6 +149,7 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
         }
         if mem.embedding_model:
             kwargs["embedding_model"] = mem.embedding_model
+        kwargs.update(_embedding_kwargs(mem))
         return WeaviateBackend(**kwargs)
 
     if backend_id == _BACKEND_MEMPALACE:
@@ -156,6 +168,7 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
             kwargs["qdrant_url"] = mem.qdrant_url
         if mem.embedding_model:
             kwargs["embedding_model"] = mem.embedding_model
+        # OllamaBackend embeds over HTTP: the local-engine options do not apply.
         return OllamaBackend(**kwargs)
 
     raise GrimoireMemoryError(f"Unknown memory backend: {backend_id}")

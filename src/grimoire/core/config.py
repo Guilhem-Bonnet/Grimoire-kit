@@ -121,6 +121,9 @@ class MemoryConfig:
     retrieval_mode: str = "vector"
     collection_prefix: str = "grimoire"
     embedding_model: str = ""
+    embedding_cache_dir: str = ""
+    embedding_model_path: str = ""
+    embedding_offline: bool = False
     qdrant_url: str = ""
     weaviate_url: str = ""
     weaviate_api_key_env: str = "GRIMOIRE_WEAVIATE_API_KEY"
@@ -167,6 +170,9 @@ class MemoryConfig:
             retrieval_mode=str(data.get("retrieval_mode", "vector")),
             collection_prefix=str(data.get("collection_prefix", "grimoire")),
             embedding_model=str(data.get("embedding_model", "")),
+            embedding_cache_dir=str(data.get("embedding_cache_dir", "")),
+            embedding_model_path=str(data.get("embedding_model_path", "")),
+            embedding_offline=bool(data.get("embedding_offline", False)),
             qdrant_url=str(data.get("qdrant_url", "")),
             weaviate_url=str(data.get("weaviate_url", "")),
             weaviate_api_key_env=str(data.get("weaviate_api_key_env", "GRIMOIRE_WEAVIATE_API_KEY")),

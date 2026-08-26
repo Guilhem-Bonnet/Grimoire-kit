@@ -160,6 +160,73 @@ def check_ollama() -> EnvCheck:
     )
 
 
+def check_embedding_model(target: Path | None = None) -> EnvCheck:
+    """Is a local embedding model reachable without going to the network?
+
+    Never downloads and never probes a remote host: it only reads what the
+    project declares and looks on disk. A closed site needs to know this before
+    the first search, not during it.
+    """
+    from grimoire.memory.bundle import default_install_root
+
+    cfg = _load_config_quiet(target) if target is not None else None
+    mem = cfg.memory if cfg is not None else None
+
+    if mem is not None and (not mem.vector_database or mem.retrieval_mode == "lexical"):
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="ok",
+            detail="lexical retrieval — no embedding model needed",
+        )
+
+    model_path = (mem.embedding_model_path if mem is not None else "").strip()
+    if model_path:
+        resolved = Path(model_path).expanduser()
+        if resolved.is_dir() and any(resolved.iterdir()):
+            return EnvCheck(
+                "env_embedding_model",
+                passed=True,
+                level="ok",
+                detail=f"embedding model available offline at {resolved}",
+            )
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="warn",
+            detail=f"memory.embedding_model_path points at nothing usable: {resolved}",
+            remedy="grimoire memory bundle install <archive> --configure",
+        )
+
+    installed = default_install_root()
+    bundles = sorted(p.parent.name for p in installed.glob("*/model") if p.is_dir()) if installed.is_dir() else []
+    if bundles:
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="info",
+            detail=f"bundle(s) installed but not wired in: {', '.join(bundles)}",
+            remedy="set memory.embedding_model_path, or re-run bundle install --configure",
+        )
+
+    offline = bool(mem.embedding_offline) if mem is not None else False
+    if offline:
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="warn",
+            detail="memory.embedding_offline is set but no local model is declared",
+            remedy="grimoire memory bundle install <archive> --configure",
+        )
+    return EnvCheck(
+        "env_embedding_model",
+        passed=True,
+        level="info",
+        detail="no local embedding model — the first search will download one",
+        remedy="on a closed site: grimoire memory bundle export, then install",
+    )
+
+
 def check_venv() -> EnvCheck:
     """Info: is the interpreter running inside a virtualenv?"""
     in_venv = sys.prefix != sys.base_prefix
@@ -272,6 +339,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         check_docker(),
         check_qdrant(target),
         check_ollama(),
+        check_embedding_model(target),
         *check_mcp_json(target),
     ]
 

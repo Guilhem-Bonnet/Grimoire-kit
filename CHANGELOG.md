@@ -24,6 +24,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
   appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
   ici. Opt-in via `memory.shared_collection`, vide par défaut.
+- **`grimoire memory bundle`** — transport d'un modèle d'embedding vers un site
+  sans accès sortant. `export` construit une archive depuis un repo Hub ou un
+  répertoire local, `install` refuse toute archive dont un fichier ne correspond
+  pas au SHA-256 déclaré au manifeste, `verify` recontrôle les empreintes puis
+  charge le modèle avec les sockets sortantes bloquées — un moteur qui retombe
+  sur un téléchargement distant échoue au lieu de réussir. `install --configure`
+  renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
+  les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
+  par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
 - **`grimoire cockpit prune`** — retire du registre les projets dont le chemin a
   disparu. Le registre accumulait une entrée par projet enrôlé sans jamais en
   retirer : chaque projet supprimé ou déplacé y laissait un pointeur mort, et
@@ -34,6 +43,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
   demande confirmation sauf `--yes`.
 
+### Modifié
+
+- **fastembed remplace sentence-transformers et torch** dans les extras
+  `[qdrant]` et `[weaviate]`. Mesure : la pile passe de **4,8 Go à 203 Mo** pour
+  le même modèle par défaut, dont 2,7 Go de wheels `nvidia/*` et 689 Mo de
+  triton qui n'avaient aucune raison d'être là — la CI les retéléchargeait à
+  chaque run. Aucun re-index n'est nécessaire : les deux moteurs produisent des
+  vecteurs identiques à 2e-7 près par composante (écart de cosinus 5e-13, top-1
+  à top-10 inchangés sur 40 entrées et 10 requêtes), l'export ONNX de Qdrant
+  étant fidèle et non quantifié. `sentence-transformers` reste utilisé à
+  l'exécution s'il est déjà installé. Nouveau module
+  `grimoire.memory.embedding`, partagé par les backends Qdrant et Weaviate.
+- **La dimension des vecteurs n'est plus lue dans une table** — elle vient d'un
+  vecteur sonde au chargement, donc elle est juste pour tout modèle, y compris
+  inconnu. L'ancienne table retombait silencieusement sur 384.
+- **Le backend Qdrant refuse une collection d'une autre largeur** que le modèle
+  courant, au lieu d'écrire des vecteurs incohérents dans un store existant.
+- Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
+  `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
+  chargement avec le moteur réellement installé, fastembed compris.
+- **`grimoire init` interroge le réseau, plus le service** — la question porte
+  désormais sur l'egress, et un projet déclaré sans accès sortant est généré en
+  `retrieval_mode: lexical`. Le démarrage de Qdrant via Docker reste proposé
+  quand l'egress existe, mais **par défaut non** au lieu de par défaut oui.
+- **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
+  signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
+  `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
 
 ## [3.32.0] - 2026-08-18
 
