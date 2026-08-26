@@ -9,6 +9,51 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **`grimoire memory up`** — met en place la stack mémoire complète, que
+  `grimoire init` laissait à moitié câblée : il détecte un backend vectoriel et
+  écrit `memory.backend`, mais `neo4j_uri`, `knowledge_graph`, `memory_graph`,
+  `code_graph`, `task_memory` et `redis_url` restaient commentés dans
+  `project-context.tpl.yaml` sans que rien ne les décommente. Trois profils
+  (`lexical`, `vector`, `full`). Règle centrale : **on n'active que ce qui
+  répond** — écrire `memory_graph: neo4j` alors que Neo4j est éteint produirait
+  une config qui échoue en silence au runtime, donc un service injoignable est
+  signalé avec sa commande de démarrage, pas activé. La comparaison porte sur ce
+  qui est écrit dans le fichier et non sur les valeurs par défaut : sinon
+  `neo4j_password_env` ne serait jamais écrit et rien n'indiquerait quelle
+  variable exporter. Plan par défaut, écriture sur `--apply`, idempotent,
+  commentaires du YAML préservés.
+- **Sondes Weaviate, Neo4j et Redis dans `grimoire doctor`** — la commande ne
+  vérifiait que Qdrant et Ollama, donc la stack cible du Memory OS était
+  invisible du diagnostic. Les sondes ne parlent que si le projet route
+  réellement la couche, pour qu'un projet en `local` ne récolte pas trois
+  avertissements pour des services qu'il n'utilise pas. La sonde Neo4j signale
+  le cas où la socket répond alors que la variable de mot de passe est absente :
+  chaque écriture de graphe échouerait alors silencieusement à
+  l'authentification.
+- **Bloc `parity` dans `grimoire memory status`** — compare les entrées du store
+  aux nœuds mémoire Neo4j et à leurs références `WeaviateObject`. C'est le
+  signal qui détecte un objet écrit d'un côté sans contrepartie de l'autre.
+  Trois `COUNT`, assez léger pour une commande de statut, là où
+  `memory graph verify` reconstruit tout le code graph.
+
+### Modifié
+
+- **`grimoire memory status` ne sort plus en erreur sur un backend mort.** Un
+  diagnostic qui échoue quand son sujet échoue ne sert à rien : la commande
+  reporte désormais le contrat des sept couches, calculé depuis la config, plus
+  la raison de l'indisponibilité. Le marqueur de santé `[OK]` / `[XX]` était par
+  ailleurs invisible, Rich interprétant les crochets comme des balises.
+- **`memory_link_status()` porte le contrat de couches et la parité**, donc
+  l'atelier et le cockpit lisent la même source au lieu de la déduire chacun de
+  son côté.
+- **La page mémoire du cockpit lit l'état réel.** Elle rendait un instantané
+  généré qui devinait le backend depuis la présence d'un répertoire et lisait le
+  store legacy ; ses cinq pseudo-couches ne correspondaient à aucune couche du
+  runtime. Elle interroge maintenant l'API locale et affiche les sept couches
+  réelles avec leur état, avec repli sur l'instantané si aucune API ne répond.
+- `memory up` et `memory status` vivent dans `grimoire.cli.cmd_memory_ops`,
+  chaîné depuis `cmd_memory_lexical` : le ratchet R2 interdit à `cmd_memory` de
+  grossir, et il rétrécit de 56 lignes.
 - **`grimoire memory shared`** — mémoire transverse entre projets, pour qu'un
   agent spécialiste accumule du savoir réutilisable sans corrompre celui des
   autres. Trois règles traitent les modes de corruption connus :
@@ -24,6 +69,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
   appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
   ici. Opt-in via `memory.shared_collection`, vide par défaut.
+- **`grimoire memory bundle`** — transport d'un modèle d'embedding vers un site
+  sans accès sortant. `export` construit une archive depuis un repo Hub ou un
+  répertoire local, `install` refuse toute archive dont un fichier ne correspond
+  pas au SHA-256 déclaré au manifeste, `verify` recontrôle les empreintes puis
+  charge le modèle avec les sockets sortantes bloquées — un moteur qui retombe
+  sur un téléchargement distant échoue au lieu de réussir. `install --configure`
+  renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
+  les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
+  par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
+- **`grimoire cockpit prune`** — retire du registre les projets dont le chemin a
+  disparu. Le registre accumulait une entrée par projet enrôlé sans jamais en
+  retirer : chaque projet supprimé ou déplacé y laissait un pointeur mort, et
+  rien n'offrait de les nettoyer autrement qu'un par un via `cockpit remove`.
+  Sur un poste de développement, 6 327 entrées mortes sur 6 460. Prudent par
+  défaut — un répertoire encore présent a pu être enrôlé délibérément, donc
+  seule l'absence du chemin justifie un retrait ; `--stale` élargit aux chemins
+  présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
+  demande confirmation sauf `--yes`.
 - **Frontière kit/overrides** — un projet Grimoire sépare désormais ce que le kit
   génère (`_grimoire/kit/`, régénéré à chaque mise à jour) de ce que le projet
   possède (`_grimoire/overrides/`, jamais écrasé, prioritaire à la résolution).
@@ -64,6 +127,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ligne). Un projet sans `user.name` y perdait son réglage de langue.
 - Le kit copiait ses propres `__pycache__` dans les projets.
 
+### Modifié
+
+- **fastembed remplace sentence-transformers et torch** dans les extras
+  `[qdrant]` et `[weaviate]`. Mesure : la pile passe de **4,8 Go à 203 Mo** pour
+  le même modèle par défaut, dont 2,7 Go de wheels `nvidia/*` et 689 Mo de
+  triton qui n'avaient aucune raison d'être là — la CI les retéléchargeait à
+  chaque run. Aucun re-index n'est nécessaire : les deux moteurs produisent des
+  vecteurs identiques à 2e-7 près par composante (écart de cosinus 5e-13, top-1
+  à top-10 inchangés sur 40 entrées et 10 requêtes), l'export ONNX de Qdrant
+  étant fidèle et non quantifié. `sentence-transformers` reste utilisé à
+  l'exécution s'il est déjà installé. Nouveau module
+  `grimoire.memory.embedding`, partagé par les backends Qdrant et Weaviate.
+- **La dimension des vecteurs n'est plus lue dans une table** — elle vient d'un
+  vecteur sonde au chargement, donc elle est juste pour tout modèle, y compris
+  inconnu. L'ancienne table retombait silencieusement sur 384.
+- **Le backend Qdrant refuse une collection d'une autre largeur** que le modèle
+  courant, au lieu d'écrire des vecteurs incohérents dans un store existant.
+- Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
+  `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
+  chargement avec le moteur réellement installé, fastembed compris.
+- **`grimoire init` interroge le réseau, plus le service** — la question porte
+  désormais sur l'egress, et un projet déclaré sans accès sortant est généré en
+  `retrieval_mode: lexical`. Le démarrage de Qdrant via Docker reste proposé
+  quand l'egress existe, mais **par défaut non** au lieu de par défaut oui.
+- **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
+  signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
+  `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
 
 ## [3.32.0] - 2026-08-18
 

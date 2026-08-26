@@ -465,32 +465,108 @@ def remove(
     console.print(f"[green]−[/green] Removed: {target}")
 
 
-@cockpit_app.command("prune")
-def prune(
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be removed, change nothing.")] = False,
-) -> None:
-    """Drop registry entries whose path no longer exists.
+def _forget_selection_if_gone(kept: list[dict[str, str]]) -> None:
+    """Oublie la sélection courante si son projet vient d'être retiré.
 
-    A cockpit registry accumulates dead entries — a moved project, a deleted
-    checkout, a test fixture under ``/tmp``. They pollute every generated view.
+    Une sélection qui pointe une entrée purgée fait retomber le cockpit sur le
+    projet primaire à chaque lecture, sans jamais le dire. Autant l'effacer au
+    moment où l'entrée disparaît.
     """
-    projects = _load_registry()
-    dead = [p for p in projects if not Path(str(p.get("path", ""))).is_dir()]
-    if not dead:
-        console.print("[green]OK[/green] Registre propre — aucun chemin mort.")
-        return
-    for p in dead:
-        console.print(f"[yellow]-[/yellow] {p.get('slug', '')} [dim]{p.get('path', '')}[/dim]")
-    if dry_run:
-        console.print(f"[dim]{len(dead)} entree(s) seraient retirees (--dry-run).[/dim]")
-        return
-    kept = [p for p in projects if Path(str(p.get("path", ""))).is_dir()]
-    _save_registry(kept)
     if _selected_slug() not in {str(p.get("slug", "")) for p in kept}:
         state = _read_state() or {}
         state.pop("selected_project", None)
         _write_state(state)
-    console.print(f"[green]OK[/green] {len(dead)} entree(s) retiree(s), {len(kept)} conservee(s).")
+
+
+_prune_dry_opt = typer.Option(False, "--dry-run", "-n", help="Montrer le plan sans rien retirer.")
+_prune_yes_opt = typer.Option(False, "--yes", "-y", help="Ne pas demander confirmation.")
+_prune_stale_opt = typer.Option(
+    False,
+    "--stale",
+    help="Retirer aussi les chemins qui existent mais ne portent plus de marqueur Grimoire.",
+)
+
+
+def classify_registry(projects: list[dict[str, str]], *, stale: bool = False) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Sépare le registre en (à garder, à retirer).
+
+    Par défaut, seule l'absence du chemin justifie un retrait : un répertoire
+    qui existe encore peut avoir été enrôlé délibérément, et supprimer une
+    entrée valide coûte plus cher que d'en garder une douteuse. ``stale``
+    élargit aux chemins présents mais sans marqueur Grimoire.
+    """
+    keep: list[dict[str, str]] = []
+    drop: list[dict[str, str]] = []
+    for entry in projects:
+        raw = str(entry.get("path", "")).strip()
+        if not raw:
+            drop.append(entry)
+            continue
+        path = Path(raw)
+        if not path.is_dir() or (stale and not _looks_grimoire(path)):
+            drop.append(entry)
+            continue
+        keep.append(entry)
+    return keep, drop
+
+
+@cockpit_app.command("prune")
+def prune(
+    ctx: typer.Context,
+    dry_run: bool = _prune_dry_opt,
+    yes: bool = _prune_yes_opt,
+    stale: bool = _prune_stale_opt,
+) -> None:
+    """Retirer du registre les projets dont le chemin a disparu.
+
+    Le registre accumule des entrées mortes à chaque projet supprimé ou
+    déplacé — et, avant le correctif d'isolation des tests, à chaque campagne
+    de tests lancée sans garde-fou.
+
+    [dim]Examples:[/dim]
+      [cyan]grimoire cockpit prune --dry-run[/cyan]  Voir ce qui partirait
+      [cyan]grimoire cockpit prune -y[/cyan]         Purger sans confirmation
+      [cyan]grimoire cockpit prune --stale[/cyan]    Inclure les chemins sans marqueur
+    """
+    projects = _load_registry()
+    keep, drop = classify_registry(projects, stale=stale)
+    fmt = str((ctx.obj or {}).get("output", "text"))
+
+    if fmt == "json":
+        payload = {
+            "total": len(projects),
+            "kept": len(keep),
+            "removed": 0 if dry_run else len(drop),
+            "candidates": [{"name": e.get("name", ""), "path": e.get("path", "")} for e in drop],
+            "dryRun": dry_run,
+        }
+        if drop and not dry_run:
+            _save_registry(keep)
+            _forget_selection_if_gone(keep)
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    if not drop:
+        console.print(f"[green]Registre propre[/green] — {len(projects)} entrée(s), aucune morte.")
+        return
+
+    console.print(f"[bold]{len(drop)}[/bold] entrée(s) à retirer sur {len(projects)} :")
+    for entry in drop[:10]:
+        console.print(f"  [dim]−[/dim] {entry.get('name', '?')} → {entry.get('path', '?')}")
+    if len(drop) > 10:
+        console.print(f"  [dim]… et {len(drop) - 10} autre(s)[/dim]")
+
+    if dry_run:
+        console.print("\n[dim]--dry-run : rien n'a été retiré.[/dim]")
+        return
+    if not yes and not typer.confirm(f"\nRetirer ces {len(drop)} entrée(s) ?"):
+        console.print("[yellow]Annulé.[/yellow]")
+        return
+
+    _save_registry(keep)
+
+    _forget_selection_if_gone(keep)
+    console.print(f"[green]−[/green] {len(drop)} entrée(s) retirée(s), {len(keep)} conservée(s).")
 
 
 @cockpit_app.command("list")

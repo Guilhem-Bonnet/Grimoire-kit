@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
+from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryEntry
 
 runner = CliRunner()
@@ -55,6 +56,9 @@ def mock_manager():
     mgr.delete.return_value = True
     mgr.consolidate.return_value = 5
     mgr.store_many.return_value = [_make_entry(id="new1"), _make_entry(id="new2")]
+    # No graph wired by default: parity is opt-in, and a MagicMock graph would
+    # otherwise fabricate counts.
+    mgr.memory_graph = None
 
     cfg = GrimoireConfig.from_dict({
         "project": {"name": "test", "type": "generic", "stack": []},
@@ -65,6 +69,11 @@ def mock_manager():
     with (
         patch("grimoire.cli.cmd_memory._load_manager", return_value=mgr),
         patch("grimoire.cli.cmd_memory._load_manager_context", return_value=(mgr, cfg, Path.cwd())),
+        # ``memory status`` vit dans cmd_memory_ops, qui lie ``_load_config_context``
+        # à l'import : patcher cmd_memory ne l'atteindrait pas, et le test
+        # lirait la vraie config du dépôt au lieu de la sienne.
+        patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, Path.cwd())),
+        patch("grimoire.cli.cmd_memory_ops.MemoryManager.from_config", return_value=mgr),
     ):
         yield mgr
 
@@ -94,6 +103,76 @@ class TestMemoryStatus:
         result = runner.invoke(app, ["memory", "status"])
         assert result.exit_code == 0
         assert "qdrant" in result.output
+
+    def test_status_reports_layers_when_backend_cannot_start(self) -> None:
+        """A diagnostic that dies with its subject is worthless.
+
+        When the backend cannot even be instantiated (missing extra, server
+        down), ``status`` must still exit 0 and print the layer contract plus
+        the reason — that is precisely when the operator needs it.
+        """
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "test", "type": "generic", "stack": []},
+            "memory": {"backend": "weaviate-server", "weaviate_url": "http://localhost:8080"},
+            "agents": {"archetype": "minimal"},
+        })
+        with (
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, Path.cwd())),
+            patch(
+                "grimoire.cli.cmd_memory_ops.MemoryManager.from_config",
+                side_effect=GrimoireMemoryError("sentence-transformers is not installed"),
+            ),
+        ):
+            result = runner.invoke(app, ["-o", "json", "memory", "status"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["healthy"] is False
+        # Prouve que la config patchée est bien celle qui a été lue : le nom du
+        # backend ne peut venir que d'elle quand le manager n'existe pas.
+        assert data["backend"] == "weaviate-server"
+        assert "sentence-transformers" in data["error"]
+        # The contract is config-derived, so it survives a dead backend.
+        assert len(data["architecture"]["layers"]) == 7
+        # The reason lives in ``error`` only — never duplicated into ``detail``.
+        assert data["detail"] == {}
+
+    def test_status_reports_projection_drift(self, mock_manager: MagicMock) -> None:
+        """Store/graph/vector counts that disagree are a broken link."""
+        graph = MagicMock()
+        graph.stats.return_value = {"memories": 3700, "weaviate_objects": 3700}
+        mock_manager.memory_graph = graph
+        mock_manager.count.return_value = 3701
+
+        result = runner.invoke(app, ["-o", "json", "memory", "status"])
+        assert result.exit_code == 0
+        parity = json.loads(result.output)["parity"]
+        assert parity["ok"] is False
+        assert parity["drift"] == 1
+        assert parity["store_entries"] == 3701
+        assert parity["graph_memories"] == 3700
+
+    def test_status_parity_ok_when_aligned(self, mock_manager: MagicMock) -> None:
+        graph = MagicMock()
+        graph.stats.return_value = {"memories": 42, "weaviate_objects": 42}
+        mock_manager.memory_graph = graph
+
+        parity = json.loads(runner.invoke(app, ["-o", "json", "memory", "status"]).output)["parity"]
+        assert parity["ok"] is True
+        assert parity["drift"] == 0
+
+    def test_status_parity_absent_without_graph(self, mock_manager: MagicMock) -> None:
+        """No graph is not drift — the section stays empty rather than alarming."""
+        parity = json.loads(runner.invoke(app, ["-o", "json", "memory", "status"]).output)["parity"]
+        assert parity == {}
+
+    def test_status_survives_unreachable_graph(self, mock_manager: MagicMock) -> None:
+        graph = MagicMock()
+        graph.stats.side_effect = RuntimeError("connection refused")
+        mock_manager.memory_graph = graph
+
+        result = runner.invoke(app, ["-o", "json", "memory", "status"])
+        assert result.exit_code == 0
+        assert "connection refused" in json.loads(result.output)["parity"]["error"]
 
 
 # ── grimoire memory search ────────────────────────────────────────────────────

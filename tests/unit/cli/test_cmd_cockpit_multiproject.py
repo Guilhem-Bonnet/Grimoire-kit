@@ -162,7 +162,9 @@ def test_prune_drops_dead_paths(runner: CliRunner, tmp_path: Path) -> None:
         {"name": "Alive", "path": str(alive), "slug": "alive"},
         {"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"},
     ])
-    result = runner.invoke(app, ["cockpit", "prune"])
+    # ``--yes`` depuis la réconciliation avec #152 : la purge demande
+    # confirmation, et un CliRunner sans entrée avorterait sur le prompt.
+    result = runner.invoke(app, ["cockpit", "prune", "--yes"])
     assert result.exit_code == 0
     assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["alive"]
 

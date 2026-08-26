@@ -115,6 +115,30 @@
     .layer.derived .layer-stat b { color: var(--data-cyan); }
     @media (max-width: 760px) { .layer { grid-template-columns: 16px 1fr auto; } .layer-desc { display: none; } }
 
+    /* ── Layer states (live contract) ── */
+    .layer.st-ready { border-left-color: var(--data-green); }
+    .layer.st-partial { border-left-color: var(--data-amber); }
+    .layer.st-planned { border-left-color: var(--data-cyan); opacity: 0.8; }
+    .layer.st-disabled { border-left-color: var(--ink-muted); opacity: 0.55; }
+    .layer.st-ready .layer-stat b { color: var(--data-green); }
+    .layer.st-partial .layer-stat b { color: var(--data-amber); }
+    .layer.st-planned .layer-stat b { color: var(--data-cyan); }
+    .layer-gap { display: block; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); margin-top: 5px; line-height: 1.5; }
+
+    /* ── Parity strip ── */
+    .parity { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (max-width: 640px) { .parity { grid-template-columns: 1fr; } }
+    .parity-cell { padding: 13px 16px; background: var(--elev-3); border: 1px solid var(--line); border-left: 2px solid var(--ink-muted); border-radius: var(--r-md); }
+    .parity-cell.ok { border-left-color: var(--data-green); }
+    .parity-cell.drift { border-left-color: var(--data-red); }
+    .parity-lbl { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
+    .parity-val { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 600; color: var(--ink); margin-top: 5px; }
+    .parity-cell.drift .parity-val { color: var(--data-red); }
+    .parity-cell.ok .parity-val { color: var(--data-green); }
+    .parity-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-soft); margin-top: 6px; line-height: 1.5; }
+    .parity-remedy { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); padding: 11px 16px; background: var(--elev-2); border: 1px solid var(--line); border-radius: var(--r-md); line-height: 1.6; }
+    .parity-remedy code { color: var(--accent); }
+
     /* ── Distribution by type ── */
     .dist-grid { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 24px; align-items: center; }
     @media (max-width: 760px) { .dist-grid { grid-template-columns: 1fr; } }
@@ -353,10 +377,17 @@
         <div class="kpi"><div class="kpi-lbl">SANTÉ LINT</div><div class="kpi-val" id="kpi-lint">—</div></div>
       </div>
 
+      <!-- Parity strip — cockpit local only, hidden until the live API answers -->
+      <div class="panel reveal" data-delay="90" id="parity-panel" hidden style="margin-bottom:14px">
+        <div class="panel-head"><span>Intégrité des projections</span><span class="sub" id="parity-sub"></span></div>
+        <div class="parity" id="parity-body"></div>
+      </div>
+
       <!-- Topology -->
       <div class="panel reveal" data-delay="100" style="margin-bottom:14px">
-        <div class="panel-head"><span>Topologie · Memory OS</span><span class="sub">les couches en place</span></div>
-        <div class="topo">
+        <div class="panel-head"><span>Topologie · Memory OS</span><span class="sub" id="topo-sub">les couches en place</span></div>
+        <div class="topo" id="topo-live" hidden></div>
+        <div class="topo" id="topo-static">
           <div class="layer on">
             <span class="layer-idx">01</span>
             <span class="layer-name">Vector store<span>embeddings &amp; recherche sémantique</span></span>
@@ -583,22 +614,84 @@
       lint: null, lint_health: null, consoles: {}, vector_projection: null };
   }
 
+  /* ── État réel (cockpit local) ────────────────────────────────────────
+     Le snapshot data/memory.json est un instantané de génération : il devine
+     le backend depuis la présence de fichiers et lit le store legacy. Quand
+     une API locale répond, elle prime — c'est la seule source qui connaisse
+     le contrat de couches et la dérive des projections.
+     Deux serveurs servent cette page : l'atelier (GET /api/memory/status) et
+     le cockpit (POST /api/memory {action:"status"}). On tente les deux.  */
+  async function liveStatus() {
+    try {
+      const r = await fetch('/api/memory/status', { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && Array.isArray(j.layers)) return j;
+      }
+    } catch (e) { /* atelier absent : on tente le cockpit */ }
+    try {
+      const r = await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status' }),
+      });
+      if (!r.ok) return null;
+      const env = await r.json();
+      if (!env || !env.ok || !env.stdout) return null;
+      const cli = JSON.parse(env.stdout);
+      const arch = cli.architecture || {};
+      // La CLI émet la parité en snake_case ; l'atelier en camelCase. On
+      // normalise ici pour que le rendu ne connaisse qu'une seule forme.
+      const p = cli.parity || {};
+      const parity = p.error ? { error: p.error } : (p.ok === undefined ? {} : {
+        storeEntries: p.store_entries, graphMemories: p.graph_memories,
+        graphVectorObjects: p.graph_vector_objects, drift: p.drift, ok: p.ok,
+      });
+      return {
+        state: cli.healthy ? 'ok' : 'unavailable',
+        resolvedBackend: cli.backend,
+        configuredBackend: cli.backend,
+        available: !!cli.healthy,
+        entries: cli.entries,
+        error: cli.error || null,
+        detail: cli.detail || {},
+        parity,
+        layers: arch.layers || [],
+        layerProfile: arch.profile || '',
+      };
+    } catch (e) { return null; }
+  }
+
+  const LIVE = await liveStatus();
+
   const store = M.store || {};
   const ENTRIES = (store.sample || []).map(e => ({
     id: e.id, type: e.type || 'memory', text: e.text || '',
     tags: e.tags || [], date: String(e.created_at || '').slice(0, 10)
   }));
   const counts = M.counts_by_type || {};
-  const total = store.total_entries || ENTRIES.length;
   const backend = M.backend || {};
-  const online = !!(window.Atelier && Atelier.online);
+  const online = !!(window.Atelier && Atelier.online) || !!LIVE;
+
+  // Le live prime sur le snapshot pour tout ce qu'il connaît.
+  const total = (LIVE && LIVE.entries != null) ? LIVE.entries : (store.total_entries || ENTRIES.length);
+  // Backend mort : le nom vient de la config, jamais du snapshot — annoncer
+  // « qdrant hors service » alors que le projet déclare Weaviate serait un
+  // diagnostic faux.
+  const backendName = LIVE
+    ? (LIVE.resolvedBackend || LIVE.configuredBackend || null)
+    : (backend.active || null);
+  const backendDown = !!(LIVE && LIVE.available === false);
 
   /* ── Hero & badges ── */
   const ti = $('mem-total-inline'); if (ti) ti.textContent = total;
   const bb = $('mem-badge-backend');
-  if (bb) bb.innerHTML = '<span class="dot"></span>' + esc((backend.active || 'AUCUN BACKEND').toUpperCase()) + (backend.active ? ' · DÉTECTÉ' : '');
+  if (bb) {
+    const suffix = LIVE ? (backendDown ? ' · HORS SERVICE' : ' · EN LIGNE') : (backendName ? ' · DÉTECTÉ' : '');
+    bb.innerHTML = '<span class="dot"></span>' + esc((backendName || 'AUCUN BACKEND').toUpperCase()) + suffix;
+  }
   const bm = $('mem-badge-mode');
-  if (bm) bm.innerHTML = '<span class="dot"></span>' + (online ? 'COCKPIT LOCAL · LECTURE' : 'LECTURE SEULE · VITRINE');
+  if (bm) bm.innerHTML = '<span class="dot"></span>' + (LIVE ? 'COCKPIT LOCAL · ÉTAT RÉEL' : (online ? 'COCKPIT LOCAL · LECTURE' : 'LECTURE SEULE · VITRINE'));
   const bc = $('mem-badge-count'); if (bc) bc.textContent = total + ' ENTRÉES';
 
   /* ── KPIs ── */
@@ -607,12 +700,71 @@
   if ($('kpi-types')) $('kpi-types').textContent = typesNonZero || Object.keys(TYPE_LABEL).length;
   if ($('kpi-tags')) $('kpi-tags').textContent = store.tags_unique != null ? store.tags_unique : '—';
   if ($('kpi-orphans')) $('kpi-orphans').textContent = store.orphans != null ? store.orphans : '—';
-  if ($('kpi-backend')) $('kpi-backend').textContent = backend.active || 'aucun';
+  if ($('kpi-backend')) $('kpi-backend').textContent = backendName || 'aucun';
   if ($('kpi-lint')) $('kpi-lint').innerHTML = M.lint_health != null ? M.lint_health + '<small>%</small>' : '—';
 
+  /* ── Topologie réelle : les 7 couches du contrat Memory OS ──
+     Le markup statique décrit 5 pseudo-couches qui ne correspondent pas au
+     contrat runtime. Dès que le live répond, on le remplace par les vraies
+     couches, leur état et leur premier trou — c'est la garantie que l'UI ne
+     peut pas dériver des capacités réelles.                                */
+  const STATE_LABEL = { ready: 'prêt', partial: 'partiel', planned: 'prévu', disabled: 'désactivé' };
+  if (LIVE && LIVE.layers.length) {
+    const liveEl = $('topo-live'), staticEl = $('topo-static');
+    if (liveEl && staticEl) {
+      liveEl.innerHTML = LIVE.layers.map((l, i) => {
+        const gap = (l.gaps || [])[0];
+        const idx = String(i + 1).padStart(2, '0');
+        return '<div class="layer st-' + esc(l.state) + '">'
+          + '<span class="layer-idx">' + idx + '</span>'
+          + '<span class="layer-name">' + esc(l.label) + '<span>' + esc(l.backend) + '</span></span>'
+          + '<span class="layer-desc">' + esc(l.purpose)
+          + (gap ? '<span class="layer-gap">' + esc(gap) + '</span>' : '') + '</span>'
+          + '<span class="layer-stat"><b>' + esc(STATE_LABEL[l.state] || l.state) + '</b>état</span>'
+          + '</div>';
+      }).join('');
+      liveEl.hidden = false;
+      staticEl.hidden = true;
+      const ready = LIVE.layers.filter(l => l.state === 'ready').length;
+      if ($('topo-sub')) $('topo-sub').textContent =
+        ready + '/' + LIVE.layers.length + ' prêtes' + (LIVE.layerProfile ? ' · profil ' + LIVE.layerProfile : '');
+    }
+  }
+
+  /* ── Intégrité des projections (store ↔ graphe ↔ vecteurs) ── */
+  const P = (LIVE && LIVE.parity) || {};
+  if (P.error || P.ok !== undefined) {
+    const panel = $('parity-panel'), body = $('parity-body');
+    if (panel && body) {
+      if (P.error) {
+        body.innerHTML = '<div class="parity-remedy">Graphe injoignable — ' + esc(P.error) + '</div>';
+        if ($('parity-sub')) $('parity-sub').textContent = 'graphe injoignable';
+      } else {
+        const cls = P.ok ? 'ok' : 'drift';
+        const cells = [
+          ['store', P.storeEntries, 'entrées du backend durable'],
+          ['graphe neo4j', P.graphMemories, 'nœuds mémoire projetés'],
+          ['références vecteur', P.graphVectorObjects, 'liens WeaviateObject'],
+        ].map(([lbl, val, note]) =>
+          '<div class="parity-cell ' + cls + '"><div class="parity-lbl">' + esc(lbl) + '</div>'
+          + '<div class="parity-val">' + esc(val == null ? '—' : val) + '</div>'
+          + '<div class="parity-note">' + esc(note) + '</div></div>').join('');
+        const remedy = P.ok
+          ? '<div class="parity-remedy">Aucune dérive : chaque souvenir du store a son nœud de graphe et sa référence vecteur.</div>'
+          : '<div class="parity-remedy">Dérive de ' + esc(P.drift) + ' — des objets existent d\'un côté sans contrepartie de l\'autre. '
+            + 'Resynchroniser : <code>grimoire memory gate --sync</code></div>';
+        body.innerHTML = cells + remedy;
+        if ($('parity-sub')) $('parity-sub').textContent = P.ok ? 'aucune dérive' : 'dérive de ' + P.drift;
+      }
+      panel.hidden = false;
+    }
+  }
+
   /* ── Backend & extras ── */
-  if ($('be-name')) $('be-name').textContent = backend.active ? backend.active.charAt(0).toUpperCase() + backend.active.slice(1) : 'Aucun';
-  if ($('be-role')) $('be-role').textContent = backend.active ? 'vector store · détecté au démarrage' : 'installez un extra vectoriel (qdrant, weaviate…)';
+  if ($('be-name')) $('be-name').textContent = backendName ? backendName.charAt(0).toUpperCase() + backendName.slice(1) : 'Aucun';
+  if ($('be-role')) $('be-role').textContent = backendDown
+    ? 'backend déclaré mais indisponible — ' + (LIVE.error || 'raison inconnue')
+    : (backendName ? (LIVE ? 'vector store · état lu en direct' : 'vector store · détecté au démarrage') : 'installez un extra vectoriel (qdrant, weaviate…)');
   const extras = backend.extras_installed || {};
   if ($('extras')) $('extras').innerHTML = Object.keys(extras).length
     ? Object.entries(extras).map(([k, v]) => '<span class="extra' + (v ? ' on' : '') + '"><span class="led"></span>' + esc(k) + '</span>').join('')
