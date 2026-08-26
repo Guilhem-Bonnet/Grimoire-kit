@@ -289,7 +289,7 @@ def repair_project_artifacts(target: Path) -> list[str]:
     Returns the list of regenerated labels (relative paths).
     """
     from grimoire.core.archetype_resolver import ResolvedArchetype
-    from grimoire.core.scaffold import FileCopy, ProjectScaffolder, ScaffoldPlan
+    from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
 
     target = target.resolve()
     cfg = _load_config_quiet(target)
@@ -312,16 +312,10 @@ def repair_project_artifacts(target: Path) -> list[str]:
     )
 
     plan = ScaffoldPlan()
-    agents_dir = target / "_grimoire" / "_config" / "custom" / "agents"
-    if agents_dir.is_dir():
-        for agent_file in sorted(agents_dir.glob("*.md")):
-            if agent_file.name.endswith(".tpl.md"):
-                continue
-            # Feed deployed agents to the wrapper planner as pseudo-copies.
-            plan.copies.append(FileCopy(src=agent_file, dst=agent_file, label=agent_file.stem))
     # Intentional reuse of ProjectScaffolder's planning internals so the
-    # regenerated artifacts stay identical to what `grimoire init` produces.
-    scaffolder._plan_agent_wrappers(plan)
+    # regenerated artifact stays identical to what `grimoire init` produces.
+    # Per-host agent files are not planned here: they belong to the host
+    # emitters, and `_sync_host_surfaces` below regenerates them.
     scaffolder._plan_mcp_config(plan)
 
     written: list[str] = []

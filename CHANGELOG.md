@@ -51,6 +51,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   commandes chargeables à la demande comprises.
 - **Hôtes Cursor et Gemini CLI** au registre de capacités, avec leurs manifestes.
 
+### Modifié
+
+- **`.github/agents/` a un seul propriétaire** — le scaffolder générait un
+  wrapper à frontière d'outils fixe (`read, search` ou `read, search, execute`)
+  pointant vers un chemin d'agent codé en dur, et l'émetteur Copilot réécrivait
+  le même fichier avec la frontière réellement résolue et le vrai chemin de la
+  persona. Deux écrivains pour un chemin : `_plan_agent_wrappers` est retiré du
+  scaffolder, l'émetteur est seul propriétaire. Les garanties que les tests du
+  scaffolder épinglaient (frontmatter, `user-invocable`, référence au fichier
+  d'agent, fichier écrit à la main préservé) sont épinglées sur l'émetteur.
+
 ### Corrigé
 
 - **Détection d'hôte** — `HostBridge.detect()` identifiait Claude Code sur la
@@ -68,6 +79,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - **Fusion JSON des émetteurs** — une variable de boucle réutilisée faisait
   passer le texte du fichier précédent à la fonction de fusion quand le fichier
   cible n'existait pas encore.
+- **Suite de tests rouge sans l'extra `mcp`** — `tests/unit/mcp/test_server.py`
+  importait `grimoire.mcp.server` au niveau module : sans `grimoire-kit[mcp]`
+  installé, pytest remontait une *erreur de collecte* et toute la suite passait
+  au rouge. Un `pytest.importorskip` énonce le même fait sans en faire un échec.
+  C'est ce qui rendait le hook pre-commit systématiquement rouge en local, et
+  donc `--no-verify` systématique.
 
 
 ## [3.32.0] - 2026-08-18

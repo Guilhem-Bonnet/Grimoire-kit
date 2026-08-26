@@ -345,7 +345,6 @@ class ProjectScaffolder:
         self._plan_feature_agents(p)
         self._plan_framework(p)
         self._plan_templates(p)
-        self._plan_agent_wrappers(p)
         self._plan_copilot_prompts(p)
         self._plan_copilot_instruction_files(p)
         self._plan_copilot_instructions(p)
@@ -805,57 +804,6 @@ class ProjectScaffolder:
             content='{"name": "main", "created": "auto", "active": true}\n',
             label=".runs/main/branch.json",
         ))
-
-    def _plan_agent_wrappers(self, p: ScaffoldPlan) -> None:
-        """Generate .github/agents/*.agent.md wrappers for VS Code discovery."""
-        gh_agents = self._target / ".github" / "agents"
-        concierge_name = "concierge"
-        for fc in p.copies:
-            if not _is_agent_markdown(fc.dst):
-                continue
-            name = fc.dst.stem
-            wrapper_dst = gh_agents / f"{name}.agent.md"
-            if wrapper_dst.is_file():
-                continue
-            desc = self._extract_agent_description(fc.src)
-            is_entry = name == concierge_name
-            tools = "['read', 'search', 'execute']" if is_entry else "['read', 'search']"
-            lines = [
-                "---",
-                f"description: '{desc}'",
-                f"tools: {tools}",
-            ]
-            if not is_entry:
-                lines.append("user-invocable: false")
-            lines.append("---")
-            lines.append("")
-            # Richer activation instructions
-            lines.append(f"You are activating the **{name}** Grimoire agent.")
-            lines.append("")
-            lines.append("Follow these steps IN ORDER:")
-            lines.append("")
-            lines.append(f"1. **Load the full agent definition**: Read `{{{{project-root}}}}/_grimoire/_config/custom/agents/{name}.md` completely — this file contains the persona, capabilities, and all behaviour instructions.")
-            lines.append("2. **Load project context**: Read `{project-root}/_grimoire/_memory/shared-context.md` to understand the current project.")
-            lines.append("3. **Load memory config**: Read `{project-root}/_grimoire/_memory/config.yaml` to get `user_name` and `communication_language`.")
-            lines.append("4. **Follow ALL activation steps** defined in the agent file — they specify the greeting, menu, and behaviour.")
-            lines.append("5. **Never break character** — stay in persona until the user explicitly exits.")
-            lines.append("")
-            if is_entry:
-                lines.append("> This is the **entry-point agent**. When uncertain which agent the user needs, route here first.")
-            else:
-                lines.append("> This agent is **internally routed** — it may receive tasks from other agents via `_grimoire/_memory/handoff-log.md`.")
-            lines.append("")
-            # Marked as generated: `grimoire host sync` owns this path and
-            # replaces the wrapper with one carrying the agent's resolved tool
-            # boundary. Without the marker the emitter would treat it as
-            # hand-written and preserve it, freezing the coarser version.
-            lines.append("<!-- grimoire:managed -->")
-            lines.append("")
-            p.templates.append(TemplateRender(
-                dst=wrapper_dst,
-                content="\n".join(lines),
-                label=f".github/agents/{name}.agent.md",
-            ))
 
     @staticmethod
     def _extract_agent_description(src: Path) -> str:

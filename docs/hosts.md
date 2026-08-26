@@ -145,6 +145,11 @@ ne réécrit qu'eux :
 Pour personnaliser durablement, modifier la source — la persona dans
 `_grimoire/`, la compétence ou la commande du kit — puis resynchroniser.
 
+Chaque chemin a un seul propriétaire. `.github/agents/` appartient à l'émetteur
+Copilot, `.github/prompts/` au scaffolder pour les workflows du kit, et
+`.claude/**` à l'émetteur Claude Code. Deux générateurs sur un même fichier
+produisent un conflit permanent, jamais un contenu stable.
+
 ## Hôtes sans émetteur
 
 Un client MCP quelconque atteint la même surface par les outils du serveur

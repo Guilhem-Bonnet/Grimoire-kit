@@ -139,6 +139,42 @@ def test_copilot_surface_declares_its_permission_gap(governed: Path) -> None:
     assert "permissions" in {d.surface for d in plan.degradations}
 
 
+def test_copilot_agent_files_carry_the_wrapper_contract(governed: Path) -> None:
+    """Contracts inherited from the scaffolder's wrappers, now owned here.
+
+    `.github/agents/` had two writers: the scaffolder emitted a coarse wrapper
+    and this emitter replaced it with one carrying the resolved tool boundary
+    and the real definition path. The scaffolder no longer writes them, so the
+    guarantees its tests pinned are pinned here instead.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    sub = (governed / ".github/agents/scribe.agent.md").read_text(encoding="utf-8")
+
+    assert entry.startswith("---\n") and "description:" in entry
+    # The entry point stays user-invocable; every other persona is routed.
+    assert "user-invocable: false" not in entry
+    assert "user-invocable: false" in sub
+    # The wrapper must point at the file that actually holds the persona.
+    assert "_grimoire/_config/custom/agents/concierge.md" in entry
+    # ...and carry the boundary the surface resolved, not a fixed guess.
+    assert "tools: ['read', 'search', 'edit']" in sub
+
+
+def test_a_hand_written_copilot_wrapper_is_preserved(governed: Path) -> None:
+    target = governed / ".github/agents/concierge.agent.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Mon agent à moi\n", encoding="utf-8")
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    result = apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    assert ".github/agents/concierge.agent.md" in result.skipped
+    assert target.read_text(encoding="utf-8") == "# Mon agent à moi\n"
+
+
 def test_prose_only_host_states_that_governance_is_not_enforced(governed: Path) -> None:
     emitter = emitter_for(HostId.CODEX)
     assert emitter is not None
