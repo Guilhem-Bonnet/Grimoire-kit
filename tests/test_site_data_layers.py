@@ -40,3 +40,22 @@ def test_read_version_tolerates_a_non_kit_project(tmp_path: Path) -> None:
 
     (tmp_path / "version.txt").write_text("9.9.9\n", encoding="utf-8")
     assert mod._read_version(tmp_path) == "9.9.9"
+
+
+def test_routes_module_does_not_import_its_hub() -> None:
+    """forge_routes est une feuille : un cycle d'import y est une régression."""
+    src = (ROOT / "src" / "grimoire" / "tools" / "forge_routes.py").read_text(encoding="utf-8")
+    assert "forge_server" not in src.replace("grimoire.tools.forge_server` pour", "")
+
+
+def test_blueprint_path_refuses_traversal(tmp_path: Path) -> None:
+    """L'identifiant vient d'une URL : il ne doit jamais sortir du dossier."""
+    import pytest
+
+    from grimoire.tools.forge_server import ForgeAPI
+
+    api = ForgeAPI(tmp_path, tmp_path, None)
+    for bad in ("../../etc/passwd", "a/../../b", "..", "a b", ""):
+        with pytest.raises(ValueError, match="invalide"):
+            api._blueprint_path(bad)
+    assert api._blueprint_path("ok-1").name == "ok-1.blueprint.json"

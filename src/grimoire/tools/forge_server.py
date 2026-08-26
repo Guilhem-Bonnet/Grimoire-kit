@@ -220,9 +220,19 @@ class ForgeAPI:
     # ── blueprints ────────────────────────────────────────────────────────
 
     def _blueprint_path(self, bp_id: str) -> Path:
+        """Chemin du blueprint — l'identifiant vient d'une URL, jamais de confiance.
+
+        Deux gardes plutôt qu'une : la forme (``SLUG_RE``, qui exclut déjà les
+        séparateurs et ``..``) puis le confinement du chemin résolu sous le
+        dossier des blueprints. La seconde tient même si la première s'assouplit.
+        """
         if not SLUG_RE.match(bp_id):
             raise ValueError(f"id de blueprint invalide : {bp_id}")
-        return self.project_root / BLUEPRINTS_RELPATH / f"{bp_id}.blueprint.json"
+        base = (self.project_root / BLUEPRINTS_RELPATH).resolve()
+        path = (base / f"{bp_id}.blueprint.json").resolve()
+        if not path.is_relative_to(base):
+            raise ValueError(f"id de blueprint invalide : {bp_id}")
+        return path
 
     def blueprints_list(self) -> list[dict[str, Any]]:
         base = self.project_root / BLUEPRINTS_RELPATH
