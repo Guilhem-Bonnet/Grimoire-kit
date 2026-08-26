@@ -182,9 +182,12 @@ def collect_agents(project_root: Path, *, entry_point: str = "concierge") -> tup
         declared = _tool_verbs(meta.get("tools"))
         tools = declared or infer_tools(body, description)
         try:
-            definition_ref = str(path.relative_to(project_root))
+            # POSIX separators: this path is written into a generated
+            # instruction telling an agent which file to read, and a Windows
+            # backslash there is both wrong in Markdown and unreadable.
+            definition_ref = path.relative_to(project_root).as_posix()
         except ValueError:
-            definition_ref = str(path)
+            definition_ref = path.as_posix()
         specs.append(
             AgentSpec(
                 name=name,

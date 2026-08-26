@@ -260,6 +260,13 @@ def test_tool_classification_reads_both_host_vocabularies() -> None:
     assert classify_tool("Read", {"file_path": "app/.env"}).secret_target
 
 
+def test_secret_detection_survives_a_windows_separator() -> None:
+    """A Windows host hands over `app\\.env`; a `/`-only anchor lets it through."""
+    assert classify_tool("Read", {"file_path": r"app\.env"}).secret_target
+    assert classify_tool("Read", {"file_path": r"C:\proj\secrets\token.txt"}).secret_target
+    assert not classify_tool("Read", {"file_path": r"docs\environment.md"}).secret_target
+
+
 def test_destructive_and_secret_actions_are_refused(governed: Path) -> None:
     deny = decide_tool_policy(
         HookInput(

@@ -79,7 +79,7 @@ class EmitPlan:
     degradations: tuple[Degradation, ...] = ()
 
     def labels(self) -> list[str]:
-        return [str(f.relpath) for f in self.files] + [str(m.relpath) for m in self.merges]
+        return [f.relpath.as_posix() for f in self.files] + [m.relpath.as_posix() for m in self.merges]
 
 
 @dataclass
@@ -121,7 +121,9 @@ def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, for
 
     for emitted in plan.files:
         dest = root / emitted.relpath
-        label = str(emitted.relpath)
+        # POSIX form on purpose: a label is an identifier reported to the user
+        # and asserted in tests, so it must not change shape with the host OS.
+        label = emitted.relpath.as_posix()
         if dest.is_file():
             current = dest.read_text(encoding="utf-8")
             if current == emitted.content:
@@ -137,7 +139,7 @@ def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, for
 
     for merge in plan.merges:
         dest = root / merge.relpath
-        label = merge.label or str(merge.relpath)
+        label = merge.label or merge.relpath.as_posix()
         existing: dict[str, Any] = {}
         if dest.is_file():
             try:

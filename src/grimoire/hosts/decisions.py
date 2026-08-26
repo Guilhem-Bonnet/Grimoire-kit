@@ -143,17 +143,19 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 
 #: Paths that hold credentials. Reading one is a policy event, not an edit.
 #: The patterns are matched against paths *and* against command lines, so the
-#: anchors accept a path separator, a quote, or whitespace — ``cat .env`` must
-#: read as the same event as opening ``.env`` with a file tool.
-_BEFORE = r"(?:^|[\s=/'\"])"
-_AFTER = r"(?=$|[\s'\"/:])"
+#: anchors accept either path separator, a quote, or whitespace — ``cat .env``
+#: must read as the same event as opening ``.env`` with a file tool, and a
+#: Windows host handing over ``app\\.env`` must not slip through on a
+#: separator.
+_BEFORE = r"(?:^|[\s=/\\'\"])"
+_AFTER = r"(?=$|[\s'\"/\\:])"
 _SECRET_PATTERNS: tuple[str, ...] = (
     rf"{_BEFORE}\.env{_AFTER}",
     rf"{_BEFORE}\.env\.[a-z0-9_-]+{_AFTER}",
     rf"{_BEFORE}\.npmrc{_AFTER}",
     rf"{_BEFORE}\.pypirc{_AFTER}",
     rf"{_BEFORE}id_(?:rsa|ed25519|ecdsa){_AFTER}",
-    rf"{_BEFORE}secrets?/",
+    rf"{_BEFORE}secrets?[/\\\\]",
     rf"\.(?:pem|p12|pfx|keystore|jks){_AFTER}",
     rf"{_BEFORE}credentials(?:\.json|\.yaml|\.yml)?{_AFTER}",
     rf"{_BEFORE}service-account[a-z0-9_-]*\.json{_AFTER}",
