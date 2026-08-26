@@ -297,6 +297,25 @@ class TestProbeServices:
         probes = ms.probe_services({"neo4j": "bolt://graph.internal:7999"})
         assert probes["neo4j"].url == "bolt://graph.internal:7999"
 
+    def test_either_embedding_engine_satisfies_the_vector_extra(self) -> None:
+        """fastembed OU sentence-transformers : tester un seul serait un faux négatif.
+
+        Les extras `[qdrant]` et `[weaviate]` tirent fastembed ;
+        sentence-transformers reste un repli utilisé s'il est déjà installé.
+        N'exiger que le second ferait déclarer l'extra absent sur une
+        installation valide, et `memory up` retomberait en lexical.
+        """
+        engines = ms._EXTRA_MODULES["weaviate"][1]
+        assert "fastembed" in engines
+        assert "sentence_transformers" in engines
+
+    def test_module_installed_accepts_any_candidate(self) -> None:
+        # `json` est toujours importable, `paquet_absent_xyz` jamais.
+        assert ms._module_installed(("paquet_absent_xyz", "json")) is True
+        assert ms._module_installed(("json",)) is True
+        assert ms._module_installed(("paquet_absent_xyz",)) is False
+        assert ms._module_installed(()) is False
+
     def test_usable_requires_both_service_and_extra(self) -> None:
         assert _probe("neo4j").usable is True
         assert _probe("neo4j", reachable=False).usable is False

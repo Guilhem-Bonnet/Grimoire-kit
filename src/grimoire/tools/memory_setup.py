@@ -41,13 +41,18 @@ _DEFAULT_URLS = {
 }
 _DEFAULT_PORTS = {"weaviate": 8080, "qdrant": 6333, "neo4j": 7687, "redis": 6379, "ollama": 11434}
 
-#: Extra pip requis par service, et le module qui prouve son installation.
-_EXTRA_MODULES = {
-    "weaviate": ("weaviate", "sentence_transformers"),
-    "qdrant": ("qdrant", "qdrant_client"),
-    "neo4j": ("neo4j", "neo4j"),
-    "redis": ("redis", "redis"),
-    "ollama": ("ollama", "ollama"),
+#: Extra pip requis par service, et les modules dont **au moins un** prouve son
+#: installation. Les extras vectoriels acceptent deux moteurs d'embedding :
+#: fastembed (tiré par les extras) et sentence-transformers (repli historique,
+#: utilisé s'il est déjà présent). Ne tester qu'un seul des deux ferait
+#: déclarer l'extra absent sur une installation parfaitement valide, et
+#: memory up retomberait en lexical sans raison.
+_EXTRA_MODULES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "weaviate": ("weaviate", ("fastembed", "sentence_transformers")),
+    "qdrant": ("qdrant", ("qdrant_client",)),
+    "neo4j": ("neo4j", ("neo4j",)),
+    "redis": ("redis", ("redis",)),
+    "ollama": ("ollama", ("ollama",)),
 }
 
 #: Commande de démarrage proposée quand un service manque.
@@ -134,28 +139,29 @@ def _tcp_reachable(url: str, default_port: int, *, timeout: float = _SOCKET_TIME
         return False
 
 
-def _module_installed(name: str) -> bool:
-    try:
-        return find_spec(name) is not None
-    except (ImportError, ValueError):
-        return False
+def _module_installed(names: tuple[str, ...]) -> bool:
+    """Vrai dès qu'un des *names* est importable."""
+    for name in names:
+        try:
+            if find_spec(name) is not None:
+                return True
+        except (ImportError, ValueError):
+            continue
+    return False
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:
     """Sonde chaque service mémoire connu sur cette machine. Ne lève jamais."""
     resolved = {**_DEFAULT_URLS, **(urls or {})}
     probes: dict[str, ServiceProbe] = {}
-    for service, (extra, module) in _EXTRA_MODULES.items():
+    for service, (extra, modules) in _EXTRA_MODULES.items():
         url = resolved[service]
         probes[service] = ServiceProbe(
             id=service,
             url=url,
             reachable=_tcp_reachable(url, _DEFAULT_PORTS[service]),
             extra=extra,
-            # Weaviate a besoin de deux modules ; ``find_spec`` sur le second
-            # (sentence-transformers) est le vrai discriminant, le premier
-            # n'existe pas comme paquet séparé côté kit.
-            extra_installed=_module_installed(module),
+            extra_installed=_module_installed(modules),
         )
     return probes
 

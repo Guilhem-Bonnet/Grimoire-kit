@@ -93,6 +93,66 @@ Pour peupler le store à partir de la connaissance déjà sur disque :
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
 
+## Mise en place et diagnostic
+
+`grimoire init` détecte un backend vectoriel et écrit `memory.backend`, mais il
+s'arrête là : les clés de graphe et de mémoire chaude restent commentées dans
+le template. `grimoire memory up` comble cet écart.
+
+```bash
+grimoire memory up                    # plan, rien n'est écrit
+grimoire memory up --apply            # écrit le bloc memory:
+grimoire memory up --profile vector   # vecteurs sans graphe
+```
+
+| Profil | Couvre |
+| --- | --- |
+| `lexical` | FTS5 BM25, aucune dépendance, aucun service |
+| `vector` | backend vectoriel seul |
+| `full` | vecteurs + graphe + code + tâches + mémoire chaude |
+
+**On n'active que ce qui répond.** Écrire `memory_graph: neo4j` alors que Neo4j
+est éteint produirait une config qui échoue silencieusement au runtime : un
+service injoignable est signalé avec sa commande de démarrage, pas activé. La
+commande distingue « service éteint » de « extra pip absent », parce que le
+remède diffère.
+
+La comparaison porte sur ce qui est écrit dans le fichier, pas sur les valeurs
+par défaut de la configuration. Sans cela `neo4j_password_env` — qui vaut déjà
+`GRIMOIRE_NEO4J_PASSWORD` par défaut — ne serait jamais écrit, et rien
+n'indiquerait à l'opérateur quelle variable exporter. L'écriture préserve les
+commentaires du YAML et est idempotente.
+
+### Ce que `memory status` révèle
+
+`grimoire memory status` ne sort jamais en erreur, même quand le backend ne peut
+pas démarrer : un diagnostic qui meurt avec son sujet ne sert à rien. Il affiche
+alors le contrat des sept couches, calculé depuis la configuration, et la raison
+de l'indisponibilité.
+
+Le bloc `parity` compare trois compteurs :
+
+| Compteur | Source |
+| --- | --- |
+| `store` | entrées du backend durable |
+| `graph` | nœuds `GrimoireMemory` dans Neo4j |
+| `vectors` | références `WeaviateObject` dans Neo4j |
+
+Un écart signale un objet écrit d'un côté sans contrepartie de l'autre — le
+« lien brisé » que rien ne remontait jusqu'ici. Le remède est
+`grimoire memory gate --sync`. La sonde reste légère (trois `COUNT`), là où
+`grimoire memory graph verify` reconstruit tout le code graph.
+
+### Sondes d'environnement
+
+`grimoire doctor` sonde Weaviate, Neo4j et Redis en plus de Qdrant et Ollama,
+mais **seulement si le projet route réellement la couche** : un projet en
+`local` ne récolte pas d'avertissements pour des services qu'il n'utilise pas.
+
+La sonde Neo4j couvre un mode de panne silencieux : quand la socket répond mais
+que la variable `neo4j_password_env` est absente, chaque écriture de graphe
+échoue à l'authentification sans que rien ne le dise.
+
 ## Taxonomie palais
 
 La taxonomie est générée par [memory/taxonomy.py](api-reference.md). Chaque souvenir peut être enrichi automatiquement avec :
@@ -184,6 +244,7 @@ La surface publique passe par `grimoire memory`.
 
 | Domaine | Commandes |
 | --- | --- |
+| Mise en place | `grimoire memory up` |
 | Santé et inspection | `grimoire memory status`, `grimoire memory taxonomy` |
 | Recherche et listing | `grimoire memory search`, `grimoire memory list` |
 | Échange JSON | `grimoire memory export`, `grimoire memory import` |
