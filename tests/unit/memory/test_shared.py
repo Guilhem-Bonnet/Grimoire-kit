@@ -336,3 +336,52 @@ class TestLayeredRecall:
         result = sh.layered_recall(project, None, "souvenir", today=TODAY)
         assert result.shared == []
         assert result.to_dict()["shared"] == []
+
+
+# ── Aides internes : cas limites ──────────────────────────────────────────────
+
+
+class TestInternals:
+    def test_empty_project_name_yields_no_alias(self) -> None:
+        """Sans nom de projet, la garde ne doit pas inventer d'alias vide."""
+        assert sh._project_aliases("   ") == ()
+        verdict = sh.check_promotable(
+            "un motif parfaitement generique et assez long pour passer la garde",
+            project_name="", domain="x",
+        )
+        assert verdict.ok, verdict.reasons
+
+    def test_as_tuple_tolerates_bad_metadata(self) -> None:
+        assert sh._as_tuple(["a", "b"]) == ("a", "b")
+        assert sh._as_tuple("pas une liste") == ()
+        assert sh._as_tuple(None) == ()
+
+    def test_confirm_falls_back_when_backend_has_no_update(self) -> None:
+        """Un backend sans `update` doit quand meme voir sa confirmation prise."""
+
+        class _NoUpdate:
+            update = None
+
+            def __init__(self) -> None:
+                self.stored: list[dict[str, object]] = []
+
+            def recall(self, entry_id: str) -> MemoryEntry:
+                return MemoryEntry(id=entry_id, text="motif", metadata={"confirmed_in": []})
+
+            def store(self, text: str, *, tags: tuple[str, ...] = (),
+                      metadata: dict[str, object] | None = None) -> MemoryEntry:
+                self.stored.append(dict(metadata or {}))
+                return MemoryEntry(id="e1", text=text, metadata=dict(metadata or {}))
+
+        backend = _NoUpdate()
+        entry = sh.confirm(backend, "e1", project_name="Projet C", today=TODAY)
+        assert entry is not None
+        assert entry.metadata["confirmed_in"] == ["projet-c"]
+        assert entry.metadata["last_confirmed_at"] == "2026-08-26"
+
+    def test_confirm_returns_none_for_unknown_entry(self) -> None:
+        class _Empty:
+            def recall(self, entry_id: str) -> None:
+                return None
+
+        assert sh.confirm(_Empty(), "absent", project_name="P", today=TODAY) is None
