@@ -13,6 +13,9 @@ import json
 
 import typer
 
+# Importé pour son effet de bord d'enregistrement : câble `memory up` et
+# `memory status` sur memory_app.
+from grimoire.cli import cmd_memory_ops  # noqa: F401
 from grimoire.cli.cmd_memory import (
     _get_fmt,
     _graph_exclude_opt,
