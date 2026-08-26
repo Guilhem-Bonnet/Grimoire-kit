@@ -3311,12 +3311,18 @@ class TestR34LintGlobalOutput:
 
 
 class TestR34NullcontextImport:
-    """H2: nullcontext should be imported at module level."""
+    """H2: nullcontext must stay a module-level import.
+
+    The guard now points at ``cli._shared``, where ``_status_spinner`` — its
+    only consumer — moved when it was extracted to break the app/cmd_upgrade
+    import cycle. A function-local import here is what the original regression
+    was about, so the check follows the code rather than the file.
+    """
 
     def test_nullcontext_available_at_module_level(self) -> None:
-        from grimoire.cli import app as _app_mod
+        from grimoire.cli import _shared
 
-        assert hasattr(_app_mod, "nullcontext")
+        assert hasattr(_shared, "nullcontext")
 
 
 class TestR34EnvVarsComplete:
