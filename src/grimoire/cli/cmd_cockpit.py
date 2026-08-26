@@ -275,6 +275,20 @@ _MUTATION_ACTIONS: dict[str, _Mutation] = {
 }
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+# Longueur d'argument bornée : une requête n'a pas à pousser un roman dans argv.
+_MAX_ARGUMENT_LEN = 512
+
+
+def _is_plain_argument(value: str) -> bool:
+    """Vrai si la valeur peut être passée à la CLI comme simple positionnel.
+
+    Le dispatch n'utilise pas de shell, donc il n'y a pas d'injection de shell
+    possible — mais une valeur commençant par ``-`` serait lue comme une option
+    par la sous-commande. On refuse ce cas, les octets nuls et les longueurs
+    déraisonnables, et on passe malgré tout les valeurs après ``--``.
+    """
+    return bool(value) and not value.startswith("-") and "\x00" not in value and len(value) <= _MAX_ARGUMENT_LEN
+
 
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
@@ -377,25 +391,33 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
         subcmd = action
+        values: list[str] = []
         if is_read:
-            extra = list(_ALLOWED_ACTIONS[action])
+            flags = list(_ALLOWED_ACTIONS[action])
             if action == "search":
                 query = str(data.get("query", "")).strip()
                 if not query:
                     self._send_json(400, {"ok": False, "error": "query requise"})
                     return
-                extra = [query, *extra]
+                values = [query]
         else:
             spec = _MUTATION_ACTIONS[action]
             subcmd = spec.subcommand or action
-            extra = list(spec.args)
+            flags = list(spec.args)
             if spec.needs_id:
                 entry_id = str(data.get("id", "")).strip()
                 if not entry_id:
                     self._send_json(400, {"ok": False, "error": "id d'entrée requis"})
                     return
-                extra = [entry_id, *extra]
-        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *extra]
+                values = [entry_id]
+        if not all(_is_plain_argument(v) for v in values):
+            self._send_json(400, {"ok": False, "error": "valeur d'argument refusée"})
+            return
+        # Les valeurs venant de la requête passent après ``--`` : la sous-commande
+        # les lit comme des positionnels, jamais comme des options.
+        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *flags]
+        if values:
+            cmd += ["--", *values]
         try:
             res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:

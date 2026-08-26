@@ -351,7 +351,8 @@ def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.
     )
     assert status == 200
     assert body["ok"] is True
-    assert captured["cmd"][-3:] == ["delete", "dec-03", "--yes"]
+    # Les valeurs de la requête passent après ``--`` (cf. _is_plain_argument).
+    assert captured["cmd"][-4:] == ["delete", "--yes", "--", "dec-03"]
 
 
 def test_api_sync_maps_to_gate_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,3 +534,34 @@ def test_prune_dry_run_changes_nothing(runner: CliRunner, tmp_path: Path) -> Non
     result = runner.invoke(app, ["cockpit", "prune", "--dry-run"])
     assert result.exit_code == 0
     assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["gone"]
+
+
+def test_argv_values_cannot_pose_as_options(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le dispatch n'utilise pas de shell, mais `--flag` serait lu comme une option."""
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        calls.append(cmd)
+        return _FakeProc(0, stdout="{}")
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    for hostile in ("--help", "-x", "--yes", "a" * 600, "nul\x00byte"):
+        status, body = _post_api(api_server, {"action": "search", "project": "served", "query": hostile})
+        assert (status, body["ok"]) == (400, False), hostile
+    assert calls == []
+
+
+def test_argv_values_are_passed_after_a_separator(
+    api_server: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
+        captured["cmd"] = cmd
+        return _FakeProc(0, stdout="{}")
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    _post_api(api_server, {"action": "search", "project": "served", "query": "mémoire du projet"})
+    cmd = captured["cmd"]
+    assert cmd[-2:] == ["--", "mémoire du projet"]
+    assert "search" in cmd
