@@ -78,6 +78,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
   les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
   par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
+- **`grimoire cockpit prune`** — retire du registre les projets dont le chemin a
+  disparu. Le registre accumulait une entrée par projet enrôlé sans jamais en
+  retirer : chaque projet supprimé ou déplacé y laissait un pointeur mort, et
+  rien n'offrait de les nettoyer autrement qu'un par un via `cockpit remove`.
+  Sur un poste de développement, 6 327 entrées mortes sur 6 460. Prudent par
+  défaut — un répertoire encore présent a pu être enrôlé délibérément, donc
+  seule l'absence du chemin justifie un retrait ; `--stale` élargit aux chemins
+  présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
+  demande confirmation sauf `--yes`.
 
 ### Modifié
 
