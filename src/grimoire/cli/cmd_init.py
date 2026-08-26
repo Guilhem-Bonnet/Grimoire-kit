@@ -246,15 +246,30 @@ def _run_wizard(
     skill_level = _skill_choices[skill_input]
 
     qdrant_docker = False
+    offline = False
     if offer_qdrant_docker:
         console.print()
-        console.print("  [bold]Memory:[/bold] Qdrant n'est pas encore disponible sur localhost:6333.")
-        qdrant_docker = Confirm.ask(
-            "  [bold]Initialiser Qdrant via Docker pour la mémoire sémantique ?[/bold]",
+        console.print("  [bold]Memory:[/bold] aucun service vectoriel sur localhost.")
+        # The question is about the network, not about Qdrant: a closed site
+        # cannot reach an embedding model, so proposing a container there only
+        # produces a store that can never be filled.
+        has_egress = Confirm.ask(
+            "  [bold]Cette machine a-t-elle un accès réseau sortant ?[/bold]",
             default=True,
         )
-        if qdrant_docker:
-            backend = "qdrant-server"
+        if not has_egress:
+            offline = True
+            console.print("  [dim]→ recherche lexicale (BM25) : aucun modèle, aucun service, aucun réseau.[/dim]")
+            console.print("  [dim]  Pour passer au sémantique plus tard : grimoire memory bundle install[/dim]")
+        else:
+            # Proposed, never assumed: a container plus its volume is not
+            # something to start behind the user's back on a first run.
+            qdrant_docker = Confirm.ask(
+                "  [bold]Démarrer Qdrant via Docker pour la mémoire sémantique ?[/bold]",
+                default=False,
+            )
+            if qdrant_docker:
+                backend = "qdrant-server"
 
     # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
     console.print()
@@ -326,6 +341,7 @@ def _run_wizard(
         "archetype": selected_archetypes[0] if selected_archetypes else "minimal",
         "backend": backend,
         "qdrant_docker": qdrant_docker,
+        "offline": offline,
     }
 
 
@@ -712,6 +728,7 @@ def run_init(
     user_name = _git_user_name() or "Developer"
     language = "Français"
     skill_level = "intermediate"
+    offline = False
 
     is_interactive = sys.stdin.isatty() and not yes and fmt != "json"
 
@@ -729,6 +746,7 @@ def run_init(
         user_name = wizard_result["user_name"]
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
+        offline = bool(wizard_result.get("offline", False))
         qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
         # Re-resolve if user changed archetypes or backend
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
@@ -752,6 +770,7 @@ def run_init(
         scan=scan,
         resolved=resolved,
         backend=backend,
+        offline=offline,
     )
     plan = scaffolder.plan()
 

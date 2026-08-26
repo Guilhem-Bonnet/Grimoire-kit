@@ -1,6 +1,6 @@
 """Tests for grimoire.memory.backends.qdrant — QdrantBackend.
 
-All external dependencies (qdrant_client, sentence_transformers) are fully mocked.
+All external dependencies (qdrant_client, fastembed) are fully mocked.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from grimoire.memory.backends.base import BackendStatus, MemoryEntry
 # ── Mock infrastructure ───────────────────────────────────────────────────────
 
 def _make_qdrant_mocks() -> tuple[MagicMock, MagicMock, dict[str, Any]]:
-    """Build mock qdrant_client module + SentenceTransformer class."""
+    """Build mock qdrant_client module + fastembed TextEmbedding class."""
     # Qdrant client mock
     mock_client = MagicMock()
     mock_client.get_collections.return_value.collections = []
@@ -30,19 +30,24 @@ def _make_qdrant_mocks() -> tuple[MagicMock, MagicMock, dict[str, Any]]:
     models_mod = MagicMock()
     qdrant_mod.models = models_mod
 
-    # sentence_transformers module
+    # An existing collection must report a real width: the backend refuses a
+    # geometry clash, and a bare MagicMock would answer int() == 1.
+    mock_client.get_collection.return_value.config.params.vectors.size = 384
+
+    # fastembed module
     mock_encoder = MagicMock()
-    import numpy as np
+    # side_effect, not return_value: an iterator is consumed by the first call
+    # (the dimension probe) and every later encode would hit StopIteration.
+    mock_encoder.embed.side_effect = lambda texts: iter([[0.0] * 384 for _ in texts])
 
-    mock_encoder.encode.return_value = np.zeros(384)
-
-    st_mod = MagicMock()
-    st_mod.SentenceTransformer.return_value = mock_encoder
+    fe_mod = MagicMock()
+    fe_mod.TextEmbedding.return_value = mock_encoder
 
     return mock_client, mock_encoder, {
         "qdrant_client": qdrant_mod,
         "qdrant_client.models": models_mod,
-        "sentence_transformers": st_mod,
+        "fastembed": fe_mod,
+        "sentence_transformers": None,
     }
 
 
@@ -83,6 +88,37 @@ class TestQdrantBackendConstruct:
         client.get_collections.return_value.collections = [coll]
         _make_backend(qdrant_env)
         client.create_collection.assert_not_called()
+
+    def test_refuses_a_collection_of_another_width(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        """A model swap that changes the dimension must not corrupt the store."""
+        from grimoire.memory.embedding import EmbeddingEngineError
+
+        client, _ = qdrant_env
+        coll = MagicMock()
+        coll.name = "grimoire"
+        client.get_collections.return_value.collections = [coll]
+        client.get_collection.return_value.config.params.vectors.size = 768
+
+        with pytest.raises(EmbeddingEngineError, match="768-dimension"):
+            _make_backend(qdrant_env)
+
+    def test_width_check_stays_silent_on_unknown_server_shape(
+        self, qdrant_env: tuple[MagicMock, MagicMock],
+    ) -> None:
+        """Older servers expose a different config shape — that is not a failure."""
+        client, _ = qdrant_env
+        coll = MagicMock()
+        coll.name = "grimoire"
+        client.get_collections.return_value.collections = [coll]
+        client.get_collection.side_effect = RuntimeError("unsupported")
+
+        _make_backend(qdrant_env)  # must not raise
+
+    def test_reports_the_engine_in_health_check(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        backend = _make_backend(qdrant_env)
+        status = backend.health_check()
+        assert status.detail["embedding_engine"] == "fastembed"
+        assert status.detail["vector_size"] == 384
 
 
 class TestQdrantBackendStore:
