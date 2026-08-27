@@ -1,0 +1,38 @@
+name: Dependency audit (planifié)
+
+on:
+  # ── Planification hebdomadaire (chaque lundi à 6h23 UTC) ────────────────────
+  # ci-sdk.yml ne se déclenche que sur push/pull_request : un waiver de
+  # .github/security/dependency-waivers.yaml qui expire par simple passage du
+  # calendrier ne casserait la CI qu'à la prochaine PR de passage. Ce workflow
+  # fait mordre l'expiration d'elle-même.
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dep-audit:
+    name: "Dependency audit"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + pip-audit
+        run: |
+          pip install -e ".[dev]"
+          pip install pip-audit
+
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          pip freeze --exclude-editable | grep -v '^grimoire-kit==' > audit-requirements.txt
+          # Même chaîne de waivers que le job dep-audit de ci-sdk.yml : les
+          # entrées actives deviennent des --ignore-vuln ; un waiver expiré
+          # disparaît et l'audit redevient strict.
+          IGNORE_FLAGS="$(python scripts/depaudit-waivers.py)"
+          pip-audit --strict --desc $IGNORE_FLAGS -r audit-requirements.txt
