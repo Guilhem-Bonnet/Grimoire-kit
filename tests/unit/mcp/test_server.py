@@ -425,3 +425,64 @@ class TestFindKitRoot:
     def test_returns_none(self, tmp_path: Path) -> None:
         result = _find_kit_root(tmp_path)
         assert result is None
+
+
+class TestSurfaceOverMcp:
+    """Commands and skills reach any MCP client, with no emitter involved.
+
+    This is the only surface every host shares. The server exposed a third of
+    the protocol — fifteen tools, no prompt, no resource — so Codex, Cursor and
+    Gemini CLI received a prose catalog where a real slash command was
+    available for free.
+    """
+
+    def test_commands_are_exposed_as_prompts(self, project: Path) -> None:
+        from grimoire.mcp.server import _register_surface
+
+        prompts, resources = _register_surface(project)
+        assert prompts > 0, "aucune commande exposée en prompt"
+        assert resources > 0, "aucune compétence exposée en resource"
+
+    def test_registration_never_prevents_startup(self, tmp_path: Path) -> None:
+        """A server that cannot read a project is still a useful server."""
+        missing = tmp_path / "nexiste-pas"
+        assert _register_surface_is_safe(missing)
+
+    def test_a_prompt_body_carries_its_argument(self) -> None:
+        from grimoire.mcp.server import _register_command
+
+        captured: dict[str, object] = {}
+
+        def fake_prompt(*, name: str, description: str):  # type: ignore[no-untyped-def]
+            def decorator(fn):  # type: ignore[no-untyped-def]
+                captured["name"] = name
+                captured["description"] = description
+                captured["fn"] = fn
+                return fn
+
+            return decorator
+
+        import grimoire.mcp.server as server_mod
+
+        original = server_mod.mcp.prompt
+        try:
+            server_mod.mcp.prompt = fake_prompt  # type: ignore[assignment]
+            _register_command("grimoire-gate", "Vérifier les gates", "Corps.", "[task-id]")
+        finally:
+            server_mod.mcp.prompt = original  # type: ignore[assignment]
+
+        assert captured["name"] == "grimoire-gate"
+        assert "task-id" in str(captured["description"])
+        handler = captured["fn"]
+        assert handler() == "Corps."  # type: ignore[operator]
+        assert "BM-12" in handler("BM-12")  # type: ignore[operator]
+
+
+def _register_surface_is_safe(path: Path) -> bool:
+    from grimoire.mcp.server import _register_surface
+
+    try:
+        _register_surface(path)
+    except Exception:  # pragma: no cover - the point of the test is that this never runs
+        return False
+    return True

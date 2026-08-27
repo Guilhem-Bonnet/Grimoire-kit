@@ -54,6 +54,14 @@ if TYPE_CHECKING:
 
         def tool(self, *args: Any, **kwargs: Any) -> Callable[[_F], _F]: ...
 
+        # Vérifiés fonctionnellement contre mcp 1.29.1 et mcp 2.x, pas supposés :
+        # enregistrement dynamique avec `name=` explicite, `list_prompts()`,
+        # `list_resources()`, `get_prompt()` et arguments déclarés se comportent
+        # identiquement des deux côtés. Voir l'issue #176.
+        def prompt(self, *args: Any, **kwargs: Any) -> Callable[[_F], _F]: ...
+
+        def resource(self, *args: Any, **kwargs: Any) -> Callable[[_F], _F]: ...
+
         def run(self, *args: Any, **kwargs: Any) -> None: ...
 
     mcp: _ServerFacade
@@ -559,6 +567,86 @@ def grimoire_command(slug: str, project_path: str = ".") -> str:
                 ensure_ascii=False,
             )
     return json.dumps({"error": f"Unknown command: {slug}", "available": [c.slug for c in commands]})
+
+
+# ── Prompts and resources ─────────────────────────────────────────────────────
+#
+# The kit renders its commands and skills into per-host files: `.claude/commands`
+# on Claude Code, `.github/prompts` on Copilot, a prose catalog everywhere else.
+# MCP needs no emitter at all — a prompt is a slash command in *every* client,
+# and a resource is a skill body any client can load on demand. This is the one
+# surface that is genuinely host-independent, and the kit was exposing a third
+# of it: fifteen tools, no prompt, no resource.
+#
+# Registration happens at import against the working directory, because that is
+# what an MCP server is launched with. Failure is never fatal: a server that
+# cannot read a project still serves its tools.
+
+_SKILL_URI = "grimoire://skill/{slug}"
+
+
+def _register_command(slug: str, description: str, body: str, argument_hint: str) -> None:
+    """Expose one Grimoire command as an MCP prompt."""
+
+    def handler(arguments: str = "") -> str:
+        if not arguments:
+            return body
+        return f"{body}\n\nArgument fourni : {arguments}"
+
+    handler.__name__ = slug.replace("-", "_")
+    handler.__doc__ = description
+    label = f"{description} — argument : {argument_hint}" if argument_hint else description
+    mcp.prompt(name=slug, description=label)(handler)
+
+
+def _register_skill(slug: str, description: str, body: str) -> None:
+    """Expose one Grimoire skill as an MCP resource."""
+
+    def handler() -> str:
+        return body
+
+    handler.__name__ = f"skill_{slug.replace('-', '_')}"
+    handler.__doc__ = description
+    mcp.resource(_SKILL_URI.format(slug=slug), name=slug, description=description)(handler)
+
+
+def _register_surface(project_path: Path | None = None) -> tuple[int, int]:
+    """Register the project's commands and skills; return how many of each.
+
+    Never raises: an MCP server that cannot read a project is still a useful
+    MCP server, and refusing to start over a missing directory would be a
+    worse failure than serving fewer prompts.
+    """
+    try:
+        from grimoire.hosts.collect import collect_commands, collect_skills
+
+        root = (project_path or Path.cwd()).resolve()
+        commands = collect_commands(root)
+        skills = collect_skills(root)
+    # Same reasoning: a server that cannot read a project is still a useful
+    # MCP server, and refusing to start would be the worse failure.
+    except Exception:
+        return (0, 0)
+
+    prompts = sum(
+        _guarded(_register_command, c.slug, c.description, c.body, c.argument_hint) for c in commands
+    )
+    resources = sum(_guarded(_register_skill, k.slug, k.description, k.body) for k in skills)
+    return (prompts, resources)
+
+
+def _guarded(register: Callable[..., None], *args: Any) -> int:
+    """Register one entry; a malformed one must not drop the rest of the surface."""
+    try:
+        register(*args)
+    # Large on purpose: a malformed entry must not prevent the server from
+    # starting, and there is no logger on this path.
+    except Exception:
+        return 0
+    return 1
+
+
+_register_surface()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

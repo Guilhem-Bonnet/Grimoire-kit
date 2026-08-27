@@ -9,6 +9,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Prompts et resources MCP — la surface qui ne demande aucun émetteur** — le
+  protocole MCP a trois primitives, le serveur du kit en exposait une : quinze
+  outils, zéro prompt, zéro resource. Or MCP est la seule surface que *tous* les
+  hôtes partagent. Les six commandes deviennent des **prompts MCP**, donc des
+  slash commands dans n'importe quel client — Claude Code, Copilot, Cursor,
+  Codex, Gemini CLI, Zed, Continue — et les trois compétences deviennent des
+  **resources** chargeables à la demande sous `grimoire://skill/<slug>`.
+  Codex, Cursor et Gemini CLI cessent ainsi de recevoir un catalogue en prose là
+  où une commande réelle était disponible sans écrire une ligne d'émetteur.
+  La façade du serveur n'a été élargie qu'après vérification **fonctionnelle**
+  sur mcp 1.29.1 et mcp 2.x — enregistrement dynamique, listing, `get_prompt`,
+  arguments déclarés — et non sur un simple `hasattr` : c'est la discipline qui
+  avait déjà évité une borne de version erronée. L'enregistrement ne peut jamais
+  empêcher le serveur de démarrer.
+
 - **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
   vie avaient été conçus l'un pour l'autre sans jamais être reliés :
   `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
