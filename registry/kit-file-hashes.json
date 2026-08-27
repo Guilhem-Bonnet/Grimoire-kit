@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.32.0",
+ "generated_for": "3.33.0",
  "digests": {
   "0005d8e36631bdbd8de6453ab48f157a8e693d392fe1bab254b44fb9513af058": {
    "version": "3.32.0",
@@ -122,6 +122,10 @@
    "version": "3.4.3",
    "path": "framework/agentic-standard/templates/evidence-pack.md"
   },
+  "07b0f86c35a39bfde5674105788c28ff08925cb5278bebc99b11a2df5ead4a7b": {
+   "version": "3.33.0",
+   "path": "framework/hosts/skills/grimoire-evidence.md"
+  },
   "0800e97d2d308241d06a765c86db04f7b68611e91b48b150a8147382234df4aa": {
    "version": "3.21.0",
    "path": "framework/tools/web-browser.py"
@@ -193,6 +197,10 @@
   "0dee075561c6ae38f6a87338a2623823e4581fe6f62952b91c9a4100893137c4": {
    "version": "3.5.0",
    "path": "framework/agentic-standard/templates/compliance-score.yaml"
+  },
+  "0e12039178db79c2e780bfe3162c742fb38029f57054f4fd30ff189e8e3af6e5": {
+   "version": "3.33.0",
+   "path": "framework/hosts/commands/grimoire-gate.md"
   },
   "0e21e000d790f93c0a576108159486f6533b0074a14901ca9143823e5a258765": {
    "version": "3.16.0",
@@ -649,6 +657,14 @@
   "2ccbbcad59ba0447f9bd966e2bc35e77c6c6a31f9157f6c8c1fc703d2291d8e5": {
    "version": "3.4.2",
    "path": "framework/tools/agent-worker.py"
+  },
+  "2d1e51eb758d9fdaa4a0bd6abc2bdf5e3340fcbdf5dc647cab257bc02970683c": {
+   "version": "3.33.0",
+   "path": "framework/hosts/commands/grimoire-verify.md"
+  },
+  "2dad8a586193473911d742878497edac36020efcf2f78847c98c34383ab7d660": {
+   "version": "3.33.0",
+   "path": "framework/hosts/commands/grimoire-recall.md"
   },
   "2dc996f6495d86bf22baadd36c2f9d1f1d8204dc9626e751c6928b831384c415": {
    "version": "3.32.0",
@@ -1169,6 +1185,10 @@
   "562845207515c9d336fcfa9e146c3950928eef3f8ba898112b812f0189819c2d": {
    "version": "3.32.0",
    "path": "framework/tools/__pycache__/memory-lint.cpython-314.pyc"
+  },
+  "56e92aaa1174b759597a2025e2efa609136f6f2f486f1afac07dc01be537e368": {
+   "version": "3.33.0",
+   "path": "framework/hosts/skills/grimoire-memory.md"
   },
   "573edf1b8fefc48fb2e8f45b8d41f82944a3c7f59dfc53367c7274dccf970b31": {
    "version": "3.32.0",
@@ -2026,6 +2046,10 @@
    "version": "3.32.0",
    "path": "archetypes/web-app/agents/frontend-specialist.md"
   },
+  "8d9a42f4d1d51e96a1e4abf974503d678758c51552863f711d1d5045e742d31d": {
+   "version": "3.33.0",
+   "path": "framework/hosts/commands/grimoire-proof.md"
+  },
   "8d9b7b1749bff021d16b9420af882576e9c47e0c4970b296fb632ed065fa401c": {
    "version": "3.21.1",
    "path": "framework/tools/message-bus.py"
@@ -2061,6 +2085,10 @@
   "90bfb4ba2dd2f8f968a389dfd445c93cd25f465aae9a6e20bc833ab2516b54aa": {
    "version": "3.32.0",
    "path": "framework/tools/__pycache__/self-healing.cpython-314.pyc"
+  },
+  "90d3eb2888f77d7a24d86742b59506801135606ad1068706909f7c4f15c936e1": {
+   "version": "3.33.0",
+   "path": "framework/hosts/commands/grimoire-doctor.md"
   },
   "90e2f5aa012406477b795e463fd9ac64956b65413654c4f192f5e352f98d86bf": {
    "version": "3.24.0",
@@ -3097,6 +3125,10 @@
   "d18ebf2bd69194a2e4d6f4aeca2e55e69921f38c9ffca09d2f5e2f5c5fcf654a": {
    "version": "3.16.0",
    "path": "framework/tools/grimoire-daemon.py"
+  },
+  "d1b9f23fe4209380c6f4b7954a40adb10d9e94d3b9e70f11fbe8a4f7d9a84bc0": {
+   "version": "3.33.0",
+   "path": "framework/hosts/skills/grimoire-agent-dispatch.md"
   },
   "d20998b324a01860b8168012c7f97da9e1642818b80cdf2b830414219409d069": {
    "version": "3.32.0",

@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.33.0] - 2026-08-27
+
 ### Ajouté
 
 - **Surfaces hôtes (`grimoire host`)** — un projet ne se décrivait aux hôtes
