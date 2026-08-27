@@ -10,28 +10,35 @@ permissions:
 
 jobs:
   label:
+    name: "Étiquettes de domaine"
     runs-on: ubuntu-latest
     steps:
+      # Étiquettes `type:*`, posées selon les chemins touchés. Elles servent au
+      # tri et à la recherche ; elles ne décident rien de ce qui est publié.
       - uses: actions/labeler@v7
         with:
           configuration-path: .github/labeler.yml
           sync-labels: true
 
-  title:
+  release-label:
     name: "Titre de PR conventionnel"
     runs-on: ubuntu-latest
     steps:
-      # La note de version et le numéro de version se déduisent de ce titre
-      # (voir .github/release-drafter.yml). Un titre hors convention ne casse
-      # rien de visible : la PR sort simplement de la note sans catégorie, et
-      # compte pour un incrément correctif même si elle livre une
-      # fonctionnalité. Une panne muette dans un artefact publié — donc on la
-      # rend bruyante ici, au seul moment où elle coûte une seconde à réparer.
-      - name: Le préfixe annonce la nature du changement
+      # La note de version et le numéro de version se déduisent du préfixe de
+      # ce titre (voir .github/release-drafter.yml). Deux raisons de le faire
+      # ici plutôt que par l'`autolabeler` de release-drafter : sur événement
+      # de PR ce dernier tourne en `[dry-run]` et ne pose rien, et la règle
+      # serait écrite deux fois — une pour valider, une pour étiqueter. Une
+      # seule expression décide, et c'est celle qui refuse.
+      - name: Le préfixe décide de la catégorie et de l'incrément
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE: ${{ github.event.pull_request.title }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
-          re="^(feat|fix|docs|test|ci|build|chore|refactor|perf|style)([(][^)]+[)])?!?: .+"
+          set -euo pipefail
+          re="^(feat|fix|docs|test|ci|build|chore|refactor|perf|style)([(][^)]+[)])?(!)?: .+"
           if [[ ! "$TITLE" =~ $re ]]; then
             echo "::error::titre hors convention : $TITLE"
             echo "Le titre doit commencer par un préfixe Conventional Commit :"
@@ -42,4 +49,32 @@ jobs:
             echo "Le scope est facultatif ; le « : » et l'espace qui suit ne le sont pas."
             exit 1
           fi
-          echo "titre conforme : $TITLE"
+          kind="${BASH_REMATCH[1]}"
+          bang="${BASH_REMATCH[3]:-}"
+
+          if [[ -n "$bang" ]]; then
+            want="breaking"
+          else
+            case "$kind" in
+              feat)                        want="release:feature" ;;
+              fix)                         want="release:fix" ;;
+              docs)                        want="release:docs" ;;
+              test)                        want="release:test" ;;
+              ci|build)                    want="release:infra" ;;
+              chore|refactor|perf|style)   want="release:chore" ;;
+            esac
+          fi
+
+          # Exactement une étiquette de release : les autres partent, sinon un
+          # titre corrigé laisserait la PR dans deux catégories de la note.
+          current=$(gh pr view "$PR" --repo "$REPO" --json labels \
+            --jq '[.labels[].name | select(startswith("release:") or . == "breaking")] | join(" ")')
+          for lab in $current; do
+            [[ "$lab" == "$want" ]] && continue
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$lab"
+            echo "retiré : $lab"
+          done
+          if [[ " $current " != *" $want "* ]]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "$want"
+          fi
+          echo "titre conforme : $TITLE → $want"
