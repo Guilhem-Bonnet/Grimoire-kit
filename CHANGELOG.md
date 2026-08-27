@@ -9,6 +9,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
+  vie avaient été conçus l'un pour l'autre sans jamais être reliés :
+  `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
+  documente comme « fraction of tool calls that were blocked » — un nombre qui
+  ne pouvait que valoir zéro tant que les hooks n'écrivaient rien. Chaque appel
+  d'outil réellement évalué et chaque décision de clôture sont désormais
+  consignés dans `_grimoire-output/traces/`. Mesuré sur un projet gouverné :
+  `policy_block_rate` passe de 0.0 structurel à 0.5 réel.
+  Trois propriétés le rendent sûr à garder : le chemin en lecture seule n'écrit
+  rien (il sort avant toute évaluation), les arguments sont **hachés** et jamais
+  stockés tels quels — le ledger part sur disque et s'exporte en OTel —, et un
+  ledger impossible à écrire ne fait pas échouer la session.
+
 - **`grimoire task board export`** — le task board gouverné est désormais une
   projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
   enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
