@@ -27,8 +27,8 @@ from grimoire.core.agentic_standard import (
     verify_standard_profile,
 )
 
-ARMS = ("governed", "baseline", "activated")
-ENROLLED_ARMS = ("governed", "activated")
+ARMS = ("governed", "baseline", "activated", "activated-v2", "activated-v2-disclosed")
+ENROLLED_ARMS = ("governed", "activated", "activated-v2", "activated-v2-disclosed")
 
 
 def collect_standard_metrics(
@@ -110,7 +110,7 @@ def collect_record(
         collect_standard_metrics(
             project_root.resolve(),
             standard_task_id,
-            gate_target_state="review" if arm == "activated" else None,
+            gate_target_state="review" if arm.startswith("activated") else None,
         )
         if arm in ENROLLED_ARMS
         else None
