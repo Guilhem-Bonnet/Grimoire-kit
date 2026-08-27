@@ -1000,10 +1000,17 @@ class ProjectScaffolder:
 
         v = self._tpl_vars()
         v["agents_table"] = agents_table
+        # Seed, not kit. The kit seeds this file, but it is where a project
+        # writes its own doctrine — conventions, rules, house style — and
+        # regenerating it deletes that. Verified the hard way: refreshing it on
+        # a real project cut 227 lines down to 112 and dropped the project's
+        # governing doctrine. The installed agent table therefore goes stale
+        # here; that is the price of the file being the project's.
         p.templates.append(TemplateRender(
             dst=copilot_file,
             content=Template(_COPILOT_INSTRUCTIONS_TPL).safe_substitute(v),
             label=".github/copilot-instructions.md",
+            tier=TIER_SEED,
         ))
 
     def _plan_assistant_bridges(self, p: ScaffoldPlan) -> None:
@@ -1042,14 +1049,17 @@ class ProjectScaffolder:
                 "# Suivre les agents, workflows, mémoire et standard agentique décrits.\n"
             ),
         }
-        # Bridges are pure pointers at the canonical instructions file: there is
-        # nothing in them worth customising, and freezing them stranded projects
-        # on the entrypoint format of their install version.
+        # Seeded once, then the project's. They start as pointers at the
+        # canonical instructions file, but every assistant reads its own
+        # entrypoint and projects extend them — imports, house rules, agent
+        # activation. Overwriting them destroys that, so a new bridge format
+        # reaches existing projects through migration, not through an update.
         for filename, content in bridges.items():
             p.templates.append(TemplateRender(
                 dst=self._target / filename,
                 content=content,
                 label=filename,
+                tier=TIER_SEED,
             ))
 
     def _plan_mcp_config(self, p: ScaffoldPlan) -> None:
