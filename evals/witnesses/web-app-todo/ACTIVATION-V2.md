@@ -95,3 +95,14 @@ complétée inférieur à la baseline » — pas de généralisation.
   `evals/tasks/web-app-todo.yaml` (`disclosed_prompt_template`) par le
   même commit, avant tout run. Bras `activated-v2` et
   `activated-v2-disclosed` ajoutés à `arms` et au collecteur.
+- **2026-08-27 (incident toolchain, avant relance)** — Après 15 runs du
+  bras décisionnel, découverte que le toolchain **Go était absent de la
+  machine** (retiré depuis juillet ; les campagnes 07-03/07-09 l'avaient).
+  Les agents de ces 15 runs ne pouvaient pas exécuter `go test`
+  (auto-vérification impossible) : environnement non comparable aux bras
+  de référence. Décision : **15 runs invalidés et écartés** (archivés hors
+  campagne, ~16 USD), Go **1.22.12** épinglé restauré (tarball officiel,
+  `GOTOOLCHAIN=auto`), baseline revérifiée verte (6 tests), **bras
+  décisionnel redémarré à zéro** avec l'environnement complet. Le smoke
+  pilote (fix-n-plus-one, 0,59 USD) reste hors agrégation comme prévu.
+  Coût total consigné au rapport : runs valides + runs invalidés + pilote.
