@@ -83,3 +83,15 @@ Si le verdict est positif, le claim publiable est strictement borné à :
 « sur ce témoin, avec ce runner et ce modèle, l'activation du standard
 réduit les régressions et augmente la complétion à coût par tâche
 complétée inférieur à la baseline » — pas de généralisation.
+
+## Journal de lancement
+
+- **2026-08-27** — Lancement de l'exécution. Vérification des pins :
+  kit 3.18.0 (PyPI, `evals/.venv` reconstruit), runner Claude Code CLI
+  2.1.101 (réinstallé épinglé via npm local, autoupdate désactivé),
+  modèle `claude-sonnet-4-6` (disponibilité vérifiée par ping, 0,03 USD).
+  **Aucun remplacement** — comparabilité inter-campagnes intacte.
+  Formulation du prompt divulgué figée dans
+  `evals/tasks/web-app-todo.yaml` (`disclosed_prompt_template`) par le
+  même commit, avant tout run. Bras `activated-v2` et
+  `activated-v2-disclosed` ajoutés à `arms` et au collecteur.
