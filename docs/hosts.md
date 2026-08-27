@@ -192,10 +192,18 @@ produisent un conflit permanent, jamais un contenu stable.
 
 ## Hôtes sans émetteur
 
-Un client MCP quelconque atteint la même surface par les outils du serveur
-Grimoire : `grimoire_host_status` pour l'inventaire, `grimoire_skill` et
-`grimoire_command` pour charger un corps à la demande. C'est le repli pour un
-hôte que le kit ne connaît pas encore.
+Un hôte sans émetteur n'est pas pour autant sans surface : **MCP est le seul
+canal que tous partagent**, et le serveur Grimoire y expose les trois primitives.
+
+| Primitive | Contenu | Ce que le client en fait |
+|---|---|---|
+| Prompts | les commandes du projet | des slash commands, sans émetteur |
+| Resources | les compétences, sous `grimoire://skill/<slug>` | un corps chargeable à la demande |
+| Tools | `grimoire_host_status`, `grimoire_skill`, `grimoire_command`, … | l'inventaire et l'état |
+
+C'est la réponse à « peu importe l'hôte » — pour le **contenu**. La
+**contrainte** (hooks, permissions) reste l'affaire des émetteurs : MCP
+n'intercepte rien.
 
 Ajouter un hôte se fait en écrivant un émetteur et un profil de capacités ; ni la
 description du projet, ni les règles de gouvernance ne changent.
