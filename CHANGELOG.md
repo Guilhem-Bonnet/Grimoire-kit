@@ -24,6 +24,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
   seul côté casse un test plutôt que de faire disparaître une carte du tableau.
 
+### Corrigé
+
+- **`grimoire up` n'écrase plus les instructions du projet.** En 3.33.0,
+  `.github/copilot-instructions.md` et les passerelles `CLAUDE.md` /
+  `AGENTS.md` / `GEMINI.md` / `.cursorrules` étaient régénérés à chaque mise à
+  jour. Sur un projet réel, le fichier d'instructions est passé de 227 à 112
+  lignes, perdant la doctrine qui gouvernait le dépôt. Ces fichiers sont
+  désormais semés une fois puis laissés au projet — contrepartie assumée : la
+  table des agents installés s'y périme.
+- **`grimoire migrate --adopt-kit` ne supprime plus les fichiers archivés par
+  le projet.** Le masquage était détecté par nom de fichier, si bien qu'un
+  `agents/_archived/concierge.md` passait pour un doublon de l'agent
+  `concierge` livré par le kit ; l'adoption le supprimait sans que rien ne le
+  régénère. La détection compare désormais le chemin complet.
+- **La propagation d'identité n'efface plus un champ que la config ne déclare
+  pas.** `project-context.yaml` n'impose pas de section `user:` ; en son
+  absence, `grimoire up` vidait `**User**` dans le fichier d'instructions.
+
 ### Sécurité
 
 - Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
