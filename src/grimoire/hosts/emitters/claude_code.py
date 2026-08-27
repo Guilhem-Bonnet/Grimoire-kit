@@ -55,13 +55,33 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
 #: middle: the session's own model is a better guess than ours.
 _MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
 
+#: Tool families the declarative permission table covers *in full*, so a host
+#: that has one gains nothing from also spawning a hook process for them. Only
+#: ``secret`` qualifies: every credential family is expressed as a deny glob
+#: (see :mod:`grimoire.hosts.secrets`). ``execute`` is deliberately absent — its
+#: ask-list is a shortlist of the most common destructive commands, while the
+#: decision checks a broader set of shapes the table cannot express.
+#:
+#: This is not a cosmetic trim. ``Read`` in the matcher means a process per file
+#: read: measured at ~307 ms, on every read, in every session.
+_DECLARATIVELY_COVERED = frozenset({"secret"})
+
 #: Events whose configuration entries take no matcher.
 _MATCHERLESS = {HookEvent.SESSION_START, HookEvent.USER_PROMPT_SUBMIT, HookEvent.PRE_COMPACT}
 
 #: Any hook command containing one of these belongs to the kit and is replaced
 #: on sync. The activation command is legacy: the session-start decision now
 #: covers it, and leaving both installed injects the directive twice.
-_OWNED_COMMAND_MARKERS = ("grimoire host hook", "grimoire standard activation-context")
+_OWNED_COMMAND_MARKERS = (
+    "grimoire-hook",
+    # Superseded invocations, kept as markers so a project installed by an
+    # earlier kit is migrated rather than accumulating a second entry beside
+    # the new one. Forgetting one is not a cosmetic bug: the merge stops
+    # recognising its own entry, keeps it as foreign, and appends another on
+    # every sync.
+    "grimoire host hook",
+    "grimoire standard activation-context",
+)
 
 
 def _model_for(agent: AgentSpec) -> str:
@@ -127,9 +147,12 @@ def _command_file(command: CommandSpec) -> EmittedFile:
     return EmittedFile(relpath=CLAUDE_DIR / "commands" / f"{command.slug}.md", content=content)
 
 
-def _matcher(hook: HookSpec) -> str:
+def _matcher(hook: HookSpec, *, covered: frozenset[str] = frozenset()) -> str:
+    """Host tool pattern for *hook*, minus families already enforced declaratively."""
     tools: list[str] = []
     for family in hook.matcher:
+        if family in covered:
+            continue
         for tool in _MATCHER_TABLE.get(family, ()):
             if tool not in tools:
                 tools.append(tool)
@@ -139,7 +162,7 @@ def _matcher(hook: HookSpec) -> str:
 def _hook_entry(hook: HookSpec) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if hook.event not in _MATCHERLESS:
-        matcher = _matcher(hook)
+        matcher = _matcher(hook, covered=_DECLARATIVELY_COVERED)
         if matcher:
             entry["matcher"] = matcher
     entry["hooks"] = [

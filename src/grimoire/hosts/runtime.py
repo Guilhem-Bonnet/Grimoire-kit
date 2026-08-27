@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
-from grimoire.core.agentic_standard import CONTEXT_DIR
+from grimoire.core.standard_manifest import CONTEXT_DIR
 from grimoire.core.standard_state import active_task_id
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (

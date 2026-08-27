@@ -21,6 +21,7 @@ from ruamel.yaml import YAML
 from grimoire.core import layout
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.data import framework_path
+from grimoire.hosts.secrets import secret_read_globs
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -354,14 +355,7 @@ def default_permissions(profile: str) -> PermissionSpec:
     enforced — which is deliberate: the table refuses without spawning a
     process, the hook catches what a glob cannot express.
     """
-    deny = (
-        "read:**/.env",
-        "read:**/.env.*",
-        "read:**/id_rsa",
-        "read:**/id_ed25519",
-        "read:**/*.pem",
-        "read:**/secrets/**",
-    )
+    deny = tuple(f"read:{glob}" for glob in secret_read_globs())
     ask = (
         "execute:rm -rf *",
         "execute:git push --force*",

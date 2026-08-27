@@ -178,11 +178,18 @@ class Emitter:
     def hook_command(host_alias: str, wire_event: str) -> str:
         """Invocation a generated hook configuration runs.
 
-        Going through the ``grimoire`` console script rather than a shell
-        snippet keeps the hook portable (no ``cat``, no ``$(…)`` on Windows)
-        and versioned with the kit that generated it.
+        A console script rather than a shell snippet keeps the hook portable
+        (no ``cat``, no ``$(…)`` on Windows) and versioned with the kit that
+        generated it.
+
+        ``grimoire-hook`` rather than ``grimoire host hook``: the second builds
+        the entire Typer command tree — importing every ``cmd_*`` module — to
+        resolve one subcommand, measured at 391 ms per call against 116 ms for
+        the dedicated entry point. A hook runs once per tool call, so that
+        difference is paid on every action of every session. The subcommand
+        stays available for humans.
         """
-        return f"grimoire host hook --host {host_alias} --event {wire_event}"
+        return f"grimoire-hook --host {host_alias} --event {wire_event}"
 
     @staticmethod
     def frontmatter(fields: dict[str, Any]) -> str:

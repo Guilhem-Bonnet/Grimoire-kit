@@ -16,7 +16,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core import layout
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.hosts.capabilities import gaps_for, profile_for, resolve_host
-from grimoire.hosts.collect import build_surface, collect_agents, infer_tools, parse_frontmatter
+from grimoire.hosts.collect import build_surface, collect_agents, default_permissions, infer_tools, parse_frontmatter
 from grimoire.hosts.decisions import (
     HookInput,
     Outcome,
@@ -25,8 +25,10 @@ from grimoire.hosts.decisions import (
     decide_tool_policy,
 )
 from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+from grimoire.hosts.emitters.claude_code import _matcher
 from grimoire.hosts.runtime import normalize_input, parse_event, render, run_hook
-from grimoire.hosts.surface import Enforcement, HookEvent, ToolVerb
+from grimoire.hosts.secrets import SECRET_RULES, secret_read_globs
+from grimoire.hosts.surface import Enforcement, HookEvent, HookSpec, ToolVerb
 
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
 
@@ -265,7 +267,9 @@ def test_settings_merge_preserves_foreign_configuration(governed: Path) -> None:
     assert "echo maison" in commands
     # The legacy activation hook is superseded, not stacked on top of.
     assert "grimoire standard activation-context" not in commands
-    assert commands.count("grimoire host hook --host claude --event SessionStart") == 1
+    assert commands.count("grimoire-hook --host claude --event SessionStart") == 1
+    # The superseded invocation is migrated, not stacked beside the new one.
+    assert not [c for c in commands if c.startswith("grimoire host hook")]
     assert "Read(./privé)" in data["permissions"]["deny"]
 
 
@@ -286,6 +290,58 @@ def test_tool_classification_reads_both_host_vocabularies() -> None:
     assert classify_tool("run_in_terminal", {"command": "rm -rf build"}).destructive_reason
     assert classify_tool("replace_string_in_file", {"filePath": "a.py"}).family == "write"
     assert classify_tool("Read", {"file_path": "app/.env"}).secret_target
+
+
+def test_a_host_with_a_permission_table_does_not_pay_a_process_per_read() -> None:
+    """`Read` in the matcher means a hook process on every file read (~307 ms).
+
+    Credential paths are already refused by the declarative deny rules on a host
+    that has them, so intercepting reads there buys nothing and taxes every
+    session. Shell access to the same files stays covered: `Bash` is in the
+    matcher for the execute family.
+    """
+    hook = HookSpec(
+        event=HookEvent.PRE_TOOL_USE,
+        decision="grimoire.tool-policy",
+        matcher=("execute", "write", "secret"),
+    )
+    trimmed = _matcher(hook, covered=frozenset({"secret"}))
+    assert "Read" not in trimmed
+    assert "Bash" in trimmed and "Edit" in trimmed
+
+
+def test_a_host_without_a_permission_table_keeps_intercepting_reads() -> None:
+    hook = HookSpec(
+        event=HookEvent.PRE_TOOL_USE,
+        decision="grimoire.tool-policy",
+        matcher=("execute", "write", "secret"),
+    )
+    assert "Read" in _matcher(hook)
+
+
+def test_every_credential_family_is_declared_in_both_forms() -> None:
+    """The regex and the deny glob drifted apart once; this is what caught it.
+
+    Three families (`.npmrc`, `credentials.*`, `service-account*.json`) had a
+    detection pattern and no declarative counterpart, so they were unprotected
+    on the side that costs nothing.
+    """
+    for rule in SECRET_RULES:
+        assert rule.pattern, f"{rule.name} sans motif de détection"
+        assert rule.globs, f"{rule.name} sans glob déclaratif"
+
+    deny = default_permissions("governed").deny
+    for glob in secret_read_globs():
+        assert f"read:{glob}" in deny, f"{glob} absent des règles deny"
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [".env", "app/.env.local", "app/.npmrc", "x/.pypirc", "~/.ssh/id_ecdsa",
+     "secrets/token", "certs/a.p12", "k/credentials.json", "sa/service-account-prod.json"],
+)
+def test_each_credential_family_is_actually_detected(probe: str) -> None:
+    assert classify_tool("Read", {"file_path": probe}).secret_target, probe
 
 
 def test_secret_detection_survives_a_windows_separator() -> None:

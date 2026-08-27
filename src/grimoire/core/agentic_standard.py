@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import re
 import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -17,7 +16,16 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core import standard_manifest as sm
-from grimoire.core.standard_manifest import STANDARD_DIR, _render_template
+from grimoire.core.standard_manifest import (
+    CONTEXT_DIR,
+    DECISION_DIR,
+    EVIDENCE_DIR,
+    SCORE_DIR,
+    STANDARD_DIR,
+    STANDARD_PROFILE_FILE,
+    _render_template,
+    normalize_task_id,
+)
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
 from grimoire.data import framework_path
 
@@ -25,13 +33,8 @@ PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
 NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
 PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
-EVIDENCE_DIR = Path("_grimoire-output/evidence")
-CONTEXT_DIR = Path("_grimoire-output/context")
-DECISION_DIR = Path("_grimoire-output/decisions")
 EVENT_DIR = Path("_grimoire-output/events")
 KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
-SCORE_DIR = Path("_grimoire-output/standard")
-STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
 
 LLM_PROVIDER_REGISTRY_FILE = STANDARD_DIR / "llm-provider-registry.yaml"
 EVENT_JOURNAL_FILE = EVENT_DIR / "runtime-journal.jsonl"
@@ -59,7 +62,6 @@ PROVIDER_DEFAULT_MODELS = {
     "google-gemini": ("gemini-family",),
     "local": ("local-open-weight",),
 }
-TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 BOARD_STATES = {
     "proposed",
     "ready",
@@ -670,18 +672,6 @@ def resolve_install_plan(
         pip_command=pip_command,
         warnings=tuple(warnings),
     )
-
-
-def normalize_task_id(task_id: str) -> str:
-    """Validate task ids before using them in generated paths."""
-    normalized = str(task_id).strip()
-    if not TASK_ID_PATTERN.fullmatch(normalized) or normalized in {".", ".."}:
-        msg = (
-            f"Invalid task_id {task_id!r}. Use 1-128 letters, numbers, dots, underscores, "
-            "or hyphens, starting with a letter or number."
-        )
-        raise ValueError(msg)
-    return normalized
 
 
 def _ensure_inside_root(root: Path, path: Path, *, label: str) -> Path:

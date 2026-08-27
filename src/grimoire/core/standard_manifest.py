@@ -45,6 +45,34 @@ STANDARD_DIR = Path("_grimoire/standard")
 
 #: Where the manifest lives, relative to the project root.
 STANDARD_GENERATION_MANIFEST = STANDARD_DIR / ".generated.json"
+STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
+
+#: Where the governed standard writes what a task produced. Plain paths, kept
+#: with the rest of the vocabulary so that naming an artifact never requires
+#: importing the engine that fills it.
+EVIDENCE_DIR = Path("_grimoire-output/evidence")
+CONTEXT_DIR = Path("_grimoire-output/context")
+DECISION_DIR = Path("_grimoire-output/decisions")
+SCORE_DIR = Path("_grimoire-output/standard")
+
+#: A task id becomes a directory name in generated paths, so it is validated
+#: before it is ever joined. Kept here, with the paths it guards, so that
+#: reading "which task, which profile" costs nothing: the lifecycle hooks ask
+#: that on every tool call, and importing the standard engine for it cost 48 ms
+#: a time.
+TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def normalize_task_id(task_id: str) -> str:
+    """Validate task ids before using them in generated paths."""
+    normalized = str(task_id).strip()
+    if not TASK_ID_PATTERN.fullmatch(normalized) or normalized in {".", ".."}:
+        msg = (
+            f"Invalid task_id {task_id!r}. Use 1-128 letters, numbers, dots, underscores, "
+            "or hyphens, starting with a letter or number."
+        )
+        raise ValueError(msg)
+    return normalized
 
 
 #: Fields stamped at generation time. They change on every run (or every day)
