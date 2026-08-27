@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     types: [opened, reopened, synchronize]
+  # Le brouillon se calcule depuis les étiquettes des PR fusionnées. Corriger
+  # une étiquette ne le corrige donc pas : sans déclenchement manuel, il faut
+  # attendre le prochain push sur main pour que la note reflète la correction,
+  # et une note fausse reste publiable entre-temps.
+  workflow_dispatch:
 
 permissions:
   contents: write
