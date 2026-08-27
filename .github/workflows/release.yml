@@ -34,6 +34,23 @@ jobs:
       - name: Validate DNA avant release
         run: bash grimoire-init.sh validate --all
 
+      # Deux garde-fous avant que quoi que ce soit ne soit publié. Les deux
+      # pannes qu'ils couvrent sont silencieuses au moment du tag et coûteuses
+      # des mois plus tard, chez les projets installés.
+      - name: Le tag et version.txt disent la même chose
+        run: |
+          TAG="${{ github.ref_name || inputs.tag }}"
+          DECLARED="v$(tr -d '[:space:]' < version.txt)"
+          if [[ "$TAG" != "$DECLARED" ]]; then
+            echo "::error::tag $TAG mais version.txt annonce $DECLARED."
+            echo "Le paquet publié porterait un numéro que le dépôt ne reconnaît pas."
+            exit 1
+          fi
+          echo "$TAG confirmé par version.txt"
+
+      - name: Le catalogue couvre les fichiers livrés
+        run: python scripts/gen-kit-hashes.py --check
+
       - name: Générer CHANGELOG depuis Grimoire_TRACE
         id: changelog
         run: |

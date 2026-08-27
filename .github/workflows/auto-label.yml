@@ -2,7 +2,7 @@ name: Auto Label PR
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -16,3 +16,30 @@ jobs:
         with:
           configuration-path: .github/labeler.yml
           sync-labels: true
+
+  title:
+    name: "Titre de PR conventionnel"
+    runs-on: ubuntu-latest
+    steps:
+      # La note de version et le numéro de version se déduisent de ce titre
+      # (voir .github/release-drafter.yml). Un titre hors convention ne casse
+      # rien de visible : la PR sort simplement de la note sans catégorie, et
+      # compte pour un incrément correctif même si elle livre une
+      # fonctionnalité. Une panne muette dans un artefact publié — donc on la
+      # rend bruyante ici, au seul moment où elle coûte une seconde à réparer.
+      - name: Le préfixe annonce la nature du changement
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          re="^(feat|fix|docs|test|ci|build|chore|refactor|perf|style)([(][^)]+[)])?!?: .+"
+          if [[ ! "$TITLE" =~ $re ]]; then
+            echo "::error::titre hors convention : $TITLE"
+            echo "Le titre doit commencer par un préfixe Conventional Commit :"
+            echo "  feat(scope): …   nouvelle capacité   → incrément mineur"
+            echo "  fix(scope): …    correction          → incrément correctif"
+            echo "  docs | test | ci | build | chore | refactor | perf | style"
+            echo "  feat!: …         rupture déclarée    → incrément majeur"
+            echo "Le scope est facultatif ; le « : » et l'espace qui suit ne le sont pas."
+            exit 1
+          fi
+          echo "titre conforme : $TITLE"
