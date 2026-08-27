@@ -16,6 +16,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 task_app = typer.Typer(
     help="Tâches agentiques : projection du Mission Ledger vers le board gouverné.",
@@ -97,3 +98,321 @@ def _write_yaml(dest: Path, data: dict[str, Any]) -> None:
     yaml.dump(data, stream)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(stream.getvalue(), encoding="utf-8")
+
+
+# ── Surface d'écriture (issue #137) ───────────────────────────────────────────
+# Chaque transition franchit deux portes : la machine à états du ledger, qui dit
+# si le mouvement est concevable, et le gate de preuve, qui dit s'il est mérité.
+# Les deux refusent en nommant ce qui manque — un refus qu'on ne sait pas lire
+# se contourne, et un gate qu'on contourne ne garde rien.
+
+_PROJECT_ROOT = Annotated[Path, typer.Option("--project-root", help="Racine du projet (pour les gates de preuve).")]
+_LEDGER_ROOT = Annotated[Path, typer.Option("--ledger-root", help="Racine du Mission Ledger.")]
+_ACTOR = Annotated[str, typer.Option("--actor", help="Qui agit.")]
+
+
+def _ledger(project_root: Path, ledger_root: Path) -> Any:
+    from grimoire.missions.ledger import MissionLedger
+
+    root = project_root.resolve()
+    path = ledger_root if ledger_root.is_absolute() else root / ledger_root
+    return MissionLedger(path)
+
+
+def _require_task(ledger: Any, task_id: str) -> Any:
+    task = ledger.get_task(task_id)
+    if task is None:
+        console.print(f"[red]✗[/red] Tâche inconnue : {task_id}")
+        console.print("[dim]`grimoire task list` montre ce que le ledger porte.[/dim]")
+        raise typer.Exit(1)
+    return task
+
+
+def _gate_or_exit(ctx: typer.Context, project_root: Path, task: Any, target: Any) -> None:
+    """Opposer le gate de preuve avant d'écrire quoi que ce soit dans le ledger.
+
+    L'ordre compte : refuser après avoir appendé laisserait un événement que
+    rien ne justifie, dans un journal qui ne se réécrit pas.
+    """
+    from grimoire.missions.board import board_status_of
+    from grimoire.missions.gates import check_transition
+
+    verdict = check_transition(
+        project_root.resolve(), task, board_status_of(task.status), board_status_of(target)
+    )
+    if not verdict.refusals:
+        return
+
+    if _fmt(ctx) == "json" and verdict.blocked:
+        typer.echo(json.dumps({
+            "blocked": True,
+            "transition": verdict.transition_id,
+            "refusals": [{"evidence": r.evidence, "reason": r.reason, "remedy": r.remedy}
+                         for r in verdict.refusals],
+        }, indent=2, ensure_ascii=False))
+        raise typer.Exit(1)
+
+    marque = "[red]✗[/red]" if verdict.blocked else "[yellow]![/yellow]"
+    console.print(f"{marque} Gate de preuve « {verdict.transition_id} » : "
+                  f"{len(verdict.refusals)} exigence(s) non satisfaite(s)")
+    for refusal in verdict.refusals:
+        console.print(f"  - {refusal.evidence} : {refusal.reason}")
+        console.print(f"    [dim]{refusal.remedy}[/dim]")
+    if verdict.blocked:
+        raise typer.Exit(1)
+    console.print(f"[dim]Profil « {verdict.strictness} » : signalé, non bloquant.[/dim]")
+
+
+def _transition(
+    ctx: typer.Context, task_id: str, target: Any, project_root: Path, ledger_root: Path,
+    actor: str, reason: str = "",
+) -> None:
+    from grimoire.core.exceptions import GrimoireError
+
+    ledger = _ledger(project_root, ledger_root)
+    task = _require_task(ledger, task_id)
+    _gate_or_exit(ctx, project_root, task, target)
+    try:
+        moved = ledger.transition_task(task_id, target, actor_id=actor, reason=reason)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    _emit_task(ctx, moved, f"{task.status.value} → {moved.status.value}")
+
+
+def _emit_task(ctx: typer.Context, task: Any, note: str = "") -> None:
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(task.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]OK[/green] {task.id} — {task.title}" + (f" [dim]({note})[/dim]" if note else ""))
+
+
+@task_app.command("add")
+def task_add(
+    ctx: typer.Context,
+    title: Annotated[str, typer.Argument(help="Ce que la tâche accomplit.")],
+    acceptance: Annotated[list[str], typer.Option("--acceptance", "-a", help="Critère d'acceptation (répétable).")],
+    mission: Annotated[str, typer.Option("--mission", help="Mission de rattachement.")] = "",
+    owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
+    evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Ouvre une tâche dans le Mission Ledger.
+
+    Un critère d'acceptation au moins est exigé — c'est le ledger qui le
+    réclame, pas cette commande : une tâche dont on ne sait pas dire quand
+    elle est finie ne peut pas être vérifiée, donc pas fermée.
+    """
+    from grimoire.core.exceptions import GrimoireError
+
+    ledger = _ledger(project_root, ledger_root)
+    mission_id = mission
+    if not mission_id:
+        missions = ledger.list_missions()
+        if missions:
+            mission_id = missions[0].id
+        else:
+            created = ledger.create_mission(title="Travaux courants", origin="cli", created_by=actor)
+            mission_id = created.id
+            console.print(f"[dim]Mission créée : {mission_id} (aucune n'existait).[/dim]")
+    try:
+        task = ledger.create_task(
+            mission_id, title, acceptance=tuple(acceptance), owner=owner,
+            expected_evidence=tuple(evidence or ()),
+        )
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    _emit_task(ctx, task, "proposed")
+
+
+@task_app.command("list")
+def task_list(
+    ctx: typer.Context,
+    mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
+    status: Annotated[str | None, typer.Option("--status", help="Restreindre à un état du ledger.")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Liste les tâches du ledger, avec leur colonne de board."""
+    from grimoire.missions.board import board_status_of
+
+    tasks = _ledger(project_root, ledger_root).list_tasks(mission)
+    if status:
+        tasks = [t for t in tasks if t.status.value == status]
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps([t.to_dict() for t in tasks], indent=2, ensure_ascii=False))
+        return
+    if not tasks:
+        console.print("[dim]Aucune tâche.[/dim]")
+        return
+    for task in tasks:
+        # Sans échappement, Rich prend les crochets pour une balise de style
+        # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
+        etat = escape(f"[{task.status.value} · {board_status_of(task.status)}]")
+        console.print(f"  {task.id}  {etat}  {task.title}")
+
+
+@task_app.command("show")
+def task_show(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Détaille une tâche, et ce que son prochain pas exigera."""
+    from grimoire.missions.board import board_status_of
+    from grimoire.missions.gates import declared_transitions
+
+    task = _require_task(_ledger(project_root, ledger_root), task_id)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(task.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(f"[bold]{task.id}[/bold] — {task.title}")
+    console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
+    console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
+    if task.owner or task.claim:
+        console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
+    here = board_status_of(task.status)
+    exigences = {to: e.get("required_evidence", [])
+                 for (src, to), e in declared_transitions(project_root.resolve()).items() if src == here}
+    for to, req in exigences.items():
+        console.print(f"  [dim]vers {to} : {', '.join(str(r) for r in req)}[/dim]")
+
+
+@task_app.command("claim")
+def task_claim(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    host: Annotated[str, typer.Option("--host", help="Machine ou runtime qui prend la tâche.")] = "local",
+    files: Annotated[list[str] | None, typer.Option("--file", help="Fichier réservé en exclusivité (répétable).")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Réclame une tâche prête : ready → claimed."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.schemas import TaskState
+
+    ledger = _ledger(project_root, ledger_root)
+    task = _require_task(ledger, task_id)
+    _gate_or_exit(ctx, project_root, task, TaskState.CLAIMED)
+    try:
+        claimed = ledger.claim_task(task_id, actor, host, exclusive_files=tuple(files or ()))
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    _emit_task(ctx, claimed, f"réclamée par {actor}")
+
+
+@task_app.command("move")
+def task_move(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    to: Annotated[str, typer.Option("--to", help="État ledger visé (ready, running, needs_verification…).")],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi.")] = "",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Déplace une tâche, si l'état le permet et si la preuve suit."""
+    from grimoire.missions.schemas import TaskState
+
+    try:
+        target = TaskState(to)
+    except ValueError:
+        console.print(f"[red]✗[/red] État inconnu : {to}")
+        console.print("[dim]états : " + ", ".join(s.value for s in TaskState) + "[/dim]")
+        raise typer.Exit(1) from None
+    _transition(ctx, task_id, target, project_root, ledger_root, actor, reason)
+
+
+@task_app.command("block")
+def task_block(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    reason: Annotated[str, typer.Option("--reason", help="Ce qui bloque.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Bloque une tâche en disant pourquoi."""
+    from grimoire.missions.schemas import TaskState
+
+    _transition(ctx, task_id, TaskState.BLOCKED, project_root, ledger_root, actor, reason)
+
+
+@task_app.command("close")
+def task_close(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Ferme une tâche vérifiée.
+
+    Le gate `review → accepted` exige un verdict de vérification accepté : sans
+    lui, la fermeture est refusée. C'est la seule garantie qui empêche un board
+    entièrement vert de ne rien prouver.
+    """
+    from grimoire.missions.schemas import TaskState
+
+    _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+
+
+@task_app.command("link")
+def task_link(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    depends_on: Annotated[str, typer.Option("--depends-on", help="Tâche dont celle-ci dépend.")],
+    kind: Annotated[str, typer.Option("--kind", help="Nature du lien.")] = "blocks",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Déclare une dépendance entre deux tâches."""
+    from grimoire.missions.schemas import DependencyKind
+
+    ledger = _ledger(project_root, ledger_root)
+    task = _require_task(ledger, task_id)
+    _require_task(ledger, depends_on)
+    try:
+        dependency_kind = DependencyKind(kind)
+    except ValueError:
+        console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
+        console.print("[dim]natures : " + ", ".join(k.value for k in DependencyKind) + "[/dim]")
+        raise typer.Exit(1) from None
+    ledger.append_event(
+        "task.linked", task.id, "task", actor,
+        {"task_id": task.id, "depends_on": depends_on, "kind": dependency_kind.value},
+    )
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({"task": task.id, "depends_on": depends_on, "kind": dependency_kind.value}, indent=2))
+        return
+    console.print(f"[green]OK[/green] {task.id} dépend de {depends_on} ({dependency_kind.value})")
+
+
+@task_app.command("context")
+def task_context(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Produit le context bundle de cette tâche.
+
+    Le format existait déjà ; il fallait fournir l'identifiant à la main, donc
+    rien ne garantissait qu'il désigne une tâche réelle. Ici l'identifiant vient
+    du ledger, et une tâche inconnue est refusée avant tout calcul.
+    """
+    from grimoire.core.agentic_standard import build_context_bundle
+
+    _require_task(_ledger(project_root, ledger_root), task_id)
+    artifact = build_context_bundle(project_root.resolve(), task_id=task_id)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(artifact.data, indent=2, ensure_ascii=False, default=str))
+        return
+    console.print(f"[green]OK[/green] context bundle de {task_id} → {artifact.path}")
