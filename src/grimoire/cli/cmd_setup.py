@@ -134,6 +134,12 @@ def _apply_copilot(path: Path, vals: UserValues) -> bool:
     ]
     updated = text
     for pat, value in replacements:
+        # An empty value means the project simply does not declare that field —
+        # not that it wants the field blanked. Writing it through erased
+        # identity a human had put in the file by hand.
+        if not value:
+            continue
+
         def replace_value(match: re.Match[str], replacement: str = value) -> str:
             return match.group(1) + replacement
 
