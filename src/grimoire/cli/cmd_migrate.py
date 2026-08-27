@@ -146,6 +146,14 @@ def _destination(target: Path, path: Path) -> str:
     return f"{layout.OVERRIDES_DIR}/{path.name}"
 
 
+def _shadowed(destination: str, kit_destinations: frozenset[str]) -> bool:
+    """True when *destination* masks a file the kit writes at the same path."""
+    prefix = layout.OVERRIDES_DIR + "/"
+    rel = destination.removeprefix(prefix)
+    # Fallback sets hold base names, not paths; accept either shape.
+    return rel in kit_destinations or rel.rsplit("/", 1)[-1] in kit_destinations
+
+
 def plan_migration(target: Path) -> MigrationPlan:
     """Classify every legacy file without touching the filesystem."""
     target = target.resolve()
@@ -155,7 +163,7 @@ def plan_migration(target: Path) -> MigrationPlan:
         plan.already_migrated = True
         return plan
 
-    shipped_names = _kit_file_names()
+    kit_destinations = _kit_destinations(target)
     for path in files:
         rel = path.relative_to(target).as_posix()
         entry = kit_hashes.shipped_by_kit(path)
@@ -167,18 +175,60 @@ def plan_migration(target: Path) -> MigrationPlan:
                 shipped_version=str(entry.get("version", "")) if entry else "derived",
             ))
         else:
+            destination = _destination(target, path)
             plan.verdicts.append(FileVerdict(
                 source=path,
                 relative=rel,
                 action="override",
-                destination=_destination(target, path),
-                shadows_kit=path.name in shipped_names,
+                destination=destination,
+                shadows_kit=_shadowed(destination, kit_destinations),
             ))
     return plan
 
 
+def _kit_destinations(target: Path) -> frozenset[str]:
+    """Tier-relative paths the kit would write, for shadow detection.
+
+    Compared by path, not by base name: ``agents/_archived/concierge.md`` is a
+    file the project archived, not a shadow of the kit's ``agents/concierge.md``.
+    Matching on the name alone marked it as shadowing, and ``--adopt-kit``
+    would then delete it without anything regenerating it — a silent loss of
+    the project's own archive.
+
+    Falls back to base names when the plan cannot be built (unreadable config),
+    which is the previous, coarser behaviour rather than no detection at all.
+    """
+    from grimoire.cli.cmd_up import _infer_resolved, _load_config_quiet
+    from grimoire.core.scaffold import ProjectScaffolder
+
+    kit_root = layout.kit_dir(target)
+    try:
+        cfg = _load_config_quiet(target)
+        scaffolder = ProjectScaffolder(
+            target,
+            project_name=(cfg.project.name if cfg else "") or target.name,
+            user_name=(cfg.user.name if cfg else ""),
+            language=(cfg.user.language if cfg else ""),
+            skill_level=(cfg.user.skill_level if cfg else ""),
+            scan=None,
+            resolved=_infer_resolved(target, cfg),
+            backend=(cfg.memory.backend if cfg else "") or "local",
+        )
+        plan = scaffolder.plan()
+    except Exception:  # detection must never break the migration
+        return _kit_file_names()
+
+    destinations: set[str] = set()
+    for dst in [c.dst for c in plan.copies] + [t.dst for t in plan.templates]:
+        try:
+            destinations.add(dst.relative_to(kit_root).as_posix())
+        except ValueError:
+            continue  # outside the kit tier: not something an override shadows
+    return frozenset(destinations)
+
+
 def _kit_file_names() -> frozenset[str]:
-    """Base names the kit currently ships, for shadow detection."""
+    """Base names the kit currently ships — coarse fallback for shadow detection."""
     from grimoire.archetypes import bundled_path as archetypes_path
     from grimoire.data import framework_path
 

@@ -156,3 +156,31 @@ class _FakeResult:
 
     copied_files: list[str] = field(default_factory=list)
     rendered_files: list[str] = field(default_factory=list)
+
+
+class TestShadowDetection:
+    """Only a file the kit writes at the *same path* is shadowed.
+
+    Matching on the base name alone marked ``agents/_archived/concierge.md`` —
+    an agent the project had archived — as shadowing the kit's
+    ``agents/concierge.md``. ``--adopt-kit`` then deleted it, and nothing
+    regenerated it at that path: a silent loss of the project's own archive.
+    """
+
+    def test_archived_copy_does_not_shadow_the_kit_agent(self) -> None:
+        kit = frozenset({"agents/concierge.md", "framework/agent-base.md"})
+        archived = f"{layout.OVERRIDES_DIR}/agents/_archived/concierge.md"
+        assert not cmd_migrate._shadowed(archived, kit)
+
+    def test_same_path_shadows(self) -> None:
+        kit = frozenset({"agents/concierge.md"})
+        assert cmd_migrate._shadowed(f"{layout.OVERRIDES_DIR}/agents/concierge.md", kit)
+
+    def test_unknown_file_does_not_shadow(self) -> None:
+        kit = frozenset({"agents/concierge.md"})
+        assert not cmd_migrate._shadowed(f"{layout.OVERRIDES_DIR}/agents/mine.md", kit)
+
+    def test_base_name_fallback_still_matches(self) -> None:
+        # When the plan cannot be built, the coarse set holds base names.
+        kit = frozenset({"concierge.md"})
+        assert cmd_migrate._shadowed(f"{layout.OVERRIDES_DIR}/agents/concierge.md", kit)
