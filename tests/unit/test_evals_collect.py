@@ -94,7 +94,13 @@ def test_invalid_arm_rejected(tmp_path: Path) -> None:
 # d'une suite (ex. ajout du bras `activated` par la campagne du 2026-07-09,
 # PR #71) doit être répercutée ici dans le même commit — c'est le pin.
 _PINNED_ARMS = {
-    "web-app-todo": ["governed", "baseline", "activated"],
+    "web-app-todo": [
+        "governed",
+        "baseline",
+        "activated",
+        "activated-v2",
+        "activated-v2-disclosed",
+    ],
     "terraform-houseserver": ["governed", "baseline"],
 }
 

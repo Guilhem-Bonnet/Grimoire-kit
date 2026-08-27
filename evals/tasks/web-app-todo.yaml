@@ -22,8 +22,24 @@ pinned:
         (cassé/supprimé vs adapté vert). Kit toujours pinné 3.18.0 via
         evals/.venv (le CLI global a évolué vers 3.22.0) ; comparaison
         contre les bras 2026-07-03 (mêmes pins, runner 2.1.101 identique).
-arms: [governed, baseline, activated]
+    - date: "2026-08-27"
+      note: >-
+        Lancement du bras v2 (ACTIVATION-V2.md, PR #74) : ajout des bras
+        `activated-v2` (décisionnel, prompt inchangé) et
+        `activated-v2-disclosed` (exploratoire, prompt divulgué). Formulation
+        du prompt divulgué figée ci-dessous (`disclosed_prompt_template`)
+        AVANT toute exécution. Pins reconduits à l'identique et vérifiés au
+        lancement : kit 3.18.0 (evals/.venv, PyPI), runner Claude Code CLI
+        2.1.101 (réinstallé épinglé via npm local), modèle claude-sonnet-4-6
+        (disponibilité vérifiée par ping). Aucun remplacement à requalifier.
+arms: [governed, baseline, activated, activated-v2, activated-v2-disclosed]
 repetitions_min: 5
+disclosed_prompt_template: >-
+  Formulation figée du prompt du bras `activated-v2-disclosed` (exploratoire,
+  hors verdict) : le champ `prompt` de la tâche, inchangé, suivi d'une ligne
+  vide puis de la section « Critères d'acceptation : » listant verbatim, à
+  raison d'une puce « - » par item et dans l'ordre du YAML, les entrées du
+  champ `acceptance` de la tâche. Aucun autre ajout, aucune reformulation.
 tasks:
   - id: feat-due-dates
     kind: feature
