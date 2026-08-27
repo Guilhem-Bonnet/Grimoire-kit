@@ -144,6 +144,23 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
   demande confirmation sauf `--yes`.
 
+### Supprimé
+
+- **Références déclaratives qui ne résolvaient nulle part.** `_verify_pattern_catalog`
+  exigeait la *présence* des clés `check_refs`, `rule_refs` et `check_id`, jamais leur
+  résolution : le catalogue promettait des contrôles que le moteur n'émet pas, et
+  `docs/governed-controls.md` publiait ces promesses. Elles sont retirées plutôt
+  qu'implémentées — on retire des promesses, pas des contrôles : `standard verify` sur un
+  projet neuf produit exactement les mêmes identifiants de checks qu'avant, vérifié sur
+  les cinq profils. Un test d'intégrité référentielle interdit désormais toute
+  déclaration sans exécutant.
+  - 17 `check_refs` sans check émis : `events.invalid_line`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `ledger.mission_unlinked`, `memory.graph_projection_unverified`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `orchestration.role_undeclared`, `provider.cost_unbudgeted`, `provider.slo_undeclared`, `skills.classification_missing`, `tools.threat_unmapped`, `tools.unmediated_call`.
+  - 21 `rule_refs` sans règle correspondante dans `rule-packs.yaml` : `context.compression-preserves-provenance`, `decision.council-before-irreversible`, `governance.cluster-action-dry-run`, `governance.env-policy-declared`, `guardrail.versioned-four-faces`, `knowledge.doc-to-graph-sourced`, `memory.integrity-validated`, `merge.fault-classified-before-retry`, `observability.prompt-version-tracked`, `orchestration.flow-manifest-exportable`, `orchestration.workflow-state-declared`, `privilege.controller-agent-separated`, `prompt.external-content-isolated`, `provider.cost-and-slo-declared`, `quality.browser-evidence-required`, `quality.visual-evidence-required`, `remote.freshness-verified`, `runtime.k8s-agent-declared`, `runtime.provider-contract-uniform`, `security.workspace-isolated`, `tools.blast-radius-bounded`.
+  - 13 `check_id` de règles pointant vers un check inexistant : `evidence.minimum_missing`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `memory.freshness_missing`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `provider.cost_unbudgeted`, `skills.classification_missing`, `tools.unmediated_call`.
+- `check_id` n'est plus une clé obligatoire d'une règle de `rule-packs.yaml`. Une règle
+  sans check déclare honnêtement qu'aucun contrôle ne l'applique ; celles qui en
+  déclarent un doivent maintenant qu'il existe.
+
 ### Modifié
 
 - **`grimoire standard verify` ne laisse plus supprimer un artefact activé par un

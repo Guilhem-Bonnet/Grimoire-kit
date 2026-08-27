@@ -1527,7 +1527,7 @@ def _verify_rule_packs(root: Path, result: StandardVerificationResult) -> None:
             path=rel_path,
             check_prefix="rules",
             data=rule,
-            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation", "check_id"),
+            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation"),
         )
         if str(rule.get("phase", "")) not in KNOWN_HOOK_PHASES:
             _add_check(result, "rules.unknown_phase", "error", f"Rule {rule.get('id')!r} uses unknown phase {rule.get('phase')!r}.", path=rel_path)
