@@ -45,7 +45,7 @@ class TestStandardInitClaudeHook:
         # it through the shared hook entry point is what lets one rule reach
         # every host. Two entries would inject the directive twice, so the
         # legacy command is replaced rather than kept alongside.
-        assert commands == ["grimoire host hook --host claude --event SessionStart"]
+        assert commands == ["grimoire-hook --host claude --event SessionStart"]
         assert (tmp_path / ".claude" / "activation-context.md").is_file()
 
     def test_init_installs_the_blocking_gate_hook(self, tmp_path: Path) -> None:

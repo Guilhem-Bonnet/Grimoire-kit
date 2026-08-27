@@ -29,6 +29,34 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
   correction du risque réel (injection d'argument) : les valeurs issues d'une
   requête passent après `--` et refusent le préfixe `-`.
+### Corrigé
+
+- **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
+  câblé sur `Read`, donc sur chaque lecture de fichier de chaque session.
+  Trois causes, toutes mesurées :
+  **le point d'entrée** (`grimoire host hook` construisait l'arbre Typer complet,
+  chaque module `cmd_*` importé pour résoudre une sous-commande) — un script
+  console dédié `grimoire-hook` le remplace dans les configurations générées,
+  391 ms → 102 ms ;
+  **les ré-exports impatients** (`grimoire/__init__.py` et
+  `grimoire/core/__init__.py` importaient onze modules dont le scaffolder et le
+  résolveur d'archétypes) — résolution paresseuse PEP 562, API inchangée ;
+  **le moteur du standard importé pour rien** (`check_evidence_gates` au niveau
+  module alors que la décision d'outil ne l'appelle jamais) — import différé, et
+  les chemins de sortie du standard déménagent dans le module léger
+  `standard_manifest`.
+  Enfin `Read` sort du matcher sur les hôtes qui ont une table de permissions :
+  les mêmes fichiers y sont déjà refusés déclarativement, à coût nul. L'accès par
+  commande shell reste couvert, `Bash` restant dans le matcher.
+  Deux tests épinglent le résultat, dont un qui échoue si le chemin des hooks
+  réimporte le moteur au chargement.
+- **Motifs de secrets et règles déclaratives avaient dérivé** — la détection
+  couvrait neuf familles de fichiers de credentials, la table `deny` six. Trois
+  familles (`.npmrc`, `credentials.json`, `service-account*.json` entre autres)
+  n'étaient donc pas protégées du côté qui ne coûte rien. Les deux formes sont
+  désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
+  qu'une famille existe sans ses deux expressions.
+
 
 ## [3.33.0] - 2026-08-27
 

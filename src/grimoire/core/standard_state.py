@@ -17,14 +17,14 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from grimoire.core.agentic_standard import (
+# Tout vient de ``standard_generation``, le module léger : ce lecteur tourne dans
+# le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
+# pour lire deux chemins et un identifiant coûtait 48 ms par appel.
+from grimoire.core.standard_generation import (
+    STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
 )
-
-# ``STANDARD_DIR`` a déménagé dans ``standard_generation`` avec la frontière
-# kit/overrides : on le prend à sa source plutôt qu'à travers un ré-export.
-from grimoire.core.standard_generation import STANDARD_DIR
 
 TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 

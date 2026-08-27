@@ -30,9 +30,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.agentic_standard import check_evidence_gates
 from grimoire.core.claude_activation import activation_context_text
 from grimoire.core.standard_state import active_profile_id, active_task_id, is_standard_enrolled
+from grimoire.hosts.secrets import secret_patterns
 from grimoire.hosts.surface import HookEvent
 from grimoire.policies.engine import PolicyEngine
 from grimoire.policies.schemas import (
@@ -141,27 +141,6 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bdocker\s+system\s+prune\b.*-a", "full docker prune"),
 )
 
-#: Paths that hold credentials. Reading one is a policy event, not an edit.
-#: The patterns are matched against paths *and* against command lines, so the
-#: anchors accept either path separator, a quote, or whitespace — ``cat .env``
-#: must read as the same event as opening ``.env`` with a file tool, and a
-#: Windows host handing over ``app\\.env`` must not slip through on a
-#: separator.
-_BEFORE = r"(?:^|[\s=/\\'\"])"
-_AFTER = r"(?=$|[\s'\"/\\:])"
-_SECRET_PATTERNS: tuple[str, ...] = (
-    rf"{_BEFORE}\.env{_AFTER}",
-    rf"{_BEFORE}\.env\.[a-z0-9_-]+{_AFTER}",
-    rf"{_BEFORE}\.npmrc{_AFTER}",
-    rf"{_BEFORE}\.pypirc{_AFTER}",
-    rf"{_BEFORE}id_(?:rsa|ed25519|ecdsa){_AFTER}",
-    rf"{_BEFORE}secrets?[/\\\\]",
-    rf"\.(?:pem|p12|pfx|keystore|jks){_AFTER}",
-    rf"{_BEFORE}credentials(?:\.json|\.yaml|\.yml)?{_AFTER}",
-    rf"{_BEFORE}service-account[a-z0-9_-]*\.json{_AFTER}",
-)
-
-
 @dataclass(frozen=True, slots=True)
 class ToolFacts:
     """What a decision needs to know about a pending tool call."""
@@ -224,7 +203,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     secret_target = ""
     for candidate in candidates:
-        for pattern in _SECRET_PATTERNS:
+        for pattern in secret_patterns():
             match = re.search(pattern, candidate)
             if match:
                 # Report the fragment that matched, not the whole command line:
@@ -420,6 +399,12 @@ _STATES_WITHOUT_EVIDENCE = {"proposed", "", None}
 
 
 def _gate_summary(project_root: Path, task_id: str) -> tuple[bool, str, dict[str, Any]]:
+    # Imported here, not at module scope: evaluating gates needs the standard
+    # engine, but deciding a tool call does not. The tool-policy decision runs
+    # on every action of every session, and paying 48 ms to import a module it
+    # never calls is the difference between a guardrail and a tax.
+    from grimoire.core.agentic_standard import check_evidence_gates
+
     result = check_evidence_gates(project_root, task_id=task_id)
     missing = list(result.missing)
     lines = [f"  - {item}" for item in missing[:6]]

@@ -91,6 +91,10 @@ docs = [
 [project.scripts]
 grimoire = "grimoire.cli.app:cli"
 grimoire-mcp = "grimoire.mcp.server:main"
+# Lifecycle hooks run once per tool call. Routing them through `grimoire host
+# hook` builds the whole Typer tree first — every `cmd_*` module imported to
+# resolve one subcommand — for a measured 391 ms per call against 116 ms here.
+grimoire-hook = "grimoire.hosts.runtime:main"
 
 [project.entry-points."grimoire.tools"]
 [project.entry-points."grimoire.backends"]

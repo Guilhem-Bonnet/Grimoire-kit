@@ -109,6 +109,22 @@ puis classé en famille neutre.
 | Lecture d'un fichier de secrets (`.env`, clés privées, `credentials.json`…) | refus à tous les profils |
 | Appel en lecture seule | autorisé sans traitement |
 
+## Coût des hooks
+
+Un hook s'exécute une fois par appel d'outil : son coût est une propriété de
+conception, pas un détail d'implémentation.
+
+- Les configurations générées invoquent `grimoire-hook`, un script console
+  dédié. Passer par `grimoire host hook` construit tout l'arbre de commandes
+  avant d'en résoudre une seule — 391 ms par appel contre 102 ms. La
+  sous-commande reste disponible pour un usage humain.
+- Le chemin de décision n'importe pas le moteur du standard au chargement :
+  évaluer des gates en a besoin, décider d'un appel d'outil non. Un test échoue
+  si cette frontière est franchie.
+- Sur un hôte doté d'une table de permissions, `Read` ne figure pas dans le
+  matcher : les fichiers de credentials y sont déjà refusés déclarativement, à
+  coût nul. L'accès par commande shell reste couvert par `Bash`.
+
 ## Frontière d'outils des personas
 
 Chaque persona est projetée avec une frontière d'outils. Elle vient du champ
