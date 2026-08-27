@@ -7,7 +7,28 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+### Ajouté
+
+- **`grimoire task board export`** — le task board gouverné est désormais une
+  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
+  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
+  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
+  de risque, et un motif sur toute carte bloquée.
+- **ADR-005** — « Le Mission Ledger est la source, le task board une
+  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
+  neuf états côté ledger, huit côté board, aucune conversion nulle part.
+
+### Modifié
+
+- La conversion d'états ledger ↔ board vit dans un module unique
+  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
+  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
+
+### Sécurité
+
+- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
+  correction du risque réel (injection d'argument) : les valeurs issues d'une
+  requête passent après `--` et refusent le préfixe `-`.
 ### Corrigé
 
 - **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
@@ -36,30 +57,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
   qu'une famille existe sans ses deux expressions.
 
-=======
-### Ajouté
-
-- **`grimoire task board export`** — le task board gouverné est désormais une
-  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
-  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
-  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
-  de risque, et un motif sur toute carte bloquée.
-- **ADR-005** — « Le Mission Ledger est la source, le task board une
-  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
-  neuf états côté ledger, huit côté board, aucune conversion nulle part.
-
-### Modifié
-
-- La conversion d'états ledger ↔ board vit dans un module unique
-  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
-  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
-
-### Sécurité
-
-- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
-  correction du risque réel (injection d'argument) : les valeurs issues d'une
-  requête passent après `--` et refusent le préfixe `-`.
->>>>>>> origin/main
 
 ## [3.33.0] - 2026-08-27
 
