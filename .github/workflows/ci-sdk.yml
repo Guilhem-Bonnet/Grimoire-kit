@@ -19,6 +19,10 @@ on:
       # pilotent — le controle serait modifie sans etre reverifie.
       - ".github/security/**"
       - "scripts/depaudit-waivers.py"
+      # Lus par tests/test_agentic_standard.py : une PR YAML-only sur le
+      # standard doit exécuter les tests d'intégrité référentielle, sinon ils
+      # sont inertes exactement sur les PR qu'ils doivent garder.
+      - "framework/agentic-standard/**"
   pull_request:
     branches: [main]
     paths:
@@ -33,6 +37,7 @@ on:
       # pilotent — le controle serait modifie sans etre reverifie.
       - ".github/security/**"
       - "scripts/depaudit-waivers.py"
+      - "framework/agentic-standard/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
