@@ -9,7 +9,12 @@
 # fonctionnalités, publiées sous « Documentation ».
 #
 # Le préfixe Conventional Commit du titre, lui, énonce la nature du changement,
-# et le job « Titre de PR conventionnel » le rend fiable. `autolabeler` le lit.
+# et le job « Titre de PR conventionnel » de `.github/workflows/auto-label.yml`
+# le rend fiable : il refuse un titre hors convention et pose l'étiquette
+# `release:` qui en découle. C'est lui, et non l'`autolabeler` de
+# release-drafter — sur événement de PR ce dernier tourne en `[dry-run]` et ne
+# pose rien, ce qui donnait des PR sans étiquette de release et une note
+# incomplète. Une seule expression décide, et c'est celle qui refuse.
 #
 # Ces étiquettes vivent dans leur propre espace de noms, `release:`. Les faire
 # cohabiter avec `type:` ne suffisait pas : release-drafter ne s'arrête pas à la
@@ -25,30 +30,6 @@
 
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
-
-autolabeler:
-  - label: "breaking"
-    title:
-      # `feat!:`, `fix(scope)!:` — la rupture est déclarée dans le titre.
-      - '/^\w+(\([^)]*\))?!:/'
-  - label: "release:feature"
-    title:
-      - '/^feat(\([^)]*\))?:/'
-  - label: "release:fix"
-    title:
-      - '/^fix(\([^)]*\))?:/'
-  - label: "release:docs"
-    title:
-      - '/^docs(\([^)]*\))?:/'
-  - label: "release:test"
-    title:
-      - '/^test(\([^)]*\))?:/'
-  - label: "release:infra"
-    title:
-      - '/^(ci|build)(\([^)]*\))?:/'
-  - label: "release:chore"
-    title:
-      - '/^(chore|refactor|perf|style)(\([^)]*\))?:/'
 
 categories:
   - title: "⚠️ Breaking Changes"
