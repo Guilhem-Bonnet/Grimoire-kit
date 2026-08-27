@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -56,6 +57,20 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CLOSED: frozenset(),
     TaskState.CANCELLED: frozenset(),
 }
+
+
+def _slug(title: str, limit: int) -> str:
+    """Fragment d'identifiant sûr dans un chemin.
+
+    Le slug naïf recopiait le titre : « Ajouter /health » donnait
+    ``GAO-ajouter-/hea-001``, un identifiant que ``normalize_task_id`` refuse et
+    qui, employé tel quel, ouvrait un chemin de plus d'un segment. Les
+    identifiants du ledger servent de nom de dossier aux artefacts du standard :
+    ils ne peuvent contenir que ce que ce contrat autorise.
+    """
+    kept = [c if c.isascii() and (c.isalnum() or c in "_.-") else "-" for c in title.lower()]
+    slug = re.sub(r"-{2,}", "-", "".join(kept))[:limit].strip("-._")
+    return slug or "task"
 
 
 def _now_iso() -> str:
@@ -208,7 +223,7 @@ class MissionLedger:
         mission_id: str | None = None,
     ) -> Mission:
         self._load()
-        slug = title.lower().replace(" ", "-")[:20].strip("-")
+        slug = _slug(title, 20)
         if mission_id is None:
             seq = len(self._missions) + 1
             mission_id = f"MIS-{slug}-{seq:03d}"
@@ -269,7 +284,7 @@ class MissionLedger:
             raise GrimoireMissionError(f"Mission not found: {mission_id}")
         if not acceptance:
             raise GrimoireMissionError("At least one acceptance criterion is required")
-        slug = title.lower().replace(" ", "-")[:12].strip("-")
+        slug = _slug(title, 12)
         if task_id is None:
             area_tasks = [k for k in self._tasks if k.startswith(f"GAO-{slug}")]
             seq = len(area_tasks) + 1
