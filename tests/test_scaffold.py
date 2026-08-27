@@ -276,21 +276,32 @@ class TestProjectScaffolder:
         assert "| Agent |" in ci
         assert "concierge" in ci
 
-    def test_copilot_instructions_are_regenerated(self, tmp_path: Path) -> None:
-        """copilot-instructions.md is kit-owned and follows the kit version.
+    def test_copilot_instructions_are_not_overwritten(self, tmp_path: Path) -> None:
+        """The project's instruction file survives an update.
 
-        It lists the installed agents and workflows, so a frozen copy goes
-        stale the moment the agent set changes. Project-specific instructions
-        belong in the files the kit never rewrites.
+        It is seeded by the kit, then owned by the project: conventions, house
+        rules, doctrine all live here. Regenerating it once cut a real
+        project's file from 227 lines to 112 and dropped its governing
+        doctrine. The installed-agents table goes stale as a result — that is
+        the price of the file belonging to the project.
         """
         gh = tmp_path / ".github"
         gh.mkdir()
         existing = gh / "copilot-instructions.md"
-        existing.write_text("# Stale copy from an older kit\n")
+        existing.write_text("# Doctrine du projet\n", encoding="utf-8")
         s = _scaffolder(tmp_path)
         s.execute(s.plan())
-        assert existing.read_text() != "# Stale copy from an older kit\n"
+        assert existing.read_text(encoding="utf-8") == "# Doctrine du projet\n"
 
+    def test_assistant_bridges_are_not_overwritten(self, tmp_path: Path) -> None:
+        """CLAUDE.md and friends are entrypoints projects extend."""
+        claude = tmp_path / "CLAUDE.md"
+        claude.write_text(
+            "@.github/copilot-instructions.md\n@mes-regles.md\n", encoding="utf-8",
+        )
+        s = _scaffolder(tmp_path)
+        s.execute(s.plan())
+        assert "mes-regles" in claude.read_text(encoding="utf-8")
 
     def test_copilot_instructions_mentions_at_concierge(self, tmp_path: Path) -> None:
         """copilot-instructions.md should tell users about @concierge."""

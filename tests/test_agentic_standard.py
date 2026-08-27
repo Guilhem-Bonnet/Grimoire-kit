@@ -917,3 +917,103 @@ def test_standard_json_payloads_carry_a_versioned_schema(
 
     assert payload["schema"] == schema
     assert set(payload) == keys
+
+
+# --- P0.2 : aucune déclaration sans exécutant ---------------------------------
+
+
+def _source_string_literals() -> set[str]:
+    """Every string literal in the SDK source.
+
+    A deliberate over-approximation of "check ids the code can emit": ids reach
+    ``_add_check`` through tuples and loops as well as direct calls, so matching
+    on literals anywhere in ``src/`` can only under-report orphans — never
+    falsely accuse a reference that resolves.
+    """
+    import ast
+
+    src = Path(__file__).resolve().parent.parent / "src" / "grimoire"
+    literals: set[str] = set()
+    for module in src.rglob("*.py"):
+        try:
+            tree = ast.parse(module.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a syntax error fails elsewhere
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                literals.add(node.value)
+    return literals
+
+
+def _framework_yaml(relative: str) -> dict:
+    from grimoire.data import framework_path
+
+    yaml = YAML(typ="safe")
+    return yaml.load(framework_path() / "agentic-standard" / relative)
+
+
+def test_declarative_refs_resolve() -> None:
+    """Every declared reference resolves to something that exists.
+
+    A ``check_refs``, ``rule_refs`` or ``check_id`` pointing at nothing is a
+    promise the engine does not keep — the shape of the decorative lock this
+    repository has measured six times.  ``_verify_pattern_catalog`` requires the
+    *key* to be present, never that it resolves; this test closes that gap.
+    """
+    literals = _source_string_literals()
+    catalog = _framework_yaml("templates/pattern-catalog.yaml")
+    packs = _framework_yaml("templates/rule-packs.yaml")
+    rule_ids = {rule["id"] for rule in packs["rules"]}
+
+    orphan_checks = sorted(
+        {
+            ref
+            for pattern in catalog["patterns"]
+            for ref in pattern.get("check_refs") or []
+            if ref not in literals
+        }
+    )
+    orphan_rules = sorted(
+        {
+            ref
+            for pattern in catalog["patterns"]
+            for ref in pattern.get("rule_refs") or []
+            if ref not in rule_ids
+        }
+    )
+    orphan_rule_checks = sorted(
+        {
+            rule["check_id"]
+            for rule in packs["rules"]
+            if rule.get("check_id") and rule["check_id"] not in literals
+        }
+    )
+
+    assert orphan_checks == [], f"check_refs sans check émis : {orphan_checks}"
+    assert orphan_rules == [], f"rule_refs sans règle : {orphan_rules}"
+    assert orphan_rule_checks == [], f"check_id sans check émis : {orphan_rule_checks}"
+
+
+def test_capability_artifacts_are_generatable() -> None:
+    """Every artifact a pattern activates can actually be rendered somewhere.
+
+    ``_planned_artifacts`` raises when an artifact type has no generation target,
+    so a pattern activating an unmapped artifact turns a need into a crash at
+    ``standard init`` time.  This test catches it in CI instead.
+    """
+    capability = _framework_yaml("capability-map.yaml")
+    profiles = _framework_yaml("profile-map.yaml")
+    artifact_types = set(profiles["artifact_types"])
+    targets = {
+        entry["source_artifact"]
+        for scope in profiles["generation_targets"].values()
+        for entry in scope
+    }
+
+    declared = {
+        artifact
+        for spec in capability["patterns"].values()
+        for artifact in spec.get("artifacts") or []
+    }
+    assert declared <= artifact_types, f"artefacts inconnus : {sorted(declared - artifact_types)}"
+    assert declared <= targets, f"artefacts sans destination : {sorted(declared - targets)}"

@@ -15,8 +15,8 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from grimoire.core import standard_manifest as sm
-from grimoire.core.standard_manifest import (
+from grimoire.core import standard_generation as gen
+from grimoire.core.standard_generation import (
     CONTEXT_DIR,
     DECISION_DIR,
     EVIDENCE_DIR,
@@ -866,7 +866,7 @@ def setup_standard_profile(
     generated_at = datetime.now(UTC).date().isoformat()
     result = StandardSetupResult(profile=profile.id, project_root=root, dry_run=dry_run)
 
-    manifest = sm.load_generation_manifest(root)
+    manifest = gen.load_generation_manifest(root)
     generated: dict[str, str] = {}
 
     for artifact in artifacts:
@@ -877,35 +877,35 @@ def setup_standard_profile(
         # ``destination`` is a str for some artifacts and a Path for others;
         # the manifest is JSON, so its keys are always strings.
         key = str(artifact.destination)
-        action = sm.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
+        action = gen.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
         if action != "write":
             result.skipped.append(artifact.destination)
             if action == "adopt":
-                generated[key] = sm.digest(dst)
+                generated[key] = gen.digest(dst)
             continue
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(content, encoding="utf-8")
-            generated[key] = sm.digest(dst)
+            generated[key] = gen.digest(dst)
         result.written.append(artifact.destination)
 
     manifest_dst = root / STANDARD_PROFILE_FILE
     profile_key = str(STANDARD_PROFILE_FILE)
     profile_content = _manifest_content(profile, name, task_id, artifacts)
-    action = sm.decide(root, profile_key, profile_content, force=force, refresh=refresh, manifest=manifest)
+    action = gen.decide(root, profile_key, profile_content, force=force, refresh=refresh, manifest=manifest)
     if action != "write":
         result.skipped.append(STANDARD_PROFILE_FILE)
         if action == "adopt":
-            generated[profile_key] = sm.digest(manifest_dst)
+            generated[profile_key] = gen.digest(manifest_dst)
     else:
         if not dry_run:
             manifest_dst.parent.mkdir(parents=True, exist_ok=True)
             manifest_dst.write_text(profile_content, encoding="utf-8")
-            generated[profile_key] = sm.digest(manifest_dst)
+            generated[profile_key] = gen.digest(manifest_dst)
         result.written.append(STANDARD_PROFILE_FILE)
 
     if generated and not dry_run:
-        sm.save_generation_manifest(root, generated)
+        gen.save_generation_manifest(root, generated)
 
     selected_providers = normalize_provider_ids(provider_ids)
     if selected_providers:
@@ -1517,7 +1517,7 @@ def _verify_rule_packs(root: Path, result: StandardVerificationResult) -> None:
             path=rel_path,
             check_prefix="rules",
             data=rule,
-            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation", "check_id"),
+            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation"),
         )
         if str(rule.get("phase", "")) not in KNOWN_HOOK_PHASES:
             _add_check(result, "rules.unknown_phase", "error", f"Rule {rule.get('id')!r} uses unknown phase {rule.get('phase')!r}.", path=rel_path)

@@ -15,6 +15,7 @@ from grimoire.evidence.service import EvidenceService
 from grimoire.missions.ledger import MissionLedger
 
 if TYPE_CHECKING:
+    from grimoire.memory.backends.base import MemoryEntry
     from grimoire.memory.manager import MemoryManager
     from grimoire.memory.neo4j_graph import Neo4jMemoryGraph
 
@@ -29,6 +30,7 @@ __all__ = [
     "sync_code_graph_projection",
     "sync_code_vector_projection",
     "sync_docs_projection",
+    "sync_memory_projection",
     "sync_task_memory_projection",
     "sync_task_vector_projection",
     "vector_projection_verify",
@@ -86,6 +88,33 @@ def sync_code_graph_projection(
         "code_edges": len(edges),
         "test_nodes": stats["test_nodes"],
     }
+
+
+def sync_memory_projection(
+    memory_graph: Neo4jMemoryGraph,
+    entries: Iterable[MemoryEntry],
+) -> dict[str, int]:
+    """Rétro-projeter des souvenirs du store durable vers Neo4j.
+
+    La projection d'un souvenir se fait normalement à l'écriture, dans
+    ``MemoryManager._sync_memory``. Quand le graphe est indisponible à ce
+    moment-là — Neo4j éteint, extra absent, mot de passe manquant — le vecteur
+    atterrit et le nœud non : le store et le graphe divergent en silence, et
+    plus rien ne rattrape l'écart.
+
+    ``upsert_memory`` fait un MERGE sur l'identifiant, donc rejouer un souvenir
+    déjà projeté ne crée pas de doublon : la fonction est sûre à relancer sur
+    l'intégralité du store.
+    """
+    projected = 0
+    failed = 0
+    for entry in entries:
+        try:
+            memory_graph.upsert_memory(entry)
+            projected += 1
+        except Exception:  # une entrée fautive ne doit pas arrêter le rattrapage
+            failed += 1
+    return {"projected": projected, "failed": failed}
 
 
 def sync_task_memory_projection(

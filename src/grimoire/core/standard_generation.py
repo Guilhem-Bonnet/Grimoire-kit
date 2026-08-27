@@ -1,4 +1,11 @@
-"""Which standard artifacts the kit wrote, and which ones the project owns.
+"""Rendering standard artifacts, and tracking which ones the kit generated.
+
+Not to be confused with :mod:`grimoire.core.standard_profile_manifest`, which
+reads the *profile* manifest — the artifact set a project declared. This module
+answers a different question: of the files on disk, which ones did the kit
+write, and are they still as it wrote them?
+
+Which standard artifacts the kit wrote, and which ones the project owns.
 
 ``_grimoire/standard/`` holds two kinds of file that must not share a fate:
 policies the kit ships (rule packs, mission brief) and records the project
@@ -45,6 +52,7 @@ STANDARD_DIR = Path("_grimoire/standard")
 
 #: Where the manifest lives, relative to the project root.
 STANDARD_GENERATION_MANIFEST = STANDARD_DIR / ".generated.json"
+
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
 
 #: Where the governed standard writes what a task produced. Plain paths, kept

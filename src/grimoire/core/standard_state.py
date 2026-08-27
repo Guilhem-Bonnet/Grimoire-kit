@@ -17,10 +17,10 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-# Tout vient de ``standard_manifest``, le module léger : ce lecteur tourne dans
+# Tout vient de ``standard_generation``, le module léger : ce lecteur tourne dans
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
 # pour lire deux chemins et un identifiant coûtait 48 ms par appel.
-from grimoire.core.standard_manifest import (
+from grimoire.core.standard_generation import (
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
