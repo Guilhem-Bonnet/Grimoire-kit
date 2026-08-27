@@ -44,3 +44,25 @@ class TestEmptyValueDoesNotEatTheNextLine:
         vals = UserValues(user_name="Guilhem")
         _apply_copilot(ci, vals)
         assert _apply_copilot(ci, vals) is False
+
+
+class TestUndeclaredFieldIsLeftAlone:
+    """A field the config does not declare must not be blanked in the file.
+
+    ``project-context.yaml`` has no mandatory ``user:`` section. Propagating an
+    empty value through erased a name a human had typed into
+    ``copilot-instructions.md`` — seen on a real project, where ``up`` quietly
+    dropped ``**User**: Guilhem``.
+    """
+
+    def test_empty_config_value_preserves_the_existing_one(self, tmp_path: Path) -> None:
+        ci = tmp_path / "copilot-instructions.md"
+        ci.write_text("- **User**: Guilhem\n", encoding="utf-8")
+        _apply_copilot(ci, UserValues(user_name=""))
+        assert "- **User**: Guilhem" in ci.read_text(encoding="utf-8")
+
+    def test_declared_value_still_wins(self, tmp_path: Path) -> None:
+        ci = tmp_path / "copilot-instructions.md"
+        ci.write_text("- **User**: ancien\n", encoding="utf-8")
+        _apply_copilot(ci, UserValues(user_name="Guilhem"))
+        assert "- **User**: Guilhem" in ci.read_text(encoding="utf-8")

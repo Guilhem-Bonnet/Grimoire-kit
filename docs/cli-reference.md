@@ -229,6 +229,30 @@ Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, 
 
 ---
 
+## Tâches agentiques
+
+Le task board gouverné est une **projection** du Mission Ledger, pas une source
+(voir [ADR-005](adr-005-mission-ledger-source-of-truth.md)). Éditer
+`_grimoire/standard/task-board.yaml` à la main ne change rien au ledger, et le
+prochain export l'écrase.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire task board export [.]` | Régénérer le board depuis le Mission Ledger |
+| `grimoire task board export . --dry-run` | Afficher la projection sans écrire |
+| `grimoire task board export . --mission <id>` | N'exporter qu'une mission |
+| `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
+
+Sans ledger, la commande refuse et sort en erreur plutôt que d'écrire un board
+vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
+
+Neuf états côté ledger se projettent sur les huit colonnes du standard. Les
+fusions sont décidées et testées : `claimed` et `running` deviennent
+`in_progress`, `needs_verification` devient `review`, `failed` devient `blocked`
+(avec un motif), `closed` devient `accepted`, `cancelled` devient `archived`.
+
+---
+
 ## Sous-commandes
 
 ### `grimoire config show`
