@@ -22,9 +22,9 @@ from grimoire.core.agentic_standard import (
     normalize_task_id,
 )
 
-# ``STANDARD_DIR`` a déménagé dans ``standard_manifest`` avec la frontière
+# ``STANDARD_DIR`` a déménagé dans ``standard_generation`` avec la frontière
 # kit/overrides : on le prend à sa source plutôt qu'à travers un ré-export.
-from grimoire.core.standard_manifest import STANDARD_DIR
+from grimoire.core.standard_generation import STANDARD_DIR
 
 TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 
