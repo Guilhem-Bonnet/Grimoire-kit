@@ -21,7 +21,10 @@ from rich.table import Table
 from grimoire.cli.cmd_memory import (
     _get_fmt,
     _load_config_context,
+    _load_manager_context,
+    _load_neo4j_graph,
     console,
+    graph_app,
     memory_app,
 )
 from grimoire.core.exceptions import GrimoireMemoryError
@@ -118,6 +121,38 @@ def memory_up(
         console.print("\n[bold]Étapes suivantes[/bold]")
         for step in plan.next_steps:
             console.print(f"  [cyan]{escape(step)}[/cyan]")
+
+
+# ── grimoire memory graph sync-memories ───────────────────────────────────────
+
+
+@graph_app.command("sync-memories")
+def memory_graph_sync_memories(ctx: typer.Context) -> None:
+    """Rétro-projeter les souvenirs du store durable vers Neo4j.
+
+    La projection se fait normalement à l'écriture. Quand le graphe est
+    indisponible à ce moment-là — Neo4j éteint, extra absent, mot de passe non
+    exporté — le vecteur atterrit et le nœud non, et rien ne rattrape l'écart
+    ensuite : c'est la dérive que `memory status` signale sous `Parity`.
+
+    L'opération fait un MERGE par identifiant : la relancer ne crée pas de
+    doublon.
+    """
+    from grimoire.memory.projections import sync_memory_projection
+
+    mgr, cfg, _ = _load_manager_context()
+    graph = _load_neo4j_graph(cfg)
+    try:
+        stats = sync_memory_projection(graph, mgr.get_all())
+    finally:
+        graph.close()
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(stats, indent=2))
+        return
+    console.print(f"[green]Souvenirs projetés[/green] : {stats['projected']}")
+    if stats["failed"]:
+        console.print(f"  [red]échecs[/red] : {stats['failed']}")
 
 
 # ── grimoire memory status ────────────────────────────────────────────────────
@@ -223,7 +258,7 @@ def memory_status(ctx: typer.Context) -> None:
             console.print(
                 f"  [red]Parity  :[/red] store={parity['store_entries']} "
                 f"graph={parity['graph_memories']} vectors={parity['graph_vector_objects']} "
-                f"(drift={parity['drift']}) — run [cyan]grimoire memory gate --sync[/cyan]"
+                f"(drift={parity['drift']}) — run [cyan]grimoire memory graph sync-memories[/cyan]"
             )
 
     console.print("\n[bold]Memory OS layers[/bold]")
