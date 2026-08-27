@@ -1,24 +1,27 @@
 # Note de version et numéro de version, décidés par le titre de la PR.
 #
-# Ils l'étaient auparavant par les étiquettes, que `.github/labeler.yml` pose
-# selon les *chemins touchés*. Les deux signaux ne répondent pas à la même
+# Ils l'étaient auparavant par les étiquettes `type:*`, que `.github/labeler.yml`
+# pose selon les *chemins touchés*. Les deux signaux ne répondent pas à la même
 # question : un chemin dit de quoi la PR parle, pas quelle sorte de changement
-# elle apporte. Trois conséquences, toutes constatées sur le brouillon v3.32.1 :
+# elle apporte. Constaté sur le brouillon v3.32.1 : aucune règle du labeler ne
+# posait `type:feature`, donc l'incrément mineur était inatteignable et une
+# refonte de layout sortait en 3.32.1 ; et `type:docs` raflait les
+# fonctionnalités, publiées sous « Documentation ».
 #
-#   - `type:feature` n'existait dans aucune règle du labeler, donc aucune PR ne
-#     pouvait déclencher un incrément mineur et `default: patch` gagnait
-#     toujours — une refonte de layout sortait en 3.32.1 ;
-#   - la première catégorie qui correspond l'emporte, et toute PR sérieuse
-#     touche un `.md`, donc `type:docs` raflait les fonctionnalités : elles
-#     étaient publiées sous « Documentation » ;
-#   - `breaking` n'était posé par rien, donc un incrément majeur était
-#     inatteignable.
+# Le préfixe Conventional Commit du titre, lui, énonce la nature du changement,
+# et le job « Titre de PR conventionnel » le rend fiable. `autolabeler` le lit.
 #
-# Le préfixe Conventional Commit du titre, lui, énonce la nature du changement
-# et le dépôt le respecte déjà partout. `autolabeler` le lit et pose une
-# étiquette sémantique ; les catégories et le calcul de version ne regardent
-# plus que celles-là. Les étiquettes de domaine restent posées pour le tri,
-# elles ne décident simplement plus de la note de version.
+# Ces étiquettes vivent dans leur propre espace de noms, `release:`. Les faire
+# cohabiter avec `type:` ne suffisait pas : release-drafter ne s'arrête pas à la
+# première catégorie qui correspond, il liste une PR sous *chacune* de celles
+# dont elle porte une étiquette. Comme `type:test`, `type:ci` et `type:tools`
+# sont aussi posées par chemin, une fonctionnalité touchant `tests/` et
+# `pyproject.toml` ressortait quatre fois dans la même note. Séparer les espaces
+# de noms est ce qui rend l'unicité vraie plutôt qu'espérée : une PR porte
+# exactement une étiquette `release:`, donc paraît exactement une fois.
+#
+# Les étiquettes `type:` restent posées pour le tri et la recherche ; elles ne
+# décident plus rien de ce qui est publié.
 
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
@@ -28,52 +31,50 @@ autolabeler:
     title:
       # `feat!:`, `fix(scope)!:` — la rupture est déclarée dans le titre.
       - '/^\w+(\([^)]*\))?!:/'
-  - label: "type:feature"
+  - label: "release:feature"
     title:
       - '/^feat(\([^)]*\))?:/'
-  - label: "type:fix"
+  - label: "release:fix"
     title:
       - '/^fix(\([^)]*\))?:/'
-  - label: "type:docs"
+  - label: "release:docs"
     title:
       - '/^docs(\([^)]*\))?:/'
-  - label: "type:test"
+  - label: "release:test"
     title:
       - '/^test(\([^)]*\))?:/'
-  - label: "type:ci"
+  - label: "release:infra"
     title:
       - '/^(ci|build)(\([^)]*\))?:/'
-  - label: "type:tools"
+  - label: "release:chore"
     title:
       - '/^(chore|refactor|perf|style)(\([^)]*\))?:/'
 
-# Ordre significatif : la première catégorie qui correspond l'emporte.
 categories:
   - title: "⚠️ Breaking Changes"
     labels:
       - "breaking"
   - title: "🚀 Fonctionnalités"
     labels:
-      - "type:feature"
+      - "release:feature"
       - "enhancement"
   - title: "🐛 Corrections"
     labels:
-      - "type:fix"
+      - "release:fix"
       - "bug"
   - title: "🏗️ Infrastructure"
     labels:
-      - "type:ci"
-      - "type:packaging"
+      - "release:infra"
   - title: "🔧 Maintenance"
     labels:
-      - "type:tools"
+      - "release:chore"
       - "dependencies"
   - title: "🧪 Tests"
     labels:
-      - "type:test"
+      - "release:test"
   - title: "📚 Documentation"
     labels:
-      - "type:docs"
+      - "release:docs"
 
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'
@@ -84,16 +85,16 @@ version-resolver:
       - "breaking"
   minor:
     labels:
-      - "type:feature"
+      - "release:feature"
       - "enhancement"
   patch:
     labels:
-      - "type:fix"
+      - "release:fix"
       - "bug"
-      - "type:docs"
-      - "type:ci"
-      - "type:test"
-      - "type:tools"
+      - "release:docs"
+      - "release:infra"
+      - "release:test"
+      - "release:chore"
   default: patch
 
 template: |
