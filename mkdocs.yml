@@ -119,3 +119,4 @@ nav:
       - "002 — SemVer Policy": adr-002-semver-policy.md
       - "003 — Dualité mémoire": adr-003-memory-duality.md
       - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
+      - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md

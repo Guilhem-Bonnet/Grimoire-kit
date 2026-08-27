@@ -38,6 +38,7 @@ from grimoire.cli.cmd_migrate import migrate_command
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
+from grimoire.cli.cmd_task import task_app
 from grimoire.cli.cmd_up import up as up_command
 from grimoire.cli.cmd_upgrade import upgrade_command
 from grimoire.cli.workflow_catalog import WF_DESCRIPTIONS as _WF_DESCRIPTIONS
@@ -930,6 +931,7 @@ app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 app.add_typer(ext_app, name="ext", rich_help_panel="Project")
 app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
+app.add_typer(task_app, name="task", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")
 app.add_typer(host_app, name="host", rich_help_panel="Project")
