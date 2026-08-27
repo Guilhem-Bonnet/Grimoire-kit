@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from grimoire.core.agentic_standard import STANDARD_PROFILE_FILE, setup_standard_profile
-from grimoire.core.standard_manifest import is_project_owned, load_generation_manifest
+from grimoire.core.standard_generation import is_project_owned, load_generation_manifest
 
 
 def _init(root: Path, **kwargs: object) -> object:
@@ -59,7 +59,7 @@ class TestRefresh:
         # current template, but the manifest still matches what was written.
         stale = "stale content from an older version\n"
         target.write_text(stale, encoding="utf-8")
-        from grimoire.core.standard_manifest import _artifact_digest, save_generation_manifest
+        from grimoire.core.standard_generation import _artifact_digest, save_generation_manifest
         save_generation_manifest(tmp_path, {tracked: _artifact_digest(target)})
 
         _init(tmp_path, refresh=True)

@@ -23,6 +23,22 @@ REAL_HOME = Path.home()
 #: consulterait la variable sans passer par ``Path.home()``.
 _USER_STATE_VARS = ("GRIMOIRE_COCKPIT_HOME", "GRIMOIRE_SHARED_HOME", "GRIMOIRE_EMBEDDING_CACHE")
 
+#: Variables par lesquelles git redirige ses écritures. Elles sont posées dans
+#: l'environnement de tout hook git, donc présentes dès que la suite tourne
+#: depuis un `git commit` — le gate pre-commit, précisément. Un `git init`
+#: dans un tmp_path crée alors le dépôt à `GIT_DIR`, et tout ce que le test
+#: croit écrire dans son bac à sable atterrit dans le dépôt réel.
+_GIT_REDIRECT_VARS = (
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
+
 
 # ── Isolation de l'état utilisateur ───────────────────────────────────────────
 
@@ -65,6 +81,11 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
             mp.setenv(name, str(home / subdir))
         for var in _USER_STATE_VARS:
             mp.setenv(var, str(home / ".grimoire" / var.removeprefix("GRIMOIRE_").lower()))
+        # Troisième vecteur de redirection, après HOME et les racines du kit :
+        # l'environnement git. Les retirer rend `git init` et `git rev-parse`
+        # relatifs au répertoire courant, comme hors hook.
+        for var in _GIT_REDIRECT_VARS:
+            mp.delenv(var, raising=False)
         yield
 
 

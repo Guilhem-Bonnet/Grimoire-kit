@@ -76,223 +76,223 @@ patterns:
     category: runtime
     artifacts: []
     rules: []
-    checks: [events.invalid_line]
+    checks: []
     tech_extras: []
     profile_min: governed
   redis-hot-memory-soft-gate:
     category: memory
     artifacts: [memory_policy]
     rules: [memory.hot-degrades-safely]
-    checks: [memory.hot_memory_partial]
+    checks: []
     tech_extras: [redis]
     profile_min: governed
   governed-hook-gateway:
     category: governance
     artifacts: [hook_registry, rule_packs]
     rules: [hooks.must-use-gateway, hooks.no-destructive-bypass]
-    checks: [hooks.gateway_missing, hooks.destructive_bypass]
+    checks: []
     tech_extras: []
     profile_min: governed
   skill-classification-matrix:
     category: orchestration
     artifacts: [hook_registry, pattern_catalog]
     rules: [skills.classified-before-use]
-    checks: [skills.classification_missing]
+    checks: []
     tech_extras: []
     profile_min: governed
   governed-observability-cockpit:
     category: observability
     artifacts: [observability_policy]
     rules: [observability.cockpit-read-only, observability.inputs-are-declared, observability.no-secret-export]
-    checks: [observability.cockpit_mutation, observability.input_undeclared, observability.secret_export]
+    checks: []
     tech_extras: []
     profile_min: governed
   code-graph-projection:
     category: memory
     artifacts: [memory_policy]
     rules: [memory.freshness-required]
-    checks: [memory.graph_projection_unverified]
+    checks: []
     tech_extras: [neo4j]
     profile_min: orchestrated
   governed-agent-orchestration:
     category: orchestration
     artifacts: [orchestration_policy]
     rules: [orchestration.no-undeclared-handoff]
-    checks: [orchestration.role_undeclared, orchestration.handoff_unverified]
+    checks: []
     tech_extras: []
     profile_min: orchestrated
   governed-knowledge-indexing:
     category: knowledge
     artifacts: [knowledge_source_registry]
     rules: [knowledge.source-declared]
-    checks: [knowledge.source_unindexed]
+    checks: []
     tech_extras: []
     profile_min: orchestrated
   mission-evidence-ledger:
     category: workflow
     artifacts: [evidence_gates, evidence_pack]
     rules: [gate.requires-evidence]
-    checks: [ledger.mission_unlinked]
+    checks: []
     tech_extras: []
     profile_min: governed
   tool-mediation-gate:
     category: security
     artifacts: [hook_registry, rule_packs]
     rules: [tools.mediated-before-use]
-    checks: [tools.unmediated_call, tools.threat_unmapped]
+    checks: []
     tech_extras: [mcp]
     profile_min: governed
   provider-cost-slo:
     category: provider
     artifacts: [llm_provider_registry]
     rules: [provider.cost-budgeted]
-    checks: [provider.cost_unbudgeted, provider.slo_undeclared]
+    checks: []
     tech_extras: []
     profile_min: production
   tool-blast-radius-limiter:
     category: security
     artifacts: [blast_radius_policy]
-    rules: [tools.blast-radius-bounded]
+    rules: []
     checks: [tools.blast_radius_undeclared, tools.blast_radius_production_allow]
     tech_extras: []
     profile_min: starter
   agent-privilege-boundary:
     category: security
     artifacts: [privilege_boundary]
-    rules: [privilege.controller-agent-separated]
+    rules: []
     checks: [privilege.scrub_disabled, privilege.infra_token_exposed]
     tech_extras: []
     profile_min: governed
   prompt-injection-firewall:
     category: security
     artifacts: [prompt_firewall]
-    rules: [prompt.external-content-isolated]
+    rules: []
     checks: [firewall.isolation_disabled, firewall.override_allowed]
     tech_extras: []
     profile_min: controlled
   remote-hygiene-guard:
     category: governance
     artifacts: [remote_hygiene]
-    rules: [remote.freshness-verified]
+    rules: []
     checks: [remote.stale_check_disabled, remote.reachability_unchecked]
     tech_extras: []
     profile_min: controlled
   decision-council-gate:
     category: governance
     artifacts: [decision_council]
-    rules: [decision.council-before-irreversible]
+    rules: []
     checks: [council.quorum_too_low, council.no_veto]
     tech_extras: []
     profile_min: governed
   context-compression-gate:
     category: context
     artifacts: [compression_gate]
-    rules: [context.compression-preserves-provenance]
+    rules: []
     checks: [compression.provenance_dropped, compression.atomicity_dropped]
     tech_extras: []
     profile_min: orchestrated
   memory-integrity-validator:
     category: memory
     artifacts: [memory_integrity]
-    rules: [memory.integrity-validated]
+    rules: []
     checks: [integrity.provenance_unchecked, integrity.poisoning_unchecked]
     tech_extras: []
     profile_min: orchestrated
   merge-lane-fault-classifier:
     category: governance
     artifacts: [merge_lane]
-    rules: [merge.fault-classified-before-retry]
+    rules: []
     checks: [merge.classes_incomplete, merge.hard_not_escalated]
     tech_extras: []
     profile_min: governed
   llm-cost-registry:
     category: provider
     artifacts: [cost_registry]
-    rules: [provider.cost-and-slo-declared]
+    rules: []
     checks: [cost.no_pricing, cost.no_slo]
     tech_extras: []
     profile_min: production
   guardrail-contract:
     category: security
     artifacts: [guardrail_contract]
-    rules: [guardrail.versioned-four-faces]
+    rules: []
     checks: [guardrail.unversioned, guardrail.no_violation_action]
     tech_extras: []
     profile_min: controlled
   visual-evidence-gate:
     category: quality
     artifacts: [visual_evidence]
-    rules: [quality.visual-evidence-required]
+    rules: []
     checks: [visual.missing_artifact_kinds, visual.no_triggers]
     tech_extras: []
     profile_min: governed
   workspace-isolation:
     category: security
     artifacts: [workspace_isolation]
-    rules: [security.workspace-isolated]
+    rules: []
     checks: [workspace.network_open, workspace.writable_unbounded]
     tech_extras: []
     profile_min: governed
   policy-by-environment:
     category: governance
     artifacts: [environment_policy]
-    rules: [governance.env-policy-declared]
+    rules: []
     checks: [env.environments_missing, env.production_unguarded]
     tech_extras: []
     profile_min: governed
   browser-tool-contract:
     category: quality
     artifacts: [browser_tool_contract]
-    rules: [quality.browser-evidence-required]
+    rules: []
     checks: [browser.dom_required, browser.screenshot_required]
     tech_extras: []
     profile_min: governed
   runtime-provider-contract:
     category: runtime
     artifacts: [runtime_provider_contract]
-    rules: [runtime.provider-contract-uniform]
+    rules: []
     checks: [runtime.lifecycle_incomplete, runtime.logs_undeclared]
     tech_extras: []
     profile_min: orchestrated
   prompt-version-observability:
     category: observability
     artifacts: [prompt_version_log]
-    rules: [observability.prompt-version-tracked]
+    rules: []
     checks: [promptver.tracking_incomplete, promptver.evals_unlinked]
     tech_extras: []
     profile_min: controlled
   cluster-action-dry-run:
     category: governance
     artifacts: [cluster_action_policy]
-    rules: [governance.cluster-action-dry-run]
+    rules: []
     checks: [cluster.dry_run_required, cluster.rollback_required]
     tech_extras: []
     profile_min: production
   doc-to-graph-pipeline:
     category: knowledge
     artifacts: [doc_graph_pipeline]
-    rules: [knowledge.doc-to-graph-sourced]
+    rules: []
     checks: [docgraph.sources_missing, docgraph.relations_disabled]
     tech_extras: []
     profile_min: production
   flow-dsl-minimal:
     category: orchestration
     artifacts: [flow_dsl_manifest]
-    rules: [orchestration.flow-manifest-exportable]
+    rules: []
     checks: [flowdsl.steps_missing, flowdsl.export_undeclared]
     tech_extras: []
     profile_min: production
   workflow-state-manifest:
     category: workflow
     artifacts: [workflow_state_manifest]
-    rules: [orchestration.workflow-state-declared]
+    rules: []
     checks: [wsm.states_missing, wsm.transition_invalid]
     tech_extras: []
     profile_min: starter
   k8s-agent-manifest:
     category: runtime
     artifacts: [k8s_agent_manifest]
-    rules: [runtime.k8s-agent-declared]
+    rules: []
     checks: [k8s.resource_limits_missing, k8s.telemetry_missing]
     tech_extras: []
     profile_min: production

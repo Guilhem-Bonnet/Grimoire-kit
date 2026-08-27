@@ -299,9 +299,12 @@ class TestFullScaffoldPlan:
         assert [c for c in plan.copies if "session-bootstrap" in str(c.dst)]
         assert [t for t in plan.templates if "grimoire-project" in str(t.dst)]
 
-        # project-context.yaml carries the user's own configuration: seeded once.
+        # project-context.yaml and the instruction file carry the user's own
+        # content: seeded once, never rewritten.
         context = [t for t in plan.templates if t.dst.name == "project-context.yaml"]
         assert context and context[0].tier == TIER_SEED
+        instructions = [t for t in plan.templates if t.dst.name == "copilot-instructions.md"]
+        assert instructions and instructions[0].tier == TIER_SEED
 
 class TestTemplateVariableSubstitution:
     """Test that template variables are correctly substituted."""

@@ -31,7 +31,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from grimoire.core.standard_manifest import STANDARD_DIR
+from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_profile_manifest import read_profile
 from grimoire.evidence import EvidenceService, VerdictResult
 
