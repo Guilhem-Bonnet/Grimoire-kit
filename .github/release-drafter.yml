@@ -1,7 +1,57 @@
+# Note de version et numéro de version, décidés par le titre de la PR.
+#
+# Ils l'étaient auparavant par les étiquettes, que `.github/labeler.yml` pose
+# selon les *chemins touchés*. Les deux signaux ne répondent pas à la même
+# question : un chemin dit de quoi la PR parle, pas quelle sorte de changement
+# elle apporte. Trois conséquences, toutes constatées sur le brouillon v3.32.1 :
+#
+#   - `type:feature` n'existait dans aucune règle du labeler, donc aucune PR ne
+#     pouvait déclencher un incrément mineur et `default: patch` gagnait
+#     toujours — une refonte de layout sortait en 3.32.1 ;
+#   - la première catégorie qui correspond l'emporte, et toute PR sérieuse
+#     touche un `.md`, donc `type:docs` raflait les fonctionnalités : elles
+#     étaient publiées sous « Documentation » ;
+#   - `breaking` n'était posé par rien, donc un incrément majeur était
+#     inatteignable.
+#
+# Le préfixe Conventional Commit du titre, lui, énonce la nature du changement
+# et le dépôt le respecte déjà partout. `autolabeler` le lit et pose une
+# étiquette sémantique ; les catégories et le calcul de version ne regardent
+# plus que celles-là. Les étiquettes de domaine restent posées pour le tri,
+# elles ne décident simplement plus de la note de version.
+
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
 
+autolabeler:
+  - label: "breaking"
+    title:
+      # `feat!:`, `fix(scope)!:` — la rupture est déclarée dans le titre.
+      - '/^\w+(\([^)]*\))?!:/'
+  - label: "type:feature"
+    title:
+      - '/^feat(\([^)]*\))?:/'
+  - label: "type:fix"
+    title:
+      - '/^fix(\([^)]*\))?:/'
+  - label: "type:docs"
+    title:
+      - '/^docs(\([^)]*\))?:/'
+  - label: "type:test"
+    title:
+      - '/^test(\([^)]*\))?:/'
+  - label: "type:ci"
+    title:
+      - '/^(ci|build)(\([^)]*\))?:/'
+  - label: "type:tools"
+    title:
+      - '/^(chore|refactor|perf|style)(\([^)]*\))?:/'
+
+# Ordre significatif : la première catégorie qui correspond l'emporte.
 categories:
+  - title: "⚠️ Breaking Changes"
+    labels:
+      - "breaking"
   - title: "🚀 Fonctionnalités"
     labels:
       - "type:feature"
@@ -10,24 +60,20 @@ categories:
     labels:
       - "type:fix"
       - "bug"
-  - title: "📚 Documentation"
-    labels:
-      - "type:docs"
   - title: "🏗️ Infrastructure"
     labels:
       - "type:ci"
       - "type:packaging"
-  - title: "🧪 Tests"
-    labels:
-      - "type:test"
   - title: "🔧 Maintenance"
     labels:
       - "type:tools"
-      - "type:core"
       - "dependencies"
-  - title: "⚠️ Breaking Changes"
+  - title: "🧪 Tests"
     labels:
-      - "breaking"
+      - "type:test"
+  - title: "📚 Documentation"
+    labels:
+      - "type:docs"
 
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'
@@ -46,6 +92,8 @@ version-resolver:
       - "bug"
       - "type:docs"
       - "type:ci"
+      - "type:test"
+      - "type:tools"
   default: patch
 
 template: |

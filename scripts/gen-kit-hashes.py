@@ -17,6 +17,14 @@ Usage::
     scripts/gen-kit-hashes.py                  # current worktree only
     scripts/gen-kit-hashes.py --history        # every released tag, too
     scripts/gen-kit-hashes.py --since v3.20.0  # tags from this one on
+    scripts/gen-kit-hashes.py --check          # verify, write nothing
+
+``--check`` is the release gate. Tagging without regenerating the catalog is
+silent and expensive: every file the version introduces has an unknown digest,
+so ``grimoire migrate`` reads it as a user customisation and freezes it out of
+all future updates. The damage lands on projects, months later, and looks like
+"the kit stopped updating". The check is one scan — it belongs in front of the
+release, not in the incident report.
 """
 
 from __future__ import annotations
@@ -89,11 +97,45 @@ def _scan_tag(tag: str) -> dict[str, str]:
     return found
 
 
+def _check(catalog: dict[str, dict[str, str]], version: str) -> int:
+    """Fail when a shipped file is absent from the catalog.
+
+    The property is exactly what ``migrate`` relies on: a digest it does not
+    recognise is treated as the project's own work. One shipped file missing
+    here is one file that no update will ever touch again.
+    """
+    missing = sorted(
+        rel for digest, rel in _scan_worktree().items() if digest not in catalog
+    )
+    if not missing:
+        print(f"catalogue à jour — {len(catalog)} digests couvrent l'arbre livré")
+        return 0
+    print(
+        f"{len(missing)} fichier(s) livré(s) absent(s) du catalogue "
+        f"(version.txt = {version}) :",
+        file=sys.stderr,
+    )
+    for rel in missing[:20]:
+        print(f"  - {rel}", file=sys.stderr)
+    if len(missing) > 20:
+        print(f"  … et {len(missing) - 20} autre(s)", file=sys.stderr)
+    print(
+        "\nCes fichiers seraient lus comme des customisations utilisateur par\n"
+        "`grimoire migrate`, et gelés hors des mises à jour. Lancer :\n"
+        "  python scripts/gen-kit-hashes.py\n"
+        "puis committer registry/kit-file-hashes.json.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--history", action="store_true",
                     help="also scan released tags (only needed to backfill a fresh catalog)")
     ap.add_argument("--since", default="", help="oldest tag to scan with --history")
+    ap.add_argument("--check", action="store_true",
+                    help="verify the catalog covers the worktree; write nothing")
     args = ap.parse_args()
 
     version = (REPO / "version.txt").read_text(encoding="utf-8").strip()
@@ -108,6 +150,9 @@ def main() -> int:
     except (OSError, json.JSONDecodeError):
         # Pas encore de catalogue, ou illisible : on repart d'un vide.
         pass
+
+    if args.check:
+        return _check(catalog, version)
 
     if args.history:
         for tag in _released_tags(args.since or None):
