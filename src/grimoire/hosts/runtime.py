@@ -14,9 +14,12 @@ the governance.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +185,91 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
     return payload
 
 
+#: Neutral outcome -> the verdict word the ledger's ``policy_block_rate`` counts.
+#: ``deny`` is written as ``block`` on purpose: the metric predates this layer
+#: and counts ``"block"``, and renaming the value would silently zero it.
+_LEDGER_VERDICT = {
+    Outcome.DENY: "block",
+    Outcome.BLOCK: "block",
+    Outcome.ASK: "ask",
+    Outcome.ALLOW: "allow",
+}
+
+#: Events worth a ledger line. Read-only tool calls are deliberately absent:
+#: they return before the policy engine runs, so recording them would add file
+#: I/O to the one path this layer just spent a chantier making cheap.
+_RECORDED_EVENTS = {HookEvent.PRE_TOOL_USE, HookEvent.STOP, HookEvent.SUBAGENT_STOP}
+
+
+def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, latency_ms: float) -> None:
+    """Append what the decision did to the project's trace ledger.
+
+    The ledger and this layer were built for each other and never connected:
+    ``ToolCallTrace`` carries a ``policy_verdict_id``, ``TraceRecord`` carries
+    evidence refs, and ``policy_block_rate()`` documents itself as "fraction of
+    tool calls that were blocked" — a number that could only ever read zero
+    while the hooks wrote nothing. Governance that leaves no trace cannot be
+    measured, and an unmeasured guardrail is a claim.
+
+    Best-effort by construction: a ledger that cannot be written must never
+    fail a session. The import is deferred because it costs 29 ms, which the
+    read-only path has no reason to pay.
+    """
+    if hook.event not in _RECORDED_EVENTS or not decision.detail:
+        return
+    try:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import TraceLedger
+        from grimoire.traces.schemas import TraceOutcome
+
+        detail = decision.detail
+        task_id = str(detail.get("task_id") or "")
+        verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
+        tool_calls = []
+        if hook.event is HookEvent.PRE_TOOL_USE:
+            tool_calls.append(
+                {
+                    "tool": hook.tool_name or "unknown",
+                    "verdict": verdict,
+                    "args_hash": _args_hash(hook.tool_input),
+                    "latency_ms": latency_ms,
+                }
+            )
+        TraceLedger(hook.project_root / TRACES_DIR).record(
+            run_id=hook.session_id or "session-unknown",
+            workflow_instance_id="",
+            mission_id="",
+            task_id=task_id,
+            recipe_id=DEFAULT_DECISION_BY_EVENT.get(hook.event, hook.event.value),
+            outcome=TraceOutcome.FAILURE if decision.is_refusal else TraceOutcome.SUCCESS,
+            started_at=_now_iso(),
+            host_id=host_id.value,
+            tool_calls=tool_calls,
+            evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
+            latency_ms=latency_ms,
+            tags=[hook.event.value, verdict],
+        )
+    except Exception:
+        return
+
+
+def _args_hash(tool_input: dict[str, Any]) -> str:
+    """Short digest of a call's arguments — enough to correlate, not to leak.
+
+    Tool arguments carry file contents, commands and occasionally credentials.
+    The ledger is written to disk and exported to OTel, so it gets a digest.
+    """
+    try:
+        payload = json.dumps(tool_input, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        payload = repr(tool_input)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 def run_hook(
     payload: dict[str, Any],
     *,
@@ -193,7 +281,10 @@ def run_hook(
     """Full path: normalise, decide, persist side effects, render."""
     hook = normalize_input(payload, event=event, project_root=project_root)
     resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
+    started = time.perf_counter()
     decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    latency_ms = (time.perf_counter() - started) * 1000
+    _record_decision(hook, decision, host_id, latency_ms)
     capsule = _persist_capsule(hook, decision)
     if capsule is not None:
         decision = Decision(

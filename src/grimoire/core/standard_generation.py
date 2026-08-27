@@ -62,6 +62,8 @@ EVIDENCE_DIR = Path("_grimoire-output/evidence")
 CONTEXT_DIR = Path("_grimoire-output/context")
 DECISION_DIR = Path("_grimoire-output/decisions")
 SCORE_DIR = Path("_grimoire-output/standard")
+#: Where lifecycle decisions are recorded, next to the artifacts they judge.
+TRACES_DIR = Path("_grimoire-output/traces")
 
 #: A task id becomes a directory name in generated paths, so it is validated
 #: before it is ever joined. Kept here, with the paths it guards, so that

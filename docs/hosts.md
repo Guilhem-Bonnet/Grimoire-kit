@@ -125,6 +125,30 @@ conception, pas un détail d'implémentation.
   matcher : les fichiers de credentials y sont déjà refusés déclarativement, à
   coût nul. L'accès par commande shell reste couvert par `Bash`.
 
+## Ce que la gouvernance enregistre
+
+Chaque appel d'outil réellement évalué et chaque décision de clôture sont
+consignés dans `_grimoire-output/traces/traces.jsonl`. Un refus qui ne laisse
+pas de trace ne peut pas être mesuré, et un garde-fou non mesuré reste une
+affirmation.
+
+```bash
+grimoire -o json standard verify .   # l'état déclaré
+```
+
+Le ledger répond à une autre question : ce qui s'est réellement passé.
+`TraceLedger.policy_block_rate()` donne la fraction des appels évalués qui ont
+été refusés.
+
+Trois limites assumées :
+
+- **les appels en lecture seule n'écrivent rien** — ils sortent avant toute
+  évaluation, et le chemin le plus chaud reste libre ;
+- **les arguments sont hachés**, jamais stockés tels quels : le fichier part sur
+  disque et s'exporte en OTel, une trace qui cite une commande devient une fuite ;
+- **un ledger illisible n'interrompt rien** — l'observabilité ne vaut jamais une
+  session cassée.
+
 ## Frontière d'outils des personas
 
 Chaque persona est projetée avec une frontière d'outils. Elle vient du champ
