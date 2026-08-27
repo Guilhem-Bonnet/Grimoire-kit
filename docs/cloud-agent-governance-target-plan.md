@@ -188,18 +188,20 @@ qui avancent en parallèle, puis une porte, puis le reste.
 
 ```mermaid
 graph LR
-  A["Voie A — Assainissement<br/>P0.1 à P0.4"] --> C["Voie C — Le gate complet<br/>P1.2, P1.3, P1.5, P1.6, P1.7"]
+  A["Voie A — Assainissement<br/>P0.1 à P0.6"] --> C["Voie C — Le gate complet<br/>P1.2, P1.3, P1.5, P1.6, P1.7"]
   B["Voie B — Sonde<br/>P1.0, P1.1, P1.4<br/>+ P1.3 partiel"] --> PORTE{"Porte de<br/>validation"}
   C --> PORTE
   PORTE --> D["Voie D — Compilation et preuve<br/>P2, P3"]
 ```
 
-**Voie A — assainissement.** P0.1 à P0.4 se justifient **sans aucune thèse cloud**. Le
+**Voie A — assainissement.** P0.1 à P0.6 se justifient **sans aucune thèse cloud**. Le
 fail-closed qui ne ferme pas, les références mortes, l'absence de registre de checks et
 le contrat d'adapter recopié trois fois sont des défauts du kit tel qu'il est livré
 aujourd'hui. Ces lots restent à faire même si tout le reste de ce plan est abandonné :
 ils ne sont pas un investissement dans le pari cloud, ils en sont indépendants. C'est la
 raison pour laquelle ils passent en premier, et non parce qu'ils débloquent la suite.
+P0.5 et P0.6, décrits en annexe, relèvent de la même justification : ils réparent un
+champ mort et une limite de poste, indépendamment de toute thèse cloud.
 
 **Voie B — sonde.** P1.0, P1.1, P1.4 et la moitié de P1.3 qui livre `grimoire cloud
 inspect` et `grimoire cloud lifecycle` ne dépendent ni de la voie A ni du moteur du
@@ -845,3 +847,148 @@ cosign verify-attestation --type https://guilhem-bonnet.github.io/Grimoire-kit/E
 
 Et, tout au long, un test qui assert que `pyproject.toml` ne contient ni SDK cloud, ni
 dépendance cryptographique.
+
+## Annexe — demandes d'un projet consommateur (2026-08-27)
+
+Un projet tiers qui veut consommer grimoire dans son architecture cloud — plateforme de
+connaissance d'entreprise, dix-neuf équipes, un pipeline cloud — a produit huit demandes
+en les contraignant lui-même au hors périmètre ci-dessus. Aucune ne viole les quatorze
+refus : ni runtime, ni SDK cloud, ni cryptographie, ni base de données, ni moteur de
+règles maison.
+
+Cette annexe est datée et arbitrée. Elle ne réécrit pas les lots : elle dit lesquels
+absorbent quelle demande, et à quel prix.
+
+### Ce que la demande se représente mal
+
+Trois écarts entre la demande et le code réel, vérifiés au commit courant.
+
+**Le profil n'est pas la bonne maille.** La demande d'un profil `knowledge-platform`
+frère de `solo-prototyping`, `governed` et `production` confond deux mécanismes.
+`profile-map.yaml` déclare une **échelle de maturité ordonnée** — `starter` (1),
+`controlled` (2), `orchestrated` (3), `governed` (4), `production` (5) — et
+`capability-map.yaml` s'en sert par comparaison de rang via `profile_min:`. Un profil
+thématique inséré comme frère n'a pas de rang et casse la comparaison.
+`solo-prototyping`, lui, est un **need** de `needs-catalog.yaml`, pas un profil.
+
+La forme correcte est donc un need `knowledge-platform` portant
+`recommended_profile: governed` et ses patterns. Elle passe par le moteur
+need → patterns → checks de P1.2, déjà prévu, et coûte moins cher que la demande
+formulée.
+
+**La provenance n'est pas à ajouter, elle est à brancher.** `MemoryEntry` porte déjà
+`provenance: dict`, `source`, `freshness` et `task_ref`. Aucune des dix-huit
+constructions de `MemoryEntry` du dépôt ne renseigne `provenance` ; `store()` ne
+l'accepte pas en paramètre ; le champ n'est que sérialisé, vide, vers Neo4j. En
+parallèle, un second canal vit dans `metadata`, dict libre, où `memory/shared.py` écrit
+effectivement une provenance de promotion.
+
+Deux vocabulaires coexistent donc, l'un typé et mort, l'autre libre et vivant : c'est un
+**septième verrou décoratif**, de la même famille que les six déjà mesurés. La demande
+relève de P0 — rendre honnête ce qui existe — et non d'un lot de schéma. Son critère de
+sortie est un check qui échoue sur une assertion sans provenance, pas un champ de plus.
+
+**Trois demandes visent du code qui n'existe pas.** `compiles_to:`, l'evidence pack
+cloud et la réconciliation intention/observé sont P2.1, P3.3 et P3.4 : aucun n'est
+écrit. Il n'existe ni `cli/cmd_cloud.py`, ni modèle neutre de définition, ni notion
+d'autorité. Élargir ces lots élargit une spécification. Leur coût réel pour le
+demandeur inclut la voie B, la voie C et la porte de validation en amont.
+
+### Arbitrage
+
+| # | Demande | Verdict | Lot d'accueil |
+|---|---|---|---|
+| 2 | Provenance native dans les phéromones et la mémoire | Retenu, prioritaire | P0 (nouveau lot P0.5) |
+| 1 | Board stigmergique fusionnable | Retenu sous contrat | P0 (nouveau lot P0.6) |
+| 4 | Profil `knowledge-platform` | Retenu, reformulé en need | P1.2, après P0.2 |
+| 6 | Evidence pack portant la chaîne de provenance | Retenu | P3.3, dépend de P0.5 |
+| 5 | Classification et autorité compilables | Retenu, échelle opaque | P2.1 |
+| 3 | Réconciliation générique intention/observé | Refusé sous cette forme | P3.4 étendu, sans moteur |
+| 7 | Télémétrie OTel des prompts servis | Retenu, marginal | P2.2 |
+| 8 | Gate applicable à des définitions non-agent | Refusé pour l'instant | — |
+
+### Les deux refus
+
+**Un réconciliateur générique serait un moteur de règles.** La demande décrit « deux
+sources, une règle de comparaison, un rapport ». La règle de comparaison est le piège :
+paramétrer la comparaison, c'est un langage ; un langage, c'est l'évaluateur que le refus
+n°4 du hors périmètre interdit. P3.4 est borné exprès — outils déclarés contre outils
+tracés, modèle hors allowlist, plafond d'itérations — chacun avec son test négatif.
+
+Le service demandé s'obtient sans généraliser : un **second réconciliateur écrit en dur**,
+assertion déclarée contre fait observé, enregistré dans le registre de checks de P0.3
+sous le préfixe `knowledge.drift.`. Deux réconciliateurs codés valent mieux qu'un moteur
+paramétrable : même valeur pour le consommateur, aucune surface de langage pour le kit.
+
+Le garde-fou de P3.4 s'applique tel quel : sans taux de couverture du corpus, une
+réconciliation d'assertions rend un « conforme » faux dès que l'indexation est
+partielle, exactement comme un échantillonnage OTel.
+
+**Le gate sur des définitions non-agent est prématuré.** Le modèle neutre que la demande
+veut réutiliser est P1.1 et n'existe pas. Étendre un modèle à des objets non-agent avant
+qu'il ait absorbé trois définitions cloud réelles, c'est la dérive « valider n'importe
+quoi » que la demande identifie elle-même. À reconsidérer après la porte de validation,
+jamais avant.
+
+### Les deux lots nouveaux
+
+#### P0.5 — Brancher la provenance de la mémoire (M)
+
+**Objectif** : un champ typé qui existe et que personne n'écrit est une promesse, pas un
+contrôle. Le lot supprime le second vocabulaire ou le fait converger vers le premier.
+
+**Touche** : `memory/backends/base.py`, les six backends, `memory/manager.py`,
+`memory/shared.py`, `memory/neo4j_graph.py`, `core/standard_checks/`.
+
+**Critères de sortie** :
+
+- `store()` accepte la provenance sur les six backends ; un test assert qu'une entrée
+  écrite puis relue restitue `provenance`, `source` et `task_ref` non vides.
+- Les deux vocabulaires sont réconciliés : un test assert que la provenance de promotion
+  de `memory/shared.py` est lisible depuis le champ typé, et non seulement depuis
+  `metadata`.
+- Un check `memory.provenance_missing` échoue sur une entrée sans provenance quand le
+  profil l'exige, et le test négatif échoue sur le code d'avant le lot.
+- Le champ ne devient obligatoire que par un need, jamais globalement : un projet
+  `starter` continue d'écrire sans provenance.
+
+**Risque** : rendre la provenance obligatoire partout invaliderait les mémoires
+existantes. L'exigence est portée par le need, pas par le modèle.
+
+#### P0.6 — Board stigmergique fusionnable (S)
+
+**Objectif** : lever la limite d'un poste sans faire entrer ni base de données ni
+transport dans le kit. Le transport — S3, Git, dépôt partagé — reste au consommateur.
+
+**Touche** : `tools/stigmergy.py`, `cli/cmd_stigmergy.py`, `tests/`.
+
+**Critères de sortie** :
+
+- `grimoire stigmergy merge a.json b.json ... -o board.json` existe et suit le contrat de
+  sortie de P0.1.
+- Deux tests portent le contrat de fusion : **commutativité** — `merge(a, b)` égale
+  `merge(b, a)` octet pour octet — et **idempotence** — `merge(a, a)` égale `a`. Sans ces
+  deux tests, le lot ne passe pas.
+- Les règles de conflit sont testées une par une : `resolved` est collant, `reinforced_by`
+  s'unit sans doublon, `intensity` prend le maximum, `timestamp` reste celui de l'émission
+  d'origine.
+- `total_emitted` et `total_evaporated` ne sont pas sommés : un test assert qu'une
+  phéromone présente dans les deux boards n'est comptée qu'une fois. Les compteurs d'un
+  board fusionné sont dérivés de la liste, pas additionnés.
+- L'identifiant passe de huit à seize caractères hexadécimaux, avec relecture des anciens
+  identifiants courts. Un test assert la rétro-compatibilité de lecture.
+
+**Risque** : `_generate_id` produit aujourd'hui huit caractères hexadécimaux, soit
+trente-deux bits — une collision d'anniversaire vers soixante-cinq mille phéromones.
+Suffisant pour un poste, mince pour dix-neuf équipes qui fusionnent. L'élargissement est
+la condition de la fusion, pas un raffinement.
+
+### Ce que cette demande apporte au plan
+
+Plus que n'importe laquelle des huit demandes : la porte de validation exige trois dépôts
+tiers réels et au moins un faux positif constaté. Ce projet est le premier candidat, avec
+une architecture cloud et des besoins écrits avant que le gate n'existe.
+
+La contrepartie à demander n'est pas un avis mais de la matière : **une définition d'agent
+réelle et un échantillon de traces**. Un gate validé contre des fixtures écrites par
+l'auteur du gate ne mesure rien.
