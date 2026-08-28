@@ -406,3 +406,51 @@ def test_every_lexicon_page_is_a_real_term():
     terms = set(re.findall(r"\[\s*'([^']+)'\s*,", lexicon))
     unknown = [term for term in mapped if term not in terms]
     assert not unknown, f"entrées sans terme correspondant au lexique : {unknown}"
+
+
+# ── Les compositions et ce que l'atelier en propose ────────────────────────
+
+
+def test_studio_use_case_rule_matches_the_client():
+    """La règle recopiée dans le générateur doit rester celle du client.
+
+    L'atelier écarte les compositions à un seul pattern puis coupe à douze,
+    dans `web/atelier-nav.js`. Le manuel promet un squelette pour celles-là :
+    si le client change son seuil, la promesse devient fausse en silence.
+    """
+    source = (ROOT / "web/atelier-nav.js").read_text(encoding="utf-8")
+    match = re.search(r"length\s*>=\s*(\d+)\)\.slice\(0,\s*(\d+)\)", source)
+    assert match, "règle des cas d'usage introuvable dans atelier-nav.js"
+    assert int(match.group(1)) == gen.STUDIO_USE_CASE_MIN_PATTERNS
+    assert int(match.group(2)) == gen.STUDIO_USE_CASE_LIMIT
+
+
+def test_every_use_case_is_listed(catalogue, pages):
+    page = pages[f"{gen.BASE}/compositions.md"]
+    missing = [u["name"] for u in catalogue["useCases"] if u["name"] not in page]
+    assert not missing, f"compositions absentes de la page : {missing}"
+
+
+def test_seeded_use_cases_get_a_studio_link(catalogue, pages):
+    page = pages[f"{gen.BASE}/compositions.md"]
+    seeded = gen.studio_seeded_use_cases(catalogue)
+    assert seeded, "aucune composition proposée en squelette"
+    missing = [uc for uc in seeded if f"?uc={uc}" not in page]
+    assert not missing, f"squelettes promis sans lien : {missing}"
+    unseeded = [
+        u["id"] for u in catalogue["useCases"]
+        if u["id"] not in seeded and f"?uc={u['id']}" in page
+    ]
+    assert not unseeded, f"squelettes promis que l'atelier ne connaît pas : {unseeded}"
+
+
+def test_use_case_pattern_links_point_at_real_patterns(catalogue, pages):
+    """Un cas d'usage peut citer un pattern retiré du catalogue."""
+    known = {p["id"] for p in catalogue["patterns"]}
+    dangling = sorted({
+        pid
+        for use_case in catalogue["useCases"]
+        for pid in (use_case.get("patterns") or [])
+        if pid not in known
+    })
+    assert not dangling, f"compositions citant des patterns inconnus : {dangling}"

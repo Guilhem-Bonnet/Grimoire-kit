@@ -102,6 +102,16 @@ vérifiable avant d'avoir coûté quoi que ce soit. Voir
 
 </div>
 
+## Devant une toile vide
+
+Trois pages répondent aux questions qu’on se pose à ce moment-là :
+
+| La question | La page |
+| --- | --- |
+| quels patterns vont ensemble ? | [les compositions](reference/compositions.md) — 50 assemblages éprouvés, dont 12 posables en un clic |
+| à quoi ressemble un flow complet ? | [les exemples](reference/exemples.md) — les blueprints publiés, avec leur diagramme |
+| ce vers quoi ça dérive si on laisse faire ? | [les anti-patterns](reference/anti-patterns.md) |
+
 ## Le vocabulaire minimal
 
 Cinq mots suffisent pour lire n'importe quel blueprint :

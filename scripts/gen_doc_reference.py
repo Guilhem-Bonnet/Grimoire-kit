@@ -52,6 +52,14 @@ EXAMPLES = ROOT / "registry/blueprints"
 # navigateur, alors qu'une navigation passe. Le libellé dit donc franchement
 # ce qu'il faut avoir lancé.
 STUDIO_URL = "http://127.0.0.1:4173/blueprints.html"
+
+# L'atelier ne propose qu'une partie des compositions comme squelettes : sa
+# normalisation du catalogue (`web/atelier-nav.js`) écarte celles qui tiennent
+# en un seul pattern, puis coupe à douze. Le manuel les publie toutes — il n'a
+# pas de contrainte d'écran — mais ne promet le squelette que pour celles que
+# l'atelier connaît vraiment. Un test garde ces deux nombres alignés sur le JS.
+STUDIO_USE_CASE_MIN_PATTERNS = 2
+STUDIO_USE_CASE_LIMIT = 12
 PRIMITIVES_MODULE = ROOT / "src/grimoire/tools/blueprint_primitives.py"
 
 BASE = "nodal/reference"
@@ -589,6 +597,67 @@ def render_examples(examples: list[dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def studio_seeded_use_cases(catalogue: dict[str, Any]) -> list[str]:
+    """Les cas d'usage que l'atelier sait poser en squelette, dans son ordre."""
+    eligible = [
+        uc for uc in catalogue.get("useCases", [])
+        if len(uc.get("patterns") or []) >= STUDIO_USE_CASE_MIN_PATTERNS
+    ]
+    return [uc["id"] for uc in eligible[:STUDIO_USE_CASE_LIMIT]]
+
+
+def render_use_cases(catalogue: dict[str, Any]) -> str:
+    """Les compositions du catalogue : quels patterns vont ensemble, et pourquoi.
+
+    Un cas d'usage ne porte qu'un nom et une liste de patterns — de quoi faire
+    un index utile, pas un guide. On rend donc ce qu'il est réellement : une
+    carte des compositions éprouvées, cliquable vers chaque pattern. Fabriquer
+    cinquante faux tutoriels à partir de ces données serait du remplissage.
+    """
+    use_cases = catalogue.get("useCases", [])
+    families = {f["id"]: f for f in catalogue["families"]}
+    by_id = {p["id"]: p for p in catalogue["patterns"]}
+    seeded = set(studio_seeded_use_cases(catalogue))
+
+    def pattern_link(pid: str) -> str:
+        pattern = by_id.get(pid)
+        if pattern is None:
+            return f"`{pid}`"
+        slug = family_slug(families[pattern["family"]])
+        return f"[`{pid}`](patterns/{slug}.md#{_anchor(pid)})"
+
+    out = [
+        "# Compositions éprouvées",
+        "",
+        GENERATED_HEADER.format(source="`web/data/catalogue-export.json`"),
+        "",
+        f"{len(use_cases)} compositions : des assemblages de patterns qui tiennent",
+        "ensemble pour un besoin donné. Ce n'est pas une liste de recettes à",
+        "suivre pas à pas — c'est la réponse à « quels patterns vont ensemble ? »,",
+        "qui est la question qu'on se pose devant une toile vide.",
+        "",
+        f"Les {len(seeded)} premières sont proposées comme squelettes dans l'atelier :",
+        "il les pose sur la toile, à vous de diverger.",
+        "",
+        "| Composition | Patterns | Squelette |",
+        "| --- | --- | --- |",
+    ]
+    for use_case in use_cases:
+        patterns = use_case.get("patterns") or []
+        links = ", ".join(pattern_link(pid) for pid in patterns) or "—"
+        seeded_here = use_case["id"] in seeded
+        seed = f"[ouvrir]({STUDIO_URL}?uc={use_case['id']})" if seeded_here else "—"
+        out.append(f"| {use_case['name']} | {links} | {seed} |")
+    out += [
+        "",
+        "!!! note \"Le lien de squelette suppose `grimoire serve` lancé\"",
+        "    Il navigue vers l'atelier local. Sans serveur en marche, le",
+        "    navigateur affichera une erreur de connexion — pas une page vide.",
+        "",
+    ]
+    return "\n".join(out)
+
+
 def render_index(
     primitives: dict[str, Any], catalogue: dict[str, Any], xxl: dict[str, Any]
 ) -> str:
@@ -610,6 +679,8 @@ def render_index(
         f"connues |",
         "| [Format de fichier](format-fichier.md) | la structure de `.blueprint.json` |",
         "| [Exemples](exemples.md) | les blueprints publiés, avec leur diagramme |",
+        f"| [Compositions](compositions.md) | les {len(catalogue['useCases'])} assemblages "
+        f"de patterns éprouvés |",
         "",
         f"Catalogue en version `{catalogue['catalogVersion']}`.",
         "",
@@ -641,6 +712,7 @@ def render_summary(
         "* [Anti-patterns](anti-patterns.md)",
         "* [Format de fichier](format-fichier.md)",
         "* [Exemples](exemples.md)",
+        "* [Compositions](compositions.md)",
     ]
     return "\n".join(lines) + "\n"
 
@@ -673,6 +745,7 @@ def build(write: Callable[[str, str], None]) -> list[str]:
         emit(f"{name.lower()}.md", render_primitive(name, spec, xxl))
     emit("palette.md", render_palette(primitives, xxl))
     emit("exemples.md", render_examples(load_examples()))
+    emit("compositions.md", render_use_cases(catalogue))
     emit("format-fichier.md", render_format(schema, gloss))
 
     emit("contrats/index.md", render_contracts_index(catalogue["contracts"]))
