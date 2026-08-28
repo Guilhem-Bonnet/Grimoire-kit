@@ -12,10 +12,86 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
-
 from grimoire.core import standard_generation as gen
+from grimoire.core.standard_checks.base import (
+    BOARD_STATES as BOARD_STATES,
+)
+from grimoire.core.standard_checks.base import (
+    KNOWN_HOOK_PHASES as KNOWN_HOOK_PHASES,
+)
+from grimoire.core.standard_checks.base import (
+    MEMORY_OS_LEGACY_VECTOR_SOURCES as MEMORY_OS_LEGACY_VECTOR_SOURCES,
+)
+from grimoire.core.standard_checks.base import (
+    MEMORY_OS_REQUIRED_PROMOTION_GATES as MEMORY_OS_REQUIRED_PROMOTION_GATES,
+)
+from grimoire.core.standard_checks.base import (
+    MEMORY_OS_REQUIRED_TARGET as MEMORY_OS_REQUIRED_TARGET,
+)
+from grimoire.core.standard_checks.base import (
+    StandardCheck as StandardCheck,
+)
+from grimoire.core.standard_checks.base import (
+    StandardProfile as StandardProfile,
+)
+from grimoire.core.standard_checks.base import (
+    StandardVerificationResult as StandardVerificationResult,
+)
+from grimoire.core.standard_checks.base import (
+    _add_check as _add_check,
+)
+from grimoire.core.standard_checks.base import (
+    _is_inside_root as _is_inside_root,
+)
+from grimoire.core.standard_checks.base import (
+    _load_yaml_file as _load_yaml_file,
+)
+from grimoire.core.standard_checks.base import (
+    _yaml as _yaml,
+)
+from grimoire.core.standard_checks.controls import (
+    _verify_blast_radius_policy,
+    _verify_browser_tool_contract,
+    _verify_cluster_action_policy,
+    _verify_compression_gate,
+    _verify_cost_registry,
+    _verify_decision_council,
+    _verify_doc_graph_pipeline,
+    _verify_environment_policy,
+    _verify_flow_dsl_manifest,
+    _verify_guardrail_contract,
+    _verify_k8s_agent_manifest,
+    _verify_memory_integrity,
+    _verify_merge_lane,
+    _verify_privilege_boundary,
+    _verify_prompt_firewall,
+    _verify_prompt_version_log,
+    _verify_remote_hygiene,
+    _verify_runtime_provider_contract,
+    _verify_score_and_exceptions,
+    _verify_visual_evidence,
+    _verify_workflow_state_manifest,
+    _verify_workspace_isolation,
+)
+from grimoire.core.standard_checks.verifiers import (
+    _verify_compliance_declaration,
+    _verify_context_contract,
+    _verify_decision_graph,
+    _verify_evidence_gates,
+    _verify_evidence_pack,
+    _verify_hook_registry,
+    _verify_knowledge_registry,
+    _verify_manifest,
+    _verify_memory_policy,
+    _verify_mission_brief,
+    _verify_orchestration_policy,
+    _verify_pattern_catalog,
+    _verify_profile_specific_controls,
+    _verify_provider_registry,
+    _verify_rule_packs,
+    _verify_task_board,
+    _verify_task_envelope,
+)
 from grimoire.core.standard_generation import (
     CONTEXT_DIR,
     DECISION_DIR,
@@ -62,62 +138,6 @@ PROVIDER_DEFAULT_MODELS = {
     "google-gemini": ("gemini-family",),
     "local": ("local-open-weight",),
 }
-BOARD_STATES = {
-    "proposed",
-    "ready",
-    "in_progress",
-    "blocked",
-    "review",
-    "accepted",
-    "released",
-    "archived",
-}
-REQUIRED_MEMORY_TYPES = {
-    "session",
-    "task",
-    "project",
-    "workspace",
-    "organization",
-    "procedural",
-    "semantic",
-    "episodic",
-    "long_term",
-    "external_knowledge_cache",
-}
-REQUIRED_DECISION_TYPES = {
-    "task_prioritization",
-    "context_source_selection",
-    "memory_injection",
-    "provider_routing",
-    "agent_role_routing",
-    "tool_authorization",
-    "state_transition",
-    "release_authorization",
-}
-KNOWN_HOOK_PHASES = {
-    "pre_context_build",
-    "post_context_build",
-    "pre_provider_call",
-    "post_provider_call",
-    "pre_tool_call",
-    "post_tool_call",
-    "pre_state_transition",
-    "post_state_transition",
-    "pre_release",
-    "on_failure",
-    "on_rollback",
-}
-KNOWN_HOOK_ACTIONS = {
-    "allow",
-    "warn",
-    "block",
-    "redact",
-    "reroute",
-    "require_evidence",
-    "escalate",
-    "create_remediation",
-    "rollback",
-}
 DIMENSION_CHECK_PREFIXES = {
     "artifacts": ("artifact.", "yaml.", "manifest.", "mission."),
     "provider_policy": ("providers.", "cost."),
@@ -134,24 +154,6 @@ DIMENSION_CHECK_PREFIXES = {
     "evidence_gates": ("evidence.", "gate.", "visual.", "browser."),
     "runtime_journal": ("journal.",),
     "ci_release_gate": ("release.", "merge.", "cluster.", "env."),
-}
-MEMORY_OS_REQUIRED_TARGET = {
-    "hot_memory": "redis",
-    "semantic_memory": "weaviate-server",
-    "graph_projection": "neo4j",
-    "sidecar": "sqlite",
-}
-MEMORY_OS_LEGACY_VECTOR_SOURCES = {"qdrant-local", "qdrant-server"}
-MEMORY_OS_REQUIRED_PROMOTION_GATES = {
-    "hot_memory_ttl_declared",
-    "semantic_write_has_evidence",
-    "graph_projection_has_source_refs",
-    "qdrant_migration_bundle_verified",
-}
-MEMORY_OS_REQUIRED_RUNTIME_COMMANDS = {
-    "grimoire memory gate",
-    "grimoire memory migrate verify",
-    "grimoire memory graph verify",
 }
 DEFAULT_SCORE_DIMENSIONS = {
     "artifacts": 10,
@@ -171,15 +173,6 @@ DEFAULT_SCORE_DIMENSIONS = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class StandardProfile:
-    """Operational profile declared in ``profile-map.yaml``."""
-
-    id: str
-    display_name: str
-    required_artifacts: tuple[str, ...]
-    mapped_capabilities: tuple[str, ...]
-    minimum_evidence: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,47 +226,8 @@ class StandardSetupResult:
         return bool(self.written)
 
 
-@dataclass(slots=True)
-class StandardCheck:
-    """One content or structure check emitted by verification."""
-
-    id: str
-    severity: str
-    message: str
-    path: Path | None = None
-
-    @property
-    def is_error(self) -> bool:
-        """True when this check must fail verification."""
-        return self.severity == "error"
 
 
-@dataclass(slots=True)
-class StandardVerificationResult:
-    """Verification result for a standard-aware project."""
-
-    profile: str
-    project_root: Path
-    present: list[Path] = field(default_factory=list)
-    missing: list[Path] = field(default_factory=list)
-    invalid_yaml: list[Path] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    checks: list[StandardCheck] = field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        """True when mandatory files exist, parseable YAML is valid, and no check fails."""
-        return not self.missing and not self.invalid_yaml and not any(check.is_error for check in self.checks)
-
-    @property
-    def warning_count(self) -> int:
-        """Number of warning checks."""
-        return sum(1 for check in self.checks if check.severity == "warning") + len(self.warnings)
-
-    @property
-    def error_count(self) -> int:
-        """Number of error checks, including missing files and invalid YAML."""
-        return len(self.missing) + len(self.invalid_yaml) + sum(1 for check in self.checks if check.is_error)
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,11 +287,6 @@ class StandardRemediationApplyResult:
     audit_path: Path
 
 
-def _yaml() -> YAML:
-    yaml = YAML(typ="safe")
-    yaml.default_flow_style = False
-    yaml.width = 4096
-    return yaml
 
 
 def normalize_provider_ids(provider_ids: Iterable[str]) -> tuple[str, ...]:
@@ -683,10 +632,6 @@ def _ensure_inside_root(root: Path, path: Path, *, label: str) -> Path:
     return resolved_path
 
 
-def _is_inside_root(root: Path, path: Path) -> bool:
-    resolved_root = root.resolve()
-    resolved_path = path.resolve()
-    return resolved_path == resolved_root or resolved_root in resolved_path.parents
 
 
 def _format_destination(path_template: str, task_id: str) -> Path:
@@ -927,472 +872,36 @@ def _read_manifest_profile(project_root: Path) -> str | None:
     return read_profile(project_root / STANDARD_PROFILE_FILE)
 
 
-def _load_yaml_file(root: Path, rel_path: Path, result: StandardVerificationResult) -> Any | None:
-    path = root / rel_path
-    if not path.is_file():
-        return None
-    try:
-        data = _yaml().load(path)
-    except YAMLError as exc:
-        result.invalid_yaml.append(rel_path)
-        result.checks.append(StandardCheck(
-            id="yaml.invalid",
-            severity="error",
-            path=rel_path,
-            message=f"{rel_path}: {exc}",
-        ))
-        return None
-    if data is None:
-        result.invalid_yaml.append(rel_path)
-        result.checks.append(StandardCheck(
-            id="yaml.empty",
-            severity="error",
-            path=rel_path,
-            message=f"{rel_path}: empty YAML document",
-        ))
-    return data
 
 
-def _add_check(
-    result: StandardVerificationResult,
-    check_id: str,
-    severity: str,
-    message: str,
-    *,
-    path: Path | None = None,
-) -> None:
-    result.checks.append(StandardCheck(id=check_id, severity=severity, message=message, path=path))
 
 
-def _text_file(root: Path, rel_path: Path) -> str:
-    path = root / rel_path
-    if not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8")
 
 
-def _verify_manifest(
-    root: Path,
-    profile: StandardProfile,
-    task_id: str,
-    result: StandardVerificationResult,
-) -> None:
-    rel_path = STANDARD_PROFILE_FILE
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    if data.get("profile") != profile.id:
-        _add_check(
-            result,
-            "manifest.profile_mismatch",
-            "error",
-            f"Manifest profile is {data.get('profile')!r}, expected {profile.id!r}.",
-            path=rel_path,
-        )
-    if not data.get("project"):
-        _add_check(result, "manifest.project_missing", "warning", "Manifest has no project name.", path=rel_path)
-    if data.get("task_id") != task_id:
-        _add_check(
-            result,
-            "manifest.task_id_mismatch",
-            "warning",
-            f"Manifest task_id is {data.get('task_id')!r}, expected {task_id!r}.",
-            path=rel_path,
-        )
-
-    declared = {str(item) for item in data.get("required_artifacts", ())}
-    expected = set(profile.required_artifacts)
-    if declared != expected:
-        _add_check(
-            result,
-            "manifest.required_artifacts_mismatch",
-            "warning",
-            "Manifest required_artifacts differs from the bundled profile map.",
-            path=rel_path,
-        )
 
 
-def _verify_mission_brief(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "mission-brief.md"
-    text = _text_file(root, rel_path)
-    if not text:
-        return
-    if "- Project:" not in text or "- Project: \n" in text:
-        _add_check(result, "mission.project_missing", "warning", "Mission brief has no project name.", path=rel_path)
-    if f"- Selected profile: `{profile.id}`" not in text:
-        _add_check(result, "mission.profile_missing", "error", "Mission brief does not declare the selected profile.", path=rel_path)
-    if "processus-developpement-agentique/docs/norme-structure-agentique.md" not in text:
-        _add_check(result, "mission.upstream_missing", "warning", "Mission brief does not reference the upstream standard.", path=rel_path)
 
 
-def _verify_provider_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    providers = data.get("providers")
-    if not isinstance(providers, list) or not providers:
-        _add_check(result, "providers.none", "error", "Provider registry must declare at least one provider.", path=rel_path)
-        return
-
-    provider_ids = {
-        str(provider.get("id"))
-        for provider in providers
-        if isinstance(provider, dict) and provider.get("id")
-    }
-    enabled = [provider for provider in providers if isinstance(provider, dict) and provider.get("enabled") is True]
-    enabled_ids = {
-        str(provider.get("id"))
-        for provider in enabled
-        if provider.get("id")
-    }
-    if profile.id in {"controlled", "orchestrated", "governed", "production"} and not enabled:
-        _add_check(
-            result,
-            "providers.none_enabled",
-            "warning",
-            "No LLM provider is enabled; repeatable provider-neutral routing is not configured yet.",
-            path=rel_path,
-        )
-
-    for provider in providers:
-        if not isinstance(provider, dict):
-            _add_check(result, "providers.invalid_entry", "error", "Provider entries must be mappings.", path=rel_path)
-            continue
-        provider_id = provider.get("id")
-        if not provider_id:
-            _add_check(result, "providers.id_missing", "error", "Provider entry has no id.", path=rel_path)
-        if not isinstance(provider.get("enabled"), bool):
-            _add_check(result, "providers.enabled_not_bool", "error", f"Provider {provider_id!r} enabled flag must be boolean.", path=rel_path)
-        if provider.get("enabled") is True:
-            capabilities = provider.get("allowed_capabilities")
-            if not isinstance(capabilities, list) or not capabilities:
-                _add_check(result, "providers.capabilities_missing", "error", f"Enabled provider {provider_id!r} has no capabilities.", path=rel_path)
-            models = provider.get("default_models")
-            if not isinstance(models, list) or not models:
-                _add_check(result, "providers.models_missing", "warning", f"Enabled provider {provider_id!r} has no default models.", path=rel_path)
-            data_policy = provider.get("data_policy")
-            if not isinstance(data_policy, dict):
-                _add_check(result, "providers.data_policy_missing", "error", f"Enabled provider {provider_id!r} has no data policy.", path=rel_path)
-            else:
-                forbidden = data_policy.get("forbidden_data_classes")
-                if provider.get("provider_type") == "hosted" and (not isinstance(forbidden, list) or not forbidden):
-                    _add_check(result, "providers.hosted_forbidden_missing", "error", f"Hosted provider {provider_id!r} has no forbidden data classes.", path=rel_path)
-        fallback_order = provider.get("fallback_order", [])
-        if isinstance(fallback_order, list):
-            unknown_fallbacks = [str(candidate) for candidate in fallback_order if str(candidate) not in provider_ids]
-            if unknown_fallbacks:
-                _add_check(
-                    result,
-                    "providers.unknown_fallback",
-                    "error",
-                    f"Provider {provider_id!r} references unknown fallback(s): {', '.join(unknown_fallbacks)}.",
-                    path=rel_path,
-                )
-
-    routing = data.get("routing")
-    if not isinstance(routing, dict):
-        _add_check(result, "providers.routing_missing", "warning", "Provider registry has no routing policy.", path=rel_path)
-    else:
-        default_provider = str(routing.get("default_provider", ""))
-        if enabled and default_provider not in provider_ids:
-            _add_check(result, "providers.default_unknown", "error", f"Default provider {default_provider!r} is not declared.", path=rel_path)
-        elif enabled and default_provider not in enabled_ids:
-            _add_check(result, "providers.default_not_enabled", "error", f"Default provider {default_provider!r} is not enabled.", path=rel_path)
-        fallback_chain = routing.get("default_fallback_chain", [])
-        if isinstance(fallback_chain, list):
-            unknown = [str(candidate) for candidate in fallback_chain if str(candidate) not in provider_ids]
-            if unknown:
-                _add_check(result, "providers.routing_unknown_fallback", "error", f"Routing references unknown fallback(s): {', '.join(unknown)}.", path=rel_path)
-        if routing.get("require_capability_match") is not True or routing.get("require_data_policy_match") is not True:
-            _add_check(result, "providers.routing_policy_weak", "warning", "Routing should require capability and data-policy matches.", path=rel_path)
 
 
-def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "knowledge-source-registry.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    rules = data.get("rules")
-    if not isinstance(rules, dict):
-        _add_check(result, "knowledge.rules_missing", "error", "Knowledge registry must declare separation rules.", path=rel_path)
-    else:
-        for key in ("knowledge_is_not_memory", "knowledge_is_not_session_context", "explicit_source_of_truth_required"):
-            if rules.get(key) is not True:
-                _add_check(result, f"knowledge.{key}", "error", f"Rule {key} must be true.", path=rel_path)
-
-    sources = data.get("sources")
-    if not isinstance(sources, list) or not sources:
-        _add_check(result, "knowledge.sources_missing", "warning", "No external knowledge source is declared.", path=rel_path)
-        return
-
-    real_sources = 0
-    for source in sources:
-        if not isinstance(source, dict):
-            _add_check(result, "knowledge.invalid_source", "error", "Knowledge source entries must be mappings.", path=rel_path)
-            continue
-        source_id = str(source.get("id", "")).strip()
-        locator = str(source.get("locator", "")).strip()
-        source_type = str(source.get("type", "")).strip()
-        if source_id and locator and "|" not in source_type:
-            real_sources += 1
-        if source.get("enabled") is True and not locator:
-            _add_check(result, "knowledge.locator_missing", "warning", "Enabled knowledge source has no locator.", path=rel_path)
-        local_locator = locator.startswith((".", "/", "~"))
-        if source.get("enabled") is True and locator and source_type == "folder":
-            local_locator = True
-        if source.get("enabled") is True and locator and local_locator:
-            locator_path = (root / locator).resolve()
-            if not _is_inside_root(root, locator_path):
-                _add_check(result, "knowledge.locator_outside_root", "error", f"Knowledge source {source_id!r} locator must stay within project root: {locator}", path=rel_path)
-            elif not locator_path.exists():
-                _add_check(result, "knowledge.locator_not_found", "warning", f"Knowledge source {source_id!r} locator does not exist: {locator}", path=rel_path)
-        trust = source.get("trust")
-        if source.get("enabled") is True and not isinstance(trust, dict):
-            _add_check(result, "knowledge.trust_missing", "error", f"Knowledge source {source_id!r} has no trust block.", path=rel_path)
-        elif isinstance(trust, dict) and not trust.get("level"):
-            _add_check(result, "knowledge.trust_level_missing", "warning", f"Knowledge source {source_id!r} has no trust level.", path=rel_path)
-        elif isinstance(trust, dict) and trust.get("source_of_truth") is True and trust.get("level") not in {"high", "authoritative"}:
-            _add_check(result, "knowledge.truth_low_trust", "warning", f"Source of truth {source_id!r} should have high or authoritative trust.", path=rel_path)
-        evidence = source.get("evidence")
-        if source.get("enabled") is True and isinstance(evidence, dict):
-            manifest = str(evidence.get("index_manifest", "")).strip()
-            if manifest and manifest != "planned":
-                manifest_path = root / manifest
-                if not _is_inside_root(root, manifest_path):
-                    _add_check(result, "knowledge.index_manifest_outside_root", "error", f"Knowledge source {source_id!r} index manifest must stay within project root: {manifest}", path=rel_path)
-                elif not manifest_path.exists():
-                    _add_check(result, "knowledge.index_manifest_missing", "warning", f"Knowledge source {source_id!r} index manifest is missing: {manifest}", path=rel_path)
-
-    if profile.id in {"orchestrated", "governed", "production"} and real_sources == 0:
-        _add_check(
-            result,
-            "knowledge.no_real_source",
-            "warning",
-            "Profile expects indexed external knowledge, but only placeholder sources are present.",
-            path=rel_path,
-        )
 
 
-def _verify_task_envelope(root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult) -> None:
-    rel_path = EVIDENCE_DIR / task_id / "task-envelope.md"
-    text = _text_file(root, rel_path)
-    if not text:
-        return
-
-    strict_profile = profile.id in {"governed", "production"}
-    if "- Current state: `intake | planned | executing | validating | blocked | done`" in text:
-        severity = "error" if strict_profile else "warning"
-        _add_check(result, "task.state_placeholder", severity, "Task envelope still contains the state placeholder.", path=rel_path)
-    if "|  |  |  |  |  |" in text:
-        severity = "error" if strict_profile else "warning"
-        _add_check(result, "task.context_placeholder", severity, "Context orchestration table has no concrete selection.", path=rel_path)
-    if "|  | read-only |  |  |" in text:
-        severity = "error" if strict_profile else "warning"
-        _add_check(result, "task.tool_boundary_placeholder", severity, "Tool boundary is not concretely scoped.", path=rel_path)
-    if "pending |" in text.lower() and strict_profile:
-        _add_check(result, "task.pending_gate", "error", "Governed and production profiles cannot keep pending task gates.", path=rel_path)
 
 
-def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
-    rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
-    text = _text_file(root, rel_path)
-    if not text:
-        return
-    if "pending" in text.lower():
-        _add_check(result, "evidence.pending_gate", "warning", "Evidence pack still contains pending gates.", path=rel_path)
-    if "- Outcome:\n" in text or "- Final state:\n" in text:
-        _add_check(result, "evidence.summary_placeholder", "warning", "Evidence pack summary is still placeholder-only.", path=rel_path)
-    if "|  |  |  |  |" in text:
-        _add_check(result, "evidence.inventory_placeholder", "warning", "Evidence inventory has no concrete evidence rows.", path=rel_path)
 
 
-def _verify_compliance_declaration(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "compliance-declaration.md"
-    text = _text_file(root, rel_path)
-    if not text:
-        return
-    unknown_count = text.count("| unknown |")
-    if unknown_count:
-        _add_check(
-            result,
-            "compliance.unknown_status",
-            "warning",
-            f"Compliance declaration still has {unknown_count} unknown status rows.",
-            path=rel_path,
-        )
-    if "- Declaration owner:\n" in text:
-        _add_check(result, "compliance.owner_missing", "warning", "Compliance declaration has no owner.", path=rel_path)
 
 
-def _verify_profile_specific_controls(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    if profile.id not in {"governed", "production"}:
-        return
-
-    compliance = _text_file(root, STANDARD_DIR / "compliance-declaration.md").lower()
-    mission = _text_file(root, STANDARD_DIR / "mission-brief.md").lower()
-    combined = f"{compliance}\n{mission}"
-    required_terms = {
-        "governed": ("environment", "workspace", "telemetry"),
-        "production": ("environment", "workspace", "telemetry", "dry-run", "rollback", "slo"),
-    }
-    for term in required_terms[profile.id]:
-        if term not in combined:
-            _add_check(
-                result,
-                f"profile.{term.replace('-', '_')}_missing",
-                "warning",
-                f"Profile {profile.id!r} should declare {term} controls.",
-                path=STANDARD_DIR / "compliance-declaration.md",
-            )
 
 
-def _require_keys(
-    result: StandardVerificationResult,
-    *,
-    path: Path,
-    check_prefix: str,
-    data: dict[str, Any],
-    keys: Iterable[str],
-    severity: str = "error",
-) -> None:
-    for key in keys:
-        if key not in data or data[key] in (None, ""):
-            _add_check(result, f"{check_prefix}.{key}_missing", severity, f"{path}: required key {key!r} is missing.", path=path)
 
 
-def _verify_task_board(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "task-board.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    states = data.get("states")
-    if not isinstance(states, list) or not set(BOARD_STATES) <= {str(state) for state in states}:
-        _add_check(result, "board.states_incomplete", "error", "Task board must declare the normative lifecycle states.", path=rel_path)
-    tasks = data.get("tasks")
-    if not isinstance(tasks, list):
-        _add_check(result, "board.tasks_missing", "error", "Task board must declare a tasks list.", path=rel_path)
-        return
-    if not tasks:
-        _add_check(result, "board.no_tasks", "warning", "Task board has no declared tasks yet.", path=rel_path)
-        return
-    for task in tasks:
-        if not isinstance(task, dict):
-            _add_check(result, "board.task_invalid", "error", "Task board entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(
-            result,
-            path=rel_path,
-            check_prefix="board.task",
-            data=task,
-            keys=("task_id", "title", "status", "acceptance_criteria", "evidence_pack_ref"),
-        )
-        task_id = str(task.get("task_id", "")).strip()
-        if task_id:
-            try:
-                normalize_task_id(task_id)
-            except ValueError as exc:
-                _add_check(result, "board.task_id_invalid", "error", str(exc), path=rel_path)
-        status = str(task.get("status", "")).strip()
-        if status and status not in BOARD_STATES:
-            _add_check(result, "board.status_invalid", "error", f"Task {task_id!r} has invalid status {status!r}.", path=rel_path)
-        if status == "blocked" and not task.get("blockers"):
-            _add_check(result, "board.blocker_reason_missing", "error", f"Task {task_id!r} is blocked without blocker details.", path=rel_path)
-        if profile.id in {"governed", "production"} and status in {"accepted", "released"} and not task.get("decision_trace_ref"):
-            _add_check(result, "board.decision_trace_missing", "error", f"Task {task_id!r} requires a decision trace.", path=rel_path)
-        for ref_key in ("context_bundle_ref", "decision_trace_ref", "evidence_pack_ref", "remediation_ref"):
-            ref = str(task.get(ref_key, "")).strip()
-            if ref and not _is_inside_root(root, root / ref):
-                _add_check(result, f"board.{ref_key}_outside_root", "error", f"Task {task_id!r} {ref_key} escapes project root.", path=rel_path)
 
 
-def _strict_memory_os_profile(profile: StandardProfile) -> bool:
-    return profile.id in {"governed", "production"}
 
 
-def _memory_os_severity(profile: StandardProfile) -> str:
-    return "error" if _strict_memory_os_profile(profile) else "warning"
 
 
-def _verify_memory_os_contract(
-    memory_policy: Mapping[str, Any],
-    *,
-    profile: StandardProfile,
-    result: StandardVerificationResult,
-    path: Path,
-) -> None:
-    memory_os = memory_policy.get("memory_os")
-    if not isinstance(memory_os, dict):
-        _add_check(
-            result,
-            "memory.os_contract_missing",
-            _memory_os_severity(profile),
-            "Memory policy should declare a Memory OS contract for Redis, Weaviate, Neo4j, SQLite, and Qdrant migration.",
-            path=path,
-        )
-        return
-
-    target = memory_os.get("target")
-    if not isinstance(target, dict):
-        _add_check(
-            result,
-            "memory.os_target_missing",
-            _memory_os_severity(profile),
-            "Memory OS contract must declare target backends.",
-            path=path,
-        )
-        return
-
-    for key, expected in MEMORY_OS_REQUIRED_TARGET.items():
-        actual = str(target.get(key, "")).strip()
-        if actual != expected:
-            _add_check(
-                result,
-                f"memory.os_{key}_target",
-                _memory_os_severity(profile),
-                f"Memory OS target {key!r} should be {expected!r}, got {actual!r}.",
-                path=path,
-            )
-
-    legacy_sources = target.get("legacy_vector_sources")
-    declared_legacy = {str(source) for source in legacy_sources} if isinstance(legacy_sources, list) else set()
-    missing_legacy = sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES - declared_legacy)
-    if missing_legacy:
-        _add_check(
-            result,
-            "memory.os_legacy_sources_missing",
-            "warning",
-            f"Memory OS should keep Qdrant only as legacy/migration source(s): {', '.join(missing_legacy)}.",
-            path=path,
-        )
-
-    promotion_gates = memory_os.get("promotion_gates")
-    declared_gates = {str(gate) for gate in promotion_gates} if isinstance(promotion_gates, list) else set()
-    missing_gates = sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES - declared_gates)
-    if missing_gates:
-        _add_check(
-            result,
-            "memory.os_promotion_gates_missing",
-            _memory_os_severity(profile),
-            f"Memory OS promotion gates missing: {', '.join(missing_gates)}.",
-            path=path,
-        )
-
-    runtime_commands = memory_os.get("runtime_commands")
-    declared_commands = {str(command) for command in runtime_commands} if isinstance(runtime_commands, list) else set()
-    missing_commands = sorted(MEMORY_OS_REQUIRED_RUNTIME_COMMANDS - declared_commands)
-    if missing_commands:
-        _add_check(
-            result,
-            "memory.os_runtime_commands_missing",
-            "warning",
-            f"Memory OS runtime command evidence should include: {', '.join(missing_commands)}.",
-            path=path,
-        )
 
 
 def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
@@ -1415,623 +924,64 @@ def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verify_memory_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "memory-policy.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    memory_types = data.get("memory_types")
-    if not isinstance(memory_types, list) or not memory_types:
-        _add_check(result, "memory.types_missing", "error", "Memory policy must declare memory_types.", path=rel_path)
-        return
-    declared = {str(entry.get("type")) for entry in memory_types if isinstance(entry, dict)}
-    missing = sorted(REQUIRED_MEMORY_TYPES - declared)
-    if missing:
-        _add_check(result, "memory.required_types_missing", "error", f"Memory policy misses required type(s): {', '.join(missing)}.", path=rel_path)
-    for entry in memory_types:
-        if not isinstance(entry, dict):
-            _add_check(result, "memory.type_invalid", "error", "Memory type entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(
-            result,
-            path=rel_path,
-            check_prefix="memory",
-            data=entry,
-            keys=(
-                "memory_id",
-                "type",
-                "scope",
-                "read_policy",
-                "write_policy",
-                "retention",
-                "freshness",
-                "trust_level",
-                "redaction_policy",
-                "provider_compatibility",
-                "allowed_context_uses",
-            ),
-        )
-        if not isinstance(entry.get("provider_compatibility"), list):
-            _add_check(result, "memory.provider_compatibility_invalid", "error", "Memory provider compatibility must be a list.", path=rel_path)
-        if not isinstance(entry.get("allowed_context_uses"), list):
-            _add_check(result, "memory.context_uses_invalid", "error", "Memory allowed context uses must be a list.", path=rel_path)
-    _verify_memory_os_contract(data, profile=profile, result=result, path=rel_path)
-
-
-def _verify_context_contract(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "context-contract.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    _require_keys(result, path=rel_path, check_prefix="context", data=data, keys=("inputs", "bundle_sections", "budget", "redaction", "checks"))
-    for key in ("inputs", "bundle_sections", "checks"):
-        if not isinstance(data.get(key), list) or not data.get(key):
-            _add_check(result, f"context.{key}_invalid", "error", f"Context contract {key} must be a non-empty list.", path=rel_path)
-    budget = data.get("budget")
-    if not isinstance(budget, dict):
-        _add_check(result, "context.budget_invalid", "error", "Context contract budget must be a mapping.", path=rel_path)
-    redaction = data.get("redaction")
-    if not isinstance(redaction, dict) or redaction.get("required") is not True:
-        _add_check(result, "context.redaction_required", "error", "Context contract must require redaction.", path=rel_path)
-
-
-def _verify_decision_graph(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "decision-graph.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    record_fields = data.get("required_decision_record")
-    if not isinstance(record_fields, list) or not record_fields:
-        _add_check(result, "decision.record_schema_missing", "error", "Decision graph must declare required_decision_record.", path=rel_path)
-    decision_types = data.get("decision_types")
-    if not isinstance(decision_types, list) or not decision_types:
-        _add_check(result, "decision.types_missing", "error", "Decision graph must declare decision_types.", path=rel_path)
-        return
-    declared = {str(entry.get("id")) for entry in decision_types if isinstance(entry, dict)}
-    missing = sorted(REQUIRED_DECISION_TYPES - declared)
-    if missing:
-        _add_check(result, "decision.required_types_missing", "error", f"Decision graph misses required type(s): {', '.join(missing)}.", path=rel_path)
-    for entry in decision_types:
-        if not isinstance(entry, dict):
-            _add_check(result, "decision.type_invalid", "error", "Decision type entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(result, path=rel_path, check_prefix="decision", data=entry, keys=("id", "inputs", "outputs"))
-
-
-def _verify_rule_packs(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "rule-packs.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    rules = data.get("rules")
-    if not isinstance(rules, list) or not rules:
-        _add_check(result, "rules.none", "error", "Rule packs must declare at least one rule.", path=rel_path)
-        return
-    for rule in rules:
-        if not isinstance(rule, dict):
-            _add_check(result, "rules.invalid", "error", "Rule entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(
-            result,
-            path=rel_path,
-            check_prefix="rules",
-            data=rule,
-            keys=("id", "family", "source_normative", "severity", "phase", "condition", "action", "event", "remediation"),
-        )
-        if str(rule.get("phase", "")) not in KNOWN_HOOK_PHASES:
-            _add_check(result, "rules.unknown_phase", "error", f"Rule {rule.get('id')!r} uses unknown phase {rule.get('phase')!r}.", path=rel_path)
-        if str(rule.get("action", "")) not in KNOWN_HOOK_ACTIONS:
-            _add_check(result, "rules.unknown_action", "error", f"Rule {rule.get('id')!r} uses unknown action {rule.get('action')!r}.", path=rel_path)
-
-
-def _verify_hook_registry(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "hook-registry.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    hooks = data.get("hooks")
-    if not isinstance(hooks, list) or not hooks:
-        _add_check(result, "hooks.none", "error", "Hook registry must declare at least one hook.", path=rel_path)
-        return
-    for hook in hooks:
-        if not isinstance(hook, dict):
-            _add_check(result, "hooks.invalid", "error", "Hook entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(result, path=rel_path, check_prefix="hooks", data=hook, keys=("id", "phase", "action", "rule_ref", "reason"))
-        if str(hook.get("phase", "")) not in KNOWN_HOOK_PHASES:
-            _add_check(result, "hooks.unknown_phase", "error", f"Hook {hook.get('id')!r} uses unknown phase {hook.get('phase')!r}.", path=rel_path)
-        if str(hook.get("action", "")) not in KNOWN_HOOK_ACTIONS:
-            _add_check(result, "hooks.unknown_action", "error", f"Hook {hook.get('id')!r} uses unknown action {hook.get('action')!r}.", path=rel_path)
-
-
-def _verify_orchestration_policy(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "orchestration-policy.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    roles = data.get("roles")
-    if not isinstance(roles, list) or not roles:
-        _add_check(result, "orchestration.roles_missing", "error", "Orchestration policy must declare roles.", path=rel_path)
-        return
-    for role in roles:
-        if not isinstance(role, dict):
-            _add_check(result, "orchestration.role_invalid", "error", "Role entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(
-            result,
-            path=rel_path,
-            check_prefix="orchestration.role",
-            data=role,
-            keys=(
-                "role_id",
-                "persona_or_archetype",
-                "responsibilities",
-                "allowed_tools",
-                "allowed_memory_types",
-                "allowed_providers",
-                "autonomy_level",
-                "handoff_contracts",
-                "escalation_triggers",
-                "review_gates",
-                "rollback_policy",
-            ),
-        )
-
-
-def _verify_evidence_gates(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "evidence-gates.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    transitions = data.get("transitions")
-    if not isinstance(transitions, list) or not transitions:
-        _add_check(result, "gates.transitions_missing", "error", "Evidence gates must declare transitions.", path=rel_path)
-        return
-    for transition in transitions:
-        if not isinstance(transition, dict):
-            _add_check(result, "gates.transition_invalid", "error", "Evidence gate transitions must be mappings.", path=rel_path)
-            continue
-        _require_keys(result, path=rel_path, check_prefix="gates.transition", data=transition, keys=("id", "from", "to", "required_evidence"))
-        if transition.get("from") not in BOARD_STATES or transition.get("to") not in BOARD_STATES:
-            _add_check(result, "gates.unknown_state", "error", f"Transition {transition.get('id')!r} references an unknown state.", path=rel_path)
-        if not isinstance(transition.get("required_evidence"), list) or not transition.get("required_evidence"):
-            _add_check(result, "gates.required_evidence_missing", "error", f"Transition {transition.get('id')!r} has no required evidence.", path=rel_path)
-
-
-def _verify_score_and_exceptions(root: Path, result: StandardVerificationResult) -> None:
-    score_path = STANDARD_DIR / "compliance-score.yaml"
-    score_data = _load_yaml_file(root, score_path, result)
-    if isinstance(score_data, dict):
-        for key in ("dimensions", "thresholds"):
-            if not isinstance(score_data.get(key), dict) or not score_data.get(key):
-                _add_check(result, f"score.{key}_missing", "error", f"Compliance score must declare {key}.", path=score_path)
-
-    for rel_path, list_key in (
-        (STANDARD_DIR / "accepted-risks.yaml", "risks"),
-        (STANDARD_DIR / "waivers.yaml", "waivers"),
-        (STANDARD_DIR / "remediation-plan.yaml", "actions"),
-    ):
-        data = _load_yaml_file(root, rel_path, result)
-        if isinstance(data, dict) and not isinstance(data.get(list_key), list):
-            _add_check(result, f"{list_key}.invalid", "error", f"{rel_path} must declare {list_key} as a list.", path=rel_path)
-
-
-def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "pattern-catalog.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    categories = data.get("categories")
-    if not isinstance(categories, list) or not categories:
-        _add_check(result, "patterns.categories_missing", "error", "Pattern catalog must declare categories.", path=rel_path)
-    patterns = data.get("patterns")
-    if not isinstance(patterns, list) or not patterns:
-        _add_check(result, "patterns.none", "error", "Pattern catalog must declare executable patterns.", path=rel_path)
-        return
-    declared_categories = {str(category) for category in categories} if isinstance(categories, list) else set()
-    for pattern in patterns:
-        if not isinstance(pattern, dict):
-            _add_check(result, "patterns.invalid", "error", "Pattern entries must be mappings.", path=rel_path)
-            continue
-        _require_keys(
-            result,
-            path=rel_path,
-            check_prefix="patterns",
-            data=pattern,
-            keys=("id", "category", "maturity", "source_normative", "intent", "required_artifacts", "check_refs"),
-        )
-        category = str(pattern.get("category", ""))
-        if declared_categories and category not in declared_categories:
-            _add_check(result, "patterns.unknown_category", "error", f"Pattern {pattern.get('id')!r} uses unknown category {category!r}.", path=rel_path)
-        if not isinstance(pattern.get("required_artifacts"), list):
-            _add_check(result, "patterns.required_artifacts_invalid", "error", f"Pattern {pattern.get('id')!r} required_artifacts must be a list.", path=rel_path)
-
-
-def _verify_blast_radius_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "blast-radius-policy.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    strict_profile = profile.id in {"governed", "production"}
-    defaults = data.get("defaults")
-    if not isinstance(defaults, dict):
-        _add_check(result, "tools.blast_radius_defaults_missing", "error", "Blast-radius policy must declare defaults.", path=rel_path)
-    elif defaults.get("enforce") is not True:
-        severity = "error" if strict_profile else "warning"
-        _add_check(result, "tools.blast_radius_unenforced", severity, "Blast-radius policy defaults must enforce limits (fail closed).", path=rel_path)
-
-    limits = data.get("limits")
-    if not isinstance(limits, list) or not limits:
-        _add_check(result, "tools.blast_radius_undeclared", "warning", "Blast-radius policy declares no per-task tool limits.", path=rel_path)
-        return
-
-    for limit in limits:
-        if not isinstance(limit, dict):
-            _add_check(result, "tools.blast_radius_invalid", "error", "Blast-radius limit entries must be mappings.", path=rel_path)
-            continue
-        limit_id = str(limit.get("id", "")).strip()
-        if not limit_id:
-            _add_check(result, "tools.blast_radius_id_missing", "error", "Blast-radius limit has no id.", path=rel_path)
-
-        network = str(limit.get("network", "")).strip()
-        if network not in {"deny", "allowlist"}:
-            _add_check(result, "tools.blast_radius_network_invalid", "error", f"Blast-radius limit {limit_id!r} network must be 'deny' or 'allowlist'.", path=rel_path)
-        elif network == "allowlist" and not (isinstance(limit.get("network_allowlist"), list) and limit.get("network_allowlist")):
-            _add_check(result, "tools.blast_radius_allowlist_empty", "error", f"Blast-radius limit {limit_id!r} uses a network allowlist but declares no hosts.", path=rel_path)
-
-        production_touch = str(limit.get("production_touch", "")).strip()
-        if production_touch not in {"deny", "dry-run", "allow"}:
-            _add_check(result, "tools.blast_radius_production_invalid", "error", f"Blast-radius limit {limit_id!r} production_touch must be 'deny', 'dry-run' or 'allow'.", path=rel_path)
-        elif production_touch == "allow":
-            severity = "error" if strict_profile else "warning"
-            _add_check(result, "tools.blast_radius_production_allow", severity, f"Blast-radius limit {limit_id!r} allows unguarded production access.", path=rel_path)
-
-        writable = limit.get("writable_paths")
-        if not isinstance(writable, list):
-            _add_check(result, "tools.blast_radius_writable_invalid", "error", f"Blast-radius limit {limit_id!r} writable_paths must be a list.", path=rel_path)
-        else:
-            for raw in writable:
-                candidate = (root / str(raw)).resolve()
-                if not _is_inside_root(root, candidate):
-                    _add_check(result, "tools.blast_radius_writable_outside_root", "error", f"Blast-radius limit {limit_id!r} writable path escapes project root: {raw}", path=rel_path)
-
-
-def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "privilege-boundary.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    strict_profile = profile.id in {"governed", "production"}
-    if data.get("controller_token_scrub") is not True:
-        _add_check(result, "privilege.scrub_disabled", "error" if strict_profile else "warning", "Controller token scrub must be enabled before agent spawn.", path=rel_path)
-    boundaries = data.get("boundaries")
-    if not isinstance(boundaries, list) or not boundaries:
-        _add_check(result, "privilege.boundary_undeclared", "warning", "No controller/agent privilege boundary is declared.", path=rel_path)
-        return
-    for boundary in boundaries:
-        if not isinstance(boundary, dict):
-            _add_check(result, "privilege.boundary_invalid", "error", "Privilege boundary entries must be mappings.", path=rel_path)
-            continue
-        if boundary.get("infra_tokens_denied") is not True:
-            boundary_id = str(boundary.get("id", "")).strip()
-            _add_check(result, "privilege.infra_token_exposed", "error", f"Boundary {boundary_id!r} does not deny infrastructure tokens.", path=rel_path)
-
-
-def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "prompt-firewall.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    strict_profile = profile.id in {"governed", "production"}
-    if data.get("isolate_external_content") is not True:
-        _add_check(result, "firewall.isolation_disabled", "error" if strict_profile else "warning", "External content must be isolated from control instructions.", path=rel_path)
-    if data.get("instruction_override_blocked") is not True:
-        _add_check(result, "firewall.override_allowed", "error" if strict_profile else "warning", "Instruction override by external content must be blocked.", path=rel_path)
-    sources = data.get("untrusted_sources")
-    if not isinstance(sources, list) or not sources:
-        _add_check(result, "firewall.no_sources", "warning", "No untrusted content source is declared.", path=rel_path)
-        return
-    for source in sources:
-        if isinstance(source, dict) and source.get("quarantine") is not True:
-            source_id = str(source.get("id", "")).strip()
-            _add_check(result, "firewall.source_not_quarantined", "error", f"Untrusted source {source_id!r} is not quarantined.", path=rel_path)
-
-
-def _verify_remote_hygiene(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "remote-hygiene.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    if data.get("check_stale_refs") is not True:
-        _add_check(result, "remote.stale_check_disabled", "warning", "Stale ref detection is disabled.", path=rel_path)
-    if data.get("require_remote_reachable") is not True:
-        _add_check(result, "remote.reachability_unchecked", "warning", "Remote reachability is not verified before audit.", path=rel_path)
-    age = data.get("max_branch_age_days")
-    if not isinstance(age, int) or isinstance(age, bool) or age <= 0:
-        _add_check(result, "remote.age_unbounded", "warning", "max_branch_age_days must be a positive integer.", path=rel_path)
-    branches = data.get("max_open_branches")
-    if not isinstance(branches, int) or isinstance(branches, bool) or branches <= 0:
-        _add_check(result, "remote.branches_unbounded", "warning", "max_open_branches must be a positive integer.", path=rel_path)
-
-
-def _verify_decision_council(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "decision-council.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    quorum = data.get("quorum")
-    if not isinstance(quorum, int) or isinstance(quorum, bool) or quorum < 2:
-        _add_check(result, "council.quorum_too_low", "error", "Decision council quorum must be at least 2.", path=rel_path)
-    veto_roles = data.get("veto_roles")
-    if not isinstance(veto_roles, list) or not veto_roles:
-        _add_check(result, "council.no_veto", "error", "Decision council must declare at least one veto role.", path=rel_path)
-    if data.get("budget_cap_usd") is None:
-        _add_check(result, "council.no_budget_cap", "warning", "Decision council has no budget cap.", path=rel_path)
-    triggers = data.get("triggers")
-    if not isinstance(triggers, list) or not triggers:
-        _add_check(result, "council.no_triggers", "warning", "Decision council declares no escalation triggers.", path=rel_path)
-
-
-def _verify_compression_gate(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "compression-gate.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    preserve_checks = (
-        ("preserve_provenance", "compression.provenance_dropped", "provenance"),
-        ("preserve_constraints", "compression.constraints_dropped", "constraints"),
-        ("preserve_tool_atomicity", "compression.atomicity_dropped", "tool-call/tool-result atomicity"),
-        ("preserve_evidence", "compression.evidence_dropped", "evidence"),
-    )
-    for key, code, label in preserve_checks:
-        if data.get(key) is not True:
-            _add_check(result, code, "error", f"Context compression must preserve {label}.", path=rel_path)
-    ratio = data.get("max_compression_ratio")
-    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not 0 < ratio <= 1:
-        _add_check(result, "compression.ratio_invalid", "warning", "max_compression_ratio must be a number in (0, 1].", path=rel_path)
-
-
-def _verify_memory_integrity(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "memory-integrity.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    integrity_checks = (
-        ("check_provenance", "integrity.provenance_unchecked", "provenance"),
-        ("check_drift", "integrity.drift_unchecked", "drift"),
-        ("check_poisoning", "integrity.poisoning_unchecked", "poisoning"),
-    )
-    for key, code, label in integrity_checks:
-        if data.get(key) is not True:
-            _add_check(result, code, "error", f"Memory integrity validator must check {label}.", path=rel_path)
-    if data.get("expiry_required") is not True:
-        _add_check(result, "integrity.no_expiry", "warning", "Promoted memories must declare expiry.", path=rel_path)
-
-
-def _verify_merge_lane(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "merge-lane.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    classes = data.get("classes")
-    transient = classes.get("transient") if isinstance(classes, dict) else None
-    hard = classes.get("hard") if isinstance(classes, dict) else None
-    if not (isinstance(transient, list) and transient and isinstance(hard, list) and hard):
-        _add_check(result, "merge.classes_incomplete", "error", "Merge lane must declare non-empty transient and hard fault classes.", path=rel_path)
-    budget = data.get("transient_retry_budget")
-    if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
-        _add_check(result, "merge.no_retry_budget", "warning", "Transient retry budget must be a positive integer.", path=rel_path)
-    if data.get("escalate_on_hard") is not True:
-        _add_check(result, "merge.hard_not_escalated", "error", "Hard merge faults must escalate instead of retrying.", path=rel_path)
-
-
-def _verify_cost_registry(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "cost-registry.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    pricing = data.get("pricing")
-    if not isinstance(pricing, list) or not pricing:
-        _add_check(result, "cost.no_pricing", "error", "Cost registry must declare per-model pricing.", path=rel_path)
-    else:
-        for entry in pricing:
-            if not (isinstance(entry, dict) and str(entry.get("model", "")).strip() and str(entry.get("provider", "")).strip()):
-                _add_check(result, "cost.pricing_incomplete", "error", "Each pricing entry must declare model and provider.", path=rel_path)
-    budgets = data.get("budgets")
-    if not isinstance(budgets, dict) or budgets.get("per_mission_usd") is None:
-        _add_check(result, "cost.no_budget", "warning", "Cost registry has no per-mission budget.", path=rel_path)
-    slo = data.get("slo")
-    if not isinstance(slo, dict) or slo.get("max_crash_rate_pct") is None or slo.get("max_unhealthy_rate_pct") is None:
-        _add_check(result, "cost.no_slo", "warning", "Cost registry has no session reliability SLO (crash/unhealthy rate).", path=rel_path)
-
-
-def _verify_guardrail_contract(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "guardrail-contract.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    if not str(data.get("version", "")).strip():
-        _add_check(result, "guardrail.unversioned", "error", "Guardrail contract must declare a version.", path=rel_path)
-    guardrails = data.get("guardrails")
-    if not isinstance(guardrails, dict):
-        _add_check(result, "guardrail.faces_missing", "error", "Guardrail contract must declare input/output/tool/model guardrails.", path=rel_path)
-        return
-    valid_modes = {"enforce", "monitor"}
-    valid_actions = {"block", "escalate", "log"}
-    for face in ("input", "output", "tool", "model"):
-        spec = guardrails.get(face)
-        if not isinstance(spec, dict):
-            _add_check(result, f"guardrail.{face}_missing", "error", f"Guardrail face {face!r} is missing.", path=rel_path)
-            continue
-        if spec.get("mode") not in valid_modes:
-            _add_check(result, "guardrail.invalid_mode", "error", f"Guardrail face {face!r} mode must be 'enforce' or 'monitor'.", path=rel_path)
-        if spec.get("on_violation") not in valid_actions:
-            _add_check(result, "guardrail.no_violation_action", "error", f"Guardrail face {face!r} must declare a violation action.", path=rel_path)
-
-
-def _verify_visual_evidence(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "visual-evidence.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    require_for = data.get("require_for")
-    if not isinstance(require_for, list) or not require_for:
-        _add_check(result, "visual.no_triggers", "warning", "Visual evidence gate declares no UI/UX triggers.", path=rel_path)
-    kinds = data.get("required_artifact_kinds")
-    kind_set = {str(kind) for kind in kinds} if isinstance(kinds, list) else set()
-    if not {"screenshot", "dom"} <= kind_set:
-        _add_check(result, "visual.missing_artifact_kinds", "error", "Visual evidence must require at least screenshot and dom artifacts.", path=rel_path)
-    if data.get("journey_required") is not True:
-        _add_check(result, "visual.journey_not_required", "warning", "Visual evidence gate does not require a user journey.", path=rel_path)
-
-
-def _verify_workspace_isolation(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "workspace-isolation.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    if str(data.get("isolation_mode", "")).strip() not in {"container", "venv", "sandbox", "process"}:
-        _add_check(result, "workspace.isolation_undeclared", "warning", "Workspace isolation_mode must be container/venv/sandbox/process.", path=rel_path)
-    writable = data.get("writable_roots")
-    if not isinstance(writable, list) or not writable:
-        _add_check(result, "workspace.writable_unbounded", "warning", "Workspace must declare bounded writable_roots.", path=rel_path)
-    if str(data.get("network", "")).strip() not in {"deny", "allowlist"}:
-        _add_check(result, "workspace.network_open", "error", "Workspace network must be 'deny' or 'allowlist'.", path=rel_path)
-
-
-def _verify_environment_policy(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "environment-policy.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    environments = data.get("environments")
-    if not isinstance(environments, dict) or not {"local", "ci", "staging", "production"} <= set(environments):
-        _add_check(result, "env.environments_missing", "error", "Environment policy must declare local, ci, staging and production.", path=rel_path)
-        return
-    production = environments.get("production")
-    if not isinstance(production, dict) or not (production.get("dry_run") is True or production.get("approval") is True):
-        _add_check(result, "env.production_unguarded", "warning", "Production environment must require dry-run or approval.", path=rel_path)
-
-
-def _verify_browser_tool_contract(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "browser-tool-contract.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    if data.get("require_dom") is not True:
-        _add_check(result, "browser.dom_required", "error", "Browser tool contract must require DOM capture.", path=rel_path)
-    if data.get("require_screenshot") is not True:
-        _add_check(result, "browser.screenshot_required", "error", "Browser tool contract must require screenshots.", path=rel_path)
-    if not isinstance(data.get("allowed_domains"), list):
-        _add_check(result, "browser.domains_invalid", "error", "Browser tool contract allowed_domains must be a list.", path=rel_path)
-
-
-def _verify_runtime_provider_contract(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "runtime-provider-contract.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    lifecycle = data.get("lifecycle")
-    if not isinstance(lifecycle, dict) or not {"start", "stop", "health", "cleanup"} <= set(lifecycle):
-        _add_check(result, "runtime.lifecycle_incomplete", "error", "Runtime provider contract must declare start/stop/health/cleanup.", path=rel_path)
-    if not isinstance(data.get("resources"), dict):
-        _add_check(result, "runtime.resources_unbounded", "warning", "Runtime provider contract should declare resource limits.", path=rel_path)
-    if not isinstance(data.get("logs"), dict):
-        _add_check(result, "runtime.logs_undeclared", "warning", "Runtime provider contract should declare a logs policy.", path=rel_path)
-
-
-def _verify_prompt_version_log(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "prompt-version-log.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    track = data.get("track")
-    track_set = {str(item) for item in track} if isinstance(track, list) else set()
-    if not {"prompt", "provider"} <= track_set:
-        _add_check(result, "promptver.tracking_incomplete", "warning", "Prompt version tracking should include at least prompt and provider.", path=rel_path)
-    if data.get("link_to_evals") is not True:
-        _add_check(result, "promptver.evals_unlinked", "warning", "Prompt versions should be linked to evals.", path=rel_path)
-
-
-def _verify_cluster_action_policy(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "cluster-action-policy.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    actions = data.get("high_risk_actions")
-    if not isinstance(actions, list) or not actions:
-        _add_check(result, "cluster.actions_missing", "warning", "Cluster action policy declares no high-risk actions.", path=rel_path)
-    if data.get("require_dry_run") is not True:
-        _add_check(result, "cluster.dry_run_required", "error", "High-risk cluster actions must require dry-run.", path=rel_path)
-    if data.get("require_rollback") is not True:
-        _add_check(result, "cluster.rollback_required", "error", "High-risk cluster actions must require rollback proof.", path=rel_path)
-
-
-def _verify_doc_graph_pipeline(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "doc-graph-pipeline.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    sources = data.get("sources")
-    if not isinstance(sources, list) or not sources:
-        _add_check(result, "docgraph.sources_missing", "warning", "Doc-to-graph pipeline declares no sources.", path=rel_path)
-    extract = data.get("extract")
-    if not isinstance(extract, dict) or extract.get("relations") is not True:
-        _add_check(result, "docgraph.relations_disabled", "warning", "Doc-to-graph pipeline should extract relations.", path=rel_path)
-    if data.get("provenance_required") is not True:
-        _add_check(result, "docgraph.provenance_optional", "warning", "Doc-to-graph nodes/edges should require provenance.", path=rel_path)
-
-
-def _verify_flow_dsl_manifest(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "flow-dsl-manifest.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    flow = data.get("flow")
-    if not isinstance(flow, list) or not flow:
-        _add_check(result, "flowdsl.steps_missing", "error", "Flow manifest must declare at least one step.", path=rel_path)
-    if not str(data.get("export_format", "")).strip():
-        _add_check(result, "flowdsl.export_undeclared", "warning", "Flow manifest should declare an export_format.", path=rel_path)
-
-
-def _verify_workflow_state_manifest(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "workflow-state-manifest.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    states = data.get("states")
-    state_set = {str(state) for state in states} if isinstance(states, list) else set()
-    if not state_set:
-        _add_check(result, "wsm.states_missing", "error", "Workflow state manifest must declare states.", path=rel_path)
-        return
-    if str(data.get("initial_state", "")).strip() not in state_set:
-        _add_check(result, "wsm.initial_undeclared", "error", "Workflow initial_state must be one of the declared states.", path=rel_path)
-    transitions = data.get("transitions")
-    if not isinstance(transitions, list) or not transitions:
-        _add_check(result, "wsm.transitions_missing", "warning", "Workflow state manifest declares no transitions.", path=rel_path)
-        return
-    for transition in transitions:
-        if not isinstance(transition, dict) or str(transition.get("from", "")) not in state_set or str(transition.get("to", "")) not in state_set:
-            _add_check(result, "wsm.transition_invalid", "error", "Each transition must reference declared from/to states.", path=rel_path)
-
-
-def _verify_k8s_agent_manifest(root: Path, result: StandardVerificationResult) -> None:
-    rel_path = STANDARD_DIR / "k8s-agent-manifest.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-    if not str(data.get("crd_kind", "")).strip():
-        _add_check(result, "k8s.crd_missing", "error", "K8s agent manifest must declare a crd_kind.", path=rel_path)
-    resource_limits = data.get("resource_limits")
-    if not isinstance(resource_limits, dict) or not resource_limits:
-        _add_check(result, "k8s.resource_limits_missing", "error", "K8s agent manifest must declare resource_limits.", path=rel_path)
-    if not str(data.get("service_account", "")).strip():
-        _add_check(result, "k8s.service_account_missing", "warning", "K8s agent manifest should declare a service_account.", path=rel_path)
-    telemetry = data.get("telemetry")
-    if not isinstance(telemetry, dict) or telemetry.get("otel") is not True:
-        _add_check(result, "k8s.telemetry_missing", "warning", "K8s agent manifest should enable OTel telemetry.", path=rel_path)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def verify_standard_profile(

@@ -79,6 +79,6 @@
   "src_oversized": {
     "src/grimoire/cli/app.py": 2913,
     "src/grimoire/cli/cmd_memory.py": 1610,
-    "src/grimoire/core/agentic_standard.py": 2977
+    "src/grimoire/core/agentic_standard.py": 1917
   }
 }
