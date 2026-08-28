@@ -2,7 +2,19 @@
 
 Infrastructure de la campagne définie par [docs/evals-protocol.md](../docs/evals-protocol.md).
 
-**Statut : pré-enregistrement. Aucune campagne exécutée, aucun résultat.**
+**Statut : trois campagnes exécutées, toutes publiées dans `reports/`.**
+
+| Campagne | Bras | Verdict |
+|---|---|---|
+| [2026-07-03](reports/2026-07-03/report.md) | baseline, governed | effet non démontré ([errata](reports/2026-07-03/ERRATA.md)) |
+| [2026-07-09](reports/2026-07-09/report.md) | activated | engagement 40/40 contre 0/40, effet non démontré |
+| [2026-08-27](reports/2026-08-27/report.md) | activated-v2, disclosed, baseline-v3 | effet non démontré selon A1-v3 |
+
+Le constat borné répliqué sur les trois campagnes : sur ce témoin, avec ce
+runner et ce modèle, l'activation du standard élimine les régressions dures
+(0 sur 96 runs activés cumulés, contre 9/40 en baseline contemporaine). Le
+claim composite reste non démontré, et aucune revendication d'efficacité ne
+peut être faite sur cette base.
 
 ## Contenu
 
