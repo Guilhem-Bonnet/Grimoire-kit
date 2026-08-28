@@ -25,10 +25,16 @@
   /* Base du manuel. Le site publié sert mkdocs sous /docs/, à côté de ces
      pages ; l'atelier local (`grimoire serve`) ne sert que l'interface, sans
      le manuel — on renvoie alors vers la version en ligne plutôt que vers un
-     404. Le test porte sur l'hôte, pas sur le mode : `mode-atelier` est un
-     habillage, il ne dit pas qui sert la page. */
-  var local = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
-  window.GrimoireDocsBase = local
+     404. Le test porte sur qui sert la page, pas sur le mode : `mode-atelier`
+     est un habillage, il ne dit rien de l'origine.
+
+     Le protocole vient en premier : ouvert depuis le disque (`file://`),
+     `location.hostname` vaut la chaîne vide et aucun test d'hôte ne le
+     rattrape — c'est pourtant le cas où un chemin relatif est le plus sûrement
+     cassé. */
+  var elsewhere = location.protocol === 'file:'
+    || /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  window.GrimoireDocsBase = elsewhere
     ? 'https://guilhem-bonnet.github.io/Grimoire-kit/docs/'
     : 'docs/';
 })();

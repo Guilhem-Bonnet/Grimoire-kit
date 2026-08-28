@@ -6,7 +6,7 @@
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Documentation — Grimoire Kit"/>
   <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns vérifiables), catalogue de 78, mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
-  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/documentation.html"/>
+  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/docs/"/>
   <meta name="twitter:card" content="summary"/>
   <meta name="description" content="Point d'entrée vers le manuel Grimoire Kit, construit par mkdocs et publié sous /docs/." />
   <link rel="canonical" href="https://guilhem-bonnet.github.io/Grimoire-kit/docs/" />
@@ -78,7 +78,6 @@
 (function () {
   'use strict';
   const MANUAL = 'docs/';
-  const PUBLIC = 'https://guilhem-bonnet.github.io/Grimoire-kit/docs/';
   const portal = document.getElementById('doc-portal');
 
   function fallback() { if (portal) portal.hidden = false; }
@@ -87,8 +86,10 @@
     .then(r => { if (r.ok) location.replace(MANUAL); else fallback(); })
     .catch(fallback);
 
+  /* `GrimoireDocsBase` sait déjà où vit le manuel quand il n'est pas servi
+     ici — atelier local ou fichier ouvert depuis le disque. */
   const link = document.getElementById('doc-portal-link');
-  if (link && location.protocol === 'file:') link.href = PUBLIC;
+  if (link && window.GrimoireDocsBase) link.href = window.GrimoireDocsBase;
 })();
 </script>
 </body>
