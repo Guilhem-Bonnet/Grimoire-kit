@@ -7,104 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### Ajouté
-
-- **Prompts et resources MCP — la surface qui ne demande aucun émetteur** — le
-  protocole MCP a trois primitives, le serveur du kit en exposait une : quinze
-  outils, zéro prompt, zéro resource. Or MCP est la seule surface que *tous* les
-  hôtes partagent. Les six commandes deviennent des **prompts MCP**, donc des
-  slash commands dans n'importe quel client — Claude Code, Copilot, Cursor,
-  Codex, Gemini CLI, Zed, Continue — et les trois compétences deviennent des
-  **resources** chargeables à la demande sous `grimoire://skill/<slug>`.
-  Codex, Cursor et Gemini CLI cessent ainsi de recevoir un catalogue en prose là
-  où une commande réelle était disponible sans écrire une ligne d'émetteur.
-  La façade du serveur n'a été élargie qu'après vérification **fonctionnelle**
-  sur mcp 1.29.1 et mcp 2.x — enregistrement dynamique, listing, `get_prompt`,
-  arguments déclarés — et non sur un simple `hasattr` : c'est la discipline qui
-  avait déjà évité une borne de version erronée. L'enregistrement ne peut jamais
-  empêcher le serveur de démarrer.
-
-- **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
-  vie avaient été conçus l'un pour l'autre sans jamais être reliés :
-  `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
-  documente comme « fraction of tool calls that were blocked » — un nombre qui
-  ne pouvait que valoir zéro tant que les hooks n'écrivaient rien. Chaque appel
-  d'outil réellement évalué et chaque décision de clôture sont désormais
-  consignés dans `_grimoire-output/traces/`. Mesuré sur un projet gouverné :
-  `policy_block_rate` passe de 0.0 structurel à 0.5 réel.
-  Trois propriétés le rendent sûr à garder : le chemin en lecture seule n'écrit
-  rien (il sort avant toute évaluation), les arguments sont **hachés** et jamais
-  stockés tels quels — le ledger part sur disque et s'exporte en OTel —, et un
-  ledger impossible à écrire ne fait pas échouer la session.
-
-- **`grimoire task board export`** — le task board gouverné est désormais une
-  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
-  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
-  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
-  de risque, et un motif sur toute carte bloquée.
-- **ADR-005** — « Le Mission Ledger est la source, le task board une
-  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
-  neuf états côté ledger, huit côté board, aucune conversion nulle part.
-
-### Modifié
-
-- La conversion d'états ledger ↔ board vit dans un module unique
-  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
-  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
-
-### Corrigé
-
-- **`grimoire up` n'écrase plus les instructions du projet.** En 3.33.0,
-  `.github/copilot-instructions.md` et les passerelles `CLAUDE.md` /
-  `AGENTS.md` / `GEMINI.md` / `.cursorrules` étaient régénérés à chaque mise à
-  jour. Sur un projet réel, le fichier d'instructions est passé de 227 à 112
-  lignes, perdant la doctrine qui gouvernait le dépôt. Ces fichiers sont
-  désormais semés une fois puis laissés au projet — contrepartie assumée : la
-  table des agents installés s'y périme.
-- **`grimoire migrate --adopt-kit` ne supprime plus les fichiers archivés par
-  le projet.** Le masquage était détecté par nom de fichier, si bien qu'un
-  `agents/_archived/concierge.md` passait pour un doublon de l'agent
-  `concierge` livré par le kit ; l'adoption le supprimait sans que rien ne le
-  régénère. La détection compare désormais le chemin complet.
-- **La propagation d'identité n'efface plus un champ que la config ne déclare
-  pas.** `project-context.yaml` n'impose pas de section `user:` ; en son
-  absence, `grimoire up` vidait `**User**` dans le fichier d'instructions.
-
-### Sécurité
-
-- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
-  correction du risque réel (injection d'argument) : les valeurs issues d'une
-  requête passent après `--` et refusent le préfixe `-`.
-### Corrigé
-
-- **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
-  câblé sur `Read`, donc sur chaque lecture de fichier de chaque session.
-  Trois causes, toutes mesurées :
-  **le point d'entrée** (`grimoire host hook` construisait l'arbre Typer complet,
-  chaque module `cmd_*` importé pour résoudre une sous-commande) — un script
-  console dédié `grimoire-hook` le remplace dans les configurations générées,
-  391 ms → 102 ms ;
-  **les ré-exports impatients** (`grimoire/__init__.py` et
-  `grimoire/core/__init__.py` importaient onze modules dont le scaffolder et le
-  résolveur d'archétypes) — résolution paresseuse PEP 562, API inchangée ;
-  **le moteur du standard importé pour rien** (`check_evidence_gates` au niveau
-  module alors que la décision d'outil ne l'appelle jamais) — import différé, et
-  les chemins de sortie du standard déménagent dans le module léger
-  `standard_manifest`.
-  Enfin `Read` sort du matcher sur les hôtes qui ont une table de permissions :
-  les mêmes fichiers y sont déjà refusés déclarativement, à coût nul. L'accès par
-  commande shell reste couvert, `Bash` restant dans le matcher.
-  Deux tests épinglent le résultat, dont un qui échoue si le chemin des hooks
-  réimporte le moteur au chargement.
-- **Motifs de secrets et règles déclaratives avaient dérivé** — la détection
-  couvrait neuf familles de fichiers de credentials, la table `deny` six. Trois
-  familles (`.npmrc`, `credentials.json`, `service-account*.json` entre autres)
-  n'étaient donc pas protégées du côté qui ne coûte rien. Les deux formes sont
-  désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
-  qu'une famille existe sans ses deux expressions.
-
-
-## [3.33.0] - 2026-08-27
+## [3.34.0] - 2026-08-28
 
 ### Ajouté
 
@@ -241,22 +144,43 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
   demande confirmation sauf `--yes`.
 
-### Supprimé
+- **Prompts et resources MCP — la surface qui ne demande aucun émetteur** — le
+  protocole MCP a trois primitives, le serveur du kit en exposait une : quinze
+  outils, zéro prompt, zéro resource. Or MCP est la seule surface que *tous* les
+  hôtes partagent. Les six commandes deviennent des **prompts MCP**, donc des
+  slash commands dans n'importe quel client — Claude Code, Copilot, Cursor,
+  Codex, Gemini CLI, Zed, Continue — et les trois compétences deviennent des
+  **resources** chargeables à la demande sous `grimoire://skill/<slug>`.
+  Codex, Cursor et Gemini CLI cessent ainsi de recevoir un catalogue en prose là
+  où une commande réelle était disponible sans écrire une ligne d'émetteur.
+  La façade du serveur n'a été élargie qu'après vérification **fonctionnelle**
+  sur mcp 1.29.1 et mcp 2.x — enregistrement dynamique, listing, `get_prompt`,
+  arguments déclarés — et non sur un simple `hasattr` : c'est la discipline qui
+  avait déjà évité une borne de version erronée. L'enregistrement ne peut jamais
+  empêcher le serveur de démarrer.
 
-- **Références déclaratives qui ne résolvaient nulle part.** `_verify_pattern_catalog`
-  exigeait la *présence* des clés `check_refs`, `rule_refs` et `check_id`, jamais leur
-  résolution : le catalogue promettait des contrôles que le moteur n'émet pas, et
-  `docs/governed-controls.md` publiait ces promesses. Elles sont retirées plutôt
-  qu'implémentées — on retire des promesses, pas des contrôles : `standard verify` sur un
-  projet neuf produit exactement les mêmes identifiants de checks qu'avant, vérifié sur
-  les cinq profils. Un test d'intégrité référentielle interdit désormais toute
-  déclaration sans exécutant.
-  - 17 `check_refs` sans check émis : `events.invalid_line`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `ledger.mission_unlinked`, `memory.graph_projection_unverified`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `orchestration.role_undeclared`, `provider.cost_unbudgeted`, `provider.slo_undeclared`, `skills.classification_missing`, `tools.threat_unmapped`, `tools.unmediated_call`.
-  - 21 `rule_refs` sans règle correspondante dans `rule-packs.yaml` : `context.compression-preserves-provenance`, `decision.council-before-irreversible`, `governance.cluster-action-dry-run`, `governance.env-policy-declared`, `guardrail.versioned-four-faces`, `knowledge.doc-to-graph-sourced`, `memory.integrity-validated`, `merge.fault-classified-before-retry`, `observability.prompt-version-tracked`, `orchestration.flow-manifest-exportable`, `orchestration.workflow-state-declared`, `privilege.controller-agent-separated`, `prompt.external-content-isolated`, `provider.cost-and-slo-declared`, `quality.browser-evidence-required`, `quality.visual-evidence-required`, `remote.freshness-verified`, `runtime.k8s-agent-declared`, `runtime.provider-contract-uniform`, `security.workspace-isolated`, `tools.blast-radius-bounded`.
-  - 13 `check_id` de règles pointant vers un check inexistant : `evidence.minimum_missing`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `memory.freshness_missing`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `provider.cost_unbudgeted`, `skills.classification_missing`, `tools.unmediated_call`.
-- `check_id` n'est plus une clé obligatoire d'une règle de `rule-packs.yaml`. Une règle
-  sans check déclare honnêtement qu'aucun contrôle ne l'applique ; celles qui en
-  déclarent un doivent maintenant qu'il existe.
+- **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
+  vie avaient été conçus l'un pour l'autre sans jamais être reliés :
+  `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
+  documente comme « fraction of tool calls that were blocked » — un nombre qui
+  ne pouvait que valoir zéro tant que les hooks n'écrivaient rien. Chaque appel
+  d'outil réellement évalué et chaque décision de clôture sont désormais
+  consignés dans `_grimoire-output/traces/`. Mesuré sur un projet gouverné :
+  `policy_block_rate` passe de 0.0 structurel à 0.5 réel.
+  Trois propriétés le rendent sûr à garder : le chemin en lecture seule n'écrit
+  rien (il sort avant toute évaluation), les arguments sont **hachés** et jamais
+  stockés tels quels — le ledger part sur disque et s'exporte en OTel —, et un
+  ledger impossible à écrire ne fait pas échouer la session.
+
+- **`grimoire task board export`** — le task board gouverné est désormais une
+  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
+  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
+  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
+  de risque, et un motif sur toute carte bloquée.
+
+- **ADR-005** — « Le Mission Ledger est la source, le task board une
+  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
+  neuf états côté ledger, huit côté board, aucune conversion nulle part.
 
 ### Modifié
 
@@ -271,15 +195,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   code ait bougé — c'est précisément ce que le contrôle doit signaler. La remise
   en conformité se fait par `grimoire up`, qui régénère le tier kit en préservant
   waivers, scores et task board.
+
 - **`grimoire standard gate check --strict` sort en 2 sur les cinq profils.**
   L'escalade était réservée à `governed` et `production` : un projet `starter`,
   `controlled` ou `orchestrated` ne pouvait pas casser un pipeline, quel que soit
   le nombre de preuves manquantes.
+
 - **Les sorties JSON du standard portent un schéma versionné.** `verify`, `audit`,
   `score` et `gate check` émettent une clé `schema`
   (`grimoire.standard-<verbe>/v1`) et leur ensemble de clés de premier niveau est
   verrouillé par un test : une CI tierce qui les parse dispose enfin d'un contrat,
   là où le schéma pouvait changer en correctif.
+
 - Les blocs `paths:` de `ci-sdk.yml` incluent `framework/agentic-standard/**` :
   une PR qui ne modifie que du YAML du standard déclenchait `agentic-standard.yml`
   et `ci-validate.yml`, mais pas les tests de `tests/test_agentic_standard.py`.
@@ -358,6 +285,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
   `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
 
+- La conversion d'états ledger ↔ board vit dans un module unique
+  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
+  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
+
 ### Corrigé
 
 - La propagation d'identité vers `.github/copilot-instructions.md` écrasait le
@@ -391,6 +322,75 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   au rouge. Un `pytest.importorskip` énonce le même fait sans en faire un échec.
   C'est ce qui rendait le hook pre-commit systématiquement rouge en local, et
   donc `--no-verify` systématique.
+
+- **`grimoire up` n'écrase plus les instructions du projet.** En 3.33.0,
+  `.github/copilot-instructions.md` et les passerelles `CLAUDE.md` /
+  `AGENTS.md` / `GEMINI.md` / `.cursorrules` étaient régénérés à chaque mise à
+  jour. Sur un projet réel, le fichier d'instructions est passé de 227 à 112
+  lignes, perdant la doctrine qui gouvernait le dépôt. Ces fichiers sont
+  désormais semés une fois puis laissés au projet — contrepartie assumée : la
+  table des agents installés s'y périme.
+
+- **`grimoire migrate --adopt-kit` ne supprime plus les fichiers archivés par
+  le projet.** Le masquage était détecté par nom de fichier, si bien qu'un
+  `agents/_archived/concierge.md` passait pour un doublon de l'agent
+  `concierge` livré par le kit ; l'adoption le supprimait sans que rien ne le
+  régénère. La détection compare désormais le chemin complet.
+
+- **La propagation d'identité n'efface plus un champ que la config ne déclare
+  pas.** `project-context.yaml` n'impose pas de section `user:` ; en son
+  absence, `grimoire up` vidait `**User**` dans le fichier d'instructions.
+
+- **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
+  câblé sur `Read`, donc sur chaque lecture de fichier de chaque session.
+  Trois causes, toutes mesurées :
+  **le point d'entrée** (`grimoire host hook` construisait l'arbre Typer complet,
+  chaque module `cmd_*` importé pour résoudre une sous-commande) — un script
+  console dédié `grimoire-hook` le remplace dans les configurations générées,
+  391 ms → 102 ms ;
+  **les ré-exports impatients** (`grimoire/__init__.py` et
+  `grimoire/core/__init__.py` importaient onze modules dont le scaffolder et le
+  résolveur d'archétypes) — résolution paresseuse PEP 562, API inchangée ;
+  **le moteur du standard importé pour rien** (`check_evidence_gates` au niveau
+  module alors que la décision d'outil ne l'appelle jamais) — import différé, et
+  les chemins de sortie du standard déménagent dans le module léger
+  `standard_manifest`.
+  Enfin `Read` sort du matcher sur les hôtes qui ont une table de permissions :
+  les mêmes fichiers y sont déjà refusés déclarativement, à coût nul. L'accès par
+  commande shell reste couvert, `Bash` restant dans le matcher.
+  Deux tests épinglent le résultat, dont un qui échoue si le chemin des hooks
+  réimporte le moteur au chargement.
+
+- **Motifs de secrets et règles déclaratives avaient dérivé** — la détection
+  couvrait neuf familles de fichiers de credentials, la table `deny` six. Trois
+  familles (`.npmrc`, `credentials.json`, `service-account*.json` entre autres)
+  n'étaient donc pas protégées du côté qui ne coûte rien. Les deux formes sont
+  désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
+  qu'une famille existe sans ses deux expressions.
+
+### Sécurité
+
+- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
+  correction du risque réel (injection d'argument) : les valeurs issues d'une
+  requête passent après `--` et refusent le préfixe `-`.
+
+### Supprimé
+
+- **Références déclaratives qui ne résolvaient nulle part.** `_verify_pattern_catalog`
+  exigeait la *présence* des clés `check_refs`, `rule_refs` et `check_id`, jamais leur
+  résolution : le catalogue promettait des contrôles que le moteur n'émet pas, et
+  `docs/governed-controls.md` publiait ces promesses. Elles sont retirées plutôt
+  qu'implémentées — on retire des promesses, pas des contrôles : `standard verify` sur un
+  projet neuf produit exactement les mêmes identifiants de checks qu'avant, vérifié sur
+  les cinq profils. Un test d'intégrité référentielle interdit désormais toute
+  déclaration sans exécutant.
+  - 17 `check_refs` sans check émis : `events.invalid_line`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `ledger.mission_unlinked`, `memory.graph_projection_unverified`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `orchestration.role_undeclared`, `provider.cost_unbudgeted`, `provider.slo_undeclared`, `skills.classification_missing`, `tools.threat_unmapped`, `tools.unmediated_call`.
+  - 21 `rule_refs` sans règle correspondante dans `rule-packs.yaml` : `context.compression-preserves-provenance`, `decision.council-before-irreversible`, `governance.cluster-action-dry-run`, `governance.env-policy-declared`, `guardrail.versioned-four-faces`, `knowledge.doc-to-graph-sourced`, `memory.integrity-validated`, `merge.fault-classified-before-retry`, `observability.prompt-version-tracked`, `orchestration.flow-manifest-exportable`, `orchestration.workflow-state-declared`, `privilege.controller-agent-separated`, `prompt.external-content-isolated`, `provider.cost-and-slo-declared`, `quality.browser-evidence-required`, `quality.visual-evidence-required`, `remote.freshness-verified`, `runtime.k8s-agent-declared`, `runtime.provider-contract-uniform`, `security.workspace-isolated`, `tools.blast-radius-bounded`.
+  - 13 `check_id` de règles pointant vers un check inexistant : `evidence.minimum_missing`, `hooks.destructive_bypass`, `hooks.gateway_missing`, `knowledge.source_unindexed`, `memory.freshness_missing`, `memory.hot_memory_partial`, `observability.cockpit_mutation`, `observability.input_undeclared`, `observability.secret_export`, `orchestration.handoff_unverified`, `provider.cost_unbudgeted`, `skills.classification_missing`, `tools.unmediated_call`.
+
+- `check_id` n'est plus une clé obligatoire d'une règle de `rule-packs.yaml`. Une règle
+  sans check déclare honnêtement qu'aucun contrôle ne l'applique ; celles qui en
+  déclarent un doivent maintenant qu'il existe.
 
 ## [3.32.0] - 2026-08-18
 
