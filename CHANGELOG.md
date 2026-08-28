@@ -7,6 +7,30 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.34.1] - 2026-08-28
+
+### Corrigé
+
+- **`agent-caller` ne meurt plus sur une console non-UTF-8.** L'outil imprime
+  des filets (`│`) dans ses tableaux ; sur une console Windows en cp1252,
+  `print` levait `UnicodeEncodeError` et une simple commande de lecture
+  échouait. La sortie est reconfigurée en UTF-8 au démarrage, avec
+  `errors="replace"` pour qu'un flux non reconfigurable dégrade au lieu de
+  planter. Les 44 autres outils dans le même cas sont suivis en #192.
+
+### Modifié
+
+- **Le job CI *Framework Tools Tests* s'exécute réellement.** Il neutralisait le
+  code de sortie de pytest (`|| true`) puis devinait le résultat par `grep` sur
+  la dernière ligne : il échouait à la collecte depuis un moment — dépendances
+  `typer` et `ruamel.yaml` non installées — et se déclarait vert. Il tourne
+  désormais sur `ubuntu-latest` et `windows-latest`, et c'est le code de sortie
+  qui décide.
+- **Les vérificateurs du standard vivent dans `grimoire.core.standard_checks`**
+  (`base`, `controls`, `verifiers`), extraits de `agentic_standard.py` qui perd
+  1272 lignes. Aucun changement de comportement : la surface publique du module
+  est inchangée à quatre constantes près, internes au moteur de vérification.
+
 ## [3.34.0] - 2026-08-28
 
 ### Ajouté
