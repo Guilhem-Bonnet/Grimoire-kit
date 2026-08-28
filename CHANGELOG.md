@@ -7,85 +7,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### Ajouté
-
-- **Prompts et resources MCP — la surface qui ne demande aucun émetteur** — le
-  protocole MCP a trois primitives, le serveur du kit en exposait une : quinze
-  outils, zéro prompt, zéro resource. Or MCP est la seule surface que *tous* les
-  hôtes partagent. Les six commandes deviennent des **prompts MCP**, donc des
-  slash commands dans n'importe quel client — Claude Code, Copilot, Cursor,
-  Codex, Gemini CLI, Zed, Continue — et les trois compétences deviennent des
-  **resources** chargeables à la demande sous `grimoire://skill/<slug>`.
-  Codex, Cursor et Gemini CLI cessent ainsi de recevoir un catalogue en prose là
-  où une commande réelle était disponible sans écrire une ligne d'émetteur.
-  La façade du serveur n'a été élargie qu'après vérification **fonctionnelle**
-  sur mcp 1.29.1 et mcp 2.x — enregistrement dynamique, listing, `get_prompt`,
-  arguments déclarés — et non sur un simple `hasattr` : c'est la discipline qui
-  avait déjà évité une borne de version erronée. L'enregistrement ne peut jamais
-  empêcher le serveur de démarrer.
-
-- **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
-  vie avaient été conçus l'un pour l'autre sans jamais être reliés :
-  `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
-  documente comme « fraction of tool calls that were blocked » — un nombre qui
-  ne pouvait que valoir zéro tant que les hooks n'écrivaient rien. Chaque appel
-  d'outil réellement évalué et chaque décision de clôture sont désormais
-  consignés dans `_grimoire-output/traces/`. Mesuré sur un projet gouverné :
-  `policy_block_rate` passe de 0.0 structurel à 0.5 réel.
-  Trois propriétés le rendent sûr à garder : le chemin en lecture seule n'écrit
-  rien (il sort avant toute évaluation), les arguments sont **hachés** et jamais
-  stockés tels quels — le ledger part sur disque et s'exporte en OTel —, et un
-  ledger impossible à écrire ne fait pas échouer la session.
-
-- **`grimoire task board export`** — le task board gouverné est désormais une
-  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
-  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
-  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
-  de risque, et un motif sur toute carte bloquée.
-- **ADR-005** — « Le Mission Ledger est la source, le task board une
-  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
-  neuf états côté ledger, huit côté board, aucune conversion nulle part.
-
-### Modifié
-
-- La conversion d'états ledger ↔ board vit dans un module unique
-  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
-  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
-
-### Sécurité
-
-- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
-  correction du risque réel (injection d'argument) : les valeurs issues d'une
-  requête passent après `--` et refusent le préfixe `-`.
-### Corrigé
-
-- **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
-  câblé sur `Read`, donc sur chaque lecture de fichier de chaque session.
-  Trois causes, toutes mesurées :
-  **le point d'entrée** (`grimoire host hook` construisait l'arbre Typer complet,
-  chaque module `cmd_*` importé pour résoudre une sous-commande) — un script
-  console dédié `grimoire-hook` le remplace dans les configurations générées,
-  391 ms → 102 ms ;
-  **les ré-exports impatients** (`grimoire/__init__.py` et
-  `grimoire/core/__init__.py` importaient onze modules dont le scaffolder et le
-  résolveur d'archétypes) — résolution paresseuse PEP 562, API inchangée ;
-  **le moteur du standard importé pour rien** (`check_evidence_gates` au niveau
-  module alors que la décision d'outil ne l'appelle jamais) — import différé, et
-  les chemins de sortie du standard déménagent dans le module léger
-  `standard_manifest`.
-  Enfin `Read` sort du matcher sur les hôtes qui ont une table de permissions :
-  les mêmes fichiers y sont déjà refusés déclarativement, à coût nul. L'accès par
-  commande shell reste couvert, `Bash` restant dans le matcher.
-  Deux tests épinglent le résultat, dont un qui échoue si le chemin des hooks
-  réimporte le moteur au chargement.
-- **Motifs de secrets et règles déclaratives avaient dérivé** — la détection
-  couvrait neuf familles de fichiers de credentials, la table `deny` six. Trois
-  familles (`.npmrc`, `credentials.json`, `service-account*.json` entre autres)
-  n'étaient donc pas protégées du côté qui ne coûte rien. Les deux formes sont
-  désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
-  qu'une famille existe sans ses deux expressions.
-
-
 ## [3.33.0] - 2026-08-27
 
 ### Ajouté
@@ -102,7 +23,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `grimoire host list | surface | sync | status | run`. La synchronisation est
   déclenchée automatiquement par `grimoire init`, `grimoire up --fix` et
   `grimoire standard init`. Voir `docs/hosts.md`.
-
 - **Gouvernance opposable, identique sur tous les hôtes** — les règles vivent
   dans un module de décisions host-neutre (`grimoire.hosts.decisions`), traduit
   dans le JSON de chaque hôte par `grimoire.hosts.runtime`. Un refus sous
@@ -113,7 +33,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   blocage répété (`stop_hook_active`), pas de blocage sur un projet non enrôlé
   ou un profil non gouverné, pas de panne fatale (un projet cassé sort en
   « autorisé » avec l'erreur en contexte).
-
 - **`PolicyEngine` branché en production** — le moteur de politique et ses
   règles OWASP n'étaient instanciés que par les fixtures d'évals. Le hook
   `pre_tool_use` lui soumet désormais chaque appel mutant, en lisant le
@@ -121,43 +40,35 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `Edit` comme `replace_string_in_file`). Suppressions récursives, force push,
   destructions d'infrastructure et lectures de fichiers de secrets sont
   refusées ou soumises à confirmation selon le profil de risque.
-
 - **Frontière d'outils par persona** — le champ `tools:` du frontmatter d'un
   agent fixe sa frontière ; sans lui, elle est déduite du texte de la persona
   (lecture et recherche toujours, écriture et exécution sur signal explicite).
   `grimoire host status` liste les personas dont la frontière est déduite.
-
 - **Compétences et commandes livrées** — protocole de preuve, dispatch de
   persona et mémoire projet comme compétences chargées à la demande ; six
   commandes (`grimoire-status`, `-gate`, `-proof`, `-verify`, `-recall`,
   `-doctor`) rendues comme commandes natives sur les hôtes qui en ont.
-
 - **Outils MCP `grimoire_host_status`, `grimoire_skill`, `grimoire_command`** —
   un client MCP sans émetteur dédié atteint la même surface, compétences et
   commandes chargeables à la demande comprises.
-
 - **Hôtes Cursor et Gemini CLI** au registre de capacités, avec leurs manifestes.
-
 - **Frontière kit/overrides** — un projet Grimoire sépare désormais ce que le kit
   génère (`_grimoire/kit/`, régénéré à chaque mise à jour) de ce que le projet
   possède (`_grimoire/overrides/`, jamais écrasé, prioritaire à la résolution).
   Une customisation se fait en déposant un fichier dans `overrides/` — elle
   survit à toutes les mises à jour par construction, sans plus dépendre d'une
   heuristique.
-
 - **`grimoire migrate`** — opération unique qui fait passer un projet existant
   sur cette frontière : le contenu que le kit a déjà livré (reconnu par
   empreinte dans `registry/kit-file-hashes.json`) est régénéré, tout le reste
   part dans `overrides/`. Snapshot systématique, `--restore <horodatage>` pour
   revenir en arrière, `--adopt-kit` pour reprendre la version du kit sur les
   fichiers qui la masquaient sans raison. Après migration, `grimoire up` suffit.
-
 - **Manifeste de génération du standard** (`_grimoire/standard/.generated.json`)
   — enregistre l'empreinte de chaque artefact écrit par le kit, ce qui permet de
   distinguer « policy que le kit a générée » de « décision que le projet a
   prise ». Les premières suivent les mises à jour, les secondes ne sont jamais
   touchées.
-
 - **`grimoire memory shared`** — mémoire transverse entre projets, pour qu'un
   agent spécialiste accumule du savoir réutilisable sans corrompre celui des
   autres. Trois règles traitent les modes de corruption connus :
@@ -173,7 +84,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
   appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
   ici. Opt-in via `memory.shared_collection`, vide par défaut.
-
 - **`grimoire memory up`** — met en place la stack mémoire complète, que
   `grimoire init` laissait à moitié câblée : il détecte un backend vectoriel et
   écrit `memory.backend`, mais `neo4j_uri`, `knowledge_graph`, `memory_graph`,
@@ -187,7 +97,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `neo4j_password_env` ne serait jamais écrit et rien n'indiquerait quelle
   variable exporter. Plan par défaut, écriture sur `--apply`, idempotent,
   commentaires du YAML préservés.
-
 - **`grimoire memory bundle`** — transport d'un modèle d'embedding vers un site
   sans accès sortant. `export` construit une archive depuis un repo Hub ou un
   répertoire local, `install` refuse toute archive dont un fichier ne correspond
@@ -197,7 +106,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
   les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
   par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
-
 - **Sondes Weaviate, Neo4j et Redis dans `grimoire doctor`** — la commande ne
   vérifiait que Qdrant et Ollama, donc la stack cible du Memory OS était
   invisible du diagnostic. Les sondes ne parlent que si le projet route
@@ -206,13 +114,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   le cas où la socket répond alors que la variable de mot de passe est absente :
   chaque écriture de graphe échouerait alors silencieusement à
   l'authentification.
-
 - **Bloc `parity` dans `grimoire memory status`** — compare les entrées du store
   aux nœuds mémoire Neo4j et à leurs références `WeaviateObject`. C'est le
   signal qui détecte un objet écrit d'un côté sans contrepartie de l'autre.
   Trois `COUNT`, assez léger pour une commande de statut, là où
   `memory graph verify` reconstruit tout le code graph.
-
 - **`grimoire cockpit prune`** — retire du registre les projets dont le chemin a
   disparu. Le registre accumulait une entrée par projet enrôlé sans jamais en
   retirer : chaque projet supprimé ou déplacé y laissait un pointeur mort, et
@@ -222,6 +128,40 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   seule l'absence du chemin justifie un retrait ; `--stale` élargit aux chemins
   présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
   demande confirmation sauf `--yes`.
+- **Prompts et resources MCP — la surface qui ne demande aucun émetteur** — le
+  protocole MCP a trois primitives, le serveur du kit en exposait une : quinze
+  outils, zéro prompt, zéro resource. Or MCP est la seule surface que *tous* les
+  hôtes partagent. Les six commandes deviennent des **prompts MCP**, donc des
+  slash commands dans n'importe quel client — Claude Code, Copilot, Cursor,
+  Codex, Gemini CLI, Zed, Continue — et les trois compétences deviennent des
+  **resources** chargeables à la demande sous `grimoire://skill/<slug>`.
+  Codex, Cursor et Gemini CLI cessent ainsi de recevoir un catalogue en prose là
+  où une commande réelle était disponible sans écrire une ligne d'émetteur.
+  La façade du serveur n'a été élargie qu'après vérification **fonctionnelle**
+  sur mcp 1.29.1 et mcp 2.x — enregistrement dynamique, listing, `get_prompt`,
+  arguments déclarés — et non sur un simple `hasattr` : c'est la discipline qui
+  avait déjà évité une borne de version erronée. L'enregistrement ne peut jamais
+  empêcher le serveur de démarrer.
+- **La gouvernance laisse enfin une trace** — le ledger et les hooks de cycle de
+  vie avaient été conçus l'un pour l'autre sans jamais être reliés :
+  `ToolCallTrace` porte un `policy_verdict_id`, et `policy_block_rate()` se
+  documente comme « fraction of tool calls that were blocked » — un nombre qui
+  ne pouvait que valoir zéro tant que les hooks n'écrivaient rien. Chaque appel
+  d'outil réellement évalué et chaque décision de clôture sont désormais
+  consignés dans `_grimoire-output/traces/`. Mesuré sur un projet gouverné :
+  `policy_block_rate` passe de 0.0 structurel à 0.5 réel.
+  Trois propriétés le rendent sûr à garder : le chemin en lecture seule n'écrit
+  rien (il sort avant toute évaluation), les arguments sont **hachés** et jamais
+  stockés tels quels — le ledger part sur disque et s'exporte en OTel —, et un
+  ledger impossible à écrire ne fait pas échouer la session.
+- **`grimoire task board export`** — le task board gouverné est désormais une
+  projection du Mission Ledger, régénérée depuis lui (ADR-005). La carte porte
+  enfin ce que le YAML ignorait : description, garde-fous, preuves attendues,
+  propriétaire réel (à défaut, le porteur du claim), priorité dérivée du profil
+  de risque, et un motif sur toute carte bloquée.
+- **ADR-005** — « Le Mission Ledger est la source, le task board une
+  projection ». Tranche la coexistence de deux modèles de tâches concurrents :
+  neuf états côté ledger, huit côté board, aucune conversion nulle part.
 
 ### Supprimé
 
@@ -265,19 +205,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Les blocs `paths:` de `ci-sdk.yml` incluent `framework/agentic-standard/**` :
   une PR qui ne modifie que du YAML du standard déclenchait `agentic-standard.yml`
   et `ci-validate.yml`, mais pas les tests de `tests/test_agentic_standard.py`.
-
 - **`grimoire up` met réellement à jour un projet existant.** Auparavant il
   s'arrêtait dès que `project-context.yaml` existait : agents, framework,
   workflows, prompts et instructions restaient gelés à la version d'installation
   pour toute la vie du projet. Il régénère maintenant le tier kit et rafraîchit
   les artefacts standard non modifiés. L'écriture est différentielle : sans
   nouvelle version, rien n'est réécrit et rien n'est rapporté.
-
 - Les prompts, fichiers d'instructions, passerelles d'assistants et wrappers
   d'agents ne sont plus protégés par un `if fichier existe : ne rien faire` —
   ils appartiennent au kit et suivent sa version. `.mcp.json`, le contexte
   projet et les journaux mémoire restent, eux, écrits une seule fois.
-
 - **`.github/agents/` a un seul propriétaire** — le scaffolder générait un
   wrapper à frontière d'outils fixe (`read, search` ou `read, search, execute`)
   pointant vers un chemin d'agent codé en dur, et l'émetteur Copilot réécrivait
@@ -288,27 +225,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   d'agent, fichier écrit à la main préservé) sont épinglées sur l'émetteur.
   Le wrapper pointe la définition résolue par la frontière kit/overrides :
   l'override du projet quand il existe, la version du kit sinon.
-
 - **`grimoire memory status` ne sort plus en erreur sur un backend mort.** Un
   diagnostic qui échoue quand son sujet échoue ne sert à rien : la commande
   reporte désormais le contrat des sept couches, calculé depuis la config, plus
   la raison de l'indisponibilité. Le marqueur de santé `[OK]` / `[XX]` était par
   ailleurs invisible, Rich interprétant les crochets comme des balises.
-
 - **`memory_link_status()` porte le contrat de couches et la parité**, donc
   l'atelier et le cockpit lisent la même source au lieu de la déduire chacun de
   son côté.
-
 - **La page mémoire du cockpit lit l'état réel.** Elle rendait un instantané
   généré qui devinait le backend depuis la présence d'un répertoire et lisait le
   store legacy ; ses cinq pseudo-couches ne correspondaient à aucune couche du
   runtime. Elle interroge maintenant l'API locale et affiche les sept couches
   réelles avec leur état, avec repli sur l'instantané si aucune API ne répond.
-
 - `memory up` et `memory status` vivent dans `grimoire.cli.cmd_memory_ops`,
   chaîné depuis `cmd_memory_lexical` : le ratchet R2 interdit à `cmd_memory` de
   grossir, et il rétrécit de 56 lignes.
-
 - **fastembed remplace sentence-transformers et torch** dans les extras
   `[qdrant]` et `[weaviate]`. Mesure : la pile passe de **4,8 Go à 203 Mo** pour
   le même modèle par défaut, dont 2,7 Go de wheels `nvidia/*` et 689 Mo de
@@ -319,60 +251,83 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   étant fidèle et non quantifié. `sentence-transformers` reste utilisé à
   l'exécution s'il est déjà installé. Nouveau module
   `grimoire.memory.embedding`, partagé par les backends Qdrant et Weaviate.
-
 - **La dimension des vecteurs n'est plus lue dans une table** — elle vient d'un
   vecteur sonde au chargement, donc elle est juste pour tout modèle, y compris
   inconnu. L'ancienne table retombait silencieusement sur 384.
-
 - **Le backend Qdrant refuse une collection d'une autre largeur** que le modèle
   courant, au lieu d'écrire des vecteurs incohérents dans un store existant.
-
 - Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
   `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
   chargement avec le moteur réellement installé, fastembed compris.
-
 - **`grimoire init` interroge le réseau, plus le service** — la question porte
   désormais sur l'egress, et un projet déclaré sans accès sortant est généré en
   `retrieval_mode: lexical`. Le démarrage de Qdrant via Docker reste proposé
   quand l'egress existe, mais **par défaut non** au lieu de par défaut oui.
-
 - **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
   signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
   `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
+- La conversion d'états ledger ↔ board vit dans un module unique
+  (`grimoire.missions.board`), testée dans les deux sens. Un état ajouté d'un
+  seul côté casse un test plutôt que de faire disparaître une carte du tableau.
 
 ### Corrigé
 
 - La propagation d'identité vers `.github/copilot-instructions.md` écrasait le
   champ suivant lorsqu'une valeur était vide (`\s*` franchissait le saut de
   ligne). Un projet sans `user.name` y perdait son réglage de langue.
-
 - Le kit copiait ses propres `__pycache__` dans les projets.
-
 - **Détection d'hôte** — `HostBridge.detect()` identifiait Claude Code sur la
   présence d'`ANTHROPIC_API_KEY` et Codex sur `OPENAI_API_KEY`. Une clé
   d'API dit qui paie les jetons, pas quel hôte s'exécute : toute session
   exportant les deux était mal routée. La détection repose désormais sur des
   marqueurs de processus (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_ENV`…).
-
 - **`CLAUDE_CODE_CLI_MANIFEST`** déclarait `user_prompt_submit: False`. Claude
   Code expose bien cet événement ; le manifeste en excluait le seul hook capable
   d'enrichir un prompt avant que le modèle ne le lise.
-
 - **Fenêtres de contexte des variantes longues** — `resolve_window` résolvait
   `claude-opus-5[1m]` vers la fenêtre standard de sa famille, sous-évaluant le
   budget d'un facteur cinq. Un marqueur explicite (`[1m]`, `-1m`, `:1m`) est
   désormais lu avant la famille.
-
 - **Fusion JSON des émetteurs** — une variable de boucle réutilisée faisait
   passer le texte du fichier précédent à la fonction de fusion quand le fichier
   cible n'existait pas encore.
-
 - **Suite de tests rouge sans l'extra `mcp`** — `tests/unit/mcp/test_server.py`
   importait `grimoire.mcp.server` au niveau module : sans `grimoire-kit[mcp]`
   installé, pytest remontait une *erreur de collecte* et toute la suite passait
   au rouge. Un `pytest.importorskip` énonce le même fait sans en faire un échec.
   C'est ce qui rendait le hook pre-commit systématiquement rouge en local, et
   donc `--no-verify` systématique.
+- **Le hook de cycle de vie coûtait 391 ms par appel d'outil** — et il était
+  câblé sur `Read`, donc sur chaque lecture de fichier de chaque session.
+  Trois causes, toutes mesurées :
+  **le point d'entrée** (`grimoire host hook` construisait l'arbre Typer complet,
+  chaque module `cmd_*` importé pour résoudre une sous-commande) — un script
+  console dédié `grimoire-hook` le remplace dans les configurations générées,
+  391 ms → 102 ms ;
+  **les ré-exports impatients** (`grimoire/__init__.py` et
+  `grimoire/core/__init__.py` importaient onze modules dont le scaffolder et le
+  résolveur d'archétypes) — résolution paresseuse PEP 562, API inchangée ;
+  **le moteur du standard importé pour rien** (`check_evidence_gates` au niveau
+  module alors que la décision d'outil ne l'appelle jamais) — import différé, et
+  les chemins de sortie du standard déménagent dans le module léger
+  `standard_manifest`.
+  Enfin `Read` sort du matcher sur les hôtes qui ont une table de permissions :
+  les mêmes fichiers y sont déjà refusés déclarativement, à coût nul. L'accès par
+  commande shell reste couvert, `Bash` restant dans le matcher.
+  Deux tests épinglent le résultat, dont un qui échoue si le chemin des hooks
+  réimporte le moteur au chargement.
+- **Motifs de secrets et règles déclaratives avaient dérivé** — la détection
+  couvrait neuf familles de fichiers de credentials, la table `deny` six. Trois
+  familles (`.npmrc`, `credentials.json`, `service-account*.json` entre autres)
+  n'étaient donc pas protégées du côté qui ne coûte rien. Les deux formes sont
+  désormais déclarées ensemble dans `grimoire.hosts.secrets`, et un test refuse
+  qu'une famille existe sans ses deux expressions.
+
+### Sécurité
+
+- Alerte CodeQL `py/command-line-injection` du dispatch cockpit classée après
+  correction du risque réel (injection d'argument) : les valeurs issues d'une
+  requête passent après `--` et refusent le préfixe `-`.
 
 ## [3.32.0] - 2026-08-18
 

@@ -1530,6 +1530,10 @@
    "version": "3.24.0",
    "path": "framework/memory/backends/backend_ollama.py"
   },
+  "6cef5b247c38a3fa3e3cac5415a47d5c95871f53ac402fdcf6e75472125c73e3": {
+   "version": "3.33.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
+  },
   "6cf666c2bc255a24da9368bced45e8507b2e47841ad51cd7172dec99413a7311": {
    "version": "3.32.0",
    "path": "framework/tools/__pycache__/rag-retriever.cpython-314.pyc"
@@ -2574,6 +2578,10 @@
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/systems-debugger.md"
   },
+  "af3d871aa6b8dd0de086c835cd896854143b3556069400bf3da34dcb67004883": {
+   "version": "3.33.0",
+   "path": "framework/agentic-standard/templates/rule-packs.yaml"
+  },
   "af546d1e1a095e72af0576c84d933b081849bf4ba64995fe4425742eb8f42e0b": {
    "version": "3.32.0",
    "path": "framework/tools/__pycache__/cognitive-flywheel.cpython-312.pyc"
@@ -3138,6 +3146,10 @@
    "version": "3.32.0",
    "path": "archetypes/platform-engineering/agents/deploy-orchestrator.md"
   },
+  "d222c98c9fbf7743bc4d74783a168205d98f415b912e4483dd5baea94bf036a1": {
+   "version": "3.33.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
+  },
   "d28c1b06078cbf2e7ec3fcf72c61de9c70363fb9c397d8038e48574d4dd96082": {
    "version": "3.17.0",
    "path": "framework/agentic-standard/templates/memory-policy.yaml"
@@ -3677,6 +3689,10 @@
   "f7bf4004b5f5cc86d6550820bf1a04f251203e9532689901aee07d82bcce09ca": {
    "version": "3.21.1",
    "path": "framework/tools/nso.py"
+  },
+  "f8ca9937e3ec92c109fdb43a1aa9822fd7f78fda6a45cbcde38564d3b2c745a3": {
+   "version": "3.33.0",
+   "path": "framework/hooks/pre-commit-cc.sh"
   },
   "f93a8787fa1df71342fbf275752ac2a666dcb9eba0abbede3f753274fe0a7058": {
    "version": "3.16.0",
