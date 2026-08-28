@@ -454,3 +454,49 @@ def test_use_case_pattern_links_point_at_real_patterns(catalogue, pages):
         if pid not in known
     })
     assert not dangling, f"compositions citant des patterns inconnus : {dangling}"
+
+
+# ── Les nombres écrits à la main dans la prose ─────────────────────────────
+
+PALETTE_COUNT_RE = r"(\d+) cases de la palette|palette[^.]*?(\d+) cases"
+
+
+def _palette_counts_in(text: str) -> list[int]:
+    return [int(next(c for c in m if c)) for m in re.findall(PALETTE_COUNT_RE, text)]
+
+
+def _prose_sources() -> list[tuple[Path, str]]:
+    gloss = ROOT / "schemas/blueprint-v1.fr.yaml"
+    return [(gloss, gloss.read_text(encoding="utf-8")), *_handwritten_nodal_sources()]
+
+
+def test_prose_palette_count_matches_the_source():
+    """« 17 cases » doit rester vrai.
+
+    Un chiffre écrit dans une page de concept ne se régénère pas : il vieillit
+    en silence pendant que la source bouge. C'est le seul nombre qu'on affirme
+    à la main, et il est tenu.
+    """
+    _primitives, xxl = gen.load_primitives()
+    found = 0
+    wrong = []
+    for path, text in _prose_sources():
+        for written in _palette_counts_in(text):
+            found += 1
+            if written != len(xxl):
+                wrong.append(
+                    f"{path.name} annonce {written} cases, la source en a {len(xxl)}"
+                )
+    # Sans cette borne, reformuler la phrase rendrait le garde aveugle tout en
+    # le laissant vert — la panne exacte qu'il est censé empêcher.
+    assert found >= 2, (
+        f"seulement {found} mention(s) trouvée(s) : la formulation a changé et "
+        "le garde ne lit plus rien"
+    )
+    assert not wrong, "\n  ".join(wrong)
+
+
+def test_the_palette_count_gate_can_fail():
+    _primitives, xxl = gen.load_primitives()
+    faux = f"la palette expose {len(xxl) + 1} cases"
+    assert _palette_counts_in(faux) == [len(xxl) + 1]

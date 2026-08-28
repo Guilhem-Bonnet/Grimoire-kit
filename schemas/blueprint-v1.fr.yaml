@@ -161,8 +161,8 @@
   texte: >-
     Classe sémantique du node, orthogonale à `kind` : `kind` dit *d'où il
     vient*, `role` dit *ce qu'il fait*. L'une des 7 primitives. Facultative et
-    additive ; la vingtaine de cases de la palette ne sont que des
-    configurations de ces 7 (voir la page Palette).
+    additive ; les 17 cases de la palette ne sont que des configurations
+    de ces 7 (voir la page Palette).
 
 /$defs/node/properties/ref:
   texte: >-

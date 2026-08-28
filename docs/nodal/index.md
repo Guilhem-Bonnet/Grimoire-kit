@@ -32,8 +32,9 @@ s'il est réellement testé.**
 
 === "En blueprint"
 
-    Vous dessinez trois nodes : un qui cadre la mission, une **porte** qui
-    exige une preuve, un qui vérifie. Vous les reliez. Vous compilez.
+    Vous dessinez trois nodes : un qui cadre la mission, un qui la gouverne,
+    un qui vérifie — et vous posez sur le deuxième une **porte** qui exige une
+    preuve. Vous les reliez. Vous compilez.
 
     ```json
     { "from": "govern.out", "to": "verify.in", "contract": "task-envelope" }
@@ -44,8 +45,9 @@ s'il est réellement testé.**
     - **un fichier**, `mon-premier.blueprint.json`, versionné avec le code.
     - **un mission pack compilé**, avec son empreinte `sha256`. Deux
       compilations du même fichier donnent le même pack.
-    - **une porte qui bloque.** Tant que la preuve exigée n'est pas là, rien
-      ne passe. Ce n'est pas une convention, c'est un refus.
+    - **une exigence déclarée, pas une intention.** La porte dit ce qu'il faut
+      pour passer ; c'est le runtime qui l'applique, et il refuse. Un
+      commentaire dans un README ne refuse rien.
     - **des erreurs avant l'exécution.** Un contrat qui ne correspond pas est
       détecté à la validation, pas après avoir payé des jetons pour le
       découvrir.
@@ -64,6 +66,7 @@ Un blueprint n'est pas un meilleur prompt. C'est un objet différent :
 | se relit | se **valide** |
 | se refait | se **rejoue** |
 | échoue quand vous vous en apercevez | échoue à la porte, sans vous |
+| n'existe qu'au moment où vous le lancez | se vérifie sans rien lancer |
 | vit dans une conversation | vit dans le dépôt |
 
 La question utile n'est donc pas « lequel est le meilleur ? » mais « cette

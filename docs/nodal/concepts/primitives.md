@@ -1,7 +1,7 @@
 # Sept primitives, pas vingt types de node
 
-La palette de l'atelier expose une vingtaine de cases. Le format de fichier,
-lui, n'en connaît que **sept**. Chaque case est un paramétrage de l'un des sept
+La palette de l'atelier expose 17 cases. Le format de fichier, lui, n'en
+connaît que **sept**. Chaque case est un paramétrage de l'un des sept
 rôles — pas un type de plus.
 
 Cette page explique pourquoi, et ce que ça change pour vous.
@@ -100,6 +100,6 @@ chaque rôle le précise.
 
 ## À lire ensuite
 
-- [Référence des primitives](../reference/index.md) — une page par rôle.
+- [Référence des primitives](../reference/primitives.md) — le tableau des sept, et une page par rôle.
 - [La palette](../reference/palette.md) — les cases et leur primitive.
 - [Les portes](portes.md) — la primitive la plus paramétrée des sept.

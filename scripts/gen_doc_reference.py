@@ -70,10 +70,10 @@ BASE = "nodal/reference"
 REF_VARIANTS = ("pattern", "extension-node", "composite")
 
 GENERATED_HEADER = (
-    "!!! info \"Page générée\"\n"
-    "    Cette page est produite au build par `scripts/gen_doc_reference.py`\n"
-    "    depuis {source}. La modifier à la main n'aurait aucun effet : éditez\n"
-    "    la source.\n"
+    '!!! info "Page générée — ne pas éditer"\n'
+    "    Rendue au build par `scripts/gen_doc_reference.py`,\n"
+    "    depuis {source}.\n"
+    "    Une modification manuelle serait perdue au build suivant.\n"
 )
 
 
@@ -293,10 +293,14 @@ def _nested_rows(
     return rows
 
 
-def render_primitive(name: str, spec: dict[str, Any], xxl: dict[str, Any]) -> str:
+def render_primitive(
+    name: str, spec: dict[str, Any], xxl: dict[str, Any], primitives: dict[str, Any]
+) -> str:
     cases = sorted(case for case, m in xxl.items() if m["primitive"] == name)
     out = [
-        f"# {name}",
+        # Le titre porte le rôle et sa nature : `Reference` seul, sur une page
+        # rangée sous « Référence », ne dit pas de quoi il s'agit.
+        f"# {name} — primitive de node",
         "",
         GENERATED_HEADER.format(source="`src/grimoire/tools/blueprint_primitives.py`"),
         "",
@@ -327,6 +331,57 @@ def render_primitive(name: str, spec: dict[str, Any], xxl: dict[str, Any]) -> st
         out += ["",
                 "Ces cases ne sont pas des types de node : ce sont des configurations",
                 f"de `{name}`. Le fichier ne connaît que le rôle.", ""]
+    if not cases:
+        out += [
+            "## Aucune case de palette",
+            "",
+            f"Aucune case de la palette ne configure `{name}` : ce rôle se déclare",
+            "directement dans le fichier, par `role`. Ce n'est pas un oubli de la",
+            "palette — c'est un rôle qu'on écrit plutôt qu'on ne pose.",
+            "",
+        ]
+    others = [n for n in primitives if n != name]
+    out += [
+        "## Voir aussi",
+        "",
+        "- [Les sept primitives](primitives.md) — le tableau d'ensemble",
+        "- [Sept primitives, pas vingt types de node](../concepts/primitives.md) — pourquoi",
+        "- [La palette](palette.md) — toutes les cases et leur rôle",
+        "- [Format de fichier](format-fichier.md#node) — où `role` se déclare",
+        "",
+        "Les autres rôles : "
+        + " · ".join(f"[{n}]({n.lower()}.md)" for n in others) + ".",
+        "",
+    ]
+    return "\n".join(out)
+
+
+def render_primitives_index(primitives: dict[str, Any], xxl: dict[str, Any]) -> str:
+    out = [
+        "# Les sept primitives",
+        "",
+        GENERATED_HEADER.format(source="`src/grimoire/tools/blueprint_primitives.py`"),
+        "",
+        "Le `role` d'un node dit ce qu'il fait structurellement, indépendamment",
+        "de `kind` qui dit d'où il vient. Il y en a sept, et une seule produit",
+        "quelque chose.",
+        "",
+        "| Rôle | Produit | Ce qu'il fait | Compile vers | Cases |",
+        "| --- | --- | --- | --- | ---: |",
+    ]
+    for name, spec in primitives.items():
+        cases = sum(1 for m in xxl.values() if m["primitive"] == name)
+        work = "**oui**" if spec["doesWork"] else "non"
+        out.append(
+            f"| [{name}]({name.lower()}.md) | {work} | {spec['role'].rstrip('.')} "
+            f"| {spec['compilesTo'].rstrip('.')} | {cases} |"
+        )
+    out += [
+        "",
+        "Pourquoi sept et pas vingt : voir",
+        "[Sept primitives, pas vingt types de node](../concepts/primitives.md).",
+        "",
+    ]
     return "\n".join(out)
 
 
@@ -374,7 +429,15 @@ def render_contract(contract: dict[str, Any]) -> str:
     for field in fields:
         obligation = "**requis**" if field.get("obligation") == "required" else "facultatif"
         out.append(f"| `{field['name']}` | {obligation} | {field.get('role', '—')} |")
-    out.append("")
+    out += [
+        "",
+        "## Voir aussi",
+        "",
+        "- [Tous les contrats](index.md)",
+        "- [Contrats et pins](../../concepts/contrats-et-pins.md) — la règle d'identité",
+        "- [Format de fichier](../format-fichier.md#pin) — où un contrat se déclare",
+        "",
+    ]
     return "\n".join(out)
 
 
@@ -399,8 +462,24 @@ def render_contracts_index(contracts: list[dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def pattern_link(
+    pattern_id: str, by_id: dict[str, Any], families: dict[str, Any], prefix: str = ""
+) -> str:
+    """Un id de pattern, rendu cliquable vers sa fiche.
+
+    Depuis une page de famille les fiches sont dans le même fichier, depuis
+    ailleurs il faut le préfixe — d'où le paramètre plutôt que deux fonctions.
+    """
+    pattern = by_id.get(pattern_id)
+    if pattern is None:
+        return f"`{pattern_id}`"
+    slug = family_slug(families[pattern["family"]])
+    return f"[`{pattern_id}`]({prefix}{slug}.md#{_anchor(pattern_id)})"
+
+
 def render_family(
-    family: dict[str, Any], patterns: list[dict[str, Any]], relations: list[dict[str, Any]]
+    family: dict[str, Any], patterns: list[dict[str, Any]], relations: list[dict[str, Any]],
+    by_id: dict[str, Any], families: dict[str, Any]
 ) -> str:
     out = [
         f"# {family['name']}",
@@ -415,6 +494,9 @@ def render_family(
     by_source: dict[str, list[dict[str, Any]]] = {}
     for relation in relations:
         by_source.setdefault(relation["from"], []).append(relation)
+
+    def link_to(pattern_id: str) -> str:
+        return pattern_link(pattern_id, by_id, families)
     for pattern in patterns:
         pid = pattern["id"]
         out += [
@@ -436,9 +518,8 @@ def render_family(
             out += [f"**À ne pas faire.** {pattern['antiPattern']}", ""]
         links = by_source.get(pid) or []
         if links:
-            rendered = ", ".join(
-                f"{r['kind']} → `{r['to']}`" + (f" ({r['label']})" if r.get("label") else "")
-                for r in links
+            rendered = " · ".join(
+                f"{r.get('label') or r['kind']} {link_to(r['to'])}" for r in links
             )
             out += [f"**Relations.** {rendered}", ""]
     return "\n".join(out)
@@ -497,9 +578,7 @@ def render_anti_patterns(
         related = [pid for pid in (anti.get("patterns") or []) if pid in by_id]
         if related:
             links = ", ".join(
-                f"[`{pid}`](patterns/{family_slug(by_family[by_id[pid]['family']])}.md"
-                f"#{_anchor(pid)})"
-                for pid in related
+                pattern_link(pid, by_id, by_family, prefix="patterns/") for pid in related
             )
             out += [f"**Corrigé par.** {links}", ""]
     return "\n".join(out)
@@ -619,13 +698,6 @@ def render_use_cases(catalogue: dict[str, Any]) -> str:
     by_id = {p["id"]: p for p in catalogue["patterns"]}
     seeded = set(studio_seeded_use_cases(catalogue))
 
-    def pattern_link(pid: str) -> str:
-        pattern = by_id.get(pid)
-        if pattern is None:
-            return f"`{pid}`"
-        slug = family_slug(families[pattern["family"]])
-        return f"[`{pid}`](patterns/{slug}.md#{_anchor(pid)})"
-
     out = [
         "# Compositions éprouvées",
         "",
@@ -644,7 +716,9 @@ def render_use_cases(catalogue: dict[str, Any]) -> str:
     ]
     for use_case in use_cases:
         patterns = use_case.get("patterns") or []
-        links = ", ".join(pattern_link(pid) for pid in patterns) or "—"
+        links = ", ".join(
+            pattern_link(pid, by_id, families, prefix="patterns/") for pid in patterns
+        ) or "—"
         seeded_here = use_case["id"] in seeded
         seed = f"[ouvrir]({STUDIO_URL}?uc={use_case['id']})" if seeded_here else "—"
         out.append(f"| {use_case['name']} | {links} | {seed} |")
@@ -670,7 +744,7 @@ def render_index(
         "",
         "| Section | Contenu |",
         "| --- | --- |",
-        f"| [Primitives](unit.md) | les {len(primitives)} rôles sémantiques |",
+        f"| [Primitives](primitives.md) | les {len(primitives)} rôles sémantiques |",
         f"| [Palette](palette.md) | les {len(xxl)} cases et leur primitive |",
         f"| [Contrats](contrats/index.md) | les {len(catalogue['contracts'])} types échangés |",
         f"| [Patterns](patterns/index.md) | les {len(catalogue['patterns'])} patterns du "
@@ -692,7 +766,7 @@ def render_summary(
 ) -> str:
     lines = [
         "* [Vue d'ensemble](index.md)",
-        "* Primitives",
+        "* [Primitives](primitives.md)",
     ]
     lines += [f"    * [{name}]({name.lower()}.md)" for name in primitives]
     lines += [
@@ -741,8 +815,9 @@ def build(write: Callable[[str, str], None]) -> list[str]:
         written.append(f"{BASE}/{path}")
 
     emit("index.md", render_index(primitives, catalogue, xxl))
+    emit("primitives.md", render_primitives_index(primitives, xxl))
     for name, spec in primitives.items():
-        emit(f"{name.lower()}.md", render_primitive(name, spec, xxl))
+        emit(f"{name.lower()}.md", render_primitive(name, spec, xxl, primitives))
     emit("palette.md", render_palette(primitives, xxl))
     emit("exemples.md", render_examples(load_examples()))
     emit("compositions.md", render_use_cases(catalogue))
@@ -755,8 +830,14 @@ def build(write: Callable[[str, str], None]) -> list[str]:
     emit("patterns/index.md", render_patterns_index(catalogue["families"], catalogue["patterns"]))
     for family in catalogue["families"]:
         members = [p for p in catalogue["patterns"] if p["family"] == family["id"]]
-        emit(f"patterns/{family_slug(family)}.md",
-             render_family(family, members, catalogue["relations"]))
+        emit(
+            f"patterns/{family_slug(family)}.md",
+            render_family(
+                family, members, catalogue["relations"],
+                {p["id"]: p for p in catalogue["patterns"]},
+                {f["id"]: f for f in catalogue["families"]},
+            ),
+        )
 
     emit("anti-patterns.md",
          render_anti_patterns(catalogue["antiPatterns"], catalogue["patterns"],
