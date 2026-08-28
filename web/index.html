@@ -235,11 +235,11 @@
 <div id="proof-bar" aria-label="Références">
   <div class="container">
     <div class="proof-inner" id="proof-bar-inner">
-      <span class="proof-item">108 OUTILS CLI</span>
+      <span class="proof-item">164 COMMANDES CLI</span>
       <span class="proof-sep">·</span>
       <span class="proof-item">36 PATTERNS GOUVERNÉS</span>
       <span class="proof-sep">·</span>
-      <span class="proof-item">5917 TESTS</span>
+      <span class="proof-item">5517 TESTS</span>
       <span class="proof-sep">·</span>
       <span class="proof-item">10 ARCHÉTYPES · 33 AGENTS</span>
       <span class="proof-sep">·</span>
@@ -439,8 +439,8 @@
         <a href="demo.html" class="feature-link">VOIR LA DÉMO →</a></div>
       <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-02</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="1.5"/><path d="M9 11h10M9 15h6"/></svg>
-        <h3>Artefacts UDF</h3><p>Unified Dynamic Factory : agents, workflows, skills, instructions créés dynamiquement avec triage éphémère/permanent intégré.</p>
-        <a href="documentation.html" class="feature-link">SPEC UDF →</a></div>
+        <h3>Surfaces hôtes</h3><p>Une description neutre du projet, rendue par hôte : sous-agents, skills, commandes, hooks bloquants. Ce qu'un hôte ne sait pas exécuter est déclaré comme dégradation, jamais passé sous silence.</p>
+        <a href="documentation.html" class="feature-link">GRIMOIRE HOST →</a></div>
       <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-03</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 20h20M4 14h12M4 8h8"/></svg>
         <h3>Memory tiered</h3><p>Contexte mémoire structuré en niveaux : working, episodic, semantic. Isolation par namespace, TTL configurable par tier.</p>
@@ -463,8 +463,8 @@
         <a href="documentation.html" class="feature-link">PCE SPEC →</a></div>
       <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-08</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4a10 10 0 0 1 0 20M14 4A10 10 0 0 0 4 14M14 24V4"/><path d="M4 14h20"/></svg>
-        <h3>AORA iteration loop</h3><p>Assess → Orchestrate → Run → Audit : boucle d'itération autonome avec critères d'arrêt déclarés dans le contrat.</p>
-        <a href="documentation.html" class="feature-link">AORA DOC →</a></div>
+        <h3>Évals rejouées</h3><p>Un flow déclare ses cas et ses assertions ; le rejeu les vérifie sur un relevé d'exécution réel. Un cas non exécuté est rapporté comme tel, jamais comme réussi.</p>
+        <a href="documentation.html" class="feature-link">PROTOCOLE D'ÉVALS →</a></div>
       <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-09</span>
         <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/><rect x="16" y="4" width="8" height="8" rx="1.5"/><rect x="4" y="16" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="8" height="8" rx="1.5"/></svg>
         <h3>Trust scoring</h3><p>Score de confiance par agent, par session et par type d'artefact. Alerte automatique si le score descend sous le seuil du contrat.</p>
@@ -481,19 +481,19 @@
     <div class="preuves-grid">
       <div>
         <div class="metrics-row">
-          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="99" data-dec="1" data-suffix="%">99%</span></div><div class="metric-label">TRAÇABILITÉ</div></div>
-          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="3.4" data-dec="1" data-suffix="s">3.4s</span></div><div class="metric-label">LATENCE MÉDIANE SOG</div></div>
-          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="0">0</span></div><div class="metric-label">HALLUCINATION NON DÉTECTÉE</div></div>
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="0">0</span></div><div class="metric-label">RÉGRESSION DURE · 96 RUNS ACTIVÉS</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="9" data-suffix="/40">9/40</span></div><div class="metric-label">MÊME MESURE · BRAS TÉMOIN</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="3">3</span></div><div class="metric-label">CAMPAGNES PRÉ-ENREGISTRÉES</div></div>
         </div>
         <div class="metrics-row">
-          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="12400">12 400</span></div><div class="metric-label">ARTEFACTS FORGÉS · 30J</div></div>
-          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="47">47</span></div><div class="metric-label">BUILDERS EARLY ACCESS</div></div>
-          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="6">6</span></div><div class="metric-label">SURFACES · CONTROL PLANE</div></div>
+          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="2960">2960</span></div><div class="metric-label">TESTS · SUITE BLOQUANTE</div></div>
+          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="178">178</span></div><div class="metric-label">FICHIERS SOUS MYPY STRICT</div></div>
+          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="36">36</span></div><div class="metric-label">PATTERNS DU STANDARD</div></div>
         </div>
       </div>
       <div class="quote-block reveal" data-delay="200">
-        <p class="quote-text">"Pour la première fois, je peux auditer exactement pourquoi un agent a pris une décision — et rejouer la séquence à l'identique. C'est ce que j'attendais depuis trois ans."</p>
-        <div class="quote-author">THOMAS V. · STAFF ENGINEER · EARLY ACCESS</div>
+        <p class="quote-text">Le critère composite pré-enregistré n'est pas atteint : effet non démontré. Publié tel quel, conformément au protocole — aucune revendication d'efficacité n'est faite sur cette base.</p>
+        <div class="quote-author">VERDICT A1-v3 · CAMPAGNE 2026-08-27 · <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/evals/reports/2026-08-27/report.md" style="color:inherit;">RAPPORT COMPLET</a></div>
       </div>
     </div>
   </div>
