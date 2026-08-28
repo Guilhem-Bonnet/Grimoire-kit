@@ -139,7 +139,10 @@ Le pivot. `grimoire flow run`, `status`, `resume`, `abort`, adossés au
 `RuntimeKernel` existant.
 
 - Un node exécuté reçoit : son contrat d'entrée, sa frontière d'outils, ses
-  critères d'acceptation issus du ledger, et rien d'autre.
+  critères d'acceptation issus du ledger, un context-pack, et rien d'autre. Le
+  context-pack n'est pas décoratif : sans lui, chaque node redécouvre le dépôt
+  et la conduite node par node coûte plus cher qu'un document unique. C'est le
+  point qui décide du critère d'arrêt.
 - Les contrats de pins deviennent des invariants d'exécution, pas seulement de
   composition. Un contrat de sortie non satisfait suspend le flow en nommant le
   node et l'élément fautifs.
@@ -206,6 +209,13 @@ Les règles d'honnêteté du [protocole d'évaluation](evals-protocol.md)
 s'appliquent telles quelles : non exécuté n'est pas échoué, et aucune
 revendication sans critère pré-enregistré.
 
+Ce lot produit l'artefact fédérateur du plan : **le rapport de run**. Vue,
+preuve et observabilité sont trois noms pour la même chose — le graphe coloré
+par issue de node, le coût par node, les contrats satisfaits, les gates
+franchis ou refusés, la preuve produite, le diff. Un artefact par exécution,
+partageable. C'est aussi le contenu naturel de la page publique une fois
+retirées les métriques non adossées à une mesure (lot 0).
+
 **Financement** : le chemin de rejeu en double disparaît ; un seul producteur de
 relevé, celui du moteur.
 
@@ -220,6 +230,65 @@ surface est le risque principal.
 **Financement** : aucun. Ce lot est un pari, pas une dette à solder — d'où sa
 dernière place.
 
+## Transversales
+
+Deux préoccupations ne sont pas des lots : elles traversent les lots 1 à 5. Il
+faut les concevoir maintenant et les construire au fil de l'eau, sans en faire
+une couche supplémentaire à côté du nodal et du standard. La surface est le
+risque principal du dépôt ; ces transversales doivent rester des fonctions du
+moteur, pas des sous-systèmes avec leurs concepts, leurs fichiers et leur CLI.
+
+### T1 — Le pilote : la fonction qui décide combien dépenser
+
+Le graphe dit *quoi*, le pilote dit *combien*. Avant chaque node, une fonction
+de décision arbitre : quel modèle, quel contexte, combien de passes de
+vérification, et faut-il seulement appeler.
+
+Le coût agentique est dominé par la taille du contexte par appel, pas par le
+nombre d'appels. Cinq leviers, par impact décroissant :
+
+| Levier | Mécanisme |
+|---|---|
+| Ne pas appeler | Mémoïsation sur l'empreinte des entrées du node et de l'état du dépôt ; un node déjà calculé sur les mêmes entrées rejoue son résultat |
+| Envoyer moins | Le contrat du node borne ce qui est nécessaire ; le context-pack empêche la redécouverte du dépôt |
+| Appeler plus petit | Routage par genre de node — une découverte ou une réécriture mécanique n'exige pas le modèle du haut |
+| Dégrader plutôt que dépasser | Genre de node `budget` : abandon des passes optionnelles avant le plafond |
+| S'arrêter tôt | Critères d'acceptation atteints, le node rend la main |
+
+C'est le seul endroit du système qui a prise sur les quatre postes de coût. Sa
+place est dans le moteur, appelée par lui : un module et une politique, pas une
+couche.
+
+### T2 — L'accès : créer un flow sans le dessiner
+
+Rendre un éditeur de graphe intuitif est un chantier sans fin, et un canevas
+vide décourage. L'inversion coûte moins et donne plus : **le flow s'extrait d'un
+run, il ne se dessine pas.**
+
+- Le moteur enregistre déjà la séquence exécutée. `flow extract <run>` la
+  transforme en blueprint brouillon, que le Studio édite ensuite. Créer devient
+  éditer quelque chose qui a déjà fonctionné.
+- Une forme **texte d'abord**, lisible et diffable, avec le graphe comme vue
+  bidirectionnelle sur le même modèle. Un format uniquement graphique interdit
+  la revue et le diff.
+- `flow new --from <flow-du-registre>` : partir d'un flow **mesuré** plutôt que
+  du vide — ce qui suppose le lot 5.
+
+Cette transversale n'est possible que parce que le ledger de traces existe.
+C'est l'avantage structurel le moins imitable du dépôt.
+
+### L'observabilité n'est pas un lot non plus
+
+Elle tombe du moteur. Ce qui manque n'est pas une surface de plus — il y en a
+déjà — mais une **timeline unique par tâche** répondant à « pourquoi ce node a
+produit cela » : entrées, contrat, appels d'outils refusés, coût, décision qui
+mène au node suivant. C'est le périmètre déjà cadré côté tâches agentiques, et
+un flow compilé en consignes ne peut structurellement pas l'alimenter.
+
+Une exigence s'ajoute : **le coût est un axe de première classe** — par node,
+par run, comparé aux exécutions précédentes du même flow. On ne réduit pas ce
+qu'on n'attribue pas.
+
 ## Ce qui n'est pas fait
 
 Un plan sans refus n'est pas un plan. Chaque ligne est une chose que le kit a la
@@ -232,6 +301,7 @@ capacité technique de faire et ne devrait pas faire dans cette trajectoire.
 | Extension du cockpit | Le portefeuille multi-projets n'a pas de sens sans projet tiers |
 | Patterns supplémentaires | Le manque n'est pas le vocabulaire, c'est l'exécution |
 | Nouveau format de flow | Le réécrire coûterait le Studio, les évals par node et le validateur, pour un gain nul |
+| Framework de pilotage distinct | La fonction est réelle et retenue en T1 ; une troisième couche à côté du nodal et du standard ne l'est pas. Le pilote est une décision appelée par le moteur, pas un sous-système |
 
 ## Critère d'arrêt, à pré-enregistrer avant le lot 1
 
