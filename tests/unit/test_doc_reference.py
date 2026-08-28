@@ -332,7 +332,8 @@ def test_examples_are_valid_blueprints():
 
     broken = []
     for blueprint in gen.load_examples():
-        schema_errors, _status = _schema_issues(blueprint)
+        schema_errors, _status, schema_ran = _schema_issues(blueprint)
+        assert schema_ran, "jsonschema absent : cette vérification ne prouverait rien"
         structural = [i.render() for i in _structural_issues(blueprint, None)]
         if schema_errors or structural:
             broken.append(f"{blueprint['id']}: {schema_errors + structural}")
@@ -502,31 +503,27 @@ def test_the_palette_count_gate_can_fail():
     assert _palette_counts_in(faux) == [len(xxl) + 1]
 
 
-# ── Une limitation documentée doit disparaître quand elle est levée ────────
+# ── La distinction entre contrats du catalogue et du format ────────────────
 
 
-def test_error_envelope_absence_is_still_true(catalogue):
-    """La page des canaux documente un blocage ; ce test le tient à jour.
+def test_channels_page_explains_the_format_contract(catalogue):
+    """La page des canaux doit expliquer pourquoi `error-envelope` est à part.
 
-    `error-envelope` est exigé sur toute edge `failure` (règle R-F2 de
-    `blueprint_resilience`) mais absent des contrats du catalogue, que
-    l'atelier utilise pour refuser les contrats inconnus. Les deux règles se
-    ferment l'une sur l'autre.
-
-    Le jour où le contrat entre au catalogue, ce test échoue — et c'est le
-    but : l'avertissement de `docs/nodal/concepts/canaux.md` devra partir avec
-    lui. Une limitation documentée qu'on oublie de retirer devient un mensonge.
+    Il est exigé sur toute edge `failure` mais absent des contrats du
+    catalogue : le lint le reconnaît comme contrat du format. Un lecteur qui
+    cherche `error-envelope` dans la référence des contrats ne le trouvera pas
+    — la page doit lui dire pourquoi, sinon il croira à une erreur.
     """
     from grimoire.tools.blueprint_resilience import ERROR_CONTRACT
 
-    contracts = {c["id"] for c in catalogue["contracts"]}
-    warning = (ROOT / "docs/nodal/concepts/canaux.md").read_text(encoding="utf-8")
-    if ERROR_CONTRACT in contracts:
+    page = (ROOT / "docs/nodal/concepts/canaux.md").read_text(encoding="utf-8")
+    in_catalogue = ERROR_CONTRACT in {c["id"] for c in catalogue["contracts"]}
+    if in_catalogue:
         pytest.fail(
-            f"`{ERROR_CONTRACT}` est désormais au catalogue : retirer "
-            "l'avertissement « l'atelier bloque les deux façons de l'écrire » "
-            "de docs/nodal/concepts/canaux.md, et cette garde avec."
+            f"`{ERROR_CONTRACT}` est entré au catalogue : il a maintenant sa page "
+            "de référence, et l'explication « pas un contrat du catalogue » de "
+            "docs/nodal/concepts/canaux.md doit partir avec cette garde."
         )
-    assert "n'est pas déclaré parmi les 30 contrats" in warning, (
-        "la limitation tient toujours mais la page ne la signale plus"
+    assert "n'est pas un contrat du catalogue" in page, (
+        "la distinction tient toujours mais la page ne l'explique plus"
     )

@@ -51,19 +51,15 @@ refuse explicitement si vous mettez autre chose.
 Un chemin d'erreur est donc typé, validé et compilé comme le chemin nominal. Ce
 n'est pas une voie de garage.
 
-!!! danger "Aujourd'hui, l'atelier bloque les deux façons de l'écrire"
-    `error-envelope` n'est pas déclaré parmi les 30 contrats du catalogue. Or
-    l'atelier refuse tout pin dont le contrat lui est inconnu, **et** refuse
-    une edge `failure` qui ne porte pas `error-envelope`. Les deux règles se
-    ferment l'une sur l'autre : aucune edge d'erreur ne passe la simulation.
+!!! note "`error-envelope` n'est pas un contrat du catalogue"
+    Deux vocabulaires coexistent, et il vaut mieux le savoir en lisant les
+    messages d'erreur. Le **catalogue** déclare les objets métier du standard —
+    `task-envelope`, `evidence-pack`, les trente que vous voyez dans la
+    référence. Le **format**, lui, impose les siens : `error-envelope` est du
+    second, défini par la famille résilience et non par le catalogue.
 
-    En ligne de commande, `grimoire blueprint validate` n'applique pas ces deux
-    règles et accepte le fichier. Les canaux sont donc déclarables et
-    compilables, mais pas simulables dans la toile tant que le contrat n'est
-    pas au catalogue.
-
-    Vérifié le 2026-08-28 sur `web/data/catalogue-export.json` et
-    `blueprint_resilience.py` (règle R-F2).
+    Un contrat inventé reste refusé comme avant ; c'est seulement le contrat du
+    format qui est reconnu sans figurer au catalogue.
 
 ## Ce qui n'a pas besoin d'edge
 

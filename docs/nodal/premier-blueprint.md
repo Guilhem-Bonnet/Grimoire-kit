@@ -11,13 +11,15 @@ pip install grimoire-kit
 pip install jsonschema
 ```
 
-!!! warning "Le deuxième `pip install` n'est pas décoratif"
+!!! warning "Le deuxième `pip install` n'est pas optionnel en pratique"
     La validation a deux couches : la couche **schéma** (le fichier est-il un
     blueprint bien formé ?) et la couche **structurelle** (les contrats se
     correspondent-ils, le graphe est-il acyclique ?). La première a besoin de
-    `jsonschema`. Sans lui elle ne proteste pas : elle s'annonce `skipped` et
-    la commande sort quand même à zéro. Installez-le, ou lisez la première
-    ligne de sortie à chaque fois.
+    `jsonschema`, qui n'est pas tiré par défaut.
+
+    Sans lui, `validate` **refuse** : une validation à moitié faite ne se
+    conclut pas par un succès. Si vous acceptez sciemment le contrôle partiel,
+    `--allow-skipped-schema` le dit — et se voit dans une configuration de CI.
 
 ## Créer
 

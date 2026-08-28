@@ -70,6 +70,7 @@ from grimoire.tools.blueprint_primitives import (
     primitives_catalogue as _primitives_catalogue,
 )
 from grimoire.tools.blueprint_resilience import (
+    ERROR_CONTRACT,
     compile_resilience_section,
     resilience_lint,
     resilience_shape_errors,
@@ -538,7 +539,15 @@ class ForgeAPI:
         catalogue = self._catalogue()
         if catalogue:
             known = {p["id"] for p in catalogue.get("patterns", [])}
+            # Deux vocabulaires de contrats coexistent, et les confondre fermait
+            # une porte sur l'autre : le catalogue déclare les objets métier du
+            # standard (task-envelope, evidence-pack…), le format déclare ceux
+            # qu'il impose lui-même. `error-envelope` est du second : exigé sur
+            # toute edge `failure` par R-F2, absent du catalogue, donc rejeté
+            # ici comme « inconnu ». Aucune edge d'erreur ne pouvait passer,
+            # quel que soit le contrat qu'on y mettait.
             contracts = {c["id"] for c in catalogue.get("contracts", [])}
+            contracts.add(ERROR_CONTRACT)
             for n in nodes:
                 if n.get("kind") == "pattern" and n.get("ref") not in known:
                     errors.append(f"pattern inconnu du catalogue : {n.get('ref')}")

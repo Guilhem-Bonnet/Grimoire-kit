@@ -31,11 +31,21 @@ La couche **schéma** répond « est-ce un blueprint v1 ? » — les clés
 obligatoires, les motifs d'id, les énumérations. Elle a besoin du paquet
 optionnel `jsonschema`.
 
-!!! danger "Cette couche s'absente en silence"
-    Sans `jsonschema` installé, la couche schéma s'annonce `skipped` et la
-    commande sort quand même à zéro. Elle ne vous manque pas bruyamment : elle
-    vous manque discrètement. `pip install jsonschema`, et lisez la première
-    ligne de sortie.
+!!! warning "Elle est optionnelle à l'installation, pas à la validation"
+    `jsonschema` n'est pas tiré par défaut. Quand il manque, la couche schéma
+    ne peut pas s'exécuter — et `validate` comme `compile` **refusent** plutôt
+    que de conclure sur un contrôle qui n'a pas eu lieu :
+
+    ```text
+    Refused: the JSON Schema layer could not run, so this file has not been
+    fully validated.
+      fix : pip install jsonschema
+      or  : re-run with --allow-skipped-schema to accept a partial check
+    ```
+
+    L'échappatoire existe parce qu'un contrôle partiel reste parfois utile.
+    Elle est explicite pour qu'on la voie dans une configuration de CI, plutôt
+    que de la subir sans le savoir.
 
 La couche **structurelle** répond aux questions que le schéma ne peut pas
 poser, parce qu'elles portent sur les relations et non sur la forme :
