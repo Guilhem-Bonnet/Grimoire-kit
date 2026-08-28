@@ -171,3 +171,22 @@ def test_vector_projection_is_opt_in(generator: ModuleType, project: Path) -> No
     """Un nuage d'embeddings tiré au sort se lit exactement comme un vrai."""
     assert generator.build_memory(project)["vector_projection"] is None
     assert generator.build_memory(project, demo=True)["vector_projection"]["is_demo"] is True
+
+
+# ── Le portefeuille n'invente pas sa flotte ─────────────────────────────────
+
+DEMO_PROJECT_NAMES = ("Atlas Ops", "Sentinel Sec", "Ledger Data", "Grimoire Core")
+
+
+def test_the_portfolio_has_no_hardcoded_project_roster() -> None:
+    """``portfolio.html`` est la page d'accueil du cockpit local.
+
+    Elle portait un repli codé en dur de quatre projets inventés, affiché dès
+    que ``data/projects.json`` manquait — c'est-à-dire précisément le cas d'un
+    cockpit dont le registre est vide. Un portefeuille vide se dit ; il ne
+    s'invente pas.
+    """
+    page = (ROOT / "web" / "portfolio.html").read_text(encoding="utf-8")
+    for name in DEMO_PROJECT_NAMES:
+        assert name not in page, f"{name} codé en dur dans le portefeuille"
+    assert "FALLBACK" not in page

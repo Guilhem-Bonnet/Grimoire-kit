@@ -27,6 +27,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   projet n'avait rien à montrer. Réservé à la vitrine publique, qui n'a pas de
   runtime propre, il s'active maintenant par `--demo`
   (`GRIMOIRE_SITE_DEMO=1` pour `serve-site.sh`).
+- **Le portefeuille n'invente plus sa flotte.** `portfolio.html`, page d'accueil
+  du cockpit local, portait un repli codé en dur de quatre projets — « Grimoire
+  Core », « Atlas Ops », « Sentinel Sec », « Ledger Data » — affiché dès que
+  `data/projects.json` manquait, c'est-à-dire précisément sur un cockpit dont le
+  registre est vide. Le repli est supprimé au profit d'un état vide qui donne la
+  commande d'enrôlement.
+- **Les cartes du portefeuille mènent quelque part.** Sur un cockpit local,
+  « Observabilité » et « Mémoire » ouvrent la page du projet
+  (`?project=<slug>`) au lieu d'un panneau expliquant comment lancer l'atelier —
+  comportement qui n'a de sens que sur la vitrine publique. Le chemin du projet
+  sur le disque est affiché sur la carte.
 - **Le cockpit n'amorce plus sa couche de données avec la démo bundlée.** Un
   registre vide donne un cockpit vide, et la commande pour le remplir. Sur un
   poste qui avait déjà lancé le cockpit, la démo semée par une version

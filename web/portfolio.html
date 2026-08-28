@@ -132,7 +132,9 @@
     .pf-link .arr { transition: transform 180ms var(--ease-forge); }
     .pf-link:hover .arr { transform: translateX(3px); }
 
-    #pf-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
+    .pf-path { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted);
+  margin-top: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pf-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
   <script src="grimoire-mode.js"></script>
 </head>
@@ -204,7 +206,7 @@
       </div>
       <div class="band-divider"></div>
       <div class="pf-grid reveal" id="pf-grid"></div>
-      <div id="pf-empty">Aucun projet dans <code>data/projects.json</code>.</div>
+      <div id="pf-empty">Aucun projet enregistré sur cette machine. Ajoutez-en : <code>grimoire cockpit scan &lt;dossier&gt;</code> ou <code>grimoire cockpit add &lt;chemin&gt;</code>.</div>
     </div>
   </section>
 </main>
@@ -235,12 +237,13 @@
   };
 
   /* ── Fallback : projets démo (si fetch échoue, ex. file://) ── */
-  const FALLBACK = [
-    { slug: 'grimoire-core', name: 'Grimoire Core', desc: 'Noyau agentique — runtime typé',       ci: 'pass', ci_label: 'build #1284 vert', cost: '$0.38', antifragile: 94 },
-    { slug: 'atlas-ops',     name: 'Atlas Ops',     desc: 'Pipeline infra-ops k8s',               ci: 'pass', ci_label: 'build #872 vert',  cost: '$1.24', antifragile: 88 },
-    { slug: 'sentinel-sec',  name: 'Sentinel Sec',  desc: 'Surface sécurité — threat model',      ci: 'fail', ci_label: 'build #503 rouge', cost: '$0.61', antifragile: 71 },
-    { slug: 'ledger-data',   name: 'Ledger Data',   desc: 'ETL + schema-keeper',                  ci: 'pass', ci_label: 'build #2041 vert', cost: '$2.07', antifragile: 82 },
-  ];
+  /* Pas de repli codé en dur. Une liste de quatre projets inventés s'affichait
+     dès que `data/projects.json` manquait — c'est-à-dire précisément sur un
+     cockpit local dont le registre est vide. Un portefeuille vide se dit ; il
+     ne s'invente pas. (Le test qui garde cette page cherche ces noms : ne les
+     réintroduisez pas, même en commentaire.) */
+
+  let LOCAL = false;
 
   /* ── Helpers gouvernance ── */
   const isFail = (ci) => ci === 'fail' || ci === 'red' || ci === 'ko';
@@ -300,12 +303,20 @@
     ct.innerHTML = `<span class="dot"></span>${flagged.length} À SURVEILLER`;
 
     document.getElementById('watch-list').innerHTML = flagged.map(({ p, w }) => `
-      <a class="watch-row js-launch-atelier" href="#">
+      <a class="watch-row${LOCAL && p.slug ? '' : ' js-launch-atelier'}" href="${LOCAL && p.slug ? 'observability.html?project=' + encodeURIComponent(p.slug) : '#'}">
         <span class="watch-dot" style="background:${isFail(p.ci) ? 'var(--data-red)' : 'var(--data-amber)'}"></span>
         <span class="watch-name"><b>${esc(p.name)}</b><span>${esc(p.slug)} · ${esc(p.version || '')}</span></span>
         <span class="watch-reasons">${w.reasons.map((r) => `<span class="reason ${r.cls}">${esc(r.txt)}</span>`).join('')}</span>
         <span class="watch-go">OUVRIR L'OBSERVATOIRE →</span>
       </a>`).join('');
+  }
+
+  /* Sur un cockpit local la page cible existe et le projet est nommable par son
+     slug ; sur la vitrine il n'y a rien à ouvrir, on garde le panneau d'amorçage. */
+  function pfLink(page, label, p) {
+    return LOCAL && p.slug
+      ? `<a class="pf-link" href="${page}?project=${encodeURIComponent(p.slug)}">${label} <span class="arr">→</span></a>`
+      : `<a class="pf-link js-launch-atelier" href="#">${label} · ATELIER <span class="arr">→</span></a>`;
   }
 
   /* ── Carte projet (markup répétable) ── */
@@ -361,9 +372,11 @@
         <div class="pf-cov-track"><div class="pf-cov-fill" style="width:${cov}%;background:${covColor(cov)}"></div></div>
       </div>
 
+      ${p.path ? `<div class="pf-path" title="${esc(p.path)}">${esc(p.path)}</div>` : ''}
+
       <div class="pf-links">
-        <a class="pf-link js-launch-atelier" href="#">OBSERVABILITÉ · ATELIER <span class="arr">→</span></a>
-        <a class="pf-link js-launch-atelier" href="#">MÉMOIRE · ATELIER <span class="arr">→</span></a>
+        ${pfLink('observability.html', 'OBSERVABILITÉ', p)}
+        ${pfLink('memory.html', 'MÉMOIRE', p)}
       </div>
     </article>`;
   }
@@ -383,16 +396,29 @@
   }
 
   /* ── Chargement : projects.json fusionné avec ENRICH ── */
-  fetch('data/projects.json', { cache: 'no-store' })
-    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+  /* Hôte local (cockpit) ou vitrine publique : sur la vitrine il n'y a pas
+     d'atelier à ouvrir, donc les liens de carte appellent le panneau
+     d'amorçage ; en local ils doivent mener au projet. */
+  function probeLocal() {
+    return fetch('/api/status', { cache: 'no-store' })
+      .then((r) => { LOCAL = r.ok; })
+      .catch(() => { LOCAL = false; });
+  }
+
+  function loadProjects() {
+    return fetch('/api/projects', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .catch(() => fetch('data/projects.json', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status))));
+  }
+
+  probeLocal()
+    .then(loadProjects)
     .then((data) => {
       const base = (data && data.projects) || [];
-      if (!base.length) return Promise.reject('empty');
       render(base.map((p) => ({ ...ENRICH[p.slug], ...p })));
     })
-    .catch(() => {
-      render(FALLBACK.map((p) => ({ ...ENRICH[p.slug], ...p })));
-    });
+    .catch(() => { render([]); });
 
   /* dividers */
   const obs = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('drawn'); obs.unobserve(e.target); } }), { threshold: 0.5 });
