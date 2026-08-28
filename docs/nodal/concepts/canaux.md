@@ -43,13 +43,27 @@ sans lire une ligne de configuration, ce qui sort du système.
 
 ## Ce qui circule sur un chemin d'erreur
 
-Les canaux `failure` et `escalation` portent un contrat comme les autres — en
-pratique un `error-envelope`. La règle d'identité des contrats s'applique
-exactement pareil : un pin d'erreur porte son type, et l'edge relie deux pins
-qui portent le même.
+Les canaux `failure` et `escalation` portent un contrat comme les autres, et la
+règle d'identité s'applique pareil. Mais elle est resserrée : un plan de
+défaillance transporte **`error-envelope`**, et rien d'autre. L'atelier le
+refuse explicitement si vous mettez autre chose.
 
 Un chemin d'erreur est donc typé, validé et compilé comme le chemin nominal. Ce
 n'est pas une voie de garage.
+
+!!! danger "Aujourd'hui, l'atelier bloque les deux façons de l'écrire"
+    `error-envelope` n'est pas déclaré parmi les 30 contrats du catalogue. Or
+    l'atelier refuse tout pin dont le contrat lui est inconnu, **et** refuse
+    une edge `failure` qui ne porte pas `error-envelope`. Les deux règles se
+    ferment l'une sur l'autre : aucune edge d'erreur ne passe la simulation.
+
+    En ligne de commande, `grimoire blueprint validate` n'applique pas ces deux
+    règles et accepte le fichier. Les canaux sont donc déclarables et
+    compilables, mais pas simulables dans la toile tant que le contrat n'est
+    pas au catalogue.
+
+    Vérifié le 2026-08-28 sur `web/data/catalogue-export.json` et
+    `blueprint_resilience.py` (règle R-F2).
 
 ## Ce qui n'a pas besoin d'edge
 
@@ -79,14 +93,37 @@ résilience](../reference/format-fichier.md#resiliencepolicy).
 
 ## Le graphe reste acyclique
 
-Ajouter des chemins d'erreur ne permet pas de faire des boucles. Le flow doit
-rester acyclique pour compiler, canaux compris : une edge `failure` qui
-remonterait vers un node déjà traversé formerait un cycle, et serait refusée.
+Ajouter des chemins d'erreur ne permet pas de faire des boucles. Le contrôle de
+cycle de `grimoire blueprint validate` **ignore le canal** : une edge `failure`
+qui remonte vers un node déjà traversé compte comme n'importe quelle autre, et
+le fichier est refusé.
+
+```text
+$.edges: cycle detected between nodes: plan, verify
+```
+
+La simulation de l'atelier, elle, n'ordonne que sur le canal nominal — les
+chemins d'erreur y sont des routes alternatives, hors du chemin. Retenez la
+règle stricte : **c'est la ligne de commande qui décide**, et elle refuse.
 
 Ce qui ressemble à une boucle — réessayer — est justement ce que la politique
 de résilience exprime **sans** edge. La distinction n'est pas cosmétique : une
 reprise bornée par `max` est vérifiable ; une boucle dans le graphe ne l'est
 pas.
+
+## Vérifier un chemin d'erreur sans rien exécuter
+
+La question évidente : si rien ne s'exécute, comment savoir que mes edges
+`failure` routent bien ?
+
+La simulation de l'atelier accepte une **panne injectée** — un node et une
+classe de défaillance — et rejoue le flow comme si elle survenait. Elle rend le
+chemin réellement emprunté, le nombre de tentatives consommées, et signale
+quand aucun chemin de défaillance n'existe pour le node visé. La simulation
+nominale reste le plan `happy` ; la trace du what-if vit à côté.
+
+C'est aussi ce que la suite d'évals sait affirmer, avec l'assertion
+`path-taken` : *sous panne injectée, voici par où ça doit passer.*
 
 ## À lire ensuite
 

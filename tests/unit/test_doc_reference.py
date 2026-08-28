@@ -500,3 +500,33 @@ def test_the_palette_count_gate_can_fail():
     _primitives, xxl = gen.load_primitives()
     faux = f"la palette expose {len(xxl) + 1} cases"
     assert _palette_counts_in(faux) == [len(xxl) + 1]
+
+
+# ── Une limitation documentée doit disparaître quand elle est levée ────────
+
+
+def test_error_envelope_absence_is_still_true(catalogue):
+    """La page des canaux documente un blocage ; ce test le tient à jour.
+
+    `error-envelope` est exigé sur toute edge `failure` (règle R-F2 de
+    `blueprint_resilience`) mais absent des contrats du catalogue, que
+    l'atelier utilise pour refuser les contrats inconnus. Les deux règles se
+    ferment l'une sur l'autre.
+
+    Le jour où le contrat entre au catalogue, ce test échoue — et c'est le
+    but : l'avertissement de `docs/nodal/concepts/canaux.md` devra partir avec
+    lui. Une limitation documentée qu'on oublie de retirer devient un mensonge.
+    """
+    from grimoire.tools.blueprint_resilience import ERROR_CONTRACT
+
+    contracts = {c["id"] for c in catalogue["contracts"]}
+    warning = (ROOT / "docs/nodal/concepts/canaux.md").read_text(encoding="utf-8")
+    if ERROR_CONTRACT in contracts:
+        pytest.fail(
+            f"`{ERROR_CONTRACT}` est désormais au catalogue : retirer "
+            "l'avertissement « l'atelier bloque les deux façons de l'écrire » "
+            "de docs/nodal/concepts/canaux.md, et cette garde avec."
+        )
+    assert "n'est pas déclaré parmi les 30 contrats" in warning, (
+        "la limitation tient toujours mais la page ne la signale plus"
+    )

@@ -14,7 +14,12 @@ compilez. Le graphe est un objet qu'on vérifie, pas un programme qu'on lance.
 
 En ligne de commande, `grimoire blueprint` expose `validate` et `compile`. La
 **simulation** est propre à l'atelier : c'est une lecture pas à pas du flow
-dans l'éditeur, pas une commande.
+dans l'éditeur, pas une commande. Les gestes et les écrans qui la déclenchent
+sont décrits dans [Atelier local & blueprints](../../serve-blueprints.md).
+
+Les deux surfaces ne posent d'ailleurs pas exactement les mêmes règles — la
+ligne de commande est la plus stricte sur les cycles, l'atelier sur les
+contrats. Voir [Les trois canaux](canaux.md) pour le cas où ça compte.
 
 ## Valider : deux couches
 
