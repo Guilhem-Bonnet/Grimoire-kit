@@ -76,4 +76,4 @@ jobs:
           PY
 
       - name: Build docs
-        run: python -m mkdocs build --quiet
+        run: python -m mkdocs build --strict
