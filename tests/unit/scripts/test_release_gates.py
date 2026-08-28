@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -285,9 +286,10 @@ def _title_gate(title: str) -> int:
             "exit 0",
         ]
     )
-    return subprocess.run(
-        ["bash", "-c", script], env={"TITLE": title, "PATH": "/usr/bin:/bin"}, check=False
-    ).returncode
+    # L'environnement du runner est hérité : un `PATH` POSIX en dur ne survit
+    # pas au runner Windows, où bash existe mais pas `/usr/bin`.
+    env = {**os.environ, "TITLE": title}
+    return subprocess.run(["bash", "-c", script], env=env, check=False).returncode
 
 
 def test_the_gate_regex_matches_the_workflow() -> None:
