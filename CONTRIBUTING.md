@@ -88,6 +88,31 @@ docs: update getting-started for v3
 
 Types : `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
+## Vérifier qu'une poussée est bien arrivée
+
+Après un `git push` sur une branche de PR, **la référence de branche est la
+source fiable, pas l'objet PR**. Mesuré sur ce dépôt : à `t+0`, `GET /pulls/{n}`
+renvoie encore l'ancien `head.sha` pendant que `GET /git/ref/heads/{branche}` a
+déjà le nouveau. La convergence prend moins de 20 s, mais dans cet intervalle
+`gh pr view` affiche un état périmé — tête d'avance, `mergeable` calculé sur
+l'ancien contenu, souvent `CONFLICTING` alors que `git merge-tree` ne trouve
+rien.
+
+```bash
+scripts/pr-head-check.py <numéro-de-pr>
+```
+
+Le script compare la référence de branche, l'objet PR et le SHA local, et dit
+laquelle des trois situations vous êtes : synchronisé, décalage de propagation,
+ou **écrivain concurrent** — quelqu'un d'autre a poussé sur la même branche
+depuis votre `push`.
+
+Ce dernier cas est le piège coûteux. Plusieurs sessions travaillant en parallèle
+sur ce dépôt poussent sur les mêmes branches : quatre PR ont été fermées et
+rouvertes ici pour un « objet PR cassé » qui n'existait pas — la branche allait
+bien, une autre session écrivait dessus. Fermer une PR ne répare rien et lui fait
+perdre son historique de revue.
+
 ## Ajouter un outil
 
 1. Créer `src/grimoire/tools/mon_outil.py` avec une classe publique
