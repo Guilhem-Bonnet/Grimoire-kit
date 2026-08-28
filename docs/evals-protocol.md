@@ -52,6 +52,8 @@ effectivement être gouverné).
    meilleures.
 4. **Reproductibilité** : chaque campagne fige la version du kit, du modèle et
    des tâches dans son rapport (`evals/reports/<date>/`).
+5. **Règle d'arrêt** : un bras conçu après avoir vu un résultat qu'il pourrait
+   expliquer est *exploratoire*, et ne peut pas changer un verdict (voir A2).
 
 ## Layout attendu
 
@@ -110,3 +112,43 @@ d'efficacité.
 - **Portée** : non rétroactif. Le verdict « non démontré » de la campagne
   2026-07-09 reste inchangé et ne sera pas réinterprété avec le critère
   amendé ; seule une nouvelle campagne peut produire un verdict positif.
+
+### A2 — 2026-08-28 — règle d'arrêt : ce qui clôt la question, et quand
+
+- **Moment** : après les campagnes 2026-07-03 (baseline/governed), 2026-07-09
+  (activated) et le jugement du bras `activated-v2`, **avant** toute exécution
+  du bras `baseline-v3`. Aucune donnée de `baseline-v3` n'existe au moment de
+  cet amendement.
+- **Contexte** : trois campagnes, trois verdicts « non démontré ». Le bras
+  `activated-v2` atteint la composante coût A1 mais échoue sur la complétion
+  (10/40 < 12). Le bras `baseline-v3` est pré-enregistré *après* ce jugement,
+  pour tester si la dérive du modèle servi explique le déficit — l'ordre est
+  divulgué dans `ACTIVATION-V2.md`, ce qui est la bonne pratique. Il reste que
+  le protocole ne dit nulle part ce qui clôt la question. Sans règle d'arrêt,
+  chaque résultat négatif produit mécaniquement un bras de plus, et la thèse
+  centrale du produit reste ouverte indéfiniment pendant que le reste se
+  construit dessus.
+- **Décision, en trois clauses** :
+
+  1. **Un bras conçu après avoir vu un résultat qu'il pourrait expliquer est
+     exploratoire.** Son résultat ne peut pas transformer un « non démontré »
+     en « démontré ». Il peut motiver une nouvelle campagne, dont le design est
+     alors figé avant toute exécution — c'est cette campagne-là qui produit un
+     verdict. `baseline-v3` tombe sous cette clause.
+  2. **Deux campagnes pré-enregistrées consécutives qui échouent au critère
+     composite closent la question pour cette intervention sur cette suite de
+     tâches.** Le verdict devient « effet non démontré », et il est publié comme
+     tel — le README ne fait aucun claim, ce qui est déjà la règle 2.
+  3. **Ce qui suit une clôture n'est pas un bras de plus.** C'est, au choix et
+     explicitement : changer l'intervention (ce que le standard fait), changer
+     la mesure (ce qu'on appelle un progrès), ou changer la suite de tâches (où
+     l'effet est censé se voir). Le changement est journalisé ici avant la
+     campagne suivante. Reprendre la même intervention, la même mesure et la
+     même suite après une clôture demande une justification écrite.
+
+- **Portée** : non rétroactif sur les verdicts publiés. La clause 1 s'applique
+  dès `baseline-v3`. Le compteur de la clause 2 démarre à la première campagne
+  pré-enregistrée exécutée après cet amendement.
+- **Ce que cette règle ne dit pas** : elle ne préjuge pas du résultat. Si une
+  campagne pré-enregistrée passe le critère composite, la thèse est démontrée
+  sur cette suite, et la règle d'arrêt n'a simplement jamais à s'appliquer.
