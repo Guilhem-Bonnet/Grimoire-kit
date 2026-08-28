@@ -80,6 +80,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - **`GET /api/health`** — alignement, flows et activité d'un projet, servi par
   l'atelier comme par le cockpit. La couche `health.json` est générée avec les
   autres.
+- **Le tableau de bord de l'atelier porte les mêmes indicateurs** que le
+  portefeuille — alignement kit et dernière activité, lus sur `/api/health` :
+  les deux surfaces disent la même chose du même projet.
 - **Le sélecteur de projets arrive sur le portefeuille.** Il vit maintenant dans
   `web/project-picker.js`, chargé à la demande par l'atelier comme par le
   cockpit : la page d'accueil du cockpit était le seul endroit sans entrée pour
