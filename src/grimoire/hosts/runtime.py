@@ -303,6 +303,9 @@ def main(argv: list[str] | None = None) -> int:
     always exits 0: the verdict lives in the JSON, and a non-zero exit is how a
     hook turns a policy decision into an unexplained host error.
     """
+    from grimoire.core.console_encoding import enable_utf8_output
+
+    enable_utf8_output()
     args = list(sys.argv[1:] if argv is None else argv)
     host_name = ""
     event_name = ""

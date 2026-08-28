@@ -664,6 +664,9 @@ def _find_kit_root(start: Path) -> Path | None:
 
 def main() -> None:
     """Run the MCP server."""
+    from grimoire.core.console_encoding import enable_utf8_output
+
+    enable_utf8_output()
     mcp.run()
 
 

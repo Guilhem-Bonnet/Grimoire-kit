@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Le kit ne meurt plus sur une console qui ne parle pas UTF-8.** Il imprime
+  des filets (`─`), des flèches (`→`) et des marqueurs d'état dans presque
+  toutes ses sorties ; sur une console Windows par défaut — cp1252 — `print`
+  levait `UnicodeEncodeError` et la commande échouait, y compris sur une simple
+  lecture. Ce n'était pas un défaut de l'ère shell : **Rich échoue de la même
+  façon** dès que le texte à afficher, et non sa propre bordure, porte ces
+  caractères. Les trois points d'entrée (`grimoire`, `grimoire-mcp`,
+  `grimoire-hook`) reconfigurent désormais la sortie en UTF-8 tolérant, et
+  posent `PYTHONIOENCODING` pour les sous-processus. Un caractère non
+  représentable devient `?` au lieu d'interrompre la commande.
+
+
 ## [3.34.1] - 2026-08-28
 
 ### Corrigé
