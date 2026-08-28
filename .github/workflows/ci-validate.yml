@@ -16,6 +16,11 @@ on:
       - "framework/**"
       - "tests/**"
       - "grimoire-init.sh"
+      # Le filtre `push` incluait déjà ce fichier, pas celui-ci : une PR qui ne
+      # modifiait que le workflow ne le déclenchait pas, donc se faisait relire
+      # sans jamais s'exécuter. C'est la modification de CI qui a le plus besoin
+      # d'être exercée avant d'atterrir.
+      - ".github/workflows/ci-validate.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -215,9 +220,30 @@ jobs:
 
   # ── 7b. Framework Tools Tests (pytest) ────────────────────────────────────
   framework-tests:
-    name: "Framework Tools Tests (pytest)"
-    runs-on: ubuntu-latest
+    # Les 108 outils de framework/tools/ ne tournaient qu'en ubuntu : l'issue #33
+    # a montré un `import fcntl` fatal découvert par un rapport utilisateur, pas
+    # par la CI. Un outil livré sur les deux plateformes se teste sur les deux.
+    name: "Framework Tools Tests (pytest, ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     needs: bash-syntax
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          # Windows rapporte sans bloquer, le temps que l'issue #192 soit
+          # traitée : 45 des 108 outils impriment des caractères hors cp1252 et
+          # meurent en `UnicodeEncodeError` sur une console Windows. C'est un
+          # défaut de classe, pas un incident de ce lot — et le corriger demande
+          # une passe sur les outils, pas sur la CI.
+          #
+          # `continue-on-error` n'est pas l'ancien `|| true` : l'échec reste
+          # visible dans l'interface et dans le résumé, il ne se déguise pas en
+          # succès. Il se retire dès que #192 est close, et ce job redevient
+          # bloquant sur les deux plateformes.
+          - os: windows-latest
+            soft: true
+    continue-on-error: ${{ matrix.soft == true }}
     steps:
       - uses: actions/checkout@v7
 
@@ -227,22 +253,30 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      # `pytest pyyaml` seuls ne suffisaient pas : sept fichiers de
+      # `tests/test_*.py` importent `typer` et un autre `ruamel.yaml`, tous deux
+      # dépendances de base du paquet. Ils échouaient à la collecte, et le job
+      # s'en déclarait vert. On installe donc ce que les tests supposent.
       - name: Install test deps
-        run: pip install pytest pyyaml
+        run: pip install -e . pytest pyyaml
 
       - name: Run framework tests
+        shell: bash
         run: |
-          python3 -m pytest tests/test_*.py -q --tb=short -x \
+          # Le code de sortie de pytest décide, pas la forme de sa dernière
+          # ligne : l'ancienne version avalait l'échec avec `|| true` puis le
+          # devinait au grep, donc une interruption ou un format inattendu
+          # passait pour un succès.
+          set -o pipefail
+          rc=0
+          python -m pytest tests/test_*.py -q --tb=short -x \
             --ignore=tests/test_background_tasks.py \
-            2>&1 | tee framework-test-output.txt || true
-          # Report pass/fail
-          LAST_LINE=$(tail -1 framework-test-output.txt)
-          echo "### 🔧 Framework Tests" >> $GITHUB_STEP_SUMMARY
-          echo "$LAST_LINE" >> $GITHUB_STEP_SUMMARY
-          # Fail the step if pytest failed
-          if echo "$LAST_LINE" | grep -qE "failed|error"; then
-            exit 1
-          fi
+            2>&1 | tee framework-test-output.txt || rc=$?
+          {
+            echo "### 🔧 Framework Tests — ${{ matrix.os }}"
+            tail -1 framework-test-output.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
 
   # ── 8. Résumé ─────────────────────────────────────────────────────────────
   summary:
