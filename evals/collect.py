@@ -27,7 +27,7 @@ from grimoire.core.agentic_standard import (
     verify_standard_profile,
 )
 
-ARMS = ("governed", "baseline", "activated", "activated-v2", "activated-v2-disclosed")
+ARMS = ("governed", "baseline", "activated", "activated-v2", "activated-v2-disclosed", "baseline-v3")
 ENROLLED_ARMS = ("governed", "activated", "activated-v2", "activated-v2-disclosed")
 
 

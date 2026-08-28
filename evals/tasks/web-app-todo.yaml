@@ -32,7 +32,14 @@ pinned:
         lancement : kit 3.18.0 (evals/.venv, PyPI), runner Claude Code CLI
         2.1.101 (réinstallé épinglé via npm local), modèle claude-sonnet-4-6
         (disponibilité vérifiée par ping). Aucun remplacement à requalifier.
-arms: [governed, baseline, activated, activated-v2, activated-v2-disclosed]
+    - date: "2026-08-27"
+      note: >-
+        Ajout du bras `baseline-v3` (40 runs, aucun artefact standard,
+        pins du jour) — baseline contemporaine pour lever la menace de
+        dérive du modèle servi qui bloque H1. Design et règle A1-v3
+        figés dans ACTIVATION-V2.md AVANT toute exécution de baseline-v3
+        et APRÈS jugement d'activated-v2 (ordre divulgué).
+arms: [governed, baseline, activated, activated-v2, activated-v2-disclosed, baseline-v3]
 repetitions_min: 5
 disclosed_prompt_template: >-
   Formulation figée du prompt du bras `activated-v2-disclosed` (exploratoire,
