@@ -40,6 +40,35 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def task_from_board(board: Mapping[str, Any], task_id: str) -> dict[str, Any]:
+    """The board entry for *task_id*, or an empty mapping when it has none."""
+    tasks = board.get("tasks", [])
+    if not isinstance(tasks, list):
+        return {}
+    for task in tasks:
+        if isinstance(task, dict) and str(task.get("task_id", "")) == task_id:
+            return task
+    return {}
+
+
+def board_omits_task(project_root: Path, task: Mapping[str, Any]) -> bool:
+    """True when a board exists and does not declare the task being checked.
+
+    The distinction matters at the evidence gate. Every gate requirement is
+    indexed on a named board state, so a task the board ignores has an empty
+    state and owes nothing: the gate answers ``ok`` on an identifier that does
+    not exist, and a typo in a hook or a CI job turns the gate decorative.
+
+    A project with no board at all is a different case, deliberately left
+    alone: the ``starter`` profile generates none, and the Stop hook relies on
+    an unknown state owing no evidence (see ``_STATES_WITHOUT_EVIDENCE`` in
+    :mod:`grimoire.hosts.decisions`).
+    """
+    if task:
+        return False
+    return (project_root / TASK_BOARD_RELPATH).is_file()
+
+
 def is_standard_enrolled(project_root: Path) -> bool:
     """True when *project_root* carries generated standard artifacts.
 
