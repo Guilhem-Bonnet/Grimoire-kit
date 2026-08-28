@@ -14,9 +14,11 @@ import json
 import typer
 
 # Importés pour leur effet de bord d'enregistrement : câblent `memory up`,
-# `memory status` et `memory shared` sur memory_app.
+# `memory status`, `memory shared` sur memory_app, et `memory graph` /
+# `memory vector` sur leurs sous-apps.
 from grimoire.cli import (
     cmd_memory_ops,  # noqa: F401
+    cmd_memory_projections,  # noqa: F401
     cmd_memory_shared,  # noqa: F401
 )
 from grimoire.cli.cmd_memory import (
