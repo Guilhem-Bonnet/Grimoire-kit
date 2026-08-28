@@ -7,6 +7,69 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **La porte de preuve refuse une tâche que le board ne connaît pas.**
+  `grimoire standard gate check --task-id <inconnu>` répondait `ok`. Toutes les
+  exigences de `check_evidence_gates` sont indexées sur des états nommés ; une
+  tâche absente du board a un état vide, donc aucune exigence n'était évaluée
+  et le verdict était favorable. Un identifiant mal orthographié dans un hook
+  ou un job de CI rendait la porte décorative. Deux cas voisins sont
+  préservés, chacun avec son test : une tâche `proposed` réellement inscrite
+  ne doit toujours aucun artefact, et un projet sans board n'est pas gouverné
+  au niveau tâche.
+  **Changement de comportement** : une CI qui appelle `gate check` avec un
+  identifiant absent du board passait au vert, elle passe désormais au rouge.
+  C'est l'objet du correctif, mais la bascule est visible sans que rien n'ait
+  changé côté appelant.
+- **La page publique cesse d'affirmer ce que le dépôt ne mesure pas.** La
+  section « Preuves » affichait six métriques et un témoignage que rien
+  n'adosse, alors que le protocole d'évals du même dépôt interdit tout claim.
+  Remplacées par des mesures reprises des rapports committés et de la CI, et
+  le témoignage laisse place au verdict pré-enregistré — « effet non
+  démontré ». Deux cartes annonçaient encore `UDF` et `AORA`, retirés le
+  2026-07-12 pour usage nul ; elles décrivent désormais des capacités qui
+  existent. Deux chiffres périmés recomptés : 164 commandes CLI, 5517 tests.
+- **`from grimoire.cli import *` et `from grimoire.mcp import *` ne lèvent
+  plus.** Les deux paquets déclaraient un `__all__` sans importer ce qu'ils
+  annonçaient. La résolution est désormais paresseuse : les noms existent sans
+  que l'import du paquet charge Typer et Rich. `app` n'est volontairement pas
+  réexporté — le sous-module `grimoire.cli.app` et l'instance Typer portent le
+  même nom, donc la valeur dépendrait de l'ordre des imports ; l'instance
+  reste atteignable par `from grimoire.cli.app import app`.
+- **Le job CI « Python Unit Tests » ne pouvait pas échouer.** Son code de
+  sortie était celui de `tee`, la valeur réelle partait dans une sortie que
+  rien ne consommait, et l'étape suivante pouvait écrire « Some tests failed »
+  pendant que le workflow restait vert. Ses tests étant couverts par le SDK CI
+  et par *Framework Tools Tests*, le job est supprimé plutôt que réparé.
+
+### Modifié
+
+- **Le seuil de couverture passe de 70 % à 75 %.** La couverture mesurée est
+  de 75,6 %, identique en local et sur les trois plateformes de la matrice :
+  le seuil laissait cinq points acquis qu'une régression pouvait rendre sans
+  que rien n'échoue. Le seuil se relève quand la couverture monte, jamais
+  l'inverse.
+- **`cmd_memory` sort de la liste des fichiers hérités du ratchet.** Les
+  commandes `memory graph` et `memory vector` partent dans
+  `cmd_memory_projections.py` — même convention que `cmd_memory_ops.py`. Le
+  module principal passe de 1554 à 1284 lignes, sous le seuil de 1500 : trois
+  fichiers hérités deviennent deux. Aucun changement de surface CLI.
+
+### Ajouté
+
+- **Deux plans cibles** : `docs/flow-engine-target-plan.md` — brancher le
+  noyau d'exécution qui existe mais n'est appelé par rien — et
+  `docs/product-quality-target-plan.md`, qui le situe parmi les douze
+  dimensions du produit et dit où sont les points.
+- **Une règle opposable et ses gardes** : ce qui décrit un artefact doit être
+  dérivé de cet artefact, ou testé contre lui. Trois tests l'appliquent —
+  `test_docs_derivation.py` refuse un README d'évals qui nie ou omet une
+  campagne publiée, `test_cli_reference_drift.py` refuse une commande exposée
+  et absente de la référence, `test_public_exports.py` refuse un `__all__` qui
+  promet des objets absents. Le deuxième a trouvé neuf commandes livrées et
+  documentées nulle part.
+
 ## [3.34.2] - 2026-08-28
 
 ### Corrigé
