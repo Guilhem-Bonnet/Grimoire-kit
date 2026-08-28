@@ -28,7 +28,23 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   runtime propre, il s'active maintenant par `--demo`
   (`GRIMOIRE_SITE_DEMO=1` pour `serve-site.sh`).
 - **Le cockpit n'amorce plus sa couche de données avec la démo bundlée.** Un
-  registre vide donne un cockpit vide, et la commande pour le remplir.
+  registre vide donne un cockpit vide, et la commande pour le remplir. Sur un
+  poste qui avait déjà lancé le cockpit, la démo semée par une version
+  antérieure est **purgée** : ne plus amorcer ne suffisait pas, les projets
+  inventés étaient déjà sur le disque. Le critère est l'octet près — une couche
+  produite par `cockpit refresh` diffère forcément du bundle et n'est jamais
+  supprimée.
+- **Deux projets homonymes ne partagent plus leur cache de données.** Un projet
+  hors registre n'avait que son nom de dossier pour clé : deux dépôts nommés
+  `web` se marchaient dessus, et le second affichait les chiffres du premier.
+  La clé porte désormais une empreinte du chemin.
+- **`grimoire serve` refuse un `Host` étranger sur les lectures aussi.** Le
+  garde anti-rebinding DNS ne couvrait que les mutations. Le rebinding rend la
+  page attaquante same-origin, donc CORS ne protège plus la lecture des
+  réponses : le nouveau `GET /api/fs/browse` serait devenu un oracle sur les
+  dossiers de la machine. Le garde s'applique maintenant à toute requête.
+- **La profondeur de scan est plafonnée** (8) : elle vient d'une requête HTTP,
+  et un scan de `/` sans limite immobilisait un thread du serveur.
 
 ### Ajouté
 

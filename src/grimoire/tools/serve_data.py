@@ -17,6 +17,7 @@ qu'elle n'a pas tourné. Mieux vaut une page vide qu'une page fausse.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -53,8 +54,19 @@ GENERATION_TIMEOUT_S = 300
 
 
 def project_slug(project_root: Path) -> str:
-    """Clé de cache du projet : son slug au registre, sinon son nom de dossier."""
-    return slug_for_path(project_root) or slugify(project_root.name)
+    """Clé de cache du projet : son slug au registre, sinon nom + empreinte.
+
+    Le registre garantit l'unicité de ses slugs ; un projet qu'il ne connaît pas
+    n'a que son nom de dossier, et deux dépôts peuvent parfaitement s'appeler
+    ``web``. Sans l'empreinte du chemin, ils partageraient leur cache — et le
+    second afficherait les chiffres du premier, exactement le défaut que ce
+    module existe pour fermer.
+    """
+    registered = slug_for_path(project_root)
+    if registered:
+        return registered
+    digest = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:8]
+    return f"{slugify(project_root.name)}-{digest}"
 
 
 def data_dir(project_root: Path) -> Path:

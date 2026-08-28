@@ -28,6 +28,11 @@ GRIMOIRE_MARKERS = (".git", "project-context.yaml", "_grimoire", ".github/copilo
 # assez pour parcourir un home entier.
 DEFAULT_SCAN_DEPTH = 4
 
+# Plafond dur : la profondeur vient d'une requête HTTP. Un scan de ``/`` à
+# profondeur arbitraire immobiliserait un thread du serveur pendant des minutes
+# pour un résultat que personne n'attend.
+MAX_SCAN_DEPTH = 8
+
 # Un scan ne doit jamais rendre une liste ingérable ni tourner sans fin.
 MAX_SCAN_RESULTS = 500
 
@@ -263,6 +268,7 @@ def scan_payload(root: Path, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
     if not base.is_dir():
         msg = f"pas un dossier : {base}"
         raise FileNotFoundError(msg)
+    depth = max(1, min(int(depth), MAX_SCAN_DEPTH))
     registered = {p.get("path") for p in load_registry()}
     candidates = crawl_projects(base, depth)
     return {

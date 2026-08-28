@@ -1325,17 +1325,30 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 return {}
             return cast(dict[str, Any], json.loads(self.rfile.read(length).decode("utf-8")))
 
-        def _guard_mutation(self) -> bool:
-            """Anti CSRF / DNS-rebinding vers localhost (backend-permissif).
+        def _guard_host(self) -> bool:
+            """Anti DNS-rebinding — s'applique à TOUTE requête, lectures comprises.
 
-            Refuse toute mutation dont le Host n'est pas la loopback, ou dont
-            l'Origin (si présent, cas navigateur) est cross-origin. Un outil
-            local ne doit répondre qu'à sa propre UI, pas à une page tierce
-            ouverte dans le navigateur de l'utilisateur.
+            Le rebinding fait résoudre un domaine attaquant vers 127.0.0.1 :
+            depuis le navigateur la page devient same-origin, donc CORS ne
+            protège plus la *lecture* des réponses. Un `GET` qui liste des
+            dossiers ou nomme la racine du projet devient alors un oracle sur
+            la machine. Le seul Host légitime d'un outil lié à la loopback est
+            la loopback ; tout le reste est refusé, quelle que soit la méthode.
             """
             host = (self.headers.get("Host") or "").split(":")[0].lower()
             if host not in ("127.0.0.1", "localhost", "::1", ""):
                 self._error("hôte non autorisé", 403)
+                return False
+            return True
+
+        def _guard_mutation(self) -> bool:
+            """Anti CSRF, en plus du garde d'hôte (backend-permissif).
+
+            Refuse toute mutation dont l'Origin (si présent, cas navigateur) est
+            cross-origin. Un outil local ne doit répondre qu'à sa propre UI, pas
+            à une page tierce ouverte dans le navigateur de l'utilisateur.
+            """
+            if not self._guard_host():
                 return False
             origin = self.headers.get("Origin")
             if origin:
@@ -1368,6 +1381,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             path = self.path.split("?")[0]
+            if not self._guard_host():
+                return
             try:
                 if path == "/api/events":
                     self._sse()

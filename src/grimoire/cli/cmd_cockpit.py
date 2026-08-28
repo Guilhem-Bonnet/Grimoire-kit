@@ -475,6 +475,34 @@ _KIT_DATA_LAYERS = (
 )
 
 
+def _purge_seeded_vitrine(bundled_data: Path, data_dir: Path) -> int:
+    """Retire du serve dir les fichiers encore identiques à l'instantané vitrine.
+
+    Les versions antérieures amorçaient ``data/`` avec tout ``web/data`` quand le
+    registre était vide. Ne plus amorcer ne suffit pas : sur un poste qui a déjà
+    lancé le cockpit, les projets inventés et les 141 entrées mémoire d'un autre
+    dépôt sont **déjà sur le disque** et continueraient d'être servis.
+
+    Le critère est l'octet près, pas le nom : un fichier identique au bundle n'a
+    pu être écrit que par l'amorçage, tandis qu'une couche produite par
+    :func:`_generate_data` diffère forcément — elle porte l'horodatage et les
+    chiffres du projet réel. Une donnée générée n'est donc jamais supprimée.
+    """
+    removed = 0
+    for bundled in sorted(bundled_data.rglob("*.json")):
+        rel = bundled.relative_to(bundled_data)
+        if rel.name in _KIT_DATA_LAYERS:
+            continue
+        served = data_dir / rel
+        if served.is_file() and served.read_bytes() == bundled.read_bytes():
+            served.unlink()
+            removed += 1
+    for stale in sorted(data_dir.rglob("*"), reverse=True):
+        if stale.is_dir() and not any(stale.iterdir()):
+            stale.rmdir()
+    return removed
+
+
 def _sync_site(serve_dir: Path) -> None:
     """Copy the bundled static site into the serve dir.
 
@@ -485,7 +513,7 @@ def _sync_site(serve_dir: Path) -> None:
     The bundled ``data/`` also holds the public vitrine snapshot: invented
     projects and another repository's metrics. Seeding it for an empty registry
     used to make the cockpit look populated with somebody else's numbers, so it
-    is never copied. An empty registry shows an empty cockpit.
+    is never copied — and any copy left by an earlier version is purged.
     """
     src = web_path()
     serve_dir.mkdir(parents=True, exist_ok=True)
@@ -496,6 +524,7 @@ def _sync_site(serve_dir: Path) -> None:
         bundled = src / "data" / layer
         if bundled.is_file():
             shutil.copy2(bundled, data_dir / layer)
+    _purge_seeded_vitrine(src / "data", data_dir)
 
 
 def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
