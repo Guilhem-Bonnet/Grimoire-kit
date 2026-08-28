@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli import cmd_cockpit
 from grimoire.cli.app import app
+from grimoire.tools import project_registry
 
 runner = CliRunner()
 
@@ -41,7 +42,7 @@ def _bare(root: Path, name: str) -> Path:
 
 
 def _write_registry(entries: list[dict[str, str]]) -> None:
-    cmd_cockpit._save_registry(entries)
+    project_registry.save_registry(entries)
 
 
 # ── classify_registry ─────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ class TestPruneCommand:
         result = runner.invoke(app, ["cockpit", "prune", "--dry-run"])
         assert result.exit_code == 0
         assert "dry-run" in result.output
-        assert cmd_cockpit._load_registry() == entries
+        assert project_registry.load_registry() == entries
 
     def test_prune_removes_only_the_dead(self, tmp_path: Path, cockpit_home: Path) -> None:
         alive = str(_project(tmp_path, "vif"))
@@ -120,7 +121,7 @@ class TestPruneCommand:
         ])
         result = runner.invoke(app, ["cockpit", "prune", "--yes"])
         assert result.exit_code == 0
-        remaining = cmd_cockpit._load_registry()
+        remaining = project_registry.load_registry()
         assert [e["path"] for e in remaining] == [alive]
 
     def test_refusing_the_prompt_changes_nothing(
@@ -131,13 +132,13 @@ class TestPruneCommand:
         result = runner.invoke(app, ["cockpit", "prune"], input="n\n")
         assert result.exit_code == 0
         assert "Annulé" in result.output
-        assert cmd_cockpit._load_registry() == entries
+        assert project_registry.load_registry() == entries
 
     def test_accepting_the_prompt_prunes(self, tmp_path: Path, cockpit_home: Path) -> None:
         _write_registry([{"name": "mort", "path": str(tmp_path / "disparu"), "slug": "mort"}])
         result = runner.invoke(app, ["cockpit", "prune"], input="y\n")
         assert result.exit_code == 0
-        assert cmd_cockpit._load_registry() == []
+        assert project_registry.load_registry() == []
 
     def test_long_list_is_truncated_in_the_preview(
         self, tmp_path: Path, cockpit_home: Path
@@ -153,7 +154,7 @@ class TestPruneCommand:
         _write_registry([{"name": "nu", "path": str(_bare(tmp_path, "nu")), "slug": "nu"}])
         assert "propre" in runner.invoke(app, ["cockpit", "prune", "--yes"]).output
         result = runner.invoke(app, ["cockpit", "prune", "--yes", "--stale"])
-        assert cmd_cockpit._load_registry() == []
+        assert project_registry.load_registry() == []
         assert "1 entrée(s) retirée(s)" in result.output
 
 
@@ -171,7 +172,7 @@ class TestPruneJson:
         assert payload["kept"] == 1
         assert payload["removed"] == 1
         assert payload["candidates"][0]["name"] == "mort"
-        assert len(cmd_cockpit._load_registry()) == 1
+        assert len(project_registry.load_registry()) == 1
 
     def test_json_dry_run_writes_nothing(self, tmp_path: Path, cockpit_home: Path) -> None:
         entries = [{"name": "mort", "path": str(tmp_path / "disparu"), "slug": "mort"}]
@@ -180,4 +181,4 @@ class TestPruneJson:
         payload = json.loads(result.output)
         assert payload["dryRun"] is True
         assert payload["removed"] == 0
-        assert cmd_cockpit._load_registry() == entries
+        assert project_registry.load_registry() == entries

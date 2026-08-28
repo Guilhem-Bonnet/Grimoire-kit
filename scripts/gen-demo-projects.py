@@ -5,10 +5,13 @@ La vitrine publique est mono-projet par nature (un seul vrai dépôt). Pour *mon
 le cockpit multi-projets (sélecteur + portefeuille), on dérive 2-3 projets démo du
 projet primaire réel : copie des JSON + overrides d'en-tête, tout marqué is_demo.
 
-NB : ceci est réservé à la VITRINE. En local, `serve-site.sh --registry` génère les
-VRAIS projets. Les features de pilotage restent bloquées sur la vitrine (env public).
+NB : ceci est réservé à la VITRINE. En local, ni `grimoire serve` ni
+`grimoire cockpit` ne servent ces fichiers : ils génèrent la couche du projet réel.
+Les features de pilotage restent bloquées sur la vitrine (env public).
 
-Usage : python scripts/gen-demo-projects.py
+Usage :
+    GRIMOIRE_SITE_DEMO=1 scripts/serve-site.sh   # base : projet primaire + remplissage démo
+    python scripts/gen-demo-projects.py          # dérive les 2-3 projets factices
 """
 from __future__ import annotations
 
@@ -91,7 +94,7 @@ def _apply(base: dict, spec: dict) -> dict:
 
 def main() -> int:
     if not BASE.is_dir():
-        print("[!] data/projects/grimoire-kit absent — lance d'abord gen-site-data.py")
+        print("[!] data/projects/grimoire-kit absent — lance d'abord gen-site-data.py --demo")
         return 1
     base = {f: json.loads((BASE / f"{f}.json").read_text(encoding="utf-8")) for f in FILES}
     index = json.loads((DATA / "projects.json").read_text(encoding="utf-8"))

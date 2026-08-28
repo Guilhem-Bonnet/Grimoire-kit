@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.cli import cmd_cockpit
 from grimoire.memory import bundle, shared
+from grimoire.tools import project_registry, serve_data
 
 
 class TestUserHomeIsolation:
@@ -42,7 +42,8 @@ class TestUserHomeIsolation:
     @pytest.mark.parametrize(
         ("label", "resolver"),
         [
-            ("registre cockpit", cmd_cockpit._registry_file),
+            ("registre cockpit", project_registry.registry_file),
+            ("couche de données servie", lambda: serve_data.data_dir(Path("/tmp/projet"))),
             ("mémoire transverse", shared.shared_home),
             ("bundles d'embedding", bundle.default_install_root),
         ],
@@ -73,13 +74,13 @@ class TestCockpitRegistry:
         (project / "project-context.yaml").write_text(
             'project:\n  name: "demo"\nmemory:\n  backend: "local"\n', encoding="utf-8"
         )
-        assert cmd_cockpit.register_project(project, "demo") is not None
+        assert project_registry.register_project(project, "demo") is not None
 
         after = real.read_bytes() if real.is_file() else None
         assert after == before, "le registre utilisateur réel a été modifié par un test"
 
         # …et l'entrée a bien atterri dans le registre isolé.
-        isolated = json.loads(cmd_cockpit._registry_file().read_text(encoding="utf-8"))
+        isolated = json.loads(project_registry.registry_file().read_text(encoding="utf-8"))
         assert any(entry["path"] == str(project.resolve()) for entry in isolated)
 
 

@@ -99,7 +99,20 @@ from grimoire.tools.ext_manager import (
 )
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.memory_link import memory_link_status
+from grimoire.tools.project_registry import (
+    DEFAULT_SCAN_DEPTH,
+    browse,
+    looks_grimoire,
+    path_for_slug,
+    projects_payload,
+    register_project,
+    scan_payload,
+    set_selected_slug,
+    slug_for_path,
+)
 from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
+from grimoire.tools.serve_data import DataLayer
+from grimoire.tools.serve_data import resolve as resolve_data
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
@@ -123,6 +136,7 @@ class ForgeAPI:
         self.project_root = project_root.resolve()
         self.kit_root = kit_root.resolve()
         self.ui_dir = ui_dir.resolve() if ui_dir else None
+        self._data: DataLayer | None = None
 
     # ── état ──────────────────────────────────────────────────────────────
 
@@ -135,7 +149,103 @@ class ForgeAPI:
             if version_file.is_file()
             else "dev",
             "ui": str(self.ui_dir) if self.ui_dir else None,
+            # L'UI partage ses pages entre la vitrine publique et l'atelier
+            # local. Le dire explicitement évite qu'elle retombe sur les
+            # instantanés de démonstration quand une couche projet manque.
+            "env": "local",
+            "demo": False,
+            "slug": slug_for_path(self.project_root),
         }
+
+    # ── projets de la machine (découverte, sélection) ─────────────────────
+
+    @property
+    def data(self) -> DataLayer:
+        """Couche de données du projet servi (générée, jamais bundlée)."""
+        if self._data is None:
+            self._data = DataLayer(self.project_root)
+        return self._data
+
+    def projects_view(self) -> dict[str, Any]:
+        """Registre de la machine, avec le projet servi comme sélection.
+
+        Le projet servi figure toujours dans la liste, même s'il vient d'être
+        ouvert : une découverte qui oublie le projet sous les yeux n'en est pas
+        une.
+        """
+        payload = projects_payload(selected=slug_for_path(self.project_root))
+        if not any(p["path"] == str(self.project_root) for p in payload["projects"]):
+            payload["projects"].insert(
+                0,
+                {
+                    "slug": "",
+                    "name": self.project_root.name,
+                    "path": str(self.project_root),
+                    "exists": self.project_root.is_dir(),
+                    "is_grimoire": looks_grimoire(self.project_root),
+                    "managed": (self.project_root / "_grimoire").exists(),
+                    "unregistered": True,
+                },
+            )
+        payload["served"] = str(self.project_root)
+        return payload
+
+    def project_add(self, raw_path: str) -> dict[str, Any]:
+        """Enrôle un chemin donné à la main. Idempotent."""
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_dir():
+            msg = f"pas un dossier : {candidate}"
+            raise FileNotFoundError(msg)
+        proot = candidate.resolve()
+        slug = register_project(proot) or slug_for_path(proot)
+        return {"slug": slug, "path": str(proot), "added": True,
+                "is_grimoire": looks_grimoire(proot)}
+
+    def project_scan(self, raw_root: str, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
+        """Découvre les projets sous une racine. N'enrôle rien."""
+        return scan_payload(Path(raw_root).expanduser(), depth)
+
+    def browse_view(self, raw_path: str | None) -> dict[str, Any]:
+        """Navigation dossier par dossier, pour choisir un projet à la main."""
+        return browse(Path(raw_path).expanduser() if raw_path else None)
+
+    def select_project(self, *, slug: str = "", path: str = "") -> dict[str, Any]:
+        """Re-racine le serveur sur un autre projet de la machine.
+
+        ``grimoire serve`` reste un serveur unique : changer de projet déplace
+        la racine servie plutôt que d'exiger un second processus. Le projet
+        choisi est enrôlé au passage — c'est ainsi que le registre se remplit
+        de ce qu'on ouvre vraiment.
+        """
+        target: Path | None = None
+        if path:
+            candidate = Path(path).expanduser()
+            target = candidate.resolve() if candidate.is_dir() else None
+        elif slug:
+            registered = path_for_slug(slug)
+            target = registered.resolve() if registered and registered.is_dir() else None
+        if target is None:
+            msg = f"projet introuvable : {path or slug or '(vide)'}"
+            raise FileNotFoundError(msg)
+        register_project(target)
+        resolved_slug = slug_for_path(target)
+        if resolved_slug:
+            set_selected_slug(resolved_slug)
+        self.project_root = target
+        self.data.retarget(target)
+        self.data.refresh()
+        return self.status()
+
+    def data_status(self) -> dict[str, Any]:
+        return self.data.status()
+
+    def data_refresh(self) -> dict[str, Any]:
+        return {**self.data.refresh(), **self.data.status()}
+
+    def data_file(self, rel: str) -> Path | None:
+        """Fichier réel derrière ``data/<rel>``, ou ``None``."""
+        bundled = (self.ui_dir / "data") if self.ui_dir else None
+        return resolve_data(rel, self.project_root, bundled)
 
     def setup_view(self) -> dict[str, Any]:
         artifacts: dict[str, list[str]] = {}
@@ -1262,9 +1372,16 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/events":
                     self._sse()
                     return
-                payload = api_get(api, path, parse_qs(urlparse(self.path).query))
+                query = parse_qs(urlparse(self.path).query)
+                payload = api_get(api, path, query)
                 if payload is not API_GET_UNHANDLED:
                     self._json(payload)
+                elif path == "/api/projects":
+                    self._json(api.projects_view())
+                elif path == "/api/fs/browse":
+                    self._json(api.browse_view(query.get("path", [None])[0]))
+                elif path == "/api/data/status":
+                    self._json(api.data_status())
                 elif path.startswith("/api/blueprints/"):
                     # Surface atelier : le cockpit multi-projet n'y touche pas.
                     if path.endswith("/diff"):
@@ -1275,6 +1392,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._static(path)
             except FileNotFoundError as exc:
                 self._error(f"introuvable : {exc}", 404)
+            except PermissionError as exc:
+                self._error(str(exc), 403)
             except (ValueError, json.JSONDecodeError) as exc:
                 self._error(str(exc))
 
@@ -1304,6 +1423,23 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     self._json({"removed": body.get("id")})
                 elif path in ("/api/setup", "/api/setup/plan"):
                     self._json(api.setup_plan(body))
+                elif path == "/api/projects/select":
+                    # Pas de trace gouvernée ici : ouvrir un projet n'est pas le
+                    # modifier. Journaliser dans son arbre salirait le
+                    # `git status` de tout dépôt qu'on se contente de regarder.
+                    # L'enrôlement est déjà consigné, au registre de la machine.
+                    self._json(api.select_project(
+                        slug=str(body.get("slug", "")), path=str(body.get("path", ""))
+                    ))
+                elif path == "/api/projects/add":
+                    self._json(api.project_add(str(body.get("path", ""))))
+                elif path == "/api/projects/scan":
+                    self._json(api.project_scan(
+                        str(body.get("root", "")),
+                        int(body.get("depth", DEFAULT_SCAN_DEPTH)),
+                    ))
+                elif path == "/api/data/refresh":
+                    self._json(api.data_refresh())
                 elif path.startswith("/api/features/"):
                     feature_id = path.rsplit("/", 1)[1]
                     try:
@@ -1341,6 +1477,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 self._error(str(exc), 422)
             except FileNotFoundError as exc:
                 self._error(f"introuvable : {exc}", 404)
+            except PermissionError as exc:
+                self._error(str(exc), 403)
             except (ValueError, json.JSONDecodeError) as exc:
                 self._error(str(exc))
 
@@ -1395,6 +1533,9 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 self._json({"grimoire": "serve", "hint": "API disponible sous /api/"}, 200)
                 return
             rel = path.lstrip("/") or "index.html"
+            if rel.startswith("data/"):
+                self._data_file(rel[len("data/"):])
+                return
             target = (api.ui_dir / rel).resolve()
             # is_relative_to évite la confusion de préfixe (/a/web vs /a/web2).
             if not target.is_relative_to(api.ui_dir.resolve()):
@@ -1420,6 +1561,34 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
+        def _data_file(self, rel: str) -> None:
+            """Sert ``data/<rel>`` — couche générée pour les données projet.
+
+            Les instantanés de la vitrine embarqués dans la wheel décrivent
+            d'autres projets (« Atlas Ops », un store à 141 entrées). Les
+            servir ici afficherait les chiffres de quelqu'un d'autre sous le
+            nom du projet ouvert : la couche projet ne peut venir que d'une
+            génération faite sur ce projet, et son absence est un 404 honnête.
+            """
+            target = api.data_file(rel)
+            if target is None:
+                self._json(
+                    {
+                        "error": "couche de données absente pour ce projet",
+                        "hint": "POST /api/data/refresh régénère la couche du projet servi",
+                        "data": api.data_status(),
+                    },
+                    404,
+                )
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
     return Handler
 
 
@@ -1427,6 +1596,15 @@ def serve(
     project_root: Path, kit_root: Path, ui_dir: Path | None, port: int
 ) -> ThreadingHTTPServer:
     api = ForgeAPI(project_root, kit_root, ui_dir)
+    # Ouvrir un projet, c'est le connaître : il entre au registre de la machine
+    # et devient sélectionnable depuis n'importe quel atelier. Un dossier sans
+    # le moindre marqueur (ni dépôt, ni trace Grimoire) n'y entre pas — le
+    # registre décrit des projets, pas des répertoires de passage.
+    if looks_grimoire(api.project_root):
+        register_project(api.project_root)
+    # La couche de données du projet se génère en fond : le serveur répond tout
+    # de suite, et les pages runtime se remplissent quand elle est prête.
+    api.data.refresh()
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
     return server
 

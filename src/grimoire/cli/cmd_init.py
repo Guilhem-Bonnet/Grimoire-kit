@@ -659,7 +659,7 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str) -> None:
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return
     try:
-        from grimoire.cli.cmd_cockpit import register_project
+        from grimoire.tools.project_registry import register_project
 
         slug = register_project(target, project_name)
     except OSError:

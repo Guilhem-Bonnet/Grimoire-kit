@@ -7,6 +7,49 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **`grimoire serve` ne montre plus les données d'un autre projet.** Le site
+  embarqué dans la wheel contient l'instantané de la vitrine publique : des
+  projets inventés (« Atlas Ops », « Sentinel Sec », « Ledger Data ») et les
+  chiffres du dépôt du kit. Comme `serve` n'exposait aucune surface projet,
+  l'UI retombait sur cet index, n'y trouvait pas le projet ouvert et servait le
+  primaire : Mémoire affichait « aucun backend · 141 entrées » sur un dépôt
+  vide, Kanban dix tâches inventées, Observatoire des traces d'agents datées
+  d'il y a deux minutes. Les couches de télémétrie (`meta`, `taskboard`,
+  `observatory`, `activity`, `insights`, `memory`, `projects.json`) ne viennent
+  désormais que d'une génération faite sur le projet servi ; leur absence est
+  un 404, et les pages affichent leur état vide. Les références du kit
+  (catalogue de patterns, marketplace, anatomie, couverture) restent servies.
+- **Le remplissage de démonstration du générateur devient opt-in.**
+  `gen-site-data.py` fabriquait des traces horodatées à l'instant, un board
+  garni de dix cartes du template et un nuage vectoriel tiré au sort dès que le
+  projet n'avait rien à montrer. Réservé à la vitrine publique, qui n'a pas de
+  runtime propre, il s'active maintenant par `--demo`
+  (`GRIMOIRE_SITE_DEMO=1` pour `serve-site.sh`).
+- **Le cockpit n'amorce plus sa couche de données avec la démo bundlée.** Un
+  registre vide donne un cockpit vide, et la commande pour le remplir.
+
+### Ajouté
+
+- **Découverte des projets depuis l'atelier.** Le bouton de projet de la barre
+  latérale ouvre un vrai sélecteur : les projets connus de la machine, une
+  navigation dossier par dossier (ou un chemin collé), et un scan borné d'une
+  racine qui propose sans enrôler. Choisir un projet re-route le serveur en
+  cours — `grimoire serve` devient multi-projets sans second processus.
+- **Nouvelles routes locales** : `GET /api/projects`, `GET /api/fs/browse`,
+  `GET /api/data/status`, `POST /api/projects/{select,add,scan}`,
+  `POST /api/data/refresh`.
+- Le projet servi est enrôlé au registre à l'ouverture s'il porte un marqueur
+  de projet. Ouvrir un projet n'écrit rien dans son arbre : registre et couche
+  de données vivent sous `~/.grimoire/`.
+
+### Modifié
+
+- Le registre de projets et la découverte quittent `grimoire.cli.cmd_cockpit`
+  pour `grimoire.tools.project_registry` : le cockpit et l'atelier lisent et
+  écrivent le même fichier, et deux copies de cette logique auraient divergé.
+
 ## [3.34.2] - 2026-08-28
 
 ### Corrigé

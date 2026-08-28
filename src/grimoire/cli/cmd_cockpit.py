@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import signal
 import socket
@@ -34,8 +33,23 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from grimoire.core.scanner import _is_excluded_dir
 from grimoire.data import site_script, web_path
+from grimoire.tools.project_registry import (
+    classify_registry,
+    crawl_projects,
+    load_registry,
+    looks_grimoire,
+    projects_payload,
+    read_state,
+    register_project,
+    registry_file,
+    registry_home,
+    save_registry,
+    selected_slug,
+    set_selected_slug,
+    state_file,
+    write_state,
+)
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -46,51 +60,25 @@ console = Console(stderr=True)
 
 
 # ── Paths ───────────────────────────────────────────────────────────────────
-
-def _home() -> Path:
-    env = os.environ.get("GRIMOIRE_COCKPIT_HOME")
-    base = Path(env).expanduser() if env else Path.home() / ".grimoire" / "cockpit"
-    return base
-
-
-def _registry_file() -> Path:
-    return _home() / "registry.json"
-
+# Le registre, ses chemins et la découverte vivent dans
+# ``grimoire.tools.project_registry`` : le cockpit et l'atelier lisent et
+# écrivent le même fichier, et deux copies de cette logique finiraient par
+# diverger. Seul le dossier de service reste propre au cockpit.
 
 def _serve_dir() -> Path:
-    return _home() / "serve"
-
-
-def _state_file() -> Path:
-    return _home() / "cockpit.json"
-
-
-def _slug(text: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return s or "project"
+    return registry_home() / "serve"
 
 
 # ── Daemon helpers (background start/stop) ────────────────────────────────────
 
 def _read_state() -> dict[str, Any] | None:
-    f = _state_file()
-    if not f.is_file():
-        return None
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _write_state(state: dict[str, Any]) -> None:
-    f = _state_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    """État du démon, ``None`` quand il n'y en a pas — les appelants testent la
+    présence d'un cockpit démarré, pas le contenu d'un dictionnaire vide."""
+    return read_state() or None
 
 
 def _clear_state() -> None:
-    _state_file().unlink(missing_ok=True)
+    state_file().unlink(missing_ok=True)
 
 
 def _port_alive(port: int) -> bool:
@@ -121,89 +109,17 @@ def _terminate(pid: int) -> bool:
 
 
 # ── Registry I/O ──────────────────────────────────────────────────────────────
-
-def _load_registry() -> list[dict[str, str]]:
-    f = _registry_file()
-    if not f.is_file():
-        return []
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
-
-
-def _save_registry(projects: list[dict[str, str]]) -> None:
-    f = _registry_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(projects, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def _looks_grimoire(p: Path) -> bool:
-    return any(
-        (p / marker).exists()
-        for marker in (".git", "project-context.yaml", "_grimoire", ".github/copilot-instructions.md")
-    )
-
-
-def register_project(path: Path, name: str | None = None) -> str | None:
-    """Register a project in the cockpit registry (idempotent).
-
-    Returns the assigned slug if newly added, or ``None`` if the path is not a
-    directory or is already registered. Shared by ``cockpit add`` and by
-    ``grimoire init`` (auto-enrols a freshly scaffolded project).
-    """
-    proot = path.expanduser().resolve()
-    if not proot.is_dir():
-        return None
-    projects = _load_registry()
-    if any(p.get("path") == str(proot) for p in projects):
-        return None
-    disp = name or proot.name
-    slug = _slug(disp)
-    existing = {p.get("slug") for p in projects}
-    base_slug, n = slug, 2
-    while slug in existing:
-        slug = f"{base_slug}-{n}"
-        n += 1
-    projects.append({"name": disp, "path": str(proot), "slug": slug})
-    _save_registry(projects)
-    return slug
-
+# Délégué à ``grimoire.tools.project_registry`` (voir les imports en tête).
 
 def _resolve_project_path(slug: str | None) -> Path | None:
     """Map a registry slug to its absolute project path (first project if slug is empty)."""
-    projects = _load_registry()
+    projects = load_registry()
     if slug:
         for p in projects:
             if p.get("slug") == slug:
                 return Path(p["path"])
         return None
     return Path(projects[0]["path"]) if projects else None
-
-
-def _primary_slug() -> str:
-    projects = _load_registry()
-    return str(projects[0].get("slug", "")) if projects else ""
-
-
-def _selected_slug() -> str:
-    """Slug du projet courant : choix explicite s'il est encore valide, sinon primaire."""
-    state = _read_state() or {}
-    chosen = str(state.get("selected_project", ""))
-    if chosen and any(p.get("slug") == chosen for p in _load_registry()):
-        return chosen
-    return _primary_slug()
-
-
-def _set_selected_slug(slug: str) -> bool:
-    """Persiste le projet courant. False si le slug n'est pas au registre."""
-    if not any(p.get("slug") == slug for p in _load_registry()):
-        return False
-    state = _read_state() or {}
-    state["selected_project"] = slug
-    _write_state(state)
-    return True
 
 
 _API_CACHE: dict[Path, Any] = {}
@@ -223,21 +139,6 @@ def _project_api(proot: Path) -> Any:
         cached = ForgeAPI(proot, _kit_root(), None)
         _API_CACHE[proot] = cached
     return cached
-
-
-def _projects_payload() -> dict[str, Any]:
-    """Registre tel que servi à l'UI — chaque entrée dit si son chemin existe encore."""
-    projects = [
-        {
-            "slug": str(p.get("slug", "")),
-            "name": str(p.get("name", "")),
-            "path": str(p.get("path", "")),
-            "exists": Path(str(p.get("path", ""))).is_dir(),
-            "is_grimoire": _looks_grimoire(Path(str(p.get("path", "")))),
-        }
-        for p in _load_registry()
-    ]
-    return {"projects": projects, "selected": _selected_slug(), "primary": _primary_slug()}
 
 
 # ── Local API (cockpit only) ──────────────────────────────────────────────────
@@ -309,7 +210,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def _query_slug(self) -> str:
         """Projet visé par la requête : ``?project=`` explicite, sinon la sélection courante."""
         asked = parse_qs(urlparse(self.path).query).get("project", [""])[0]
-        return asked or _selected_slug()
+        return asked or selected_slug()
 
     def do_GET(self) -> None:  # http.server contract
         path = urlparse(self.path).path
@@ -320,7 +221,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(403, {"ok": False, "error": "cockpit local only"})
             return
         if path == "/api/projects":
-            self._send_json(200, _projects_payload())
+            self._send_json(200, projects_payload())
             return
         proot = _resolve_project_path(self._query_slug() or None)
         if proot is None or not proot.is_dir():
@@ -360,10 +261,10 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 # L'UI envoie historiquement un chemin ; on le tolère.
                 wanted = str(data.get("path", "")).strip()
                 slug = next(
-                    (str(x.get("slug", "")) for x in _load_registry() if x.get("path") == wanted),
+                    (str(x.get("slug", "")) for x in load_registry() if x.get("path") == wanted),
                     "",
                 )
-            if not _set_selected_slug(slug):
+            if not set_selected_slug(slug):
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             self._send_json(200, {"ok": True, "selected": slug})
@@ -447,7 +348,7 @@ def add(
         console.print(f"[yellow]•[/yellow] Already registered: {proot}")
         return
     disp = name or proot.name
-    mark = "" if _looks_grimoire(proot) else "  [yellow](pas de marqueur Grimoire détecté)[/yellow]"
+    mark = "" if looks_grimoire(proot) else "  [yellow](pas de marqueur Grimoire détecté)[/yellow]"
     console.print(f"[green]+[/green] {disp} [dim]({slug})[/dim] → {proot}{mark}")
 
 
@@ -456,12 +357,12 @@ def remove(
     target: Annotated[str, typer.Argument(help="Slug, name, or path to remove.")],
 ) -> None:
     """Remove a project from the cockpit registry."""
-    projects = _load_registry()
+    projects = load_registry()
     kept = [p for p in projects if target not in (p.get("slug"), p.get("name"), p.get("path"))]
     if len(kept) == len(projects):
         console.print(f"[yellow]•[/yellow] No match for: {target}")
         return
-    _save_registry(kept)
+    save_registry(kept)
     console.print(f"[green]−[/green] Removed: {target}")
 
 
@@ -472,10 +373,10 @@ def _forget_selection_if_gone(kept: list[dict[str, str]]) -> None:
     projet primaire à chaque lecture, sans jamais le dire. Autant l'effacer au
     moment où l'entrée disparaît.
     """
-    if _selected_slug() not in {str(p.get("slug", "")) for p in kept}:
+    if selected_slug() not in {str(p.get("slug", "")) for p in kept}:
         state = _read_state() or {}
         state.pop("selected_project", None)
-        _write_state(state)
+        write_state(state)
 
 
 _prune_dry_opt = typer.Option(False, "--dry-run", "-n", help="Montrer le plan sans rien retirer.")
@@ -485,29 +386,6 @@ _prune_stale_opt = typer.Option(
     "--stale",
     help="Retirer aussi les chemins qui existent mais ne portent plus de marqueur Grimoire.",
 )
-
-
-def classify_registry(projects: list[dict[str, str]], *, stale: bool = False) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Sépare le registre en (à garder, à retirer).
-
-    Par défaut, seule l'absence du chemin justifie un retrait : un répertoire
-    qui existe encore peut avoir été enrôlé délibérément, et supprimer une
-    entrée valide coûte plus cher que d'en garder une douteuse. ``stale``
-    élargit aux chemins présents mais sans marqueur Grimoire.
-    """
-    keep: list[dict[str, str]] = []
-    drop: list[dict[str, str]] = []
-    for entry in projects:
-        raw = str(entry.get("path", "")).strip()
-        if not raw:
-            drop.append(entry)
-            continue
-        path = Path(raw)
-        if not path.is_dir() or (stale and not _looks_grimoire(path)):
-            drop.append(entry)
-            continue
-        keep.append(entry)
-    return keep, drop
 
 
 @cockpit_app.command("prune")
@@ -528,7 +406,7 @@ def prune(
       [cyan]grimoire cockpit prune -y[/cyan]         Purger sans confirmation
       [cyan]grimoire cockpit prune --stale[/cyan]    Inclure les chemins sans marqueur
     """
-    projects = _load_registry()
+    projects = load_registry()
     keep, drop = classify_registry(projects, stale=stale)
     fmt = str((ctx.obj or {}).get("output", "text"))
 
@@ -541,7 +419,7 @@ def prune(
             "dryRun": dry_run,
         }
         if drop and not dry_run:
-            _save_registry(keep)
+            save_registry(keep)
             _forget_selection_if_gone(keep)
         typer.echo(json.dumps(payload, indent=2))
         return
@@ -563,7 +441,7 @@ def prune(
         console.print("[yellow]Annulé.[/yellow]")
         return
 
-    _save_registry(keep)
+    save_registry(keep)
 
     _forget_selection_if_gone(keep)
     console.print(f"[green]−[/green] {len(drop)} entrée(s) retirée(s), {len(keep)} conservée(s).")
@@ -572,7 +450,7 @@ def prune(
 @cockpit_app.command("list")
 def list_projects() -> None:
     """List the projects governed by the cockpit."""
-    projects = _load_registry()
+    projects = load_registry()
     if not projects:
         console.print("[dim]Aucun projet enregistré. Ajoute-en un : [b]grimoire cockpit add <path>[/b][/dim]")
         return
@@ -582,33 +460,51 @@ def list_projects() -> None:
     table.add_column("Chemin", style="dim")
     table.add_column("", justify="center")
     for p in projects:
-        ok = "[green]●[/green]" if _looks_grimoire(Path(p.get("path", ""))) else "[yellow]○[/yellow]"
+        ok = "[green]●[/green]" if looks_grimoire(Path(p.get("path", ""))) else "[yellow]○[/yellow]"
         table.add_row(p.get("slug", ""), p.get("name", ""), p.get("path", ""), ok)
     console.print(table)
+
+
+# Couches ``data/`` communes au kit — identiques pour tout le monde, sans
+# aucune donnée de projet : elles viennent du site embarqué.
+_KIT_DATA_LAYERS = (
+    "catalogue-export.json",
+    "extensions.json",
+    "architecture.json",
+    "kit-coverage.json",
+)
 
 
 def _sync_site(serve_dir: Path) -> None:
     """Copy the bundled static site into the serve dir.
 
     The ``data/`` dir is owned by :func:`_generate_data` and must never be
-    clobbered by a sync, so it is excluded here. On first run (no data yet) the
-    bundled demo data is seeded as a working fallback for an empty registry.
+    clobbered by a sync, so it is excluded here — except the kit reference
+    layers, which carry no project data and are the same everywhere.
+
+    The bundled ``data/`` also holds the public vitrine snapshot: invented
+    projects and another repository's metrics. Seeding it for an empty registry
+    used to make the cockpit look populated with somebody else's numbers, so it
+    is never copied. An empty registry shows an empty cockpit.
     """
     src = web_path()
     serve_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, serve_dir, dirs_exist_ok=True, ignore=shutil.ignore_patterns("data"))
     data_dir = serve_dir / "data"
-    if not data_dir.exists() and (src / "data").is_dir():
-        shutil.copytree(src / "data", data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for layer in _KIT_DATA_LAYERS:
+        bundled = src / "data" / layer
+        if bundled.is_file():
+            shutil.copy2(bundled, data_dir / layer)
 
 
 def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
     """Regenerate the data layer from the registry. Returns True if projects were generated."""
-    projects = _load_registry()
+    projects = load_registry()
     if not projects:
         return False
     gen = site_script("gen-site-data.py")
-    cmd = [sys.executable, str(gen), "--registry", str(_registry_file()), "--out-dir", str(serve_dir / "data")]
+    cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]
     if with_tests:
         cmd.append("--with-tests")
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -629,7 +525,8 @@ def refresh(
     if _generate_data(serve_dir, with_tests):
         console.print(f"[green]✓[/green] Données régénérées → {serve_dir / 'data'}")
     else:
-        console.print("[dim]Aucun projet enregistré — données de démo bundlées conservées.[/dim]")
+        console.print("[dim]Aucun projet enregistré — rien à générer. "
+                      "[b]grimoire cockpit scan <dossier>[/b][/dim]")
 
 
 @cockpit_app.command("serve")
@@ -646,8 +543,9 @@ def serve(
         if _generate_data(serve_dir, with_tests):
             console.print("[green]✓[/green] Data layer régénéré depuis le registre.")
         else:
-            console.print("[dim]Registre vide → site servi avec les données de démo bundlées.[/dim]")
-            console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b][/dim]")
+            console.print("[dim]Registre vide → cockpit vide (aucune donnée inventée).[/dim]")
+            console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
+                          "ou [b]grimoire cockpit scan <dossier>[/b][/dim]")
 
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
@@ -687,7 +585,8 @@ def start(
     if _generate_data(serve_dir, with_tests):
         console.print("[green]✓[/green] Data layer régénéré depuis le registre.")
     else:
-        console.print("[dim]Registre vide → données de démo bundlées. [b]grimoire cockpit add <path>[/b][/dim]")
+        console.print("[dim]Registre vide → cockpit vide. "
+                      "[b]grimoire cockpit add <path>[/b] ou [b]scan <dossier>[/b][/dim]")
 
     cmd = [sys.executable, "-m", "grimoire", "cockpit", "serve",
            "--port", str(port), "--no-open", "--no-refresh"]
@@ -701,7 +600,7 @@ def start(
         console.print("[red]✗[/red] Le cockpit n'a pas démarré à temps (port occupé ?).")
         raise typer.Exit(1)
 
-    _write_state({"pid": pid, "port": port, "url": url})
+    write_state({"pid": pid, "port": port, "url": url})
     console.print(f"[bold green]Cockpit démarré[/bold green] → [link]{url}[/link]")
     console.print("[dim]Arrêt : [b]grimoire cockpit stop[/b] · état : [b]grimoire cockpit status[/b][/dim]")
     if open_browser:
@@ -737,51 +636,8 @@ def status() -> None:
 
 
 # ── Project discovery (cockpit scan) ─────────────────────────────────────────
-
-@dataclass(frozen=True)
-class _Candidate:
-    """A project directory discovered by ``cockpit scan``."""
-
-    path: Path
-    managed: bool  # grimoire-managed (project-context.yaml / _grimoire) vs bare git
-
-
-def _is_grimoire_managed(p: Path) -> bool:
-    return (p / "project-context.yaml").exists() or (p / "_grimoire").exists()
-
-
-def _crawl_projects(root: Path, max_depth: int) -> list[_Candidate]:
-    """Find candidate projects under ``root``, bounded by ``max_depth``.
-
-    A candidate is a directory containing ``.git``, ``project-context.yaml``
-    or ``_grimoire/``. A detected project is a leaf (never descended into);
-    dependency/build directories are skipped, symlinks are never followed and
-    unreadable directories are ignored.
-    """
-    found: list[_Candidate] = []
-
-    def _walk(directory: Path, depth: int) -> None:
-        managed = _is_grimoire_managed(directory)
-        if managed or (directory / ".git").exists():
-            found.append(_Candidate(path=directory, managed=managed))
-            return  # one repo = one leaf
-        if depth >= max_depth:
-            return
-        try:
-            children = sorted(
-                (p for p in directory.iterdir() if not p.is_symlink() and p.is_dir()),
-                key=lambda p: p.name,
-            )
-        except (PermissionError, OSError):
-            return
-        for child in children:
-            if _is_excluded_dir(child.name):
-                continue
-            _walk(child, depth + 1)
-
-    _walk(root, 0)
-    return found
-
+# Le parcours est dans ``project_registry`` : ``grimoire serve`` expose la même
+# découverte depuis l'atelier (POST /api/projects/scan).
 
 @cockpit_app.command("scan")
 def scan(
@@ -799,12 +655,12 @@ def scan(
         console.print(f"[red]x[/red] Not a directory: {base}")
         raise typer.Exit(1)
 
-    candidates = _crawl_projects(base, depth)
+    candidates = crawl_projects(base, depth)
     if not candidates:
         console.print(f"[dim]No candidate project found under {base} (depth {depth}).[/dim]")
         return
 
-    registered_paths = {p.get("path") for p in _load_registry()}
+    registered_paths = {p.get("path") for p in load_registry()}
 
     def _rel(p: Path) -> str:
         return "." if p == base else str(p.relative_to(base))

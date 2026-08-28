@@ -258,6 +258,7 @@
           <span class="at-chip">${exts.length} extension${exts.length > 1 ? 's' : ''}</span>
           <span class="at-chip">${arts.length} compilation${arts.length > 1 ? 's' : ''} (session)</span>
           <span class="at-chip" id="hub-mem" title="Lien projet ↔ base mémoire (/api/memory/status)">mémoire : …</span>
+          <button class="at-chip" id="hub-data" title="Couche de données du projet (observatoire, kanban, mémoire) — cliquer pour régénérer">données : …</button>
           ${lastArt ? `<span class="at-chip acc">dernière compilation · ${relTime(lastArt.when)}</span>` : ''}
         </div>
 
@@ -297,6 +298,31 @@
     function bind(proj) {
       if (!proj) return;
       $('#hub-new').addEventListener('click', openWizard);
+      // Les pages Observatoire / Mémoire / Kanban lisent une couche générée sur
+      // CE projet. Tant qu'elle n'existe pas, elles sont vides — et le disent.
+      // Rien n'est emprunté à l'instantané de la vitrine embarqué dans la wheel.
+      (async () => {
+        const chip = $('#hub-data'); if (!chip) return;
+        const LABEL = { ready: 'à jour', generating: 'génération…', failed: 'échec', idle: 'non générée' };
+        async function paint() {
+          try {
+            const st = await Atelier.api('/api/data/status');
+            chip.textContent = 'données : ' + (LABEL[st.state] || st.state) +
+              (st.generatedAt ? ' · ' + relTime(Date.parse(st.generatedAt)) : '');
+            chip.classList.toggle('acc', st.state === 'ready');
+            chip.style.color = st.state === 'failed' ? 'var(--data-red)' : '';
+            chip.title = st.error || (st.dataDir ? 'couche du projet : ' + st.dataDir : '');
+            if (st.state === 'generating') setTimeout(paint, 1500);
+          } catch (e) { chip.textContent = 'données : hors ligne'; }
+        }
+        chip.addEventListener('click', async () => {
+          chip.textContent = 'données : génération…';
+          try { await Atelier.api('/api/data/refresh', { method: 'POST', body: '{}' }); }
+          catch (e) { Atelier.toast('Régénération refusée : ' + esc(String(e.message || e))); }
+          paint();
+        });
+        paint();
+      })();
       // B1 — lien projet <-> BDD : état du backend mémoire, best-effort.
       (async () => {
         const chip = $('#hub-mem'); if (!chip) return;
