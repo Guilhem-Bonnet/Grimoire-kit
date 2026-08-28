@@ -1,3 +1,8 @@
+---
+kind: orchestration
+description: "Spawner des sous-agents en parallèle depuis un workflow, puis agréger leurs résultats"
+agents: [architect, dev, qa]
+---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 # <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol

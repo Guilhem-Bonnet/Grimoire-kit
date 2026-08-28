@@ -507,6 +507,9 @@ class ProjectScaffolder:
     def _workflows_dir(self) -> Path:
         return self._kit_dir() / layout.WORKFLOWS_SUBDIR
 
+    def _teams_dir(self) -> Path:
+        return self._kit_dir() / layout.TEAMS_SUBDIR
+
     # Delegation roles a template may reference, each mapped to the agent tags
     # that can fill it, most specific first.
     #
@@ -637,6 +640,7 @@ class ProjectScaffolder:
             base / layout.KIT_DIR / layout.AGENTS_SUBDIR,
             base / layout.KIT_DIR / layout.PROMPT_TEMPLATES_SUBDIR,
             base / layout.KIT_DIR / layout.WORKFLOWS_SUBDIR,
+            base / layout.KIT_DIR / layout.TEAMS_SUBDIR,
             base / layout.KIT_DIR / layout.FRAMEWORK_SUBDIR,
             base / layout.OVERRIDES_DIR / layout.AGENTS_SUBDIR,
             base / "_grimoire" / "_memory" / "agent-learnings",
@@ -823,6 +827,18 @@ class ProjectScaffolder:
                     src=wf,
                     dst=self._workflows_dir() / _strip_tpl_suffix(wf.name),
                     label=f"framework/workflows/{_strip_tpl_suffix(wf.name)}",
+                ))
+
+        # Team manifests — a workflow declaring `team:` resolves against these.
+        # Installed rather than only read from the wheel, so a project can adapt
+        # a roster without forking the kit.
+        teams_src = fw / "teams"
+        if teams_src.is_dir():
+            for manifest in sorted(teams_src.glob("*.yaml")):
+                p.copies.append(FileCopy(
+                    src=manifest,
+                    dst=self._teams_dir() / manifest.name,
+                    label=f"framework/teams/{manifest.name}",
                 ))
 
         # Memory system — kit code lives in the kit tier so updates reach it.

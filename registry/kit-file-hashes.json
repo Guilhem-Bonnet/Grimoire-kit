@@ -246,6 +246,10 @@
    "version": "3.4.2",
    "path": "framework/tools/incubator.py"
   },
+  "184842bedadce93bd2617b7046bfd09269592b439cd400ffc3d8415c37cdd0e8": {
+   "version": "3.34.2",
+   "path": "framework/workflows/repo-map-generator.md"
+  },
   "1879f40e3d97a4dd0f8c3918b506ec5a43b3d71524ac5442fa700837bdc2541a": {
    "version": "3.16.0",
    "path": "framework/tools/grimoire-log.py"
@@ -586,6 +590,14 @@
    "version": "3.4.2",
    "path": "framework/registry/README.md"
   },
+  "38815c345b29b07348796928fd5823621816a5b68fece28214a7c6ff6ccf750e": {
+   "version": "3.34.2",
+   "path": "framework/workflows/subagent-orchestration.md"
+  },
+  "3934e81d56718d8259dc0de558c3e26242a4993da6a4d0fa36912bd780b3de87": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-changelog.prompt.md"
+  },
   "3961d533579ab78f60991a5511934833cc272dd09cb9027685b19ba967ae650e": {
    "version": "3.24.0",
    "path": "framework/tools/grimoire-log.py"
@@ -834,6 +846,10 @@
    "version": "3.32.0",
    "path": "framework/agent-base-compact.md"
   },
+  "52241d6f602547b6bec53bba9ce916d60043711c6930a42009540ef28def5c63": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-self-heal.prompt.md"
+  },
   "529bf0ae42b47a114d168b9a33ee771d18ccbaba15aae433319e2dc2d7dc7892": {
    "version": "3.16.0",
    "path": "framework/tools/skill-validator.py"
@@ -877,6 +893,10 @@
   "55d5cfe298a1210df0fc7b19c039e22c734d5d09dfef4284f23d8d8c656ee1e9": {
    "version": "3.16.0",
    "path": "framework/tools/doc-fetcher.py"
+  },
+  "5673b3de4792c9cb943e72d46794de99aa2bc4da284bce148fd5c71bc9644942": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-status.prompt.md"
   },
   "56e92aaa1174b759597a2025e2efa609136f6f2f486f1afac07dc01be537e368": {
    "version": "3.33.0",
@@ -1498,6 +1518,10 @@
    "version": "3.4.2",
    "path": "framework/cross-validation-trust.md"
   },
+  "8ffe5f8dc51a70e1b8431e38bf71d0986b65a25893e4fddba13610a61b85509a": {
+   "version": "3.34.2",
+   "path": "framework/workflows/incident-response.md"
+  },
   "903d722980a676c15542bf5fc4f584e6914bb8b76f623cf00250d8c7fc569c22": {
    "version": "3.12.0",
    "path": "archetypes/stack/agents/terraform-expert.dna.yaml"
@@ -1581,6 +1605,10 @@
   "99a838c361641c004920d975c1147af020317b76bb30d02d4e5202e37bb440d4": {
    "version": "3.21.0",
    "path": "framework/grimoire-trace.md"
+  },
+  "9a0fa253ef8057466eb8a8ad6abe1b919106e20abef943373032875d4cc4b964": {
+   "version": "3.34.2",
+   "path": "framework/workflows/party-mode.md"
   },
   "9a55f4375e3d9094fc7e0237dd78c3559ee207ffc298e65ae445798d910740da": {
    "version": "3.4.2",
@@ -1673,6 +1701,10 @@
   "9ed369a59f9e48149e7d1037f0ced978f89ed37aa40b03cd2565bfbc7f1d582a": {
    "version": "3.4.2",
    "path": "framework/tools/message-bus.py"
+  },
+  "9ed4880de4767705d20d159cbb4e2f36c91db1b82a83627a403389275ca1c9e9": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-pre-push.prompt.md"
   },
   "9ef00c02be367b80da2f0574c755c358dd668c9da911e971f4105ce594679c72": {
    "version": "3.16.0",
@@ -2118,6 +2150,10 @@
    "version": "3.4.2",
    "path": "framework/tools/grimoire-mcp-tools.py"
   },
+  "c3e983ce84ff05cbb562f80462b0adeb829fcc27413afaba9cccfbc7c1d9a363": {
+   "version": "3.34.2",
+   "path": "framework/workflows/state-checkpoint.md"
+  },
   "c4f72a41f19bcfe0c9ec4e85df14627c95827950fcef29664994b8e2bb143361": {
    "version": "3.4.2",
    "path": "framework/tools/background-tasks.py"
@@ -2185,6 +2221,10 @@
   "c922b60230bd9621dab4a385dd52eef9135405291892b96df7bde4ed3e5a1d30": {
    "version": "3.4.2",
    "path": "framework/tools/swarm-consensus.py"
+  },
+  "c9786cb96fb568a4454d01d7be42cd7152dab8eb7ab37215d4387fbd40fbbdba": {
+   "version": "3.34.2",
+   "path": "framework/workflows/boomerang-orchestration.md"
   },
   "c9b89befa496b7a7204dbe99509b3cbbb36d5d598c76920c6a8346fd18f42068": {
    "version": "3.16.0",
@@ -2273,6 +2313,10 @@
   "d09507dafe3d86ed29924a9f29ad71717ebc504f15ea1abc8506ce2d4adc404b": {
    "version": "3.4.2",
    "path": "archetypes/meta/agents/art-director.md"
+  },
+  "d09c721652565aa3c56fad286cd3f94792785cf0480a11ade826c74aa6607f83": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-health-check.prompt.md"
   },
   "d0c2d5ccf1cd1abfef110eecfa656420e7844b3c37b9a85b47b9f7631c5fa60e": {
    "version": "3.4.3",
@@ -2586,6 +2630,10 @@
    "version": "3.12.0",
    "path": "archetypes/stack/agents/typescript-expert.dna.yaml"
   },
+  "ec00085ed2d17b2a5b5ba6bc243098870b32037cce0dc46faf80127f8ed49a60": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-dream.prompt.md"
+  },
   "ec039c8bd5512f50ddfc1a4d708deb0d9566d9408a88d58bdceccdc8753ee2cb": {
    "version": "3.32.0",
    "path": "archetypes/platform-engineering/agents/backend-engineer.md"
@@ -2749,6 +2797,10 @@
   "fa7415d0e32daaaa8c08f765b70c51a2c061b402ff34053d2efe84f050915706": {
    "version": "3.4.2",
    "path": "framework/context-router.md"
+  },
+  "fa774a05b362d64a555a93fe7b4955322750c42ee5ae08c61344abd5971e593c": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-session-bootstrap.prompt.md"
   },
   "fac2c3f0bd8b834adebcef8c5967867137ea6001ade854ea5042164fce194105": {
    "version": "3.4.2",

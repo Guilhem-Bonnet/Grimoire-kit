@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Auto-diagnostic et réparation Grimoire — identifie et corrige les problèmes courants'
 agent: 'agent'
 tools: ['read', 'search', 'execute', 'edit']

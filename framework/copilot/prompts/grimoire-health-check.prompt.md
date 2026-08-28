@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Health check complet du projet Grimoire — agents, mémoire, config, intégrité'
 agent: 'agent'
 tools: ['read', 'search', 'execute']

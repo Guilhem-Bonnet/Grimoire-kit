@@ -9,6 +9,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Le catalogue de workflows ne montrait que la moitié de ce que le kit
+  installe.** `grimoire workflows list` n'indexait que `.github/prompts/` :
+  sept prompts d'hygiène, qui doublent pour la plupart une commande CLI. Les
+  six workflows d'orchestration multi-agents — boomerang, subagent,
+  party-mode, incident-response, state-checkpoint, repo-map-generator — sont
+  déposés par le scaffold dans le tier kit et n'étaient listés par aucune
+  surface : installés dans chaque projet, invocables depuis nulle part. Le
+  catalogue indexe désormais les deux familles, avec la nature de chaque
+  workflow, les agents qu'il mobilise et sa provenance ; `--kind` filtre.
+  Le groupe `workflows` n'avait aucun test — c'est ce qui a permis à l'écart
+  de tenir.
+- **Les manifestes d'équipe avaient un schéma, trois fichiers et aucun
+  lecteur.** `framework/teams/` décrit la chaîne vision → build → ops :
+  membres et rôles, contrats d'entrée et de sortie, phases de livraison,
+  outils autorisés, condition de handoff. Rien dans le SDK ne les chargeait.
+  Ils sont désormais installés dans le projet, résolus par tier, affichés par
+  `grimoire workflows teams`, et rendus par `workflows show` quand un workflow
+  déclare `team:`.
+- **`workflows show` et `workflows install` ne pouvaient pas atteindre une
+  orchestration.** Les deux résolvaient en `<slug>.prompt.md`, un nom que les
+  workflows d'orchestration ne portent pas. `install` dépose maintenant chaque
+  workflow là où sa nature l'exige.
+- **Deux workflows livrés perdaient leur frontmatter en silence.** Leur
+  description contenait un `:` non échappé ; le YAML échouait, le parseur
+  renvoyait un dictionnaire vide, et le workflow arrivait sans nom ni agents.
+  Un test paramétré sur les fichiers livrés ferme le cas.
+
 - **La porte de preuve refuse une tâche que le board ne connaît pas.**
   `grimoire standard gate check --task-id <inconnu>` répondait `ok`. Toutes les
   exigences de `check_evidence_gates` sont indexées sur des états nommés ; une
@@ -57,6 +84,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   fichiers hérités deviennent deux. Aucun changement de surface CLI.
 
 ### Ajouté
+
+- **Les workflows se déclarent.** Un frontmatter `kind` / `description` /
+  `agents` / `team` / `triggers` fait entrer un workflow au catalogue, plutôt
+  que de le deviner depuis son emplacement — sous `workflows/` vivent aussi
+  des gabarits de rapport rendus à chaque run. Les six orchestrations et les
+  sept commandes livrées le portent désormais.
+- **`grimoire workflows teams`** — les équipes disponibles, leurs membres et
+  la chaîne de handoff.
 
 - **Deux plans cibles** : `docs/flow-engine-target-plan.md` — brancher le
   noyau d'exécution qui existe mais n'est appelé par rien — et

@@ -1,3 +1,9 @@
+---
+kind: orchestration
+description: "Orchestration hiérarchique : un orchestrateur décompose, délègue aux agents spécialisés, agrège et trace les artefacts"
+agents: [sm, architect, dev, qa]
+team: team-build
+---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 # <img src="../../docs/assets/icons/boomerang.svg" width="32" height="32" alt=""> Boomerang Orchestration Workflow

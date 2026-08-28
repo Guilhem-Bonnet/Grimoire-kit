@@ -341,21 +341,48 @@ et l'annonce, et `GRIMOIRE_NO_COCKPIT` désactive cette inscription.
 
 ---
 
-## Workflows Copilot
+## Workflows
 
-Inspection et synchronisation des prompts de workflow entre le framework et le
-projet.
+Un workflow a une **nature**. Les commandes d'hygiène (`command`) doublent un
+diagnostic CLI ; les orchestrations (`orchestration`) coordonnent plusieurs
+agents sur plusieurs tours et déclarent parfois l'équipe avec laquelle elles
+tournent. Les deux familles vivent dans des répertoires différents — les
+premières sous `.github/prompts/`, les secondes sous le tier kit — et le
+catalogue indexe les deux.
 
 | Commande | Description |
 | --- | --- |
-| `grimoire workflows list` | Lister les workflows du projet et du framework |
+| `grimoire workflows list` | Lister les workflows — nature, agents, provenance |
+| `grimoire workflows list -k orchestration` | Ne garder que les workflows multi-agents |
+| `grimoire workflows teams` | Lister les équipes : membres, spécialité, chaîne de handoff |
 | `grimoire workflows search <terme>` | Chercher par slug, description, et optionnellement contenu |
-| `grimoire workflows show <slug>` | Afficher le contenu et la source d'un prompt |
-| `grimoire workflows install <slug>` | Installer un workflow du framework dans le projet |
-| `grimoire workflows sync` | Synchroniser les workflows du framework vers le projet |
+| `grimoire workflows show <slug>` | Afficher un workflow, l'équipe qu'il déclare, et son contenu |
+| `grimoire workflows install <slug>` | Installer un workflow du framework — la destination suit sa nature |
+| `grimoire workflows sync` | Synchroniser les prompts du framework vers le projet |
 | `grimoire workflows diff` | Différences entre framework et projet |
-| `grimoire workflows doctor` | Auditer les workflows du projet contre les défauts du framework |
-| `grimoire workflows prune` | Retirer les workflows propres au projet absents du framework |
+| `grimoire workflows doctor` | Auditer les prompts du projet contre les défauts du framework |
+| `grimoire workflows prune` | Retirer les prompts propres au projet absents du framework |
+
+### Se déclarer pour entrer au catalogue
+
+Un workflow d'orchestration entre au catalogue en le disant, dans son
+frontmatter — pas en étant deviné depuis son emplacement, parce que sous
+`workflows/` vivent aussi des gabarits de rapport rendus à chaque run :
+
+```yaml
+---
+kind: orchestration
+description: "Ce que fait ce workflow"
+agents: [sm, architect, dev, qa]
+team: team-build
+triggers:
+  - la situation qui appelle ce workflow
+---
+```
+
+`agents` et `team` sont facultatifs ; `description` ne l'est pas en pratique,
+c'est ce que le catalogue affiche. Un fichier sans frontmatter reste sur
+disque et n'est pas listé.
 
 ---
 

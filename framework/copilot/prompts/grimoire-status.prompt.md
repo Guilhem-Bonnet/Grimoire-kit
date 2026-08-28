@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Tableau de bord Grimoire — agents actifs, mémoire, activité récente, état projet'
 agent: 'agent'
 tools: ['read', 'search']

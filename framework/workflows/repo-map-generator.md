@@ -1,3 +1,8 @@
+---
+kind: orchestration
+description: "Carte statique du dépôt consultable par tous les agents — arborescence, symboles, relations"
+agents: [dev]
+---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 # <img src="../../docs/assets/icons/folder-tree.svg" width="32" height="32" alt=""> Repo Map Generator — BM-05

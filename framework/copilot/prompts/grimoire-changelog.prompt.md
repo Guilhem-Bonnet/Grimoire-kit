@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Génère un CHANGELOG structuré depuis git history et les décisions Grimoire'
 agent: 'agent'
 tools: ['read', 'execute']

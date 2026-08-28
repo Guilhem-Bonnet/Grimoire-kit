@@ -37,6 +37,7 @@ OVERRIDES_DIR = f"{GRIMOIRE_DIR}/overrides"
 #: Kit sub-trees, named once so scaffolder and readers cannot drift apart.
 AGENTS_SUBDIR = "agents"
 WORKFLOWS_SUBDIR = "workflows"
+TEAMS_SUBDIR = "teams"
 PROMPT_TEMPLATES_SUBDIR = "prompt-templates"
 FRAMEWORK_SUBDIR = "framework"
 MEMORY_CODE_SUBDIR = "memory"

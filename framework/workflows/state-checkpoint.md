@@ -1,3 +1,8 @@
+---
+kind: orchestration
+description: "Persistance d'état entre sessions : un workflow long repart du step interrompu, variables comprises"
+agents: [dev]
+---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 # <img src="../../docs/assets/icons/branch.svg" width="32" height="32" alt=""> State Checkpoint & Resume Protocol

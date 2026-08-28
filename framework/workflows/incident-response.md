@@ -1,11 +1,12 @@
-<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
-
-name: incident-response
-description: Workflow partagé de réponse aux incidents et génération de post-mortems structurés
+---
+kind: orchestration
+description: "Réponse aux incidents et génération de post-mortems structurés"
 triggers:
- - alerte critique résolue
- - incident infra détecté
- - incident sécurité détecté
+  - alerte critique résolue
+  - incident infra détecté
+  - incident sécurité détecté
+---
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 <!--
 Ces {{placeholders}} sont résolus à l'installation depuis les agents réellement
