@@ -190,7 +190,11 @@ branch = true
 omit = ["*/__main__.py"]
 
 [tool.coverage.report]
-fail_under = 70
+# Cliquet : la couverture mesurée est de 75,58 % sur les trois plateformes de
+# la matrice, identique en local et en CI. Un seuil à 70 laissait 5,6 points
+# acquis non verrouillés — une régression pouvait les rendre sans rien casser.
+# Le seuil se relève quand la couverture monte, jamais l'inverse.
+fail_under = 75
 precision = 2
 show_missing = true
 exclude_lines = [
