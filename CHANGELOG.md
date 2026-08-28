@@ -11,21 +11,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
-- **`agent-caller` ne meurt plus sur une console non-UTF-8.** L'outil imprime
-  des filets (`│`) dans ses tableaux ; sur une console Windows en cp1252,
-  `print` levait `UnicodeEncodeError` et une simple commande de lecture
-  échouait. La sortie est reconfigurée en UTF-8 au démarrage, avec
-  `errors="replace"` pour qu'un flux non reconfigurable dégrade au lieu de
-  planter. Les 44 autres outils dans le même cas sont suivis en #192.
+- **Le catalogue de contenu livré ne recense plus du bytecode.**
+  `gen-kit-hashes.py` parcourait le disque : un `__pycache__` laissé par une
+  exécution de tests suffisait à y injecter des digests de `.pyc`, propres à une
+  version de Python. 304 entrées de ce type traînaient dans le catalogue, dont
+  249 depuis la 3.32.0. Le scan lit désormais `git ls-files`, comme le scan d'un
+  tag lisait déjà `git ls-tree` — les deux vues répondent enfin à la même
+  question — et les entrées parasites sont retirées.
+- **Le job CI *Framework Tools Tests* ne se déclarait vert qu'en apparence.** Il
+  neutralisait le code de sortie de pytest (`|| true`) puis devinait le résultat
+  par `grep` sur la dernière ligne. Il échouait en réalité à la collecte depuis
+  un moment — `typer` et `ruamel.yaml` absents de ses dépendances — et personne
+  ne le voyait. Il tourne désormais sur `ubuntu-latest` et `windows-latest`, et
+  c'est le code de sortie qui décide.
 
 ### Modifié
 
-- **Le job CI *Framework Tools Tests* s'exécute réellement.** Il neutralisait le
-  code de sortie de pytest (`|| true`) puis devinait le résultat par `grep` sur
-  la dernière ligne : il échouait à la collecte depuis un moment — dépendances
-  `typer` et `ruamel.yaml` non installées — et se déclarait vert. Il tourne
-  désormais sur `ubuntu-latest` et `windows-latest`, et c'est le code de sortie
-  qui décide.
 - **Les vérificateurs du standard vivent dans `grimoire.core.standard_checks`**
   (`base`, `controls`, `verifiers`), extraits de `agentic_standard.py` qui perd
   1272 lignes. Aucun changement de comportement : la surface publique du module

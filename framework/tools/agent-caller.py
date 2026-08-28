@@ -585,23 +585,7 @@ def _print_schema(spec: AgentToolSpec) -> None:
     print()
 
 
-def _force_utf8_output() -> None:
-    """Sortie en UTF-8 même quand la console ne l'est pas.
-
-    L'outil imprime des caractères de filet (``│``) dans ses tableaux. Sur une
-    console Windows en cp1252, `print` lève un `UnicodeEncodeError` et l'outil
-    meurt sur une commande de lecture — constaté par la matrice Windows de la
-    CI (issue #37), après que l'issue #33 eut montré le même angle mort avec un
-    `import fcntl`.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(encoding="utf-8", errors="replace")
-
-
 def main() -> None:
-    _force_utf8_output()
     parser = argparse.ArgumentParser(
         description="Agent Caller — Agent-to-Agent Tool Calling Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
