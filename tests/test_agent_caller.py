@@ -449,7 +449,10 @@ class TestCLIIntegration(unittest.TestCase):
 
     def test_list_command(self):
         r = self._run("--project-root", str(KIT_DIR), "list")
-        self.assertEqual(r.returncode, 0)
+        # Le code de retour seul ne dit pas pourquoi : sur un échec de
+        # plateforme, c'est stderr qui porte le diagnostic, et un
+        # `assertEqual(1, 0)` nu oblige à deviner.
+        self.assertEqual(r.returncode, 0, f"stderr:\n{r.stderr}\nstdout:\n{r.stdout}")
         self.assertIn("Agents appelables", r.stdout)
 
     def test_history_empty(self):
