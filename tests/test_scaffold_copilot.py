@@ -82,14 +82,26 @@ class TestPlanDirectoriesIncludesCopilot:
         assert agents_path in plan.directories
 
     def test_plan_directories_count(self, scaffolder):
-        """The planned directories cover both tiers of the boundary."""
+        """The planned directories cover both tiers of the boundary.
+
+        Le compte est vérifié, mais il ne suffit pas : un nombre seul ne dit pas
+        *lesquels*, et il tombe à chaque ajout sans rien apprendre à qui le
+        relit. Les répertoires structurants sont donc nommés — c'est eux que le
+        test protège, le compte n'est qu'un garde contre les doublons.
+        """
         plan = ScaffoldPlan()
         scaffolder._plan_directories(plan)
 
-        assert len(plan.directories) == 17
         names = {str(d) for d in plan.directories}
-        assert any("_grimoire/kit/agents" in n for n in names)
-        assert any("_grimoire/overrides/agents" in n for n in names)
+        for expected in (
+            "_grimoire/kit/agents",
+            "_grimoire/kit/teams",  # manifestes d'équipe, installés par cette PR
+            "_grimoire/overrides/agents",
+        ):
+            assert any(expected in n for n in names), f"{expected} absent du plan"
+
+        assert len(plan.directories) == 18
+        assert len(names) == len(plan.directories), "un répertoire est planifié deux fois"
 
 
 class TestPlanCopilotPrompts:
