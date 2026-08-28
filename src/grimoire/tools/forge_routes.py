@@ -72,6 +72,9 @@ class ReadableForgeAPI(Protocol):
     def memory_link_view(self) -> dict[str, Any]:
         """Lien projet ↔ backend mémoire."""
 
+    def health_view(self) -> dict[str, Any]:
+        """Alignement kit, flows et activité réelle du projet."""
+
 
 def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> Any:
     """Résout une lecture projet.
@@ -106,4 +109,6 @@ def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> An
         return backend_catalogue()
     if path == "/api/memory/status":
         return api.memory_link_view()
+    if path == "/api/health":
+        return api.health_view()
     return API_GET_UNHANDLED

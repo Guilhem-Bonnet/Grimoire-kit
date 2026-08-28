@@ -1273,6 +1273,24 @@ def _write(out_dir: Path, name: str, data: dict) -> None:
     (out_dir / name).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def build_health(root: Path) -> dict:
+    """Alignement kit, flows et activité — importé du kit, jamais recalculé ici.
+
+    Le portefeuille a besoin de ces trois réponses par projet sans faire N
+    requêtes. Elles viennent de ``grimoire.tools.project_health``, seule source :
+    dupliquer ici la datation par digest la ferait diverger au premier
+    changement de format du catalogue.
+    """
+    try:
+        from grimoire.tools.project_health import project_health
+    except ImportError:  # script lancé hors du paquet installé
+        return {}
+    try:
+        return project_health(root)
+    except OSError:  # best-effort : un projet illisible n'arrête pas la génération
+        return {}
+
+
 def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = False) -> dict:
     """Génère tous les JSON d'un projet dans out_dir et renvoie une fiche d'en-tête (portefeuille)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1291,6 +1309,8 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
     _write(out_dir, "insights.json", ins)
     mem = build_memory(root, demo=demo)
     _write(out_dir, "memory.json", mem)
+    health = build_health(root)
+    _write(out_dir, "health.json", health)
     # Fiche d'en-tête pour la vue portefeuille
     af = (ins.get("governance", {}).get("antifragile") or {})
     return {
@@ -1304,6 +1324,18 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
         "ci_status": act.get("tracking", {}).get("ci_status", "unknown"),
         "antifragile": af.get("score"),
         "antifragile_level": af.get("level"),
+        "kit_installed": (health.get("kit") or {}).get("installed"),
+        "kit_aligned": (health.get("kit") or {}).get("aligned"),
+        "kit_up_to_date": (health.get("kit") or {}).get("upToDate", False),
+        "kit_behind": (health.get("kit") or {}).get("behind", 0),
+        "flows": [
+            {"id": f["id"], "name": f["name"], "nodes": f["nodes"], "validated": f["validated"]}
+            for f in (health.get("flows") or [])
+        ],
+        "active": (health.get("activity") or {}).get("active", False),
+        "last_event_at": (health.get("activity") or {}).get("lastEventAt"),
+        "last_event_label": (health.get("activity") or {}).get("lastEventLabel"),
+        "in_flight": (health.get("activity") or {}).get("inFlight") or [],
         "memory_backend": mem.get("backend", {}).get("active"),
         "memory_entries": mem.get("store", {}).get("total_entries", 0),
         "contradictions": mem.get("counts_by_type", {}).get("contradictions", 0),

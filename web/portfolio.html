@@ -132,7 +132,22 @@
     .pf-link .arr { transition: transform 180ms var(--ease-forge); }
     .pf-link:hover .arr { transform: translateX(3px); }
 
-    .pf-path { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted);
+    .pf-state { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.pf-tag { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono);
+  font-size: 0.58rem; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 3px;
+  border: 1px solid var(--line-strong); color: var(--ink-soft); white-space: nowrap; }
+.pf-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pf-tag.ok    { color: var(--data-green); border-color: color-mix(in srgb, var(--data-green) 40%, transparent); }
+.pf-tag.warn  { color: var(--data-amber); border-color: color-mix(in srgb, var(--data-amber) 40%, transparent); }
+.pf-tag.live  { color: var(--data-cyan);  border-color: color-mix(in srgb, var(--data-cyan) 45%, transparent); }
+.pf-tag.mute  { color: var(--ink-muted); }
+.pf-tag button, button.pf-tag { cursor: pointer; background: transparent; font-family: var(--font-mono); }
+.pf-flows { margin-top: 10px; font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft); }
+.pf-flows b { color: var(--ink); font-weight: 500; }
+.pf-flows .none { color: var(--ink-muted); }
+.pf-inflight { margin-top: 8px; font-size: 0.7rem; color: var(--ink-soft); }
+.pf-inflight span { color: var(--ink); }
+.pf-path { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted);
   margin-top: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pf-empty { display: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); padding: 40px 0; }
   </style>
@@ -311,6 +326,66 @@
       </a>`).join('');
   }
 
+  /* ── Alignement kit, flows et activité : trois faits, trois sources ──
+     Tout vient de `project_health` côté kit ; la page ne déduit rien. */
+
+  function relTime(iso) {
+    if (!iso) return '';
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (!isFinite(m)) return '';
+    if (m < 1) return "à l'instant";
+    if (m < 60) return 'il y a ' + m + ' min';
+    const h = Math.round(m / 60);
+    return h < 24 ? 'il y a ' + h + ' h' : 'il y a ' + Math.round(h / 24) + ' j';
+  }
+
+  function stateHTML(p) {
+    const tags = [];
+    if (p.measured === false) {
+      return '<div class="pf-state"><span class="pf-tag mute" title="Lancez '
+        + 'grimoire cockpit refresh">MESURES NON GÉNÉRÉES</span></div>';
+    }
+
+    /* Activité : on rapporte la dernière trace écrite, jamais un processus. */
+    if (p.active) {
+      tags.push(`<span class="pf-tag live" title="Trace écrite ${esc(relTime(p.last_event_at))}${p.last_event_label ? ' — ' + esc(p.last_event_label) : ''}"><span class="dot"></span>ACTIF · ${esc(relTime(p.last_event_at))}</span>`);
+    } else if (p.last_event_at) {
+      tags.push(`<span class="pf-tag mute" title="${esc(p.last_event_label || '')}">DERNIÈRE TRACE · ${esc(relTime(p.last_event_at))}</span>`);
+    } else {
+      tags.push('<span class="pf-tag mute">AUCUNE TRACE</span>');
+    }
+
+    /* Alignement kit : dit par le contenu, pas par une version déclarée. */
+    if (p.kit_up_to_date) {
+      tags.push(`<span class="pf-tag ok">KIT ${esc(p.kit_aligned || '')} · ALIGNÉ</span>`);
+    } else if (p.kit_behind > 0) {
+      tags.push(`<span class="pf-tag warn" title="${p.kit_behind} fichier(s) datent d'une version antérieure à ${esc(p.kit_installed || '')}">KIT ${esc(p.kit_aligned || '?')} · ${p.kit_behind} EN RETARD</span>`);
+      if (LOCAL && p.slug) {
+        tags.push(`<button class="pf-tag warn js-update" data-slug="${esc(p.slug)}" data-name="${esc(p.name)}">METTRE À JOUR →</button>`);
+      }
+    } else {
+      tags.push('<span class="pf-tag mute" title="Aucun fichier du kit reconnu dans ce projet">KIT · NON ALIGNÉ</span>');
+    }
+    return `<div class="pf-state">${tags.join('')}</div>`;
+  }
+
+  function flowsHTML(p) {
+    const flows = p.flows || [];
+    if (!flows.length) return '<div class="pf-flows"><span class="none">aucun flow composé</span></div>';
+    const shown = flows.slice(0, 3).map((f) =>
+      `<b>${esc(f.name || f.id)}</b> <span>${f.nodes} nœuds${f.validated ? ' ✓' : ''}</span>`).join(' · ');
+    const rest = flows.length > 3 ? ` · +${flows.length - 3}` : '';
+    return `<div class="pf-flows">${flows.length} flow${flows.length > 1 ? 's' : ''} — ${shown}${rest}</div>`;
+  }
+
+  function inFlightHTML(p) {
+    const tasks = p.in_flight || [];
+    if (!tasks.length) return '';
+    const first = tasks[0];
+    const rest = tasks.length > 1 ? ` <span class="none">+${tasks.length - 1}</span>` : '';
+    return `<div class="pf-inflight">En cours : <span>${esc(first.title || first.id)}</span> <em>${esc(first.status || '')}</em>${rest}</div>`;
+  }
+
   /* Sur un cockpit local la page cible existe et le projet est nommable par son
      slug ; sur la vitrine il n'y a rien à ouvrir, on garde le panneau d'amorçage. */
   function pfLink(page, label, p) {
@@ -372,6 +447,9 @@
         <div class="pf-cov-track"><div class="pf-cov-fill" style="width:${cov}%;background:${covColor(cov)}"></div></div>
       </div>
 
+      ${stateHTML(p)}
+      ${flowsHTML(p)}
+      ${inFlightHTML(p)}
       ${p.path ? `<div class="pf-path" title="${esc(p.path)}">${esc(p.path)}</div>` : ''}
 
       <div class="pf-links">
@@ -380,6 +458,100 @@
       </div>
     </article>`;
   }
+
+  /* ── Mise à jour d'un projet : aperçu, puis accord explicite ──
+     `grimoire up` écrit dans le dépôt de quelqu'un. On montre d'abord ce qui
+     changerait ; le bouton d'écriture n'apparaît qu'après cet aperçu. */
+
+  function closeUpdate() {
+    const ov = document.getElementById('pf-update-ov');
+    if (ov) ov.remove();
+  }
+
+  function updateModal(inner) {
+    let ov = document.getElementById('pf-update-ov');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'pf-update-ov';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;'
+        + 'justify-content:center;background:rgba(11,12,14,0.72);backdrop-filter:blur(3px)';
+      ov.addEventListener('click', (e) => { if (e.target === ov) closeUpdate(); });
+      document.body.appendChild(ov);
+    }
+    ov.innerHTML = `<div style="background:var(--elev-1,#16181c);border:1px solid var(--line-strong,#2a2d33);
+      border-radius:6px;padding:24px 26px;width:min(720px,calc(100vw - 48px));max-height:84vh;overflow:auto">${inner}</div>`;
+    return ov;
+  }
+
+  function updateOutput(text) {
+    return `<pre style="margin:14px 0 0;padding:12px;background:var(--elev-2,#101216);
+      border:1px solid var(--line,#23262c);border-radius:4px;font-size:0.62rem;
+      line-height:1.5;white-space:pre-wrap;color:var(--ink-soft,#aab)">${esc(text || '(aucune sortie)')}</pre>`;
+  }
+
+  async function callUpdate(slug, confirm) {
+    const r = await fetch('/api/projects/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: slug, confirm }),
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+    return body;
+  }
+
+  async function openUpdate(slug, name) {
+    updateModal(`<h2 style="margin:0 0 6px">Mettre à jour ${esc(name)}</h2>
+      <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">Aperçu en cours — <code>grimoire up --dry-run</code>…</p>`);
+    let preview;
+    try {
+      preview = await callUpdate(slug, false);
+    } catch (e) {
+      updateModal(`<h2 style="margin:0 0 6px">Mettre à jour ${esc(name)}</h2>
+        <p style="color:var(--data-red,#f87171);font-size:0.8rem">Aperçu impossible : ${esc(String(e.message || e))}</p>
+        <div style="margin-top:16px"><button id="pf-up-close" class="pf-tag">FERMER</button></div>`);
+      document.getElementById('pf-up-close').addEventListener('click', closeUpdate);
+      return;
+    }
+    const ov = updateModal(`
+      <h2 style="margin:0 0 6px">Mettre à jour ${esc(name)}</h2>
+      <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">
+        Aperçu de <code>grimoire up</code>. Rien n'a été écrit. La commande est idempotente :
+        elle rapporte « skipped » pour ce qui est déjà en place.</p>
+      ${updateOutput(preview.output)}
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button id="pf-up-close" class="pf-tag">ANNULER</button>
+        <button id="pf-up-go" class="pf-tag warn">APPLIQUER À ${esc(name).toUpperCase()}</button>
+      </div>`);
+    ov.querySelector('#pf-up-close').addEventListener('click', closeUpdate);
+    ov.querySelector('#pf-up-go').addEventListener('click', async () => {
+      updateModal(`<h2 style="margin:0 0 6px">Mise à jour de ${esc(name)}</h2>
+        <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">En cours…</p>`);
+      try {
+        const done = await callUpdate(slug, true);
+        updateModal(`<h2 style="margin:0 0 6px">${done.ok ? 'Projet aligné' : 'Mise à jour refusée'}</h2>
+          <p style="font-size:0.78rem;color:${done.ok ? 'var(--data-green,#34d399)' : 'var(--data-red,#f87171)'};margin:0">
+            ${esc(done.ok ? name + ' est aligné sur le kit installé.' : (done.error || 'échec'))}</p>
+          ${updateOutput(done.output)}
+          <div style="margin-top:16px;display:flex;justify-content:flex-end">
+            <button id="pf-up-close" class="pf-tag">FERMER ET RECHARGER</button>
+          </div>`);
+        document.getElementById('pf-up-close').addEventListener('click', () => location.reload());
+      } catch (e) {
+        updateModal(`<h2 style="margin:0 0 6px">Mise à jour refusée</h2>
+          <p style="color:var(--data-red,#f87171);font-size:0.8rem">${esc(String(e.message || e))}</p>
+          <div style="margin-top:16px"><button id="pf-up-close" class="pf-tag">FERMER</button></div>`);
+        document.getElementById('pf-up-close').addEventListener('click', closeUpdate);
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.js-update');
+    if (!b) return;
+    e.preventDefault();
+    openUpdate(b.getAttribute('data-slug'), b.getAttribute('data-name') || b.getAttribute('data-slug'));
+  });
 
   /* ── Grille : projets à surveiller en tête ── */
   function renderGrid(list) {
@@ -405,19 +577,31 @@
       .catch(() => { LOCAL = false; });
   }
 
+  const getJSON = (url) => fetch(url, { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+  /* Deux sources, deux rôles. `/api/projects` est le registre de la machine :
+     il fait autorité sur QUI est là, y compris un projet enrôlé à l'instant.
+     `data/projects.json` porte les MESURES, produites par `cockpit refresh`.
+     Prendre l'un sans l'autre donne soit des cartes vides, soit une flotte
+     périmée : on fusionne par slug. */
   function loadProjects() {
-    return fetch('/api/projects', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .catch(() => fetch('data/projects.json', { cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : Promise.reject(r.status))));
+    return Promise.all([getJSON('/api/projects'), getJSON('data/projects.json')])
+      .then(([registry, generated]) => {
+        const measured = new Map(((generated && generated.projects) || []).map((p) => [p.slug, p]));
+        const roster = (registry && registry.projects) || null;
+        if (!roster) return Array.from(measured.values());
+        return roster.map((entry) => ({
+          ...(measured.get(entry.slug) || { measured: false }),
+          ...entry,
+          measured: measured.has(entry.slug),
+        }));
+      });
   }
 
   probeLocal()
     .then(loadProjects)
-    .then((data) => {
-      const base = (data && data.projects) || [];
-      render(base.map((p) => ({ ...ENRICH[p.slug], ...p })));
-    })
+    .then((list) => render(list.map((p) => ({ ...ENRICH[p.slug], ...p }))))
     .catch(() => { render([]); });
 
   /* dividers */

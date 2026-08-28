@@ -66,11 +66,22 @@ def test_the_bundled_site_really_carries_a_foreign_snapshot() -> None:
 # ── Le serveur : couches projet générées, références du kit embarquées ───────
 
 
+#: Couches projet réellement piégées dans le site embarqué. La prémisse porte
+#: sur celles-là ; une couche plus récente que l'instantané vitrine n'y a pas
+#: d'équivalent, et exiger qu'elle en ait un ferait échouer le test pour la
+#: seule raison qu'on a ajouté une couche.
+BUNDLED_PROJECT_LAYERS = (
+    "meta.json", "taskboard.json", "observatory.json",
+    "activity.json", "insights.json", "memory.json", "projects.json",
+)
+
+
 def test_project_layers_never_come_from_the_bundled_site(project: Path) -> None:
     """Un projet neuf n'emprunte rien à la vitrine, même si le fichier existe."""
     api = ForgeAPI(project, ROOT, ROOT / "web")
-    for layer in sorted(serve_data.PROJECT_LAYERS | {"projects.json"}):
+    for layer in BUNDLED_PROJECT_LAYERS:
         assert (BUNDLED_DATA / layer).is_file(), f"{layer} devrait exister dans le site embarqué"
+    for layer in sorted(serve_data.PROJECT_LAYERS | {"projects.json"}):
         assert api.data_file(layer) is None, f"{layer} a été servi depuis la vitrine"
     assert api.data_file("projects/grimoire-kit/memory.json") is None
 

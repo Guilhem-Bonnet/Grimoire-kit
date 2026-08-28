@@ -104,7 +104,7 @@
      test_project_scoped_layers_match_the_generator garde les deux en phase. */
   const PROJECT_SCOPED = new Set([
     'meta.json', 'taskboard.json', 'observatory.json',
-    'activity.json', 'insights.json', 'memory.json'
+    'activity.json', 'insights.json', 'memory.json', 'health.json'
   ]);
 
   async function fetchData(name) {

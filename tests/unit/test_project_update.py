@@ -1,0 +1,175 @@
+"""Mettre à jour un projet depuis l'UI écrit dans le dépôt de quelqu'un.
+
+L'aperçu est donc le défaut, et l'alignement effectif demande un accord
+explicite — sur les deux hôtes. Un bouton qui réécrit un projet sur un clic mal
+placé n'est pas un cockpit.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import urllib.error
+import urllib.request
+from functools import partial
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from grimoire.cli import cmd_cockpit
+from grimoire.tools import forge_server, project_update
+from grimoire.tools import project_registry as reg
+from grimoire.tools.forge_server import ForgeAPI, make_handler
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def project(tmp_path: Path) -> Path:
+    root = tmp_path / "projet"
+    (root / ".git").mkdir(parents=True)
+    return root
+
+
+def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — loopback de test
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+# ── La commande ──────────────────────────────────────────────────────────────
+
+
+def test_a_dry_run_writes_nothing(project: Path) -> None:
+    before = {p.name for p in project.iterdir()}
+    report = project_update.update_project(project, dry_run=True)
+    assert report["dryRun"] is True
+    assert report["output"], "l'aperçu doit rendre un compte rendu lisible"
+    assert {p.name for p in project.iterdir()} == before
+
+
+def test_a_missing_path_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        project_update.update_project(tmp_path / "nulle-part")
+
+
+def test_a_failing_command_is_reported_not_raised(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un projet qui refuse de s'aligner est un résultat à afficher, pas une
+    panne du serveur."""
+
+    class _Fail:
+        returncode = 2
+        stdout = ""
+        stderr = "refus net"
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Fail())
+    report = project_update.update_project(project)
+    assert report["ok"] is False
+    assert report["error"]
+    assert "refus net" in report["output"]
+
+
+def test_a_timeout_is_reported(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise project_update.subprocess.TimeoutExpired(cmd="grimoire up", timeout=1)
+
+    monkeypatch.setattr(project_update.subprocess, "run", _boom)
+    report = project_update.update_project(project)
+    assert report["ok"] is False
+    assert "délai" in str(report["error"])
+
+
+# ── L'atelier ────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def atelier(project: Path) -> Any:
+    api = ForgeAPI(project, ROOT, None)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(api))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield httpd.server_address[1]
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_the_atelier_previews_unless_told_otherwise(atelier: int) -> None:
+    code, body = _post(atelier, "/api/projects/update", {})
+    assert code == 200
+    assert body["dryRun"] is True, "sans accord explicite, on n'écrit pas"
+
+
+def test_the_atelier_writes_only_on_explicit_confirmation(
+    atelier: int, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le serveur importe le symbole : c'est là qu'il faut le remplacer."""
+    seen: list[bool] = []
+
+    def _spy(root: Path, *, dry_run: bool = True) -> dict[str, Any]:
+        seen.append(dry_run)
+        return {"ok": True, "dryRun": dry_run, "path": str(root), "code": 0,
+                "output": "", "error": None}
+
+    monkeypatch.setattr(forge_server, "update_project", _spy)
+    _post(atelier, "/api/projects/update", {})
+    _post(atelier, "/api/projects/update", {"confirm": True})
+    assert seen == [True, False]
+
+
+def test_a_real_update_is_journalled(
+    atelier: int, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Écrire dans un dépôt laisse une trace ; le simple aperçu, non."""
+    monkeypatch.setattr(
+        forge_server, "update_project",
+        lambda root, *, dry_run=True: {"ok": True, "dryRun": dry_run, "path": str(root),
+                                       "code": 0, "output": "", "error": None},
+    )
+    ledger = project / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+
+    _post(atelier, "/api/projects/update", {})
+    assert not ledger.exists(), "un aperçu n'écrit pas dans le projet"
+
+    _post(atelier, "/api/projects/update", {"confirm": True})
+    assert ledger.is_file()
+    assert "project.update" in ledger.read_text(encoding="utf-8")
+
+
+# ── Le cockpit ───────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def cockpit(tmp_path: Path) -> Any:
+    serve_dir = tmp_path / "serve"
+    (serve_dir / "data").mkdir(parents=True)
+    handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield httpd.server_address[1]
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_the_cockpit_refuses_an_unknown_project(cockpit: int) -> None:
+    code, body = _post(cockpit, "/api/projects/update", {"project": "jamais-vu"})
+    assert code == 404
+    assert body["ok"] is False
+
+
+def test_the_cockpit_previews_a_registered_project(cockpit: int, project: Path) -> None:
+    slug = reg.register_project(project)
+    code, body = _post(cockpit, "/api/projects/update", {"project": slug})
+    assert code == 200
+    assert body["dryRun"] is True
+    assert body["path"] == str(project.resolve())

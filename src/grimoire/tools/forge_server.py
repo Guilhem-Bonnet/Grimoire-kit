@@ -99,6 +99,7 @@ from grimoire.tools.ext_manager import (
 )
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.memory_link import memory_link_status
+from grimoire.tools.project_health import project_health
 from grimoire.tools.project_registry import (
     DEFAULT_SCAN_DEPTH,
     browse,
@@ -111,6 +112,7 @@ from grimoire.tools.project_registry import (
     slug_for_path,
 )
 from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
+from grimoire.tools.project_update import update_project
 from grimoire.tools.serve_data import DataLayer
 from grimoire.tools.serve_data import resolve as resolve_data
 
@@ -290,6 +292,14 @@ class ForgeAPI:
     def memory_link_view(self) -> dict[str, Any]:
         """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume."""
         return memory_link_status(self.project_root)
+
+    def health_view(self) -> dict[str, Any]:
+        """Alignement kit, flows et activité réelle — vue du portefeuille."""
+        return project_health(self.project_root)
+
+    def project_update(self, *, dry_run: bool = True) -> dict[str, Any]:
+        """Aligne le projet servi sur le kit installé (``grimoire up``)."""
+        return update_project(self.project_root, dry_run=dry_run)
 
     # ── extensions ────────────────────────────────────────────────────────
 
@@ -1455,6 +1465,17 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     ))
                 elif path == "/api/data/refresh":
                     self._json(api.data_refresh())
+                elif path == "/api/projects/update":
+                    # Écriture réelle dans le dépôt : l'aperçu est le défaut, et
+                    # l'alignement effectif demande un accord explicite. Une UI
+                    # qui peut réécrire un projet sur un clic mal placé n'est
+                    # pas un cockpit, c'est un piège.
+                    dry_run = body.get("confirm") is not True
+                    report = api.project_update(dry_run=dry_run)
+                    if not dry_run:
+                        self._governed_event("project.update", path=report["path"],
+                                             ok=report["ok"])
+                    self._json(report)
                 elif path.startswith("/api/features/"):
                     feature_id = path.rsplit("/", 1)[1]
                     try:

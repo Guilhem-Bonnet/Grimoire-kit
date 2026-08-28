@@ -64,6 +64,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Le portefeuille pilote la flotte.** Chaque carte porte désormais trois faits
+  vérifiables, tous issus de `grimoire.tools.project_health` :
+  l'**alignement kit** (par digest de contenu — un fichier est en retard quand
+  le kit connaît une révision plus récente du même chemin, pas quand son
+  numéro de version est ancien), les **flows** réellement composés dans le
+  projet, et l'**activité** : dernière trace écrite, avec sa fraîcheur, plus les
+  tâches que le board déclare en cours. Rien n'affirme qu'un processus tourne —
+  on rapporte ce qui est écrit sur le disque et ce que le projet dit de lui-même.
+- **Mettre un projet à jour depuis l'UI.** `POST /api/projects/update` lance
+  `grimoire up` sur le projet, sur les deux hôtes. L'aperçu (`--dry-run`) est le
+  défaut ; l'écriture réelle exige `confirm: true` et laisse une trace gouvernée.
+  Le portefeuille en fait un parcours en deux temps : on voit ce qui changerait,
+  puis on décide.
+- **`GET /api/health`** — alignement, flows et activité d'un projet, servi par
+  l'atelier comme par le cockpit. La couche `health.json` est générée avec les
+  autres.
 - **Découverte des projets depuis l'atelier.** Le bouton de projet de la barre
   latérale ouvre un vrai sélecteur : les projets connus de la machine, une
   navigation dossier par dossier (ou un chemin collé), et un scan borné d'une

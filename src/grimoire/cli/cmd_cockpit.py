@@ -54,6 +54,7 @@ from grimoire.tools.project_registry import (
     state_file,
     write_state,
 )
+from grimoire.tools.project_update import update_project
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -282,6 +283,23 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             self._send_json(200, {"ok": True, "selected": slug})
+            return
+        if self.path == "/api/projects/update":
+            # Seule écriture du cockpit dans un dépôt. Aperçu par défaut ;
+            # l'alignement effectif exige `confirm: true`, comme les mutations
+            # mémoire. Le cockpit gouverne une flotte : un bouton qui réécrit
+            # N projets sans accord serait la pire surface possible.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            target = _resolve_project_path(str(data.get("project", "")) or None)
+            if target is None or not target.is_dir():
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            self._send_json(200, update_project(target, dry_run=data.get("confirm") is not True))
             return
         if self.path in ("/api/projects/add", "/api/projects/scan"):
             # Le cockpit est en lecture seule sur les *projets* ; peupler le
