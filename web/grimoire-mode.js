@@ -21,4 +21,14 @@
   } catch (e) { mode = mode || 'vitrine'; }
   document.documentElement.classList.add(mode === 'atelier' ? 'mode-atelier' : 'mode-vitrine');
   window.GrimoireMode = mode;
+
+  /* Base du manuel. Le site publié sert mkdocs sous /docs/, à côté de ces
+     pages ; l'atelier local (`grimoire serve`) ne sert que l'interface, sans
+     le manuel — on renvoie alors vers la version en ligne plutôt que vers un
+     404. Le test porte sur l'hôte, pas sur le mode : `mode-atelier` est un
+     habillage, il ne dit pas qui sert la page. */
+  var local = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  window.GrimoireDocsBase = local
+    ? 'https://guilhem-bonnet.github.io/Grimoire-kit/docs/'
+    : 'docs/';
 })();

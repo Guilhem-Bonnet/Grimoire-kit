@@ -32,6 +32,14 @@ theme:
 
 plugins:
   - search
+  # La référence du système nodal (52 pages) est rendue ici, au build, depuis
+  # le schéma, les primitives et le catalogue. Rien n'est commité : une page
+  # ne peut donc pas être en retard sur sa source. `literate-nav` lit le
+  # SUMMARY.md que le générateur produit avec elles.
+  - gen-files:
+      scripts:
+        - scripts/gen_doc_reference.py
+  - literate-nav
   - mkdocstrings:
       handlers:
         python:
@@ -115,6 +123,9 @@ nav:
           - "003 — Dualité mémoire": adr-003-memory-duality.md
           - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
           - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
+  - Système nodal:
+      - nodal/index.md
+      - Référence: nodal/reference/
   - Standard agentique:
       - standard/index.md
       - Intégration: standard/integration.md

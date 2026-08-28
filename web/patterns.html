@@ -80,8 +80,10 @@
     const esc = Atelier.esc;
     const IN_ATELIER = window.GrimoireMode === 'atelier';
     const { catalogue: CAT, extensions: EXT } = await Atelier.data();
-    const docBase = CAT.source && CAT.source.repository
-      ? CAT.source.repository.replace(/\.git$/, '') + '/blob/main/' : '';
+    /* Les fiches de pattern vivent dans le manuel, pas dans le dépôt
+       d'origine du catalogue : `docPath` porte désormais l'emplacement rendu
+       par mkdocs (`nodal/reference/patterns/<famille>/#<id>`). */
+    const docBase = window.GrimoireDocsBase || 'docs/';
 
     let view = 'familles';
     let activeCat = 'ALL';
@@ -153,7 +155,7 @@
           <span class="at-chip">${esc(p.maturity || '—')}</span>
         </div>
         ${p.docPath ? `<div class="at-lbl" style="margin:14px 0 6px">Fiche complète</div>
-        <a class="at-chip" style="font-size:0.56rem;text-decoration:none" target="_blank" rel="noopener" href="${esc(docBase + p.docPath)}">catalogue · ${esc(p.ref)} ↗</a>` : ''}
+        <a class="at-chip" style="font-size:0.56rem;text-decoration:none" target="_blank" rel="noopener" href="${esc(docBase + p.docPath)}">manuel · ${esc(p.ref)} ↗</a>` : ''}
         ${impl.length ? `<div class="at-lbl" style="margin:14px 0 6px">Implémenté par</div>
         <div class="at-row" style="gap:5px;flex-wrap:wrap">${impl.map(e => `<a class="at-chip" style="font-size:0.56rem;text-decoration:none" href="extensions.html?ext=${esc(e.id)}">${esc(e.name)}</a>`).join('')}</div>` : ''}
         <div style="margin-top:18px">
