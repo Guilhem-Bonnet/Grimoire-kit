@@ -18,7 +18,7 @@ Generated indexes that enumerate the whole frozen zone (see
 ``GENERATED_INDEXES``) are excluded: they cite every tool without calling any,
 so counting them collapses every file into REFERENCED.
 
-Writes ``docs/framework-tools-inventory.md``. Regenerate with:
+Writes ``planning/framework-tools-inventory.md``. Regenerate with:
 
     python scripts/framework-usage-inventory.py
 """
@@ -33,7 +33,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "docs" / "framework-tools-inventory.md"
+OUTPUT = ROOT / "planning" / "framework-tools-inventory.md"
 
 RUNTIME_PATHS = [
     "src", "archetypes", "_grimoire", "extensions", "scripts", ".github",
@@ -56,7 +56,7 @@ TOOLS_PATHS = ["framework"]
 GENERATED_INDEXES = {
     "scripts/code-ratchet-baseline.json",  # plafonds du gel — scripts/check-code-ratchet.py
     "web/data/architecture.json",          # données du site — scripts/gen-site-data.py
-    "docs/framework-tools-inventory.md",   # cet inventaire lui-même
+    "planning/framework-tools-inventory.md",   # cet inventaire lui-même
 }
 
 

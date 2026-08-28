@@ -208,7 +208,7 @@ persona.
 
 ## Standard agentique gouverné
 
-Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](governed-controls.md).
+Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).
 
 | Commande | Description |
 | --- | --- |

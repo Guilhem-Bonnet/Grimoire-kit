@@ -32,7 +32,7 @@ code. Le gel rend la direction mécanique : tout investissement va au SDK.
 
 ## Instrument de décision
 
-`docs/framework-tools-inventory.md` (régénérable par
+`planning/framework-tools-inventory.md` (régénérable par
 `python scripts/framework-usage-inventory.py`) classe chaque outil de
 `framework/tools/` par usage réel. Politique de résorption :
 

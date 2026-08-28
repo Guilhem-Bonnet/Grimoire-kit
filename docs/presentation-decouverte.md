@@ -40,7 +40,7 @@ Pour les builders, leads et équipes qui veulent une continuité réelle, pas ju
 
 [Orchestration et intent routing](concepts.md)
 [Evidence-first et Completion Contract](workflow-design-patterns.md)
-[Standard agentique gouverné](governed-controls.md)
+[Standard agentique gouverné](standard/controles-gouvernes.md)
 [Mémoire projet et session](memory-system.md)
 [Workflows et artefacts](workflow-taxonomy.md)
 {: .gp-hero-signals }

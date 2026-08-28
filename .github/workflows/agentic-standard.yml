@@ -8,7 +8,7 @@ on:
       - "src/grimoire/core/agentic_standard.py"
       - "src/grimoire/cli/cmd_standard.py"
       - "tests/test_agentic_standard.py"
-      - "docs/agentic-standard-integration.md"
+      - "docs/standard/integration.md"
       - ".github/workflows/agentic-standard.yml"
   push:
     branches: [main, feat/agentic-standard-bridge]
@@ -18,7 +18,7 @@ on:
       - "src/grimoire/core/agentic_standard.py"
       - "src/grimoire/cli/cmd_standard.py"
       - "tests/test_agentic_standard.py"
-      - "docs/agentic-standard-integration.md"
+      - "docs/standard/integration.md"
       - ".github/workflows/agentic-standard.yml"
 
 jobs:

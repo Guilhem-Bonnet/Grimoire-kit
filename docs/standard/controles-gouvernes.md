@@ -1,7 +1,7 @@
 # Référence des contrôles gouvernés
 
 > Page de référence générée depuis `framework/agentic-standard/templates/pattern-catalog.yaml`
-> (source unique). Régénérer via `python docs/gen-governed-controls.py`.
+> (source unique). Régénérer via `python scripts/gen-governed-controls.py`.
 
 **36 patterns gouvernés** répartis sur 11 catégories. Chaque pattern pose un
 artefact déclaratif (`_grimoire/standard/*.yaml`) vérifié *fail-closed* par
