@@ -250,3 +250,19 @@ def test_refresh_route_is_wired(server: int) -> None:
         payload = json.loads(resp.read().decode("utf-8"))
     assert "started" in payload
     assert payload["state"] in {"generating", "ready", "failed", "idle"}
+
+
+# ── 7. Le cache de l'atelier n'est pas dans la racine web du cockpit ─────────
+
+
+def test_the_atelier_cache_lives_outside_the_cockpit_web_root(tmp_path: Path) -> None:
+    """``cockpit serve`` publie ``serve/`` tel quel.
+
+    Y ranger le cache de l'atelier exposerait la couche générée de chaque projet
+    de la machine à ``/<slug>/data/…``, et un projet dont le slug est ``data``
+    écrirait dans le dossier de données du cockpit lui-même.
+    """
+    cockpit_web_root = cmd_cockpit._serve_dir().resolve()
+    for name in ("un-projet", "data"):
+        cache = serve_data.data_dir(tmp_path / name).resolve()
+        assert not cache.is_relative_to(cockpit_web_root), f"{name} : cache publié par le cockpit"

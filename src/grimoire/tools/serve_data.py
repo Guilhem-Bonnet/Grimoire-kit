@@ -70,8 +70,15 @@ def project_slug(project_root: Path) -> str:
 
 
 def data_dir(project_root: Path) -> Path:
-    """Dossier où vit la couche de données générée pour ce projet."""
-    return registry_home() / "serve" / project_slug(project_root) / "data"
+    """Dossier où vit la couche de données générée pour ce projet.
+
+    Sous ``atelier/``, pas sous ``serve/`` : ce dernier est la racine web que
+    ``grimoire cockpit serve`` publie telle quelle. Y ranger le cache de
+    l'atelier exposerait la couche de chaque projet à ``/<slug>/data/…``, et un
+    projet dont le slug est ``data`` écrirait dans le dossier de données du
+    cockpit lui-même.
+    """
+    return registry_home() / "atelier" / project_slug(project_root) / "data"
 
 
 def is_project_layer(rel: str) -> bool:

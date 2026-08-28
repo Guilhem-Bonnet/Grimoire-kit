@@ -45,6 +45,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   dossiers de la machine. Le garde s'applique maintenant à toute requête.
 - **La profondeur de scan est plafonnée** (8) : elle vient d'une requête HTTP,
   et un scan de `/` sans limite immobilisait un thread du serveur.
+- **Le cache de l'atelier sort de la racine web du cockpit.** Il vit sous
+  `~/.grimoire/cockpit/atelier/<slug>/data/` et non plus sous `serve/`, que
+  `grimoire cockpit serve` publie tel quel : la couche générée de chaque projet
+  de la machine y aurait été exposée à `/<slug>/data/…`, et un projet dont le
+  slug est `data` aurait écrit dans le dossier de données du cockpit lui-même.
 
 ### Ajouté
 

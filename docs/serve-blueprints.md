@@ -41,7 +41,8 @@ projet re-route le serveur en cours — pas de second processus à lancer.
 
 Le registre est celui de `grimoire cockpit` (`~/.grimoire/cockpit/registry.json`) :
 un projet ouvert dans l'atelier apparaît dans le portefeuille, et
-réciproquement. Ouvrir un projet n'écrit rien dans son arbre.
+réciproquement. Ouvrir un projet n'écrit rien dans son arbre : la couche de
+données générée vit sous `~/.grimoire/cockpit/atelier/<slug>/data/`.
 
 ### Ce que montrent Observatoire, Mémoire et Kanban
 
