@@ -251,7 +251,7 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
     target = Path(project_path).resolve()
     try:
         cfg = GrimoireConfig.find_and_load(target)
-        mgr = MemoryManager.from_config(cfg)
+        mgr = MemoryManager.from_config(cfg, project_root=target)
         entry = mgr.store(text, user_id=user_id)
         return json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
     except GrimoireError as exc:
@@ -273,12 +273,16 @@ def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, projec
     target = Path(project_path).resolve()
     try:
         cfg = GrimoireConfig.find_and_load(target)
-        mgr = MemoryManager.from_config(cfg)
-        entries = mgr.search(query, user_id=user_id, limit=limit)
+        mgr = MemoryManager.from_config(cfg, project_root=target)
+        # Agents read through this tool. Fusing the vector and BM25 rankings
+        # here is what makes a composed memory observable to them at all;
+        # hybrid_search falls back to plain search when there is nothing to fuse.
+        entries = mgr.hybrid_search(query, user_id=user_id, limit=limit)
         return json.dumps({
             "query": query,
             "results": [e.to_dict() for e in entries],
             "count": len(entries),
+            "retrieval": "hybrid" if mgr.prefers_hybrid else "single",
         }, indent=2, ensure_ascii=False)
     except GrimoireError as exc:
         return json.dumps({"error": str(exc)})

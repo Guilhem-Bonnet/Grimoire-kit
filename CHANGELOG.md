@@ -42,6 +42,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   rien ne consommait, et l'étape suivante pouvait écrire « Some tests failed »
   pendant que le workflow restait vert. Ses tests étant couverts par le SDK CI
   et par *Framework Tools Tests*, le job est supprimé plutôt que réparé.
+- **L'index lexical compagnon est créé pour tout backend vectoriel.** Il exigeait
+  `retrieval_mode == "vector"` au caractère près, ce qui excluait silencieusement
+  tous les autres modes déclarés — dont celui dont la fusion est l'unique raison
+  d'être. Seul `none` s'en exclut désormais.
+- **Un store détecté reçoit ses réglages de connexion quelle que soit la
+  composition.** Un projet généré sur une machine faisant tourner Weaviate
+  sortait sans `weaviate_url` dès que la composition n'était pas celle des
+  graphes, et `grimoire doctor` le signalait à chaque exécution.
+- **Le serveur MCP lit et écrit dans le projet visé.** `grimoire_memory_store`
+  et `grimoire_memory_search` construisaient leur `MemoryManager` sans
+  `project_root`, donc avec un repli sur le répertoire courant du serveur.
 
 ### Modifié
 
@@ -55,6 +66,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `cmd_memory_projections.py` — même convention que `cmd_memory_ops.py`. Le
   module principal passe de 1554 à 1284 lignes, sous le seuil de 1500 : trois
   fichiers hérités deviennent deux. Aucun changement de surface CLI.
+- **La récupération hybride est le chemin par défaut.** La fusion RRF du
+  classement vectoriel et du classement BM25 existait, était testée, et
+  n'était atteignable que derrière un `--hybrid` que rien n'activait : le
+  serveur MCP — le seul chemin de lecture qu'empruntent les agents — appelait
+  la recherche mono-backend. L'index compagnon était donc écrit à chaque
+  `store` et interrogé par personne. La fusion s'applique désormais partout où
+  il y a deux classements à fusionner ; `--no-hybrid` force le backend seul.
 
 ### Ajouté
 
@@ -69,6 +87,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   et absente de la référence, `test_public_exports.py` refuse un `__all__` qui
   promet des objets absents. Le deuxième a trouvé neuf commandes livrées et
   documentées nulle part.
+- **La mémoire se choisit comme une composition, plus comme un backend.**
+  `project-context.yaml` décrivait déjà sept couches indépendantes (mémoire
+  courte, sémantique, sidecar structuré, graphes de connaissances, de
+  souvenirs, de code, de tâches), mais le setup ne posait qu'une question —
+  quel backend ? — et n'écrivait que deux blocs codés en dur. Deux
+  compositions sur toutes les possibles étaient donc atteignables, et tous les
+  autres projets héritaient des mêmes défauts. Quatre profils déclaratifs
+  (`lexical`, `standard`, `graphe`, `complet`) fixent les sept couches d'un
+  coup ; `grimoire init --memory-profile` et le wizard les exposent. Le wizard
+  ne propose que les compositions que la machine peut réellement servir et
+  affiche ce qui manque aux autres. Le profil `weaviate-neo4j` des versions
+  antérieures reste reconnu — il désigne `graphe`.
 
 ## [3.34.2] - 2026-08-28
 

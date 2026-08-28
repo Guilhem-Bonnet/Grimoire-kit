@@ -665,10 +665,17 @@ def memory_search(
     wing: str = typer.Option("", "--wing", help="Filter by palace wing."),
     hall: str = typer.Option("", "--hall", help="Filter by palace hall."),
     room: str = typer.Option("", "--room", help="Filter by palace room."),
-    hybrid: bool = typer.Option(False, "--hybrid", help="Fuse vector and lexical BM25 rankings (RRF)."),
+    hybrid: bool | None = typer.Option(None, "--hybrid/--no-hybrid", help="Fuse vector and lexical BM25 rankings (RRF). Default: on when the project has both."),
 ) -> None:
-    """Search memories by keyword or semantic similarity."""
-    results = run_memory_search(_load_manager(), query, hybrid=hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+    """Search memories by keyword or semantic similarity.
+
+    Fusion is the default wherever there are two rankings to fuse. It used to
+    be opt-in behind a flag nobody passed, so a project paying for a vector
+    store and a BM25 companion only ever read from one of them.
+    """
+    mgr = _load_manager()
+    use_hybrid = mgr.prefers_hybrid if hybrid is None else hybrid
+    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
     fmt = _get_fmt(ctx)
 
     if fmt == "json":

@@ -25,6 +25,7 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
+from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 
@@ -50,10 +51,10 @@ _BACKEND_MEMPALACE = "mempalace"
 _BACKEND_OLLAMA = "ollama"
 _BACKEND_AUTO = "auto"
 
-# Server-backed vector backends that benefit from a lexical companion index.
-_VECTOR_BACKENDS = frozenset({
-    _BACKEND_QDRANT_LOCAL, _BACKEND_QDRANT_SERVER, _BACKEND_WEAVIATE_SERVER, _BACKEND_OLLAMA,
-})
+# Vector backends that benefit from a lexical companion index. Declared in
+# grimoire.memory.profiles so the setup and the runtime agree on which
+# compositions can actually fuse two rankings.
+_VECTOR_BACKENDS = VECTOR_BACKENDS
 
 
 def _best_local_backend() -> str:
@@ -189,13 +190,15 @@ def _create_lexical_backend(collection_prefix: str, root: Path) -> MemoryBackend
 def _create_lexical_companion(config: GrimoireConfig, backend_id: str, root: Path) -> MemoryBackend | None:
     """Lexical companion index for hybrid (vector + BM25) retrieval.
 
-    Only created for vector backends when FTS5 is available and the project
-    has not opted out of vector retrieval — the companion mirrors writes so
-    :meth:`MemoryManager.hybrid_search` can fuse both rankings.
+    Created for every vector backend when FTS5 is available; the companion
+    mirrors writes so :meth:`MemoryManager.hybrid_search` can fuse both
+    rankings.  It used to require ``retrieval_mode == "vector"`` exactly,
+    which silently excluded every other declared mode — including ``hybrid``,
+    the one mode whose entire purpose is to fuse.  Only ``none`` opts out.
     """
     from grimoire.memory.backends.lexical import fts5_available
 
-    if backend_id not in _VECTOR_BACKENDS or config.memory.retrieval_mode != "vector":
+    if backend_id not in _VECTOR_BACKENDS or config.memory.retrieval_mode == "none":
         return None
     if not fts5_available():
         return None
@@ -387,6 +390,16 @@ class MemoryManager:
     def lexical_companion(self) -> MemoryBackend | None:
         """The optional lexical companion index used for hybrid retrieval."""
         return self._lexical_companion
+
+    @property
+    def prefers_hybrid(self) -> bool:
+        """Whether fusion is the better default read path for this project.
+
+        True exactly when a lexical companion exists — which is to say when
+        there are two rankings to fuse.  Read surfaces use this instead of
+        defaulting everyone to single-backend search.
+        """
+        return self._lexical_companion is not None
 
     def hybrid_search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
         """Fuse vector and lexical rankings via RRF.

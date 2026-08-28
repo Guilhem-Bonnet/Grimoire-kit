@@ -31,8 +31,6 @@ from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_host import host_app
-from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
-from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
 from grimoire.cli.cmd_memory_lexical import memory_app
 from grimoire.cli.cmd_migrate import migrate_command
 from grimoire.cli.cmd_serve import serve as serve_cmd
@@ -248,8 +246,8 @@ def version_cmd(ctx: typer.Context) -> None:
 
 
 # ── grimoire init ─────────────────────────────────────────────────────────────────
-# _KNOWN_ARCHETYPES / _KNOWN_BACKENDS are imported at the top of this module
-# from cmd_init.py — the archetype catalog there is the single source of truth.
+# Flag validation lives in cmd_init.validate_init_flags, next to the catalogs it
+# checks against — this module is the one under a size ratchet.
 
 _TEMPLATE_YAML = """\
 # Grimoire Kit — Project Context
@@ -304,6 +302,7 @@ def init(
     backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, tantivy-local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
+    memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
@@ -317,30 +316,9 @@ def init(
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
     """
-    # Validate archetype(s) if explicitly provided
-    if archetype:
-        parts = [a.strip() for a in archetype.split(",") if a.strip()]
-        invalid = [a for a in parts if a not in _KNOWN_ARCHETYPES]
-        if invalid:
-            for a in invalid:
-                console.print(f"[red]Unknown archetype:[/red] {a}")
-                matches = difflib.get_close_matches(a, sorted(_KNOWN_ARCHETYPES), n=2, cutoff=0.5)
-                if matches:
-                    console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
-            console.print(f"Available: {', '.join(sorted(_KNOWN_ARCHETYPES))}")
-            raise typer.Exit(1)
+    from grimoire.cli.cmd_init import run_init, validate_init_flags
 
-    # Validate backend
-    if backend not in _KNOWN_BACKENDS:
-        console.print(f"[red]Unknown backend:[/red] {backend}")
-        matches = difflib.get_close_matches(backend, sorted(_KNOWN_BACKENDS), n=2, cutoff=0.5)
-        if matches:
-            console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
-        else:
-            console.print(f"Available: {', '.join(sorted(_KNOWN_BACKENDS))}")
-        raise typer.Exit(1)
-
-    from grimoire.cli.cmd_init import run_init
+    validate_init_flags(archetype, backend, memory_profile)
 
     if yes:
         # The global --yes lives on the app callback (grimoire -y init …); this
@@ -356,6 +334,7 @@ def init(
         backend=backend,
         force=force,
         dry_run=dry_run,
+        memory_profile=memory_profile,
     )
 
 

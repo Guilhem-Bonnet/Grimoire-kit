@@ -75,7 +75,7 @@ de données vectorielle locale. Deux clés de `project-context.yaml` couvrent ce
 ```yaml
 memory:
   vector_database: false   # désactive toute DB vectorielle
-  retrieval_mode: lexical  # vector | lexical
+  retrieval_mode: lexical  # hybrid | vector | lexical | none
 ```
 
 Avec `vector_database: false`, `get_backend()` force le backend `lexical` et
@@ -304,19 +304,65 @@ et vaut `~/.cache/grimoire/embeddings` par défaut.
 Grimoire ne redistribue aucun poids de modèle : l'archive est produite par
 l'opérateur, depuis la source de son choix.
 
+## Profils de composition
+
+Un projet ne fait jamais tourner *une* mémoire : il en fait tourner plusieurs,
+en couches. Le setup ne demandait pourtant qu'une chose — quel backend ? — si
+bien que les six autres couches gardaient leurs valeurs par défaut dans tous
+les projets générés.
+
+Un **profil** nomme une composition entière. Il est ce que le setup demande, ce
+que `layer_profile` enregistre, et ce contre quoi `grimoire memory status`
+rapporte l'état des couches.
+
+| Profil | Sémantique | Récupération | Graphes | Mémoire chaude |
+|--------|-----------|--------------|---------|----------------|
+| `lexical` | aucune | BM25 (FTS5) | sidecar SQLite | SQLite |
+| `standard` | store détecté | vectoriel + BM25 fusionnés (RRF) | sidecar SQLite | SQLite |
+| `graphe` | Weaviate | vectoriel + BM25 fusionnés | Neo4j (connaissances, souvenirs, code, tâches) | SQLite |
+| `complet` | Weaviate | vectoriel + BM25 fusionnés | Neo4j | Redis (TTL, baux) |
+
+```bash
+grimoire init . --memory-profile graphe
+```
+
+L'axe du backend reste séparé : `standard` ne fixe pas de store et garde celui
+que la détection a trouvé (`qdrant-local`, `ollama`, `mempalace`…), pour que
+choisir une composition n'écrase jamais un service que la machine fait déjà
+tourner. Les profils qui déclarent leurs propres services (`graphe`, `complet`)
+fixent le leur.
+
+Un profil ne s'élargit jamais tout seul : sur un store lexical, `standard` se
+rétracte en `retrieval_mode: lexical` plutôt que de déclarer une couche
+sémantique inexistante. Et le profil `weaviate-neo4j` des versions antérieures
+reste reconnu — il désigne `graphe`.
+
+### Récupération hybride
+
+`retrieval_mode: hybrid` fusionne le classement vectoriel et le classement BM25
+par *reciprocal rank fusion*. La fusion est le **chemin par défaut** partout où
+il y a deux classements à fusionner — `grimoire memory search`, la recherche du
+serveur MCP qu'utilisent les agents. Elle était auparavant derrière un
+`--hybrid` optionnel : l'index compagnon était écrit à chaque `store` et
+interrogé par personne. `--no-hybrid` force le backend seul.
+
 ## Choix à l'initialisation
 
-`grimoire init` ne demande plus « veut-on Qdrant ? » mais « cette machine a-t-elle
-un accès réseau sortant ? ». La différence n'est pas cosmétique : proposer un
-conteneur vectoriel à une machine qui ne peut pas atteindre un modèle
-d'embedding produit un store qu'on ne pourra jamais remplir.
+`grimoire init` ne demande plus « veut-on Qdrant ? » mais « cette machine
+a-t-elle un accès réseau sortant ? », puis « quelle composition ? ». La
+différence n'est pas cosmétique : proposer un conteneur vectoriel à une machine
+qui ne peut pas atteindre un modèle d'embedding produit un store qu'on ne
+pourra jamais remplir.
 
-- **Pas d'egress** — le projet est généré en `vector_database: false` et
-  `retrieval_mode: lexical`. Aucun modèle, aucun service, aucun réseau. Le
-  passage au sémantique reste ouvert plus tard via `memory bundle install`.
-- **Egress disponible** — Qdrant via Docker est proposé, **par défaut non**.
-  Démarrer un conteneur et son volume persistant au premier lancement n'est pas
-  quelque chose qui se fait dans le dos de l'utilisateur.
+- **Pas d'egress** — le projet est généré en profil `lexical`
+  (`vector_database: false`, `retrieval_mode: lexical`). Aucun modèle, aucun
+  service, aucun réseau. Le passage au sémantique reste ouvert plus tard via
+  `memory bundle install`.
+- **Egress disponible** — les compositions que la machine peut réellement
+  servir sont proposées ; les autres sont affichées avec ce qui leur manque et
+  ne sont pas sélectionnables. Qdrant via Docker reste proposé **par défaut
+  non** : démarrer un conteneur et son volume persistant au premier lancement
+  n'est pas quelque chose qui se fait dans le dos de l'utilisateur.
 
 `grimoire up` et `grimoire doctor` exposent une sonde `env_embedding_model` qui
 ne télécharge rien et ne contacte personne : elle lit ce que le projet déclare
