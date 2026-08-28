@@ -7,6 +7,31 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.34.1] - 2026-08-28
+
+### Corrigé
+
+- **Le catalogue de contenu livré ne recense plus du bytecode.**
+  `gen-kit-hashes.py` parcourait le disque : un `__pycache__` laissé par une
+  exécution de tests suffisait à y injecter des digests de `.pyc`, propres à une
+  version de Python. 304 entrées de ce type traînaient dans le catalogue, dont
+  249 depuis la 3.32.0. Le scan lit désormais `git ls-files`, comme le scan d'un
+  tag lisait déjà `git ls-tree` — les deux vues répondent enfin à la même
+  question — et les entrées parasites sont retirées.
+- **Le job CI *Framework Tools Tests* ne se déclarait vert qu'en apparence.** Il
+  neutralisait le code de sortie de pytest (`|| true`) puis devinait le résultat
+  par `grep` sur la dernière ligne. Il échouait en réalité à la collecte depuis
+  un moment — `typer` et `ruamel.yaml` absents de ses dépendances — et personne
+  ne le voyait. Il tourne désormais sur `ubuntu-latest` et `windows-latest`, et
+  c'est le code de sortie qui décide.
+
+### Modifié
+
+- **Les vérificateurs du standard vivent dans `grimoire.core.standard_checks`**
+  (`base`, `controls`, `verifiers`), extraits de `agentic_standard.py` qui perd
+  1272 lignes. Aucun changement de comportement : la surface publique du module
+  est inchangée à quatre constantes près, internes au moteur de vérification.
+
 ## [3.34.0] - 2026-08-28
 
 ### Ajouté

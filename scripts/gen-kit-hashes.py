@@ -63,15 +63,24 @@ def _released_tags(since: str | None) -> list[str]:
 
 
 def _scan_worktree() -> dict[str, str]:
-    """``digest -> path`` for every shipped file in the current worktree."""
+    """``digest -> path`` for every shipped file in the current worktree.
+
+    Les fichiers viennent de ``git ls-files``, pas d'un parcours du disque.
+    Un ``rglob`` catalogue tout ce qui traîne — et un ``__pycache__`` laissé
+    par une exécution de tests suffisait à injecter cinquante digests de
+    bytecode, propres à une version de Python, dans un catalogue censé décrire
+    ce que le kit livre. Le scan d'un tag lit déjà l'index git (``ls-tree``) :
+    les deux vues répondent désormais à la même question.
+    """
     found: dict[str, str] = {}
-    for root in SHIPPED_ROOTS:
-        base = REPO / root
-        if not base.is_dir():
+    listing = _git("ls-files", "-z", "--", *SHIPPED_ROOTS)
+    for rel in listing.split("\0"):
+        rel = rel.strip()
+        if not rel:
             continue
-        for p in sorted(base.rglob("*")):
-            if p.is_file():
-                found[_digest(p.read_bytes())] = str(p.relative_to(REPO))
+        path = REPO / rel
+        if path.is_file():
+            found[_digest(path.read_bytes())] = rel
     return found
 
 
