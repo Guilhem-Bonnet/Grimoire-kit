@@ -371,3 +371,20 @@ def test_the_picker_does_not_reach_into_its_host() -> None:
     picker = (WEB / "project-picker.js").read_text(encoding="utf-8")
     for symbol in ("Atelier.", "window.Atelier", "ENRICH", "pf-card"):
         assert symbol not in picker, f"le sélecteur dépend de son hôte via {symbol}"
+
+
+# ── 10. Un seul parcours du dossier des blueprints ─────────────────────────
+
+
+def test_blueprints_are_listed_in_one_place_only() -> None:
+    """Deux parcours du même dossier répondraient différemment sur le même projet.
+
+    C'est déjà arrivé au registre de projets et au partage projet/kit : la
+    duplication ne se voit qu'au moment où les deux copies divergent.
+    """
+    server = (ROOT / "src" / "grimoire" / "tools" / "forge_server.py").read_text(encoding="utf-8")
+    health = (ROOT / "src" / "grimoire" / "tools" / "project_health.py").read_text(encoding="utf-8")
+    assert server.count('glob("*.blueprint.json")') == 0, "le serveur re-parcourt le dossier"
+    assert health.count('glob("*.blueprint.json")') == 1
+    assert 'BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"' in health
+    assert server.count('BLUEPRINTS_RELPATH = ') == 0, "deux définitions de l'emplacement"

@@ -39,6 +39,10 @@ _yaml = YAML(typ="safe")
 #: laisser croire qu'une session d'hier est en cours.
 ACTIVE_WINDOW_MINUTES = 15
 
+#: Où vivent les blueprints d'un projet. Défini ici, module feuille, pour que
+#: le serveur et la santé ne puissent pas diverger sur l'emplacement.
+BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
+
 #: Emplacements possibles du board gouverné, dans l'ordre de priorité.
 TASK_BOARD_CANDIDATES = (
     Path("_grimoire") / "standard" / "task-board.yaml",
@@ -150,7 +154,7 @@ def kit_alignment(project_root: Path) -> dict[str, Any]:
 
 def flows(project_root: Path) -> list[dict[str, Any]]:
     """Blueprints réellement présents dans le projet, avec leur taille."""
-    base = project_root / "_grimoire" / "blueprints"
+    base = project_root / BLUEPRINTS_RELPATH
     found: list[dict[str, Any]] = []
     if not base.is_dir():
         return found

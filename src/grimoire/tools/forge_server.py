@@ -99,7 +99,7 @@ from grimoire.tools.ext_manager import (
 )
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.memory_link import memory_link_status
-from grimoire.tools.project_health import project_health
+from grimoire.tools.project_health import BLUEPRINTS_RELPATH, flows, project_health
 from grimoire.tools.project_registry import (
     DEFAULT_SCAN_DEPTH,
     browse,
@@ -118,7 +118,6 @@ from grimoire.tools.serve_data import resolve as resolve_data
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
-BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
 
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
@@ -377,23 +376,13 @@ class ForgeAPI:
         return path
 
     def blueprints_list(self) -> list[dict[str, Any]]:
-        base = self.project_root / BLUEPRINTS_RELPATH
-        result = []
-        if base.is_dir():
-            for p in sorted(base.glob("*.blueprint.json")):
-                try:
-                    bp = json.loads(p.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    continue
-                result.append(
-                    {
-                        "id": bp.get("id", p.stem.replace(".blueprint", "")),
-                        "name": bp.get("name", ""),
-                        "nodes": len(bp.get("nodes", [])),
-                        "edges": len(bp.get("edges", [])),
-                    }
-                )
-        return result
+        """Inventaire des blueprints — même lecture que la vue santé.
+
+        Deux parcours du même dossier finiraient par répondre différemment sur
+        le même projet ; l'inventaire est donc celui de ``project_health``, à
+        quelques champs de métadonnées près qui ne gênent aucun consommateur.
+        """
+        return flows(self.project_root)
 
     def blueprint_get(self, bp_id: str) -> dict[str, Any]:
         path = self._blueprint_path(bp_id)

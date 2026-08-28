@@ -208,3 +208,72 @@ def test_an_unknown_target_is_refused_not_silently_redirected(atelier: int) -> N
 def test_a_path_target_must_exist(atelier: int, tmp_path: Path) -> None:
     code, _ = _post(atelier, "/api/projects/update", {"path": str(tmp_path / "nulle-part")})
     assert code == 404
+
+
+def test_two_updates_of_the_same_project_do_not_overlap(project: Path) -> None:
+    """`grimoire up` est idempotente, pas réentrante.
+
+    Le serveur est multi-thread et le bouton est cliquable : deux exécutions
+    concurrentes écriraient les mêmes fichiers en même temps.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    second: dict[str, Any] = {}
+
+    def _slow(*_a: object, **_k: object) -> Any:
+        entered.set()
+        release.wait(timeout=5)
+
+        class _Ok:
+            returncode = 0
+            stdout = "fini"
+            stderr = ""
+
+        return _Ok()
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(project_update.subprocess, "run", _slow):
+        first = threading.Thread(target=lambda: project_update.update_project(project))
+        first.start()
+        assert entered.wait(timeout=5)
+        second.update(project_update.update_project(project))
+        release.set()
+        first.join(timeout=10)
+
+    assert second["ok"] is False
+    assert "déjà en cours" in str(second["error"])
+
+
+def test_a_process_that_never_starts_is_reported_not_raised(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interpréteur absent, descripteurs épuisés : un échec à afficher.
+
+    Laisser remonter l'``OSError`` donnait un 500 sans explication à une UI qui
+    attend un compte rendu — et le handler HTTP ne l'attrapait pas.
+    """
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise OSError("cassé")
+
+    monkeypatch.setattr(project_update.subprocess, "run", _boom)
+    report = project_update.update_project(project)
+    assert report["ok"] is False
+    assert "lancement impossible" in str(report["error"])
+
+
+def test_the_lock_is_released_after_a_failure(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un verrou gardé après une erreur bloquerait le projet pour toujours."""
+    calls: list[int] = []
+
+    def _boom(*_a: object, **_k: object) -> None:
+        calls.append(1)
+        raise OSError("cassé")
+
+    monkeypatch.setattr(project_update.subprocess, "run", _boom)
+    project_update.update_project(project)
+    project_update.update_project(project)
+    assert len(calls) == 2, "le second appel n'a pas pu prendre le verrou"

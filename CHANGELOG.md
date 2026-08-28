@@ -124,6 +124,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Modifié
 
+- **Un seul parcours du dossier des blueprints.** `blueprints_list` et la vue
+  santé lisaient chacune `_grimoire/blueprints`, avec deux définitions de son
+  emplacement : elles auraient fini par répondre différemment sur le même
+  projet. L'inventaire est désormais unique (`/api/blueprints` gagne au passage
+  l'état de validation et la date de compilation).
+- **Une mise à jour par projet à la fois.** `grimoire up` est idempotente, pas
+  réentrante : deux exécutions concurrentes écriraient les mêmes fichiers en
+  même temps. Un verrou par projet refuse la seconde au lieu de la lancer.
+- **Un processus qui ne démarre pas est rapporté, pas levé.** L'`OSError` de
+  `subprocess.run` remontait jusqu'au handler HTTP, qui ne l'attrapait pas —
+  500 sans explication pour une UI qui attend un compte rendu.
 - Le registre de projets et la découverte quittent `grimoire.cli.cmd_cockpit`
   pour `grimoire.tools.project_registry` : le cockpit et l'atelier lisent et
   écrivent le même fichier, et deux copies de cette logique auraient divergé.
