@@ -100,6 +100,7 @@ _PINNED_ARMS = {
         "activated",
         "activated-v2",
         "activated-v2-disclosed",
+        "baseline-v3",
     ],
     "terraform-houseserver": ["governed", "baseline"],
 }

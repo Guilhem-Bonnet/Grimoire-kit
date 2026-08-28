@@ -106,3 +106,38 @@ complétée inférieur à la baseline » — pas de généralisation.
   décisionnel redémarré à zéro** avec l'environnement complet. Le smoke
   pilote (fix-n-plus-one, 0,59 USD) reste hors agrégation comme prévu.
   Coût total consigné au rapport : runs valides + runs invalidés + pilote.
+
+## Bras complémentaire pré-enregistré : baseline-v3 (2026-08-27)
+
+Conçu et figé APRÈS la lecture des résultats du bras décisionnel
+`activated-v2` (jugés le 2026-08-27 : completed 10/40, régressions
+primaires 8, dures 0) et AVANT toute exécution de `baseline-v3` — la
+divulgation de cet ordre fait partie du pré-enregistrement.
+
+Motif : le verdict `activated-v2` vs baseline 2026-07-03 est bloqué par
+H1 (complétion 10/40 < 12) alors que les trois composantes A1 passent.
+La cause candidate est la menace n° 1 anticipée : dérive du modèle
+servi entre les campagnes (coût et tours par run sensiblement
+différents à pins identiques). Une baseline contemporaine élimine
+cette menace.
+
+Design figé :
+
+- Bras `baseline-v3` : 8 tâches × 5 répétitions = 40 runs, prompt de
+  tâche inchangé, AUCUN artefact du standard (ni enrôlement ni hook) —
+  réplique exacte du bras `baseline` 2026-07-03.
+- Pins identiques aux runs `activated-v2` du jour : CLI 2.1.101 épinglé,
+  `claude-sonnet-4-6`, `--max-turns 100`, timeout 1800 s, même machine,
+  Go 1.22.12 restauré (même environnement que les runs activated-v2).
+- Jugement : grille `JUDGING.md` inchangée, mêmes juges mécaniques et
+  qualitatifs, cas limites `false`.
+- Règle décisionnelle A1-v3 (figée avant exécution de baseline-v3) : le
+  verdict d'utilité compare `activated-v2` (déjà exécuté, comptages déjà
+  jugés et non modifiables) à `baseline-v3` sous le critère A1 :
+  régressions primaires −30 % relatif, complétion non dégradée, coût par
+  tâche complétée ≤ baseline-v3. H1 est requalifiée : la comparaison
+  same-day remplace la comparaison inter-campagnes comme base du claim ;
+  la non-réplication de la complétion inter-campagnes reste rapportée.
+- Si `baseline-v3` diverge fortement de la baseline 2026-07-03 (signe de
+  dérive du modèle), cette divergence est elle-même un résultat publié.
+- Coût estimé : ≈ 20-25 USD (40 runs sans enrôlement).
