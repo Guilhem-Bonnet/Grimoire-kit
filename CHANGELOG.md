@@ -60,7 +60,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cours — `grimoire serve` devient multi-projets sans second processus.
 - **Nouvelles routes locales** : `GET /api/projects`, `GET /api/fs/browse`,
   `GET /api/data/status`, `POST /api/projects/{select,add,scan}`,
-  `POST /api/data/refresh`.
+  `POST /api/data/refresh`. Le cockpit sert lui aussi la découverte
+  (`/api/fs/browse`, `/api/projects/add|scan`) : les pages Mémoire, Kanban et
+  Observatoire portent le chrome de l'atelier et y affichent le sélecteur, dont
+  deux entrées sur trois auraient sinon renvoyé un 404.
 - Le projet servi est enrôlé au registre à l'ouverture s'il porte un marqueur
   de projet. Ouvrir un projet n'écrit rien dans son arbre : registre et couche
   de données vivent sous `~/.grimoire/`.

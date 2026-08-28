@@ -35,6 +35,8 @@ from rich.table import Table
 
 from grimoire.data import site_script, web_path
 from grimoire.tools.project_registry import (
+    DEFAULT_SCAN_DEPTH,
+    browse,
     classify_registry,
     crawl_projects,
     load_registry,
@@ -45,8 +47,10 @@ from grimoire.tools.project_registry import (
     registry_file,
     registry_home,
     save_registry,
+    scan_payload,
     selected_slug,
     set_selected_slug,
+    slug_for_path,
     state_file,
     write_state,
 )
@@ -223,6 +227,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects":
             self._send_json(200, projects_payload())
             return
+        if path == "/api/fs/browse":
+            # Découverte : ne dépend d'aucun projet, donc avant la résolution.
+            raw = parse_qs(urlparse(self.path).query).get("path", [None])[0]
+            try:
+                self._send_json(200, browse(Path(raw).expanduser() if raw else None))
+            except FileNotFoundError as exc:
+                self._send_json(404, {"ok": False, "error": str(exc)})
+            except PermissionError as exc:
+                self._send_json(403, {"ok": False, "error": str(exc)})
+            return
         proot = _resolve_project_path(self._query_slug() or None)
         if proot is None or not proot.is_dir():
             self._send_json(404, {"ok": False, "error": "projet inconnu"})
@@ -268,6 +282,40 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             self._send_json(200, {"ok": True, "selected": slug})
+            return
+        if self.path in ("/api/projects/add", "/api/projects/scan"):
+            # Le cockpit est en lecture seule sur les *projets* ; peupler le
+            # registre de la machine n'en est pas une écriture — c'est
+            # exactement ce que fait déjà `grimoire cockpit add|scan`.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            try:
+                if self.path.endswith("/add"):
+                    target = Path(str(data.get("path", ""))).expanduser()
+                    if not target.is_dir():
+                        self._send_json(404, {"ok": False, "error": f"pas un dossier : {target}"})
+                        return
+                    # Noms distincts de ``proot``/``slug`` plus bas : même
+                    # portée de fonction, types différents.
+                    added_root = target.resolve()
+                    added_slug = register_project(added_root) or slug_for_path(added_root)
+                    self._send_json(200, {
+                        "slug": added_slug, "path": str(added_root), "added": True,
+                        "is_grimoire": looks_grimoire(added_root),
+                    })
+                else:
+                    self._send_json(200, scan_payload(
+                        Path(str(data.get("root", ""))).expanduser(),
+                        int(data.get("depth", DEFAULT_SCAN_DEPTH)),
+                    ))
+            except FileNotFoundError as exc:
+                self._send_json(404, {"ok": False, "error": str(exc)})
+            except (PermissionError, OSError) as exc:
+                self._send_json(403, {"ok": False, "error": str(exc)})
             return
         if self.path != "/api/memory":
             self._send_json(404, {"ok": False, "error": "not found"})

@@ -17,6 +17,7 @@ import shutil
 import threading
 import urllib.error
 import urllib.request
+from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -127,6 +128,20 @@ def _get(port: int, path: str, host: str | None = None) -> tuple[int, str]:
         req.add_header("Host", host)
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 — loopback de test
+            return resp.status, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8")
+
+
+def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, str]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — loopback de test
             return resp.status, resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8")
@@ -266,3 +281,58 @@ def test_the_atelier_cache_lives_outside_the_cockpit_web_root(tmp_path: Path) ->
     for name in ("un-projet", "data"):
         cache = serve_data.data_dir(tmp_path / name).resolve()
         assert not cache.is_relative_to(cockpit_web_root), f"{name} : cache publié par le cockpit"
+
+
+# ── 8. Le sélecteur fonctionne aussi sous le cockpit ─────────────────────────
+
+
+def _cockpit_server(tmp_path: Path) -> Any:
+    serve_dir = tmp_path / "serve"
+    (serve_dir / "data").mkdir(parents=True)
+    handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def test_the_picker_is_usable_on_the_cockpit_host(tmp_path: Path) -> None:
+    """Les pages Mémoire / Kanban / Observatoire portent le chrome de l'atelier
+    et sont servies par le cockpit : le sélecteur s'y affiche. Ses trois entrées
+    doivent y répondre, sinon deux boutons sur trois renvoient un 404.
+    """
+    project = tmp_path / "un-projet"
+    (project / "_grimoire").mkdir(parents=True)
+    httpd = _cockpit_server(tmp_path)
+    port = httpd.server_address[1]
+    try:
+        code, body = _get(port, "/api/projects")
+        assert code == 200, "liste des projets"
+
+        code, body = _get(port, f"/api/fs/browse?path={tmp_path}")
+        assert code == 200, "navigation manuelle"
+        assert "un-projet" in {e["name"] for e in json.loads(body)["entries"]}
+
+        code, body = _post(port, "/api/projects/scan", {"root": str(tmp_path), "depth": 3})
+        assert code == 200, "scan"
+        assert [c["name"] for c in json.loads(body)["candidates"]] == ["un-projet"]
+
+        code, body = _post(port, "/api/projects/add", {"path": str(project)})
+        assert code == 200, "enrôlement"
+        assert json.loads(body)["slug"]
+        assert str(project) in {p["path"] for p in reg.load_registry()}
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_the_cockpit_refuses_an_unknown_path(tmp_path: Path) -> None:
+    httpd = _cockpit_server(tmp_path)
+    port = httpd.server_address[1]
+    try:
+        code, _ = _post(port, "/api/projects/add", {"path": str(tmp_path / "nulle-part")})
+        assert code == 404
+        code, _ = _post(port, "/api/projects/scan", {"root": str(tmp_path / "absent")})
+        assert code == 404
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

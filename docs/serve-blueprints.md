@@ -101,6 +101,7 @@ bindings du blueprint.
 | `GET /api/projects` · `POST /api/projects/select` | Registre de la machine · re-router le serveur sur un autre projet |
 | `POST /api/projects/add` · `/scan` | Enrôler un chemin · découvrir les projets sous une racine (sans enrôler) |
 | `GET /api/fs/browse?path=` | Navigation dossier par dossier, pour désigner un projet à la main |
+| *(cockpit)* `GET /api/fs/browse` · `POST /api/projects/add\|scan` | Même découverte depuis le portefeuille : peupler le registre de la machine n'est pas une écriture sur un projet |
 | `GET /api/data/status` · `POST /api/data/refresh` | État et régénération de la couche de données du projet servi |
 
 Le bloc `behavior` de `GET /api/stigmergy` porte les métriques de promotion
