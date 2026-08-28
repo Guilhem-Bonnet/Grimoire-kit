@@ -215,11 +215,24 @@ class TestUpAlias:
         result = runner.invoke(cli_app, ["--help"])
         assert "up" in result.output
 
-    def test_up_help_shows_new_flags(self, runner, cli_app) -> None:
-        # `CliRunner` impose sa propre largeur de terminal ; à 80 colonnes Rich
-        # coupe `--interactive` en deux et l'assertion échoue pour une raison
-        # étrangère à ce qu'elle vérifie. La largeur est passée à l'invocation,
-        # seul endroit qui gagne sur l'isolation du runner.
-        result = runner.invoke(cli_app, ["up", "--help"], env={"COLUMNS": "200"})
-        for flag in ("--interactive", "--name", "--user", "--archetype", "--backend", "--no-standard", "--needs"):
-            assert flag in result.output
+    def test_up_help_shows_new_flags(self, cli_app) -> None:
+        """Les options existent sur la commande, quelle que soit la mise en page.
+
+        La version précédente cherchait chaque nom d'option dans l'aide rendue
+        par Rich. Elle testait donc la largeur du terminal autant que le
+        contrat : sous 80 colonnes, `--interactive` est coupé en deux et
+        l'assertion échoue pour une raison étrangère à ce qu'elle vérifie. Les
+        paramètres déclarés sur la commande répondent à la même question sans
+        passer par le rendu.
+        """
+        from typer.main import get_command
+
+        up = get_command(cli_app).commands["up"]
+        declared = {opt for param in up.params for opt in getattr(param, "opts", [])}
+        missing = [
+            flag
+            for flag in ("--interactive", "--name", "--user", "--archetype",
+                         "--backend", "--no-standard", "--needs")
+            if flag not in declared
+        ]
+        assert not missing, f"options absentes de `up` : {missing}"
