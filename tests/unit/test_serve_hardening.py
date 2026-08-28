@@ -336,3 +336,38 @@ def test_the_cockpit_refuses_an_unknown_path(tmp_path: Path) -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+# ── 9. Un seul sélecteur pour les deux hôtes ────────────────────────────────
+
+WEB = ROOT / "web"
+
+#: Fragments que seule l'implémentation du sélecteur doit contenir. Les voir
+#: ailleurs signifie qu'une seconde copie est née.
+PICKER_MARKERS = ("SCANNER UNE RACINE", "PARCOURIR UN DOSSIER", "pk-scan-go", "at-proj-modal")
+
+
+def test_the_picker_has_exactly_one_implementation() -> None:
+    """L'atelier et le portefeuille posent la même question au même serveur.
+
+    Deux copies de cette UI divergeraient à la première correction — c'est déjà
+    ce qui était arrivé au registre de projets, dupliqué entre le cockpit et
+    l'atelier.
+    """
+    picker = (WEB / "project-picker.js").read_text(encoding="utf-8")
+    for marker in PICKER_MARKERS:
+        assert marker in picker, f"{marker} devrait vivre dans project-picker.js"
+
+    for host in ("atelier-nav.js", "portfolio.html"):
+        source = (WEB / host).read_text(encoding="utf-8")
+        assert "project-picker.js" in source, f"{host} devrait charger le module partagé"
+        for marker in PICKER_MARKERS:
+            assert marker not in source, f"{host} porte une seconde copie du sélecteur ({marker})"
+
+
+def test_the_picker_does_not_reach_into_its_host() -> None:
+    """Le module est chargé par deux pages très différentes : il ne doit
+    connaître ni le chrome de l'atelier ni celui du portefeuille."""
+    picker = (WEB / "project-picker.js").read_text(encoding="utf-8")
+    for symbol in ("Atelier.", "window.Atelier", "ENRICH", "pf-card"):
+        assert symbol not in picker, f"le sélecteur dépend de son hôte via {symbol}"

@@ -221,7 +221,10 @@
       </div>
       <div class="band-divider"></div>
       <div class="pf-grid reveal" id="pf-grid"></div>
-      <div id="pf-empty">Aucun projet enregistré sur cette machine. Ajoutez-en : <code>grimoire cockpit scan &lt;dossier&gt;</code> ou <code>grimoire cockpit add &lt;chemin&gt;</code>.</div>
+      <div id="pf-add-bar" style="display:none;margin-bottom:18px">
+  <button id="pf-add" class="pf-tag">+ AJOUTER OU SCANNER DES PROJETS</button>
+</div>
+<div id="pf-empty">Aucun projet enregistré sur cette machine. Ajoutez-en : <code>grimoire cockpit scan &lt;dossier&gt;</code> ou <code>grimoire cockpit add &lt;chemin&gt;</code>.</div>
     </div>
   </section>
 </main>
@@ -546,7 +549,60 @@
     });
   }
 
+  /* ── Sélecteur de projets : même module que l'atelier ──
+     Le portefeuille est la page d'accueil du cockpit ; c'est l'endroit le plus
+     naturel pour enrôler un projet, et il n'y avait aucune entrée. */
+  function ensurePicker() {
+    if (window.GrimoirePicker) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = 'project-picker.js';
+      el.onload = resolve;
+      el.onerror = () => reject(new Error('project-picker.js introuvable'));
+      document.head.appendChild(el);
+    });
+  }
+
+  function pfToast(html) {
+    let el = document.getElementById('pf-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pf-toast';
+      el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:1200;'
+        + 'background:var(--elev-1,#16181c);border:1px solid var(--line-strong,#2a2d33);border-radius:4px;'
+        + 'padding:10px 16px;font-size:0.78rem;max-width:min(560px,90vw)';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = html;
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.remove(), 5000);
+  }
+
+  async function pfApi(path, opts) {
+    const o = Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {});
+    const r = await fetch(path, o);
+    if (!r.ok) throw new Error(path + ' -> ' + r.status);
+    return r.json();
+  }
+
+  async function openPicker() {
+    try { await ensurePicker(); }
+    catch (e) { pfToast(esc(String(e.message || e))); return; }
+    window.GrimoirePicker.open({
+      api: pfApi,
+      esc,
+      toast: pfToast,
+      servedPath: null,
+      selectionHint: 'choisir un projet le met au premier plan du portefeuille',
+      /* Le cockpit ne se re-route pas : il gouverne N projets à la fois.
+         Sélectionner ne fait donc que changer le projet courant, et la page
+         se relit avec le nouveau. */
+      onSelected() { location.reload(); },
+    });
+  }
+
   document.addEventListener('click', (e) => {
+    if (e.target.closest('#pf-add')) { e.preventDefault(); openPicker(); return; }
     const b = e.target.closest('.js-update');
     if (!b) return;
     e.preventDefault();
@@ -600,6 +656,10 @@
   }
 
   probeLocal()
+    .then(() => {
+      const bar = document.getElementById('pf-add-bar');
+      if (bar && LOCAL) bar.style.display = '';
+    })
     .then(loadProjects)
     .then((list) => render(list.map((p) => ({ ...ENRICH[p.slug], ...p }))))
     .catch(() => { render([]); });

@@ -80,6 +80,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - **`GET /api/health`** — alignement, flows et activité d'un projet, servi par
   l'atelier comme par le cockpit. La couche `health.json` est générée avec les
   autres.
+- **Le sélecteur de projets arrive sur le portefeuille.** Il vit maintenant dans
+  `web/project-picker.js`, chargé à la demande par l'atelier comme par le
+  cockpit : la page d'accueil du cockpit était le seul endroit sans entrée pour
+  enrôler un projet, alors que c'est le plus naturel. Une seule implémentation —
+  deux copies auraient divergé à la première correction.
 - **Découverte des projets depuis l'atelier.** Le bouton de projet de la barre
   latérale ouvre un vrai sélecteur : les projets connus de la machine, une
   navigation dossier par dossier (ou un chemin collé), et un scan borné d'une
