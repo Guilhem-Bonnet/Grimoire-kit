@@ -2760,6 +2760,9 @@ def _format_error(exc: GrimoireError) -> None:
 
 def cli() -> None:
     """Typer entry point for ``grimoire`` console script."""
+    from grimoire.core.console_encoding import enable_utf8_output
+
+    enable_utf8_output()
     _install_signal_handlers()
     _phase_timings.clear()  # clear before any early-exit path
     _expand_aliases()
