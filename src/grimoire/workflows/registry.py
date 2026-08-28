@@ -224,6 +224,27 @@ def find_workflow(project_root: Path, workflow: str) -> WorkflowEntry | None:
     return None
 
 
+def find_framework_workflow(project_root: Path, workflow: str) -> WorkflowEntry | None:
+    """Résout un workflow **dans le cadre livré**, en ignorant les copies locales.
+
+    ``find_workflow`` applique la précédence de lecture — projet d'abord — qui
+    est la bonne pour afficher, et la mauvaise pour installer : « installer
+    depuis le cadre » sur un workflow déjà présent dans le projet renverrait la
+    copie locale et refuserait l'opération.
+    """
+    wanted = workflow_slug(workflow) if workflow.endswith(".md") else workflow
+    for source, directory, pattern, default_kind in source_dirs(project_root):
+        if source != SOURCE_FRAMEWORK:
+            continue
+        for path in sorted(directory.glob(pattern)):
+            if not path.is_file() or path.name.endswith(".tpl.md"):
+                continue
+            if workflow_slug(path.name) != wanted:
+                continue
+            return _read_entry(path, source, default_kind=default_kind)
+    return None
+
+
 def orchestrations(project_root: Path) -> list[WorkflowEntry]:
     """Les workflows qui coordonnent plusieurs agents."""
     return [entry for entry in load_workflows(project_root) if entry.is_orchestration]

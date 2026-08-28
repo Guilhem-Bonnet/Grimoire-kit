@@ -16,6 +16,20 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
+def _patch_framework(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """Rediriger le cadre livré vers *path* pour ses **deux** lecteurs.
+
+    Depuis que le groupe ``workflows`` est sorti de ``app.py``, deux modules
+    lisent le cadre : ``grimoire.workflows.registry``, qui découvre, et
+    ``grimoire.cli.cmd_workflows``, dont ``doctor``, ``sync``, ``diff`` et
+    ``install`` comparent le projet au cadre. N'en rediriger qu'un fait
+    cohabiter le faux cadre et le vrai dans le même test — sept échecs qui
+    n'avaient rien à voir avec le comportement testé.
+    """
+    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: path)
+    monkeypatch.setattr("grimoire.cli.cmd_workflows.framework_path", lambda: path)
+
+
 def _write_prompt(dir_path: Path, slug: str) -> None:
     file_path = dir_path / f"{slug}.prompt.md"
     file_path.write_text(f"# {slug}\n", encoding="utf-8")
@@ -62,7 +76,7 @@ def test_workflows_list_falls_back_to_framework(
     fw_prompts.mkdir(parents=True)
     _write_prompt(fw_prompts, "grimoire-session-bootstrap")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     project = tmp_path / "empty-project"
     project.mkdir()
@@ -89,7 +103,7 @@ def test_workflows_list_prefers_project_over_framework_duplicate(
     fw_prompts.mkdir(parents=True)
     _write_prompt(fw_prompts, "grimoire-status")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "list", str(project)])
 
@@ -116,7 +130,7 @@ def test_workflows_doctor_passes_when_project_matches_framework(
     _write_prompt(project_prompts, "grimoire-status")
     _write_prompt(project_prompts, "grimoire-health-check")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "doctor", str(project)])
 
@@ -141,7 +155,7 @@ def test_workflows_doctor_fails_on_missing_or_modified(
     # Missing grimoire-health-check, and modified grimoire-status
     (project_prompts / "grimoire-status.prompt.md").write_text("# custom\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "doctor", str(project)])
 
@@ -165,7 +179,7 @@ def test_workflows_doctor_json_output(
     project_prompts.mkdir(parents=True)
     _write_prompt(project_prompts, "grimoire-status")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "doctor", str(project)])
 
@@ -192,7 +206,7 @@ def test_workflows_doctor_strict_fails_on_extra(
     _write_prompt(project_prompts, "grimoire-status")
     _write_prompt(project_prompts, "custom-flow")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "doctor", str(project), "--strict"])
 
@@ -214,7 +228,7 @@ def test_workflows_sync_copies_missing_prompts(
     project = tmp_path / "proj"
     project.mkdir()
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "sync", str(project)])
 
@@ -236,7 +250,7 @@ def test_workflows_sync_dry_run_does_not_write(
     project = tmp_path / "proj"
     project.mkdir()
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "sync", str(project), "--dry-run"])
 
@@ -260,7 +274,7 @@ def test_workflows_sync_overwrite_updates_modified_prompt(
     project_prompts.mkdir(parents=True)
     (project_prompts / "grimoire-status.prompt.md").write_text("# project\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "sync", str(project), "--overwrite"])
 
@@ -283,7 +297,7 @@ def test_workflows_sync_json_reports_skipped_modified(
     project_prompts.mkdir(parents=True)
     (project_prompts / "grimoire-status.prompt.md").write_text("# local\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "sync", str(project)])
 
@@ -308,7 +322,7 @@ def test_workflows_diff_shows_modified_workflow(
     project_prompts.mkdir(parents=True)
     (project_prompts / "grimoire-status.prompt.md").write_text("# framework\ncustom\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "diff", str(project)])
 
@@ -333,7 +347,7 @@ def test_workflows_diff_json_output_for_specific_workflow(
     project_prompts.mkdir(parents=True)
     (project_prompts / "grimoire-status.prompt.md").write_text("# framework\nlocal\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "diff", str(project), "grimoire-status"])
 
@@ -359,7 +373,7 @@ def test_workflows_diff_reports_no_differences(
     project_prompts.mkdir(parents=True)
     (project_prompts / "grimoire-status.prompt.md").write_text("# same\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "diff", str(project)])
 
@@ -382,7 +396,7 @@ def test_workflows_show_prefers_project_version(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-status.prompt.md").write_text("# framework version\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "show", "grimoire-status", str(project)])
 
@@ -404,7 +418,7 @@ def test_workflows_show_falls_back_to_framework(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-session-bootstrap.prompt.md").write_text("# framework bootstrap\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "show", "grimoire-session-bootstrap", str(project)])
 
@@ -426,7 +440,7 @@ def test_workflows_show_json_output(
     fake_fw = tmp_path / "fw"
     fw_prompts = fake_fw / "copilot" / "prompts"
     fw_prompts.mkdir(parents=True)
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "show", "grimoire-pre-push", str(project)])
 
@@ -450,7 +464,7 @@ def test_workflows_install_copies_single_framework_workflow(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-status.prompt.md").write_text("# framework status\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "install", "grimoire-status", str(project)])
 
@@ -471,7 +485,7 @@ def test_workflows_install_dry_run_does_not_write(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-status.prompt.md").write_text("# framework status\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "install", "grimoire-status", str(project), "--dry-run"])
 
@@ -495,7 +509,7 @@ def test_workflows_install_skips_existing_without_overwrite(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-status.prompt.md").write_text("# framework\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "install", "grimoire-status", str(project)])
 
@@ -519,7 +533,7 @@ def test_workflows_install_json_overwrite(
     fw_prompts.mkdir(parents=True)
     (fw_prompts / "grimoire-status.prompt.md").write_text("# framework\n", encoding="utf-8")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "install", "grimoire-status", str(project), "--overwrite"])
 
@@ -546,7 +560,7 @@ def test_workflows_prune_removes_extra_project_workflows(
     fw_prompts.mkdir(parents=True)
     _write_prompt(fw_prompts, "grimoire-status")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "prune", str(project)])
 
@@ -571,7 +585,7 @@ def test_workflows_prune_dry_run_keeps_files(
     fw_prompts.mkdir(parents=True)
     _write_prompt(fw_prompts, "grimoire-status")
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "prune", str(project), "--dry-run"])
 
@@ -594,7 +608,7 @@ def test_workflows_prune_json_output(
     fw_prompts = fake_fw / "copilot" / "prompts"
     fw_prompts.mkdir(parents=True)
 
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "prune", str(project), "--dry-run"])
 
@@ -618,7 +632,7 @@ def test_workflows_search_matches_slug(
 
     fake_fw = tmp_path / "fw"
     (fake_fw / "copilot" / "prompts").mkdir(parents=True)
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "search", "status", str(project)])
 
@@ -638,7 +652,7 @@ def test_workflows_search_matches_content_when_enabled(
 
     fake_fw = tmp_path / "fw"
     (fake_fw / "copilot" / "prompts").mkdir(parents=True)
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["workflows", "search", "incident", str(project), "--content"])
 
@@ -658,7 +672,7 @@ def test_workflows_search_json_output(
 
     fake_fw = tmp_path / "fw"
     (fake_fw / "copilot" / "prompts").mkdir(parents=True)
-    monkeypatch.setattr("grimoire.workflows.registry.framework_path", lambda: fake_fw)
+    _patch_framework(monkeypatch, fake_fw)
 
     result = runner.invoke(app, ["-o", "json", "workflows", "search", "status", str(project)])
 

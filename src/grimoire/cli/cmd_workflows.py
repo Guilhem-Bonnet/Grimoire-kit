@@ -27,7 +27,7 @@ from grimoire.data import framework_path
 from grimoire.workflows.registry import (
     KIND_COMMAND,
     KIND_ORCHESTRATION,
-    SOURCE_FRAMEWORK,
+    find_framework_workflow,
     find_workflow,
     load_workflows,
     workflow_slug,
@@ -286,8 +286,8 @@ def workflows_install(
     orchestration no longer fails on a filename that never existed.
     """
     root = path.resolve()
-    entry = find_workflow(root, workflow)
-    if entry is None or entry.source != SOURCE_FRAMEWORK:
+    entry = find_framework_workflow(root, workflow)
+    if entry is None:
         console.print(f"[red]Unknown framework workflow:[/red] {workflow}")
         raise typer.Exit(1)
 
