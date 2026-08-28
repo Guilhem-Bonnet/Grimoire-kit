@@ -16,6 +16,11 @@ on:
       - "framework/**"
       - "tests/**"
       - "grimoire-init.sh"
+      # Le filtre `push` incluait déjà ce fichier, pas celui-ci : une PR qui ne
+      # modifiait que le workflow ne le déclenchait pas, donc se faisait relire
+      # sans jamais s'exécuter. C'est la modification de CI qui a le plus besoin
+      # d'être exercée avant d'atterrir.
+      - ".github/workflows/ci-validate.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
