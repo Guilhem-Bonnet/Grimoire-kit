@@ -56,6 +56,9 @@ hooks:
 
 markdown_extensions:
   - admonition
+  # Les listes de définitions servent aux pages de concepts, qui expliquent des
+  # termes un par un plutôt qu'en tableau.
+  - def_list
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -125,6 +128,13 @@ nav:
           - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
   - Système nodal:
       - nodal/index.md
+      - Votre premier blueprint: nodal/premier-blueprint.md
+      - Comprendre:
+          - Ce que le graphe fait: nodal/concepts/execution.md
+          - Contrats et pins: nodal/concepts/contrats-et-pins.md
+          - Les trois canaux: nodal/concepts/canaux.md
+          - Les portes: nodal/concepts/portes.md
+          - Sept primitives: nodal/concepts/primitives.md
       - Référence: nodal/reference/
   - Standard agentique:
       - standard/index.md

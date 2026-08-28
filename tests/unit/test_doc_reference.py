@@ -186,3 +186,73 @@ def test_summary_lists_every_generated_page(pages):
         if path.endswith(".md") and not path.endswith("SUMMARY.md")
     }
     assert expected - linked == set(), f"pages hors sommaire : {sorted(expected - linked)}"
+
+
+# ── Les pages écrites à la main pointent dans la référence générée ─────────
+
+
+def _broken_anchor_links(
+    pages: dict[str, str], sources: list[tuple[Path, str]]
+) -> list[str]:
+    """Relever les liens ancrés qui ne résolvent pas dans la référence rendue.
+
+    `sources` est une liste de `(chemin, contenu)` : le chemin sert à résoudre
+    les liens relatifs, le contenu à les trouver. Passer les deux séparément
+    permet de vérifier le garde lui-même sur une page fabriquée.
+    """
+    broken = []
+    for path, text in sources:
+        for target, anchor in re.findall(r"\]\(([^)#]*)#([^)\s]+)\)", text):
+            if not target.endswith(".md"):
+                continue
+            key = (path.parent / target).resolve()
+            try:
+                key = key.relative_to(ROOT / "docs").as_posix()
+            except ValueError:
+                continue
+            if not key.startswith(f"{gen.BASE}/"):
+                continue
+            rendered = pages.get(key)
+            if rendered is None:
+                broken.append(f"{path.name} → {key} (page absente)")
+            elif f"{{: #{anchor} }}" not in rendered:
+                broken.append(f"{path.name} → {key}#{anchor} (ancre absente)")
+    return broken
+
+
+def _handwritten_nodal_sources() -> list[tuple[Path, str]]:
+    root = ROOT / "docs/nodal"
+    return [
+        (p, p.read_text(encoding="utf-8"))
+        for p in sorted(root.rglob("*.md"))
+        if "reference" not in p.parts
+    ]
+
+
+def test_the_anchor_gate_can_fail(pages):
+    """Une ancre inventée doit être vue, sinon le garde ne garde rien."""
+    fake = ROOT / "docs/nodal/concepts/faux.md"
+    broken = _broken_anchor_links(
+        pages, [(fake, "Voir [ceci](../reference/format-fichier.md#inexistant).")]
+    )
+    assert broken and "inexistant" in broken[0], broken
+
+
+def test_the_anchor_gate_sees_a_missing_page(pages):
+    fake = ROOT / "docs/nodal/concepts/faux.md"
+    broken = _broken_anchor_links(
+        pages, [(fake, "Voir [ceci](../reference/jamais-rendue.md#node).")]
+    )
+    assert broken and "page absente" in broken[0], broken
+
+
+def test_handwritten_anchors_into_the_reference_resolve(pages):
+    """`mkdocs --strict` valide les fichiers cibles, pas les ancres.
+
+    Les pages de concepts pointent des sections précises de la référence
+    générée (`format-fichier.md#gatepolicy`, `patterns/...#orc-01`). Renommer
+    une primitive ou un pattern casserait ces liens en silence : le fichier
+    existerait toujours, l'ancre non. Ce test ferme ce trou.
+    """
+    broken = _broken_anchor_links(pages, _handwritten_nodal_sources())
+    assert not broken, "liens vers la référence à réparer :\n  " + "\n  ".join(broken)
