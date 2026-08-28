@@ -261,7 +261,9 @@
      ne s'invente pas. (Le test qui garde cette page cherche ces noms : ne les
      réintroduisez pas, même en commentaire.) */
 
-  let LOCAL = false;
+  let LOCAL = false;   // une API locale répond
+  let MULTI = false;   // ...et elle sert plusieurs projets (cockpit)
+  let SERVED = null;   // racine servie par un hôte mono-projet (atelier)
 
   /* ── Helpers gouvernance ── */
   const isFail = (ci) => ci === 'fail' || ci === 'red' || ci === 'ko';
@@ -359,20 +361,35 @@
     }
 
     /* Alignement kit : dit par le contenu, pas par une version déclarée. */
+    /* Aligné = le contenu est la dernière révision que le kit connaît. La
+       version à afficher est donc celle du kit installé, pas celle de la
+       dernière release qui a touché ces fichiers : « KIT 3.32.0 · ALIGNÉ »
+       sous un kit 3.34.2 se lit comme un retard alors que c'est l'inverse. */
     if (p.kit_up_to_date) {
-      tags.push(`<span class="pf-tag ok">KIT ${esc(p.kit_aligned || '')} · ALIGNÉ</span>`);
+      tags.push(`<span class="pf-tag ok" title="Le contenu du projet est la dernière révision connue du kit ${esc(p.kit_installed || '')}">KIT ${esc(p.kit_installed || '')} · ALIGNÉ</span>`);
     } else if (p.kit_behind > 0) {
-      tags.push(`<span class="pf-tag warn" title="${p.kit_behind} fichier(s) datent d'une version antérieure à ${esc(p.kit_installed || '')}">KIT ${esc(p.kit_aligned || '?')} · ${p.kit_behind} EN RETARD</span>`);
-      if (LOCAL && p.slug) {
-        tags.push(`<button class="pf-tag warn js-update" data-slug="${esc(p.slug)}" data-name="${esc(p.name)}">METTRE À JOUR →</button>`);
-      }
+      tags.push(`<span class="pf-tag warn" title="${p.kit_behind} fichier(s) ont une révision plus récente dans le kit ${esc(p.kit_installed || '')}">KIT · ${p.kit_behind} EN RETARD</span>`);
+      tags.push(updateButton(p, 'METTRE À JOUR →'));
+    } else if (p.kit_scaffolded) {
+      tags.push('<span class="pf-tag mute" title="Aucun fichier du kit reconnu — le projet a peut-être divergé">KIT · NON RECONNU</span>');
+      tags.push(updateButton(p, 'RÉALIGNER →'));
     } else {
-      tags.push('<span class="pf-tag mute" title="Aucun fichier du kit reconnu dans ce projet">KIT · NON ALIGNÉ</span>');
+      /* Le projet qui a le plus besoin de `grimoire up` est celui qui n'a
+         jamais été initialisé — c'est précisément celui qui n'avait aucun
+         bouton. */
+      tags.push('<span class="pf-tag mute" title="Ce dossier n\'a pas encore de couche Grimoire">NON INITIALISÉ</span>');
+      tags.push(updateButton(p, 'INITIALISER →'));
     }
     return `<div class="pf-state">${tags.join('')}</div>`;
   }
 
+  function updateButton(p, label) {
+    if (!LOCAL || !p.slug) return '';
+    return `<button class="pf-tag warn js-update" data-slug="${esc(p.slug)}" data-name="${esc(p.name)}">${label}</button>`;
+  }
+
   function flowsHTML(p) {
+    if (p.measured === false) return '';
     const flows = p.flows || [];
     if (!flows.length) return '<div class="pf-flows"><span class="none">aucun flow composé</span></div>';
     const shown = flows.slice(0, 3).map((f) =>
@@ -382,6 +399,7 @@
   }
 
   function inFlightHTML(p) {
+    if (p.measured === false) return '';
     const tasks = p.in_flight || [];
     if (!tasks.length) return '';
     const first = tasks[0];
@@ -392,9 +410,16 @@
   /* Sur un cockpit local la page cible existe et le projet est nommable par son
      slug ; sur la vitrine il n'y a rien à ouvrir, on garde le panneau d'amorçage. */
   function pfLink(page, label, p) {
-    return LOCAL && p.slug
-      ? `<a class="pf-link" href="${page}?project=${encodeURIComponent(p.slug)}">${label} <span class="arr">→</span></a>`
-      : `<a class="pf-link js-launch-atelier" href="#">${label} · ATELIER <span class="arr">→</span></a>`;
+    if (!LOCAL || !p.slug) {
+      return `<a class="pf-link js-launch-atelier" href="#">${label} · ATELIER <span class="arr">→</span></a>`;
+    }
+    if (MULTI || p.path === SERVED) {
+      return `<a class="pf-link" href="${page}?project=${encodeURIComponent(p.slug)}">${label} <span class="arr">→</span></a>`;
+    }
+    /* Hôte mono-projet, autre projet : il faut d'abord re-router le serveur,
+       sinon la page cible montrerait le projet servi. */
+    return `<a class="pf-link js-goto" href="#" data-page="${page}" data-path="${esc(p.path)}"
+      title="Re-route l'atelier sur ce projet, puis l'ouvre">${label} <span class="arr">→</span></a>`;
   }
 
   /* ── Carte projet (markup répétable) ── */
@@ -601,8 +626,23 @@
     });
   }
 
+  async function gotoProject(page, path) {
+    try {
+      await pfApi('/api/projects/select', { method: 'POST', body: JSON.stringify({ path }) });
+      location.href = page;
+    } catch (err) {
+      pfToast('Impossible d\'ouvrir ce projet : ' + esc(String(err.message || err)));
+    }
+  }
+
   document.addEventListener('click', (e) => {
     if (e.target.closest('#pf-add')) { e.preventDefault(); openPicker(); return; }
+    const g = e.target.closest('.js-goto');
+    if (g) {
+      e.preventDefault();
+      gotoProject(g.getAttribute('data-page'), g.getAttribute('data-path'));
+      return;
+    }
     const b = e.target.closest('.js-update');
     if (!b) return;
     e.preventDefault();
@@ -629,7 +669,17 @@
      d'amorçage ; en local ils doivent mener au projet. */
   function probeLocal() {
     return fetch('/api/status', { cache: 'no-store' })
-      .then((r) => { LOCAL = r.ok; })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((st) => {
+        LOCAL = true;
+        /* Deux hôtes locaux, deux modèles. Le cockpit sert N projets et lit
+           `?project=`. L'atelier n'en sert qu'un et ignore ce paramètre :
+           ouvrir un autre projet par simple lien y afficherait les données du
+           projet servi sous le nom d'un autre — exactement le défaut que cette
+           branche existe pour fermer. */
+        MULTI = st.host === 'cockpit';
+        SERVED = st.projectRoot || null;
+      })
       .catch(() => { LOCAL = false; });
   }
 

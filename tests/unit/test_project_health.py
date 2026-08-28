@@ -205,3 +205,27 @@ def test_project_health_reports_the_three_surfaces(project: Path) -> None:
     health = ph.project_health(project)
     assert set(health) == {"projectRoot", "kit", "flows", "activity"}
     assert health["projectRoot"] == str(project.resolve())
+
+
+# ── L'atelier est une activité du projet ────────────────────────────────────
+
+
+def test_work_done_in_the_atelier_counts_as_activity(project: Path) -> None:
+    """Un projet qu'on manipule dans l'atelier ne doit pas afficher « aucune trace ».
+
+    Les mutations servies sont journalisées dans un fichier que la télémétrie
+    du runtime ne référence pas : sans lui, installer une extension ou aligner
+    le projet ne se voyait nulle part.
+    """
+    ledger = project / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    ledger.write_text(
+        json.dumps({"ts": now.isoformat(), "source": "serve", "action": "project.update"}) + "\n",
+        encoding="utf-8",
+    )
+
+    act = ph.activity(project, now=now)
+    assert act["active"] is True
+    assert act["lastEventSource"] == "atelier"
+    assert act["lastEventLabel"] == "project.update"

@@ -297,9 +297,31 @@ class ForgeAPI:
         """Alignement kit, flows et activité réelle — vue du portefeuille."""
         return project_health(self.project_root)
 
-    def project_update(self, *, dry_run: bool = True) -> dict[str, Any]:
-        """Aligne le projet servi sur le kit installé (``grimoire up``)."""
-        return update_project(self.project_root, dry_run=dry_run)
+    def project_update(
+        self, *, dry_run: bool = True, slug: str = "", path: str = ""
+    ) -> dict[str, Any]:
+        """Aligne un projet sur le kit installé (``grimoire up``).
+
+        La cible par défaut est le projet servi, mais l'UI est partagée avec le
+        portefeuille, qui liste TOUS les projets de la machine : ignorer la
+        cible demandée ferait écrire ``grimoire up`` dans le dépôt servi alors
+        que l'utilisateur a cliqué sur un autre. Une cible inconnue est refusée
+        plutôt que repliée sur le projet courant.
+        """
+        target = self.project_root
+        if path:
+            candidate = Path(path).expanduser()
+            if not candidate.is_dir():
+                msg = f"projet introuvable : {path}"
+                raise FileNotFoundError(msg)
+            target = candidate.resolve()
+        elif slug:
+            registered = path_for_slug(slug)
+            if registered is None or not registered.is_dir():
+                msg = f"projet introuvable : {slug}"
+                raise FileNotFoundError(msg)
+            target = registered.resolve()
+        return update_project(target, dry_run=dry_run)
 
     # ── extensions ────────────────────────────────────────────────────────
 
@@ -1471,7 +1493,11 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                     # qui peut réécrire un projet sur un clic mal placé n'est
                     # pas un cockpit, c'est un piège.
                     dry_run = body.get("confirm") is not True
-                    report = api.project_update(dry_run=dry_run)
+                    report = api.project_update(
+                        dry_run=dry_run,
+                        slug=str(body.get("project", "") or body.get("slug", "")),
+                        path=str(body.get("path", "")),
+                    )
                     if not dry_run:
                         self._governed_event("project.update", path=report["path"],
                                              ok=report["ok"])

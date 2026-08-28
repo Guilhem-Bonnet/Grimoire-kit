@@ -49,6 +49,14 @@ TASK_BOARD_CANDIDATES = (
 #: au niveau du board.
 IN_FLIGHT_STATUSES = ("in_progress", "review", "blocked")
 
+#: Journaux qui témoignent d'une activité, en plus de la télémétrie du runtime.
+#: Travailler dans l'atelier — installer une extension, compiler un blueprint —
+#: est une activité sur le projet ; ne pas la compter afficherait « aucune
+#: trace » sur un projet qu'on est justement en train de manipuler.
+EXTRA_EVENT_SOURCES = (
+    ("atelier", Path("_grimoire-runtime-output") / "hook-runtime" / "serve-mutations.jsonl"),
+)
+
 
 def _installed_kit_version() -> str:
     from grimoire.__version__ import __version__
@@ -168,7 +176,13 @@ def flows(project_root: Path) -> list[dict[str, Any]]:
 def _latest_event(project_root: Path) -> dict[str, Any] | None:
     """Événement le plus récent, tous journaux du projet confondus."""
     best: dict[str, Any] | None = None
-    for name, path in event_files(project_root):
+    sources = list(event_files(project_root))
+    sources += [
+        (name, project_root / rel)
+        for name, rel in EXTRA_EVENT_SOURCES
+        if (project_root / rel).is_file()
+    ]
+    for name, path in sources:
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:

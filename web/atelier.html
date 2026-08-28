@@ -310,7 +310,7 @@
           const k = h.kit || {};
           if (k.upToDate) {
             kitChip.classList.add('acc');
-            kitChip.textContent = 'kit ' + (k.aligned || '') + ' · aligné ✓';
+            kitChip.textContent = 'kit ' + (k.installed || '') + ' · aligné ✓';
           } else if (k.behind > 0) {
             kitChip.textContent = 'kit ' + (k.aligned || '?') + ' · ' + k.behind + ' fichier(s) en retard';
             kitChip.style.color = 'var(--data-amber)';

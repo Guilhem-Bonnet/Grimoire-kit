@@ -1328,6 +1328,7 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
         "kit_aligned": (health.get("kit") or {}).get("aligned"),
         "kit_up_to_date": (health.get("kit") or {}).get("upToDate", False),
         "kit_behind": (health.get("kit") or {}).get("behind", 0),
+        "kit_scaffolded": (health.get("kit") or {}).get("scaffolded", False),
         "flows": [
             {"id": f["id"], "name": f["name"], "nodes": f["nodes"], "validated": f["validated"]}
             for f in (health.get("flows") or [])

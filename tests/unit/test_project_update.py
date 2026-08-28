@@ -173,3 +173,38 @@ def test_the_cockpit_previews_a_registered_project(cockpit: int, project: Path) 
     assert code == 200
     assert body["dryRun"] is True
     assert body["path"] == str(project.resolve())
+
+
+# ── La cible : l'UI est partagée, le serveur ne l'est pas ───────────────────
+
+
+def test_the_atelier_updates_the_project_it_was_asked_for(
+    atelier: int, project: Path, tmp_path: Path
+) -> None:
+    """Le défaut le plus grave de cette branche, trouvé en relecture.
+
+    Le portefeuille liste TOUS les projets de la machine et il est servi par
+    l'atelier comme par le cockpit. La route ignorait la cible demandée :
+    cliquer « mettre à jour » sur un projet lançait `grimoire up` dans le dépôt
+    servi. Avec confirmation, cela écrivait dans le mauvais dépôt.
+    """
+    other = tmp_path / "autre"
+    (other / ".git").mkdir(parents=True)
+    slug = reg.register_project(other)
+
+    _, body = _post(atelier, "/api/projects/update", {"project": slug})
+    assert body["path"] == str(other.resolve()), "l'atelier a traité un autre projet"
+
+    _, served = _post(atelier, "/api/projects/update", {})
+    assert served["path"] == str(project.resolve()), "sans cible, le projet servi"
+
+
+def test_an_unknown_target_is_refused_not_silently_redirected(atelier: int) -> None:
+    """Se replier sur le projet servi ferait écrire ailleurs sans le dire."""
+    code, _ = _post(atelier, "/api/projects/update", {"project": "jamais-vu"})
+    assert code == 404
+
+
+def test_a_path_target_must_exist(atelier: int, tmp_path: Path) -> None:
+    code, _ = _post(atelier, "/api/projects/update", {"path": str(tmp_path / "nulle-part")})
+    assert code == 404

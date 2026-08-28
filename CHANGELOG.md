@@ -27,6 +27,25 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   projet n'avait rien à montrer. Réservé à la vitrine publique, qui n'a pas de
   runtime propre, il s'active maintenant par `--demo`
   (`GRIMOIRE_SITE_DEMO=1` pour `serve-site.sh`).
+- **`POST /api/projects/update` traite le projet demandé, pas celui qui est
+  servi.** L'atelier ignorait la cible : le portefeuille liste tous les projets
+  de la machine et il est servi par les deux hôtes, donc cliquer « mettre à
+  jour » sur un projet lançait `grimoire up` dans le dépôt servi — avec
+  confirmation, cela écrivait dans le mauvais dépôt. Une cible inconnue est
+  désormais refusée plutôt que repliée silencieusement.
+- **Les liens d'un projet non servi passent par un re-routage.** Sur l'atelier,
+  qui ne sert qu'un projet et ignore `?project=`, ouvrir la mémoire d'un autre
+  projet affichait celle du projet servi sous son nom.
+- **Le projet non initialisé a enfin un bouton.** L'action `grimoire up`
+  n'apparaissait que sur les projets *en retard* — jamais sur ceux qui n'ont
+  aucune couche Grimoire, c'est-à-dire ceux qui en ont le plus besoin.
+- **L'étiquette d'alignement montre la version installée.** « KIT 3.32.0 ·
+  ALIGNÉ » sous un kit 3.34.2 se lisait comme un retard alors que c'était
+  l'inverse.
+- **Travailler dans l'atelier compte comme une activité.** Les mutations
+  servies sont journalisées dans un fichier que la télémétrie du runtime ne
+  référence pas : un projet qu'on était en train de manipuler affichait
+  « aucune trace ».
 - **Le portefeuille n'invente plus sa flotte.** `portfolio.html`, page d'accueil
   du cockpit local, portait un repli codé en dur de quatre projets — « Grimoire
   Core », « Atlas Ops », « Sentinel Sec », « Ledger Data » — affiché dès que
