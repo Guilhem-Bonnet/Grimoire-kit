@@ -216,6 +216,10 @@ class TestUpAlias:
         assert "up" in result.output
 
     def test_up_help_shows_new_flags(self, runner, cli_app) -> None:
-        result = runner.invoke(cli_app, ["up", "--help"])
+        # `CliRunner` impose sa propre largeur de terminal ; à 80 colonnes Rich
+        # coupe `--interactive` en deux et l'assertion échoue pour une raison
+        # étrangère à ce qu'elle vérifie. La largeur est passée à l'invocation,
+        # seul endroit qui gagne sur l'isolation du runner.
+        result = runner.invoke(cli_app, ["up", "--help"], env={"COLUMNS": "200"})
         for flag in ("--interactive", "--name", "--user", "--archetype", "--backend", "--no-standard", "--needs"):
             assert flag in result.output
