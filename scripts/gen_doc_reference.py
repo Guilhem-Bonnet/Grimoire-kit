@@ -44,6 +44,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas/blueprint-v1.schema.json"
 SCHEMA_FR = ROOT / "schemas/blueprint-v1.fr.yaml"
 CATALOGUE = ROOT / "web/data/catalogue-export.json"
+EXAMPLES = ROOT / "registry/blueprints"
+
+# L'atelier local sert sur ce port par défaut (`grimoire serve --port` le
+# change). Le lien « ouvrir dans l'atelier » y navigue : pas de sonde préalable,
+# parce qu'un fetch de https vers http://127.0.0.1 se fait bloquer selon le
+# navigateur, alors qu'une navigation passe. Le libellé dit donc franchement
+# ce qu'il faut avoir lancé.
+STUDIO_URL = "http://127.0.0.1:4173/blueprints.html"
 PRIMITIVES_MODULE = ROOT / "src/grimoire/tools/blueprint_primitives.py"
 
 BASE = "nodal/reference"
@@ -84,6 +92,20 @@ def load_gloss() -> dict[str, dict[str, str]]:
 
 def load_catalogue() -> dict[str, Any]:
     return json.loads(CATALOGUE.read_text(encoding="utf-8"))
+
+
+def load_examples() -> list[dict[str, Any]]:
+    """Les blueprints du registre, qui servent d'exemples au manuel.
+
+    Ce sont de vrais fichiers, publiés avec le kit — pas des extraits écrits
+    pour la documentation. Un exemple inventé se met à mentir dès que le format
+    bouge ; celui-ci est validé par la suite de tests comme n'importe quel
+    blueprint.
+    """
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(EXAMPLES.glob("*.blueprint.json"))
+    ]
 
 
 # ─────────────────────────── parcours du schéma ────────────────────────────
@@ -475,6 +497,98 @@ def render_anti_patterns(
     return "\n".join(out)
 
 
+def _mermaid_id(node_id: str) -> str:
+    """Un identifiant sûr pour Mermaid, dérivé de l'id du node."""
+    return "n_" + re.sub(r"[^A-Za-z0-9_]", "_", node_id)
+
+
+def render_diagram(blueprint: dict[str, Any]) -> str:
+    """Dessiner le flow en Mermaid, depuis le fichier lui-même.
+
+    Le diagramme n'est jamais tracé à la main : il est dérivé des nodes et des
+    edges, donc il ne peut pas montrer autre chose que ce que le fichier dit.
+    Les canaux d'erreur sont en pointillés — on voit d'un coup d'œil ce qui est
+    le chemin nominal et ce qui est le rattrapage.
+    """
+    lines = ["```mermaid", "flowchart LR"]
+    for node in blueprint.get("nodes", []):
+        label = node.get("label") or node["id"]
+        ref = node.get("ref", "")
+        caption = f"{label}<br/><small>{ref}</small>" if ref else label
+        lines.append(f'    {_mermaid_id(node["id"])}["{caption}"]')
+    for edge in blueprint.get("edges", []):
+        source = edge["from"].split(".", 1)[0]
+        target = edge["to"].split(".", 1)[0]
+        channel = edge.get("channel", "happy")
+        contract = edge.get("contract", "")
+        arrow = "-->" if channel == "happy" else "-.->"
+        caption = contract if channel == "happy" else f"{channel}: {contract}".strip(": ")
+        link = f"{arrow}|{caption}|" if caption else arrow
+        lines.append(f"    {_mermaid_id(source)} {link} {_mermaid_id(target)}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_examples(examples: list[dict[str, Any]]) -> str:
+    out = [
+        "# Exemples",
+        "",
+        GENERATED_HEADER.format(source="`registry/blueprints/*.blueprint.json`"),
+        "",
+        "Ce sont les blueprints réellement publiés avec le kit, pas des extraits",
+        "écrits pour la documentation. Les diagrammes sont dérivés des fichiers :",
+        "ils ne peuvent pas montrer autre chose que ce qui s'y trouve.",
+        "",
+        "Chacun est vérifié par la suite de tests comme n'importe quel blueprint —",
+        "un exemple qui cesserait de valider casserait le build.",
+        "",
+    ]
+    for blueprint in examples:
+        nodes = blueprint.get("nodes", [])
+        edges = blueprint.get("edges", [])
+        out += [
+            f"## {blueprint.get('name') or blueprint['id']} "
+            f"{{: #{_anchor(blueprint['id'])} }}",
+            "",
+            blueprint.get("description", ""),
+            "",
+            f"`{blueprint['id']}` — {len(nodes)} node(s), {len(edges)} edge(s).",
+            "",
+            render_diagram(blueprint),
+            "",
+        ]
+        kinds = sorted({n.get("kind", "?") for n in nodes})
+        contracts = sorted({
+            p.get("contract", "") for n in nodes for p in n.get("pins", []) if p.get("contract")
+        })
+        out += ["| | |", "| --- | --- |",
+                f"| `kind` présents | {', '.join(f'`{k}`' for k in kinds) or '—'} |",
+                f"| Contrats échangés | {', '.join(f'`{c}`' for c in contracts) or '—'} |",
+                ""]
+        deps = blueprint.get("extensions") or []
+        if deps:
+            out += [
+                "!!! warning \"Extensions requises\"",
+                "    Ce flow ne compile pas tant que ces extensions ne sont pas "
+                "installées : "
+                + ", ".join(f"`{d['id']}`" for d in deps) + ".",
+                "",
+            ]
+        out += [
+            "**L'essayer.** Repartez d'un squelette équivalent, puis divergez :",
+            "",
+            "```bash",
+            f"grimoire blueprint new {blueprint['id']}-essai --template "
+            f"{'minimal' if len(nodes) <= 1 else 'pipeline'}",
+            "```",
+            "",
+            "Ou ouvrez l'atelier — il faut avoir lancé `grimoire serve` :",
+            f"[`{STUDIO_URL}`]({STUDIO_URL}?bp={blueprint['id']})",
+            "",
+        ]
+    return "\n".join(out)
+
+
 def render_index(
     primitives: dict[str, Any], catalogue: dict[str, Any], xxl: dict[str, Any]
 ) -> str:
@@ -495,6 +609,7 @@ def render_index(
         f"| [Anti-patterns](anti-patterns.md) | les {len(catalogue['antiPatterns'])} dérives "
         f"connues |",
         "| [Format de fichier](format-fichier.md) | la structure de `.blueprint.json` |",
+        "| [Exemples](exemples.md) | les blueprints publiés, avec leur diagramme |",
         "",
         f"Catalogue en version `{catalogue['catalogVersion']}`.",
         "",
@@ -522,7 +637,11 @@ def render_summary(
         f"    * [{f['name']}](patterns/{family_slug(f)}.md)"
         for f in catalogue["families"]
     ]
-    lines += ["* [Anti-patterns](anti-patterns.md)", "* [Format de fichier](format-fichier.md)"]
+    lines += [
+        "* [Anti-patterns](anti-patterns.md)",
+        "* [Format de fichier](format-fichier.md)",
+        "* [Exemples](exemples.md)",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -553,6 +672,7 @@ def build(write: Callable[[str, str], None]) -> list[str]:
     for name, spec in primitives.items():
         emit(f"{name.lower()}.md", render_primitive(name, spec, xxl))
     emit("palette.md", render_palette(primitives, xxl))
+    emit("exemples.md", render_examples(load_examples()))
     emit("format-fichier.md", render_format(schema, gloss))
 
     emit("contrats/index.md", render_contracts_index(catalogue["contracts"]))

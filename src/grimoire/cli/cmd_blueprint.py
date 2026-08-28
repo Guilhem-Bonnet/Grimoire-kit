@@ -134,17 +134,68 @@ def _pipeline_template(bp_id: str) -> dict[str, Any]:
     }
 
 
+# Where the manual explains each finding. A validation error that says what is
+# wrong but not where to learn why leaves the reader to search; these anchors
+# turn every failure into one click. They are checked against the generated
+# reference by tests/unit/test_doc_reference.py, so they cannot rot silently.
+DOC_BASE = "https://guilhem-bonnet.github.io/Grimoire-kit/docs/"
+DOC_FORMAT = "nodal/reference/format-fichier/"
+DOC_NODE = f"{DOC_FORMAT}#node"
+DOC_PIN = f"{DOC_FORMAT}#pin"
+DOC_EDGE = f"{DOC_FORMAT}#edge"
+DOC_IDENTIFIER = f"{DOC_FORMAT}#identifier"
+DOC_CONTRACTS = "nodal/concepts/contrats-et-pins/"
+DOC_CHANNELS = "nodal/concepts/canaux/"
+DOC_EXECUTION = "nodal/concepts/execution/"
+
+# Every doc target the CLI can emit. The test suite asserts each one resolves.
+DOC_TARGETS = (
+    DOC_FORMAT, DOC_NODE, DOC_PIN, DOC_EDGE, DOC_IDENTIFIER,
+    DOC_CONTRACTS, DOC_CHANNELS, DOC_EXECUTION,
+)
+
+
+def _doc_for_path(path: str) -> str:
+    """Pick the reference section that explains a finding, from its JSON path.
+
+    Deriving the target rather than tagging each finding means a check added
+    later inherits a sensible link for free; the three findings whose lesson is
+    conceptual rather than structural override it explicitly.
+    """
+    if ".pins" in path:
+        return DOC_PIN
+    if path.startswith("$.edges"):
+        return DOC_EDGE
+    if path.endswith(".id"):
+        return DOC_IDENTIFIER
+    if path.startswith("$.nodes"):
+        return DOC_NODE
+    return DOC_FORMAT
+
+
 @dataclass(frozen=True, slots=True)
 class Issue:
-    """One actionable finding: JSON path, problem, expectation, remediation."""
+    """One actionable finding: JSON path, problem, expectation, remediation.
+
+    ``doc`` overrides the section derived from ``path`` — set it when the
+    lesson is conceptual (a type system, a channel) rather than a field shape.
+    """
 
     path: str
     problem: str
     expected: str
     fix: str
+    doc: str = ""
+
+    @property
+    def doc_url(self) -> str:
+        return DOC_BASE + (self.doc or _doc_for_path(self.path))
 
     def render(self) -> str:
-        return f"{self.path}: {self.problem} | expected: {self.expected} | fix: {self.fix}"
+        return (
+            f"{self.path}: {self.problem} | expected: {self.expected} "
+            f"| fix: {self.fix} | doc: {self.doc_url}"
+        )
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -197,6 +248,7 @@ def _structural_issues(blueprint: dict[str, Any], project_root: Path | None) -> 
                 "at least the `pins` key on every node (an empty list is fine)",
                 "add `\"pins\": []` to each node, otherwise the file is treated as a Studio draft "
                 "and re-projected, ignoring your typing",
+                doc=DOC_CONTRACTS,
             )
         )
 
@@ -352,6 +404,7 @@ def _structural_issues(blueprint: dict[str, Any], project_root: Path | None) -> 
                         f"pin contracts differ ({c_from!r} != {c_to!r})",
                         "the same contract on both connected pins",
                         "align the two pin contracts, or route through an adapter node",
+                        doc=DOC_CONTRACTS,
                     )
                 )
             elif edge.get("contract") and edge["contract"] != c_from:
@@ -402,6 +455,7 @@ def _cycle_issues(nodes: list[Any], edges: list[Any]) -> list[Issue]:
                     f"cycle detected between nodes: {cycle}",
                     "an acyclic flow (compilation orders nodes topologically)",
                     "remove one connection of the cycle",
+                    doc=DOC_CHANNELS,
                 )
             ]
         for nid in ready:
@@ -423,6 +477,8 @@ def _validate_report(bp_path: Path, project_root: Path | None) -> int:
     typer.echo(f"Schema layer: {schema_status}")
     for line in schema_errors:
         typer.secho(f"  {line}", fg=typer.colors.RED)
+    if schema_errors:
+        typer.echo(f"  doc: {DOC_BASE}{DOC_FORMAT}")
 
     structural = _structural_issues(blueprint, project_root)
     typer.echo("Structural layer: validate_blueprint_file + compile-level checks")

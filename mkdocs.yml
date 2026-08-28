@@ -60,7 +60,13 @@ markdown_extensions:
   # termes un par un plutôt qu'en tableau.
   - def_list
   - pymdownx.details
-  - pymdownx.superfences
+  # Les diagrammes des exemples sont dérivés des .blueprint.json : sans ce
+  # fence, ils s'afficheraient comme du texte au lieu d'être rendus.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite

@@ -256,3 +256,153 @@ def test_handwritten_anchors_into_the_reference_resolve(pages):
     """
     broken = _broken_anchor_links(pages, _handwritten_nodal_sources())
     assert not broken, "liens vers la référence à réparer :\n  " + "\n  ".join(broken)
+
+
+# ── Les erreurs du validateur renvoient vers des pages qui existent ────────
+
+
+def _resolve_doc_target(target: str, pages: dict[str, str]) -> str | None:
+    """Traduire une URL du manuel en défaut, ou None si elle résout.
+
+    Les cibles s'écrivent comme mkdocs les sert (`.../format-fichier/#node`).
+    On repasse à la source : une page générée est cherchée dans `pages`, une
+    page écrite à la main sur le disque.
+    """
+    path, _, anchor = target.partition("#")
+    stem = path.strip("/")
+    # mkdocs sert `x.md` sous `x/` et `x/index.md` sous `x/` : une URL en
+    # répertoire peut venir des deux, il faut essayer les deux.
+    for candidate in (f"{stem}.md", f"{stem}/index.md"):
+        if candidate in pages:
+            if anchor and f"{{: #{anchor} }}" not in pages[candidate]:
+                return f"{target} : ancre absente de la référence générée"
+            return None
+        handwritten = ROOT / "docs" / candidate
+        if handwritten.is_file():
+            if anchor and f"#{anchor}" not in handwritten.read_text(encoding="utf-8"):
+                return f"{target} : ancre absente de {handwritten.name}"
+            return None
+    return f"{target} : aucune page correspondante"
+
+
+def test_validator_doc_targets_resolve(pages):
+    """Une erreur qui renvoie vers une page morte est pire qu'une sans lien.
+
+    `grimoire blueprint validate` joint à chaque erreur l'endroit du manuel qui
+    l'explique. Renommer une page casserait ces liens sans que rien ne le dise :
+    la CLI ne connaît pas le manuel, et le manuel ne connaît pas la CLI.
+    """
+    from grimoire.cli.cmd_blueprint import DOC_TARGETS
+
+    broken = [p for p in (_resolve_doc_target(t, pages) for t in DOC_TARGETS) if p]
+    assert not broken, "renvois du validateur à réparer :\n  " + "\n  ".join(broken)
+
+
+def test_the_doc_target_gate_can_fail(pages):
+    assert _resolve_doc_target("nodal/reference/jamais-rendue/", pages) is not None
+    assert _resolve_doc_target("nodal/reference/format-fichier/#inexistant", pages) is not None
+
+
+def test_every_issue_renders_a_doc_url():
+    """Toute erreur porte un lien, y compris celles ajoutées plus tard.
+
+    Le lien est dérivé du chemin JSON quand il n'est pas fourni : une
+    vérification ajoutée demain hérite d'un renvoi correct sans y penser.
+    """
+    from grimoire.cli.cmd_blueprint import DOC_BASE, Issue
+
+    for path in ("$.nodes", "$.nodes[0].id", "$.nodes[0].pins[1].contract",
+                 "$.edges[2]", "$.boundaries[0]", "$"):
+        rendered = Issue(path, "p", "e", "f").render()
+        assert "| doc: " in rendered, rendered
+        assert DOC_BASE in rendered, rendered
+
+
+# ── Les exemples du manuel sont de vrais blueprints valides ────────────────
+
+
+def test_examples_are_valid_blueprints():
+    """Un exemple qui ne valide plus est une leçon fausse publiée.
+
+    Les diagrammes du manuel sont dérivés de ces fichiers : si le format
+    évolue et qu'ils cessent de valider, la page continuerait à les montrer
+    comme des modèles à suivre.
+    """
+    from grimoire.cli.cmd_blueprint import _schema_issues, _structural_issues
+
+    broken = []
+    for blueprint in gen.load_examples():
+        schema_errors, _status = _schema_issues(blueprint)
+        structural = [i.render() for i in _structural_issues(blueprint, None)]
+        if schema_errors or structural:
+            broken.append(f"{blueprint['id']}: {schema_errors + structural}")
+    assert not broken, "exemples invalides :\n  " + "\n  ".join(broken)
+
+
+def test_examples_have_a_page_and_an_anchor(pages):
+    page = pages[f"{gen.BASE}/exemples.md"]
+    missing = [
+        b["id"] for b in gen.load_examples()
+        if f"{{: #{b['id'].lower()} }}" not in page
+    ]
+    assert not missing, f"exemples sans ancre : {missing}"
+
+
+def test_diagram_shows_every_node_and_edge():
+    """Le diagramme est dérivé du fichier : il doit tout montrer."""
+    for blueprint in gen.load_examples():
+        diagram = gen.render_diagram(blueprint)
+        for node in blueprint.get("nodes", []):
+            assert gen._mermaid_id(node["id"]) in diagram, (blueprint["id"], node["id"])
+        arrows = diagram.count("-->") + diagram.count("-.->")
+        assert arrows == len(blueprint.get("edges", [])), blueprint["id"]
+
+
+def test_diagram_marks_error_channels_differently():
+    """Un chemin de rattrapage ne doit pas se lire comme le chemin nominal."""
+    flow = {
+        "id": "x",
+        "nodes": [{"id": "a", "pins": []}, {"id": "b", "pins": []}],
+        "edges": [
+            {"from": "a.out", "to": "b.in", "contract": "task-envelope"},
+            {"from": "a.err", "to": "b.in", "contract": "error-envelope",
+             "channel": "escalation"},
+        ],
+    }
+    diagram = gen.render_diagram(flow)
+    assert "-.->" in diagram, diagram
+    assert "escalation" in diagram, diagram
+
+
+# ── Les renvois de l'atelier vers le manuel résolvent aussi ────────────────
+
+
+def _studio_manual_paths() -> list[str]:
+    """Les chemins du manuel déclarés par `web/bp2-manual.js`."""
+    source = (ROOT / "web/bp2-manual.js").read_text(encoding="utf-8")
+    return sorted(set(re.findall(r"'(nodal/[^']*)'", source)))
+
+
+def test_studio_manual_links_resolve(pages):
+    """La toile renvoie vers le manuel ; le manuel ne sait pas qu'elle existe.
+
+    Renommer une page casserait ces liens en silence, des deux côtés d'une
+    frontière que rien ne surveille. Ce test est cette surveillance.
+    """
+    targets = _studio_manual_paths()
+    assert targets, "aucun chemin trouvé dans bp2-manual.js — le format a changé"
+    broken = [p for p in (_resolve_doc_target(t, pages) for t in targets) if p]
+    assert not broken, "renvois de l'atelier à réparer :\n  " + "\n  ".join(broken)
+
+
+def test_every_lexicon_page_is_a_real_term():
+    """Une entrée de la carte qui ne correspond à aucun terme ne s'afficherait
+    jamais : le lien serait écrit, et invisible."""
+    manual = (ROOT / "web/bp2-manual.js").read_text(encoding="utf-8")
+    lexicon = (ROOT / "web/bp2-lexicon.js").read_text(encoding="utf-8")
+    block = manual.partition("var PAGES = {")[2].partition("};")[0]
+    mapped = re.findall(r"'([^']+)':\s*'nodal/", block)
+    assert mapped, "carte des pages illisible"
+    terms = set(re.findall(r"\[\s*'([^']+)'\s*,", lexicon))
+    unknown = [term for term in mapped if term not in terms]
+    assert not unknown, f"entrées sans terme correspondant au lexique : {unknown}"

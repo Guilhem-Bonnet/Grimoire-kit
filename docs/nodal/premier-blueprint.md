@@ -110,10 +110,15 @@ Structural layer: validate_blueprint_file + compile-level checks
   $.edges[1]: pin contracts differ ('task-envelope' != 'evidence-pack')
     | expected: the same contract on both connected pins
     | fix: align the two pin contracts, or route through an adapter node
+    | doc: .../docs/nodal/concepts/contrats-et-pins/
 Invalid: 1 error(s) found in mon-premier.blueprint.json
 ```
 
-Sortie non nulle, message qui dit où (`$.edges[1]`), quoi, et quoi faire.
+(la sortie réelle tient sur une ligne ; elle est coupée ici pour la lecture)
+
+Sortie non nulle, et un message qui dit où (`$.edges[1]`), quoi, quoi faire —
+et où l'apprendre. Chaque erreur de validation porte le lien vers la page du
+manuel qui l'explique.
 
 Retenez le principe : **les contrats doivent être identiques, pas
 compatibles.** Il n'y a pas de conversion implicite. Si vous avez besoin de
