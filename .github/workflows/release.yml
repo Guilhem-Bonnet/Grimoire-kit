@@ -51,6 +51,9 @@ jobs:
       - name: Le catalogue couvre les fichiers livrés
         run: python scripts/gen-kit-hashes.py --check
 
+      - name: Le CHANGELOG décrit la version publiée
+        run: python scripts/check-changelog-release.py
+
       - name: Générer CHANGELOG depuis Grimoire_TRACE
         id: changelog
         run: |
