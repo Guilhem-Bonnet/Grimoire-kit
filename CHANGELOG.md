@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.34.2] - 2026-08-28
+
 ### Corrigé
 
 - **Le kit ne meurt plus sur une console qui ne parle pas UTF-8.** Il imprime
