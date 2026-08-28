@@ -16,6 +16,7 @@ from grimoire.core.agentic_standard import (
     build_knowledge_graph,
     build_knowledge_index,
     calculate_compliance_score,
+    check_evidence_gates,
     detect_standard_providers,
     list_profiles,
     list_standard_patterns,
@@ -1017,3 +1018,59 @@ def test_capability_artifacts_are_generatable() -> None:
     }
     assert declared <= artifact_types, f"artefacts inconnus : {sorted(declared - artifact_types)}"
     assert declared <= targets, f"artefacts sans destination : {sorted(declared - targets)}"
+
+
+def test_gate_refuses_a_task_absent_from_the_board(tmp_path: Path) -> None:
+    """Un identifiant inconnu ne doit pas franchir la porte par défaut.
+
+    Avant ce test, `gate check --task-id <inconnu>` répondait `ok: true` :
+    l'état d'une tâche absente est vide, et toutes les exigences sont indexées
+    sur des états nommés. Un identifiant mal orthographié dans un hook ou un
+    job de CI rendait donc la porte décorative — le garde échouait ouvert.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+
+    result = check_evidence_gates(tmp_path, task_id="tache-absente-du-board")
+
+    assert not result.ok
+    assert any(check.id == "gate.task_not_on_board" and check.is_error for check in result.checks)
+
+
+def test_gate_still_passes_for_a_proposed_task_on_the_board(tmp_path: Path) -> None:
+    """Garde-fou : une tâche `proposed` ne doit toujours aucun artefact.
+
+    C'est la sémantique documentée dans `hosts/decisions.py`
+    (`_STATES_WITHOUT_EVIDENCE`), dont dépend le hook Stop. Le correctif du
+    fail-open ne doit pas la changer.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap")
+
+    assert result.state == "proposed"
+    assert result.ok
+
+
+def test_gate_passes_without_a_board_at_all(tmp_path: Path) -> None:
+    """Garde-fou : un projet sans board n'est pas gouverné au niveau tâche.
+
+    Le profil `starter` ne génère pas de `task-board.yaml`. Refuser dans ce
+    cas ferait échouer le hook Stop de tout projet non gouverné, ce qui n'est
+    pas le trou visé.
+    """
+    setup_standard_profile(tmp_path, profile_id="starter")
+    assert not (tmp_path / "_grimoire/standard/task-board.yaml").exists()
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap")
+
+    assert result.ok
+
+
+def test_cli_gate_exits_nonzero_on_an_unknown_task(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed"])
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", "inconnue"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output)["ok"] is False
