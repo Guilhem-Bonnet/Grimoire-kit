@@ -263,3 +263,95 @@ def test_a_short_log_is_read_entirely(project: Path) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("une\ndeux\n", encoding="utf-8")
     assert ph._tail_lines(log) == ["une", "deux"], "rien ne doit être perdu sur un petit journal"
+
+
+# ── Runs : le kit tenait déjà le registre, personne ne le lisait ────────────
+
+
+def _kernel(project: Path) -> object:
+    from grimoire.runtime.kernel import RuntimeKernel
+
+    return RuntimeKernel(project / "_grimoire-runtime-output" / "runtime")
+
+
+def _ctx(run_id: str) -> object:
+    from grimoire.runtime.schemas import ExecutionContext
+
+    return ExecutionContext(
+        run_id=run_id, mission_id="m", task_id="t", workflow_instance_id="",
+        actor_id="dev", host_id="poste", risk_profile="standard",
+    )
+
+
+def test_a_project_that_never_ran_has_no_runs(project: Path) -> None:
+    assert ph.runs(project) == []
+    assert ph.activity(project)["running"] is False
+
+
+def test_a_checkpointed_run_reports_its_current_step(project: Path) -> None:
+    """« Où il se trouve » est littéral : l'étape nommée par le dernier checkpoint."""
+    kernel, ctx = _kernel(project), _ctx("run-A")
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.revue")
+    kernel.start(wfi.id, ctx)
+    kernel.checkpoint(wfi.id, ctx, step_id="analyse",
+                      completed_steps=["lecture"], pending_steps=["revue", "preuve"])
+
+    live = ph.runs(project)
+    assert len(live) == 1
+    assert live[0]["recipe"] == "recipe.revue"
+    assert live[0]["step"] == "analyse"
+    assert live[0]["completedSteps"] == 1
+    assert live[0]["pendingSteps"] == 2
+    assert live[0]["silent"] is False
+    assert ph.activity(project)["running"] is True
+
+
+def test_a_completed_run_leaves_the_in_flight_list(project: Path) -> None:
+    kernel, ctx = _kernel(project), _ctx("run-A")
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.revue")
+    kernel.start(wfi.id, ctx)
+    assert ph.runs(project)
+    kernel.complete(wfi.id, ctx)
+    assert ph.runs(project) == []
+
+
+def test_a_killed_run_stops_counting_as_running(project: Path) -> None:
+    """Un processus tué n'écrit jamais son statut terminal.
+
+    Son instance reste « running » indéfiniment : sans borne de fraîcheur, le
+    portefeuille afficherait une exécution en cours pour toujours. Constaté en
+    interrompant un vrai run.
+    """
+    kernel, ctx = _kernel(project), _ctx("run-B")
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.abandonnee")
+    kernel.start(wfi.id, ctx)
+
+    later = datetime.now(UTC) + timedelta(minutes=ph.RUN_SILENT_AFTER_MINUTES + 5)
+    live = ph.runs(project, now=later)
+    assert len(live) == 1, "le run reste visible : il n'a pas disparu, il s'est tu"
+    assert live[0]["silent"] is True
+    assert live[0]["silentForMinutes"] > ph.RUN_SILENT_AFTER_MINUTES
+    assert ph.activity(project, now=later)["running"] is False
+
+
+def test_instances_are_read_whole_not_by_the_tail(project: Path) -> None:
+    """``instances.jsonl`` est réécrit intégralement à chaque sauvegarde.
+
+    Le lire par la fin, comme un journal append-only, ferait disparaître des
+    exécutions dès que le fichier dépasse la fenêtre.
+    """
+    runtime = project / "_grimoire-runtime-output" / "runtime"
+    runtime.mkdir(parents=True)
+    now = datetime.now(UTC).isoformat()
+    rows = [
+        json.dumps({
+            "id": f"wfi-{i}", "recipe_id": "r", "mission_id": "m", "task_id": "t",
+            "status": "running", "created_at": now, "run_id": f"run-{i}",
+            "x": "p" * 400,  # de quoi dépasser la fenêtre de queue
+        })
+        for i in range(400)
+    ]
+    (runtime / "instances.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    assert (runtime / "instances.jsonl").stat().st_size > ph._TAIL_BYTES
+
+    assert len(ph.runs(project)) == 400

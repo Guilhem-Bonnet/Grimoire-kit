@@ -1338,6 +1338,12 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
             for f in (health.get("flows") or [])
         ],
         "active": (health.get("activity") or {}).get("active", False),
+        "running": (health.get("activity") or {}).get("running", False),
+        "runs": [
+            {"recipe": r["recipe"], "status": r["status"], "step": r["step"],
+             "silent": r["silent"], "pendingSteps": r["pendingSteps"]}
+            for r in ((health.get("activity") or {}).get("runs") or [])
+        ],
         "last_event_at": (health.get("activity") or {}).get("lastEventAt"),
         "last_event_label": (health.get("activity") or {}).get("lastEventLabel"),
         "in_flight": (health.get("activity") or {}).get("inFlight") or [],

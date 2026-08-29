@@ -351,7 +351,21 @@
         + 'grimoire cockpit refresh">MESURES NON GÉNÉRÉES</span></div>';
     }
 
-    /* Activité : on rapporte la dernière trace écrite, jamais un processus. */
+    /* Exécutions : ici on parle bien de processus, parce que le noyau
+       d'exécution tient le registre. Un run tué ne l'écrit jamais : il est
+       montré « sans nouvelles », pas compté comme actif. */
+    const live = (p.runs || []).filter((r) => !r.silent);
+    const silent = (p.runs || []).filter((r) => r.silent);
+    if (live.length) {
+      const first = live[0];
+      const where = first.step ? ' · ' + esc(first.step) : '';
+      tags.push(`<span class="pf-tag live" title="${esc(first.recipe || '')} — ${first.pendingSteps} étape(s) restante(s)"><span class="dot"></span>${live.length} EN COURS${esc(where)}</span>`);
+    }
+    if (silent.length) {
+      tags.push(`<span class="pf-tag warn" title="Exécution en vol qui ne donne plus signe de vie — processus interrompu ?">${silent.length} SANS NOUVELLES</span>`);
+    }
+
+    /* Activité : la dernière trace écrite, qui n'affirme aucun processus. */
     if (p.active) {
       tags.push(`<span class="pf-tag live" title="Trace écrite ${esc(relTime(p.last_event_at))}${p.last_event_label ? ' — ' + esc(p.last_event_label) : ''}"><span class="dot"></span>ACTIF · ${esc(relTime(p.last_event_at))}</span>`);
     } else if (p.last_event_at) {

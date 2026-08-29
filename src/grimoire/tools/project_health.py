@@ -61,6 +61,21 @@ EXTRA_EVENT_SOURCES = (
     ("atelier", Path("_grimoire-runtime-output") / "hook-runtime" / "serve-mutations.jsonl"),
 )
 
+#: Où le noyau d'exécution persiste ses instances, événements et checkpoints.
+#: Voir ``grimoire.runtime.kernel.RuntimeKernel``.
+RUNTIME_RELPATH = Path("_grimoire-runtime-output") / "runtime"
+
+#: Statuts d'instance qui décrivent un travail encore en vol. Les autres sont
+#: terminaux : les compter comme « en cours » afficherait comme actives des
+#: exécutions finies il y a des semaines.
+LIVE_RUN_STATUSES = frozenset({"created", "running", "checkpointed", "paused", "blocked"})
+
+#: Un run tué n'écrit jamais son statut terminal : il reste « running » pour
+#: toujours. Constaté en produisant un vrai run puis en interrompant le
+#: processus. Au-delà de cette fenêtre sans le moindre signal, l'exécution est
+#: rapportée comme sans nouvelles plutôt que comptée comme active.
+RUN_SILENT_AFTER_MINUTES = 60
+
 #: On ne veut que la fin de chaque journal. Les lire en entier coûterait, sur
 #: cette machine, 14 Mo pour une seule ligne utile — et ces fichiers ne font
 #: que grossir. 64 Kio couvrent largement les dernières entrées.
@@ -243,6 +258,98 @@ def _tail_lines(path: Path) -> list[str]:
     return lines
 
 
+def _read_jsonl(path: Path, *, tail: bool = True) -> list[dict[str, Any]]:
+    """Objets d'un JSONL, lignes illisibles écartées.
+
+    ``tail`` borne la lecture à la fin du fichier — bon pour un journal
+    append-only, faux pour un fichier réécrit en entier à chaque sauvegarde,
+    où tronquer ferait disparaître des enregistrements.
+    """
+    if tail:
+        lines = _tail_lines(path)
+    else:
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return []
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict):
+            out.append(entry)
+    return out
+
+
+def runs(project_root: Path, *, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Exécutions encore en vol, et où elles en sont.
+
+    Le noyau d'exécution tient déjà ce registre — instances, événements,
+    checkpoints. Rien ne le remontait, d'où l'impression qu'« est-ce que ça
+    tourne » n'avait pas de réponse dans le kit : elle existait, elle n'était
+    simplement lue par personne.
+
+    « Où il se trouve » est littéral ici : le dernier checkpoint d'une instance
+    nomme l'étape courante et ce qui reste à faire.
+    """
+    root = project_root / RUNTIME_RELPATH
+    # `instances.jsonl` est réécrit intégralement à chaque sauvegarde : le lire
+    # par la fin en perdrait. Les journaux append-only, eux, restent bornés.
+    instances = _read_jsonl(root / "instances.jsonl", tail=False)
+    if not instances:
+        return []
+
+    # Le fichier d'instances est réécrit en entier à chaque sauvegarde : la
+    # dernière occurrence d'un id est l'état courant.
+    latest: dict[str, dict[str, Any]] = {}
+    for entry in instances:
+        instance_id = str(entry.get("id", ""))
+        if instance_id:
+            latest[instance_id] = entry
+
+    checkpoints: dict[str, dict[str, Any]] = {}
+    for chk in _read_jsonl(root / "checkpoints.jsonl"):
+        instance_id = str(chk.get("workflow_instance_id", ""))
+        if not instance_id:
+            continue
+        seen = checkpoints.get(instance_id)
+        if seen is None or str(chk.get("created_at", "")) >= str(seen.get("created_at", "")):
+            checkpoints[instance_id] = chk
+
+    now = now or datetime.now(UTC)
+    live = []
+    for instance_id, entry in latest.items():
+        if str(entry.get("status", "")) not in LIVE_RUN_STATUSES:
+            continue
+        chk = checkpoints.get(instance_id, {})
+        raw_state = chk.get("state")
+        state: dict[str, Any] = raw_state if isinstance(raw_state, dict) else {}
+        signal = _parse_stamp(chk.get("created_at")) or _parse_stamp(entry.get("created_at"))
+        silent_for = None if signal is None else (now - signal).total_seconds() / 60.0
+        live.append({
+            "silentForMinutes": None if silent_for is None else round(silent_for, 1),
+            "silent": bool(silent_for is not None and silent_for > RUN_SILENT_AFTER_MINUTES),
+            "id": instance_id,
+            "runId": str(entry.get("run_id", "")),
+            "recipe": str(entry.get("recipe_id", "")),
+            "mission": str(entry.get("mission_id", "")),
+            "task": str(entry.get("task_id", "")),
+            "status": str(entry.get("status", "")),
+            "startedAt": str(entry.get("created_at", "")) or None,
+            "step": str(chk.get("step_id", "")) or None,
+            "completedSteps": len(state.get("completed_steps") or []),
+            "pendingSteps": len(state.get("pending_steps") or []),
+            "checkpointAt": str(chk.get("created_at", "")) or None,
+        })
+    live.sort(key=lambda r: str(r.get("checkpointAt") or r.get("startedAt") or ""), reverse=True)
+    return live
+
+
 def _parse_stamp(raw: object) -> datetime | None:
     if not isinstance(raw, str) or not raw:
         return None
@@ -292,7 +399,12 @@ def activity(project_root: Path, *, now: datetime | None = None) -> dict[str, An
     age_minutes = None
     if latest is not None:
         age_minutes = max(0.0, (now - latest["at"]).total_seconds() / 60.0)
+    live_runs = runs(project_root, now=now)
     return {
+        "runs": live_runs,
+        # Seul un run qui donne encore signe de vie compte comme en cours : un
+        # processus tué laisse son instance en « running » indéfiniment.
+        "running": any(not r["silent"] for r in live_runs),
         "lastEventAt": latest["at"].isoformat() if latest else None,
         "lastEventSource": latest["source"] if latest else None,
         "lastEventLabel": latest["label"] if latest else None,

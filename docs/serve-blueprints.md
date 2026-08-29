@@ -103,7 +103,7 @@ bindings du blueprint.
 | `GET /api/fs/browse?path=` | Navigation dossier par dossier, pour désigner un projet à la main |
 | *(cockpit)* `GET /api/fs/browse` · `POST /api/projects/add\|scan` | Même découverte depuis le portefeuille : peupler le registre de la machine n'est pas une écriture sur un projet |
 | `GET /api/data/status` · `POST /api/data/refresh` | État et régénération de la couche de données du projet servi |
-| `GET /api/health` | Alignement kit, flows composés et activité réelle du projet |
+| `GET /api/health` | Alignement kit, flows composés, exécutions en vol et activité réelle du projet |
 | `POST /api/projects/update` | `grimoire up` sur le projet — aperçu par défaut, écriture sur `confirm: true` |
 
 Le bloc `behavior` de `GET /api/stigmergy` porte les métriques de promotion

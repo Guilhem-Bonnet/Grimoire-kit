@@ -319,6 +319,14 @@
             kitChip.textContent = k.scaffolded ? 'kit : non aligné' : 'kit : projet non initialisé';
           }
           const a = h.activity || {};
+          const live = (a.runs || []).filter(r => !r.silent);
+          if (live.length) {
+            actChip.classList.add('acc');
+            actChip.textContent = live.length + ' run' + (live.length > 1 ? 's' : '') +
+              ' en cours' + (live[0].step ? ' · ' + live[0].step : '');
+            actChip.title = live.map(r => r.recipe + (r.step ? ' → ' + r.step : '')).join(' · ');
+            return;
+          }
           if (a.active) {
             actChip.classList.add('acc');
             actChip.textContent = 'actif · ' + relTime(Date.parse(a.lastEventAt));

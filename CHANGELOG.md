@@ -83,6 +83,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **« Est-ce que ça tourne, et où ? » a une réponse.** Le noyau d'exécution du
+  kit tenait déjà le registre — instances, événements, checkpoints sous
+  `_grimoire-runtime-output/runtime/` — mais rien ne le lisait. Le portefeuille
+  et le tableau de bord affichent maintenant les exécutions en vol avec l'étape
+  courante nommée par leur dernier checkpoint, et ce qui reste à faire.
+  Un processus interrompu n'écrit jamais son statut terminal : au-delà d'une
+  heure sans signal, son exécution est montrée « sans nouvelles » plutôt que
+  comptée comme active.
 - **Le portefeuille pilote la flotte.** Chaque carte porte désormais trois faits
   vérifiables, tous issus de `grimoire.tools.project_health` :
   l'**alignement kit** (par digest de contenu — un fichier est en retard quand
