@@ -387,7 +387,8 @@ class TestDetectContextDrift(_MaintenanceTestBase):
             "| Agent | Role |\n"
             "|-------|------|\n"
             "| forge | Terraform |\n"
-            "| hawk  | Monitoring |\n"
+            "| hawk  | Monitoring |\n",
+            encoding="utf-8",
         )
         self.maint.AGENT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
         with open(self.maint.AGENT_MANIFEST, "w", newline="", encoding="utf-8") as f:
@@ -404,7 +405,8 @@ class TestDetectContextDrift(_MaintenanceTestBase):
             "## Équipe d'Agents Custom\n"
             "| Agent | Role |\n"
             "|-------|------|\n"
-            "| forge | Terraform |\n"
+            "| forge | Terraform |\n",
+            encoding="utf-8",
         )
         self.maint.AGENT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
         with open(self.maint.AGENT_MANIFEST, "w", newline="", encoding="utf-8") as f:

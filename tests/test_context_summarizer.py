@@ -279,7 +279,7 @@ This is an old decision that should be summarized.
 This is a recent decision that should be kept.
 - Reason: just happened
 - Impact: ongoing
-""")
+""", encoding="utf-8")
         return memory_dir
 
     def test_init_defaults(self):
