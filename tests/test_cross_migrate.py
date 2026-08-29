@@ -447,7 +447,7 @@ class TestImportBundle(BaseTest):
         # Verify files created
         dev_file = self.root / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
         self.assertTrue(dev_file.exists())
-        content = dev_file.read_text()
+        content = dev_file.read_text(encoding="utf-8")
         self.assertIn("migré", content)
         self.assertIn("imported learning", content)
 

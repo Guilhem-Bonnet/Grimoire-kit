@@ -158,6 +158,44 @@ def _locale_written_non_ascii(path: Path) -> list[str]:
     return sorted(set(offenders))
 
 
+def _locale_read_in_non_ascii_test(path: Path) -> list[str]:
+    """Lectures sans `encoding=` dans un test qui manipule du non-ASCII.
+
+    C'est le versant discret du même défaut. Lire des octets UTF-8 comme du
+    cp1252 ne lève presque jamais d'erreur : cp1252 traduit la quasi-totalité
+    des octets. On obtient du mojibake, donc un `assertIn("migré", …)` qui
+    échoue sans rien dire d'utile sur la cause.
+
+    La règle est volontairement large — toute lecture nue dans une fonction de
+    test contenant du non-ASCII. Un faux positif coûte un argument nommé ;
+    l'omission inverse coûte un run de CI et une demi-heure de diagnostic.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        has_non_ascii = any(
+            ord(c) > 127
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            for c in node.value
+        )
+        if not has_non_ascii:
+            continue
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", None) != "read_text":
+                continue
+            if any(keyword.arg == "encoding" for keyword in node.keywords):
+                continue
+            offenders.append(
+                f"{path.name}:{node.lineno} lit sans encoding= dans {scope.name}()"
+            )
+    return sorted(set(offenders))
+
+
 class TestFixtureFileEncoding(unittest.TestCase):
     """Un fixture doit s'écrire sur Windows comme il s'écrit ailleurs.
 
@@ -214,6 +252,30 @@ class TestFixtureFileEncoding(unittest.TestCase):
             probe.unlink(missing_ok=True)
         self.assertTrue(offenders, "la charge passée par variable n'est pas vue")
         self.assertIn("—", offenders[0])
+
+    def test_no_test_reads_non_ascii_with_the_locale_encoding(self) -> None:
+        """Les outils écrivent en UTF-8 explicite ; les tests doivent relire pareil."""
+        offenders = []
+        for path in sorted(Path(__file__).parent.glob("test_*.py")):
+            offenders.extend(_locale_read_in_non_ascii_test(path))
+        self.assertEqual(
+            offenders, [], "\n  ".join(["relectures faussées sur Windows :", *offenders])
+        )
+
+    def test_the_read_guard_sees_a_relapse(self) -> None:
+        probe = Path(__file__).parent / "test_zz_probe_read.py"
+        probe.write_text(
+            'from pathlib import Path\n'
+            'def test_x():\n'
+            '    contenu = Path("f.md").read_text()\n'
+            '    assert "migré" in contenu\n',
+            encoding="utf-8",
+        )
+        try:
+            offenders = _locale_read_in_non_ascii_test(probe)
+        finally:
+            probe.unlink(missing_ok=True)
+        self.assertTrue(offenders, "la lecture nue n'est pas vue")
 
     def test_the_guard_sees_a_relapse(self) -> None:
         """Y compris sur un caractère que cp1252 sait représenter.
