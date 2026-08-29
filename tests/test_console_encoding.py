@@ -196,6 +196,45 @@ def _locale_read_in_non_ascii_test(path: Path) -> list[str]:
     return sorted(set(offenders))
 
 
+def _locale_written_non_ascii_in(root: Path) -> list[str]:
+    """La même règle, appliquée au code produit.
+
+    Un test mal encodé fait perdre une heure ; un outil mal encodé écrit un
+    fichier que le reste de l'écosystème ne saura pas relire. C'est le même
+    défaut, avec un coût différent.
+    """
+    offenders: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            offenders.extend(_locale_written_non_ascii(path))
+        except SyntaxError:  # pragma: no cover - fichier non parsable
+            continue
+    return offenders
+
+
+class TestProductFileEncoding(unittest.TestCase):
+    """Ce que les outils écrivent doit se relire partout.
+
+    `session-save.py` écrivait `session-state.md` — « # État de Session »,
+    « ## Dernière Session » — sans encodage explicite. Sur Windows le fichier
+    partait en cp1252, alors que tout ce qui le relit impose UTF-8. Le défaut
+    ne s'est vu que le jour où un test a cessé de relire dans l'encodage de la
+    locale, c'est-à-dire quand il a cessé de se tromper de la même façon.
+    """
+
+    def test_tools_write_non_ascii_with_an_explicit_encoding(self) -> None:
+        kit = Path(__file__).resolve().parents[1]
+        offenders = _locale_written_non_ascii_in(kit / "src")
+        offenders += _locale_written_non_ascii_in(kit / "framework")
+        self.assertEqual(
+            offenders,
+            [],
+            "\n  ".join(["fichiers écrits dans l'encodage de la locale :", *offenders]),
+        )
+
+
 class TestFixtureFileEncoding(unittest.TestCase):
     """Un fixture doit s'écrire sur Windows comme il s'écrit ailleurs.
 
