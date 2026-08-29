@@ -196,9 +196,9 @@ grimoire standard score
 grimoire standard gate
 ```
 
-Référence des contrôles : [Contrôles gouvernés](governed-controls.md) · intégration :
-[Standard agentique](agentic-standard-integration.md) · installation par besoins :
-[Installation par besoins](agentic-standard-install-by-needs.md).
+Référence des contrôles : [Contrôles gouvernés](standard/controles-gouvernes.md) · intégration :
+[Standard agentique](standard/integration.md) · installation par besoins :
+[Installation par besoins](standard/install-by-needs.md).
 
 ## Portabilité multi-assistant
 

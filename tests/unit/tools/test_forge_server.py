@@ -1177,3 +1177,72 @@ class TestPontStudioDeclarations:
         studio["nodes"][0]["config"] = {"checkpoint": {"scope": "state"}}
         errors = api.blueprint_validate(api._studio_to_v1(studio))
         assert not any("R-K1" in e for e in errors)
+
+
+class TestErrorContractIsKnown:
+    """Le contrat d'erreur du format n'est pas un contrat du catalogue.
+
+    Deux vocabulaires coexistent : le catalogue déclare les objets métier du
+    standard, le format impose les siens. `error-envelope` est du second —
+    exigé sur toute edge `failure` par R-F2. Le lint le comparait au seul
+    catalogue et le rejetait donc comme inconnu, pendant que R-F2 refusait
+    tout autre contrat : les deux règles se fermaient l'une sur l'autre et
+    aucune edge d'erreur ne passait.
+    """
+
+    @staticmethod
+    def _flow_with_failure_edge(contract: str) -> dict:
+        return {
+            "blueprintVersion": 1,
+            "id": "avec-repli",
+            "nodes": [
+                {
+                    "id": "work", "kind": "pattern", "ref": "ORC-01",
+                    "pins": [
+                        {"id": "out", "direction": "out", "contract": "task-envelope"},
+                        {"id": "err", "direction": "out", "contract": contract},
+                    ],
+                },
+                {
+                    "id": "verify", "kind": "pattern", "ref": "QUA-04",
+                    "pins": [
+                        {"id": "in", "direction": "in", "contract": "task-envelope"}
+                    ],
+                },
+                {
+                    "id": "repli", "kind": "pattern", "ref": "GOV-01",
+                    "pins": [{"id": "in", "direction": "in", "contract": contract}],
+                },
+            ],
+            "edges": [
+                {"from": "work.out", "to": "verify.in", "contract": "task-envelope"},
+                {"from": "work.err", "to": "repli.in", "contract": contract,
+                 "channel": "failure"},
+            ],
+        }
+
+    def test_failure_edge_passes_the_lint(self, api_with_catalogue: ForgeAPI) -> None:
+        """Le catalogue de la fixture ne connaît pas `error-envelope`."""
+        catalogue = api_with_catalogue._catalogue() or {}
+        assert "error-envelope" not in {c["id"] for c in catalogue.get("contracts", [])}
+
+        report = api_with_catalogue.blueprint_lint(
+            self._flow_with_failure_edge("error-envelope")
+        )
+        assert not [e for e in report["errors"] if "contrat inconnu" in e], report["errors"]
+
+    def test_failure_edge_simulates_clean(self, api_with_catalogue: ForgeAPI) -> None:
+        report = api_with_catalogue.blueprint_simulate(
+            self._flow_with_failure_edge("error-envelope")
+        )
+        assert report["blockers"] == [], report["blockers"]
+        assert report["channels"]["failure"] == 1
+
+    def test_another_unknown_contract_is_still_rejected(
+        self, api_with_catalogue: ForgeAPI
+    ) -> None:
+        """La garde reste fermée : seul le contrat du format est ajouté."""
+        report = api_with_catalogue.blueprint_lint(
+            self._flow_with_failure_edge("contrat-invente")
+        )
+        assert [e for e in report["errors"] if "contrat inconnu" in e], report["errors"]

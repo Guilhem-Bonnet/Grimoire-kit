@@ -6,7 +6,7 @@ description: >
   governed agentic runtime.
 
 final_target:
-  document: "docs/agentic-standard-final-target.md"
+  document: "planning/agentic-standard-final-target.md"
   intent: "Maximal north-star target for the normative agentic runtime."
   maturity_levels:
     - minimal

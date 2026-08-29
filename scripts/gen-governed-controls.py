@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate docs/governed-controls.md from the agentic-standard pattern catalog.
+"""Generate docs/standard/controles-gouvernes.md from the agentic-standard catalog.
 
 Single source of truth: framework/agentic-standard/templates/pattern-catalog.yaml.
-Run from anywhere: ``python docs/gen-governed-controls.py``.
+Run from anywhere: ``python scripts/gen-governed-controls.py``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from ruamel.yaml import YAML
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "framework/agentic-standard/templates/pattern-catalog.yaml"
-OUTPUT = ROOT / "docs/governed-controls.md"
+OUTPUT = ROOT / "docs/standard/controles-gouvernes.md"
 ORDER = [
     "context", "memory", "knowledge", "orchestration", "workflow",
     "provider", "security", "governance", "quality", "runtime", "observability",
@@ -32,7 +32,7 @@ def render() -> str:
         "# Référence des contrôles gouvernés",
         "",
         "> Page de référence générée depuis `framework/agentic-standard/templates/pattern-catalog.yaml`",
-        "> (source unique). Régénérer via `python docs/gen-governed-controls.py`.",
+        "> (source unique). Régénérer via `python scripts/gen-governed-controls.py`.",
         "",
         f"**{len(patterns)} patterns gouvernés** répartis sur {len(groups)} catégories. Chaque pattern pose un",
         "artefact déclaratif (`_grimoire/standard/*.yaml`) vérifié *fail-closed* par",

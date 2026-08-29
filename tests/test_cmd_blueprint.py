@@ -168,16 +168,25 @@ def test_registry_examples_pass_validate() -> None:
         assert "Valid" in result.output
 
 
-def test_validate_falls_back_when_jsonschema_missing(tmp_path: Path, monkeypatch) -> None:
+def test_validate_reports_the_skip_without_claiming_a_pass(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """La couche absente se dit, et ne se conclut pas par « Valid ».
+
+    Ce test affirmait l'inverse : sortie zéro et « Valid » alors que la couche
+    schéma ne s'était pas exécutée. Il figeait le mode de panne qu'il aurait dû
+    empêcher — une porte de CI qui dégrade à la moitié de ses contrôles en
+    restant verte.
+    """
     out = tmp_path / "demo.blueprint.json"
     assert runner.invoke(blueprint_app, ["new", "demo", "--out", str(out)]).exit_code == 0
     # `sys.modules[name] = None` makes `import jsonschema` raise ImportError.
     monkeypatch.setitem(sys.modules, "jsonschema", None)
 
     result = runner.invoke(blueprint_app, ["validate", str(out)])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "skipped (optional package jsonschema is not installed)" in result.output
-    assert "Valid" in result.output
+    assert "Valid:" not in result.output
 
 
 # ── compile ───────────────────────────────────────────────────────────────────
@@ -317,3 +326,72 @@ def test_evals_sur_le_blueprint_de_reference(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "sur 5 déclarés" in result.output
+
+
+# ── La couche schéma ne peut plus s'absenter en silence ────────────────────
+
+
+def _without_jsonschema(monkeypatch) -> None:
+    """Simuler une installation sans `jsonschema`, comme un `pip install` nu.
+
+    `sys.modules[name] = None` fait lever ImportError à l'import — la même
+    technique que le reste du fichier.
+    """
+    monkeypatch.setitem(sys.modules, "jsonschema", None)
+
+
+def test_validate_refuses_when_the_schema_layer_cannot_run(tmp_path: Path, monkeypatch) -> None:
+    """Une validation à moitié faite ne doit pas se conclure par « Valid ».
+
+    Le mode de panne d'origine : sans `jsonschema`, la couche schéma
+    s'annonçait `skipped` et la commande sortait quand même à zéro. Une porte
+    de CI dégradait ainsi à la moitié de ses contrôles en restant verte.
+    """
+    out = tmp_path / "demo.blueprint.json"
+    assert runner.invoke(blueprint_app, ["new", "demo", "--out", str(out)]).exit_code == 0
+
+    _without_jsonschema(monkeypatch)
+    result = runner.invoke(blueprint_app, ["validate", str(out)])
+    assert result.exit_code == 1, result.output
+    assert "has not been fully validated" in result.output
+    assert "pip install jsonschema" in result.output
+    assert "Valid:" not in result.output
+
+
+def test_validate_accepts_a_partial_check_when_asked_explicitly(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """L'échappatoire existe, mais elle se voit dans la commande."""
+    out = tmp_path / "demo.blueprint.json"
+    assert runner.invoke(blueprint_app, ["new", "demo", "--out", str(out)]).exit_code == 0
+
+    _without_jsonschema(monkeypatch)
+    result = runner.invoke(
+        blueprint_app, ["validate", str(out), "--allow-skipped-schema"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Partial:" in result.output
+    assert "passes both validation layers" not in result.output
+
+
+def test_compile_refuses_a_partial_validation(tmp_path: Path, monkeypatch) -> None:
+    """La compilation écrit des artefacts : elle exige la validation entière."""
+    out = tmp_path / "demo.blueprint.json"
+    assert runner.invoke(blueprint_app, ["new", "demo", "--out", str(out)]).exit_code == 0
+
+    _without_jsonschema(monkeypatch)
+    result = runner.invoke(
+        blueprint_app, ["compile", str(out), "--project-root", str(tmp_path)]
+    )
+    assert result.exit_code == 1, result.output
+    assert "has not been fully validated" in result.output
+    assert not (tmp_path / ".github" / "prompts").exists()
+
+
+def test_validate_still_passes_with_jsonschema_available(tmp_path: Path) -> None:
+    """Sans dégradation, rien ne change pour qui a le paquet."""
+    out = tmp_path / "demo.blueprint.json"
+    assert runner.invoke(blueprint_app, ["new", "demo", "--out", str(out)]).exit_code == 0
+    result = runner.invoke(blueprint_app, ["validate", str(out)])
+    assert result.exit_code == 0, result.output
+    assert "passes both validation layers" in result.output

@@ -39,6 +39,14 @@ _ID_ARGUMENT = typer.Argument(..., metavar="ID", help="Blueprint id (lowercase, 
 _OUT_OPTION = typer.Option(None, "--out", help="Output file (default: <id>.blueprint.json).")
 _TEMPLATE_OPTION = typer.Option("minimal", "--template", help="Template: minimal or pipeline.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Overwrite the output file if it exists.")
+_ALLOW_SKIPPED_SCHEMA_OPTION = typer.Option(
+    False,
+    "--allow-skipped-schema",
+    help=(
+        "Accept a partial validation when the JSON Schema layer cannot run "
+        "(jsonschema missing). Without it, a skipped layer is an error."
+    ),
+)
 _PROJECT_ROOT_OPTION = typer.Option(
     None,
     "--project-root",
@@ -134,17 +142,68 @@ def _pipeline_template(bp_id: str) -> dict[str, Any]:
     }
 
 
+# Where the manual explains each finding. A validation error that says what is
+# wrong but not where to learn why leaves the reader to search; these anchors
+# turn every failure into one click. They are checked against the generated
+# reference by tests/unit/test_doc_reference.py, so they cannot rot silently.
+DOC_BASE = "https://guilhem-bonnet.github.io/Grimoire-kit/docs/"
+DOC_FORMAT = "nodal/reference/format-fichier/"
+DOC_NODE = f"{DOC_FORMAT}#node"
+DOC_PIN = f"{DOC_FORMAT}#pin"
+DOC_EDGE = f"{DOC_FORMAT}#edge"
+DOC_IDENTIFIER = f"{DOC_FORMAT}#identifier"
+DOC_CONTRACTS = "nodal/concepts/contrats-et-pins/"
+DOC_CHANNELS = "nodal/concepts/canaux/"
+DOC_EXECUTION = "nodal/concepts/execution/"
+
+# Every doc target the CLI can emit. The test suite asserts each one resolves.
+DOC_TARGETS = (
+    DOC_FORMAT, DOC_NODE, DOC_PIN, DOC_EDGE, DOC_IDENTIFIER,
+    DOC_CONTRACTS, DOC_CHANNELS, DOC_EXECUTION,
+)
+
+
+def _doc_for_path(path: str) -> str:
+    """Pick the reference section that explains a finding, from its JSON path.
+
+    Deriving the target rather than tagging each finding means a check added
+    later inherits a sensible link for free; the three findings whose lesson is
+    conceptual rather than structural override it explicitly.
+    """
+    if ".pins" in path:
+        return DOC_PIN
+    if path.startswith("$.edges"):
+        return DOC_EDGE
+    if path.endswith(".id"):
+        return DOC_IDENTIFIER
+    if path.startswith("$.nodes"):
+        return DOC_NODE
+    return DOC_FORMAT
+
+
 @dataclass(frozen=True, slots=True)
 class Issue:
-    """One actionable finding: JSON path, problem, expectation, remediation."""
+    """One actionable finding: JSON path, problem, expectation, remediation.
+
+    ``doc`` overrides the section derived from ``path`` — set it when the
+    lesson is conceptual (a type system, a channel) rather than a field shape.
+    """
 
     path: str
     problem: str
     expected: str
     fix: str
+    doc: str = ""
+
+    @property
+    def doc_url(self) -> str:
+        return DOC_BASE + (self.doc or _doc_for_path(self.path))
 
     def render(self) -> str:
-        return f"{self.path}: {self.problem} | expected: {self.expected} | fix: {self.fix}"
+        return (
+            f"{self.path}: {self.problem} | expected: {self.expected} "
+            f"| fix: {self.fix} | doc: {self.doc_url}"
+        )
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -162,22 +221,27 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _schema_issues(blueprint: dict[str, Any]) -> tuple[list[str], str]:
-    """JSON Schema layer. Returns (errors, status) — status explains a skip."""
+def _schema_issues(blueprint: dict[str, Any]) -> tuple[list[str], str, bool]:
+    """JSON Schema layer. Returns (errors, status, ran).
+
+    ``ran`` is what the caller acts on: a layer that could not run found no
+    errors, which is not the same as finding none. Conflating the two is how a
+    validator ends up reporting a pass over half a check.
+    """
     try:
         import jsonschema
     except ImportError:
-        return [], "skipped (optional package jsonschema is not installed)"
+        return [], "skipped (optional package jsonschema is not installed)", False
     schema_file = _schema_path()
     if not schema_file.is_file():
-        return [], f"skipped (schema not found: {schema_file})"
+        return [], f"skipped (schema not found: {schema_file})", False
     schema = json.loads(schema_file.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = [
         f"{error.json_path}: {error.message}"
         for error in sorted(validator.iter_errors(blueprint), key=lambda e: e.json_path)
     ]
-    return errors, "checked against schemas/blueprint-v1.schema.json"
+    return errors, "checked against schemas/blueprint-v1.schema.json", True
 
 
 def _structural_issues(blueprint: dict[str, Any], project_root: Path | None) -> list[Issue]:
@@ -197,6 +261,7 @@ def _structural_issues(blueprint: dict[str, Any], project_root: Path | None) -> 
                 "at least the `pins` key on every node (an empty list is fine)",
                 "add `\"pins\": []` to each node, otherwise the file is treated as a Studio draft "
                 "and re-projected, ignoring your typing",
+                doc=DOC_CONTRACTS,
             )
         )
 
@@ -352,6 +417,7 @@ def _structural_issues(blueprint: dict[str, Any], project_root: Path | None) -> 
                         f"pin contracts differ ({c_from!r} != {c_to!r})",
                         "the same contract on both connected pins",
                         "align the two pin contracts, or route through an adapter node",
+                        doc=DOC_CONTRACTS,
                     )
                 )
             elif edge.get("contract") and edge["contract"] != c_from:
@@ -402,6 +468,7 @@ def _cycle_issues(nodes: list[Any], edges: list[Any]) -> list[Issue]:
                     f"cycle detected between nodes: {cycle}",
                     "an acyclic flow (compilation orders nodes topologically)",
                     "remove one connection of the cycle",
+                    doc=DOC_CHANNELS,
                 )
             ]
         for nid in ready:
@@ -411,18 +478,25 @@ def _cycle_issues(nodes: list[Any], edges: list[Any]) -> list[Issue]:
     return []
 
 
-def _validate_report(bp_path: Path, project_root: Path | None) -> int:
-    """Run both validation layers, print one line per finding. Returns error count."""
+def _validate_report(bp_path: Path, project_root: Path | None) -> tuple[int, bool]:
+    """Run both validation layers, print one line per finding.
+
+    Returns ``(error count, schema layer ran)``. The second value matters as
+    much as the first: a run where the schema layer was absent has not
+    validated the file, whatever the count says.
+    """
     try:
         blueprint, file_errors = validate_blueprint_file(bp_path)
     except ExtensionError as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        return 1
+        return 1, False
 
-    schema_errors, schema_status = _schema_issues(blueprint)
+    schema_errors, schema_status, schema_ran = _schema_issues(blueprint)
     typer.echo(f"Schema layer: {schema_status}")
     for line in schema_errors:
         typer.secho(f"  {line}", fg=typer.colors.RED)
+    if schema_errors:
+        typer.echo(f"  doc: {DOC_BASE}{DOC_FORMAT}")
 
     structural = _structural_issues(blueprint, project_root)
     typer.echo("Structural layer: validate_blueprint_file + compile-level checks")
@@ -435,7 +509,30 @@ def _validate_report(bp_path: Path, project_root: Path | None) -> int:
             "  note: artifact refs not checked (pass --project-root to check them "
             "against a project)"
         )
-    return len(schema_errors) + len(file_errors) + len(structural)
+    return len(schema_errors) + len(file_errors) + len(structural), schema_ran
+
+
+def _refuse_partial_validation() -> None:
+    """Stop rather than report a pass over a check that never ran.
+
+    The JSON Schema layer is optional at install time but not at validation
+    time: without it, `validate` used to print `skipped` and exit zero, so a CI
+    gate silently degraded to half its checks and still went green. That is the
+    failure mode this project treats as worse than no gate at all.
+    """
+    typer.secho(
+        "Refused: the JSON Schema layer could not run, so this file has not "
+        "been fully validated.",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    typer.secho(
+        "  fix : pip install jsonschema\n"
+        "  or  : re-run with --allow-skipped-schema to accept a partial check",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(code=1)
 
 
 # ── commands ─────────────────────────────────────────────────────────────────
@@ -483,12 +580,21 @@ def blueprint_new(
 def blueprint_validate(
     file: Path = _FILE_ARGUMENT,
     project_root: Path = _PROJECT_ROOT_OPTION,
+    allow_skipped_schema: bool = _ALLOW_SKIPPED_SCHEMA_OPTION,
 ) -> None:
-    """Validate a blueprint: JSON Schema (if available) + compile-level structural checks."""
-    count = _validate_report(file, project_root)
+    """Validate a blueprint: JSON Schema + compile-level structural checks."""
+    count, schema_ran = _validate_report(file, project_root)
     if count:
         typer.secho(f"Invalid: {count} error(s) found in {file}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+    if not schema_ran and not allow_skipped_schema:
+        _refuse_partial_validation()
+    if not schema_ran:
+        typer.secho(
+            f"Partial: {file} passes the structural layer only (schema layer skipped)",
+            fg=typer.colors.YELLOW,
+        )
+        return
     typer.secho(f"Valid: {file} passes both validation layers", fg=typer.colors.GREEN)
 
 
@@ -496,6 +602,7 @@ def blueprint_validate(
 def blueprint_compile(
     file: Path = _FILE_ARGUMENT,
     project_root: Path = _PROJECT_ROOT_OPTION,
+    allow_skipped_schema: bool = _ALLOW_SKIPPED_SCHEMA_OPTION,
 ) -> None:
     """Compile a blueprint into a mission pack (same fail-closed rules as the atelier).
 
@@ -505,10 +612,14 @@ def blueprint_compile(
     from grimoire.tools.forge_server import ForgeAPI
 
     root = (project_root or Path.cwd()).resolve()
-    count = _validate_report(file, root)
+    count, schema_ran = _validate_report(file, root)
     if count:
         typer.secho(f"Invalid: fix the {count} error(s) above before compiling", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+    # La compilation écrit des artefacts : la moitié d'une validation ne suffit
+    # pas à autoriser une écriture.
+    if not schema_ran and not allow_skipped_schema:
+        _refuse_partial_validation()
 
     try:
         from grimoire.data import web_path

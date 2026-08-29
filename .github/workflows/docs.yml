@@ -1,40 +1,97 @@
 name: Deploy site
 
-# Publie le site statique Grimoire Kit (web/) sur GitHub Pages.
-# La page Documentation rend les fichiers docs/*.md en direct (raw.githubusercontent),
-# donc aucune étape de build n'est nécessaire — on uploade web/ tel quel.
+# Publie un seul artefact Pages composé de deux surfaces :
+#   /            → web/ (vitrine + atelier statique, servi tel quel)
+#   /docs/       → site/ (manuel construit par mkdocs, --strict)
+#
+# Avant, seul web/ était publié : `mkdocs build` tournait en CI mais son
+# résultat n'était déployé nulle part, et la page Documentation re-rendait
+# docs/*.md côté client depuis raw.githubusercontent. Le manuel n'avait donc
+# ni index de recherche, ni validation de liens au build, ni ancres stables.
+#
+# Le build tourne aussi sur pull request : c'est là que la porte doit pouvoir
+# échouer. La construire seulement au push sur main la rendrait décorative —
+# on constaterait la casse après le merge.
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# GitHub Actions ne résout pas les ancres YAML : les deux listes de chemins
+# sont volontairement dupliquées, elles doivent rester identiques.
 on:
   push:
     branches: [main]
     paths:
       - "web/**"
+      - "docs/**"
+      - "mkdocs.yml"
+      - "mkdocs_hooks/**"
+      - "src/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "docs/**"
+      - "mkdocs.yml"
+      - "mkdocs_hooks/**"
+      - "src/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
-  pages: write
-  id-token: write
+  contents: read
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[docs]"
+
+      # --strict : un lien interne cassé ou une page hors nav échoue le build.
+      # C'est la seule barrière qui empêche le manuel de pourrir en silence.
+      - name: Build manual
+        run: python -m mkdocs build --strict --site-dir site
+
+      # Le runner est neuf à chaque exécution : pas de nettoyage préalable.
+      - name: Compose Pages artifact
+        run: |
+          mkdir -p _site
+          cp -r web/. _site/
+          test ! -e _site/docs || (echo "web/docs entrerait en collision avec le manuel" && exit 1)
+          cp -r site _site/docs
+          test -f _site/index.html
+          test -f _site/docs/index.html
+          test -f _site/docs/search/search_index.json
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site/
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: web/
-
       - id: deployment
         uses: actions/deploy-pages@v5

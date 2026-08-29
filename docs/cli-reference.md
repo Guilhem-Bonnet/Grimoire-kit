@@ -222,7 +222,7 @@ persona.
 
 ## Standard agentique gouverné
 
-Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](governed-controls.md).
+Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).
 
 | Commande | Description |
 | --- | --- |
@@ -319,6 +319,11 @@ l'éditeur : [Mode local et blueprints](serve-blueprints.md).
 
 Le rejeu ne fabrique aucun verdict : un cas absent du relevé est rapporté comme
 **non exécuté**, jamais comme échoué.
+
+`validate` et `compile` ont deux couches de contrôle, dont la première demande
+le paquet `jsonschema`. Quand il manque, la couche ne s'exécute pas et les deux
+commandes **refusent** : un contrôle qui n'a pas eu lieu ne peut pas conclure à
+un succès. `--allow-skipped-schema` accepte explicitement le contrôle partiel.
 
 ---
 

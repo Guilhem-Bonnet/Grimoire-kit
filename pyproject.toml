@@ -86,6 +86,10 @@ docs = [
     "mkdocs-material>=9.5",
     "pymdown-extensions>=10.0",
     "mkdocstrings[python]>=0.25",
+    # La référence du système nodal est rendue au build depuis les sources
+    # (schéma, primitives, catalogue) : rien n'est commité, donc rien ne rote.
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
 ]
 
 [project.scripts]

@@ -113,6 +113,18 @@
     </div>`;
   }
 
+  /* Le lexique dit ce qu'un terme veut dire ; le manuel dit pourquoi. Le lien
+     n'apparaît que pour les termes qui ont une page — un lien mort serait pire
+     que pas de lien. */
+  function manualLink(term) {
+    const pages = (window.BP2Manual && window.BP2Manual.pages) || {};
+    const page = pages[term];
+    if (!page) return '';
+    const base = (window.BP2Manual && window.BP2Manual.base()) || 'docs/';
+    return `<a class="at-chip" style="font-size:0.56rem;text-decoration:none;margin-top:6px;display:inline-block"
+      href="${esc(base + page)}" target="_blank" rel="noopener">lire dans le manuel ↗</a>`;
+  }
+
   function openLex(focusKey) {
     const f = $('#bp-fiche');
     const entry = focusKey ? lexEntry(focusKey) : null;
@@ -120,10 +132,10 @@
     f.innerHTML = `
       <div class="f-head"><div class="at-row sb"><h2 style="font-size:1rem">Lexique</h2><button class="at-btn sm ghost" id="fiche-close">✕</button></div></div>
       <div class="f-body">
-        ${LEX.map(([k, v]) => `<div class="lex-entry${lexBase(k).toLowerCase() === focusBase ? ' on' : ''}" data-lex-entry="${esc(lexBase(k).toLowerCase())}"><b style="font-family:var(--font-mono);font-size:0.77rem;color:var(--accent)">${k}</b><p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.55;margin-top:2px">${v}</p></div>`).join('')}
+        ${LEX.map(([k, v]) => `<div class="lex-entry${lexBase(k).toLowerCase() === focusBase ? ' on' : ''}" data-lex-entry="${esc(lexBase(k).toLowerCase())}"><b style="font-family:var(--font-mono);font-size:0.77rem;color:var(--accent)">${k}</b><p style="font-size:0.82rem;color:var(--ink-soft);line-height:1.55;margin-top:2px">${v}</p>${manualLink(k)}</div>`).join('')}
         <div style="border-top:1px solid var(--line);padding-top:14px">
           <div class="at-lbl" style="margin-bottom:8px">Gestes</div>
-          <p style="font-size:0.77rem;color:var(--ink-soft);line-height:1.8">clic droit — ajouter un node<br>fil lâché dans le vide — menu des nodes compatibles<br>double-clic — entrer (sous-flow) ou dossier (node)<br><span class="at-kbd">⌘G</span> grouper · <span class="at-kbd">⌘⇧G</span> dégrouper · <span class="at-kbd">Échap</span> remonter<br><span class="at-kbd">C</span> commentaire · <span class="at-kbd">F</span> recadrer · <span class="at-kbd">⌘Z</span> annuler · <span class="at-kbd">⌘D</span> dupliquer</p>
+          <p style="font-size:0.77rem;color:var(--ink-soft);line-height:1.8">clic droit — ajouter un node<br>fil lâché dans le vide — menu des nodes compatibles<br>double-clic — entrer (sous-flow) ou dossier (node)<br><span class="at-kbd">⌘G</span> grouper · <span class="at-kbd">⌘⇧G</span> dégrouper · <span class="at-kbd">Échap</span> remonter<br><span class="at-kbd">C</span> commentaire · <span class="at-kbd">F</span> recadrer · <span class="at-kbd">⌘Z</span> annuler · <span class="at-kbd">⌘D</span> dupliquer<br><span class="at-kbd">F1</span> ouvrir le manuel sur le node sélectionné</p>
         </div>
         ${journalHtml()}
       </div>

@@ -546,7 +546,7 @@ def _print_agent_list(agents: list[AgentToolSpec]) -> None:
 
     for a in agents:
         caps = ", ".join(a.capabilities[:3]) if a.capabilities else "—"
-        print(f"  {a.agent_id:20s} │ {a.title}")
+        print(f"  {a.agent_id:20s} | {a.title}")
         print(f"    Capabilities: {caps}")
     print()
 
@@ -564,7 +564,7 @@ def _print_history(entries: list[dict]) -> None:
         dur = e.get("duration_ms", 0)
         tokens = e.get("tokens_used", 0)
         print(f"  {status_icon} [{e.get('call_id', '?')[:8]}] "
-              f"{e.get('from', '?')} → {e.get('to', '?')} | "
+              f"{e.get('from', '?')} -> {e.get('to', '?')} | "
               f"{e.get('model_used', '?')} | {tokens:,} tok | {dur}ms")
         task = e.get("task", "")
         if task:
@@ -674,7 +674,7 @@ def main() -> None:
             if stats.get("calls_per_agent"):
                 print("\n  Par agent :")
                 for ag, count in sorted(stats["calls_per_agent"].items(), key=lambda x: -x[1]):
-                    print(f"    {ag:20s} │ {count:>4d} appels")
+                    print(f"    {ag:20s} | {count:>4d} appels")
             print()
         else:
             entries = caller.get_history(last_n=getattr(args, "last", 20))
