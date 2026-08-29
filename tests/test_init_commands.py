@@ -62,7 +62,19 @@ requires_bash = pytest.mark.skipif(
 
 
 def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subprocess.CompletedProcess:
-    """Run a command, return CompletedProcess."""
+    """Run a command, return CompletedProcess.
+
+    `stdin` est explicitement fermé. `grimoire-init.sh` contient des invites
+    interactives (`read -p "Continuer ? (y/N)"`) : sans stdin fermé, le script
+    attend une réponse qui ne viendra jamais. Sous Linux la CI ferme déjà stdin
+    et `read` reçoit EOF tout de suite, ce qui masquait le problème ; sous
+    Windows le descripteur hérité ne se ferme pas, et le job s'est trouvé bloqué
+    plus de quarante minutes là où ubuntu finissait en secondes.
+
+    Le `timeout` ne suffit pas à rattraper ce cas : il tue bien `bash`, mais
+    `communicate()` continue d'attendre la fermeture du tube tant qu'un
+    petit-fils le tient.
+    """
     run_env = {**os.environ, **(env or {})}
     return subprocess.run(
         args,
@@ -71,6 +83,7 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
         text=True,
         timeout=30,
         env=run_env,
+        stdin=subprocess.DEVNULL,
     )
 
 
