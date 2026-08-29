@@ -1,0 +1,352 @@
+# Glose française du schéma `blueprint-v1.schema.json`.
+#
+# Le schéma est un contrat public : ses `description` sont en anglais et le
+# restent. Le manuel, lui, est en français. Plutôt que de traduire au moment du
+# rendu, on tient ici une glose écrite pour être lue — chaque entrée est le
+# texte de référence de la page « Format de fichier ».
+#
+# Les clés sont des pointeurs JSON vers le nœud glosé. La correspondance est
+# vérifiée dans les deux sens par `scripts/gen_doc_reference.py` : un champ du
+# schéma sans glose, ou une glose sans champ, échoue le build. C'est ce qui
+# rend la dérive impossible plutôt qu'improbable.
+
+/:
+  titre: Blueprint Grimoire (v1)
+  texte: >-
+    Le format compilable lu par la Forge (`grimoire serve`) et par
+    `grimoire ext publish` / `grimoire ext add-blueprint`. Un blueprint v1
+    déclare des nodes typés dont les pins portent un contrat ; une edge ne
+    relie que deux pins qui portent le même. Les brouillons du Studio
+    (`blueprintVersion` 2, ou des nodes sans clé `pins`) ne relèvent pas de ce
+    schéma : la Forge les projette en v1 avant de valider, simuler ou compiler.
+
+/properties/blueprintVersion:
+  texte: >-
+    Version du format. Vaut l'entier `1`, et rien d'autre : `grimoire ext
+    publish` refuse toute autre valeur. C'est la présence d'une clé `pins` sur
+    les nodes qui distingue un vrai v1 d'un brouillon de Studio.
+
+/properties/id:
+  texte: >-
+    Identifiant du blueprint : minuscules et chiffres séparés par des traits
+    d'union simples (`web-pipeline`). Il sert aussi de nom de fichier
+    (`<id>.blueprint.json`) et de nom du mission pack compilé
+    (`.github/prompts/<id>.blueprint.prompt.md`) — le renommer déplace donc
+    deux artefacts, pas un.
+
+/properties/name:
+  texte: >-
+    Nom d'affichage. Facultatif ; à défaut, c'est l'`id` qui s'affiche dans les
+    listes et dans le mission pack compilé.
+
+/properties/description:
+  texte: >-
+    Description libre. Facultative ; recopiée telle quelle dans le mission pack
+    compilé.
+
+/properties/catalogRef:
+  texte: >-
+    Épingle la version du catalogue de patterns contre laquelle le blueprint a
+    été écrit. Le compilateur trace `catalogRef.version` dans l'artefact généré,
+    ce qui permet de détecter après coup qu'un flow a été composé contre un
+    catalogue plus ancien que celui du projet.
+
+/properties/catalogRef/properties/version:
+  texte: >-
+    Version du catalogue (`1.0.0`). Correspond au `catalogVersion` de l'export
+    de catalogue.
+
+/properties/nodes:
+  texte: >-
+    Les nodes du flow. Au moins un. **Chaque node doit porter une clé `pins`**,
+    quitte à ce que la liste soit vide : si aucun node n'en porte, le fichier
+    est traité comme un brouillon de Studio et re-projeté, ce qui contourne le
+    typage déclaré.
+
+/properties/edges:
+  texte: >-
+    Les connexions typées entre pins. La clé est obligatoire, la liste peut être
+    vide (flow à un seul node). Chaque extrémité s'écrit `<nodeId>.<pinId>`, et
+    les deux pins reliés doivent déclarer le même contrat.
+
+/properties/boundaries:
+  texte: >-
+    Les régions d'isolation. Une boundary est une annotation transversale qui
+    regroupe plusieurs nodes dans une même fenêtre mise en quarantaine
+    (orchestrateur-worker) ; la région compile vers un seul dispatch de
+    sub-agent. Facultative et additive — son absence signifie « pas de région ».
+    Une région à un seul membre est le cas dégénéré de l'isolation déclarée sur
+    le node lui-même (`config.context.isolation`).
+
+/properties/boundaries/items/properties/id:
+  texte: Identifiant de la région.
+
+/properties/boundaries/items/properties/mode:
+  texte: >-
+    Nature de la région. `isolation` : fenêtre partagée mise en quarantaine.
+
+/properties/boundaries/items/properties/members:
+  texte: >-
+    Les ids des nodes contenus dans la région. Chaque id doit exister. Une edge
+    qui sort de la région doit porter un contrat de digest.
+
+/properties/extensions:
+  texte: >-
+    Les extensions dont le blueprint dépend. `grimoire ext add-blueprint`
+    compare ces ids aux extensions installées et signale celles qui manquent,
+    avec la commande d'installation à lancer.
+
+/properties/extensions/items/properties/id:
+  texte: Id de l'extension tel que publié au registre (par exemple `crewai`).
+
+/properties/compiled:
+  texte: >-
+    Écrite par le compilateur après une compilation réussie : horodatage,
+    version de catalogue et empreintes des artefacts produits. **Ne s'écrit pas
+    à la main** — toute valeur saisie ici sera écrasée.
+
+/properties/compiled/properties/at:
+  texte: Horodatage ISO 8601 de la compilation (UTC).
+
+/properties/compiled/properties/catalogVersion:
+  texte: Version du catalogue au moment de la compilation.
+
+/properties/compiled/properties/artifacts:
+  texte: Les artefacts produits, un par entrée.
+
+/properties/compiled/properties/artifacts/items/properties/path:
+  texte: Chemin de l'artefact généré, relatif à la racine du projet.
+
+/properties/compiled/properties/artifacts/items/properties/hash:
+  texte: Empreinte `sha256:<hex>` du contenu de l'artefact.
+
+/properties/compiled/properties/artifacts/items/properties/sourceNode:
+  texte: Id du blueprint (ou du node) dont l'artefact est issu.
+
+/properties/meta:
+  texte: >-
+    Métadonnées d'éditeur : marqueurs « validé » / « simulé », horodatages.
+    Ignorée par le compilateur.
+
+/$defs/identifier:
+  titre: Identifiant
+  texte: >-
+    Les ids de node et de pin ne peuvent contenir ni point ni espace : une
+    extrémité d'edge est lue en coupant `<nodeId>.<pinId>` au premier point. Un
+    point dans un id rendrait la coupe ambiguë.
+
+/$defs/node:
+  titre: Node
+  texte: >-
+    Un node du flow. `kind` décide comment `ref` est résolu et quels
+    prérequis la simulation vérifie ; `role` décrit, indépendamment, ce que le
+    node fait structurellement.
+
+/$defs/node/properties/id:
+  texte: >-
+    Id du node, unique dans le blueprint. Un doublon est une erreur bloquante.
+
+/$defs/node/properties/kind:
+  texte: >-
+    D'où vient le node. `pattern` : un pattern du catalogue (`ref` = son id).
+    `artifact` : un fichier gouverné du projet (`ref` = chemin relatif, qui doit
+    exister au moment de la validation). `extension-node` : un node fourni par
+    une extension (`ref` = `<extId>/<nodeId>`, l'extension doit être installée
+    pour compiler). `composite` : un sous-flow (`ref` = `use-case:<id>` ou un
+    chemin `.blueprint.json`). `composite-inline` : un groupe de Studio aplati,
+    informatif. `agent-spec` : une esquisse d'agent ou de déclencheur venue du
+    Studio, informative.
+
+/$defs/node/properties/role:
+  texte: >-
+    Classe sémantique du node, orthogonale à `kind` : `kind` dit *d'où il
+    vient*, `role` dit *ce qu'il fait*. L'une des 7 primitives. Facultative et
+    additive ; les 17 cases de la palette ne sont que des configurations
+    de ces 7 (voir la page Palette).
+
+/$defs/node/properties/ref:
+  texte: >-
+    La cible pointée. Sa forme dépend de `kind` — les contraintes par `kind`
+    sont détaillées plus bas.
+
+/$defs/node/properties/label:
+  texte: >-
+    Libellé d'affichage. Facultatif ; utilisé dans les listes, les étapes de
+    simulation et le mission pack compilé.
+
+/$defs/node/properties/description:
+  texte: >-
+    Note libre sur le rôle du node dans le flow. Facultative, informative.
+
+/$defs/node/properties/pins:
+  texte: >-
+    Les points de connexion typés. **Obligatoire sur tout node v1**, une liste
+    vide étant valide pour un node non relié : l'absence de cette clé sur tous
+    les nodes rétrograde le fichier en brouillon de Studio.
+
+/$defs/node/ref/pattern:
+  titre: "`ref` quand `kind` vaut `pattern`"
+  texte: >-
+    Id de pattern du catalogue, par exemple `ORC-01` ou `QUA-04` — trois
+    majuscules, un tiret, deux chiffres. Vérifié contre le catalogue quand il y
+    en a un.
+
+/$defs/node/ref/extension-node:
+  titre: "`ref` quand `kind` vaut `extension-node`"
+  texte: >-
+    `<extensionId>/<nodeId>`, tel que déclaré dans le manifeste de l'extension
+    sous `provides.nodes` (par exemple `crewai/crewai-crew`). La compilation est
+    bloquée tant que l'extension n'est pas installée dans le projet.
+
+/$defs/node/ref/composite:
+  titre: "`ref` quand `kind` vaut `composite`"
+  texte: >-
+    Soit `use-case:<id d'un cas d'usage du catalogue>`, soit un chemin relatif
+    au projet vers un sous-blueprint, terminé par `.blueprint.json`.
+
+/$defs/pin:
+  titre: Pin
+  texte: >-
+    Un point de connexion typé porté par un node. Une extrémité d'edge
+    `<nodeId>.<pinId>` se résout en un pin, et les contrats des deux extrémités
+    doivent être identiques — pas compatibles, identiques.
+
+/$defs/pin/properties/id:
+  texte: >-
+    Id du pin, unique au sein de son node (`in`, `out`, `mission`, `result`…).
+
+/$defs/pin/properties/direction:
+  texte: "`in` : le pin reçoit. `out` : le pin émet."
+
+/$defs/pin/properties/contract:
+  texte: >-
+    Le contrat porté par le pin (`task-envelope`, `handoff-packet`,
+    `evidence-pack`…). Vérifié contre les contrats du catalogue quand il y en a
+    un. C'est le type du système de types.
+
+/$defs/edge:
+  titre: Edge
+  texte: >-
+    Une connexion entre deux pins. Les deux extrémités doivent exister et
+    porter le même contrat ; un `contract` déclaré sur l'edge doit être égal à
+    celui des pins. Les edges définissent aussi l'ordre d'exécution : le flow
+    doit être acyclique pour compiler.
+
+/$defs/edge/properties/from:
+  texte: >-
+    Extrémité source, `<nodeId>.<pinId>`. Le pin visé doit avoir la direction
+    `out`.
+
+/$defs/edge/properties/to:
+  texte: >-
+    Extrémité destination, `<nodeId>.<pinId>`. Le pin visé doit avoir la
+    direction `in`.
+
+/$defs/edge/properties/contract:
+  texte: >-
+    Contrat explicite, facultatif. S'il est présent, il doit être égal au
+    contrat des deux pins reliés — une divergence est une erreur bloquante.
+
+/$defs/edge/properties/channel:
+  texte: >-
+    Le canal d'exécution de l'edge. `happy` (par défaut) est le chemin nominal ;
+    `failure` porte le routage de reprise, de repli, de compensation et de
+    rebut ; `escalation` route vers un humain ou une autorité supérieure.
+    L'absence vaut `happy` — les blueprints existants migrent sans perte.
+
+/$defs/resiliencePolicy:
+  titre: Politique de résilience
+  texte: >-
+    Politique locale à un node, portée par `config.resilience`. Ce qui n'a pas
+    besoin d'une edge vit ici : la reprise bornée et le délai d'expiration. Le
+    repli, la compensation et l'escalade, eux, sont des edges `failure` ou
+    `escalation` portant un `error-envelope`. Additive ; son absence signifie
+    « pas de politique ».
+
+/$defs/resiliencePolicy/properties/retry:
+  texte: La reprise. Bornée par construction.
+
+/$defs/resiliencePolicy/properties/retry/properties/max:
+  texte: >-
+    Nombre maximal de tentatives, entre 1 et 10. Une reprise sans `max` ne
+    compile pas — c'est le garde-fou contre la boucle infinie.
+
+/$defs/resiliencePolicy/properties/retry/properties/backoffMs:
+  texte: Délai d'attente entre deux tentatives, en millisecondes.
+
+/$defs/resiliencePolicy/properties/retry/properties/strategy:
+  texte: >-
+    Progression du délai : `fixed` (constant), `linear` (croissance
+    proportionnelle), `exponential` (doublement).
+
+/$defs/resiliencePolicy/properties/timeoutMs:
+  texte: Délai d'expiration du node, en millisecondes.
+
+/$defs/resiliencePolicy/properties/onExhaustion:
+  texte: >-
+    Ce qui se passe quand les tentatives sont épuisées : `escalate` (route vers
+    une edge `escalation`), `deadletter` (met au rebut), `compensate` (déclenche
+    la compensation). Dans les trois cas, la sortie passe par une edge typée.
+
+/$defs/gatePolicy:
+  titre: Politique de porte
+  texte: >-
+    La porte universelle paramétrée, portée par `config.gate` sur un node. Une
+    primitive, six modes : une porte affirme une précondition et gouverne le
+    passage — elle ne transforme jamais rien. Sa présence dérive
+    `role: "Gate"`. Le rejet réutilise les canaux d'edge typés.
+
+/$defs/gatePolicy/properties/mode:
+  texte: >-
+    Ce que la porte vérifie. `human` : validation par une personne.
+    `budget` : plafond de jetons ou de dollars. `evidence` : présence d'une
+    preuve exigée. `output-contract` : conformité de la sortie à un schéma.
+    `guardrail` : contrôles de contenu en entrée ou en sortie. `mcp-trust` :
+    périmètre autorisé d'un serveur MCP.
+
+/$defs/gatePolicy/properties/onReject:
+  texte: >-
+    Comment le rejet se propage : `escalation` (par une edge d'escalade),
+    `failure` (par une edge d'échec), ou `block` (arrêt net, valeur par défaut).
+
+/$defs/gatePolicy/properties/params:
+  texte: >-
+    Paramètres propres au mode — `human` : action, approbateurs, seuil de
+    confiance, pourcentage ; `budget` : maxTokens, maxUsd, portée ;
+    `evidence` : ce qui est exigé et sous quel format ; `output-contract` : le
+    schéma ; `guardrail` : direction et contrôles ; `mcp-trust` : serveur,
+    outils autorisés, permissions.
+
+/$defs/evalSuite:
+  titre: Suite d'évaluation
+  texte: >-
+    Une suite d'évals comportementales, portée par `config.evals` sur un node ou
+    par `evals` à la racine du blueprint. Elle attache une preuve versionnée du
+    comportement attendu. Elle est exécutée par l'hôte, pas par le Studio — le
+    Studio ne fait jamais tourner un flow. Additive ; son absence signifie
+    « pas de suite ».
+
+/$defs/evalSuite/properties/version:
+  texte: >-
+    Version de la suite, suivie avec le fichier `.blueprint.json`. Une suite
+    non versionnée n'est pas une preuve : on ne saurait pas de quoi.
+
+/$defs/evalSuite/properties/cases:
+  texte: Les cas de la suite, au moins un par assertion utile.
+
+/$defs/evalSuite/properties/cases/items/properties/id:
+  texte: Id du cas.
+
+/$defs/evalSuite/properties/cases/items/properties/input:
+  texte: L'entrée soumise au cas.
+
+/$defs/evalSuite/properties/cases/items/properties/assert:
+  texte: >-
+    Les assertions du cas. Au moins une : un cas sans assertion ne prouve rien.
+
+/$defs/evalSuite/properties/cases/items/properties/assert/items/properties/kind:
+  texte: >-
+    Ce qui est affirmé. `contract` : la sortie honore un contrat nommé.
+    `cost` : le coût reste sous un plafond de jetons ou de dollars.
+    `no-refusal` : l'agent ne doit pas refuser. `verdict` : le verdict attendu.
+    `path-taken` : sous panne injectée, le chemin réellement emprunté.

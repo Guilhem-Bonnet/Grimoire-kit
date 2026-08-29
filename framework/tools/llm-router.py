@@ -713,10 +713,10 @@ def _print_decision(dec: RoutingDecision) -> None:
 def _print_models(router: LLMRouter) -> None:
     """Affiche la liste des modèles configurés."""
     print(f"\n  Modèles configurés ({len(router.models)})")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     for m in sorted(router.models.values(), key=lambda x: x.cost_per_1m_tokens, reverse=True):
         caps = ", ".join(m.capabilities[:4]) if m.capabilities else "general"
-        print(f"  {m.id:20s} │ {m.cost_label:28s} │ {caps}")
+        print(f"  {m.id:20s} | {m.cost_label:28s} | {caps}")
     print()
 
 
@@ -728,21 +728,21 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
         return
 
     print("\n  Statistiques d'utilisation LLM Router")
-    print(f"  {'─' * 55}")
-    print(f"  {'Modèle':20s} │ {'Requêtes':>10s} │ {'Tokens':>10s} │ {'Coût':>10s}")
-    print(f"  {'─' * 55}")
+    print(f"  {'-' * 55}")
+    print(f"  {'Modèle':20s} | {'Requêtes':>10s} | {'Tokens':>10s} | {'Coût':>10s}")
+    print(f"  {'-' * 55}")
     for s in stats:
-        print(f"  {s.model:20s} │ {s.request_count:>10d} │ {s.total_tokens:>10d} │ ${s.estimated_cost:>9.4f}")
+        print(f"  {s.model:20s} | {s.request_count:>10d} | {s.total_tokens:>10d} | ${s.estimated_cost:>9.4f}")
     total_cost = sum(s.estimated_cost for s in stats)
     total_req = sum(s.request_count for s in stats)
-    print(f"  {'─' * 55}")
-    print(f"  {'TOTAL':20s} │ {total_req:>10d} │ {'':>10s} │ ${total_cost:>9.4f}")
+    print(f"  {'-' * 55}")
+    print(f"  {'TOTAL':20s} | {total_req:>10d} | {'':>10s} | ${total_cost:>9.4f}")
     print()
 
     if recommend:
         recs = router.get_recommendations()
         print("  Recommandations")
-        print(f"  {'─' * 55}")
+        print(f"  {'-' * 55}")
         for r in recs:
             print(f"  {r}")
         print()

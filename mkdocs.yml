@@ -1,6 +1,6 @@
 site_name: Grimoire Kit
 site_description: Composable AI Agent Platform — personas, memory, workflows, and quality automation.
-site_url: https://guilhem-bonnet.github.io/Grimoire-kit/
+site_url: https://guilhem-bonnet.github.io/Grimoire-kit/docs/
 repo_url: https://github.com/Guilhem-Bonnet/Grimoire-kit
 repo_name: Guilhem-Bonnet/Grimoire-kit
 edit_uri: edit/main/docs/
@@ -18,7 +18,9 @@ theme:
     - navigation.instant
     - navigation.tabs
     - navigation.sections
-    - navigation.expand
+    # navigation.indexes remplace navigation.expand : les corpus sont désormais
+    # des onglets à plusieurs niveaux, tout déplier donnerait un mur de liens.
+    - navigation.indexes
     - navigation.top
     - search.suggest
     - search.highlight
@@ -30,6 +32,14 @@ theme:
 
 plugins:
   - search
+  # La référence du système nodal (52 pages) est rendue ici, au build, depuis
+  # le schéma, les primitives et le catalogue. Rien n'est commité : une page
+  # ne peut donc pas être en retard sur sa source. `literate-nav` lit le
+  # SUMMARY.md que le générateur produit avec elles.
+  - gen-files:
+      scripts:
+        - scripts/gen_doc_reference.py
+  - literate-nav
   - mkdocstrings:
       handlers:
         python:
@@ -46,8 +56,17 @@ hooks:
 
 markdown_extensions:
   - admonition
+  # Les listes de définitions servent aux pages de concepts, qui expliquent des
+  # termes un par un plutôt qu'en tableau.
+  - def_list
   - pymdownx.details
-  - pymdownx.superfences
+  # Les diagrammes des exemples sont dérivés des .blueprint.json : sans ce
+  # fence, ils s'afficheraient comme du texte au lieu d'être rendus.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -65,60 +84,66 @@ extra_css:
 extra_javascript:
   - javascripts/presentation-onepager.js
 
+# Trois corpus, trois onglets. Le manuel décrit ce que le produit fait ; le
+# standard décrit la norme qu'il applique. Les plans cibles et backlogs ne
+# sont pas de la documentation et vivent dans `planning/`, hors du site.
 nav:
   - Accueil: index.md
-  - Présentation & Découverte: presentation-decouverte.md
-  - Signaux & nouveautés: signaux.md
-  - Démarrage:
-      - Quick Start: getting-started.md
-      - Quick Start (English): getting-started.en.md
-      - Setup VS Code: vscode-setup.md
-      - Onboarding: onboarding.md
-  - Concepts:
-      - Architecture: concepts.md
-      - Standard agentique: agentic-standard-integration.md
-      - Surfaces hôtes: hosts.md
-      - Contrôles gouvernés (référence): governed-controls.md
-      - Installation par besoins: agentic-standard-install-by-needs.md
-      - Cible finale standard agentique: agentic-standard-final-target.md
-      - Plan cible standard agentique: agentic-standard-target-plan.md
-      - Architecture cible standard agentique: agentic-standard-target-architecture.md
-      - Plan cible gouvernance des agents cloud: cloud-agent-governance-target-plan.md
-      - Plan cible qualité produit: product-quality-target-plan.md
-      - Plan cible moteur de flows: flow-engine-target-plan.md
-      - Benchmark corpus & écarts: agentic-standard-benchmark-corpus-2026Q2.md
-      - Travaux inachevés (backlog): travaux-inacheves-2026Q2.md
-      - Mémoire: memory-system.md
-      - Roadmap Memory OS: memory-os-roadmap.md
-      - Workflows: workflow-design-patterns.md
-      - Taxonomie Workflows: workflow-taxonomy.md
-      - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
-  - Guides:
-      - Extensions & marketplace: extensions-marketplace.md
-      - Mode local & blueprints: serve-blueprints.md
-      - SDK Python: sdk-guide.md
-      - Créer un agent: creating-agents.md
-      - Archétypes: archetype-guide.md
-      - Intégration MCP: mcp-integration.md
-      - Observatory API: observatory-api.md
-      - Référence YAML: grimoire-yaml-reference.md
-  - Référence:
-      - CLI: cli-reference.md
-      - Configuration: config-reference.md
-      - API: api-reference.md
-      - Changelog: changelog.md
-  - Migration:
-      - v2 → v3: migration-v2-v3.md
-  - Aide:
-      - FAQ: faq.md
-      - Troubleshooting: troubleshooting.md
-  - Guides avancés:
-      - Plugin Development: plugin-development.md
-      - R&D expérimental: rnd.md
-      - Protocole d'évaluation: evals-protocol.md
-  - ADR:
-      - "001 — No Multi-LLM": adr-001-no-multi-llm.md
-      - "002 — SemVer Policy": adr-002-semver-policy.md
-      - "003 — Dualité mémoire": adr-003-memory-duality.md
-      - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
-      - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
+  - Manuel:
+      - Présentation & Découverte: presentation-decouverte.md
+      - Signaux & nouveautés: signaux.md
+      - Démarrage:
+          - Quick Start: getting-started.md
+          - Quick Start (English): getting-started.en.md
+          - Setup VS Code: vscode-setup.md
+          - Onboarding: onboarding.md
+      - Concepts:
+          - Architecture: concepts.md
+          - Surfaces hôtes: hosts.md
+          - Mémoire: memory-system.md
+          - Workflows: workflow-design-patterns.md
+          - Taxonomie Workflows: workflow-taxonomy.md
+          - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
+      - Atelier local & blueprints: serve-blueprints.md
+      - Guides:
+          - Extensions & marketplace: extensions-marketplace.md
+          - SDK Python: sdk-guide.md
+          - Créer un agent: creating-agents.md
+          - Archétypes: archetype-guide.md
+          - Intégration MCP: mcp-integration.md
+          - Observatory API: observatory-api.md
+          - Référence YAML: grimoire-yaml-reference.md
+          - Plugin Development: plugin-development.md
+          - Protocole d'évaluation: evals-protocol.md
+          - R&D expérimental: rnd.md
+      - Référence:
+          - CLI: cli-reference.md
+          - Configuration: config-reference.md
+          - API: api-reference.md
+          - Changelog: changelog.md
+      - Migration:
+          - v2 → v3: migration-v2-v3.md
+      - Aide:
+          - FAQ: faq.md
+          - Troubleshooting: troubleshooting.md
+      - ADR:
+          - "001 — No Multi-LLM": adr-001-no-multi-llm.md
+          - "002 — SemVer Policy": adr-002-semver-policy.md
+          - "003 — Dualité mémoire": adr-003-memory-duality.md
+          - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
+          - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
+  - Système nodal:
+      - nodal/index.md
+      - Votre premier blueprint: nodal/premier-blueprint.md
+      - Comprendre:
+          - Ce que le graphe fait: nodal/concepts/execution.md
+          - Contrats et pins: nodal/concepts/contrats-et-pins.md
+          - Les trois canaux: nodal/concepts/canaux.md
+          - Les portes: nodal/concepts/portes.md
+          - Sept primitives: nodal/concepts/primitives.md
+      - Référence: nodal/reference/
+  - Standard agentique:
+      - standard/index.md
+      - Intégration: standard/integration.md
+      - Installation par besoins: standard/install-by-needs.md
+      - Contrôles gouvernés: standard/controles-gouvernes.md

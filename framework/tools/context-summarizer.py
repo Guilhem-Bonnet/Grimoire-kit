@@ -733,7 +733,7 @@ def _print_report(report: SummaryReport) -> None:
     """Affiche le rapport de résumé."""
     status = "[OK]" if not report.errors else "[!]"
     print(f"\n  {status} Context Summarizer — Rapport")
-    print(f"  {'─' * 55}")
+    print(f"  {'-' * 55}")
     print(f"  Sections traitées  : {report.sections_processed}")
     print(f"  Sections résumées  : {report.sections_summarized}")
     print(f"  Sections préservées: {report.sections_preserved}")
@@ -747,20 +747,20 @@ def _print_report(report: SummaryReport) -> None:
         for d in report.digests:
             print(f"    {d.digest_file}")
             print(f"       {d.sections_summarized} sections | "
-                  f"{d.original_tokens:,} → {d.digest_tokens:,} tok "
+                  f"{d.original_tokens:,} -> {d.digest_tokens:,} tok "
                   f"({d.compression_ratio:.0%} compression)")
 
     if report.errors:
         print("\n  [!]  Erreurs :")
         for err in report.errors:
-            print(f"     → {err}")
+            print(f"     -> {err}")
     print()
 
 
 def _print_status(digests: list[DigestStatus]) -> None:
     """Affiche l'état des digests existants."""
     print(f"\n  Digests existants — {len(digests)} trouvés")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
 
     if not digests:
         print("  Aucun digest trouvé. Lancer: summarize\n")
@@ -779,7 +779,7 @@ def _print_status(digests: list[DigestStatus]) -> None:
 def _print_preview(sections: list[Section]) -> None:
     """Affiche la prévisualisation des sections à résumer."""
     print(f"\n  Preview — {len(sections)} sections à résumer")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
 
     if not sections:
         print("  Aucune section éligible au résumé.\n")

@@ -252,6 +252,62 @@ class TestFromConfigErrors:
 
 # ── hybrid retrieval (lexical companion) ──────────────────────────────────────
 
+class TestLexicalCompanionCreation:
+    """Which compositions actually get a second ranking to fuse.
+
+    The companion used to be built only when ``retrieval_mode`` was exactly
+    ``"vector"``. Every other declared mode — ``hybrid`` included, the one mode
+    whose whole purpose is fusion — silently got no companion at all.
+    """
+
+    @staticmethod
+    def _config(*, backend: str, retrieval_mode: str) -> Any:
+        from grimoire.core.config import GrimoireConfig, MemoryConfig, ProjectConfig
+
+        return GrimoireConfig(
+            project=ProjectConfig(name="demo"),
+            memory=MemoryConfig(backend=backend, retrieval_mode=retrieval_mode),
+        )
+
+    @pytest.fixture(autouse=True)
+    def _require_fts5(self) -> None:
+        from grimoire.memory.backends.lexical import fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+
+    @pytest.mark.parametrize("mode", ["hybrid", "vector"])
+    def test_a_vector_backend_gets_a_companion(self, tmp_path: Path, mode: str) -> None:
+        from grimoire.memory.manager import _create_lexical_companion
+
+        config = self._config(backend="qdrant-server", retrieval_mode=mode)
+
+        assert _create_lexical_companion(config, "qdrant-server", tmp_path) is not None
+
+    def test_mode_none_opts_out(self, tmp_path: Path) -> None:
+        from grimoire.memory.manager import _create_lexical_companion
+
+        config = self._config(backend="qdrant-server", retrieval_mode="none")
+
+        assert _create_lexical_companion(config, "qdrant-server", tmp_path) is None
+
+    def test_a_lexical_primary_gets_no_companion(self, tmp_path: Path) -> None:
+        """Fusing a BM25 index with itself buys nothing."""
+        from grimoire.memory.manager import _create_lexical_companion
+
+        config = self._config(backend="lexical", retrieval_mode="lexical")
+
+        assert _create_lexical_companion(config, "lexical", tmp_path) is None
+
+    def test_prefers_hybrid_tracks_the_companion(self, mock_backend: MagicMock, tmp_path: Path) -> None:
+        from grimoire.memory.backends.lexical import LexicalMemoryBackend
+
+        companion = LexicalMemoryBackend(tmp_path / "companion.sqlite3")
+
+        assert MemoryManager(mock_backend, lexical_companion=companion).prefers_hybrid is True
+        assert MemoryManager.from_backend(mock_backend).prefers_hybrid is False
+
+
 class TestHybridRetrieval:
     @pytest.fixture()
     def companion(self, tmp_path: Path) -> Any:

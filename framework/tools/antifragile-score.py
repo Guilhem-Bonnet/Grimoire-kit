@@ -853,7 +853,7 @@ def main():
             print()
             print("   Actions prioritaires :")
             for rec in all_recs[:3]:
-                print(f"      → {rec}")
+                print(f"      -> {rec}")
 
     # Sauvegarder
     if not args.dry_run:

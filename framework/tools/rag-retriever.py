@@ -665,13 +665,13 @@ def _print_retrieval(result: RetrievalResult) -> None:
         print("  Aucun résultat pertinent.\n")
         return
 
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
     for i, chunk in enumerate(result.chunks, 1):
         score_bar = "█" * int(chunk.final_score * 10)
         print(f"\n  [{i}] {chunk.source_file}")
         print(f"      Score: {chunk.final_score} {score_bar}")
         if chunk.rerank_score != 0:
-            print(f"      Rerank: {chunk.score} → {chunk.final_score} ({chunk.rerank_score:+.4f})")
+            print(f"      Rerank: {chunk.score} -> {chunk.final_score} ({chunk.rerank_score:+.4f})")
         print(f"      Type: {chunk.chunk_type} | Collection: {chunk.collection}")
         if chunk.heading:
             print(f"      Heading: {chunk.heading}")
@@ -686,28 +686,28 @@ def _print_preflight(report: PreflightReport) -> None:
     """Affiche le rapport preflight."""
     status = "[OK] HEALTHY" if report.healthy else "[x] ISSUES"
     print(f"\n  RAG Preflight — {status}")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     print(f"  Qdrant    : {'[OK]' if report.qdrant_reachable else '[x]'}")
     print(f"  Embedding : {'[OK]' if report.embedding_available else '[x]'}")
     print(f"  Chunks    : {report.total_indexed_chunks}")
 
     if report.collections_status:
-        print(f"  {'─' * 50}")
+        print(f"  {'-' * 50}")
         for coll, info in report.collections_status.items():
             icon = "[OK]" if info.get("exists") and info.get("points", 0) > 0 else "[-]"
-            print(f"  {icon} {coll:12s} │ {info.get('points', 0):>6d} chunks │ {info.get('status', '?')}")
+            print(f"  {icon} {coll:12s} | {info.get('points', 0):>6d} chunks | {info.get('status', '?')}")
 
     if report.errors:
         print("\n  [!]  Problèmes détectés:")
         for err in report.errors:
-            print(f"     → {err}")
+            print(f"     -> {err}")
     print()
 
 
 def _print_augmented(aug: AugmentedPrompt) -> None:
     """Affiche le prompt augmenté."""
     print("\n  Prompt Augmenté")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
     print(f"  Original  : {aug.original_prompt[:80]}...")
     print(f"  Chunks RAG: {len(aug.retrieval.chunks)}")
     print(f"  Tokens RAG: {aug.budget_tokens_used} ({aug.budget_pct}% du budget)")
@@ -846,7 +846,7 @@ def main() -> None:
     elif args.command == "benchmark":
         queries = [q.strip() for q in args.queries.split(",") if q.strip()]
         print(f"\n   RAG Benchmark — {len(queries)} queries")
-        print(f"  {'─' * 60}")
+        print(f"  {'-' * 60}")
 
         try:
             retriever = build_retriever_from_config(project_root)
@@ -861,7 +861,7 @@ def main() -> None:
             total_time += result.retrieval_time_ms
             total_chunks += len(result.chunks)
             status = "[OK]" if result.chunks else "[-]"
-            print(f"  {status} \"{q}\" → {len(result.chunks)} chunks, {result.retrieval_time_ms}ms")
+            print(f"  {status} \"{q}\" -> {len(result.chunks)} chunks, {result.retrieval_time_ms}ms")
 
         avg_time = total_time / len(queries) if queries else 0
         print(f"\n  Moyenne: {avg_time:.0f}ms/query, {total_chunks / len(queries):.1f} chunks/query")

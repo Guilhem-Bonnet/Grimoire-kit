@@ -934,7 +934,7 @@ def main():
         p = amplify_pheromone(board, args.id, args.agent)
         if p:
             save_board(project_root, board)
-            print(f"⬆ Phéromone {args.id} renforcée par {args.agent}")
+            print(f"^ Phéromone {args.id} renforcée par {args.agent}")
             print(f"   Nouvelle intensité : {p.intensity:.0%}")
             print(f"   Renforcements : {p.reinforcements}")
         else:

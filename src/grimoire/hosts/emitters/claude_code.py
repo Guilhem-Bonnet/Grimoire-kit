@@ -13,6 +13,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts.emitters.base import (
+    OWNED_COMMAND_MARKERS,
     EmitPlan,
     EmittedFile,
     Emitter,
@@ -69,19 +70,9 @@ _DECLARATIVELY_COVERED = frozenset({"secret"})
 #: Events whose configuration entries take no matcher.
 _MATCHERLESS = {HookEvent.SESSION_START, HookEvent.USER_PROMPT_SUBMIT, HookEvent.PRE_COMPACT}
 
-#: Any hook command containing one of these belongs to the kit and is replaced
-#: on sync. The activation command is legacy: the session-start decision now
-#: covers it, and leaving both installed injects the directive twice.
-_OWNED_COMMAND_MARKERS = (
-    "grimoire-hook",
-    # Superseded invocations, kept as markers so a project installed by an
-    # earlier kit is migrated rather than accumulating a second entry beside
-    # the new one. Forgetting one is not a cosmetic bug: the merge stops
-    # recognising its own entry, keeps it as foreign, and appends another on
-    # every sync.
-    "grimoire host hook",
-    "grimoire standard activation-context",
-)
+#: Alias local vers la liste partagée : la reconnaissance d'un hook écrit par
+#: le kit est la même question ici et chez Copilot, elle ne doit pas diverger.
+_OWNED_COMMAND_MARKERS = OWNED_COMMAND_MARKERS
 
 
 def _model_for(agent: AgentSpec) -> str:

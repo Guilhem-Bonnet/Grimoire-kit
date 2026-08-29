@@ -1,7 +1,7 @@
 """``grimoire hooks`` — install and inspect Grimoire git hooks.
 
 Python port of the ``grimoire-init.sh hooks`` subcommand (bash resorption
-plan, ``docs/resorption-bash.md``).  Improvements over the bash version:
+plan, ``planning/resorption-bash.md``).  Improvements over the bash version:
 
 - hooks directory resolved via ``git rev-parse --git-path hooks`` — correct
   inside git worktrees and with ``core.hooksPath``;

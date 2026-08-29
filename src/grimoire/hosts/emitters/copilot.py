@@ -18,6 +18,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts.emitters.base import (
+    OWNED_COMMAND_MARKERS,
     Degradation,
     EmitPlan,
     EmittedFile,
@@ -124,6 +125,7 @@ def _hook_file(hook: HookSpec) -> EmittedFile:
         relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
         content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         managed=False,
+        owned_if_contains=OWNED_COMMAND_MARKERS,
     )
 
 
@@ -144,7 +146,9 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
         "",
         "Les fichiers de hook ne portent pas de marqueur de gestion : ce sont des",
-        "JSON purs. `grimoire host sync` les réécrit quand leur contenu change.",
+        "JSON purs. C'est la commande invoquée qui dit à qui le fichier",
+        "appartient — `grimoire host sync` réécrit ceux qui appellent",
+        "`grimoire-hook`, et préserve les autres en les signalant `[!]`.",
         "",
     ]
     if blocking:

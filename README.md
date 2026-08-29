@@ -125,9 +125,9 @@ prompt-injection firewall, decision council, memory integrity, LLM cost registry
 reliability SLO, guardrail contracts (input/output/tool/model), visual evidence,
 workspace isolation, per-environment policies.
 
-Reference: [governed controls (36 patterns)](docs/governed-controls.md) ·
-[standard integration](docs/agentic-standard-integration.md) ·
-[install by needs](docs/agentic-standard-install-by-needs.md)
+Reference: [governed controls (36 patterns)](docs/standard/controles-gouvernes.md) ·
+[standard integration](docs/standard/integration.md) ·
+[install by needs](docs/standard/install-by-needs.md)
 
 ## Architecture
 

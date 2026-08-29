@@ -36,7 +36,7 @@
   <a href="#-architecture">Architecture</a> •
   <a href="#-features">Features</a> •
   <a href="#-outils-cli">Outils CLI</a> •
-  <a href="docs/agentic-standard-integration.md">Standard agentique</a> •
+  <a href="docs/standard/integration.md">Standard agentique</a> •
   <a href="docs/concepts.md">Concepts</a> •
   <a href="docs/getting-started.md">Guide complet</a> •
   <a href="CHANGELOG.md">Changelog</a>
@@ -193,7 +193,7 @@ grimoire standard doctor
 ```
 
 > Détails et matrice complète besoins → patterns → technologie :
-> [docs/agentic-standard-install-by-needs.md](docs/agentic-standard-install-by-needs.md).
+> [docs/standard/install-by-needs.md](docs/standard/install-by-needs.md).
 
 ### <img src="docs/assets/icons/seal.svg" width="24" height="24" alt=""> Standard agentique gouverné (depuis v3.5)
 
@@ -212,7 +212,7 @@ grimoire standard gate check   # gate CI : échoue si une preuve obligatoire man
 Exemples de contrôles : blast-radius outil, séparation de privilèges controller/agent (ScrubTokenEnv),
 firewall d'injection de prompt, council de décision, intégrité mémoire, registre de coût LLM + SLO,
 contrat de guardrails (input/output/tool/model), preuve visuelle, isolation workspace, policy par
-environnement. Voir [docs/agentic-standard-integration.md](docs/agentic-standard-integration.md).
+environnement. Voir [docs/standard/integration.md](docs/standard/integration.md).
 
 
 > **Premier pas ?** Lisez [docs/concepts.md](docs/concepts.md) — tous les concepts expliqués avec des analogies.
@@ -267,7 +267,7 @@ flowchart TB
 ## <img src="docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Features
 
 > **Maturité** : l'icône <img src="docs/assets/icons/flask.svg" width="14" height="14" alt=""> marque les features expérimentales / R&D (fonctionnent et testées, mais surface exploratoire) ; sans icône = cœur mûr.
-> Le différenciateur le plus mûr est le **[standard agentique gouverné](docs/governed-controls.md)** — 36 patterns
+> Le différenciateur le plus mûr est le **[standard agentique gouverné](docs/standard/controles-gouvernes.md)** — 36 patterns
 > vérifiés (`grimoire standard verify` / `audit` / `score` / `gate`), cf. la section Quick Start ci-dessus.
 
 <table>

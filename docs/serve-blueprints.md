@@ -5,6 +5,13 @@ pip install grimoire-kit
 grimoire serve
 ```
 
+!!! tip "Cette page décrit l'outil ; le langage est ailleurs"
+    Ici : les pages de l'atelier, les gestes, ce que fait chaque bouton. Pour
+    ce qu'un blueprint **contient** — nodes, pins, contrats, canaux, portes —
+    voir [Le système nodal](nodal/index.md), et
+    [Votre premier blueprint](nodal/premier-blueprint.md) pour le parcourir en
+    ligne de commande.
+
 `grimoire serve` ouvre l'**atelier** sur `http://127.0.0.1:4173/atelier.html` :
 l'UI complète est embarquée dans le paquet (hub de projet, marketplace,
 éditeur de blueprints, wizard de setup). Le serveur est lié à `127.0.0.1` —

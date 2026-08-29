@@ -223,8 +223,12 @@ jobs:
       # `tests/test_*.py` importent `typer` et un autre `ruamel.yaml`, tous deux
       # dépendances de base du paquet. Ils échouaient à la collecte, et le job
       # s'en déclarait vert. On installe donc ce que les tests supposent.
+      # `jsonschema` s'ajoute aux dépendances de base : depuis que la validation
+      # de blueprint refuse au lieu de sauter sa couche schéma en silence, le job
+      # doit exercer la validation complète — sinon il vérifierait le chemin
+      # dégradé et déclarerait vert un contrôle qui n'a pas eu lieu.
       - name: Install test deps
-        run: pip install -e . pytest pyyaml
+        run: pip install -e . pytest pyyaml jsonschema
 
       - name: Run framework tests
         shell: bash
@@ -235,7 +239,11 @@ jobs:
           # passait pour un succès.
           set -o pipefail
           rc=0
-          python -m pytest tests/test_*.py -q --tb=short -x \
+          # `--maxfail=20` plutôt que `-x` : sous Windows, chaque défaut
+          # d'encodage en cache le suivant, et un `-x` transforme la remise en
+          # état en une boucle d'un échec par cycle de CI. Une exécution doit
+          # rendre la liste complète de ce qu'il reste à traiter.
+          python -m pytest tests/test_*.py -q --tb=short --maxfail=20 \
             --ignore=tests/test_background_tasks.py \
             2>&1 | tee framework-test-output.txt || rc=$?
           {

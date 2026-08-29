@@ -6,48 +6,31 @@
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Documentation — Grimoire Kit"/>
   <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns vérifiables), catalogue de 78, mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
-  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/documentation.html"/>
+  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/docs/"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Documentation du runtime Grimoire Kit, rendue en direct depuis le dépôt Grimoire-kit. Diagrammes Mermaid, code colorisé, recherche et table des matières." />
+  <meta name="description" content="Point d'entrée vers le manuel Grimoire Kit, construit par mkdocs et publié sous /docs/." />
+  <link rel="canonical" href="https://guilhem-bonnet.github.io/Grimoire-kit/docs/" />
   <link rel="stylesheet" href="forge-tokens.css" />
   <link rel="stylesheet" href="forge-base.css" />
   <link rel="stylesheet" href="forge-motion.css" />
-  <link rel="stylesheet" href="forge-docs.css" />
   <link rel="stylesheet" href="atelier.css" />
   <script src="grimoire-mode.js"></script>
   <style>
-    /* Page dédiée : application plein écran, pas de scroll de page */
-    html, body { height: 100%; }
-    body { overflow: hidden; }
-    html.mode-vitrine body.at-body { overflow: hidden; padding-top: 56px; }
-    #documentation { padding: 0; margin: 0; }
-    html.mode-vitrine #documentation { height: calc(100vh - 56px); }
-    html.mode-atelier #main { flex: 1; min-height: 0; }
-    html.mode-atelier #documentation { height: 100%; }
-    #documentation > .container {
-      max-width: none; padding: 0; margin: 0;
-      height: 100%; position: relative; z-index: 1;
-    }
-
-    /* ── Tweaks panel (local) ── */
-    #tweaks-panel {
-      position: fixed; bottom: 24px; right: 24px;
-      background: var(--elev-2); border: 1px solid rgba(255,107,61,0.3); border-radius: var(--r-md);
-      padding: 20px; width: 232px; z-index: 9999; display: none;
-      font-family: var(--font-mono); font-size: 0.72rem;
-    }
-    #tweaks-panel.open { display: block; }
-    #tweaks-panel h4 { color: var(--accent); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-    .tw-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-    .tw-row label { color: var(--ink-muted); font-size: 0.62rem; letter-spacing: 0.06em; }
-    .tw-row input[type=range] { width: 100%; accent-color: var(--accent); }
-    .tw-row select { background: var(--bg); border: 1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: var(--r-sm); font-family: inherit; font-size: 0.68rem; }
-    .tw-row input[type=color] { width: 32px; height: 22px; border: none; background: none; cursor: pointer; }
-    .tw-sep { border: none; border-top: 1px solid var(--line); margin: 8px 0 12px; }
+    /* Page de passage : rien à mettre en scène, une carte centrée suffit. */
+    #documentation { display: grid; place-items: center; min-height: 60vh; padding: 64px 24px; }
+    .doc-portal { max-width: 34rem; text-align: left; }
+    .doc-portal[hidden] { display: none; }
+    .doc-portal h1 { font-size: 1.5rem; margin: 0 0 12px; }
+    .doc-portal p { color: var(--ink-muted); line-height: 1.65; margin: 0 0 20px; }
+    .doc-portal code { font-family: var(--font-mono); font-size: 0.85em; }
+    .doc-portal .cta { display: inline-block; padding: 10px 18px; border: 1px solid var(--accent);
+      color: var(--accent); border-radius: var(--r-sm); text-decoration: none; font-family: var(--font-mono);
+      font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .doc-portal .cta:hover { background: var(--accent); color: var(--bg); }
   </style>
 </head>
 <body class="at-body">
-<a href="#docs-article" class="skip-link">Aller au contenu</a>
+<a href="#documentation" class="skip-link">Aller au contenu</a>
 <nav id="forge-nav" aria-label="Navigation principale"></nav>
 
 <div class="at-app">
@@ -55,39 +38,30 @@
 <div class="at-main">
 <main id="main">
 
-<!-- ═══ DOCUMENTATION — plein écran ═══ -->
 <section id="documentation">
-  <div class="container">
-    <div class="docs-shell is-fullpage" data-doc-layout="cockpit" id="docs-shell">
-      <div class="docs-bar">
-        <span class="ctl-dot r"></span><span class="ctl-dot y"></span><span class="ctl-dot g"></span>
-        <span class="cockpit-label">GRIMOIRE-KIT · /docs · main</span>
-        <div class="docs-focus-pick"><span class="cockpit-label" style="margin-left:0">PAGE</span><select id="docs-focus-select" aria-label="Choisir un document"></select></div>
-        <a class="docs-source" id="docs-source-link" href="#" target="_blank" rel="noopener"><span class="sync"></span>SOURCE GITHUB ↗</a>
-      </div>
-      <div class="docs-body">
-        <aside class="docs-nav" aria-label="Sommaire de la documentation">
-          <div class="docs-nav-head">
-            <span class="docs-nav-title">DOCUMENTATION</span>
-            <span class="docs-nav-sync"><span class="sync"></span>LIVE</span>
-          </div>
-          <div class="docs-search">
-            <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M11 11l3 3"/></svg>
-            <input id="docs-search-input" type="search" placeholder="Rechercher…" aria-label="Rechercher dans la documentation" />
-          </div>
-          <div class="docs-tree" id="docs-tree"></div>
-        </aside>
-        <div class="docs-main">
-          <nav class="docs-crumb" id="docs-crumb" aria-label="Fil d'Ariane"></nav>
-          <article class="docs-article md-body" id="docs-article" aria-live="polite"></article>
-        </div>
-        <aside class="docs-toc" aria-label="Table des matières">
-          <div class="docs-toc-label">Sur cette page</div>
-          <nav id="docs-toc-nav"></nav>
-        </aside>
-      </div>
-    </div>
+  <!-- Affiché seulement si le manuel n'est pas servi à côté (atelier local :
+       `grimoire serve` ne sert que web/, pas le site construit). En ligne, la
+       sonde ci-dessous redirige avant que cette carte ne s'affiche. -->
+  <div class="doc-portal" id="doc-portal" hidden>
+    <h1>Le manuel est en ligne</h1>
+    <p>
+      Cette page est servie par l'atelier local, qui ne contient que l'interface.
+      Le manuel Grimoire Kit est construit par mkdocs et publié séparément.
+    </p>
+    <p>
+      Pour le consulter hors ligne depuis le dépôt&nbsp;:
+      <code>make docs-serve</code>.
+    </p>
+    <a class="cta" id="doc-portal-link"
+       href="https://guilhem-bonnet.github.io/Grimoire-kit/docs/"
+       target="_blank" rel="noopener">Ouvrir le manuel ↗</a>
   </div>
+  <noscript>
+    <div class="doc-portal" style="display:block">
+      <h1>Documentation</h1>
+      <p><a href="docs/">Ouvrir le manuel Grimoire Kit</a></p>
+    </div>
+  </noscript>
 </section>
 
 </main>
@@ -95,58 +69,27 @@
 </div>
 </div>
 
-<!-- Tweaks panel -->
-<div id="tweaks-panel" role="complementary" aria-label="Panneau de configuration">
-  <h4>⚙ TWEAKS</h4>
-  <div class="tw-row"><label>Disposition doc</label>
-    <select id="tw-doc"><option value="cockpit">Cockpit (3 colonnes)</option><option value="large">Large (sans TOC)</option><option value="focus">Focus (lecture centrée)</option></select>
-  </div>
-  <hr class="tw-sep"/>
-  <div class="tw-row"><label>Couleur accent</label><input type="color" id="tw-accent" value="#FF6B3D"/></div>
-  <div class="tw-row"><label>Taille de texte</label><input type="range" id="tw-size" min="14" max="20" step="1" value="16"/></div>
-</div>
-
-<!-- Markdown + diagrammes + coloration -->
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script src="atelier-nav.js"></script>
 <script src="forge-nav.js"></script>
-<script src="forge-docs.js"></script>
-
 <script>
-/* ── Tweaks panel ── */
-const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "docLayout": "cockpit",
-  "accent": "#FF6B3D",
-  "size": 16
-}/*EDITMODE-END*/;
-(function(){
-  window.addEventListener('message', e => {
-    if (e.data?.type === '__activate_edit_mode')   document.getElementById('tweaks-panel').classList.add('open');
-    if (e.data?.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('open');
-  });
-  window.parent.postMessage({type:'__edit_mode_available'},'*');
+/* Le manuel vit sous /docs/ quand le site complet est publié ; l'atelier local
+   ne sert que web/. On sonde avant de choisir : redirection si le manuel est
+   là, carte de renvoi sinon. Pas de flash — la carte n'apparaît qu'en repli. */
+(function () {
+  'use strict';
+  const MANUAL = 'docs/';
+  const portal = document.getElementById('doc-portal');
 
-  const r = document.documentElement;
-  const d = TWEAK_DEFAULTS;
-  function apply(v) {
-    r.style.setProperty('--accent', v.accent);
-    r.style.fontSize = v.size + 'px';
-    const ds = document.getElementById('docs-shell');
-    if (ds && v.docLayout) ds.dataset.docLayout = v.docLayout;
-  }
-  apply(d);
+  function fallback() { if (portal) portal.hidden = false; }
 
-  function send(k,v) { window.parent.postMessage({type:'__edit_mode_set_keys',edits:{[k]:v}},'*'); }
+  fetch(MANUAL + 'index.html', { method: 'HEAD' })
+    .then(r => { if (r.ok) location.replace(MANUAL); else fallback(); })
+    .catch(fallback);
 
-  document.getElementById('tw-doc').value = d.docLayout;
-  document.getElementById('tw-accent').value = d.accent;
-  document.getElementById('tw-size').value = d.size;
-
-  document.getElementById('tw-doc').addEventListener('change', function(){ d.docLayout=this.value; apply(d); send('docLayout',this.value); });
-  document.getElementById('tw-accent').addEventListener('input', function(){ d.accent=this.value; apply(d); send('accent',this.value); });
-  document.getElementById('tw-size').addEventListener('input', function(){ d.size=+this.value; apply(d); send('size',+this.value); });
+  /* `GrimoireDocsBase` sait déjà où vit le manuel quand il n'est pas servi
+     ici — atelier local ou fichier ouvert depuis le disque. */
+  const link = document.getElementById('doc-portal-link');
+  if (link && window.GrimoireDocsBase) link.href = window.GrimoireDocsBase;
 })();
 </script>
 </body>

@@ -194,7 +194,7 @@
       "name": "verify · audit · score · gate",
       "status": "real",
       "desc": "Vérification fail-closed de la conformité (CI-friendly).",
-      "ref": "docs/governed-controls.md",
+      "ref": "docs/standard/controles-gouvernes.md",
       "connects": [
         "capability_map",
         "completion_contract",

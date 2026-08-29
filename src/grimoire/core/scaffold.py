@@ -25,6 +25,7 @@ from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
+from grimoire.memory import profiles as memory_profiles
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -405,8 +406,10 @@ class ProjectScaffolder:
         backend: str,
         offline: bool = False,
         force: bool = False,
+        profile: str = "",
     ) -> None:
         self._offline = offline
+        self._profile = profile
         self._target = target.resolve()
         self._project_name = project_name
         self._user_name = user_name
@@ -572,50 +575,18 @@ class ProjectScaffolder:
         stack_list = ", ".join(f'"{s}"' for s in stacks) if stacks else ""
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
-        memory_extra = ""
-        # A project declared without egress cannot reach an embedding model:
-        # lexical is the only mode that actually works there.
-        vector_line = "false" if self._offline else "true"
-        mode_line = "lexical" if self._offline else "vector"
-        memory_layers = f"""  layer_profile: "standard"
-  vector_database: {vector_line}
-  retrieval_mode: "{mode_line}"
-  short_term_backend: "sqlite"
-  redis_url: ""
-  knowledge_graph: "sqlite-sidecar"
-  memory_graph: "sqlite-sidecar"
-  code_graph: "planned"
-  task_memory: "planned"
-  visualization: "runtime-dashboard"
-"""
-        if self._backend == "ollama":
-            memory_extra = '\n  ollama_url: "http://localhost:11434"'
-        elif self._backend == "qdrant-server":
-            memory_extra = '\n  qdrant_url: "http://localhost:6333"'
-        elif self._backend == "weaviate-server":
-            memory_extra = (
-                '\n  qdrant_url: "http://localhost:6333"'
-                '\n  weaviate_url: "http://localhost:8080"'
-                '\n  weaviate_collection: "GrimoireMemory"'
-                '\n  neo4j_uri: "bolt://localhost:7687"'
-                '\n  neo4j_user: "neo4j"'
-                '\n  neo4j_password_env: "GRIMOIRE_NEO4J_PASSWORD"'
-                '\n  neo4j_database: "neo4j"'
-                '\n  migration_source_backend: "qdrant-server"'
-                '\n  migration_target_backend: "weaviate-server"'
-                '\n  migration_bundle_path: "_grimoire/_memory/migration/weaviate-neo4j"'
-            )
-            memory_layers = """  layer_profile: "weaviate-neo4j"
-  vector_database: true
-  retrieval_mode: "vector"
-  short_term_backend: "sqlite"
-  redis_url: ""
-  knowledge_graph: "neo4j"
-  memory_graph: "neo4j"
-  code_graph: "neo4j"
-  task_memory: "neo4j"
-  visualization: "runtime-dashboard"
-"""
+        # The composition is chosen as one unit (see grimoire.memory.profiles).
+        # This used to be two blocks hardcoded here, so only two of the
+        # possible compositions were ever reachable from the setup.
+        profile = (
+            memory_profiles.resolve(self._profile)
+            if self._profile
+            else memory_profiles.infer(self._backend, offline=self._offline)
+        )
+        profile = profile.for_backend(self._backend)
+        memory_extra = profile.connection_block(self._backend)
+        memory_layers = profile.layers_block()
+
         return {
             "project_name": self._project_name,
             "user_name": self._user_name,

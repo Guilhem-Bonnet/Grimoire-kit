@@ -188,7 +188,7 @@ La commande `standard init` ne remplace pas les artefacts existants sauf avec `-
 
 Le standard agentique a maintenant une cible de runtime normatif plus large :
 
-- [Plan cible du runtime normatif agentique](agentic-standard-target-plan.md)
-- [Schéma et documentation cible du standard agentique](agentic-standard-target-architecture.md)
+- [Plan cible du runtime normatif agentique](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/planning/agentic-standard-target-plan.md) (document de travail, non publié)
+- [Schéma et documentation cible du standard agentique](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/planning/agentic-standard-target-architecture.md) (document de travail, non publié)
 
 Le contrat machine-readable associé est versionné dans `framework/agentic-standard/target-schema.yaml`.

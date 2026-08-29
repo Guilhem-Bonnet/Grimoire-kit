@@ -784,9 +784,9 @@ def test_profile_mapped_capabilities_are_real_patterns() -> None:
 
 def test_governed_controls_doc_covers_all_patterns() -> None:
     patterns = set(load_capability_map()["patterns"])
-    doc = (Path(__file__).resolve().parents[1] / "docs/governed-controls.md").read_text(encoding="utf-8")
+    doc = (Path(__file__).resolve().parents[1] / "docs/standard/controles-gouvernes.md").read_text(encoding="utf-8")
     missing = {pid for pid in patterns if f"`{pid}`" not in doc}
-    assert not missing, f"patterns absents de docs/governed-controls.md (régénérer): {sorted(missing)}"
+    assert not missing, f"patterns absents de docs/standard/controles-gouvernes.md (régénérer): {sorted(missing)}"
 
 
 def test_new_control_checks_route_to_dimensions() -> None:

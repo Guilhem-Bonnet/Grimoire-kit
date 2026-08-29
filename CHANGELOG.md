@@ -18,8 +18,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   surface : installés dans chaque projet, invocables depuis nulle part. Le
   catalogue indexe désormais les deux familles, avec la nature de chaque
   workflow, les agents qu'il mobilise et sa provenance ; `--kind` filtre.
-  Le groupe `workflows` n'avait aucun test — c'est ce qui a permis à l'écart
-  de tenir.
 - **Les manifestes d'équipe avaient un schéma, trois fichiers et aucun
   lecteur.** `framework/teams/` décrit la chaîne vision → build → ops :
   membres et rôles, contrats d'entrée et de sortie, phases de livraison,
@@ -29,12 +27,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   déclare `team:`.
 - **`workflows show` et `workflows install` ne pouvaient pas atteindre une
   orchestration.** Les deux résolvaient en `<slug>.prompt.md`, un nom que les
-  workflows d'orchestration ne portent pas. `install` dépose maintenant chaque
-  workflow là où sa nature l'exige.
+  workflows d'orchestration ne portent pas. `install` résout désormais dans le
+  cadre livré, sans la précédence de lecture qui lui rendait la copie du
+  projet, et dépose chaque workflow là où sa nature l'exige.
 - **Deux workflows livrés perdaient leur frontmatter en silence.** Leur
   description contenait un `:` non échappé ; le YAML échouait, le parseur
   renvoyait un dictionnaire vide, et le workflow arrivait sans nom ni agents.
   Un test paramétré sur les fichiers livrés ferme le cas.
+- **`host sync` ne remplace plus en silence un hook écrit à la main.**
+  L'émetteur Copilot posait `managed=False` sur ses fichiers de hook, ce qui
+  désactivait entièrement le contrôle de préservation : le drapeau confondait
+  « ne peut pas porter de marqueur de gestion » — un JSON n'a pas de
+  commentaires — avec « peut être écrasé sans prévenir ». Un projet ayant sa
+  propre chaîne de gouvernance la perdait au premier sync, sans message, sans
+  sauvegarde, et le dry-run l'annonçait comme un `[OK]` ordinaire.
+  Un fichier qui ne peut pas porter de marqueur prouve désormais son
+  appartenance autrement : par la commande qu'il invoque. Le sync réécrit les
+  hooks qui appellent `grimoire-hook`, préserve les autres et les signale
+  `[!]`, comme il le faisait déjà pour un agent écrit à la main. La liste des
+  commandes reconnues, jusque-là propre à l'émetteur Claude Code, devient
+  partagée — la même question ne doit pas recevoir deux réponses.
 
 - **La porte de preuve refuse une tâche que le board ne connaît pas.**
   `grimoire standard gate check --task-id <inconnu>` répondait `ok`. Toutes les
@@ -69,6 +81,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   rien ne consommait, et l'étape suivante pouvait écrire « Some tests failed »
   pendant que le workflow restait vert. Ses tests étant couverts par le SDK CI
   et par *Framework Tools Tests*, le job est supprimé plutôt que réparé.
+- **L'index lexical compagnon est créé pour tout backend vectoriel.** Il exigeait
+  `retrieval_mode == "vector"` au caractère près, ce qui excluait silencieusement
+  tous les autres modes déclarés — dont celui dont la fusion est l'unique raison
+  d'être. Seul `none` s'en exclut désormais.
+- **Un store détecté reçoit ses réglages de connexion quelle que soit la
+  composition.** Un projet généré sur une machine faisant tourner Weaviate
+  sortait sans `weaviate_url` dès que la composition n'était pas celle des
+  graphes, et `grimoire doctor` le signalait à chaque exécution.
+- **Le serveur MCP lit et écrit dans le projet visé.** `grimoire_memory_store`
+  et `grimoire_memory_search` construisaient leur `MemoryManager` sans
+  `project_root`, donc avec un repli sur le répertoire courant du serveur.
 
 ### Modifié
 
@@ -82,6 +105,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `cmd_memory_projections.py` — même convention que `cmd_memory_ops.py`. Le
   module principal passe de 1554 à 1284 lignes, sous le seuil de 1500 : trois
   fichiers hérités deviennent deux. Aucun changement de surface CLI.
+- **La récupération hybride est le chemin par défaut.** La fusion RRF du
+  classement vectoriel et du classement BM25 existait, était testée, et
+  n'était atteignable que derrière un `--hybrid` que rien n'activait : le
+  serveur MCP — le seul chemin de lecture qu'empruntent les agents — appelait
+  la recherche mono-backend. L'index compagnon était donc écrit à chaque
+  `store` et interrogé par personne. La fusion s'applique désormais partout où
+  il y a deux classements à fusionner ; `--no-hybrid` force le backend seul.
 
 ### Ajouté
 
@@ -104,6 +134,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   et absente de la référence, `test_public_exports.py` refuse un `__all__` qui
   promet des objets absents. Le deuxième a trouvé neuf commandes livrées et
   documentées nulle part.
+- **La mémoire se choisit comme une composition, plus comme un backend.**
+  `project-context.yaml` décrivait déjà sept couches indépendantes (mémoire
+  courte, sémantique, sidecar structuré, graphes de connaissances, de
+  souvenirs, de code, de tâches), mais le setup ne posait qu'une question —
+  quel backend ? — et n'écrivait que deux blocs codés en dur. Deux
+  compositions sur toutes les possibles étaient donc atteignables, et tous les
+  autres projets héritaient des mêmes défauts. Quatre profils déclaratifs
+  (`lexical`, `standard`, `graphe`, `complet`) fixent les sept couches d'un
+  coup ; `grimoire init --memory-profile` et le wizard les exposent. Le wizard
+  ne propose que les compositions que la machine peut réellement servir et
+  affiche ce qui manque aux autres. Le profil `weaviate-neo4j` des versions
+  antérieures reste reconnu — il désigne `graphe`.
 
 ## [3.34.2] - 2026-08-28
 

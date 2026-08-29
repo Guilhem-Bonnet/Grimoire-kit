@@ -741,7 +741,7 @@ def main(argv: list[str] | None = None) -> int:
         stats = tracer.get_stats()
         print(f"Synapse Trace — {stats.total_entries} entrées")
         if stats.total_entries > 0:
-            print(f"  Période : {stats.oldest_entry} → {stats.newest_entry}")
+            print(f"  Période : {stats.oldest_entry} -> {stats.newest_entry}")
             print(f"  Durée totale : {stats.total_duration_ms:,.0f}ms")
             print(f"  Tokens totaux : ~{stats.total_tokens:,}")
             if stats.total_input_tokens or stats.total_output_tokens:
