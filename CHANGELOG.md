@@ -124,6 +124,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Modifié
 
+- **Les journaux d'événements sont lus par la fin.** `activity()` chargeait
+  chaque fichier en entier pour n'en garder que la dernière ligne horodatée —
+  204 Kio sur ce poste pour le journal task-flow, et ces fichiers ne font que
+  grossir (un autre y atteint 14 Mo). Fenêtre de 64 Kio, ligne tronquée écartée.
+- **Pas de couche `health.json` générée.** La fiche d'en-tête porte ce dont le
+  portefeuille a besoin et `/api/health` sert la vérité fraîche sur les deux
+  hôtes : une couche de plus se serait périmée entre deux régénérations et
+  aurait pu contredire l'API.
 - **Un seul parcours du dossier des blueprints.** `blueprints_list` et la vue
   santé lisaient chacune `_grimoire/blueprints`, avec deux définitions de son
   emplacement : elles auraient fini par répondre différemment sur le même

@@ -1309,8 +1309,12 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
     _write(out_dir, "insights.json", ins)
     mem = build_memory(root, demo=demo)
     _write(out_dir, "memory.json", mem)
+    # Pas de `health.json` : la fiche d'en-tête porte déjà ce dont le
+    # portefeuille a besoin, et `/api/health` sert la vérité fraîche sur les
+    # deux hôtes. Une couche générée en plus se périmerait entre deux
+    # régénérations et pourrait contredire l'API — le défaut même que cette
+    # branche referme.
     health = build_health(root)
-    _write(out_dir, "health.json", health)
     # Fiche d'en-tête pour la vue portefeuille
     af = (ins.get("governance", {}).get("antifragile") or {})
     return {

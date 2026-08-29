@@ -229,3 +229,37 @@ def test_work_done_in_the_atelier_counts_as_activity(project: Path) -> None:
     assert act["active"] is True
     assert act["lastEventSource"] == "atelier"
     assert act["lastEventLabel"] == "project.update"
+
+
+def test_a_huge_log_is_not_read_whole(project: Path) -> None:
+    """Ces journaux ne font que grossir — 14 Mo sur cette machine, pour une
+    seule ligne utile. On ne lit que la fin."""
+    log = project / "_grimoire-runtime-output" / "hook-runtime" / "events.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    filler = json.dumps({"ts": (now - timedelta(days=9)).isoformat(), "action": "vieux"})
+    recent = json.dumps({"ts": (now - timedelta(minutes=3)).isoformat(), "action": "récent"})
+    with log.open("w", encoding="utf-8") as f:
+        for _ in range(20_000):
+            f.write(filler + "\n")
+        f.write(recent + "\n")
+    assert log.stat().st_size > ph._TAIL_BYTES * 4, "le journal doit dépasser la fenêtre"
+
+    act = ph.activity(project, now=now)
+    assert act["lastEventLabel"] == "récent"
+    assert act["active"] is True
+
+
+def test_the_tail_window_drops_a_line_cut_in_half(project: Path) -> None:
+    """La découpe en octets tombe au milieu d'une ligne : elle est écartée."""
+    log = project / "_grimoire-runtime-output" / "hook-runtime" / "events.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (ph._TAIL_BYTES + 500) + "\n", encoding="utf-8")
+    assert ph._tail_lines(log) == [], "la ligne tronquée ne doit pas être rendue"
+
+
+def test_a_short_log_is_read_entirely(project: Path) -> None:
+    log = project / "_grimoire-runtime-output" / "hook-runtime" / "events.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("une\ndeux\n", encoding="utf-8")
+    assert ph._tail_lines(log) == ["une", "deux"], "rien ne doit être perdu sur un petit journal"

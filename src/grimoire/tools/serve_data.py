@@ -41,7 +41,6 @@ PROJECT_LAYERS = frozenset(
         "activity.json",
         "insights.json",
         "memory.json",
-        "health.json",
     }
 )
 

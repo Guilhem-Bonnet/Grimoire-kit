@@ -61,6 +61,11 @@ EXTRA_EVENT_SOURCES = (
     ("atelier", Path("_grimoire-runtime-output") / "hook-runtime" / "serve-mutations.jsonl"),
 )
 
+#: On ne veut que la fin de chaque journal. Les lire en entier coûterait, sur
+#: cette machine, 14 Mo pour une seule ligne utile — et ces fichiers ne font
+#: que grossir. 64 Kio couvrent largement les dernières entrées.
+_TAIL_BYTES = 64 * 1024
+
 
 def _installed_kit_version() -> str:
     from grimoire.__version__ import __version__
@@ -187,11 +192,8 @@ def _latest_event(project_root: Path) -> dict[str, Any] | None:
         if (project_root / rel).is_file()
     ]
     for name, path in sources:
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for line in reversed(lines[-200:]):
+        lines = _tail_lines(path)
+        for line in reversed(lines):
             line = line.strip()
             if not line:
                 continue
@@ -219,6 +221,26 @@ def _latest_event(project_root: Path) -> dict[str, Any] | None:
                 }
             break  # la dernière ligne horodatée du flux suffit
     return best
+
+
+def _tail_lines(path: Path) -> list[str]:
+    """Dernières lignes d'un journal, sans le charger en entier.
+
+    La première ligne lue peut être tronquée par la découpe en octets : on
+    l'écarte, sauf quand tout le fichier tient dans la fenêtre.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > _TAIL_BYTES:
+                f.seek(size - _TAIL_BYTES)
+            chunk = f.read()
+    except OSError:
+        return []
+    lines = chunk.decode("utf-8", errors="replace").splitlines()
+    if size > _TAIL_BYTES and lines:
+        lines = lines[1:]
+    return lines
 
 
 def _parse_stamp(raw: object) -> datetime | None:
