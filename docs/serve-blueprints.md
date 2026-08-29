@@ -51,6 +51,19 @@ un projet ouvert dans l'atelier apparaît dans le portefeuille, et
 réciproquement. Ouvrir un projet n'écrit rien dans son arbre : la couche de
 données générée vit sous `~/.grimoire/cockpit/atelier/<slug>/data/`.
 
+La découverte ne regarde pas partout. Un chemin venu d'une requête HTTP ne doit
+pas pouvoir désigner n'importe quel dossier du système, même derrière un garde
+d'hôte. Sont autorisés :
+
+- le répertoire personnel ;
+- le projet servi et son dossier parent — de quoi scanner ses voisins dès le
+  premier lancement ;
+- le dossier parent de chaque projet déjà enrôlé, ce qui garde atteignable un
+  dépôt hors de `$HOME`.
+
+Une racine entièrement nouvelle s'ouvre par `grimoire cockpit add <chemin>`,
+qui n'est pas exposé au réseau.
+
 ### Ce que montrent Observatoire, Mémoire et Kanban
 
 Une couche générée sur le projet servi (`gen-site-data.py`, régénérée en
@@ -107,7 +120,7 @@ bindings du blueprint.
 | `GET /api/stigmergy` | Vue live du tableau phéromonique (signaux actifs, trails, métriques) — beta |
 | `GET /api/projects` · `POST /api/projects/select` | Registre de la machine · re-router le serveur sur un autre projet |
 | `POST /api/projects/add` · `/scan` | Enrôler un chemin · découvrir les projets sous une racine (sans enrôler) |
-| `GET /api/fs/browse?path=` | Navigation dossier par dossier, pour désigner un projet à la main |
+| `GET /api/fs/browse?path=` | Navigation dossier par dossier, pour désigner un projet à la main — bornée aux racines permises |
 | *(cockpit)* `GET /api/fs/browse` · `POST /api/projects/add\|scan` | Même découverte depuis le portefeuille : peupler le registre de la machine n'est pas une écriture sur un projet |
 | `GET /api/data/status` · `POST /api/data/refresh` | État et régénération de la couche de données du projet servi |
 | `GET /api/health` | Alignement kit, flows composés, exécutions en vol et activité réelle du projet |
