@@ -159,7 +159,12 @@ class TestScanGapsFromSharedContext(unittest.TestCase):
             "- [x] [hawk→probe] Monitoring actif\n"
             "- [ ] [dev→?] Agent migration DB nécessaire\n"
             "## Autre section\n"
-            "Contenu normal.\n"
+            "Contenu normal.\n",
+            # `→` est un jeton du format `shared-context.md`, pas de la
+            # décoration : la regex de `scan_gaps_from_shared_context` s'appuie
+            # dessus. Sans encodage explicite, `write_text` prend celui de la
+            # locale — cp1252 sur Windows — et le fixture ne s'écrit même pas.
+            encoding="utf-8",
         )
         gaps = self.forge.scan_gaps_from_shared_context(f)
         self.assertEqual(len(gaps), 2)

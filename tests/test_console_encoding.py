@@ -1,4 +1,10 @@
-"""La sortie des outils de `framework/` doit s'imprimer sur une console Windows.
+"""Ce que le dépôt écrit doit survivre à l'encodage par défaut de Windows.
+
+Deux défauts distincts, une seule cause : l'encodage de la locale. Sur Linux
+c'est UTF-8 et rien ne casse ; sur Windows c'est cp1252, et tout ce qui n'y
+entre pas fait tomber le programme.
+
+## La sortie des outils de `framework/`
 
 `Framework Tools Tests (pytest, windows-latest)` échouait sur `main` :
 `agent-caller.py` imprimait un filet `│` (U+2502), absent de cp1252, ce qui
@@ -22,6 +28,7 @@ Exécuter l'outil tranche sans se tromper.
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -86,6 +93,71 @@ class TestConsoleEncoding(unittest.TestCase):
         finally:
             script.unlink(missing_ok=True)
         self.assertIn(MARKER, output, "le garde ne voit pas un filet réintroduit")
+
+
+def _unencodable(text: str) -> list[str]:
+    """Les caractères de *text* qu'une console Windows ne sait pas écrire."""
+    found = []
+    for char in text:
+        if ord(char) <= 127:
+            continue
+        try:
+            char.encode(WINDOWS_CONSOLE_ENCODING)
+        except UnicodeEncodeError:
+            found.append(char)
+    return found
+
+
+def _literal_text(node: ast.AST) -> str:
+    """Concaténer les chaînes littérales d'une expression, implicites comprises."""
+    return "".join(
+        sub.value
+        for sub in ast.walk(node)
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+    )
+
+
+class TestFixtureFileEncoding(unittest.TestCase):
+    """Un fixture doit s'écrire sur Windows comme il s'écrit ailleurs.
+
+    `Path.write_text` et `open` sans `encoding=` prennent l'encodage de la
+    locale. `test_agent_forge.py` écrivait un `shared-context.md` contenant
+    `→` — un jeton du format que l'outil parse, pas une décoration : le
+    fichier ne s'écrivait même pas sur Windows, et le test tombait avant
+    d'avoir rien vérifié.
+
+    Le garde ne condamne pas l'absence d'`encoding=` en général : elle est
+    inoffensive sur du texte ASCII, et le dépôt en compte près de deux cents
+    appels. Il ne relève que la combinaison qui casse — pas d'encodage
+    explicite **et** un caractère hors cp1252 dans ce qu'on écrit.
+    """
+
+    def test_no_test_writes_unencodable_text_with_the_locale_encoding(self) -> None:
+        offenders = []
+        for path in sorted(Path(__file__).parent.glob("test_*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                if name not in {"write_text", "open"}:
+                    continue
+                if any(keyword.arg == "encoding" for keyword in node.keywords):
+                    continue
+                chars = _unencodable("".join(_literal_text(a) for a in node.args))
+                if chars:
+                    offenders.append(
+                        f"{path.name}:{node.lineno} écrit {''.join(sorted(set(chars)))!r} "
+                        "sans encoding= explicite"
+                    )
+        self.assertEqual(offenders, [], "\n  ".join(["fixtures illisibles sur Windows :", *offenders]))
+
+    def test_the_guard_sees_a_relapse(self) -> None:
+        source = 'p.write_text("un → deux")\n'
+        tree = ast.parse(source)
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
+        self.assertFalse(any(k.arg == "encoding" for k in call.keywords))
+        self.assertEqual(_unencodable(_literal_text(call.args[0])), ["→"])
 
 
 if __name__ == "__main__":  # pragma: no cover
