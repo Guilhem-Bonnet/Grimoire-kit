@@ -202,6 +202,25 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def log_message(self, *args: object) -> None:
         return  # quiet by default
 
+    def _local_only(self) -> bool:
+        """Le cockpit ne répond qu'à sa propre UI, sur la loopback.
+
+        Deux contrôles, parce qu'ils ferment deux portes différentes. L'adresse
+        du pair écarte un client distant. L'en-tête ``Host`` écarte le rebinding
+        DNS : un domaine attaquant qui résout vers 127.0.0.1 arrive bien *depuis*
+        la loopback, et la page devient same-origin — CORS ne protège alors plus
+        la lecture des réponses. Sans ce second contrôle, ``GET /api/fs/browse``
+        est un oracle sur les dossiers de la machine.
+        """
+        if self.client_address[0] not in _LOCAL_HOSTS:
+            self._send_json(403, {"ok": False, "error": "cockpit local only"})
+            return False
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        if host not in ("127.0.0.1", "localhost", "::1", ""):
+            self._send_json(403, {"ok": False, "error": "hôte non autorisé"})
+            return False
+        return True
+
     def _send_json(self, code: int, payload: dict[str, object]) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(code)
@@ -222,8 +241,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if not path.startswith("/api/"):
             super().do_GET()
             return
-        if self.client_address[0] not in _LOCAL_HOSTS:
-            self._send_json(403, {"ok": False, "error": "cockpit local only"})
+        if not self._local_only():
             return
         if path == "/api/projects":
             self._send_json(200, projects_payload())
@@ -261,8 +279,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self._send_json(200, payload)
 
     def do_POST(self) -> None:  # http.server contract
-        if self.client_address[0] not in _LOCAL_HOSTS:
-            self._send_json(403, {"ok": False, "error": "cockpit local only"})
+        if not self._local_only():
             return
         if self.path == "/api/projects/select":
             try:

@@ -388,3 +388,45 @@ def test_blueprints_are_listed_in_one_place_only() -> None:
     assert health.count('glob("*.blueprint.json")') == 1
     assert 'BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"' in health
     assert server.count('BLUEPRINTS_RELPATH = ') == 0, "deux définitions de l'emplacement"
+
+
+# ── 11. Le cockpit aussi refuse un hôte étranger ────────────────────────────
+
+
+def test_the_cockpit_refuses_a_foreign_host(tmp_path: Path) -> None:
+    """Le cockpit ne vérifiait que l'adresse du pair.
+
+    Sous rebinding DNS, la requête arrive bien depuis la loopback : le contrôle
+    d'adresse passe, la page attaquante est same-origin, et `/api/fs/browse`
+    devient un oracle sur les dossiers de la machine. Trouvé par CodeQL sur les
+    routes de découverte ajoutées à cet hôte.
+    """
+    httpd = _cockpit_server(tmp_path)
+    port = httpd.server_address[1]
+    try:
+        for path in ("/api/projects", f"/api/fs/browse?path={tmp_path}"):
+            code, body = _get(port, path, host="evil.example.com")
+            assert code == 403, f"{path} a répondu {code} à un Host étranger"
+            # Le cockpit sérialise en ASCII échappé : on compare la valeur, pas les octets.
+            assert json.loads(body)["error"] == "hôte non autorisé"
+
+        code, _ = _post(port, "/api/projects/scan", {"root": str(tmp_path)})
+        assert code == 200, "la loopback légitime doit continuer à répondre"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_both_local_hosts_guard_the_same_way() -> None:
+    """Deux serveurs, une seule règle : un Host non-loopback est refusé.
+
+    La divergence est ce qui a laissé le cockpit ouvert alors que l'atelier
+    était fermé.
+    """
+    for module, symbol in (
+        ("src/grimoire/tools/forge_http.py", "_guard_host"),
+        ("src/grimoire/cli/cmd_cockpit.py", "_local_only"),
+    ):
+        source = (ROOT / module).read_text(encoding="utf-8")
+        assert symbol in source
+        assert 'headers.get("Host")' in source, f"{module} ne regarde pas l'en-tête Host"

@@ -140,6 +140,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   page attaquante same-origin, donc CORS ne protège plus la lecture des
   réponses : le nouveau `GET /api/fs/browse` serait devenu un oracle sur les
   dossiers de la machine. Le garde s'applique maintenant à toute requête.
+- **Le cockpit refuse aussi un `Host` étranger.** Il ne vérifiait que l'adresse
+  du pair : sous rebinding DNS la requête arrive bien depuis la loopback, donc
+  ce contrôle passe et la page attaquante est same-origin. Les routes de
+  découverte ajoutées à cet hôte — dont `GET /api/fs/browse` — devenaient un
+  oracle sur les dossiers de la machine. Trouvé par CodeQL ; l'atelier, lui,
+  était déjà fermé, et un test verrouille désormais l'absence de divergence.
 - **La profondeur de scan est plafonnée** (8) : elle vient d'une requête HTTP,
   et un scan de `/` sans limite immobilisait un thread du serveur.
 - **Le cache de l'atelier sort de la racine web du cockpit.** Il vit sous
