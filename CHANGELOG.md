@@ -9,6 +9,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **`host sync` ne remplace plus en silence un hook écrit à la main.**
+  L'émetteur Copilot posait `managed=False` sur ses fichiers de hook, ce qui
+  désactivait entièrement le contrôle de préservation : le drapeau confondait
+  « ne peut pas porter de marqueur de gestion » — un JSON n'a pas de
+  commentaires — avec « peut être écrasé sans prévenir ». Un projet ayant sa
+  propre chaîne de gouvernance la perdait au premier sync, sans message, sans
+  sauvegarde, et le dry-run l'annonçait comme un `[OK]` ordinaire.
+  Un fichier qui ne peut pas porter de marqueur prouve désormais son
+  appartenance autrement : par la commande qu'il invoque. Le sync réécrit les
+  hooks qui appellent `grimoire-hook`, préserve les autres et les signale
+  `[!]`, comme il le faisait déjà pour un agent écrit à la main. La liste des
+  commandes reconnues, jusque-là propre à l'émetteur Claude Code, devient
+  partagée — la même question ne doit pas recevoir deux réponses.
+
 - **La porte de preuve refuse une tâche que le board ne connaît pas.**
   `grimoire standard gate check --task-id <inconnu>` répondait `ok`. Toutes les
   exigences de `check_evidence_gates` sont indexées sur des états nommés ; une
