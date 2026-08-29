@@ -579,10 +579,10 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"  Threshold: {rubric['acceptance_threshold']}")
         print(f"  Criteria: {len(rubric['criteria'])}")
         print("\n  Evaluation Prompt:")
-        print(f"  {'─' * 60}")
+        print(f"  {'-' * 60}")
         for line in prompt.split("\n"):
             print(f"  {line}")
-        print(f"  {'─' * 60}")
+        print(f"  {'-' * 60}")
         print("\n  Send this prompt + image to a multimodal LLM to get the evaluation.")
 
     return 0

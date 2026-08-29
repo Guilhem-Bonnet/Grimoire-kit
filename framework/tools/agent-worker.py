@@ -518,7 +518,7 @@ def mcp_agent_worker(
 
 def _print_workers(wl: WorkerList) -> None:
     print(f"\n  Agent Workers ({wl.total_count})")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
     print(f"  Actifs : {wl.running_count}/{wl.max_parallel}")
     print()
 
@@ -529,8 +529,8 @@ def _print_workers(wl: WorkerList) -> None:
     for w in wl.workers:
         icon = {"running": "[ok]", "stopped": "[!!]", "error": "[x]"}.get(w.status, "")
         tasks = f" [{w.tasks_completed} done]" if w.tasks_completed else ""
-        print(f"    {icon} {w.worker_id} │ {w.agent_id:>10s} │ "
-              f"{w.status:>8s} │ {w.model or '-':>20s}{tasks}")
+        print(f"    {icon} {w.worker_id} | {w.agent_id:>10s} | "
+              f"{w.status:>8s} | {w.model or '-':>20s}{tasks}")
     print()
 
 
@@ -605,11 +605,11 @@ def main() -> None:
     elif args.command == "list":
         agents = manager.list_available_agents()
         print(f"\n  Agents disponibles ({len(agents)})")
-        print(f"  {'─' * 60}")
+        print(f"  {'-' * 60}")
         for a in agents:
             status_icon = "[ok]" if a["worker_status"] == "running" else "[-]"
             caps = ", ".join(a["capabilities"][:3])
-            print(f"    {status_icon} {a['agent_id']:>12s} │ {a['title']:>20s} │ {caps}")
+            print(f"    {status_icon} {a['agent_id']:>12s} | {a['title']:>20s} | {caps}")
         print()
 
 

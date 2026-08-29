@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-memory-sync.py — Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant (BM-42 Story 2.4).
+memory-sync.py — Synchronisation bidirectionnelle mémoire Grimoire <-> Qdrant (BM-42 Story 2.4).
 ============================================================
 
 Après chaque session agent, vectorise automatiquement les nouvelles
 entrées (decisions-log, learnings, failure-museum) et les stocke dans
-Qdrant. Sync bidirectionnelle : Qdrant → MD et MD → Qdrant.
+Qdrant. Sync bidirectionnelle : Qdrant -> MD et MD -> Qdrant.
 
 Modes :
-  push       — MD → Qdrant (vectorise les fichiers modifiés)
-  pull       — Qdrant → MD (exporte en fichiers structurés)
+  push       — MD -> Qdrant (vectorise les fichiers modifiés)
+  pull       — Qdrant -> MD (exporte en fichiers structurés)
   diff       — Affiche les différences entre MD et Qdrant
   hook       — Mode hook post-session (auto-detect changements)
   dedup      — Détection et nettoyage des doublons par similarité
@@ -331,7 +331,7 @@ class SyncStateManager:
 # ── Memory Syncer ────────────────────────────────────────────────────────────
 
 class MemorySyncer:
-    """Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant."""
+    """Synchronisation bidirectionnelle mémoire Grimoire <-> Qdrant."""
 
     def __init__(
         self,
@@ -403,7 +403,7 @@ class MemorySyncer:
         return files
 
     def push(self, specific_file: str | None = None, force: bool = False) -> SyncReport:
-        """Push MD → Qdrant : vectorise les fichiers mémoire modifiés."""
+        """Push MD -> Qdrant : vectorise les fichiers mémoire modifiés."""
         start = time.time()
         report = SyncReport(direction="push")
 
@@ -478,7 +478,7 @@ class MemorySyncer:
         return report
 
     def pull(self, collection: str = "memory", output_dir: Path | None = None) -> SyncReport:
-        """Pull Qdrant → MD : exporte les entrées Qdrant en fichiers structurés."""
+        """Pull Qdrant -> MD : exporte les entrées Qdrant en fichiers structurés."""
         start = time.time()
         report = SyncReport(direction="pull")
         output = output_dir or self.memory_dir
@@ -697,7 +697,7 @@ def _print_sync_report(report: SyncReport) -> None:
     """Affiche un rapport de sync."""
     status = "[OK]" if not report.errors else "[!]"
     print(f"\n  {status} Memory Sync — {report.direction.upper()}")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     print(f"  Processed : {report.entries_processed}")
     print(f"  New       : {report.entries_new}")
     if report.entries_updated:
@@ -711,14 +711,14 @@ def _print_sync_report(report: SyncReport) -> None:
     if report.errors:
         print("\n  [!]  Erreurs:")
         for err in report.errors:
-            print(f"     → {err}")
+            print(f"     -> {err}")
     print()
 
 
 def _print_diff(diffs: list[DiffEntry]) -> None:
     """Affiche le diff MD vs Qdrant."""
     print("\n  Memory Diff — MD vs Qdrant")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
 
     status_icons = {
         "synced": "[OK]",
@@ -732,7 +732,7 @@ def _print_diff(diffs: list[DiffEntry]) -> None:
         extra = ""
         if d.status == "modified":
             extra = f" (MD: {d.md_hash}… Qdrant: {d.qdrant_hash}…)"
-        print(f"  {icon} {d.source_file:45s} │ {d.status}{extra}")
+        print(f"  {icon} {d.source_file:45s} | {d.status}{extra}")
 
     synced = sum(1 for d in diffs if d.status == "synced")
     modified = sum(1 for d in diffs if d.status in ("modified", "new_in_md"))
@@ -743,7 +743,7 @@ def _print_diff(diffs: list[DiffEntry]) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="Memory Sync — Synchronisation bidirectionnelle mémoire Grimoire ↔ Qdrant",
+        description="Memory Sync — Synchronisation bidirectionnelle mémoire Grimoire <-> Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -755,13 +755,13 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", help="Commande à exécuter")
 
     # push
-    push_p = sub.add_parser("push", help="MD → Qdrant (vectorise les changements)")
+    push_p = sub.add_parser("push", help="MD -> Qdrant (vectorise les changements)")
     push_p.add_argument("--file", help="Fichier spécifique à pousser")
     push_p.add_argument("--force", action="store_true", help="Forcer le push même si non modifié")
     push_p.add_argument("--json", action="store_true", help="Output JSON")
 
     # pull
-    pull_p = sub.add_parser("pull", help="Qdrant → MD (exporter en fichiers)")
+    pull_p = sub.add_parser("pull", help="Qdrant -> MD (exporter en fichiers)")
     pull_p.add_argument("--collection", default="memory", help="Collection à exporter")
     pull_p.add_argument("--output", type=Path, help="Dossier de sortie")
     pull_p.add_argument("--json", action="store_true", help="Output JSON")

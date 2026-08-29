@@ -464,7 +464,7 @@ def generate_bench_context(session: SessionMetrics, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"[OK] Bench context écrit : {out}")
-    print("   → Ouvrez ce fichier et passez-le à Sentinel avec la commande : bench-review")
+    print("   -> Ouvrez ce fichier et passez-le à Sentinel avec la commande : bench-review")
 
 
 def _auto_recommendations(session: SessionMetrics) -> list[str]:
