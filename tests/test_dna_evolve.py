@@ -166,7 +166,8 @@ class TestAnalyzeDecisionsLog(unittest.TestCase):
             "| Agent | Decision |\n"
             "| dev | Hardened sécurité on all endpoints |\n"
             "| ops | Security scan before deploy |\n"
-            "| dev | Added vulnerability checks |\n"
+            "| dev | Added vulnerability checks |\n",
+            encoding="utf-8",
         )
         patterns = self.evolve.analyze_decisions_log(f)
         pat_ids = [p.pattern_id for p in patterns]

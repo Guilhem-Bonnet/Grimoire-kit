@@ -97,7 +97,7 @@ def _create_copilot_instructions(base: Path) -> Path:
     """Create .github/copilot-instructions.md with Grimoire marker."""
     ci = base / ".github" / "copilot-instructions.md"
     ci.parent.mkdir(parents=True, exist_ok=True)
-    ci.write_text("# Copilot Instructions\n> Auto-généré par Grimoire Custom Kit v3.1.0\n")
+    ci.write_text("# Copilot Instructions\n> Auto-généré par Grimoire Custom Kit v3.1.0\n", encoding="utf-8")
     return ci
 
 

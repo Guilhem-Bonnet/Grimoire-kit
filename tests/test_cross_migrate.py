@@ -485,7 +485,7 @@ class TestImportBundle(BaseTest):
         mem = self.root / "_grimoire" / "_memory"
         mem.mkdir(parents=True, exist_ok=True)
         (mem / "migrated-rules.md").write_text(
-            "- [2026-01-01] [CC-FAIL] Règle: Always test\n")
+            "- [2026-01-01] [CC-FAIL] Règle: Always test\n", encoding="utf-8")
 
         bundle = cm.MigrationBundle(
             manifest=cm.BundleManifest(),

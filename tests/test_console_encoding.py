@@ -126,10 +126,21 @@ class TestFixtureFileEncoding(unittest.TestCase):
     fichier ne s'écrivait même pas sur Windows, et le test tombait avant
     d'avoir rien vérifié.
 
+    Le garde a d'abord relevé les seuls caractères absents de cp1252. C'était
+    trop étroit, et un cinquième test l'a montré : `test_context_summarizer`
+    écrivait un tiret cadratin, que cp1252 sait très bien représenter.
+    L'écriture passait donc sur Windows — et c'est la relecture qui échouait,
+    le code produit lisant en UTF-8 explicite. Pire, `parse_file` avale
+    `UnicodeDecodeError` et rend une liste vide : le test ne voyait pas une
+    erreur, il voyait zéro section.
+
+    La règle juste est donc l'aller-retour : **tout** contenu non-ASCII écrit
+    avec l'encodage de la locale casse, puisque le lecteur, lui, impose UTF-8.
+
     Le garde ne condamne pas l'absence d'`encoding=` en général : elle est
     inoffensive sur du texte ASCII, et le dépôt en compte près de deux cents
     appels. Il ne relève que la combinaison qui casse — pas d'encodage
-    explicite **et** un caractère hors cp1252 dans ce qu'on écrit.
+    explicite **et** du non-ASCII dans ce qu'on écrit.
     """
 
     def test_no_test_writes_unencodable_text_with_the_locale_encoding(self) -> None:
@@ -144,20 +155,29 @@ class TestFixtureFileEncoding(unittest.TestCase):
                     continue
                 if any(keyword.arg == "encoding" for keyword in node.keywords):
                     continue
-                chars = _unencodable("".join(_literal_text(a) for a in node.args))
+                payload = "".join(_literal_text(a) for a in node.args)
+                chars = sorted({c for c in payload if ord(c) > 127})
                 if chars:
                     offenders.append(
-                        f"{path.name}:{node.lineno} écrit {''.join(sorted(set(chars)))!r} "
+                        f"{path.name}:{node.lineno} écrit {''.join(chars)!r} "
                         "sans encoding= explicite"
                     )
         self.assertEqual(offenders, [], "\n  ".join(["fixtures illisibles sur Windows :", *offenders]))
 
     def test_the_guard_sees_a_relapse(self) -> None:
-        source = 'p.write_text("un → deux")\n'
-        tree = ast.parse(source)
-        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
-        self.assertFalse(any(k.arg == "encoding" for k in call.keywords))
-        self.assertEqual(_unencodable(_literal_text(call.args[0])), ["→"])
+        """Y compris sur un caractère que cp1252 sait représenter.
+
+        C'est le cas qui avait échappé à la première version du garde : le
+        tiret cadratin s'écrit sans erreur, et se relit de travers.
+        """
+        for text in ("un → deux", "un — deux"):
+            source = f'p.write_text("{text}")\n'
+            call = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call))
+            self.assertFalse(any(k.arg == "encoding" for k in call.keywords))
+            payload = _literal_text(call.args[0])
+            self.assertTrue(
+                [c for c in payload if ord(c) > 127], f"non-ASCII non détecté dans {text!r}"
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover
