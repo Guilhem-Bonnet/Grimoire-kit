@@ -90,7 +90,15 @@ def resolve_within_allowed(raw: str | Path | None, *extra: Path | str | None) ->
     statique reconnaît comme assainissement ; l'écrire autrement laissait la
     vérification invisible à l'outil qui l'exige.
     """
-    requested = Path(raw).expanduser() if raw else Path.home()
+    home = str(Path.home())
+    requested = str(raw) if raw else home
+    # Expansion du tilde par substitution de texte, sans toucher au disque :
+    # la première opération de fichier appliquée à une valeur venue d'une
+    # requête doit être celle qui l'assainit, pas une commodité d'écriture.
+    # Les formes ``~autre-utilisateur`` ne sont donc pas reconnues, et c'est
+    # aussi bien : la découverte parle du compte courant.
+    if requested == "~" or requested.startswith("~/"):
+        requested = home + requested[1:]
     # ``realpath`` plutôt que ``Path.resolve`` : c'est la forme que l'analyse
     # statique reconnaît comme assainissement d'un chemin venu d'une requête.
     resolved = os.path.realpath(requested)

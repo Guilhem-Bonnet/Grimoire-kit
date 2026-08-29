@@ -232,3 +232,25 @@ def test_traversal_cannot_escape_an_allowed_root() -> None:
     `~/../../etc`."""
     with pytest.raises(PermissionError):
         reg.resolve_within_allowed(str(Path.home()) + "/../../etc")
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_a_tilde_path_is_expanded_without_touching_the_disk() -> None:
+    """L'expansion du tilde est textuelle.
+
+    La première opération de fichier appliquée à une valeur venue d'une requête
+    doit être celle qui l'assainit. Les formes ``~autre-utilisateur`` ne sont
+    donc pas reconnues — la découverte parle du compte courant.
+    """
+    home = Path.home().resolve()
+    assert reg.resolve_within_allowed("~") == home
+    assert reg.resolve_within_allowed("~/Documents") == home / "Documents"
+    with pytest.raises(PermissionError):
+        reg.resolve_within_allowed("~root/quelque-part")
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_a_sibling_prefix_is_not_mistaken_for_containment() -> None:
+    """``/home/uX`` n'est pas contenu dans ``/home/u`` — le séparateur le dit."""
+    with pytest.raises(PermissionError):
+        reg.resolve_within_allowed(str(Path.home()) + "X")
