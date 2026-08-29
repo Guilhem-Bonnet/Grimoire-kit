@@ -785,7 +785,7 @@ def list_proposals(proposals_dir: Path) -> None:
         print(f"  {p.name}")
         print(f"     Source : {source} — {desc}")
         print()
-    print("  → Installer : bash grimoire-init.sh forge --install <nom-agent>")
+    print("  -> Installer : bash grimoire-init.sh forge --install <nom-agent>")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -873,7 +873,7 @@ Exemples :
         if not gaps:
             print("[i]  Aucune requête inter-agent non résolue trouvée dans shared-context.md")
             print(f"   Cherché dans : {args.shared_context}")
-            print("   Format attendu : - [ ] [agent→?] description")
+            print("   Format attendu : - [ ] [agent->?] description")
             return
         proposals = build_proposals_from_gaps(gaps, project_context, existing_agents)
         print(f"{len(gaps)} gap(s) inter-agent trouvé(s)")
@@ -909,7 +909,7 @@ Exemples :
             print(f"   Gap from : {proposal.inter_agent_source}")
         print()
 
-    print("─" * 60)
+    print("-" * 60)
     print(f"  {len(proposals)} proposal(s) dans {proposals_dir}/")
     print()
     print("  Étapes suivantes :")

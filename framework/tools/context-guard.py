@@ -529,7 +529,7 @@ def do_optimize(
 
     total_savings = 0
     print(f"  {'Fichier':<40} {'Catégorie':<14} {'Actuel':>8} {'Gain':>8} {'%':>6}")
-    print(f"  {'─' * 80}")
+    print(f"  {'-' * 80}")
 
     for hint in all_hints:
         short_name = hint.path.name
@@ -543,7 +543,7 @@ def do_optimize(
     if total_savings > 0:
         per_agent = total_savings
         total_fleet = total_savings * agent_count
-        print("  ─────────────────────────────────────────────")
+        print("  ---------------------------------------------")
         print(f"  Gain estimé par agent  : ~{fmt_tokens(per_agent)} tokens")
         print(f"  Gain total (× {agent_count} agents) : ~{fmt_tokens(total_fleet)} tokens")
         print(f"  Équivalent fenêtre     : {per_agent / window * 100:.1f}% du budget {model}")
@@ -808,7 +808,7 @@ def do_recommend_models(
         return
 
     print(f"  {'Agent':<28} {'Recommandé':<20} {'Score':>6} {'Alternatif':<20} {'Score':>6} {'Raison'}")
-    print(f"  {'─' * 110}")
+    print(f"  {'-' * 110}")
 
     # Trier par score décroissant du best
     recs.sort(key=lambda r: r.best_score, reverse=True)
@@ -825,7 +825,7 @@ def do_recommend_models(
 
     # Résumé
     print()
-    print("  ─────────────────────────────────────────────")
+    print("  ---------------------------------------------")
     total = len(recs)
     for tier_name, icon in [("economy", ""), ("standard", ""), ("premium", "")]:
         count = tier_savings.get(tier_name, 0)
@@ -836,7 +836,7 @@ def do_recommend_models(
     economy_pct = tier_savings.get("economy", 0) / total * 100 if total else 0
     if economy_pct >= 30:
         print(f"  {economy_pct:.0f}% des agents peuvent tourner sur des modèles economy")
-        print("      → réduction significative des rate limits et coûts API")
+        print("      -> réduction significative des rate limits et coûts API")
     print()
 
 def generate_recommendations(budgets: list[AgentBudget]) -> list[str]:
@@ -943,7 +943,7 @@ def print_summary_table(budgets: list[AgentBudget]) -> None:
     total_agent_tokens = sum(b.total_tokens for b in budgets)
 
     print()
-    print("  ─────────────────────────────────────────────")
+    print("  ---------------------------------------------")
     print(f"  Agents analysés : {len(budgets)}")
     print(f"    [OK] OK       : {ok}")
     print(f"    [!]  WARNING  : {warn}  (> {THRESHOLD_WARN}% du contexte au démarrage)")
@@ -1077,7 +1077,7 @@ Exemples :
           f"·  fenêtre: {fmt_tokens(MODEL_WINDOWS.get(args.model, 0))} tokens")
     print()
     print(f"  {'Agent':<32} {'Budget consommé':<24} {'  %':>6}  {'Tokens':>8}")
-    print(f"  {'─' * 75}")
+    print(f"  {'-' * 75}")
 
     # Trier par %
     for budget in sorted(budgets, key=lambda b: b.pct, reverse=True):

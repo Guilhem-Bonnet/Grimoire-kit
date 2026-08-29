@@ -127,9 +127,11 @@ def _memory_schema() -> dict[str, Any]:
             },
             "retrieval_mode": {
                 "type": "string",
-                "enum": ["vector", "lexical", "none"],
+                "enum": ["hybrid", "vector", "lexical", "none"],
                 "default": "vector",
-                "description": "Retrieval strategy. 'lexical' forces sqlite FTS5 BM25 without any vector backend.",
+                "description": "Retrieval strategy. 'hybrid' fuses the vector ranking with a sqlite FTS5 BM25 "
+                "companion (RRF) and is what the composed profiles ask for. 'vector' queries the semantic "
+                "backend alone; 'lexical' forces BM25 without any vector backend.",
             },
             "collection_prefix": {"type": "string", "default": "grimoire", "description": "Collection name prefix."},
             "embedding_model": {"type": "string", "default": "", "description": "Embedding model name."},
@@ -173,7 +175,9 @@ def _memory_schema() -> dict[str, Any]:
             "layer_profile": {
                 "type": "string",
                 "default": "standard",
-                "description": "Named Memory OS profile exposed to status and visualisation surfaces.",
+                "description": "Named composition of the seven Memory OS layers: lexical | standard | graphe | "
+                "complet (see grimoire.memory.profiles). Chosen as one unit at setup; drives the layer fields "
+                "below and what `grimoire memory status` reports against.",
             },
             "short_term_backend": {
                 "type": "string",

@@ -411,7 +411,7 @@ def cmd_condense(args: argparse.Namespace) -> int:
             "ratio": result.ratio, "content": result.content,
         }, indent=2, ensure_ascii=False))
     else:
-        print(f"Condensation {result.mode} ({result.original_words} → {result.condensed_words} mots, "
+        print(f"Condensation {result.mode} ({result.original_words} -> {result.condensed_words} mots, "
               f"{result.ratio:.0%})\n")
         print(result.content)
     return 0

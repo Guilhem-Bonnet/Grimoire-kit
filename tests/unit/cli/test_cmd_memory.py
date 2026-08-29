@@ -59,6 +59,11 @@ def mock_manager():
     # No graph wired by default: parity is opt-in, and a MagicMock graph would
     # otherwise fabricate counts.
     mgr.memory_graph = None
+    # No lexical companion by default, so `search` stays the read path here.
+    # Left as a MagicMock it would be truthy and silently route every search
+    # through fusion — see TestMemorySearch for the composed case.
+    mgr.prefers_hybrid = False
+    mgr.hybrid_search.return_value = list(mgr.search.return_value)
 
     cfg = GrimoireConfig.from_dict({
         "project": {"name": "test", "type": "generic", "stack": []},
@@ -184,6 +189,30 @@ class TestMemorySearch:
         assert result.exit_code == 0
         assert "Hello world" in result.output
         mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=10, wing="", hall="", room="")
+
+    def test_search_fuses_by_default_when_the_project_composes(self, mock_manager: MagicMock) -> None:
+        """A project with both rankings reads from both without asking.
+
+        Fusion used to sit behind ``--hybrid``, a flag no agent and no default
+        invocation ever passed: the companion index was written on every store
+        and queried by nobody.
+        """
+        mock_manager.prefers_hybrid = True
+
+        result = runner.invoke(app, ["memory", "search", "hello"])
+
+        assert result.exit_code == 0
+        mock_manager.hybrid_search.assert_called_once()
+        mock_manager.search_taxonomy.assert_not_called()
+
+    def test_no_hybrid_forces_the_single_backend_path(self, mock_manager: MagicMock) -> None:
+        mock_manager.prefers_hybrid = True
+
+        result = runner.invoke(app, ["memory", "search", "hello", "--no-hybrid"])
+
+        assert result.exit_code == 0
+        mock_manager.hybrid_search.assert_not_called()
+        mock_manager.search_taxonomy.assert_called_once()
 
     def test_search_json(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["-o", "json", "memory", "search", "hello"])

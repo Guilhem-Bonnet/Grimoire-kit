@@ -27,6 +27,19 @@ from grimoire.hosts.surface import ProjectSurface, ToolVerb
 #: Marker identifying a kit-generated artifact. Present in every managed file.
 MANAGED_MARKER = "grimoire:managed"
 
+#: Un JSON n'a pas de commentaires : un fichier de hook ne peut pas porter
+#: ``MANAGED_MARKER``. C'est alors ce qu'il invoque qui dit à qui il
+#: appartient. Toute commande contenant l'un de ces fragments a été écrite par
+#: le kit et peut être réécrite ; tout le reste est la chaîne du projet et se
+#: préserve. Les invocations dépassées restent dans la liste : les oublier ne
+#: serait pas cosmétique — la reconnaissance cesserait, le fichier passerait
+#: pour étranger, et le sync le préserverait au lieu de le migrer.
+OWNED_COMMAND_MARKERS: tuple[str, ...] = (
+    "grimoire-hook",
+    "grimoire host hook",
+    "grimoire standard activation-context",
+)
+
 _MARKER_COMMENTS = {
     ".md": f"<!-- {MANAGED_MARKER} — régénéré par `grimoire host sync`; éditez la source, pas ce fichier. -->",
 }
@@ -55,6 +68,10 @@ class EmittedFile:
     relpath: Path
     content: str
     managed: bool = True
+    #: Pour un fichier qui ne peut pas porter de marqueur : fragments dont la
+    #: présence dans le fichier existant prouve que le kit l'a écrit. Vide,
+    #: l'ancien comportement est conservé — le fichier est réécrit sans test.
+    owned_if_contains: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +131,24 @@ def _is_managed(path: Path) -> bool:
     return MANAGED_MARKER in head
 
 
+def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
+    """Le kit a-t-il écrit le fichier déjà en place ?
+
+    Deux preuves d'appartenance, selon ce que le format autorise : un marqueur
+    en commentaire quand le fichier en accepte un, sinon la commande que le
+    fichier invoque.
+    """
+    if emitted.managed:
+        return _is_managed(path)
+    if not emitted.owned_if_contains:
+        return True
+    try:
+        head = path.read_text(encoding="utf-8")[:4096]
+    except OSError:
+        return False
+    return any(marker in head for marker in emitted.owned_if_contains)
+
+
 def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, force: bool = False) -> EmitResult:
     """Write *plan* into *project_root*, leaving hand-written files alone."""
     result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
@@ -129,7 +164,7 @@ def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, for
             if current == emitted.content:
                 result.unchanged.append(label)
                 continue
-            if emitted.managed and not _is_managed(dest) and not force:
+            if not force and not _kit_owns(dest, emitted):
                 result.skipped.append(label)
                 continue
         if not dry_run:

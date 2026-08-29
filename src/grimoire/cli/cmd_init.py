@@ -8,8 +8,11 @@ framework installation, and a rich summary report.
 from __future__ import annotations
 
 import contextlib
+import difflib
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -28,6 +31,7 @@ from grimoire.__version__ import __version__
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
+from grimoire.memory import profiles as memory_profiles
 
 console = Console(stderr=True)
 
@@ -128,6 +132,36 @@ def detect_memory_backend() -> str:
     return "local"
 
 
+def _is_docker_available() -> bool:
+    """Whether a Docker CLI exists to bring the composed services up."""
+    return shutil.which("docker") is not None
+
+
+def _is_redis_reachable(host: str = "localhost", port: int = 6379) -> bool:
+    """Probe a local Redis — the hot-memory layer cannot be composed without one."""
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def machine_capabilities(*, has_egress: bool) -> frozenset[str]:
+    """Capability tokens this machine offers to the memory profiles.
+
+    Egress is answered, not probed: a proxy that resolves DNS but blocks the
+    model download would make any probe lie.
+    """
+    tokens = set()
+    if has_egress:
+        tokens.add(memory_profiles.REQ_EGRESS)
+    if _is_docker_available():
+        tokens.add(memory_profiles.REQ_DOCKER)
+    if _is_redis_reachable():
+        tokens.add(memory_profiles.REQ_REDIS)
+    return frozenset(tokens)
+
+
 def _wait_for_qdrant(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
     """Wait briefly for a freshly started Qdrant service to answer."""
     for _ in range(10):
@@ -183,6 +217,83 @@ def _git_user_name() -> str:
 # ── Interactive wizard ───────────────────────────────────────────────────────
 
 
+def _choose_memory_profile(
+    backend: str,
+    *,
+    offer_qdrant_docker: bool,
+) -> tuple[str, str, bool, bool]:
+    """Ask for a memory *composition*, not a backend.
+
+    A project runs several memory layers at once; asking which single backend
+    to use left the other six on their defaults forever.  Returns the chosen
+    profile id, the backend it runs on, the offline verdict, and whether to
+    start Qdrant in Docker.
+
+    Only compositions this machine can actually serve are offered — an
+    unreachable one is shown with the reason and cannot be selected, because a
+    profile that cannot be filled is worse than a smaller one that can.
+    """
+    has_egress = True
+    if offer_qdrant_docker:
+        console.print("  [dim]Aucun service vectoriel sur localhost.[/dim]")
+        # The question is about the network, not about Qdrant: a closed site
+        # cannot reach an embedding model, so proposing a container there only
+        # produces a store that can never be filled.
+        has_egress = Confirm.ask(
+            "  [bold]Cette machine a-t-elle un accès réseau sortant ?[/bold]",
+            default=True,
+        )
+
+    available = machine_capabilities(has_egress=has_egress)
+
+    console.print()
+    console.print("  [bold]La mémoire est une composition de couches, pas un backend.[/bold]")
+    console.print()
+    choices: list[str] = []
+    default_choice = "1"
+    for idx, profile in enumerate(memory_profiles.ordered(), 1):
+        key = str(idx)
+        unmet = profile.unmet(available)
+        if unmet:
+            reason = ", ".join(unmet)
+            console.print(f"    [dim]{key}) {profile.label:<10} {profile.summary}[/dim]")
+            console.print(f"       [dim]indisponible ici — manque : {reason}[/dim]")
+            continue
+        choices.append(key)
+        if profile.id == memory_profiles.DEFAULT_PROFILE:
+            default_choice = key
+            console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary} [cyan]← recommandé[/cyan]")
+        else:
+            console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary}")
+
+    console.print()
+    if default_choice not in choices:
+        default_choice = choices[0]
+    raw = Prompt.ask("  [bold]Composition[/bold]", default=default_choice, choices=choices)
+    chosen = memory_profiles.ordered()[int(raw) - 1]
+
+    offline = chosen.id == "lexical" and not has_egress
+    backend = chosen.resolve_backend(backend)
+
+    # Proposed, never assumed: a container plus its volume is not something to
+    # start behind the user's back on a first run.
+    # `standard` is the only composition that does not pin its own store, so
+    # it is the only one where a container still has to be offered.
+    qdrant_docker = False
+    if offer_qdrant_docker and has_egress and chosen.id == memory_profiles.DEFAULT_PROFILE:
+        qdrant_docker = Confirm.ask(
+            "  [bold]Démarrer Qdrant via Docker pour la couche sémantique ?[/bold]",
+            default=False,
+        )
+        if qdrant_docker:
+            backend = "qdrant-server"
+    if chosen.id == "lexical":
+        console.print("  [dim]→ BM25 seul : aucun modèle, aucun service, aucun réseau.[/dim]")
+        console.print("  [dim]  Pour ajouter la couche sémantique plus tard : grimoire memory bundle install[/dim]")
+
+    return chosen.id, backend, offline, qdrant_docker
+
+
 def _run_wizard(
     target: Path,
     scan: ScanResult | None,
@@ -198,9 +309,9 @@ def _run_wizard(
         border_style="cyan",
     ))
 
-    # ── Step 1/4 · Identity ───────────────────────────────────────────
+    # ── Step 1/5 · Identity ───────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[#---] 1/4 · Identity[/dim]")
+    console.print("  [dim]\\[#----] 1/5 · Identity[/dim]")
 
     # Show detected stacks
     if scan and scan.stacks:
@@ -223,9 +334,9 @@ def _run_wizard(
         default=git_name or "Developer",
     )
 
-    # ── Step 2/4 · Preferences ────────────────────────────────────────
+    # ── Step 2/5 · Preferences ────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[##--] 2/4 · Preferences[/dim]")
+    console.print("  [dim]\\[##---] 2/5 · Preferences[/dim]")
 
     _lang_choices = {"1": "Français", "2": "English"}
     console.print("  [bold]Language:[/bold]  1) Français  2) English")
@@ -245,35 +356,16 @@ def _run_wizard(
     )
     skill_level = _skill_choices[skill_input]
 
-    qdrant_docker = False
-    offline = False
-    if offer_qdrant_docker:
-        console.print()
-        console.print("  [bold]Memory:[/bold] aucun service vectoriel sur localhost.")
-        # The question is about the network, not about Qdrant: a closed site
-        # cannot reach an embedding model, so proposing a container there only
-        # produces a store that can never be filled.
-        has_egress = Confirm.ask(
-            "  [bold]Cette machine a-t-elle un accès réseau sortant ?[/bold]",
-            default=True,
-        )
-        if not has_egress:
-            offline = True
-            console.print("  [dim]→ recherche lexicale (BM25) : aucun modèle, aucun service, aucun réseau.[/dim]")
-            console.print("  [dim]  Pour passer au sémantique plus tard : grimoire memory bundle install[/dim]")
-        else:
-            # Proposed, never assumed: a container plus its volume is not
-            # something to start behind the user's back on a first run.
-            qdrant_docker = Confirm.ask(
-                "  [bold]Démarrer Qdrant via Docker pour la mémoire sémantique ?[/bold]",
-                default=False,
-            )
-            if qdrant_docker:
-                backend = "qdrant-server"
-
-    # ── Step 3/4 · Archetypes (multi-select) ──────────────────────────
+    # ── Step 3/5 · Memory composition ─────────────────────────────────
     console.print()
-    console.print("  [dim]\\[###-] 3/4 · Archetypes[/dim]")
+    console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
+    profile_id, backend, offline, qdrant_docker = _choose_memory_profile(
+        backend, offer_qdrant_docker=offer_qdrant_docker,
+    )
+
+    # ── Step 4/5 · Archetypes (multi-select) ──────────────────────────
+    console.print()
+    console.print("  [dim]\\[####-] 4/5 · Archetypes[/dim]")
     console.print()
     console.print("  [bold]minimal[/bold] is always included — it's the base.")
     console.print("  Choose specializations to add:\n")
@@ -313,9 +405,9 @@ def _run_wizard(
         selected_archetypes = _parse_archetype_selection(adjust, scan)
         _display_composition_preview(selected_archetypes)
 
-    # ── Step 4/4 · Confirm ────────────────────────────────────────────
+    # ── Step 5/5 · Confirm ────────────────────────────────────────────
     console.print()
-    console.print("  [dim]\\[####] 4/4 · Confirmation[/dim]")
+    console.print("  [dim]\\[#####] 5/5 · Confirmation[/dim]")
     arch_display = ", ".join(selected_archetypes) if selected_archetypes else "minimal"
     console.print()
     console.print("  [bold]Summary:[/bold]")
@@ -324,6 +416,8 @@ def _run_wizard(
     console.print(f"    Language:    {language}")
     console.print(f"    Skill level: {skill_level}")
     console.print(f"    Archetypes:  {arch_display}")
+    memory_profile = memory_profiles.resolve(profile_id)
+    console.print(f"    Mémoire:     {memory_profile.label} — {memory_profile.summary}")
     console.print(f"    Backend:     {backend}")
     if qdrant_docker:
         console.print("    Qdrant:      Docker local auto-start")
@@ -342,6 +436,7 @@ def _run_wizard(
         "backend": backend,
         "qdrant_docker": qdrant_docker,
         "offline": offline,
+        "memory_profile": profile_id,
     }
 
 
@@ -671,6 +766,40 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str) -> None:
         )
 
 
+def validate_init_flags(archetype: str, backend: str, memory_profile: str) -> None:
+    """Reject unknown archetype / backend / memory-profile values, with a hint.
+
+    Lives here rather than in the CLI wiring module: the catalogs these values
+    are checked against are declared in this file, and the wiring module is the
+    one under a size ratchet.
+    """
+    if archetype:
+        parts = [a.strip() for a in archetype.split(",") if a.strip()]
+        invalid = [a for a in parts if a not in KNOWN_ARCHETYPES]
+        if invalid:
+            for a in invalid:
+                console.print(f"[red]Unknown archetype:[/red] {a}")
+                matches = difflib.get_close_matches(a, sorted(KNOWN_ARCHETYPES), n=2, cutoff=0.5)
+                if matches:
+                    console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
+            console.print(f"Available: {', '.join(sorted(KNOWN_ARCHETYPES))}")
+            raise typer.Exit(1)
+
+    if backend not in KNOWN_BACKENDS:
+        console.print(f"[red]Unknown backend:[/red] {backend}")
+        matches = difflib.get_close_matches(backend, sorted(KNOWN_BACKENDS), n=2, cutoff=0.5)
+        if matches:
+            console.print(f"Did you mean: [cyan]{', '.join(matches)}[/cyan]?")
+        else:
+            console.print(f"Available: {', '.join(sorted(KNOWN_BACKENDS))}")
+        raise typer.Exit(1)
+
+    if memory_profile and not memory_profiles.is_known(memory_profile):
+        console.print(f"[red]Unknown memory profile:[/red] {memory_profile}")
+        console.print(f"Available: {', '.join(memory_profiles.PROFILE_ORDER)}")
+        raise typer.Exit(1)
+
+
 def run_init(
     ctx: typer.Context,
     target: Path,
@@ -681,11 +810,19 @@ def run_init(
     force: bool = False,
     dry_run: bool = False,
     qdrant_docker: bool = False,
+    memory_profile: str = "",
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
+
+    if memory_profile and not memory_profiles.is_known(memory_profile):
+        if fmt == "json":
+            typer.echo(json.dumps({"ok": False, "error": f"unknown memory profile: {memory_profile}"}, indent=2))
+        else:
+            validate_init_flags("", "auto", memory_profile)
+        raise typer.Exit(1)
 
     # Check existing project
     config_file = target / "project-context.yaml"
@@ -710,6 +847,11 @@ def run_init(
         backend = "qdrant-server"
     elif backend == "auto":
         backend = detect_memory_backend()
+    # A composition that pins its own services decides the backend: asking for
+    # `graphe` and landing on the detected qdrant would produce a config whose
+    # graph layers point at a store that is not there.
+    if memory_profile:
+        backend = memory_profiles.resolve(memory_profile).resolve_backend(backend)
 
     # Phase 3: Resolve archetype
     resolver = ArchetypeResolver()
@@ -747,6 +889,7 @@ def run_init(
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
         offline = bool(wizard_result.get("offline", False))
+        memory_profile = str(wizard_result.get("memory_profile", memory_profile))
         qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
         # Re-resolve if user changed archetypes or backend
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
@@ -772,6 +915,7 @@ def run_init(
         backend=backend,
         offline=offline,
         force=force,
+        profile=memory_profile,
     )
     plan = scaffolder.plan()
 

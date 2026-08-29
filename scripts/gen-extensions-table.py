@@ -4,7 +4,7 @@
 Single source of truth: the ``extension.json`` manifests. The table is
 rewritten between the ``extensions-table`` markers; everything outside
 the markers is left untouched. Same contract as
-``docs/gen-governed-controls.py`` — run from anywhere:
+``scripts/gen-governed-controls.py`` — run from anywhere:
 
     python scripts/gen-extensions-table.py            # rewrite in place
     python scripts/gen-extensions-table.py --check    # exit 1 on drift

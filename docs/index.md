@@ -18,12 +18,12 @@ Si vous arrivez depuis le README, suivez ce parcours:
 
 1. [Guide de démarrage](getting-started.md)
 2. [Concepts](concepts.md)
-3. [Standard agentique gouverné](agentic-standard-integration.md) · [Contrôles gouvernés](governed-controls.md)
+3. [Standard agentique gouverné](standard/integration.md) · [Contrôles gouvernés](standard/controles-gouvernes.md)
 4. [Configuration YAML](grimoire-yaml-reference.md)
 
 ## Fonctionnalités clés
 
-- **Standard agentique gouverné** — 36 patterns vérifiables *fail-closed* (`grimoire standard verify` / `audit` / `score` / `gate`), profils `starter → production`. Voir [Contrôles gouvernés](governed-controls.md).
+- **Standard agentique gouverné** — 36 patterns vérifiables *fail-closed* (`grimoire standard verify` / `audit` / `score` / `gate`), profils `starter → production`. Voir [Contrôles gouvernés](standard/controles-gouvernes.md).
 - **Teams & Personas** — Agents spécialisés avec personnalités, règles et mémoire
 - **Mémoire sémantique** — Contexte persistant entre sessions
 - **Workflows composables** — Enchaînements d'agents avec handoffs automatiques
@@ -63,8 +63,8 @@ grimoire-kit/
 | --- | --- |
 | [Guide de démarrage](getting-started.md) | Installation et premier projet en quelques minutes |
 | [Concepts](concepts.md) | Architecture et principes |
-| [Standard agentique](agentic-standard-integration.md) | Profils, patterns gouvernés, installation par besoins |
-| [Contrôles gouvernés](governed-controls.md) | Référence des 36 patterns (`verify`/`audit`/`score`/`gate`) |
+| [Standard agentique](standard/integration.md) | Profils, patterns gouvernés, installation par besoins |
+| [Contrôles gouvernés](standard/controles-gouvernes.md) | Référence des 36 patterns (`verify`/`audit`/`score`/`gate`) |
 | [Guardrails runtime Grimoire Game](grimoire-game-runtime-guardrails.md) | Gouvernance des mutations, trust et compatibilité du runtime |
 | [SDK Guide](sdk-guide.md) | API Python complète |
 | [Créer un agent](creating-agents.md) | Guide pas-à-pas |

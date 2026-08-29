@@ -145,7 +145,7 @@ Au-delà des protocoles d'agents, Grimoire applique un **standard agentique** : 
 → production`) qui active des **patterns gouvernés vérifiables** (36 au catalogue — sécurité,
 gouvernance, contexte, mémoire, observabilité…). Chaque pattern pose un artefact déclaratif
 (`_grimoire/standard/*.yaml`) et un contrôle *fail-closed* vérifié par `grimoire standard verify`
-/ `audit` / `score` / `gate`. Référence : [Contrôles gouvernés](governed-controls.md).
+/ `audit` / `score` / `gate`. Référence : [Contrôles gouvernés](standard/controles-gouvernes.md).
 
 ## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
 

@@ -184,40 +184,6 @@ jobs:
           path: guard-output.json
           retention-days: 14
 
-  # ── 7. Python Unit Tests ──────────────────────────────────────────────────
-  python-tests:
-    name: "Python Unit Tests"
-    runs-on: ubuntu-latest
-    needs: bash-syntax
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
-        run: pip install pyyaml
-
-      - name: Run all unit tests
-        run: |
-          python3 -m unittest discover -s tests -v 2>&1 | tee test-output.txt
-          echo "test_exit=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
-        id: tests
-
-      - name: Report test count
-        if: always()
-        run: |
-          TOTAL=$(grep -oP 'Ran \K[0-9]+' test-output.txt || echo "?")
-          echo "### 🧪 Python Tests: $TOTAL tests" >> $GITHUB_STEP_SUMMARY
-          if grep -q "^OK" test-output.txt; then
-            echo "✅ All tests passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
-            grep "^FAIL:" test-output.txt >> $GITHUB_STEP_SUMMARY || true
-          fi
-
   # ── 7b. Framework Tools Tests (pytest) ────────────────────────────────────
   framework-tests:
     # Les 108 outils de framework/tools/ ne tournaient qu'en ubuntu : l'issue #33
@@ -257,8 +223,12 @@ jobs:
       # `tests/test_*.py` importent `typer` et un autre `ruamel.yaml`, tous deux
       # dépendances de base du paquet. Ils échouaient à la collecte, et le job
       # s'en déclarait vert. On installe donc ce que les tests supposent.
+      # `jsonschema` s'ajoute aux dépendances de base : depuis que la validation
+      # de blueprint refuse au lieu de sauter sa couche schéma en silence, le job
+      # doit exercer la validation complète — sinon il vérifierait le chemin
+      # dégradé et déclarerait vert un contrôle qui n'a pas eu lieu.
       - name: Install test deps
-        run: pip install -e . pytest pyyaml
+        run: pip install -e . pytest pyyaml jsonschema
 
       - name: Run framework tests
         shell: bash
@@ -269,7 +239,11 @@ jobs:
           # passait pour un succès.
           set -o pipefail
           rc=0
-          python -m pytest tests/test_*.py -q --tb=short -x \
+          # `--maxfail=20` plutôt que `-x` : sous Windows, chaque défaut
+          # d'encodage en cache le suivant, et un `-x` transforme la remise en
+          # état en une boucle d'un échec par cycle de CI. Une exécution doit
+          # rendre la liste complète de ce qu'il reste à traiter.
+          python -m pytest tests/test_*.py -q --tb=short --maxfail=20 \
             --ignore=tests/test_background_tasks.py \
             2>&1 | tee framework-test-output.txt || rc=$?
           {
@@ -282,7 +256,7 @@ jobs:
   summary:
     name: "CI Summary"
     runs-on: ubuntu-latest
-    needs: [bash-syntax, dna-validate, shellcheck, yaml-lint, doctor, context-guard, python-tests, framework-tests]
+    needs: [bash-syntax, dna-validate, shellcheck, yaml-lint, doctor, context-guard, framework-tests]
     if: always()
     steps:
       - name: Print summary
@@ -297,5 +271,4 @@ jobs:
           echo "| YAML lint | ${{ needs.yaml-lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Doctor | ${{ needs.doctor.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Context Guard | ${{ needs.context-guard.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Framework Tests | ${{ needs.framework-tests.result }} |" >> $GITHUB_STEP_SUMMARY

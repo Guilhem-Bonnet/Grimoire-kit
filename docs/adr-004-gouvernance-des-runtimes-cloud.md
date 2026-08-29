@@ -117,6 +117,6 @@ peut pas parser de façon stable n'est pas opposable.
 
 ## Références
 
-- [Plan cible — gouvernance des agents cloud](cloud-agent-governance-target-plan.md)
+- [Plan cible — gouvernance des agents cloud](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/planning/cloud-agent-governance-target-plan.md) (document de travail, non publié)
 - [ADR-001 — Pourquoi l'orchestration n'est pas multi-LLM](adr-001-no-multi-llm.md)
 - [ADR-002 — Politique SemVer](adr-002-semver-policy.md)

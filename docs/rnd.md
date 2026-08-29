@@ -3,7 +3,7 @@
 Ces features fonctionnent et sont testées, mais leur surface est **exploratoire** :
 API et formats peuvent évoluer sans garantie de compatibilité. Le cœur mûr du kit
 (standard gouverné, mémoire, cockpit, MCP) est documenté dans le
-[README](../README.md) et les guides.
+[README](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/README.md) et les guides.
 
 ## Features expérimentales
 
@@ -37,4 +37,4 @@ API et formats peuvent évoluer sans garantie de compatibilité. Le cœur mûr d
   suite de tests, mais restent hors du contrat de stabilité SemVer du SDK.
 - Une feature expérimentale est promue dans le cœur quand son usage est récurrent,
   son API stabilisée, et sa valeur démontrée (voir la politique dans
-  [CONTRIBUTING.md](../CONTRIBUTING.md)).
+  [CONTRIBUTING.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CONTRIBUTING.md)).

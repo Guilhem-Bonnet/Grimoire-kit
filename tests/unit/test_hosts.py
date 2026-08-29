@@ -487,3 +487,68 @@ def test_every_gap_names_its_fallback() -> None:
     for host_id in supported_hosts():
         for gap in gaps_for(profile_for(host_id)):
             assert gap.fallback, f"{host_id.value}/{gap.surface} dégrade sans repli déclaré"
+
+
+def _copilot_hook_plan(project: Path) -> tuple[object, object]:
+    """Le plan Copilot et son premier fichier de hook."""
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    plan = emitter.plan(build_surface(project), project)
+    hooks = [f for f in plan.files if f.relpath.as_posix().startswith(".github/hooks/grimoire-")]
+    assert hooks, "le plan Copilot doit émettre au moins un fichier de hook"
+    return plan, hooks[0]
+
+
+_HAND_WRITTEN_HOOK = (
+    '{"hooks": {"SessionStart": [{"type": "command", '
+    '"command": "MAISON-NE-PAS-ECRASER.sh", "timeout": 10}]}}\n'
+)
+
+
+def test_copilot_sync_preserves_a_hand_written_hook(project: Path) -> None:
+    """Un hook écrit à la main survit au sync, comme un agent écrit à la main.
+
+    L'émetteur Copilot posait ``managed=False`` sur ses fichiers de hook, ce
+    qui désactivait entièrement le contrôle de préservation : le drapeau
+    confondait « ne peut pas porter de marqueur de gestion » — un JSON n'a pas
+    de commentaires — avec « peut être écrasé sans prévenir ». Un projet ayant
+    sa propre chaîne de gouvernance la perdait au premier sync, sans message
+    et sans sauvegarde.
+    """
+    plan, hook = _copilot_hook_plan(project)
+    target = project / hook.relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_HAND_WRITTEN_HOOK, encoding="utf-8")
+
+    result = apply_plan(plan, project)
+
+    assert target.read_text(encoding="utf-8") == _HAND_WRITTEN_HOOK
+    assert hook.relpath.as_posix() in result.skipped
+
+
+def test_copilot_sync_still_updates_its_own_hook(project: Path) -> None:
+    """Garde-fou : le kit doit continuer à mettre à jour ce qu'il a écrit."""
+    plan, hook = _copilot_hook_plan(project)
+    target = project / hook.relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    stale = json.dumps(
+        {"hooks": {"SessionStart": [{"type": "command", "command": "grimoire-hook --host copilot", "timeout": 5}]}},
+        indent=2,
+    ) + "\n"
+    target.write_text(stale, encoding="utf-8")
+
+    result = apply_plan(plan, project)
+
+    assert target.read_text(encoding="utf-8") == hook.content
+    assert hook.relpath.as_posix() in result.written
+
+
+def test_copilot_sync_force_overwrites_a_hand_written_hook(project: Path) -> None:
+    """``--force`` reste la porte de sortie, comme pour les agents."""
+    plan, hook = _copilot_hook_plan(project)
+    target = project / hook.relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_HAND_WRITTEN_HOOK, encoding="utf-8")
+
+    apply_plan(plan, project, force=True)
+
+    assert target.read_text(encoding="utf-8") == hook.content

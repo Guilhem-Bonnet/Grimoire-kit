@@ -154,7 +154,7 @@ jobs:
               --cov=src/grimoire \
               --cov-report=xml \
               --cov-report=term-missing \
-              --cov-fail-under=70
+              --cov-fail-under=75
           fi
 
       - name: Upload coverage

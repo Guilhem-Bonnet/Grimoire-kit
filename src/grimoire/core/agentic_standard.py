@@ -103,6 +103,7 @@ from grimoire.core.standard_generation import (
     normalize_task_id,
 )
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
+from grimoire.core.standard_state import board_omits_task, task_from_board
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
@@ -1100,16 +1101,6 @@ def _append_runtime_event(root: Path, *, event_type: str, task_id: str, profile:
         handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _task_from_board(board: dict[str, Any], task_id: str) -> dict[str, Any]:
-    tasks = board.get("tasks", [])
-    if not isinstance(tasks, list):
-        return {}
-    for task in tasks:
-        if isinstance(task, dict) and str(task.get("task_id", "")) == task_id:
-            return task
-    return {}
-
-
 def _task_required_capabilities(task: Mapping[str, Any]) -> list[str]:
     declared = task.get("required_capabilities")
     if isinstance(declared, list):
@@ -1184,7 +1175,7 @@ def build_context_bundle(
     provider_registry = _read_yaml_mapping(root, STANDARD_DIR / "llm-provider-registry.yaml")
     context_contract = _read_yaml_mapping(root, STANDARD_DIR / "context-contract.yaml")
     orchestration_policy = _read_yaml_mapping(root, STANDARD_DIR / "orchestration-policy.yaml")
-    task = _task_from_board(board, normalized_task_id)
+    task = task_from_board(board, normalized_task_id)
 
     enabled_providers = [
         str(provider.get("id"))
@@ -1610,11 +1601,19 @@ def check_evidence_gates(
     if target_state is not None and target_state not in BOARD_STATES:
         msg = f"Unknown target state {target_state!r}. Available: {', '.join(sorted(BOARD_STATES))}"
         raise ValueError(msg)
-    board = _read_yaml_mapping(root, STANDARD_DIR / "task-board.yaml")
-    task = _task_from_board(board, normalized_task_id)
+    board_path = STANDARD_DIR / "task-board.yaml"
+    board = _read_yaml_mapping(root, board_path)
+    task = task_from_board(board, normalized_task_id)
     state = str(target_state or task.get("status") or "")
     missing: list[str] = []
     checks: list[StandardCheck] = []
+    if board_omits_task(root, task):
+        checks.append(StandardCheck(
+            id="gate.task_not_on_board",
+            severity="error",
+            message=f"Task {normalized_task_id!r} is not on the board: evidence gates cannot be evaluated.",
+            path=board_path,
+        ))
     required_paths = {
         "task_board": STANDARD_DIR / "task-board.yaml",
         "memory_policy": STANDARD_DIR / "memory-policy.yaml",

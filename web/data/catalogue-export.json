@@ -63,7 +63,7 @@
       "intent": "Traiter l'agent comme une organisation opératrice plutôt que comme un simple assistant.",
       "problem": "Un agent conversationnel mélange besoin, exécution, validation et mémoire.",
       "solution": "Séparer rôles, responsabilités, validations, preuves et mémoire comme dans une entreprise.",
-      "docPath": "docs/patterns/01-organisation/README.md#org-01--entreprise-agent",
+      "docPath": "nodal/reference/patterns/organisation/#org-01",
       "controls": [
         "RACI",
         "Kanban",
@@ -81,7 +81,7 @@
       "intent": "Savoir qui peut accepter, bloquer ou demander correction.",
       "problem": "L'agent confond complétion technique et acceptation métier.",
       "solution": "Définir les autorités par domaine : client, QA, sécurité, ops, design, architecture.",
-      "docPath": "docs/patterns/01-organisation/README.md#org-02--validation-authority",
+      "docPath": "nodal/reference/patterns/organisation/#org-02",
       "controls": [
         "RACI",
         "matrice de validation",
@@ -98,7 +98,7 @@
       "intent": "Déléguer sans perdre le contrôle.",
       "problem": "Un agent généraliste sature en contexte et oublie les contraintes.",
       "solution": "L'orchestrateur découpe le travail et transmet des task envelopes à des subagents spécialisés.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-01--orchestrateur-et-subagents-spécialisés",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-01",
       "controls": [
         "WIP limité",
         "outils par rôle",
@@ -115,7 +115,7 @@
       "intent": "Donner à un agent exactement ce qu'il doit faire.",
       "problem": "Les prompts longs et flous produisent dérive, coûts et faux Done.",
       "solution": "Encapsuler mission, rôle, contexte minimal, outils, contraintes, critères et format de sortie.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-02--task-envelope",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-02",
       "controls": [
         "Pre-delegation",
         "budget de contexte",
@@ -132,7 +132,7 @@
       "intent": "Passer le relais sans recharger toute la mission.",
       "problem": "Les étapes suivantes perdent les décisions ou héritent de bruit inutile.",
       "solution": "Résumer résultat, preuves, hypothèses, risques, changements et prochain déclencheur.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-03--handoff-packet",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-03",
       "controls": [
         "Post-subagent",
         "claim ledger",
@@ -149,7 +149,7 @@
       "intent": "Fournir un contexte utile, frais et proportionné.",
       "problem": "Trop peu de contexte crée hallucination ; trop de contexte crée confusion.",
       "solution": "Sélectionner sources par rôle, étape, risque, budget, fraîcheur et statut de connaissance.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-04--context-router",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-04",
       "controls": [
         "Pre-context-load",
         "Post-context-load",
@@ -166,7 +166,7 @@
       "intent": "Piloter le contexte comme un plan de contrôle au-dessus des mémoires, modèles, outils et transitions.",
       "problem": "Des couches mémoire séparées restent utiles mais insuffisantes : elles rappellent, stockent ou relient, sans décider quoi exposer, à qui, quand, ni avec quel niveau de preuve.",
       "solution": "Ajouter un orchestrateur de contexte qui classe la tâche, choisit un profil, arbitre les sources, calcule un budget, critique les contradictions, produit un context pack, puis décide persistance, invalidation ou escalade.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-05--orchestrateur-de-contexte-avancé",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-05",
       "controls": [
         "Context scorecard",
         "provenance obligatoire",
@@ -186,7 +186,7 @@
       "intent": "Définir l'ordre d'autorité des informations utilisées par l'agent.",
       "problem": "L'agent peut traiter une mémoire, une similarité ou une hypothèse comme équivalente à une source de vérité.",
       "solution": "Établir une constitution du contexte : source active > preuve vérifiée > décision validée > mémoire durable > handoff récent > hypothèse > similarité vectorielle.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-06--context-constitution",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-06",
       "controls": [
         "Source registry",
         "claim ledger",
@@ -204,7 +204,7 @@
       "intent": "Résoudre ou exposer les contradictions de contexte avant action.",
       "problem": "Code, documentation, tickets, mémoire, ADR et demande client peuvent se contredire.",
       "solution": "Détecter les conflits, classer leur gravité, appliquer l'ordre d'autorité, puis décider : source gagnante, hypothèse, question client, tâche d'analyse ou blocage.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-07--context-conflict-resolver",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-07",
       "controls": [
         "Context scorecard",
         "claim ledger",
@@ -221,7 +221,7 @@
       "intent": "Augmenter le contexte seulement quand une preuve montre que le budget courant est insuffisant.",
       "problem": "Le contexte grossit par confort, ou reste trop petit par économie, ce qui crée hallucinations et coûts inutiles.",
       "solution": "Définir des déclencheurs d'escalade de tiny vers small, medium ou deep, avec justification, durée et retour au budget inférieur après synthèse.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-08--context-budget-escalation",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-08",
       "controls": [
         "Logs tokens/coût",
         "context scorecard",
@@ -238,7 +238,7 @@
       "intent": "Rendre les workflows agentiques explicites, reprenables et auditables.",
       "problem": "Les agents enchaînent souvent étapes, interruptions et reprises dans une logique cachée au prompt ou au runtime.",
       "solution": "Déclarer un manifeste d'états, transitions, guards, retries, interruptions, compensations et preuves minimales.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-09--workflow-state-engine",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-09",
       "controls": [
         "Workflow state manifest",
         "mission ledger append-only",
@@ -255,7 +255,7 @@
       "intent": "Décrire des flows réutilisables sans créer un langage complexe prématuré.",
       "problem": "Les workflows restent dispersés entre prompts, scripts et documentation, ou deviennent un DSL trop riche et fragile.",
       "solution": "Définir un DSL minimal : états, transitions, guards, preuves et export Mermaid/manifest.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-10--flow-dsl-minimal",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-10",
       "controls": [
         "Flow DSL minimal",
         "workflow state manifest",
@@ -272,7 +272,7 @@
       "intent": "Séparer planification, exécution et critique pour les tâches complexes ou risquées.",
       "problem": "Un agent unique peut confondre intention, action et validation, puis défendre son propre résultat.",
       "solution": "Organiser trois responsabilités : un planner produit plan et critères, un executor agit sous task envelope, un critic vérifie hypothèses, preuves, erreurs et risques résiduels.",
-      "docPath": "docs/patterns/02-orchestration-contexte/README.md#orc-11--planner-executor-critic",
+      "docPath": "nodal/reference/patterns/orchestration-et-contexte/#orc-11",
       "controls": [
         "Task envelope",
         "validation authority",
@@ -290,7 +290,7 @@
       "intent": "Prévenir les actions non autorisées avant qu'elles se produisent.",
       "problem": "Les agents peuvent appeler outils, écrire, pousser ou supprimer au mauvais moment.",
       "solution": "Intercepter les moments critiques avec règles allow, block ou escalate.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-01--policy-engine-et-hooks",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-01",
       "controls": [
         "Pre-tool",
         "Pre-write",
@@ -308,7 +308,7 @@
       "intent": "Simuler avant d'agir sur un système externe, coûteux ou irréversible.",
       "problem": "Un agent peut produire un changement correct localement mais dangereux en contexte réel.",
       "solution": "Décrire impact, permissions, coût, rollback, validation et critères de go/no-go.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-02--dry-run-avant-action-risquée",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-02",
       "controls": [
         "Pre-dry-run",
         "validation humaine",
@@ -325,7 +325,7 @@
       "intent": "Déployer les garde-fous sans casser le flux de travail.",
       "problem": "Un hook nouveau peut bloquer trop large ou manquer des cas critiques.",
       "solution": "Promouvoir les hooks par modes `shadow`, `canary`, puis `enforced`.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-03--hook-lifecycle-progressif",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-03",
       "controls": [
         "Registre des hooks",
         "digest de validation",
@@ -342,7 +342,7 @@
       "intent": "Utiliser le bon modèle pour la bonne tâche.",
       "problem": "Le modèle par défaut peut être trop faible, trop cher ou non autorisé.",
       "solution": "Router selon tâche, rôle, risque, confidentialité, coût, modalité et evals.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-01--model-router",
+      "docPath": "nodal/reference/patterns/modeles/#mod-01",
       "controls": [
         "Pre-model-route",
         "fallback",
@@ -360,7 +360,7 @@
       "intent": "Adapter le niveau d'autonomie de l'agent au risque, aux preuves et aux autorités de validation.",
       "problem": "Une autonomie uniforme donne trop de pouvoir aux tâches risquées ou bloque inutilement les tâches simples.",
       "solution": "Définir des niveaux d'autonomie par tâche : proposer, préparer, exécuter sous contrôle, exécuter automatiquement, ou bloquer.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-04--autonomie-gouvernée",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-04",
       "controls": [
         "Policy engine",
         "validation authority",
@@ -378,7 +378,7 @@
       "intent": "Retirer ou restreindre un modèle sans casser l'orchestration.",
       "problem": "Un modèle obsolète peut rester utilisé par habitude ou fallback implicite.",
       "solution": "Maintenir statuts active, restricted, deprecated, disallowed et local_only avec fallback explicite.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-02--model-retirement-guard",
+      "docPath": "nodal/reference/patterns/modeles/#mod-02",
       "controls": [
         "Politique de routage",
         "pre-model-route",
@@ -395,7 +395,7 @@
       "intent": "Router chaque tâche vers la cible réellement compétente pour la modalité requise, et assumer ses limites au lieu de simuler une maîtrise absente.",
       "problem": "Un LLM généraliste accepte toute demande et produit un résultat médiocre hors de son cœur de compétence (illustration, audio, 3D, vidéo), ce qui dégrade le projet dès les fondations.",
       "solution": "Déclarer pour chaque tâche la modalité et le niveau de maîtrise requis ; mapper vers la cible capable (modèle spécialisé, outil dédié ou humain) ; sous un seuil de confiance, refuser et émettre des options vers GOV-15 (humain) ou RUN-15 (outil).",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#mod-03--routage-par-compétence-et-modalité-limites-assumées",
+      "docPath": "nodal/reference/patterns/modeles/#mod-03",
       "controls": [
         "Capability/modality matrix",
         "capability routing record",
@@ -413,7 +413,7 @@
       "intent": "Empêcher qu'un agent hérite des permissions d'infrastructure du controller.",
       "problem": "Un agent lancé avec les mêmes variables d'environnement que l'orchestrateur peut écrire des clés réservées, modifier l'état de convergence ou escalader ses droits.",
       "solution": "Séparer les clés controller et agent, protéger les champs d'infrastructure et scrubber les tokens avant spawn de toute session agent.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-05--agent-privilege-boundary",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-05",
       "controls": [
         "Pre-spawn env scrub",
         "liste de clés protégées",
@@ -430,7 +430,7 @@
       "intent": "Relancer seulement les échecs réellement transitoires et escalader les échecs durables.",
       "problem": "Les workflows de review/merge peuvent rester bloqués par des retries infinis ou échouer trop tôt sur un timeout provider.",
       "solution": "Classifier chaque échec en transient ou hard avant retry : rate limit, timeout et indisponibilité provider sont retryables ; violation durable, conflit logique ou verdict critique escaladent.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-06--merge-lane-fault-classifier",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-06",
       "controls": [
         "Budget de retry",
         "raison normalisée",
@@ -447,7 +447,7 @@
       "intent": "Limiter l'impact maximal d'un appel outil avant exécution.",
       "problem": "Un outil autorisé peut quand même toucher trop de fichiers, domaines, environnements, coûts ou données sensibles.",
       "solution": "Déclarer pour chaque tool call un périmètre fichiers/réseau/shell/browser/MCP/coût/environnement, puis appliquer allow, dry-run, escalate ou block.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-07--tool-blast-radius-limiter",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-07",
       "controls": [
         "Pre-tool policy",
         "allowlist",
@@ -466,7 +466,7 @@
       "intent": "Rendre les garde-fous explicites, testables et versionnés.",
       "problem": "Les règles de sécurité, qualité ou conformité restent souvent implicites dans prompts, hooks ou habitudes.",
       "solution": "Décrire chaque guardrail par type, scope, mode, point de déclenchement, décisions possibles, preuves et métriques.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-08--guardrail-contract",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-08",
       "controls": [
         "Guardrail contract",
         "hook lifecycle",
@@ -483,7 +483,7 @@
       "intent": "Autoriser les serveurs MCP comme capacités externes seulement après qualification.",
       "problem": "Un MCP peut exposer réseau, fichiers, secrets ou actions métier sans frontière claire.",
       "solution": "Enregistrer serveur, outils, variables, scopes, données accessibles, owner et mode de confiance avant usage.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-09--mcp-trust-gate",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-09",
       "controls": [
         "Registre MCP",
         "secret minimization",
@@ -502,7 +502,7 @@
       "intent": "Adapter l'autonomie et les outils au niveau de risque de l'environnement.",
       "problem": "Les règles local, staging, prod et client peuvent être confondues ou appliquées uniformément.",
       "solution": "Déclarer des profils d'environnement avec actions permises, dry-run requis, validation authority et secrets accessibles.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-10--policy-by-environment",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-10",
       "controls": [
         "Environment policy",
         "runtime provider",
@@ -520,7 +520,7 @@
       "intent": "Simuler toute action cluster ou infra avant effet réel.",
       "problem": "Une commande Kubernetes ou cloud peut dégrader plusieurs workloads même si elle est syntaxiquement correcte.",
       "solution": "Produire plan d'impact, ressources touchées, RBAC utilisé, diff attendu, rollback et preuve de policy avant apply.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-11--cluster-action-dry-run",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-11",
       "controls": [
         "Server-side dry-run",
         "diff",
@@ -539,7 +539,7 @@
       "intent": "Empêcher qu'un contenu externe devienne une instruction de contrôle.",
       "problem": "Pages web, tickets, logs, docs ou sorties outil peuvent contenir des instructions adverses ou hors périmètre.",
       "solution": "Séparer instructions de contrôle et contenu lu, marquer les sources non fiables, refuser toute instruction provenant d'un corpus externe.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-12--prompt-injection-firewall",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-12",
       "controls": [
         "Source trust label",
         "pre-context-load",
@@ -557,7 +557,7 @@
       "intent": "Vérifier la fraîcheur et la sûreté d'une source distante avant audit ou indexation.",
       "problem": "Une analyse peut s'appuyer sur une branche obsolète, un remote inaccessible, des tags massifs ou un worktree sale.",
       "solution": "Contrôler remote, branche, ref, tags, dirty state, pull/fetch safe et statut de fraîcheur avant de conclure.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-13--remote-hygiene-guard",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-13",
       "controls": [
         "Remote audit",
         "dirty-skip-pull",
@@ -574,7 +574,7 @@
       "intent": "Escalader les décisions critiques vers un quorum contrôlé.",
       "problem": "Une seule réponse modèle peut être insuffisante pour architecture, sécurité, production ou arbitrage irréversible.",
       "solution": "Définir conseil, quorum, veto, budget, modèles/providers autorisés, synthèse des désaccords et verdict final.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-14--decision-council-gate",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-14",
       "controls": [
         "Council record",
         "validation authority",
@@ -592,7 +592,7 @@
       "intent": "Escalader vers un humain quand le risque, l'ambiguïté ou l'impact dépassent l'autonomie autorisée.",
       "problem": "Un agent peut trancher seul une situation sensible, irréversible ou hors de son mandat.",
       "solution": "Définir des déclencheurs d'escalade (risque élevé, ambiguïté critique, impact sensible, faible confiance) et un canal de décision humaine traçable.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-15--human-escalation-gate",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-15",
       "controls": [
         "Policy engine",
         "validation authority",
@@ -610,7 +610,7 @@
       "intent": "Classer les erreurs LLM avant toute reprise.",
       "problem": "Un échec non qualifié déclenche des retries aveugles ou masque un défaut durable.",
       "solution": "Distinguer erreur transitoire provider, sortie invalide, risque factuel, omission, conflit d'instruction et échec d'outil.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-16--llm-error-classifier",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-16",
       "controls": [
         "Failure classification contract",
         "telemetry events",
@@ -627,7 +627,7 @@
       "intent": "Associer chaque classe d'erreur à une stratégie de reprise explicite.",
       "problem": "Sans politique, la reprise est improvisée, coûteuse ou dangereuse.",
       "solution": "Mapper erreur vers retry borné, fallback modèle, correction ciblée, rollback, escalade ou blocage, avec budget et preuves.",
-      "docPath": "docs/patterns/03-gouvernance-controles/README.md#gov-17--recovery-policy",
+      "docPath": "nodal/reference/patterns/gouvernance-et-controles/#gov-17",
       "controls": [
         "LLM error classifier",
         "model router",
@@ -645,7 +645,7 @@
       "intent": "Transformer les affirmations en éléments vérifiables.",
       "problem": "L'agent peut produire des conclusions plausibles mais non prouvées.",
       "solution": "Relier chaque affirmation critique à une source, un résultat d'outil ou une hypothèse.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-01--claim-ledger",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-01",
       "controls": [
         "QA",
         "critique",
@@ -662,7 +662,7 @@
       "intent": "Comprendre et améliorer les décisions agentiques.",
       "problem": "Sans traces, on ne sait pas pourquoi un agent a agi ni comment corriger.",
       "solution": "Capturer prompts, contexte, outils, coûts, latence, erreurs, validations et incidents.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-02--observabilité-agentique",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-02",
       "controls": [
         "Traces",
         "métriques",
@@ -680,7 +680,7 @@
       "intent": "Rendre les missions et transitions auditables.",
       "problem": "Un état courant écrasé ne permet pas de comprendre pourquoi une décision a changé.",
       "solution": "Journaliser missions, tâches, transitions, incidents et preuves comme événements append-only.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-03--mission-ledger-append-only",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-03",
       "controls": [
         "Machine d'état",
         "actor_id",
@@ -698,7 +698,7 @@
       "intent": "Transformer le Done en décision vérifiable.",
       "problem": "Les preuves existent mais restent dispersées entre logs, tests, captures et rapports.",
       "solution": "Regrouper les preuves dans un evidence pack, puis produire un verdict de vérification.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-04--evidence-pack-et-verification-verdict",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-04",
       "controls": [
         "Digest",
         "couverture des critères",
@@ -715,7 +715,7 @@
       "intent": "Autoriser les transitions d'étape seulement par preuves proportionnées au risque.",
       "problem": "Une mission peut passer de discovery à cadrage, de dev à QA ou de QA à livraison sans preuve suffisante.",
       "solution": "Associer chaque transition à un gate de preuves : critères couverts, risques traités, verdict, prochaine autorité.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-05--evidence-driven-transition",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-05",
       "controls": [
         "Pre-stage-transition",
         "evidence pack",
@@ -732,7 +732,7 @@
       "intent": "Rendre le coût LLM observable, comparable et gouvernable.",
       "problem": "Les coûts tokens sont souvent visibles trop tard dans la facturation provider et difficiles à relier à une mission, un modèle ou un rig.",
       "solution": "Maintenir un registre de prix par modèle/provider avec précédence explicite (défauts, pack, projet), puis rattacher tokens, coût estimé et budget à chaque trace.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-06--llm-cost-registry",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-06",
       "controls": [
         "Source de prix",
         "version de pricing",
@@ -750,7 +750,7 @@
       "intent": "Mesurer la santé réelle des sessions agentiques par runtime, modèle et version de prompt.",
       "problem": "Un agent peut sembler fonctionnel globalement alors qu'un modèle, rig ou prompt version provoque crashs, quarantaines ou idle kills.",
       "solution": "Agréger sessions, crashes, quarantaines, idle kills et drain events par Model/PromptVersion/Rig, puis calculer CrashRate% et UnhealthyRate%.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-07--session-reliability-slo-reporter",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-07",
       "controls": [
         "SLO de fiabilité",
         "seuil de quarantaine",
@@ -767,7 +767,7 @@
       "intent": "Unifier traces, métriques et événements des agents, modèles, outils, workflows et connaissances.",
       "problem": "Les preuves existent mais restent fragmentées entre logs shell, traces provider, prompts, coûts et résultats de test.",
       "solution": "Définir un plan télémétrique avec trace_id, mission_id, actor_id, model/provider, tool, state, coût, latence, verdict et incident.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-08--agent-telemetry-plane",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-08",
       "controls": [
         "OpenTelemetry ou équivalent",
         "corrélation evidence pack",
@@ -784,7 +784,7 @@
       "intent": "Comprendre l'effet des versions de prompts, instructions, skills et modèles.",
       "problem": "Un changement de prompt peut dégrader qualité, coût ou sécurité sans être attribuable.",
       "solution": "Versionner prompt, instruction, skill, capability pack, provider/model et dataset d'eval dans chaque trace.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-09--promptversion-observability",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-09",
       "controls": [
         "Prompt registry",
         "eval dataset record",
@@ -802,7 +802,7 @@
       "intent": "Rejouer le raisonnement opérationnel observable d'une mission sans exposer de données sensibles inutiles.",
       "problem": "Le résultat final ne montre pas quelles sources, outils, validations ou hésitations ont structuré l'action.",
       "solution": "Journaliser la trajectoire en événements : intention, contexte chargé, décision, tool call, observation, correction, verdict.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-10--trajectory-logging",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-10",
       "controls": [
         "Mission ledger",
         "telemetry plane",
@@ -820,7 +820,7 @@
       "intent": "Rendre les actions UI/browser vérifiables et sûres.",
       "problem": "Une validation visuelle ou E2E peut être non reproductible sans DOM, screenshot, console et réseau.",
       "solution": "Encadrer URLs, actions autorisées, preuves visuelles, logs et dry-run pour toute interaction navigateur.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-11--browser-evidence-contract",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-11",
       "controls": [
         "Browser tool contract",
         "screenshot final",
@@ -838,7 +838,7 @@
       "intent": "Capturer les preuves visuelles nécessaires aux livrables UI, design ou navigateur.",
       "problem": "Un test ou une réponse textuelle ne prouve pas toujours l'état réel de l'interface.",
       "solution": "Grouper DOM snapshot, screenshots, console, réseau, viewport, parcours et critères UX dans un pack de preuve.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-12--visual-evidence-pack",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-12",
       "controls": [
         "Browser tool contract",
         "design validation authority",
@@ -855,7 +855,7 @@
       "intent": "Faire évoluer les evals comme un actif de qualité versionné.",
       "problem": "Les evals deviennent vite obsolètes si elles ne suivent pas prompts, modèles, skills et incidents.",
       "solution": "Versionner datasets, juges, seuils, historique de runs, cas ajoutés depuis incidents et règles de blocage.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-13--eval-lifecycle",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-13",
       "controls": [
         "Eval dataset record",
         "prompt/version observability",
@@ -872,7 +872,7 @@
       "intent": "Garantir que la sortie respecte un contrat exploitable avant utilisation.",
       "problem": "Une réponse plausible peut violer schéma, types, invariants ou format attendu.",
       "solution": "Définir un contrat (schéma, champs requis, types, invariants métier) et valider la sortie avant de la consommer.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-14--output-contract-validator",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-14",
       "controls": [
         "Output contract",
         "validation automatique",
@@ -889,7 +889,7 @@
       "intent": "Séparer producteur et vérificateur pour les sorties critiques.",
       "problem": "Un agent qui valide son propre travail défend ses erreurs.",
       "solution": "Confier la vérification à un rôle, agent ou modèle distinct, avec critères explicites et verdict tracé.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-15--independent-reviewer",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-15",
       "controls": [
         "Validation authority",
         "evidence pack",
@@ -906,7 +906,7 @@
       "intent": "Distinguer explicitement hypothèses et faits prouvés.",
       "problem": "Les hypothèses implicites sont traitées comme des certitudes et propagées sans contrôle.",
       "solution": "Enregistrer chaque hypothèse, son statut (à confirmer, confirmée, invalidée) et son impact si elle est fausse.",
-      "docPath": "docs/patterns/04-preuves-qualite/README.md#qua-16--assumption-ledger",
+      "docPath": "nodal/reference/patterns/preuves-et-qualite/#qua-16",
       "controls": [
         "Claim ledger",
         "context conflict resolver",
@@ -922,7 +922,7 @@
       "intent": "Empêcher la mémoire et les documents de devenir toxiques ou ingouvernables.",
       "problem": "Les vieux rapports, traces et décisions remplacées polluent le contexte futur.",
       "solution": "Classer artefacts en durable, archive, TTL, désindexation ou purge.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-01--knowledge-janitor",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-01",
       "controls": [
         "Pre-index",
         "Scheduled-cleanup",
@@ -939,7 +939,7 @@
       "intent": "Combiner rappel sémantique, relations et faits temporels.",
       "problem": "Une vector DB seule rappelle des textes similaires sans comprendre validité ni dépendances.",
       "solution": "Associer vectoriel, graphe, sidecar structuré, journal et sources de vérité.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-02--mémoire-hybride",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-02",
       "controls": [
         "Source registry",
         "memory gate",
@@ -956,7 +956,7 @@
       "intent": "Empêcher la divergence entre documentation, manifests, hooks, workflows et mémoire.",
       "problem": "Le runtime évolue plus vite que le standard documentaire, ou inversement.",
       "solution": "Comparer surfaces déclarées, fichiers réels, registres, sources actives et preuves de workflow.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-03--doc-drift-detector",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-03",
       "controls": [
         "Hook doc-drift-check",
         "release gate",
@@ -973,7 +973,7 @@
       "intent": "Transformer une sortie temporaire en connaissance durable seulement si elle le mérite.",
       "problem": "Les handoffs, rapports et notes temporaires sont souvent indexés trop tôt ou jamais capitalisés correctement.",
       "solution": "Évaluer chaque candidat selon stabilité, source, réutilité, sensibilité, propriétaire et expiration, puis promouvoir, archiver ou purger.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-04--knowledge-promotion",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-04",
       "controls": [
         "Pre-memory-write",
         "registre de rétention",
@@ -990,7 +990,7 @@
       "intent": "Réparer une mémoire fausse, sensible ou obsolète déjà utilisée par le système.",
       "problem": "Une mémoire contaminée peut influencer plusieurs tâches avant d'être détectée.",
       "solution": "Déclarer incident, identifier portée, purger ou corriger la mémoire, invalider caches, réviser décisions impactées et ajouter une prévention.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-05--memory-contamination-response",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-05",
       "controls": [
         "Incident report",
         "memory audit",
@@ -1008,7 +1008,7 @@
       "intent": "Greffer une base documentaire externe au système agentique pour spécialiser un flow sur un domaine, produit, client ou entreprise.",
       "problem": "Un agent générique ne connaît pas les spécifications internes, procédures, APIs, contraintes métier ou historiques de décision d'une organisation. Tout mettre en prompt ou en mémoire agentique mélange les responsabilités et devient ingouvernable.",
       "solution": "Déclarer des sources de connaissance externes via connecteurs (repo, URL, API, MCP, base de données, dossier), les indexer avec métadonnées, ACL, fraîcheur et stratégie de réindexation, puis exposer la recherche à l'orchestrateur de contexte.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-06--knowledge-base-indexer",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-06",
       "controls": [
         "Pre-index",
         "source owner",
@@ -1029,7 +1029,7 @@
       "intent": "Vérifier que les mémoires utilisées restent sourcées, fraîches et non contaminées.",
       "problem": "Une mémoire durable peut devenir fausse, obsolète, sensible ou contradictoire avec une source active.",
       "solution": "Auditer périodiquement les mémoires par provenance, validité, TTL, contradictions, usage récent et sensibilité.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-07--memory-integrity-validator",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-07",
       "controls": [
         "Memory routing policy",
         "source registry",
@@ -1046,7 +1046,7 @@
       "intent": "Transformer un corpus documentaire en graphe de relations exploitable et vérifiable.",
       "problem": "L'indexation vectorielle retrouve des passages mais ne représente pas dépendances, contradictions, supersessions ou preuves.",
       "solution": "Extraire nœuds et relations depuis docs/code/ADR/tickets/API, avec provenance, confiance et statut de fraîcheur.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-08--doc-to-graph-pipeline",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-08",
       "controls": [
         "Source graph record",
         "relation provenance",
@@ -1063,7 +1063,7 @@
       "intent": "Présenter une connaissance complexe sous une forme narrative exploitable par humains et agents.",
       "problem": "Un graphe ou un index peut être correct mais trop fragmenté pour onboarding, audit ou décision.",
       "solution": "Générer des packages narratifs sourcés : résumé, décisions, concepts, dépendances, risques, exemples et preuves.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-09--knowledge-narrative-packaging",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-09",
       "controls": [
         "Claim ledger",
         "source graph",
@@ -1081,7 +1081,7 @@
       "intent": "Résoudre les relations entre sources pour éviter qu'une similarité soit prise pour une preuve.",
       "problem": "Code, documentation, ADR, tickets, API et mémoire peuvent dépendre, se contredire ou se remplacer sans que le RAG le voie.",
       "solution": "Interroger le graphe source pour retrouver dépendances, supersessions, contradictions, preuves et source active avant décision.",
-      "docPath": "docs/patterns/05-memoire-connaissances/README.md#kno-10--source-graph-resolver",
+      "docPath": "nodal/reference/patterns/memoire-et-connaissances/#kno-10",
       "controls": [
         "Source graph record",
         "context conflict resolver",
@@ -1098,7 +1098,7 @@
       "intent": "Créer de nouvelles capacités sans prolifération incontrôlée.",
       "problem": "Agents, skills et workflows dynamiques peuvent devenir une dette invisible.",
       "solution": "Détecter le gap, classer l'artefact, décider éphémère/permanent, valider puis promouvoir ou purger.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-01--dynamic-factory-contrôlée",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-01",
       "controls": [
         "Usage tracking",
         "expiration",
@@ -1116,7 +1116,7 @@
       "intent": "Gouverner les artefacts produits par le runtime agentique.",
       "problem": "Plans, traces, rapports, captures et sorties temporaires s'accumulent sans statut.",
       "solution": "Déclarer type, propriétaire, sensibilité, rétention, indexation et statut.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-02--runtime-output-governance",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-02",
       "controls": [
         "Registre de surfaces runtime",
         "cleanup",
@@ -1133,7 +1133,7 @@
       "intent": "Exécuter agents et sandboxes en production comme ressources réconciliées, isolées et observables.",
       "problem": "Un worker local ne suffit pas pour quotas, scheduling, multi-tenant, service accounts et tolérance de panne.",
       "solution": "Fournir un provider K8s natif : pods gérés directement, requests/limits, node selectors, tolerations, affinity, service accounts, images prebaked et télémétrie OTel.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-03--kubernetes-agent-control-plane",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-03",
       "controls": [
         "Admission policy",
         "network allowlist",
@@ -1152,7 +1152,7 @@
       "intent": "Choisir le coût et le niveau d'orchestration appropriés pour un ordre.",
       "problem": "Toutes les commandes ne nécessitent pas une session agent ; inversement certains workflows shell cachent une orchestration complexe.",
       "solution": "Distinguer `exec` (shell-only, sans session agent) et `formula` (workflow agentique instancié), avec budget, preuve et blast-radius différents.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-04--orders-execformula-dispatcher",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-04",
       "controls": [
         "Type d'ordre",
         "budget token",
@@ -1170,7 +1170,7 @@
       "intent": "Éviter que les rôles et capacités deviennent des types SDK rigides.",
       "problem": "Un framework role-centric pousse à forker le core dès qu'un rôle ou workflow change.",
       "solution": "Définir rôles, prompts, formules et permissions dans des packs/configs ; le SDK ne fournit que les primitives d'exécution et de composition.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-05--primitive-first-capability-model",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-05",
       "controls": [
         "Registry de packs",
         "résolution de conflits",
@@ -1187,7 +1187,7 @@
       "intent": "Rendre les capacités agentiques découvrables, gouvernées et réutilisables.",
       "problem": "Agents, prompts, skills, outils et workflows se multiplient sans catalogue ni statut.",
       "solution": "Publier des capability packs avec owner, version, runtime compatible, permissions, tests et lifecycle.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-06--capability-marketplace",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-06",
       "controls": [
         "Capability pack manifest",
         "skill record",
@@ -1205,7 +1205,7 @@
       "intent": "Promouvoir ou retirer les skills selon preuve d'utilité et de sécurité.",
       "problem": "Une skill expérimentale peut devenir critique sans review, ou une skill obsolète rester active.",
       "solution": "Utiliser les statuts draft, experimental, canary, enforced, deprecated, retired avec gates et owner.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-07--skillcapability-lifecycle",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-07",
       "controls": [
         "Skill record",
         "eval",
@@ -1223,7 +1223,7 @@
       "intent": "Séparer l'orchestration logique du backend d'exécution réel.",
       "problem": "Le même workflow doit pouvoir tourner localement, dans un IDE, sur worker distant ou cluster sans changer ses garanties.",
       "solution": "Normaliser lifecycle, ressources, logs, health, secrets, cleanup et policies via un runtime provider contract.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-08--runtime-provider-contract",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-08",
       "controls": [
         "Runtime provider contract",
         "provider health",
@@ -1241,7 +1241,7 @@
       "intent": "Isoler le backend agent des modèles, outils et environnements spécifiques.",
       "problem": "Un agent couplé à un fournisseur ou runtime ne peut pas migrer entre Copilot, Codex, Claude, local ou cluster.",
       "solution": "Définir des ports : model provider, tool provider, memory provider, runtime provider et telemetry provider.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-09--agent-backend-boundary",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-09",
       "controls": [
         "Provider registry",
         "adapter contract",
@@ -1258,7 +1258,7 @@
       "intent": "Exécuter plusieurs tâches locales sans bloquer l'orchestrateur.",
       "problem": "Les missions longues, tests ou explorations concurrentes saturent une seule session et masquent les pannes.",
       "solution": "Gérer un pool de workers locaux avec capacité, queue, timeout, health, logs et cleanup.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-10--local-agent-worker-pool",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-10",
       "controls": [
         "WIP limit",
         "runtime provider contract",
@@ -1276,7 +1276,7 @@
       "intent": "Empêcher les agents de modifier ou lire hors du périmètre autorisé.",
       "problem": "Un agent outillé peut toucher fichiers, secrets, caches ou repos voisins par accident.",
       "solution": "Déclarer workspace root, mounts, write zones, secrets visibles, network policy et cleanup.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-11--workspace-isolation",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-11",
       "controls": [
         "Path allowlist",
         "sandbox",
@@ -1294,7 +1294,7 @@
       "intent": "Coordonner plusieurs agents locaux sans proxy de credentials ni canal opaque.",
       "problem": "Un coordinateur local peut devenir un relais de tokens, un bus non audité ou un contournement des policies.",
       "solution": "Utiliser inbox signée, terminal bridge officiel, sessions bornées, env scrub et gates avant action.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-12--secure-local-coordinator",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-12",
       "controls": [
         "Agent privilege boundary",
         "runtime provider contract",
@@ -1311,7 +1311,7 @@
       "intent": "Rendre les actions à effet externe rejouables sans doublon.",
       "problem": "Un retry après timeout peut recréer, repayer ou renvoyer deux fois le même effet.",
       "solution": "Utiliser clés d'idempotence, vérification d'état avant action et déduplication des effets.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-13--idempotent-tool-action",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-13",
       "controls": [
         "Idempotency key",
         "dry-run",
@@ -1328,7 +1328,7 @@
       "intent": "Corriger ou compenser les effets partiels d'une séquence interrompue.",
       "problem": "Un échec en milieu de séquence laisse le système dans un état incohérent.",
       "solution": "Définir pour chaque effet une action de compensation ou de rollback, déclenchée par la recovery policy.",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-14--compensation--rollback-action",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-14",
       "controls": [
         "Recovery policy",
         "idempotent tool action",
@@ -1345,7 +1345,7 @@
       "intent": "Combler un manque de capacité par la bonne option d'outillage, choisie par l'utilisateur, sans réinventer la roue.",
       "problem": "Face à un manque d'outil, l'agent réinvente un outil mûr (gaspillage), adopte un outil non gouverné ou payant sans accord, ou abandonne la tâche.",
       "solution": "Produire un dossier d'options — adopter (gratuit, open-source, payant), commander un build aux agents de dev, ou faire soi-même si trivial — avec coût, risque et maintenance ; faire choisir l'utilisateur (GOV-15) ; gouverner l'adoption externe (GOV-09, GOV-05, GOV-07).",
-      "docPath": "docs/patterns/06-runtime-evolution/README.md#run-15--acquisition-doutils-et-provisioning",
+      "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-15",
       "controls": [
         "Tool sourcing decision record",
         "make-or-buy analysis",
@@ -1363,7 +1363,7 @@
       "intent": "Transformer un objectif vague en sous-buts vérifiables et ordonnés avant d'agir ou de déléguer.",
       "problem": "Un modèle tente souvent de répondre à un objectif large en un seul jet, ce qui masque dépendances, angles morts et critères de succès.",
       "solution": "Découper l'objectif en sous-buts explicites, chacun avec critère de complétion, dépendances et preuve attendue, puis exécuter ou encapsuler chaque sous-but dans une task envelope.",
-      "docPath": "docs/patterns/08-cognition/README.md#cog-01--décomposition-dobjectif",
+      "docPath": "nodal/reference/patterns/cognition/#cog-01",
       "controls": [
         "Critère de complétion par sous-but",
         "dépendances déclarées",
@@ -1381,7 +1381,7 @@
       "intent": "Donner au modèle un espace de raisonnement intermédiaire, distinct de la sortie livrable et non persisté par défaut.",
       "problem": "Le raisonnement intermédiaire est soit absent (réponse précipitée), soit mélangé à la sortie, soit persisté ou fuité alors qu'il contient hypothèses fausses ou données sensibles.",
       "solution": "Isoler un scratchpad éphémère pour hypothèses, étapes et calculs, borné en taille, séparé du livrable, non indexé sauf décision explicite via memory gate.",
-      "docPath": "docs/patterns/08-cognition/README.md#cog-02--espace-de-raisonnement-gouverné",
+      "docPath": "nodal/reference/patterns/cognition/#cog-02",
       "controls": [
         "Séparation raisonnement/sortie",
         "rétention courte",
@@ -1399,7 +1399,7 @@
       "intent": "Améliorer une sortie par une passe de critique puis correction par le modèle lui-même, dans une boucle bornée.",
       "problem": "La première sortie d'un modèle est souvent améliorable ; sans révision, des erreurs évidentes passent ; avec révision non bornée, le coût explose et le modèle tourne en rond.",
       "solution": "Ajouter une passe d'auto-critique guidée par critères explicites, puis une correction ciblée, avec un nombre maximal d'itérations et un critère d'arrêt sur convergence.",
-      "docPath": "docs/patterns/08-cognition/README.md#cog-03--auto-révision-bornée",
+      "docPath": "nodal/reference/patterns/cognition/#cog-03",
       "controls": [
         "Critères de révision explicites",
         "budget d'itérations",
@@ -1416,7 +1416,7 @@
       "intent": "Choisir et invoquer la compétence, l'outil ou le skill adapté à un sous-but, comme MOD-01 le fait pour les modèles.",
       "problem": "Un agent peut ignorer une compétence disponible, en choisir une inadaptée, ou tout faire en raisonnement libre alors qu'un outil fiable existe.",
       "solution": "Décrire les compétences disponibles (intention, entrées, coût, risque, preuves), puis sélectionner la plus adaptée au sous-but selon capacité, risque, coût et autorisations, avec fallback explicite.",
-      "docPath": "docs/patterns/08-cognition/README.md#cog-04--sélecteur-de-compétence",
+      "docPath": "nodal/reference/patterns/cognition/#cog-04",
       "controls": [
         "Capability description",
         "policy engine",

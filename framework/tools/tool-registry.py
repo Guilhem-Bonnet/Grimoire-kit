@@ -547,13 +547,13 @@ def load_registry_config(project_root: Path) -> dict:
 
 def _print_tool_list(tools: list[GrimoireTool]) -> None:
     print(f"\n  Grimoire Tool Registry — {len(tools)} outils")
-    print(f"  {'─' * 70}")
+    print(f"  {'-' * 70}")
 
     for tool in tools:
         tags = " ".join(f"[{t}]" for t in tool.tags) if tool.tags else ""
         ver = f" v{tool.version}" if tool.version else ""
         subs = f" ({', '.join(tool.subcommands)})" if tool.subcommands else ""
-        print(f"  {tool.name:30s} │ {tool.tool_type:5s}{ver}")
+        print(f"  {tool.name:30s} | {tool.tool_type:5s}{ver}")
         print(f"    {tool.description[:70]}")
         if subs:
             print(f"    Subcommands: {subs}")
@@ -564,7 +564,7 @@ def _print_tool_list(tools: list[GrimoireTool]) -> None:
 
 def _print_tool_detail(tool: GrimoireTool) -> None:
     print(f"\n  {tool.name}")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
     print(f"  Description : {tool.description}")
     print(f"  Type        : {tool.tool_type}")
     print(f"  Source      : {tool.source_file}")
@@ -591,7 +591,7 @@ def _print_validation(results: list[ValidationResult]) -> None:
     icon = "[OK]" if valid_count == total else "[!]"
 
     print(f"\n  {icon} Validation — {valid_count}/{total} outils valides")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
 
     for r in results:
         status = "[OK]" if r.valid else "[x]"
@@ -605,7 +605,7 @@ def _print_validation(results: list[ValidationResult]) -> None:
 
 def _print_stats(stats: RegistryStats) -> None:
     print("\n  Registry Stats")
-    print(f"  {'─' * 40}")
+    print(f"  {'-' * 40}")
     print(f"  Total outils       : {stats.total_tools}")
     print(f"  Python CLI         : {stats.python_tools}")
     print(f"  Shell scripts      : {stats.shell_tools}")

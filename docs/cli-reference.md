@@ -23,9 +23,23 @@ grimoire init [PATH] [OPTIONS]
 | `--name TEXT` | Nom du projet | Nom du répertoire |
 | `--archetype, -a` | Archétype d'agents | `minimal` |
 | `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
+| `--memory-profile, -m` | Composition mémoire : `lexical`, `standard`, `graphe`, `complet` | déduite |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |
+
+La mémoire se choisit comme une composition, pas comme un backend : le profil
+fixe les sept couches du Memory OS d'un coup (mémoire courte, sémantique,
+sidecar structuré, graphes, mémoire chaude, visualisation). Sans l'option, le
+profil est déduit du store détecté et de l'accès réseau. Voir
+[Système de mémoire](memory-system.md).
+
+| Profil | Composition |
+|--------|-------------|
+| `lexical` | BM25 SQLite seul — aucun modèle, aucun service, aucun réseau |
+| `standard` | Sémantique + BM25 fusionnés (RRF) et sidecar structuré |
+| `graphe` | Standard + graphes Neo4j : connaissances, souvenirs, code, tâches |
+| `complet` | Graphe + mémoire chaude Redis (TTL, baux, coordination multi-agents) |
 
 ### `grimoire doctor`
 
@@ -208,7 +222,7 @@ persona.
 
 ## Standard agentique gouverné
 
-Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](governed-controls.md).
+Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).
 
 | Commande | Description |
 | --- | --- |
@@ -250,6 +264,133 @@ Neuf états côté ledger se projettent sur les huit colonnes du standard. Les
 fusions sont décidées et testées : `claimed` et `running` deviennent
 `in_progress`, `needs_verification` devient `review`, `failed` devient `blocked`
 (avec un motif), `closed` devient `accepted`, `cancelled` devient `archived`.
+
+---
+
+## Mémoire
+
+Le groupe `grimoire memory` pilote le sous-système mémoire. Concepts, backends
+et projections : [Système de mémoire](memory-system.md).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire memory status` | Santé du backend, nombre d'entrées, configuration |
+| `grimoire memory up` | Mettre en place la stack mémoire complète, plan par plan |
+| `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois |
+| `grimoire memory recall <requête>` | Rechercher parmi les mémoires typées |
+| `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul |
+| `grimoire memory list` | Lister les mémoires stockées, paginées |
+| `grimoire memory delete <id>` | Supprimer une entrée |
+| `grimoire memory gc` | Consolider et compacter |
+| `grimoire memory export` / `import` | Exporter vers JSON, réimporter |
+| `grimoire memory reindex-lexical` | Reconstruire l'index lexical compagnon |
+| `grimoire memory gate` | Gate de parité Memory OS entre Weaviate et Neo4j |
+| `grimoire memory graph` / `vector` | Synchroniser et vérifier les projections |
+| `grimoire memory bundle` | Construire, installer et vérifier les bundles de modèles d'embedding |
+| `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
+| `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
+| `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
+| `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |
+
+---
+
+## Hooks git
+
+| Commande | Description |
+| --- | --- |
+| `grimoire hooks list` | Lister les hooks disponibles et leur état d'installation |
+| `grimoire hooks status` | Résumer l'état d'installation — sortie `1` si incomplet |
+| `grimoire hooks install` | Installer les hooks git Grimoire dans le dépôt |
+
+---
+
+## Blueprints et flows
+
+Un blueprint décrit un flow agentique comme un graphe de nodes typés. Ces
+commandes le manipulent sans passer par l'atelier web. Détail du format et de
+l'éditeur : [Mode local et blueprints](serve-blueprints.md).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire blueprint new <id>` | Scaffolder un `.blueprint.json` valide depuis un modèle embarqué |
+| `grimoire blueprint validate <fichier>` | Valider : JSON Schema, puis contrôles structurels de compilation |
+| `grimoire blueprint compile <fichier>` | Compiler en mission pack, avec les mêmes règles fail-closed que l'atelier |
+| `grimoire blueprint evals <fichier> --record <relevé>` | Rejouer les évals déclarées contre un relevé d'exécution |
+
+Le rejeu ne fabrique aucun verdict : un cas absent du relevé est rapporté comme
+**non exécuté**, jamais comme échoué.
+
+`validate` et `compile` ont deux couches de contrôle, dont la première demande
+le paquet `jsonschema`. Quand il manque, la couche ne s'exécute pas et les deux
+commandes **refusent** : un contrôle qui n'a pas eu lieu ne peut pas conclure à
+un succès. `--allow-skipped-schema` accepte explicitement le contrôle partiel.
+
+---
+
+## Cadrage produit
+
+Cinq phases posées sous `_grimoire/cadrage/` : brief, brainstorm, compréhension,
+exigences, cahier des charges.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire cadrage init` | Poser les cinq phases du cadrage |
+| `grimoire cadrage status` | Progression, phase par phase |
+| `grimoire cadrage check` | Gate de complétude : exigences et cahier des charges doivent être renseignés |
+
+---
+
+## Cockpit multi-projets
+
+Cockpit local de gouvernance, servi sur `127.0.0.1` uniquement. Le registre vit
+dans `~/.grimoire/cockpit/registry.json` ; `grimoire init` y inscrit le projet
+et l'annonce, et `GRIMOIRE_NO_COCKPIT` désactive cette inscription.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire cockpit add <chemin>` | Enregistrer un projet local |
+| `grimoire cockpit list` | Lister les projets gouvernés |
+| `grimoire cockpit remove <slug>` | Retirer un projet du registre |
+| `grimoire cockpit prune` | Retirer les projets dont le chemin a disparu |
+| `grimoire cockpit scan <racine>` | Découvrir les projets sous une racine et les enrôler |
+| `grimoire cockpit refresh` | Régénérer la couche de données sans servir |
+| `grimoire cockpit serve` | Servir le cockpit (bloquant) |
+| `grimoire cockpit start` / `stop` / `status` | Lancer en arrière-plan, arrêter, interroger |
+| `grimoire cockpit open` | Ouvrir le cockpit en cours d'exécution dans le navigateur |
+
+---
+
+## Workflows Copilot
+
+Inspection et synchronisation des prompts de workflow entre le framework et le
+projet.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire workflows list` | Lister les workflows du projet et du framework |
+| `grimoire workflows search <terme>` | Chercher par slug, description, et optionnellement contenu |
+| `grimoire workflows show <slug>` | Afficher le contenu et la source d'un prompt |
+| `grimoire workflows install <slug>` | Installer un workflow du framework dans le projet |
+| `grimoire workflows sync` | Synchroniser les workflows du framework vers le projet |
+| `grimoire workflows diff` | Différences entre framework et projet |
+| `grimoire workflows doctor` | Auditer les workflows du projet contre les défauts du framework |
+| `grimoire workflows prune` | Retirer les workflows propres au projet absents du framework |
+
+---
+
+## Utilitaires
+
+| Commande | Description |
+| --- | --- |
+| `grimoire context-pack` | Écrire un context-pack durable (contrat catalogue) pour le dépôt |
+| `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` |
+| `grimoire debugger status` | État de la réalité et du débogage des agents |
+| `grimoire debugger claims` | Affirmations enregistrées par les agents |
+| `grimoire debugger plan` | Plan de débogage courant |
+| `grimoire debugger generate` | Générer les artefacts de débogage |
+| `grimoire debugger serve` | Servir la vue de débogage |
+
+L'alias court `grimoire dbg` existe pour `debugger`.
 
 ---
 

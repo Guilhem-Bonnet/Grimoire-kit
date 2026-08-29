@@ -324,9 +324,9 @@ def cmd_history(args: argparse.Namespace) -> int:
             typ = entry.get("type", "?")
             if typ == "vote":
                 icon = "[OK]" if entry.get("consensus") else "[x]"
-                print(f"   {ts} [vote] {entry.get('topic', '?')} → {icon}")
+                print(f"   {ts} [vote] {entry.get('topic', '?')} -> {icon}")
             elif typ == "estimate":
-                print(f"   {ts} [estimate] {entry.get('task', '?')} → Fib {entry.get('fibonacci', '?')}")
+                print(f"   {ts} [estimate] {entry.get('task', '?')} -> Fib {entry.get('fibonacci', '?')}")
     return 0
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rag-indexer.py — Pipeline RAG d'indexation Grimoire → Qdrant (BM-42).
+rag-indexer.py — Pipeline RAG d'indexation Grimoire -> Qdrant (BM-42).
 ============================================================
 
 Indexe tous les artifacts Grimoire (agents, mémoire, docs, PRDs, ADRs, code)
@@ -127,7 +127,7 @@ def _validate_url(url: str, *, allow_localhost: bool = True) -> str:
         if allow_localhost and (ip.is_loopback or ip.is_private) and not ip.is_link_local:
             continue
         if _forbidden_ip(ip, allow_loopback=allow_localhost):
-            raise ValueError(f"URL résout vers une adresse interdite: {host} → {ip}")
+            raise ValueError(f"URL résout vers une adresse interdite: {host} -> {ip}")
     return url
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -589,7 +589,7 @@ class EmbeddingProvider:
 # ── RAG Indexer ──────────────────────────────────────────────────────────────
 
 class RAGIndexer:
-    """Pipeline d'indexation Grimoire → Qdrant."""
+    """Pipeline d'indexation Grimoire -> Qdrant."""
 
     def __init__(
         self,
@@ -954,15 +954,15 @@ def _print_status(indexer: RAGIndexer) -> None:
     st = indexer.status()
     print(f"\n   RAG Index Status — {st['project']}")
     print(f"  Embedding model : {st['embedding_model']} ({st['vector_size']}d)")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     for coll, info in st["collections"].items():
         if "error" in info:
-            print(f"  [x] {coll:12s} │ error: {info['error']}")
+            print(f"  [x] {coll:12s} | error: {info['error']}")
         else:
             count = info.get("points_count", 0)
             status = info.get("status", "unknown")
             icon = "[OK]" if count > 0 else "[-]"
-            print(f"  {icon} {coll:12s} │ {count:>6d} chunks │ {status}")
+            print(f"  {icon} {coll:12s} | {count:>6d} chunks | {status}")
     print()
 
 
@@ -973,9 +973,9 @@ def _print_search_results(results: list[SearchResult]) -> None:
         return
 
     print(f"\n  {len(results)} résultats trouvés")
-    print(f"  {'─' * 60}")
+    print(f"  {'-' * 60}")
     for i, r in enumerate(results, 1):
-        score_bar = "█" * int(r.score * 10)
+        score_bar = "#" * int(r.score * 10)
         print(f"\n  [{i}] {r.source_file}")
         print(f"      Score: {r.score} {score_bar}")
         print(f"      Type: {r.chunk_type} | Collection: {r.collection}")
@@ -992,7 +992,7 @@ def _print_search_results(results: list[SearchResult]) -> None:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(
-        description="RAG Indexer — Pipeline d'indexation Grimoire → Qdrant",
+        description="RAG Indexer — Pipeline d'indexation Grimoire -> Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -1043,7 +1043,7 @@ def main() -> None:
         collection = getattr(args, "collection", None)
 
         print(f"\n  RAG Indexation {'FULL' if full else 'INCREMENTAL'}")
-        print(f"  {'─' * 50}")
+        print(f"  {'-' * 50}")
 
         if collection:
             report = indexer.index_collection(collection, full=full)
@@ -1057,13 +1057,13 @@ def main() -> None:
         total_errors = sum(len(r.errors) for r in reports)
         total_time = sum(r.duration_ms for r in reports)
 
-        print(f"\n  {'─' * 50}")
+        print(f"\n  {'-' * 50}")
         print(f"  Total : {total_files} fichiers, {total_chunks} chunks, {total_time}ms")
         if total_errors:
             print(f"  [!]  {total_errors} erreurs")
             for r in reports:
                 for err in r.errors:
-                    print(f"     → {err}")
+                    print(f"     -> {err}")
         else:
             print("  [OK] Indexation terminée sans erreur")
         print()
@@ -1085,7 +1085,7 @@ def main() -> None:
 
     elif args.command == "export":
         count = indexer.export_collection(args.collection, args.output)
-        print(f"\n  Exporté {count} entrées → {args.output}\n")
+        print(f"\n  Exporté {count} entrées -> {args.output}\n")
 
 
 if __name__ == "__main__":
