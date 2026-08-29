@@ -1,23 +1,43 @@
-"""Workflow catalogue — discovery, metadata and team manifests.
+"""Catalogue de workflows — découverte, métadonnées et manifestes d'équipe.
 
-A workflow is not CLI wiring: it is an artefact with a kind, a set of agents,
-sometimes a team, and a place it resolves from. This package owns that model;
-:mod:`grimoire.cli.cmd_workflows` only renders it.
+Un workflow n'est pas du câblage CLI : c'est un artefact avec une nature, des
+agents, parfois une équipe, et un tier de résolution. Ce paquet porte ce
+modèle ; :mod:`grimoire.cli.cmd_workflows` ne fait que le rendre.
 """
 
 from __future__ import annotations
 
-__all__ = ["WorkflowEntry", "load_team", "load_workflows"]
+import importlib
+from typing import TYPE_CHECKING, Any
+
+__all__ = ["WorkflowEntry", "load_team", "load_teams", "load_workflows"]
+
+if TYPE_CHECKING:
+    from grimoire.workflows.registry import WorkflowEntry as WorkflowEntry
+    from grimoire.workflows.registry import load_workflows as load_workflows
+    from grimoire.workflows.teams import load_team as load_team
+    from grimoire.workflows.teams import load_teams as load_teams
+
+#: Sous-module qui porte chaque export, pour que la résolution paresseuse sache
+#: où aller sans importer les deux.
+_ORIGIN = {
+    "WorkflowEntry": "registry",
+    "load_workflows": "registry",
+    "load_team": "teams",
+    "load_teams": "teams",
+}
 
 
-def __getattr__(name: str) -> object:
-    """Resolve the public API lazily — importing the package stays cheap."""
-    if name in ("WorkflowEntry", "load_workflows"):
-        from grimoire.workflows import registry
+def __getattr__(name: str) -> Any:
+    """Résolution paresseuse des exports déclarés.
 
-        return getattr(registry, name)
-    if name == "load_team":
-        from grimoire.workflows.teams import load_team
-
-        return load_team
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    ``__all__`` doit nommer des objets atteignables, sinon ``import *`` lève —
+    et le bloc ``TYPE_CHECKING`` ci-dessus les rend visibles à l'analyse
+    statique, qui ne suit pas ``__getattr__``. Les importer au chargement du
+    paquet chargerait ruamel.yaml pour un appelant qui ne veut que le registre.
+    """
+    origin = _ORIGIN.get(name)
+    if origin is not None:
+        return getattr(importlib.import_module(f"grimoire.workflows.{origin}"), name)
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
