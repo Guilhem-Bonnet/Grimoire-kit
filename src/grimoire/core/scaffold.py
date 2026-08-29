@@ -453,10 +453,10 @@ class ProjectScaffolder:
             if d.is_dir():
                 continue  # already there: not work this run did
             d.mkdir(parents=True, exist_ok=True)
-            result.created_dirs.append(str(d.relative_to(self._target)))
+            result.created_dirs.append(d.relative_to(self._target).as_posix())
 
         for fc in plan.copies:
-            label = fc.label or str(fc.dst.relative_to(self._target))
+            label = fc.label or fc.dst.relative_to(self._target).as_posix()
             if fc.tier == TIER_SEED and fc.dst.exists() and not self._force:
                 result.preserved_files.append(label)
                 continue
@@ -478,7 +478,7 @@ class ProjectScaffolder:
             result.copied_files.append(label)
 
         for tr in plan.templates:
-            label = tr.label or str(tr.dst.relative_to(self._target))
+            label = tr.label or tr.dst.relative_to(self._target).as_posix()
             if tr.tier == TIER_SEED and tr.dst.exists() and not self._force:
                 result.preserved_files.append(label)
                 continue

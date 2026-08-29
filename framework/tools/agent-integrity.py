@@ -78,7 +78,7 @@ def _collect_agent_files(project_root: Path) -> dict[str, str]:
     for pattern in AGENT_PATTERNS:
         for f in project_root.glob(pattern):
             if f.is_file():
-                rel = str(f.relative_to(project_root))
+                rel = f.relative_to(project_root).as_posix()
                 checksums[rel] = _sha256(f)
 
     return checksums

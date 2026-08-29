@@ -63,6 +63,46 @@ def _run_under_windows_console(argv: list[str]) -> str:
     return result.stdout + result.stderr
 
 
+def _printed_via_variable(path: Path) -> list[str]:
+    """Caractères hors cp1252 dans une chaîne qui finit dans un `print()`.
+
+    Complément indispensable au garde comportemental : `--help` ne traverse que
+    le docstring et l'aide d'argparse. `token-budget check` construisait sa
+    barre de progression sur une ligne (`bar = "█" * n`) et l'imprimait sur la
+    suivante — invisible pour `--help`, invisible pour une règle qui ne regarde
+    que les lignes `print(`, et fatale sous Windows.
+
+    On ne relève que ce qui atteint réellement la sortie : une variable
+    imprimée dans le même périmètre. Un caractère décoratif dans un gabarit ou
+    une expression régulière n'est pas concerné — `agent-forge.py` utilise `→`
+    comme jeton du format `shared-context.md`, et le remplacer casserait la
+    lecture des fichiers existants.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+            continue
+        printed = {
+            sub.id
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "print"
+            for sub in ast.walk(node)
+            if isinstance(sub, ast.Name)
+        }
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(x, ast.Name) and x.id in printed for x in node.targets):
+                continue
+            chars = _unencodable(_literal_text(node.value))
+            if chars:
+                offenders.append(
+                    f"{path.name}:{node.lineno} imprime {''.join(sorted(set(chars)))!r}"
+                )
+    return sorted(set(offenders))
+
+
 class TestConsoleEncoding(unittest.TestCase):
     def test_framework_tools_help_survives_a_windows_console(self) -> None:
         """`--help` touche le docstring, la description argparse et l'aide.
@@ -83,6 +123,29 @@ class TestConsoleEncoding(unittest.TestCase):
             "outils dont la sortie ne s'encode pas sur une console Windows "
             f"({WINDOWS_CONSOLE_ENCODING}) : {broken}",
         )
+
+    def test_no_tool_prints_an_unencodable_variable(self) -> None:
+        """Ce que `--help` ne traverse pas, une règle statique doit le voir."""
+        offenders = []
+        for tool in sorted(TOOLS_DIR.glob("*.py")):
+            offenders.extend(_printed_via_variable(tool))
+        self.assertEqual(
+            offenders, [], "\n  ".join(["chaînes imprimées non encodables :", *offenders])
+        )
+
+    def test_the_variable_guard_sees_a_relapse(self) -> None:
+        probe = TOOLS_DIR.parent / "zz-probe-print.py"
+        probe.write_text(
+            "def main():\n"
+            '    bar = "█" * 10\n'
+            "    print(bar)\n",
+            encoding="utf-8",
+        )
+        try:
+            offenders = _printed_via_variable(probe)
+        finally:
+            probe.unlink(missing_ok=True)
+        self.assertTrue(offenders, "la barre construite en variable n'est pas vue")
 
     def test_the_guard_sees_a_relapse(self) -> None:
         """Un garde qui ne sait pas échouer ne garde rien."""

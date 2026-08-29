@@ -432,7 +432,7 @@ class AgentWorkerManager:
         worker = self._find_worker_by_agent(agent_id)
         model_used = worker.model if worker else self._resolve_model(agent_id)
 
-        start_time = time.monotonic()
+        start_time = time.perf_counter()
 
         result = TaskResult(
             task_id=task.get("task_id", f"task-{uuid.uuid4().hex[:8]}"),
@@ -445,7 +445,7 @@ class AgentWorkerManager:
                 "result": f"[Simulation] Agent {agent_id} a traité la tâche avec {model_used}",
             },
             model_used=model_used,
-            duration_seconds=round(time.monotonic() - start_time, 3),
+            duration_seconds=round(time.perf_counter() - start_time, 3),
         )
 
         # Update worker stats

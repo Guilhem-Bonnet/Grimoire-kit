@@ -138,7 +138,7 @@ def _read_tokens(path: Path) -> int:
 def resolve_agent_loads(agent_path: Path, project_root: Path) -> list[FileLoad]:
     """Resolve all files an agent loads at startup."""
     loads: list[FileLoad] = []
-    rel = str(agent_path.relative_to(project_root)) if agent_path.is_relative_to(project_root) else str(agent_path)
+    rel = agent_path.relative_to(project_root).as_posix() if agent_path.is_relative_to(project_root) else str(agent_path)
 
     # Agent definition
     agent_text = ""
@@ -165,7 +165,7 @@ def resolve_agent_loads(agent_path: Path, project_root: Path) -> list[FileLoad]:
     for bp in base_candidates:
         if bp.exists():
             loads.append(FileLoad(
-                path=str(bp.relative_to(project_root)),
+                path=bp.relative_to(project_root).as_posix(),
                 role="base-protocol", tokens=_read_tokens(bp),
             ))
             break

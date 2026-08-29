@@ -143,7 +143,7 @@ class ForgeAPI:
         for kind, (rel, pattern) in ARTIFACT_SURFACES.items():
             base = self.project_root / rel
             artifacts[kind] = sorted(
-                str(p.relative_to(self.project_root)) for p in base.glob(pattern)
+                p.relative_to(self.project_root).as_posix() for p in base.glob(pattern)
             ) if base.is_dir() else []
         return {
             "artifacts": artifacts,

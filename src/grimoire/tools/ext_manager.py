@@ -384,7 +384,7 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
     dist_path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(dist_path, "w:gz") as tar:
         for path in sorted(p for p in ext_dir.rglob("*") if p.is_file()):
-            tar.add(path, arcname=str(path.relative_to(ext_dir)), filter=_deterministic_filter)
+            tar.add(path, arcname=path.relative_to(ext_dir).as_posix(), filter=_deterministic_filter)
     checksum = _sha256(dist_path)
 
     index_path = registry_dir / REGISTRY_INDEX
@@ -527,7 +527,7 @@ def install_blueprint_from_registry(
     ]
     return {
         "installed": bp_id,
-        "path": str(target.relative_to(project_root)),
+        "path": target.relative_to(project_root).as_posix(),
         "missingExtensions": missing,
         # Commande exacte pour résoudre chaque extension manquante.
         "remediations": [
