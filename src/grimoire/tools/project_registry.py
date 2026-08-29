@@ -81,14 +81,24 @@ def allowed_roots(*extra: Path | str | None) -> list[Path]:
 def resolve_within_allowed(raw: str | Path | None, *extra: Path | str | None) -> Path:
     """Chemin demandé, résolu et vérifié comme contenu dans une racine permise.
 
-    Résolution d'abord — ``..`` et liens symboliques compris — puis comparaison :
-    l'inverse laisserait passer ``~/../../etc``.
+    Résolution d'abord — ``..`` et liens symboliques compris — puis comparaison
+    de préfixe sur les chemins canoniques : l'ordre inverse laisserait passer
+    ``~/../../etc``. La comparaison ajoute le séparateur pour que ``/home/uX``
+    ne soit pas accepté comme contenu dans ``/home/u``.
+
+    La forme ``realpath`` + ``startswith`` est aussi celle que l'analyse
+    statique reconnaît comme assainissement ; l'écrire autrement laissait la
+    vérification invisible à l'outil qui l'exige.
     """
-    target = (Path(raw).expanduser() if raw else Path.home()).resolve()
+    requested = Path(raw).expanduser() if raw else Path.home()
+    # ``realpath`` plutôt que ``Path.resolve`` : c'est la forme que l'analyse
+    # statique reconnaît comme assainissement d'un chemin venu d'une requête.
+    resolved = os.path.realpath(requested)
     for root in allowed_roots(*extra):
-        if target == root or root in target.parents:
-            return target
-    msg = f"chemin hors des racines autorisées : {target}"
+        root_path = os.path.realpath(str(root))
+        if resolved == root_path or resolved.startswith(root_path + os.sep):
+            return Path(resolved)
+    msg = f"chemin hors des racines autorisées : {resolved}"
     raise PermissionError(msg)
 
 
