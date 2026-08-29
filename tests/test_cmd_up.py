@@ -37,10 +37,27 @@ class TestArchetypeCatalog:
             "meta", "stack", "features", "platform-engineering", "agentic-standard",
         } <= KNOWN_ARCHETYPES
 
-    def test_app_validation_uses_the_catalog(self) -> None:
-        from grimoire.cli import app as app_module
+    def test_the_cli_rejects_an_archetype_absent_from_the_catalog(self) -> None:
+        """La validation refuse ce que le catalogue ne connaît pas.
 
-        assert app_module._KNOWN_ARCHETYPES is KNOWN_ARCHETYPES
+        La version précédente vérifiait la présence de `app._KNOWN_ARCHETYPES` :
+        elle épinglait *où* vit la validation, pas ce qu'elle fait. Le contrôle
+        a déménagé dans `cmd_init` — `app.py` est sous ratchet de taille — et le
+        test est tombé sans qu'aucun comportement n'ait changé. Ce qui compte
+        est qu'un archétype inconnu soit refusé, d'où qu'il le soit.
+        """
+        import typer
+
+        from grimoire.cli.cmd_init import validate_init_flags
+
+        with pytest.raises(typer.Exit):
+            validate_init_flags("archetype-qui-nexiste-pas", "auto", "")
+
+    def test_the_cli_accepts_every_catalogued_archetype(self) -> None:
+        """Contre-épreuve : une validation qui refuserait tout passerait aussi."""
+        from grimoire.cli.cmd_init import validate_init_flags
+
+        validate_init_flags(",".join(sorted(KNOWN_ARCHETYPES)), "auto", "")
 
 
 # ── CLI integration ───────────────────────────────────────────────────────────

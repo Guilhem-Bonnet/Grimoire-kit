@@ -23,9 +23,23 @@ grimoire init [PATH] [OPTIONS]
 | `--name TEXT` | Nom du projet | Nom du répertoire |
 | `--archetype, -a` | Archétype d'agents | `minimal` |
 | `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
+| `--memory-profile, -m` | Composition mémoire : `lexical`, `standard`, `graphe`, `complet` | déduite |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |
+
+La mémoire se choisit comme une composition, pas comme un backend : le profil
+fixe les sept couches du Memory OS d'un coup (mémoire courte, sémantique,
+sidecar structuré, graphes, mémoire chaude, visualisation). Sans l'option, le
+profil est déduit du store détecté et de l'accès réseau. Voir
+[Système de mémoire](memory-system.md).
+
+| Profil | Composition |
+|--------|-------------|
+| `lexical` | BM25 SQLite seul — aucun modèle, aucun service, aucun réseau |
+| `standard` | Sémantique + BM25 fusionnés (RRF) et sidecar structuré |
+| `graphe` | Standard + graphes Neo4j : connaissances, souvenirs, code, tâches |
+| `complet` | Graphe + mémoire chaude Redis (TTL, baux, coordination multi-agents) |
 
 ### `grimoire doctor`
 
@@ -264,7 +278,7 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory up` | Mettre en place la stack mémoire complète, plan par plan |
 | `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois |
 | `grimoire memory recall <requête>` | Rechercher parmi les mémoires typées |
-| `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique |
+| `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul |
 | `grimoire memory list` | Lister les mémoires stockées, paginées |
 | `grimoire memory delete <id>` | Supprimer une entrée |
 | `grimoire memory gc` | Consolider et compacter |
