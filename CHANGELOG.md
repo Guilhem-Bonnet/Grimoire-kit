@@ -21,6 +21,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   désormais que d'une génération faite sur le projet servi ; leur absence est
   un 404, et les pages affichent leur état vide. Les références du kit
   (catalogue de patterns, marketplace, anatomie, couverture) restent servies.
+- **Le nuage de la page Mémoire montre de vrais embeddings, ou rien.** Il était
+  tiré au sort — `random.Random(42)` autour de cinq centres, avec les vrais noms
+  de types dessus. Il projette maintenant les vecteurs que le backend possède
+  réellement, par analyse en composantes principales (une trentaine de lignes,
+  aucune dépendance nouvelle). Un backend lexical ou fichier n'a pas
+  d'embedding : la réponse est alors « rien », et le panneau dit lequel des deux
+  cas il montre au lieu d'un « vecteurs absents » qui se lisait comme une panne.
+  Nouveau `MemoryBackend.vectors()`, vide par défaut, implémenté pour Qdrant.
 - **Le remplissage de démonstration du générateur devient opt-in.**
   `gen-site-data.py` fabriquait des traces horodatées à l'instant, un board
   garni de dix cartes du template et un nuage vectoriel tiré au sort dès que le

@@ -129,6 +129,26 @@ class QdrantStorageMixin:
     def count(self) -> int:
         return int(self._client.count(collection_name=self._collection).count)
 
+    def vectors(self, *, limit: int = 300) -> list[tuple[str, list[float]]]:
+        """Embeddings réellement stockés, bornés — de quoi projeter, pas de quoi
+        rapatrier la collection entière dans une page web."""
+        points, _ = self._client.scroll(
+            collection_name=self._collection,
+            limit=max(1, limit),
+            with_payload=False,
+            with_vectors=True,
+        )
+        out: list[tuple[str, list[float]]] = []
+        for point in points:
+            vector = getattr(point, "vector", None)
+            # Collection à vecteurs nommés : on prend le premier, faute de nom
+            # imposé par le kit (qui n'en crée qu'un, par défaut).
+            if isinstance(vector, dict):
+                vector = next(iter(vector.values()), None)
+            if isinstance(vector, list) and vector:
+                out.append((str(point.id), [float(v) for v in vector]))
+        return out
+
     def consolidate(self) -> int:
         """Qdrant has no built-in dedup — returns 0."""
         return 0

@@ -1199,6 +1199,24 @@ def _memory_lint(root: Path) -> dict:
         return {}
 
 
+def _real_vector_projection(root: Path, entries: list[dict]) -> dict | None:
+    """Nuage 2D des embeddings réellement stockés, ou ``None``.
+
+    ``None`` est la réponse exacte d'un backend lexical ou fichier : il n'a pas
+    d'embedding. La page affiche alors son état vide, qui dit la vérité — un
+    nuage tiré au sort se lisait exactement comme un vrai.
+    """
+    try:
+        from grimoire.tools.memory_vectors import projection
+    except ImportError:  # script lancé hors du paquet installé
+        return None
+    types = {str(e.get("id", "")): str(e.get("type", "memory")) for e in entries}
+    try:
+        return projection(root, types_by_id=types)
+    except OSError:
+        return None
+
+
 def build_memory(root: Path, *, demo: bool = False) -> dict:
     """Couche données du Memory Manager (lecture : inspection + vault + consoles).
 
@@ -1227,7 +1245,9 @@ def build_memory(root: Path, *, demo: bool = False) -> dict:
         })(health.get("contradictions", 0), health.get("failures", 0),
            health.get("learnings_files", 0), health.get("decisions", 0)),
         "graph": _memory_graph(entries),
-        "vector_projection": _vector_projection_demo() if demo else None,
+        "vector_projection": (
+            _vector_projection_demo() if demo else _real_vector_projection(root, entries)
+        ),
         "lint": lint,
         "lint_health": lint_health,
         "consoles": _MEMORY_CONSOLES,
