@@ -250,6 +250,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   portefeuille a besoin et `/api/health` sert la vérité fraîche sur les deux
   hôtes : une couche de plus se serait périmée entre deux régénérations et
   aurait pu contredire l'API.
+- **La surface HTTP de l'atelier quitte `forge_server`** pour
+  `grimoire.tools.forge_http` : gardes d'hôte, table de routage, service de
+  fichiers et flux SSE d'un côté, `ForgeAPI` de l'autre. Le module dépassait le
+  seuil de 1500 lignes du ratchet de taille ; la coupe suit une frontière réelle
+  — ce qui se teste par une requête, et ce qui se teste par un appel de méthode.
+  `make_handler`, `serve` et `main` restent ré-exportés à leur ancienne place.
 - **Un seul parcours du dossier des blueprints.** `blueprints_list` et la vue
   santé lisaient chacune `_grimoire/blueprints`, avec deux définitions de son
   emplacement : elles auraient fini par répondre différemment sur le même
