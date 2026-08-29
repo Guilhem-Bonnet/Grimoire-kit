@@ -117,6 +117,47 @@ def _literal_text(node: ast.AST) -> str:
     )
 
 
+def _locale_written_non_ascii(path: Path) -> list[str]:
+    """Écritures de texte non-ASCII sans `encoding=`, dans un fichier de test.
+
+    Les chaînes passent souvent par une variable locale — c'est ce qui avait
+    laissé passer `test_parse_markdown_sections`, dont le contenu est affecté
+    avant d'être écrit. On résout donc les affectations simples du même
+    périmètre en plus des littéraux passés directement.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+            continue
+        known: dict[str, str] = {}
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign):
+                text = _literal_text(node.value)
+                if text:
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            known[target.id] = text
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if name not in {"write_text", "open"}:
+                continue
+            if any(keyword.arg == "encoding" for keyword in node.keywords):
+                continue
+            payload = "".join(
+                known.get(arg.id, "") if isinstance(arg, ast.Name) else _literal_text(arg)
+                for arg in node.args
+            )
+            chars = sorted({c for c in payload if ord(c) > 127})
+            if chars:
+                offenders.append(
+                    f"{path.name}:{node.lineno} écrit {''.join(chars)!r} "
+                    "sans encoding= explicite"
+                )
+    return sorted(set(offenders))
+
+
 class TestFixtureFileEncoding(unittest.TestCase):
     """Un fixture doit s'écrire sur Windows comme il s'écrit ailleurs.
 
@@ -146,23 +187,33 @@ class TestFixtureFileEncoding(unittest.TestCase):
     def test_no_test_writes_unencodable_text_with_the_locale_encoding(self) -> None:
         offenders = []
         for path in sorted(Path(__file__).parent.glob("test_*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
-                if name not in {"write_text", "open"}:
-                    continue
-                if any(keyword.arg == "encoding" for keyword in node.keywords):
-                    continue
-                payload = "".join(_literal_text(a) for a in node.args)
-                chars = sorted({c for c in payload if ord(c) > 127})
-                if chars:
-                    offenders.append(
-                        f"{path.name}:{node.lineno} écrit {''.join(chars)!r} "
-                        "sans encoding= explicite"
-                    )
-        self.assertEqual(offenders, [], "\n  ".join(["fixtures illisibles sur Windows :", *offenders]))
+            offenders.extend(_locale_written_non_ascii(path))
+        self.assertEqual(
+            offenders, [], "\n  ".join(["fixtures illisibles sur Windows :", *offenders])
+        )
+
+    def test_the_guard_sees_a_payload_passed_by_variable(self) -> None:
+        """Le cas qui a coûté un run de CI de plus.
+
+        `test_parse_markdown_sections` affectait son contenu à une variable
+        avant de l'écrire. Une règle qui n'inspecte que les littéraux passés
+        directement ne voit rien — et laisse passer exactement le défaut
+        qu'elle cherche.
+        """
+        probe = Path(__file__).parent / "test_zz_probe_encoding.py"
+        probe.write_text(
+            'from pathlib import Path\n'
+            'def test_x():\n'
+            '    contenu = "une décision — importante"\n'
+            '    Path("f.md").write_text(contenu)\n',
+            encoding="utf-8",
+        )
+        try:
+            offenders = _locale_written_non_ascii(probe)
+        finally:
+            probe.unlink(missing_ok=True)
+        self.assertTrue(offenders, "la charge passée par variable n'est pas vue")
+        self.assertIn("—", offenders[0])
 
     def test_the_guard_sees_a_relapse(self) -> None:
         """Y compris sur un caractère que cp1252 sait représenter.
