@@ -37,6 +37,61 @@ MAX_SCAN_DEPTH = 8
 MAX_SCAN_RESULTS = 500
 
 
+def allowed_roots(*extra: Path | str | None) -> list[Path]:
+    """Racines sous lesquelles la découverte par HTTP a le droit de regarder.
+
+    Le répertoire personnel, plus le dossier parent de chaque projet déjà au
+    registre — c'est ainsi qu'un dépôt hors de ``$HOME`` (``/mnt/...``) reste
+    atteignable sans ouvrir la machine entière.
+
+    Un chemin venu d'une requête ne doit pas pouvoir désigner n'importe quel
+    dossier du système : le garde d'hôte empêche une page tierce d'appeler ces
+    routes, mais un contrôle d'accès n'est pas une raison de laisser la surface
+    illimitée. Pour ouvrir une racine nouvelle, on passe par la CLI
+    (``grimoire cockpit add <chemin>``), qui n'est pas exposée au réseau.
+    """
+    roots = [Path.home().resolve()]
+    # Le projet servi est autorisé par définition : c'est celui qu'on a ouvert.
+    # Son dossier parent l'est aussi, sinon on ne pourrait pas découvrir ses
+    # voisins — le cas de figure exact d'un premier scan.
+    for candidate in extra:
+        if not candidate:
+            continue
+        try:
+            resolved = Path(candidate).resolve()
+        except OSError:
+            continue
+        roots.append(resolved)
+        if resolved.parent != resolved:
+            roots.append(resolved.parent)
+    for entry in load_registry():
+        raw = str(entry.get("path", "")).strip()
+        if not raw:
+            continue
+        try:
+            registered = Path(raw).resolve()
+        except OSError:
+            continue
+        roots.append(registered)
+        if registered.parent != registered:
+            roots.append(registered.parent)
+    return roots
+
+
+def resolve_within_allowed(raw: str | Path | None, *extra: Path | str | None) -> Path:
+    """Chemin demandé, résolu et vérifié comme contenu dans une racine permise.
+
+    Résolution d'abord — ``..`` et liens symboliques compris — puis comparaison :
+    l'inverse laisserait passer ``~/../../etc``.
+    """
+    target = (Path(raw).expanduser() if raw else Path.home()).resolve()
+    for root in allowed_roots(*extra):
+        if target == root or root in target.parents:
+            return target
+    msg = f"chemin hors des racines autorisées : {target}"
+    raise PermissionError(msg)
+
+
 # ── Chemins ──────────────────────────────────────────────────────────────────
 
 def registry_home() -> Path:
@@ -257,14 +312,16 @@ def crawl_projects(root: Path, max_depth: int = DEFAULT_SCAN_DEPTH) -> list[Cand
     return found
 
 
-def scan_payload(root: Path, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
+def scan_payload(
+    root: str | Path, depth: int = DEFAULT_SCAN_DEPTH, *extra: Path | str | None
+) -> dict[str, Any]:
     """Résultat d'un scan, prêt pour l'UI — rien n'est enrôlé ici.
 
     L'enrôlement reste un acte explicite : le scan propose, l'utilisateur
     dispose. Un scan qui enrôle tout seul finit par remplir le registre de
     dossiers jetables, comme l'a montré la pollution par les campagnes d'évals.
     """
-    base = root.expanduser().resolve()
+    base = resolve_within_allowed(root, *extra)
     if not base.is_dir():
         msg = f"pas un dossier : {base}"
         raise FileNotFoundError(msg)
@@ -287,14 +344,14 @@ def scan_payload(root: Path, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
     }
 
 
-def browse(path: Path | None = None) -> dict[str, Any]:
+def browse(path: str | Path | None = None, *extra: Path | str | None) -> dict[str, Any]:
     """Liste les sous-dossiers d'un chemin, pour une navigation manuelle.
 
     Lecture seule et sans récursion : l'UI descend un niveau à la fois. Les
     liens symboliques ne sont pas suivis et les dossiers cachés sont écartés —
     un sélecteur de projet n'a rien à faire dans ``.git`` ou ``.venv``.
     """
-    base = (path.expanduser() if path else Path.home()).resolve()
+    base = resolve_within_allowed(path, *extra)
     if not base.is_dir():
         msg = f"pas un dossier : {base}"
         raise FileNotFoundError(msg)

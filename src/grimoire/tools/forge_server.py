@@ -104,6 +104,7 @@ from grimoire.tools.project_registry import (
     path_for_slug,
     projects_payload,
     register_project,
+    resolve_within_allowed,
     scan_payload,
     set_selected_slug,
     slug_for_path,
@@ -189,23 +190,26 @@ class ForgeAPI:
         return payload
 
     def project_add(self, raw_path: str) -> dict[str, Any]:
-        """Enrôle un chemin donné à la main. Idempotent."""
-        candidate = Path(raw_path).expanduser()
-        if not candidate.is_dir():
-            msg = f"pas un dossier : {candidate}"
+        """Enrôle un chemin donné à la main. Idempotent.
+
+        Le chemin vient d'une requête : il doit tomber sous une racine permise,
+        comme la navigation et le scan.
+        """
+        proot = resolve_within_allowed(raw_path, self.project_root)
+        if not proot.is_dir():
+            msg = f"pas un dossier : {proot}"
             raise FileNotFoundError(msg)
-        proot = candidate.resolve()
         slug = register_project(proot) or slug_for_path(proot)
         return {"slug": slug, "path": str(proot), "added": True,
                 "is_grimoire": looks_grimoire(proot)}
 
     def project_scan(self, raw_root: str, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
         """Découvre les projets sous une racine. N'enrôle rien."""
-        return scan_payload(Path(raw_root).expanduser(), depth)
+        return scan_payload(raw_root, depth, self.project_root)
 
     def browse_view(self, raw_path: str | None) -> dict[str, Any]:
         """Navigation dossier par dossier, pour choisir un projet à la main."""
-        return browse(Path(raw_path).expanduser() if raw_path else None)
+        return browse(raw_path, self.project_root)
 
     def select_project(self, *, slug: str = "", path: str = "") -> dict[str, Any]:
         """Re-racine le serveur sur un autre projet de la machine.

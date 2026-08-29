@@ -30,6 +30,19 @@ def api(tmp_path: Path) -> ForgeAPI:
     return ForgeAPI(_make_project(tmp_path, "servi"), ROOT, None)
 
 
+@pytest.fixture
+def isolated_registry(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Registre vierge pour ce test.
+
+    Les racines permises se déduisent des projets enrôlés : un test qui vérifie
+    la frontière ne peut pas partager le registre de la session, où les
+    enrôlements des autres ouvrent des dossiers voisins.
+    """
+    monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path_factory.mktemp("registre")))
+
+
 # ── Registre ─────────────────────────────────────────────────────────────────
 
 
@@ -151,3 +164,71 @@ def test_selection_survives_a_registry_entry_going_away(api: ForgeAPI, tmp_path:
     other.rmdir()
     with pytest.raises(FileNotFoundError):
         api.select_project(slug=slug)
+
+
+# ── Racines autorisées : la découverte ne va pas partout ────────────────────
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_a_path_outside_the_allowed_roots_is_refused(
+    api: ForgeAPI, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Le chemin vient d'une requête HTTP.
+
+    Le garde d'hôte empêche une page tierce d'appeler ces routes ; ce n'est pas
+    une raison pour laisser la surface illimitée. Signalé par CodeQL comme
+    `py/path-injection` sur les trois entrées de découverte.
+
+    L'« ailleurs » doit être hors du voisinage du projet servi : ce voisinage
+    est autorisé exprès, pour qu'un premier scan trouve les projets voisins.
+    """
+    outside = tmp_path_factory.mktemp("ailleurs") / "depot"
+    (outside / ".git").mkdir(parents=True)
+    assert not any(
+        outside == root or root in outside.parents
+        for root in reg.allowed_roots(api.project_root)
+    ), "prémisse : ce chemin doit être hors des racines"
+
+    with pytest.raises(PermissionError):
+        api.browse_view(str(outside))
+    with pytest.raises(PermissionError):
+        api.project_scan(str(outside), 2)
+    with pytest.raises(PermissionError):
+        api.project_add(str(outside))
+
+
+def test_the_served_project_neighbourhood_is_reachable(api: ForgeAPI, tmp_path: Path) -> None:
+    """Premier usage : on ouvre un projet, on scanne ses voisins.
+
+    Sans cette permission, la découverte serait inutilisable tant qu'un projet
+    n'a pas été enrôlé par la CLI — c'est-à-dire au moment précis où elle sert.
+    """
+    neighbour = tmp_path / "voisin"
+    (neighbour / ".git").mkdir(parents=True)
+    found = api.project_scan(str(tmp_path), 2)
+    assert "voisin" in {c["name"] for c in found["candidates"]}
+
+
+def test_the_home_directory_is_always_reachable() -> None:
+    assert reg.resolve_within_allowed(str(Path.home())) == Path.home().resolve()
+    assert reg.resolve_within_allowed(None) == Path.home().resolve()
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_a_registered_project_opens_its_own_root(tmp_path: Path) -> None:
+    """Un dépôt hors de `$HOME` reste atteignable — sinon la borne casse l'outil."""
+    elsewhere = tmp_path / "hors-home" / "projet"
+    (elsewhere / "_grimoire").mkdir(parents=True)
+    with pytest.raises(PermissionError):
+        reg.resolve_within_allowed(str(elsewhere))
+
+    reg.register_project(elsewhere)  # l'enrôlement passe par la CLI, hors réseau
+    assert reg.resolve_within_allowed(str(elsewhere)) == elsewhere.resolve()
+    assert reg.resolve_within_allowed(str(elsewhere.parent)) == elsewhere.parent.resolve()
+
+
+def test_traversal_cannot_escape_an_allowed_root() -> None:
+    """Résolution d'abord, comparaison ensuite : l'inverse laisserait passer
+    `~/../../etc`."""
+    with pytest.raises(PermissionError):
+        reg.resolve_within_allowed(str(Path.home()) + "/../../etc")

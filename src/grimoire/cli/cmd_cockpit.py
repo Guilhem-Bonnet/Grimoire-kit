@@ -46,6 +46,7 @@ from grimoire.tools.project_registry import (
     register_project,
     registry_file,
     registry_home,
+    resolve_within_allowed,
     save_registry,
     scan_payload,
     selected_slug,
@@ -250,7 +251,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # Découverte : ne dépend d'aucun projet, donc avant la résolution.
             raw = parse_qs(urlparse(self.path).query).get("path", [None])[0]
             try:
-                self._send_json(200, browse(Path(raw).expanduser() if raw else None))
+                self._send_json(200, browse(raw))
             except FileNotFoundError as exc:
                 self._send_json(404, {"ok": False, "error": str(exc)})
             except PermissionError as exc:
@@ -330,13 +331,13 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             try:
                 if self.path.endswith("/add"):
-                    target = Path(str(data.get("path", ""))).expanduser()
-                    if not target.is_dir():
-                        self._send_json(404, {"ok": False, "error": f"pas un dossier : {target}"})
-                        return
                     # Noms distincts de ``proot``/``slug`` plus bas : même
                     # portée de fonction, types différents.
-                    added_root = target.resolve()
+                    added_root = resolve_within_allowed(str(data.get("path", "")))
+                    if not added_root.is_dir():
+                        self._send_json(404, {"ok": False,
+                                              "error": f"pas un dossier : {added_root}"})
+                        return
                     added_slug = register_project(added_root) or slug_for_path(added_root)
                     self._send_json(200, {
                         "slug": added_slug, "path": str(added_root), "added": True,
@@ -344,7 +345,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                     })
                 else:
                     self._send_json(200, scan_payload(
-                        Path(str(data.get("root", ""))).expanduser(),
+                        str(data.get("root", "")),
                         int(data.get("depth", DEFAULT_SCAN_DEPTH)),
                     ))
             except FileNotFoundError as exc:

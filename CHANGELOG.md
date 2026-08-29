@@ -140,6 +140,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   page attaquante same-origin, donc CORS ne protège plus la lecture des
   réponses : le nouveau `GET /api/fs/browse` serait devenu un oracle sur les
   dossiers de la machine. Le garde s'applique maintenant à toute requête.
+- **La découverte est bornée à des racines permises.** Un chemin venu d'une
+  requête HTTP pouvait désigner n'importe quel dossier du système — signalé par
+  CodeQL comme `py/path-injection` sur les trois entrées. Le garde d'hôte
+  empêche une page tierce d'appeler ces routes, mais ce n'est pas une raison de
+  laisser la surface illimitée. Sont autorisés : le répertoire personnel, le
+  projet servi et son voisinage, et le dossier parent de chaque projet enrôlé —
+  de quoi ouvrir un dépôt hors de `$HOME` et scanner ses voisins dès le premier
+  usage. Pour une racine entièrement nouvelle, on passe par
+  `grimoire cockpit add`, qui n'est pas exposé au réseau. La résolution précède
+  la comparaison, sinon `~/../../etc` passerait.
 - **Le cockpit refuse aussi un `Host` étranger.** Il ne vérifiait que l'adresse
   du pair : sous rebinding DNS la requête arrive bien depuis la loopback, donc
   ce contrôle passe et la page attaquante est same-origin. Les routes de

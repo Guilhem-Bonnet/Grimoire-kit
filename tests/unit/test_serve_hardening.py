@@ -101,6 +101,12 @@ def test_a_registered_project_keeps_its_registry_slug(tmp_path: Path) -> None:
 def test_scan_depth_is_capped(tmp_path: Path) -> None:
     """La profondeur vient du réseau : un scan de ``/`` à profondeur 999
     immobiliserait un thread du serveur."""
+    # Le scan est borné aux racines permises : on ouvre celle-ci en y enrôlant
+    # un projet, comme le ferait `grimoire cockpit add`.
+    project = tmp_path / "un-projet"
+    (project / "_grimoire").mkdir(parents=True)
+    reg.register_project(project)
+
     assert reg.scan_payload(tmp_path, 999)["depth"] == reg.MAX_SCAN_DEPTH
     assert reg.scan_payload(tmp_path, 0)["depth"] >= 1
     assert reg.scan_payload(tmp_path, -5)["depth"] >= 1
@@ -302,6 +308,9 @@ def test_the_picker_is_usable_on_the_cockpit_host(tmp_path: Path) -> None:
     """
     project = tmp_path / "un-projet"
     (project / "_grimoire").mkdir(parents=True)
+    # Le cockpit ne gouverne que des projets enrôlés : c'est l'enrôlement qui
+    # ouvre leur voisinage à la découverte.
+    reg.register_project(project)
     httpd = _cockpit_server(tmp_path)
     port = httpd.server_address[1]
     try:
@@ -326,13 +335,20 @@ def test_the_picker_is_usable_on_the_cockpit_host(tmp_path: Path) -> None:
 
 
 def test_the_cockpit_refuses_an_unknown_path(tmp_path: Path) -> None:
+    """Deux refus distincts : hors des racines permises (403), ou inexistant (404)."""
+    project = tmp_path / "connu"
+    (project / "_grimoire").mkdir(parents=True)
+    reg.register_project(project)
     httpd = _cockpit_server(tmp_path)
     port = httpd.server_address[1]
     try:
         code, _ = _post(port, "/api/projects/add", {"path": str(tmp_path / "nulle-part")})
-        assert code == 404
+        assert code == 404, "sous une racine permise mais inexistant"
         code, _ = _post(port, "/api/projects/scan", {"root": str(tmp_path / "absent")})
         assert code == 404
+        code, body = _post(port, "/api/projects/scan", {"root": "/etc"})
+        assert code == 403, "hors des racines permises"
+        assert "racines autorisées" in json.loads(body)["error"]
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -401,6 +417,9 @@ def test_the_cockpit_refuses_a_foreign_host(tmp_path: Path) -> None:
     devient un oracle sur les dossiers de la machine. Trouvé par CodeQL sur les
     routes de découverte ajoutées à cet hôte.
     """
+    project = tmp_path / "connu"
+    (project / "_grimoire").mkdir(parents=True)
+    reg.register_project(project)
     httpd = _cockpit_server(tmp_path)
     port = httpd.server_address[1]
     try:
