@@ -616,7 +616,7 @@ def main():
         path = log_entry(entry, project_root)
         icon = TYPE_ICONS.get(args.type, "")
         print(f"{icon} Entrée '{args.type}' ajoutée au reasoning stream")
-        print(f"   → {path}")
+        print(f"   -> {path}")
 
     elif args.command == "query":
         entries = read_stream(
@@ -669,7 +669,7 @@ def main():
                                       args.status)
         if success:
             icon = STATUS_ICONS.get(args.status, "?")
-            print(f"{icon} Entrée mise à jour → {args.status}")
+            print(f"{icon} Entrée mise à jour -> {args.status}")
         else:
             print("[x] Entrée non trouvée", file=sys.stderr)
             sys.exit(1)

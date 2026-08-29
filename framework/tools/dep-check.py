@@ -256,7 +256,7 @@ def cmd_cycles(args: argparse.Namespace) -> int:
         else:
             print(f"  {len(cycles)} cycle(s) detected:\n")
             for cyc in cycles:
-                print(f"    {' → '.join(cyc)}")
+                print(f"    {' -> '.join(cyc)}")
     return 1 if cycles else 0
 
 

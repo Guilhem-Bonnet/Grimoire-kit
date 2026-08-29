@@ -573,7 +573,7 @@ def mcp_message_bus_status(backend: str = "in-process") -> dict:
 
 def _print_stats(stats: BusStats) -> None:
     print(f"\n  Message Bus — {stats.backend}")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
     print(f"  Total envoyés  : {stats.total_sent}")
     print(f"  Total reçus    : {stats.total_received}")
     print(f"  Total perdus   : {stats.total_dropped}")
@@ -584,14 +584,14 @@ def _print_stats(stats: BusStats) -> None:
     if stats.queues:
         print("  Queues :")
         for agent_id, count in sorted(stats.queues.items()):
-            print(f"    {agent_id:20s} │ {count} messages")
+            print(f"    {agent_id:20s} | {count} messages")
     else:
         print("  (aucune queue active)")
 
     if stats.subscriptions:
         print("\n  Subscriptions :")
         for agent_id, patterns in sorted(stats.subscriptions.items()):
-            print(f"    {agent_id:20s} │ {', '.join(patterns)}")
+            print(f"    {agent_id:20s} | {', '.join(patterns)}")
     print()
 
 
@@ -653,7 +653,7 @@ def main() -> None:
         else:
             icon = "[OK]" if result.success else "[x]"
             print(f"\n  {icon} Message {result.message_id}")
-            print(f"    {args.sender} → {args.recipient} [{args.msg_type}]")
+            print(f"    {args.sender} -> {args.recipient} [{args.msg_type}]")
             print(f"    Pattern : {args.pattern}")
             print(f"    Destinataires : {result.recipients_count}")
             if result.error:

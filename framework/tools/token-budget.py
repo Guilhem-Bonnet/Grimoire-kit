@@ -631,7 +631,7 @@ def _level_icon(level: str) -> str:
 def _print_status(status: BudgetStatus) -> None:
     icon = _level_icon(status.level)
     print(f"\n  {icon} Token Budget — {status.level.upper()}")
-    print(f"  {'─' * 55}")
+    print(f"  {'-' * 55}")
     print(f"  Modèle     : {status.model}")
     print(f"  Fenêtre    : {status.window_tokens:,} tokens")
     print(f"  Utilisé    : {status.used_tokens:,} tokens ({status.usage_pct:.1%})")
@@ -661,14 +661,14 @@ def _print_status(status: BudgetStatus) -> None:
     for bucket in status.buckets:
         if bucket.tokens > 0 or bucket.files_count > 0:
             pct = f"{bucket.percentage:.1%}" if bucket.percentage > 0 else "0%"
-            print(f"    {bucket.name:30s} │ {bucket.tokens:>8,} tok "
-                  f"({pct:>5s}) │ {bucket.files_count} fichiers")
+            print(f"    {bucket.name:30s} | {bucket.tokens:>8,} tok "
+                  f"({pct:>5s}) | {bucket.files_count} fichiers")
     print()
 
     if status.recommendations:
         print("  Recommandations :")
         for rec in status.recommendations:
-            print(f"    → {rec}")
+            print(f"    -> {rec}")
         print()
 
 

@@ -1096,7 +1096,7 @@ def cmd_provision(args: argparse.Namespace) -> int:
             icon = "[OK]" if a.get("success") else "[x]"
             print(f"  {icon} [{a['method']}] {a['command']}")
             if a.get("output"):
-                print(f"     → {a['output'][:200]}")
+                print(f"     -> {a['output'][:200]}")
     return 0
 
 
@@ -1142,7 +1142,7 @@ def cmd_cache(args: argparse.Namespace) -> int:
             plan = entry.get("plan", {})
             caps = plan.get("matched_capabilities", [])
             ready = len(plan.get("ready_to_use", []))
-            print(f"  • \"{key[:60]}\" [{cached_at}] → {', '.join(caps)} ({ready} ready)")
+            print(f"  • \"{key[:60]}\" [{cached_at}] -> {', '.join(caps)} ({ready} ready)")
     return 0
 
 

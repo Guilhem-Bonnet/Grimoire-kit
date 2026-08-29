@@ -395,3 +395,29 @@ def test_validate_still_passes_with_jsonschema_available(tmp_path: Path) -> None
     result = runner.invoke(blueprint_app, ["validate", str(out)])
     assert result.exit_code == 0, result.output
     assert "passes both validation layers" in result.output
+
+
+def test_validate_reports_an_unreadable_file_instead_of_crashing(tmp_path: Path) -> None:
+    """Un JSON cassé est une erreur d'utilisateur, pas une trace de pile.
+
+    Cette branche n'était couverte par aucun test : elle a survécu à un
+    changement de signature sans que rien ne le signale.
+    """
+    broken = tmp_path / "casse.blueprint.json"
+    broken.write_text('{"blueprintVersion": 1, "id": "x"', encoding="utf-8")
+
+    result = runner.invoke(blueprint_app, ["validate", str(broken)])
+    assert result.exit_code == 1, result.output
+    assert "illisible" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_compile_reports_an_unreadable_file(tmp_path: Path) -> None:
+    broken = tmp_path / "casse.blueprint.json"
+    broken.write_text("pas du json", encoding="utf-8")
+
+    result = runner.invoke(
+        blueprint_app, ["compile", str(broken), "--project-root", str(tmp_path)]
+    )
+    assert result.exit_code == 1, result.output
+    assert not (tmp_path / ".github" / "prompts").exists()

@@ -730,15 +730,15 @@ Exemples :
     learning_patterns = analyze_learnings(memory_dir)
 
     all_patterns = trace_patterns + decision_patterns + learning_patterns
-    print(f"  → {len(observed_tools)} outils observés dans TRACE")
-    print(f"  → {len(all_patterns)} patterns comportementaux")
+    print(f"  -> {len(observed_tools)} outils observés dans TRACE")
+    print(f"  -> {len(all_patterns)} patterns comportementaux")
 
     # ── Générer les mutations ──────────────────────────────────────────────
     mutations = generate_mutations(dna, observed_tools, all_patterns)
     adds = [m for m in mutations if "add" in m.mutation_type]
     deps = [m for m in mutations if "deprecate" in m.mutation_type]
 
-    print(f"  → {len(adds)} ajouts proposés, {len(deps)} dépréciations")
+    print(f"  -> {len(adds)} ajouts proposés, {len(deps)} dépréciations")
 
     if not mutations:
         print()
@@ -765,12 +765,12 @@ Exemples :
 
     # ── Résumé ────────────────────────────────────────────────────────────
     print()
-    print("  ──────────────────────────────────────────────────")
+    print("  --------------------------------------------------")
     high = [m for m in adds if m.confidence == "high"]
     if high:
         print(f"  [ok] HIGH confidence ({len(high)}) — fortement recommandés :")
         for m in high[:4]:
-            print(f"     + {m.item_id} → {m.target_section}  ({m.evidence_count}x dans TRACE)")
+            print(f"     + {m.item_id} -> {m.target_section}  ({m.evidence_count}x dans TRACE)")
     med = [m for m in adds if m.confidence == "medium"]
     if med:
         print(f"  [!] MEDIUM confidence ({len(med)}) — à évaluer")

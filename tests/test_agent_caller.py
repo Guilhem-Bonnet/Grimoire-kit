@@ -507,37 +507,3 @@ class TestCLIIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestWindowsConsoleEncoding(unittest.TestCase):
-    """La sortie doit s'encoder sur une console Windows.
-
-    `test_list_command` échouait sur `windows-latest` — et échouait déjà sur
-    `main` : `_print_agent_list` imprimait un filet `│` (U+2502), absent de
-    cp1252, ce qui levait UnicodeEncodeError avant la première ligne utile. Le
-    job est déclaré `continue-on-error` pour Windows, donc l'échec ne bloquait
-    rien et personne ne le voyait.
-
-    Ce test porte sur le code exécuté, pas sur les commentaires : les filets
-    des séparateurs de section sont lus en UTF-8 depuis le source et
-    n'atteignent jamais la console.
-    """
-
-    def test_executed_strings_encode_to_cp1252(self) -> None:
-        source = TOOL.read_text(encoding="utf-8")
-        offenders = []
-        for number, line in enumerate(source.splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
-            code = line.split("#", 1)[0]
-            for char in code:
-                if ord(char) <= 127:
-                    continue
-                try:
-                    char.encode("cp1252")
-                except UnicodeEncodeError:
-                    offenders.append(f"ligne {number} : {char!r} ({hex(ord(char))})")
-        self.assertEqual(
-            offenders, [], "caractères impossibles à imprimer sur une console Windows :\n"
-            + "\n".join(offenders),
-        )

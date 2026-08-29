@@ -287,9 +287,9 @@ def run_apply(project_root: Path, config: UserConfig) -> SetupReport:
 
 def prompt_user(current: UserConfig) -> UserConfig:
     """Interactively prompt for configuration values."""
-    print("\n╔══════════════════════════════════════════════════════╗")
-    print("║       Grimoire Setup — Configuration Projet         ║")
-    print("╚══════════════════════════════════════════════════════╝")
+    print("\n+======================================================+")
+    print("|       Grimoire Setup — Configuration Projet         |")
+    print("+======================================================+")
     print()
     print("  Valeurs actuelles (project-context.yaml) :")
     print(f"    Project          : {current.project_name}")
@@ -361,7 +361,7 @@ def print_report(report: SetupReport, *, json_mode: bool = False) -> None:
     if report.diffs:
         print("\n  Différences restantes :")
         for d in report.diffs:
-            print(f"     • {d.file} → {d.key}: '{d.current}' ≠ '{d.expected}'")
+            print(f"     • {d.file} -> {d.key}: '{d.current}' != '{d.expected}'")
     elif not report.errors:
         print("\n  [OK] Tous les fichiers sont synchronisés.")
 
@@ -454,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n  {len(pre_report.diffs)} modification(s) à appliquer :")
     for d in pre_report.diffs:
-        print(f"     • {d.key}: '{d.current}' → '{d.expected}'")
+        print(f"     • {d.key}: '{d.current}' -> '{d.expected}'")
 
     confirm = input("\n  Appliquer ? [O/n] : ").strip().lower()
     if confirm and confirm not in ("o", "oui", "y", "yes", ""):

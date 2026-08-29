@@ -819,7 +819,7 @@ def main():
             ("grimoire_rag_search", "Recherche sémantique Qdrant"),
             ("grimoire_rag_augment", "Augmente un prompt avec contexte RAG"),
             ("grimoire_rag_status", "État des collections Qdrant"),
-            ("grimoire_memory_push", "Push mémoire MD → Qdrant"),
+            ("grimoire_memory_push", "Push mémoire MD -> Qdrant"),
             ("grimoire_memory_diff", "Diff MD vs Qdrant"),
         ]
         discovered = discover_synapse_tools()

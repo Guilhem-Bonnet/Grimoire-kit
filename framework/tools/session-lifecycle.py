@@ -476,7 +476,7 @@ def _print_result(result: LifecycleResult) -> None:
     phase_icons = {"pre": "", "post": ""}
     icon = phase_icons.get(result.phase, "")
     print(f"\n  {icon} Session Lifecycle — {result.phase.upper()}")
-    print(f"  {'─' * 50}")
+    print(f"  {'-' * 50}")
 
     for hook in result.hooks:
         status_icon = {
