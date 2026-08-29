@@ -9,6 +9,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Quatre prompts livrés redisaient une commande du SDK.**
+  `/grimoire-status`, `/grimoire-health-check`, `/grimoire-self-heal` et
+  `/grimoire-pre-push` refont ce que `grimoire status`, `doctor`,
+  `doctor --fix` et `check` font déjà — et occupaient la moitié du catalogue,
+  qui donnait l'impression d'un produit sachant seulement diagnostiquer. Ils
+  déclarent désormais la commande qui les remplace, sortent de la vue par
+  défaut (`--all` les montre) et ne sont plus déployés dans les projets neufs.
+  Ils restent livrés et installables : un projet qui les a ne les perd pas, et
+  `workflows doctor` ne les réclame plus. Les trois autres —
+  `/grimoire-changelog`, `/grimoire-dream`, `/grimoire-session-bootstrap` —
+  lisent l'historique et la mémoire pour en tirer une synthèse, ce qu'aucune
+  commande ne fait : ils restent de plein droit.
+- **Les champs `team` et `patterns` étaient déclarés et vides.** Deux
+  workflows de plus déclarent leur équipe — `subagent-orchestration` nomme le
+  roster de `team-build`, et la spécialité de `team-ops` contient « Incident
+  Response » — et trois citent le pattern qu'ils instancient (`ORC-01` pour
+  les deux orchestrateurs, `ORC-09` pour le checkpoint d'état). Les trois
+  restants n'en déclarent aucun : leurs fichiers ne l'ancrent pas, et le
+  deviner contredirait la règle qui veut qu'une description soit dérivée de
+  son artefact. Deux tests refusent un identifiant de pattern hors catalogue
+  et une équipe qui ne se résout pas.
 - **Le catalogue de workflows ne montrait que la moitié de ce que le kit
   installe.** `grimoire workflows list` n'indexait que `.github/prompts/` :
   sept prompts d'hygiène, qui doublent pour la plupart une commande CLI. Les

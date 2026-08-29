@@ -29,6 +29,7 @@ from grimoire.workflows.registry import (
     KIND_ORCHESTRATION,
     find_framework_workflow,
     find_workflow,
+    is_deprecated_file,
     load_workflows,
     workflow_slug,
 )
@@ -64,7 +65,14 @@ def _workflow_inventory(project_root: Path) -> tuple[dict[str, Path], dict[str, 
     project_dir = project_root / ".github" / "prompts"
     framework_dir = framework_path() / "copilot" / "prompts"
 
-    expected = {p.name: p for p in sorted(framework_dir.glob("*.prompt.md"))} if framework_dir.is_dir() else {}
+    # Les prompts remplacés par une commande CLI ne sont plus déployés : les
+    # attendre ferait rapporter « manquant » sur tout projet neuf, et `sync`
+    # les réinstallerait aussitôt.
+    expected = (
+        {p.name: p for p in sorted(framework_dir.glob("*.prompt.md")) if not is_deprecated_file(p)}
+        if framework_dir.is_dir()
+        else {}
+    )
     actual = {p.name: p for p in sorted(project_dir.glob("*.prompt.md"))} if project_dir.is_dir() else {}
     missing = sorted(name for name in expected if name not in actual)
     modified = sorted(
@@ -87,13 +95,13 @@ def _workflow_unified_diff(expected: Path, actual: Path) -> list[str]:
     )
 
 
-def _collect_workflow_rows(project_root: Path) -> list[dict[str, str]]:
+def _collect_workflow_rows(project_root: Path, *, include_deprecated: bool = True) -> list[dict[str, str]]:
     """Lignes de catalogue, dédoublonnées, projet d'abord.
 
     Déléguée au registre : la liste ne balayait que ``.github/prompts`` et
-    ignorait les workflows d'orchestration installés sous ``_grimoire/workflows``.
+    ignorait les workflows d'orchestration installés sous le tier kit.
     """
-    return [entry.to_dict() for entry in load_workflows(project_root)]
+    return [entry.to_dict() for entry in load_workflows(project_root, include_deprecated=include_deprecated)]
 
 
 def _workflow_table(title: str, rows: list[dict[str, Any]]) -> Table:
@@ -109,10 +117,14 @@ def _workflow_table(title: str, rows: list[dict[str, Any]]) -> Table:
         kind = str(row.get("kind", KIND_COMMAND))
         style = "cyan" if kind == KIND_ORCHESTRATION else "dim"
         agents = ", ".join(row.get("agents") or []) or "—"
+        replacement = str(row.get("deprecated_by") or "")
+        description = str(row.get("description") or "—")
+        if replacement:
+            description = f"[dim]{description}[/dim]\n[yellow]remplacé par[/yellow] [bold]{replacement}[/bold]"
         table.add_row(
             str(row["command"]),
             f"[{style}]{kind}[/{style}]",
-            str(row.get("description") or "—"),
+            description,
             agents,
             str(row.get("source", "")),
         )
@@ -124,10 +136,16 @@ def workflows_list(
     ctx: typer.Context,
     path: Path = _WORKFLOW_PATH_ARGUMENT,
     kind: str = typer.Option("", "--kind", "-k", help=f"Filter by kind: {KIND_ORCHESTRATION} | {KIND_COMMAND}."),
+    all_: bool = typer.Option(False, "--all", "-a", help="Include workflows a CLI command has replaced."),
 ) -> None:
-    """List available workflows — orchestrations and hygiene commands alike."""
+    """List available workflows — orchestrations and hygiene commands alike.
+
+    Workflows that merely restate a CLI command are hidden unless ``--all``:
+    four of the seven shipped prompts did exactly that, and they filled most
+    of the catalogue.
+    """
     root = path.resolve()
-    rows = _collect_workflow_rows(root)
+    rows = _collect_workflow_rows(root, include_deprecated=all_)
     if kind:
         rows = [row for row in rows if row.get("kind") == kind]
 
@@ -148,6 +166,12 @@ def workflows_list(
     console.print(
         f"\n[dim]{len(rows)} workflow(s) available — {orchestrated} orchestration(s).[/dim]"
     )
+    if not all_:
+        hidden = len(_collect_workflow_rows(root)) - len(_collect_workflow_rows(root, include_deprecated=False))
+        if hidden:
+            console.print(
+                f"[dim]{hidden} remplacé(s) par une commande CLI — [bold]--all[/bold] pour les voir.[/dim]"
+            )
 
 
 @workflows_app.command("search")
@@ -212,8 +236,14 @@ def workflows_show(
     console.print(f"Kind: {entry.kind}")
     console.print(f"Source: {entry.source}")
     console.print(f"Description: {entry.description or '—'}")
+    if entry.is_deprecated:
+        console.print(f"[yellow]Remplacé par :[/yellow] [bold]{entry.deprecated_by}[/bold]")
     if entry.agents:
         console.print(f"Agents: {', '.join(entry.agents)}")
+    if entry.patterns:
+        console.print(f"Patterns: {', '.join(entry.patterns)}")
+    if entry.memory:
+        console.print(f"Mémoire: {', '.join(entry.memory)}")
     if entry.triggers:
         console.print("Triggers:")
         for trigger in entry.triggers:

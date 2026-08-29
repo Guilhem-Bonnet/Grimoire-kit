@@ -373,6 +373,7 @@ catalogue indexe les deux.
 | --- | --- |
 | `grimoire workflows list` | Lister les workflows — nature, agents, provenance |
 | `grimoire workflows list -k orchestration` | Ne garder que les workflows multi-agents |
+| `grimoire workflows list --all` | Inclure ceux qu'une commande CLI remplace |
 | `grimoire workflows teams` | Lister les équipes : membres, spécialité, chaîne de handoff |
 | `grimoire workflows search <terme>` | Chercher par slug, description, et optionnellement contenu |
 | `grimoire workflows show <slug>` | Afficher un workflow, l'équipe qu'il déclare, et son contenu |
@@ -381,6 +382,25 @@ catalogue indexe les deux.
 | `grimoire workflows diff` | Différences entre framework et projet |
 | `grimoire workflows doctor` | Auditer les prompts du projet contre les défauts du framework |
 | `grimoire workflows prune` | Retirer les prompts propres au projet absents du framework |
+
+### Workflows remplacés par une commande
+
+Quatre des sept prompts livrés redisaient une commande du SDK :
+
+| Workflow | Commande qui le remplace |
+|----------|--------------------------|
+| `/grimoire-status` | `grimoire status` |
+| `/grimoire-health-check` | `grimoire doctor` |
+| `/grimoire-self-heal` | `grimoire doctor --fix` |
+| `/grimoire-pre-push` | `grimoire check` |
+
+Ils occupaient la moitié du catalogue. Ils restent livrés et installables — un
+projet qui les a ne les perd pas — mais ne sont plus déployés dans les projets
+neufs ni listés par défaut : `--all` les montre, avec la commande à utiliser.
+
+Les trois autres restent de plein droit : `/grimoire-changelog`,
+`/grimoire-dream` et `/grimoire-session-bootstrap` lisent l'historique et la
+mémoire pour en tirer une synthèse, ce qu'aucune commande ne fait.
 
 ### Se déclarer pour entrer au catalogue
 
@@ -399,9 +419,19 @@ triggers:
 ---
 ```
 
-`agents` et `team` sont facultatifs ; `description` ne l'est pas en pratique,
-c'est ce que le catalogue affiche. Un fichier sans frontmatter reste sur
-disque et n'est pas listé.
+`agents`, `team` et `patterns` sont facultatifs ; `description` ne l'est pas en
+pratique, c'est ce que le catalogue affiche. Un fichier sans frontmatter reste
+sur disque et n'est pas listé.
+
+`patterns` cite les identifiants du catalogue de patterns (`ORC-01`, `KNO-02`…)
+que le workflow instancie, et `memory` les couches du Memory OS qu'il lit ou
+écrit. Aucun workflow livré ne déclare de couche mémoire : leurs fichiers ne le
+disent pas, et l'inventer contredirait la règle du dépôt — ce qui décrit un
+artefact doit en être dérivé. Le champ existe pour les workflows que vous
+écrivez.
+
+Un prompt qui redit une commande du SDK le déclare avec `deprecated_by:`,
+suivi de la commande.
 
 ---
 

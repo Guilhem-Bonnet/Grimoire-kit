@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from typer.testing import CliRunner
@@ -41,10 +42,13 @@ class TestList:
         assert {"party-mode", "boomerang-orchestration", "subagent-orchestration"} <= slugs
 
     def test_the_count_separates_the_two_kinds(self, project: Path) -> None:
+        """Sept commandes étaient listées ; quatre redisaient une commande CLI
+        et sont sorties de la vue par défaut. Les trois qui restent
+        synthétisent — changelog, dream, session-bootstrap."""
         data = json.loads(runner.invoke(app, ["-o", "json", "workflows", "list", str(project)]).output)
 
         assert data["counts_by_kind"]["orchestration"] >= 6
-        assert data["counts_by_kind"]["command"] >= 7
+        assert data["counts_by_kind"]["command"] >= 3
 
     def test_kind_filters(self, project: Path) -> None:
         result = runner.invoke(app, ["-o", "json", "workflows", "list", str(project), "--kind", "orchestration"])
@@ -144,3 +148,57 @@ class TestSearch:
         assert result.exit_code == 0
         slugs = {row["slug"] for row in json.loads(result.output)["results"]}
         assert "boomerang-orchestration" in slugs
+
+
+class TestDeprecatedAreOutOfTheWay:
+    _REPLACED: ClassVar[list[str]] = [
+        "grimoire-status", "grimoire-health-check", "grimoire-self-heal", "grimoire-pre-push",
+    ]
+
+    def test_the_default_listing_drops_them(self, project: Path) -> None:
+        data = json.loads(runner.invoke(app, ["-o", "json", "workflows", "list", str(project)]).output)
+
+        slugs = {w["slug"] for w in data["workflows"]}
+        assert not (slugs & set(self._REPLACED))
+
+    def test_all_brings_them_back_with_their_replacement(self, project: Path) -> None:
+        data = json.loads(
+            runner.invoke(app, ["-o", "json", "workflows", "list", str(project), "--all"]).output
+        )
+
+        by_slug = {w["slug"]: w for w in data["workflows"]}
+        assert set(self._REPLACED) <= set(by_slug)
+        assert by_slug["grimoire-status"]["deprecated_by"] == "grimoire status"
+
+    def test_orchestrations_dominate_the_default_view(self, project: Path) -> None:
+        """Le reproche d'origine : le catalogue avait l'air basique."""
+        data = json.loads(runner.invoke(app, ["-o", "json", "workflows", "list", str(project)]).output)
+
+        counts = data["counts_by_kind"]
+        assert counts["orchestration"] > counts["command"]
+
+    def test_show_names_the_replacement(self, project: Path) -> None:
+        result = runner.invoke(app, ["-o", "json", "workflows", "show", "grimoire-status", str(project)])
+
+        assert result.exit_code == 0
+        assert json.loads(result.output)["deprecated_by"] == "grimoire status"
+
+    def test_a_replaced_prompt_stays_installable(self, project: Path) -> None:
+        """Sortir du catalogue n'est pas disparaître : qui le veut peut l'installer."""
+        result = runner.invoke(app, ["-o", "json", "workflows", "install", "grimoire-status", str(project)])
+
+        assert result.exit_code == 0
+        assert (project / ".github" / "prompts" / "grimoire-status.prompt.md").is_file()
+
+    def test_doctor_does_not_claim_they_are_missing(self, project: Path) -> None:
+        """Le scaffold ne les déploie plus ; les attendre rendrait tout projet
+        neuf rouge, et `sync` les réinstallerait aussitôt."""
+        result = runner.invoke(app, ["-o", "json", "workflows", "doctor", str(project)])
+
+        missing = json.loads(result.output)["missing"]
+        assert not any(name.startswith(tuple(self._REPLACED)) for name in missing), missing
+
+    def test_show_renders_declared_patterns(self, project: Path) -> None:
+        result = runner.invoke(app, ["-o", "json", "workflows", "show", "boomerang-orchestration", str(project)])
+
+        assert "ORC-01" in json.loads(result.output)["patterns"]

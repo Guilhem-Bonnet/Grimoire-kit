@@ -2,6 +2,8 @@
 kind: orchestration
 description: "Spawner des sous-agents en parallèle depuis un workflow, puis agréger leurs résultats"
 agents: [architect, dev, qa]
+team: team-build
+patterns: [ORC-01]
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 

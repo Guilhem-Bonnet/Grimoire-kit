@@ -1,5 +1,6 @@
 ---
 kind: command
+deprecated_by: 'grimoire doctor --fix'
 description: 'Auto-diagnostic et réparation Grimoire — identifie et corrige les problèmes courants'
 agent: 'agent'
 tools: ['read', 'search', 'execute', 'edit']

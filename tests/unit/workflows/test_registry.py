@@ -9,6 +9,7 @@ catalogue voit, d'où, et dans quel ordre de priorité.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -172,3 +173,131 @@ class TestMetadata:
 
     def test_find_returns_none_for_an_unknown_slug(self, tmp_path: Path) -> None:
         assert registry.find_workflow(tmp_path, "workflow-imaginaire") is None
+
+
+class TestDeprecation:
+    """Quatre des sept prompts livrés redisent une commande CLI.
+
+    Ils occupaient la moitié du catalogue et donnaient l'impression d'un
+    produit qui ne sait faire que du diagnostic. Ils restent livrés et
+    invocables — un projet qui les a ne les perd pas — mais sortent de la vue
+    par défaut, en nommant la commande qui les remplace.
+    """
+
+    _REPLACED: ClassVar[dict[str, str]] = {
+        "grimoire-status": "grimoire status",
+        "grimoire-health-check": "grimoire doctor",
+        "grimoire-self-heal": "grimoire doctor --fix",
+        "grimoire-pre-push": "grimoire check",
+    }
+
+    @pytest.mark.parametrize(("slug", "command"), sorted(_REPLACED.items()))
+    def test_a_replaced_prompt_names_its_command(self, tmp_path: Path, slug: str, command: str) -> None:
+        entry = registry.find_workflow(tmp_path, slug)
+
+        assert entry is not None
+        assert entry.is_deprecated
+        assert entry.deprecated_by == command
+
+    def test_the_default_catalogue_hides_them(self, tmp_path: Path) -> None:
+        visible = {e.slug for e in registry.load_workflows(tmp_path, include_deprecated=False)}
+
+        assert not (visible & set(self._REPLACED))
+
+    def test_they_remain_reachable_on_demand(self, tmp_path: Path) -> None:
+        """Cacher n'est pas supprimer : `--all` et `show` doivent les rendre."""
+        every = {e.slug for e in registry.load_workflows(tmp_path)}
+
+        assert set(self._REPLACED) <= every
+
+    def test_the_synthesising_prompts_are_kept(self, tmp_path: Path) -> None:
+        """changelog, dream et session-bootstrap ne redisent aucune commande.
+
+        Ils lisent l'historique et la mémoire pour en tirer une synthèse ; le
+        SDK n'a rien qui fasse ça. Les supprimer retirerait une capacité.
+        """
+        visible = {e.slug for e in registry.load_workflows(tmp_path, include_deprecated=False)}
+
+        assert {"grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap"} <= visible
+
+    def test_no_orchestration_is_deprecated(self, tmp_path: Path) -> None:
+        for entry in registry.load_workflows(tmp_path):
+            if entry.is_orchestration:
+                assert not entry.is_deprecated, entry.slug
+
+    def test_is_deprecated_file_reads_the_frontmatter(self, tmp_path: Path) -> None:
+        plain = _write(tmp_path / "a.md", "---\nkind: command\ndescription: 'x'\n---\n")
+        marked = _write(tmp_path / "b.md", "---\nkind: command\ndeprecated_by: 'grimoire status'\n---\n")
+
+        assert registry.is_deprecated_file(plain) is False
+        assert registry.is_deprecated_file(marked) is True
+
+    def test_a_missing_file_is_not_deprecated(self, tmp_path: Path) -> None:
+        """La sonde du scaffold ne doit pas exploser sur un chemin absent."""
+        assert registry.is_deprecated_file(tmp_path / "absent.md") is False
+
+
+class TestDeclaredPatterns:
+    """Les patterns déclarés doivent exister au catalogue.
+
+    Le champ existait et n'était rempli nulle part. Les valeurs posées le sont
+    d'après le texte du pattern et celui du workflow ; ce test empêche qu'un
+    identifiant inventé passe.
+    """
+
+    @pytest.mark.parametrize(
+        ("slug", "pattern"),
+        [
+            ("boomerang-orchestration", "ORC-01"),
+            ("subagent-orchestration", "ORC-01"),
+            ("state-checkpoint", "ORC-09"),
+        ],
+    )
+    def test_declared_pattern(self, tmp_path: Path, slug: str, pattern: str) -> None:
+        entry = registry.find_workflow(tmp_path, slug)
+
+        assert entry is not None
+        assert pattern in entry.patterns
+
+    def test_every_declared_pattern_looks_like_a_catalogue_id(self, tmp_path: Path) -> None:
+        import re
+
+        for entry in registry.load_workflows(tmp_path):
+            for pattern in entry.patterns:
+                assert re.fullmatch(r"[A-Z]{3}-\d{2}", pattern), f"{entry.slug}: {pattern}"
+
+
+class TestDeclaredTeams:
+    @pytest.mark.parametrize(
+        ("slug", "team"),
+        [
+            ("boomerang-orchestration", "team-build"),
+            ("subagent-orchestration", "team-build"),
+            ("incident-response", "team-ops"),
+        ],
+    )
+    def test_declared_team(self, tmp_path: Path, slug: str, team: str) -> None:
+        entry = registry.find_workflow(tmp_path, slug)
+
+        assert entry is not None
+        assert entry.team == team
+
+    def test_every_declared_team_resolves(self, tmp_path: Path) -> None:
+        """Déclarer une équipe absente donnerait un `show` qui promet dans le vide."""
+        from grimoire.workflows.teams import load_team
+
+        for entry in registry.load_workflows(tmp_path):
+            if entry.team:
+                assert load_team(tmp_path, entry.team) is not None, entry.slug
+
+    @pytest.mark.parametrize("slug", ["party-mode", "state-checkpoint", "repo-map-generator"])
+    def test_a_workflow_without_a_grounded_team_declares_none(self, tmp_path: Path, slug: str) -> None:
+        """Mieux vaut aucune équipe qu'une équipe devinée.
+
+        Ces trois-là ne nomment pas de roster et ne recoupent la spécialité
+        d'aucune équipe : leur en attribuer une serait une invention.
+        """
+        entry = registry.find_workflow(tmp_path, slug)
+
+        assert entry is not None
+        assert entry.team == ""

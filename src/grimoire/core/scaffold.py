@@ -26,6 +26,7 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
 from grimoire.memory import profiles as memory_profiles
+from grimoire.workflows import registry as workflow_registry
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -946,6 +947,10 @@ class ProjectScaffolder:
             return
         gh_prompts = self._target / ".github" / "prompts"
         for prompt_file in sorted(prompts_src.glob("*.prompt.md")):
+            # Un prompt qui redit une commande CLI n'est plus déployé dans les
+            # projets neufs. Il reste livré : ceux qui l'ont gardent le leur.
+            if workflow_registry.is_deprecated_file(prompt_file):
+                continue
             p.copies.append(FileCopy(
                 src=prompt_file,
                 dst=gh_prompts / prompt_file.name,

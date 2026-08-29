@@ -2,6 +2,7 @@
 kind: orchestration
 description: "Persistance d'état entre sessions : un workflow long repart du step interrompu, variables comprises"
 agents: [dev]
+patterns: [ORC-09]
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 

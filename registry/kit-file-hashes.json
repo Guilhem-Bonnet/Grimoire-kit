@@ -338,6 +338,10 @@
    "version": "3.4.2",
    "path": "framework/tools/bias-toolkit.py"
   },
+  "1ca09e03fa7c75231352d58a92f12be326b41d741a45a38855e5049bf3048d21": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-self-heal.prompt.md"
+  },
   "1cdea41aacf50cc932787b161c8e26bfbc9190998a001e60457b949cc4688eeb": {
    "version": "3.32.0",
    "path": "archetypes/web-app/agents/fullstack-dev.md"
@@ -357,6 +361,10 @@
   "1fe6c4eca99fb53c4204310cf7724b1e9655da634d719574e17718c6a92a730e": {
    "version": "3.16.0",
    "path": "framework/tools/rnd_engine.py"
+  },
+  "209dfd37239c33c2a991fc6961326db59f973dcf72eed404d3436f0d989b0722": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-status.prompt.md"
   },
   "2211ea3bd8e00b70fa39db7206b04fc1734c5c751a7478fee922b0a86cabbd84": {
    "version": "3.32.0",
@@ -602,6 +610,10 @@
    "version": "3.4.2",
    "path": "framework/event-log-shared-state.md"
   },
+  "35fbc78b93f90259634c04c57eec4b835dc0996ce4103d7248b45234d323a058": {
+   "version": "3.34.2",
+   "path": "framework/workflows/state-checkpoint.md"
+  },
   "364248402ee0b1d5aa0b225518854602adbe37e022bf700c30934f1e4d7c57a0": {
    "version": "3.24.0",
    "path": "framework/tools/grimoire-mcp-tools.py"
@@ -641,6 +653,10 @@
   "3a3dc6f945b3c2e46031567e50f88cb5a76e238d01b6746131fd04b189eecf65": {
    "version": "3.24.0",
    "path": "archetypes/infra-ops/agents/backup-dr-specialist.md"
+  },
+  "3a6d1d5547269f5bea85ea1919b9b7c5720ff6aa35d850abf7d157749c416f3a": {
+   "version": "3.34.2",
+   "path": "framework/workflows/subagent-orchestration.md"
   },
   "3ac2e340bd0fcac587d894fbe154ac57144407f07e7f3fda5e5b37880fb1a979": {
    "version": "3.4.2",
@@ -2670,6 +2686,10 @@
    "version": "3.16.0",
    "path": "framework/tools/project-graph.py"
   },
+  "e64d30d776e9ae8e3dcd70c64ff97d85d894db808101e1509c6ec8c85529123c": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-health-check.prompt.md"
+  },
   "e64db8afa218e1d794cf81672549559e6c9deb200d355cd392c5c916bdbf3ad9": {
    "version": "3.4.2",
    "path": "framework/tools/new-game-plus.py"
@@ -2806,6 +2826,10 @@
    "version": "3.4.2",
    "path": "framework/tools/quantum-branch.py"
   },
+  "f0c01567670603b6f601019a350fed5baaed57f7429e43fcec4ff849551a5ef7": {
+   "version": "3.34.2",
+   "path": "framework/workflows/incident-response.md"
+  },
   "f10c3cb0a9302b5f03ef841571ccb30966391c04dc1414af9f2abbb07ecb36e1": {
    "version": "3.4.2",
    "path": "framework/tools/semantic-chain.py"
@@ -2821,6 +2845,10 @@
   "f1aa0354a736c90d79f7ee2e4bcf5c30dd4a10be20a31ceea8fdf5871e6b8c00": {
    "version": "3.34.2",
    "path": "framework/tools/tool-resolver.py"
+  },
+  "f1bb68cd2ad19c2aad8352beff5aef57c3405b2fb18d840bbe4ac588e67df81a": {
+   "version": "3.34.2",
+   "path": "framework/workflows/boomerang-orchestration.md"
   },
   "f1f60f9de21627c258aa371ba72bb140e1c2ca5afef0a9a4d235a8ec1edbc082": {
    "version": "3.4.2",
@@ -2845,6 +2873,10 @@
   "f3412e24cedafd9c64edf1a7506050ffb364e14168f76f26f28ef1dd76507e4b": {
    "version": "3.4.2",
    "path": "framework/tools/context-router.py"
+  },
+  "f35b7842240e85dad1330e005552b34f84aa6a41f938446d6039f7b53884ab28": {
+   "version": "3.34.2",
+   "path": "framework/copilot/prompts/grimoire-pre-push.prompt.md"
   },
   "f4230898f3279c5fc23f72e4142f057d1ca9ad07e3fc442c30284e3ffbb5bef5": {
    "version": "3.4.2",

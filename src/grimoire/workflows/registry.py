@@ -61,6 +61,8 @@ class WorkflowEntry:
     patterns: tuple[str, ...] = ()
     memory: tuple[str, ...] = ()
     triggers: tuple[str, ...] = ()
+    #: Commande CLI qui remplace ce workflow, ou "" s'il n'est pas déprécié.
+    deprecated_by: str = ""
 
     @property
     def command(self) -> str:
@@ -70,6 +72,17 @@ class WorkflowEntry:
     @property
     def is_orchestration(self) -> bool:
         return self.kind == KIND_ORCHESTRATION
+
+    @property
+    def is_deprecated(self) -> bool:
+        """Un workflow qui redit ce qu'une commande CLI fait déjà.
+
+        Il reste livré et invocable : un projet qui l'a installé ne le perd
+        pas. Il sort simplement du catalogue par défaut, parce qu'occuper la
+        moitié des lignes avec des doublons donne l'impression d'un produit
+        qui ne sait rien faire d'autre.
+        """
+        return bool(self.deprecated_by)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +97,7 @@ class WorkflowEntry:
             "patterns": list(self.patterns),
             "memory": list(self.memory),
             "triggers": list(self.triggers),
+            "deprecated_by": self.deprecated_by,
             "path": str(self.path),
         }
 
@@ -156,7 +170,22 @@ def _read_entry(path: Path, source: str, *, default_kind: str) -> WorkflowEntry 
         patterns=_tuple_field(meta.get("patterns")),
         memory=_tuple_field(meta.get("memory")),
         triggers=_triggers(meta.get("triggers")),
+        deprecated_by=str(meta.get("deprecated_by", "")).strip(),
     )
+
+
+def is_deprecated_file(path: Path) -> bool:
+    """Le fichier déclare-t-il une commande CLI qui le remplace ?
+
+    Lu fichier par fichier plutôt que via le catalogue : le scaffold décide
+    quoi installer avant qu'un projet existe, et l'inventaire de dérive
+    compare des répertoires, pas des entrées.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+    return bool(str(meta.get("deprecated_by", "")).strip())
 
 
 def source_dirs(project_root: Path) -> list[tuple[str, Path, str, str]]:
@@ -186,11 +215,14 @@ def _installed_workflows(project_root: Path) -> dict[str, Path]:
     return {stem: path for stem, path in found.items() if not path.name.endswith(".tpl.md")}
 
 
-def load_workflows(project_root: Path) -> list[WorkflowEntry]:
+def load_workflows(project_root: Path, *, include_deprecated: bool = True) -> list[WorkflowEntry]:
     """Tous les workflows visibles depuis *project_root*, dédoublonnés par slug.
 
     Le projet prime sur l'installé, qui prime sur le cadre : un workflow
     personnalisé n'est jamais masqué par sa version d'origine.
+
+    ``include_deprecated=False`` écarte ceux qu'une commande CLI remplace —
+    ce que fait le catalogue par défaut.
     """
     seen: dict[str, WorkflowEntry] = {}
 
@@ -212,7 +244,8 @@ def load_workflows(project_root: Path) -> list[WorkflowEntry]:
             else:
                 seen.setdefault(entry.slug, entry)
 
-    return sorted(seen.values(), key=lambda e: (_SOURCE_ORDER.index(e.source), e.slug))
+    entries = seen.values() if include_deprecated else [e for e in seen.values() if not e.is_deprecated]
+    return sorted(entries, key=lambda e: (_SOURCE_ORDER.index(e.source), e.slug))
 
 
 def find_workflow(project_root: Path, workflow: str) -> WorkflowEntry | None:

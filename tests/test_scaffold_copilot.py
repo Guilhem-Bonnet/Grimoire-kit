@@ -107,17 +107,20 @@ class TestPlanDirectoriesIncludesCopilot:
 class TestPlanCopilotPrompts:
     """Test _plan_copilot_prompts() copies workflow prompts."""
 
-    def test_plan_copilot_prompts_copies_all_prompts(self, scaffolder):
-        """Verify all 7 prompts are copied."""
+    def test_plan_copilot_prompts_skips_the_replaced_ones(self, scaffolder):
+        """Un projet neuf ne reçoit que les prompts qui apportent quelque chose.
+
+        Quatre des sept redisaient une commande du SDK — `status`, `doctor`,
+        `doctor --fix`, `check`. Ils restent livrés et installables à la
+        demande, mais les déployer d'office remplissait `.github/prompts` de
+        doublons.
+        """
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
-        
-        # Extract prompt copies
-        prompt_copies = [
-            c for c in plan.copies 
-            if ".github/prompts" in str(c.dst)
-        ]
-        assert len(prompt_copies) == 7
+
+        stems = {c.dst.stem.removesuffix(".prompt") for c in plan.copies if ".github/prompts" in str(c.dst)}
+
+        assert stems == {"grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap"}
 
     def test_plan_copilot_prompts_destination(self, scaffolder):
         """Verify all prompts go to .github/prompts/."""
@@ -143,18 +146,19 @@ class TestPlanCopilotPrompts:
         ]
         names = [c.dst.stem for c in prompt_copies]
         
+        # Les prompts qui synthétisent : rien dans le SDK ne les remplace.
         expected_stems = [
             "grimoire-changelog",
             "grimoire-dream",
-            "grimoire-health-check",
-            "grimoire-pre-push",
-            "grimoire-self-heal",
             "grimoire-session-bootstrap",
-            "grimoire-status",
         ]
-        
+
         for expected in expected_stems:
             assert any(expected in n for n in names)
+
+        # Ceux qu'une commande remplace ne sont plus déployés d'office.
+        for replaced in ("grimoire-status", "grimoire-health-check", "grimoire-self-heal", "grimoire-pre-push"):
+            assert not any(replaced in n for n in names), replaced
 
     def test_existing_prompt_is_updated_not_frozen(self, scaffolder, temp_project):
         """A prompt already on disk is refreshed, not skipped.
@@ -285,8 +289,9 @@ class TestFullScaffoldPlan:
             c for c in plan.copies 
             if ".github/prompts" in str(c.dst)
         ]
-        assert len(prompts) == 7
-        
+        # Trois : ceux qu'une commande du SDK ne remplace pas.
+        assert len(prompts) == 3
+
         # Should have instructions
         instructions = [
             t for t in plan.templates 
