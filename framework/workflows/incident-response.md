@@ -7,7 +7,7 @@ triggers:
  - incident infra détecté
  - incident sécurité détecté
 
-<!--
+<!-- grimoire:legend
 Ces {{placeholders}} sont résolus à l'installation depuis les agents réellement
 présents dans le projet ; un rôle sans agent installé rend « aucun ».
  {{ops_agent}} - Agent infrastructure/provisioning (ex: Forge)
