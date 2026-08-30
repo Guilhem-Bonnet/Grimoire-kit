@@ -49,7 +49,15 @@ _AGENT_TAG_RE = re.compile(r'<agent\s+tag="([\w-]+)"')
 _READABLE_SUFFIXES = frozenset({".md", ".yaml", ".yml", ".csv", ".json", ".sh", ".py", ".toml"})
 
 #: Directories whose contents are the project's, not the kit's.
-_SKIPPED_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__", "_grimoire-output"})
+#:
+#: ``_archived`` is a convention the kit's own migration already honours — see
+#: ``_kit_destinations`` in ``cli/cmd_migrate.py``: a file parked there is one
+#: the project retired, not one the kit shipped. Its routing map is a record of
+#: what used to be true, and reading it as a live one resurrects agents the
+#: project deliberately removed.
+_SKIPPED_DIRS = frozenset({
+    ".git", ".venv", "node_modules", "__pycache__", "_grimoire-output", "_archived",
+})
 
 
 @dataclass(frozen=True, slots=True)
