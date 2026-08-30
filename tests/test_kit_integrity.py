@@ -245,3 +245,23 @@ class TestNestedRepositories:
             '<agent tag="dev" name="Amelia" role="d\'un autre dépôt"/>\n', encoding="utf-8",
         )
         assert roster_incoherences(tmp_path).routed_but_absent == []
+
+    def test_the_projects_own_git_directory_is_not_nested(self, tmp_path: Path) -> None:
+        """The guard exists for this: a project is not a repository inside itself.
+
+        Without the `root != project_root` test, a project under version control
+        — every real one — would exclude its whole tree and the check would
+        silently pass on everything.
+        """
+        _install(tmp_path)
+        (tmp_path / ".git").mkdir()
+
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8") + "\nCharger `_grimoire/kit/absent.md`.\n",
+            encoding="utf-8",
+        )
+        dead = dead_path_references(tmp_path)
+        assert [ref.target for ref in dead] == ["_grimoire/kit/absent.md"], (
+            "le `.git` du projet lui-même a exclu son propre arbre"
+        )
