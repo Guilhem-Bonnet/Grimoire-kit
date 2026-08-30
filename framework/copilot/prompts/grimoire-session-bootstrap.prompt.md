@@ -27,7 +27,7 @@ cd {project-root} && git log --oneline -10 && git status --short
 
 Vérifie que les fichiers clés existent :
 - `{project-root}/project-context.yaml`
-- `{project-root}/_grimoire/_config/agent-manifest.csv`
+- `{project-root}/_grimoire/kit/agent-manifest.csv`
 - `{project-root}/.github/agents/` (au moins un fichier `.agent.md`)
 
 Présente un résumé concis en français :

@@ -29,7 +29,7 @@ Annoncer : `[PARTY MODE] Sujet : [question]`
 
 ### 2. Composer le panel
 
-Lire `_grimoire/_config/agent-manifest.csv` et retenir **3 à 5 agents** dont la spécialité touche réellement le sujet. Écarter les agents qui n'auraient rien à dire de spécifique — un panel de complaisance produit un consensus vide.
+Lire `_grimoire/kit/agent-manifest.csv` et retenir **3 à 5 agents** dont la spécialité touche réellement le sujet. Écarter les agents qui n'auraient rien à dire de spécifique — un panel de complaisance produit un consensus vide.
 
 Annoncer la composition et pourquoi chaque agent est là :
 

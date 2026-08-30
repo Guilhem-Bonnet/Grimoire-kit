@@ -22,7 +22,7 @@ You must fully embody this agent's persona and follow all activation instruction
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
       <step n="4">Charger {project-root}/_grimoire/_memory/shared-context.md pour connaître le projet</step>
-      <step n="4b">Si le fichier existe, charger {project-root}/_grimoire/_config/archetype.dna.yaml pour connaître les traits, contraintes et valeurs du projet (guide le comportement de tous les agents)</step>
+      <step n="4b">Si le fichier existe, charger {project-root}/_grimoire/kit/archetype.dna.yaml pour connaître les traits, contraintes et valeurs du projet (guide le comportement de tous les agents)</step>
       <step n="5">FIRST-RUN DETECTION:
           1. Charger {project-root}/_grimoire/_memory/session-state.md
           2. Si le fichier contient "first_run: true" → mode first-run (voir step 5b)

@@ -63,7 +63,7 @@ tools_required:
     required: true
     check_command: "which git"
   - name: python3
-    description: "mem0-bridge.py, gen-tests.py"
+    description: "grimoire memory, gen-tests.py"
     required: false
     check_command: "which python3"
 

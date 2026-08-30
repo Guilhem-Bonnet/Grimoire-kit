@@ -13,7 +13,7 @@ Solutions aux problèmes les plus fréquents.
 
 **Diagnostic** :
 ```bash
-python3 _grimoire/_memory/mem0-bridge.py status
+grimoire memory status
 ```
 
 **Causes et fixes** :
@@ -38,7 +38,7 @@ source .venv/bin/activate
 pip install -r _grimoire/_memory/requirements.txt
 
 # Vérifier le résultat
-python3 _grimoire/_memory/mem0-bridge.py status
+grimoire memory status
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
@@ -161,7 +161,7 @@ ls _grimoire/_memory/agent-learnings/
 # Des fichiers .md doivent exister pour chaque agent
 
 # 3. Tester la mémoire
-python3 _grimoire/_memory/mem0-bridge.py search "nom du projet"
+grimoire memory search "nom du projet"
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
@@ -440,7 +440,7 @@ nordvpn allowlist add app /usr/share/code/code
 
 Si le problème persiste :
 
-1. `python3 _grimoire/_memory/mem0-bridge.py status` — état complet de la mémoire
+1. `grimoire memory status` — état complet de la mémoire
 2. `bash _grimoire/kit/framework/cc-verify.sh` — état du CC
 3. `bash grimoire-init.sh doctor` — diagnostic global du kit
 4. `bash grimoire-init.sh guard --json` — budget de contexte agents (JSON pour le partager)

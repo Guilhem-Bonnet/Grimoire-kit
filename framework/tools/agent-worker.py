@@ -8,7 +8,7 @@ LLM, recevant des tâches via le message bus et produisant des résultats
 validés par les delivery contracts.
 
 Le worker :
-  - Charge sa persona depuis _grimoire/_config/agents/
+  - Charge sa persona depuis _grimoire/kit/agents/
   - Se connecte au message bus
   - Écoute les messages entrants
   - Utilise le LLM Router pour sélectionner son modèle
