@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.35.1] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité ignore les dépôts imbriqués.** Les deux checks
+  introduits en 3.35.0 parcouraient tout l'arbre du projet, clones vendorisés,
+  sous-modules et worktrees compris : un projet hébergeant un dépôt se voyait
+  reprocher les chemins de ce dépôt comme s'il les avait installés lui-même.
+  Constaté immédiatement à la mise à jour d'un atelier hébergeant un clone du
+  kit : 395 références mortes annoncées, dont 345 venaient du clone — non
+  réparables depuis `grimoire doctor`, et noyant les 50 qui étaient vraies.
+  Un répertoire portant son propre `.git` répond à son arbre, pas à celui du
+  projet englobant.
+
 ## [3.35.0] - 2026-08-30
 
 ### Corrigé
