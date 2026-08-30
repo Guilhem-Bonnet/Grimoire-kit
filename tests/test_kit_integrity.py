@@ -199,3 +199,69 @@ class TestScope:
         assert has_kit_tier(tmp_path)
         result = CliRunner().invoke(app, ["doctor", str(tmp_path)])
         assert "tous les chemins du kit cités se résolvent" in result.output
+
+
+class TestNestedRepositories:
+    def test_a_vendored_clone_is_not_this_project(self, tmp_path: Path) -> None:
+        """A repository checked out inside a project answers to its own tree.
+
+        The Forge carries a clone of the kit; scanning it reported 345 dead
+        references from files the Forge never installed — noise nobody can act
+        on from `grimoire doctor`, and a check reporting the unfixable is one
+        people learn to skip.
+        """
+        _install(tmp_path)
+        assert dead_path_references(tmp_path) == []
+
+        vendored = tmp_path / "vendor" / "some-clone"
+        (vendored / ".git").mkdir(parents=True)
+        (vendored / "README.md").write_text(
+            "Charger `_grimoire/kit/inexistant.md` et `_grimoire/_config/vieux.csv`.\n",
+            encoding="utf-8",
+        )
+
+        assert dead_path_references(tmp_path) == [], (
+            "les chemins d'un dépôt imbriqué sont comptés comme ceux du projet"
+        )
+
+    def test_the_projects_own_files_are_still_read(self, tmp_path: Path) -> None:
+        """Skipping nested repos must not blind the check to the project."""
+        _install(tmp_path)
+        (tmp_path / "vendor" / "clone" / ".git").mkdir(parents=True)
+
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8") + "\nCharger `_grimoire/kit/absent.md`.\n",
+            encoding="utf-8",
+        )
+        dead = dead_path_references(tmp_path)
+        assert [ref.target for ref in dead] == ["_grimoire/kit/absent.md"]
+
+    def test_a_nested_repo_does_not_pollute_the_roster(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        vendored = tmp_path / "vendor" / "clone"
+        (vendored / ".git").mkdir(parents=True)
+        (vendored / "agents.md").write_text(
+            '<agent tag="dev" name="Amelia" role="d\'un autre dépôt"/>\n', encoding="utf-8",
+        )
+        assert roster_incoherences(tmp_path).routed_but_absent == []
+
+    def test_the_projects_own_git_directory_is_not_nested(self, tmp_path: Path) -> None:
+        """The guard exists for this: a project is not a repository inside itself.
+
+        Without the `root != project_root` test, a project under version control
+        — every real one — would exclude its whole tree and the check would
+        silently pass on everything.
+        """
+        _install(tmp_path)
+        (tmp_path / ".git").mkdir()
+
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8") + "\nCharger `_grimoire/kit/absent.md`.\n",
+            encoding="utf-8",
+        )
+        dead = dead_path_references(tmp_path)
+        assert [ref.target for ref in dead] == ["_grimoire/kit/absent.md"], (
+            "le `.git` du projet lui-même a exclu son propre arbre"
+        )

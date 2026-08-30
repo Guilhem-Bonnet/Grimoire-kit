@@ -88,10 +88,31 @@ def has_kit_tier(project_root: Path) -> bool:
     return (project_root / "_grimoire" / "kit").is_dir()
 
 
+def _nested_repository_roots(project_root: Path) -> set[Path]:
+    """Directories under *project_root* that are repositories of their own.
+
+    A vendored clone, a submodule or a worktree checked out inside a project is
+    not something this kit installed here: its paths answer to its own tree. A
+    Forge carrying a clone of the kit reported 345 dead references from it —
+    noise the user cannot act on from ``grimoire doctor``, and a check that
+    reports what nobody can fix is a check people learn to skip.
+    """
+    nested: set[Path] = set()
+    for git_entry in project_root.rglob(".git"):
+        root = git_entry.parent
+        if root != project_root:
+            nested.add(root)
+    return nested
+
+
 def _readable_files(project_root: Path) -> list[Path]:
+    nested = _nested_repository_roots(project_root)
     files: list[Path] = []
     for path in sorted(project_root.rglob("*")):
-        if any(part in _SKIPPED_DIRS for part in path.relative_to(project_root).parts):
+        relative = path.relative_to(project_root)
+        if any(part in _SKIPPED_DIRS for part in relative.parts):
+            continue
+        if any(root in path.parents for root in nested):
             continue
         if path.is_file() and path.suffix in _READABLE_SUFFIXES:
             files.append(path)
