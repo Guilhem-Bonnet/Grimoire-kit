@@ -4,7 +4,7 @@ version: 2.7
 description: Orchestre une boucle de correction fermée avec validation automatique bout-en-bout. Aucun "done" sans preuve d'exécution. Sévérité adaptative, escalade gauntlet sur déclencheur, gate oracle, borne de convergence, guardrails destructifs, rollback par context_type, délégation agents experts, META-REVIEW auto-amélioration.
 ---
 
-<!--
+<!-- grimoire:legend
 PLACEHOLDERS — résolus à l'installation depuis les agents réellement présents
 dans le projet ; un rôle sans agent installé rend « aucun » et le workflow
 reste en mode SOLO :

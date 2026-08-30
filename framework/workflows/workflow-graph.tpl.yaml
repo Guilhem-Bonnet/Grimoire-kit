@@ -8,6 +8,10 @@
 #
 # Usage : copier dans _grimoire-output/.runs/{run_id}/workflow-graph.yaml
 # et mettre à jour les statuts en temps réel.
+#
+# CECI EST UN EXEMPLE. Les agents qu'il nomme illustrent la forme du graphe ;
+# ce ne sont pas les agents de ce projet. Le roster réel est dans
+# _grimoire/kit/agent-manifest.csv.
 
 # ── Identité du workflow ─────────────────────────────────────────────────────
 workflow:

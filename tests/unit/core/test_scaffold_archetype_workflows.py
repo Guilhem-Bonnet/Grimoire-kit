@@ -81,6 +81,14 @@ class TestArchetypeWorkflowsAreInstalled:
         assert not {dst for dst in installed if dst.name in shipped}
 
 
+LEGEND_RE = re.compile(r"<!--\s*grimoire:legend\b.*?-->", re.DOTALL)
+
+
+def _body(text: str) -> str:
+    """Everything outside the legend block, which documents the markers."""
+    return LEGEND_RE.sub("", text)
+
+
 class TestPlaceholderRendering:
     """Install-time placeholders are resolved; the other three families are not."""
 
@@ -101,21 +109,24 @@ class TestPlaceholderRendering:
     def test_unfilled_role_reads_as_absent_not_as_a_marker(self, tmp_path: Path) -> None:
         root = self._installed(tmp_path, ("fix-loop",))
         wf = (root.joinpath(*WORKFLOWS_DIR) / "workflow-closed-loop-fix.md").read_text(encoding="utf-8")
-        assert "{{ops_agent_name}}" not in wf
+        assert "{{ops_agent_name}}" not in _body(wf)
+        assert "{{ops_agent_name}}" in wf, "la légende doit garder le marqueur qu'elle explique"
         assert "aucun" in wf
 
     def test_no_install_time_marker_survives(self, tmp_path: Path) -> None:
         root = self._installed(tmp_path, ("fix-loop", "infra-ops"))
         resolved_keys = ("ops_agent", "debug_agent", "tech_stack_list", "user_name", "project_name")
         for wf in root.joinpath(*WORKFLOWS_DIR).iterdir():
-            text = wf.read_text(encoding="utf-8", errors="ignore")
+            if wf.is_dir():
+                continue
+            text = _body(wf.read_text(encoding="utf-8", errors="ignore"))
             leaked = [k for k in resolved_keys if "{{" + k + "}}" in text]
             assert not leaked, f"{wf.name} still carries {leaked}"
 
     def test_runtime_slots_survive_installation(self, tmp_path: Path) -> None:
         """`{{current_step}}` & co are filled per run by the LLM, not at install."""
         root = self._installed(tmp_path, ("minimal",))
-        status = (root.joinpath(*WORKFLOWS_DIR) / "workflow-status.md").read_text(encoding="utf-8")
+        status = (root.joinpath(*WORKFLOWS_DIR) / "examples" / "workflow-status.md").read_text(encoding="utf-8")
         assert "{{current_step}}" in status
         assert "{{progress_bar}}" in status
 
