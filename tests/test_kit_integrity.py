@@ -265,3 +265,43 @@ class TestNestedRepositories:
         assert [ref.target for ref in dead] == ["_grimoire/kit/absent.md"], (
             "le `.git` du projet lui-même a exclu son propre arbre"
         )
+
+
+class TestArchives:
+    def test_an_archived_agent_does_not_haunt_the_roster(self, tmp_path: Path) -> None:
+        """A retired persona keeps its old map; it is a record, not a promise.
+
+        The Forge parks superseded agents under `overrides/agents/_archived/`.
+        Its archived concierge still carried the pre-generation roster, so the
+        check resurrected nine agents the project had deliberately removed.
+        """
+        _install(tmp_path)
+        archive = tmp_path / "_grimoire" / "overrides" / "agents" / "_archived"
+        archive.mkdir(parents=True)
+        (archive / "concierge.md").write_text(
+            '<agents>\n  <agent tag="dev" name="Amelia" role="retiré"/>\n</agents>\n',
+            encoding="utf-8",
+        )
+        assert roster_incoherences(tmp_path).routed_but_absent == []
+
+    def test_an_archived_file_makes_no_path_promise(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        archive = tmp_path / "_grimoire" / "overrides" / "agents" / "_archived"
+        archive.mkdir(parents=True)
+        (archive / "old.md").write_text(
+            "Charger `_grimoire/_config/custom/cc-verify.sh`.\n", encoding="utf-8",
+        )
+        assert dead_path_references(tmp_path) == []
+
+    def test_a_live_agent_is_still_read(self, tmp_path: Path) -> None:
+        """Skipping archives must not blind the check to what is in service."""
+        _install(tmp_path)
+        (tmp_path / "_grimoire" / "overrides" / "agents" / "_archived").mkdir(parents=True)
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8").replace(
+                "</agents>", '  <agent tag="dev" name="Amelia" role="vivant"/>\n    </agents>', 1,
+            ),
+            encoding="utf-8",
+        )
+        assert roster_incoherences(tmp_path).routed_but_absent == ["dev"]

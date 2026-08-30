@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.35.2] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité honore la convention d'archive.** Un agent
+  retiré et parqué sous `_archived/` conservait sa carte de routage d'époque ;
+  la vérification la lisait comme une carte vivante et ressuscitait les agents
+  que le projet avait délibérément retirés. La convention est déjà connue du
+  code de migration du kit — un fichier archivé est un fichier que le projet a
+  retiré, pas un fichier que le kit a livré. Une archive est un compte rendu de
+  ce qui fut vrai, pas une promesse.
+
 ## [3.35.1] - 2026-08-30
 
 ### Corrigé
