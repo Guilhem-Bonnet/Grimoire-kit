@@ -30,7 +30,7 @@ grimoire -o json status
 ```
 
 Le tableau de bord donne le nombre de personas déployées. Leurs définitions
-vivent dans `_grimoire/_config/custom/agents/<nom>.md` et décrivent le rôle, le
+vivent dans `_grimoire/kit/agents/<nom>.md` et décrivent le rôle, le
 protocole d'activation et les règles de chacune. `grimoire registry search
 <mot-clé>` cherche dans le catalogue du kit ce que le projet n'a pas encore.
 

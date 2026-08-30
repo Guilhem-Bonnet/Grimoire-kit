@@ -9,7 +9,7 @@ Affiche le tableau de bord Grimoire du projet :
 ## Collecte des données
 
 1. Lis `{project-root}/project-context.yaml`
-2. Lis `{project-root}/_grimoire/_config/agent-manifest.csv`
+2. Lis `{project-root}/_grimoire/kit/agent-manifest.csv`
 3. Lis `{project-root}/_grimoire/_memory/config.yaml`
 4. Lis `{project-root}/_grimoire/_memory/session-state.md`
 5. Liste les fichiers dans `.github/agents/` (agents VS Code actifs)

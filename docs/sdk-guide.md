@@ -46,13 +46,25 @@ print(ctx.stack)
 ## Résolution de chemins
 
 ```python
+from pathlib import Path
+
+from grimoire.core import layout
 from grimoire.core.resolver import PathResolver
 
-resolver = PathResolver(project_root=Path("."))
-print(resolver.grimoire_dir)         # _grimoire/
-print(resolver.config_dir)       # _grimoire/_config/
-print(resolver.memory_dir)       # _grimoire/_memory/
-print(resolver.agents_dir)       # _grimoire/_config/agents/
+root = Path(".")
+
+# Les trois étages du projet.
+print(layout.kit_dir(root))        # _grimoire/kit/       — régénéré par le kit
+print(layout.overrides_dir(root))  # _grimoire/overrides/ — redéfini par le projet
+print(layout.agent_dirs(root))     # ordre de résolution des agents
+
+# `resolve()` traverse overrides → kit → emplacements historiques.
+print(layout.resolve(root, "framework/cc-verify.sh"))
+
+# `PathResolver` sert aux chemins et gabarits d'une session.
+resolver = PathResolver(project_root=root)
+print(resolver.root)
+print(resolver.resolve_path("_grimoire/kit/agent-manifest.csv"))
 ```
 
 ## Détection de stack

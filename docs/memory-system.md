@@ -87,11 +87,15 @@ Compromis : le mode lexical est purement textuel (BM25), sans similarité séman
 (synonymes, paraphrase). La source de vérité reste le markdown ; un backend vectoriel
 approuvé peut être réactivé plus tard sans migration de la source de vérité.
 
-Pour peupler le store à partir de la connaissance déjà sur disque :
+Pour peupler le store à partir de la connaissance déjà sur disque, depuis un
+clone du dépôt du kit :
 
 ```bash
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
+
+> Ce script n'est pas déployé dans un projet : le semis depuis le markdown n'a
+> pas encore d'équivalent dans le CLI `grimoire memory`.
 
 ## Mise en place et diagnostic
 

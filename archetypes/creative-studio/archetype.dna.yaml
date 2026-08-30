@@ -71,37 +71,37 @@ values:
 
 tools_required:
   - name: image-prompt
-    description: "Générateur de prompts pour images (framework/tools/image-prompt.py)"
+    description: "Générateur de prompts pour images (_grimoire/kit/tools/image-prompt.py)"
     required: true
-    check_command: "python3 framework/tools/image-prompt.py --version"
+    check_command: "python3 _grimoire/kit/tools/image-prompt.py --version"
   - name: design-tokens-template
     description: "Template de design tokens (framework/prompt-templates/design-tokens.md)"
     required: true
     check_command: "test -f framework/prompt-templates/design-tokens.md"
   - name: vision-judge
-    description: "Évaluation visuelle des outputs agents (framework/tools/vision-judge.py)"
+    description: "Évaluation visuelle des outputs agents (_grimoire/kit/tools/vision-judge.py)"
     required: true
-    check_command: "python3 framework/tools/vision-judge.py --version"
+    check_command: "python3 _grimoire/kit/tools/vision-judge.py --version"
   - name: expert-tool-chain
-    description: "Pipeline expert MCP + vision loop (framework/tools/expert-tool-chain.py)"
+    description: "Pipeline expert MCP + vision loop (_grimoire/kit/tools/expert-tool-chain.py)"
     required: true
-    check_command: "python3 framework/tools/expert-tool-chain.py --version"
+    check_command: "python3 _grimoire/kit/tools/expert-tool-chain.py --version"
   - name: agent-test
-    description: "Tests comportementaux agents (framework/tools/agent-test.py)"
+    description: "Tests comportementaux agents (_grimoire/kit/tools/agent-test.py)"
     required: false
-    check_command: "python3 framework/tools/agent-test.py --version"
+    check_command: "python3 _grimoire/kit/tools/agent-test.py --version"
   - name: agent-watch
-    description: "Monitoring dérive agents (framework/tools/agent-watch.py)"
+    description: "Monitoring dérive agents (_grimoire/kit/tools/agent-watch.py)"
     required: false
-    check_command: "python3 framework/tools/agent-watch.py --version"
+    check_command: "python3 _grimoire/kit/tools/agent-watch.py --version"
   - name: tool-resolver
-    description: "Résolution et provisionnement d'outils (framework/tools/tool-resolver.py)"
+    description: "Résolution et provisionnement d'outils (_grimoire/kit/tools/tool-resolver.py)"
     required: true
-    check_command: "python3 framework/tools/tool-resolver.py --version"
+    check_command: "python3 _grimoire/kit/tools/tool-resolver.py --version"
   - name: web-browser
-    description: "Navigation web sandboxée (framework/tools/web-browser.py)"
+    description: "Navigation web sandboxée (_grimoire/kit/tools/web-browser.py)"
     required: false
-    check_command: "python3 framework/tools/web-browser.py --version"
+    check_command: "python3 _grimoire/kit/tools/web-browser.py --version"
 
 mcp_servers:
   - name: blender-mcp

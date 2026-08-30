@@ -324,7 +324,7 @@ $agents_table
 | `_grimoire/_memory/decisions-log.md` | Journal des décisions architecturales | Auto-alimenté par les agents |
 | `_grimoire/_memory/failure-museum.md` | Catalogue erreurs + résolutions | Auto-alimenté |
 | `project-context.yaml` | Config globale (name, stack, language) | Modifier si besoin |
-| `_grimoire/_config/archetype.dna.yaml` | Traits et contraintes de l'archétype | Ne pas modifier sans raison |
+| `_grimoire/kit/archetype.dna.yaml` | Traits et contraintes de l'archétype | Ne pas modifier sans raison |
 
 ## File Ownership
 
@@ -332,7 +332,7 @@ $agents_table
 |---------|-------------|-------|
 | `_grimoire/_memory/shared-context.md` | Tous les agents | Lecture/écriture |
 | `_grimoire/_memory/decisions-log.md` | Agents décisionnels | Écriture, utilisateurs lecture |
-| `_grimoire/_config/archetype.dna.yaml` | Grimoire Kit | Ne pas modifier sans raison |
+| `_grimoire/kit/archetype.dna.yaml` | Grimoire Kit | Ne pas modifier sans raison |
 | `project-context.yaml` | Équipe projet | Configurable |
 
 ## Project Context
@@ -506,6 +506,10 @@ class ProjectScaffolder:
     def _memory_code_dir(self) -> Path:
         """Kit-provided memory helpers — code, so it belongs to the kit tier."""
         return self._kit_dir() / layout.MEMORY_CODE_SUBDIR
+
+    def _tools_dir(self) -> Path:
+        """Kit-provided tools a persona invokes by name."""
+        return self._kit_dir() / layout.TOOLS_SUBDIR
 
     def _workflows_dir(self) -> Path:
         return self._kit_dir() / layout.WORKFLOWS_SUBDIR
@@ -758,12 +762,66 @@ class ProjectScaffolder:
                         label="feature/vectus",
                     ))
 
+    #: Protocol references ``agent-base.md`` tells every agent to load on demand.
+    #: The socle is deployed, so its siblings must be too: a "voir
+    #: ``framework/x.md``" that resolves nowhere is an instruction no agent can
+    #: follow. Kept explicit rather than globbing ``framework/*.md`` — the
+    #: directory also holds schemas and kit-internal notes a project never reads.
+    #: Tools a shipped persona or the socle *invokes* — an ``exec=`` item or a
+    #: numbered step, not a passing mention. ``framework/tools/`` holds fifty
+    #: scripts; a project has no use for the forty nothing calls, and shipping
+    #: them all would put 1.3 MB of unreferenced code in every install.
+    #:
+    #: ``""`` is the always-deployed set: ``agent-base.md`` and the meta agents
+    #: ship with every archetype, so what they call must always resolve.
+    _SHIPPED_TOOLS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "": (
+            "failure-museum.py",     # concierge #triage, #failure-check
+            "dep-check.py",          # creative-toolsmith [DC] menu item
+            "grimoire-mcp-tools.py",  # creative-toolsmith, MCP discovery
+            "tool-resolver.py",      # agent-base.md, tool resolution protocol
+            "web-browser.py",        # agent-base.md — "TOUJOURS disponible"
+        ),
+        "creative-studio": (
+            "image-prompt.py",       # content-creator
+            "expert-tool-chain.py",  # illustration-expert, blender-expert
+            "vision-judge.py",       # illustration-expert, blender-expert
+            "agent-test.py",         # tools_required de l'archétype
+            "agent-watch.py",        # tools_required de l'archétype
+        ),
+    }
+
+    _PROTOCOL_DOCS: ClassVar[tuple[str, ...]] = (
+        "agent-mesh-network.md",
+        "agent-relationship-graph.md",
+        "cc-reference.md",
+        "cross-validation-trust.md",
+        "event-log-shared-state.md",
+        "honest-uncertainty-protocol.md",
+        "hybrid-parallelism-engine.md",
+        "orchestrator-gateway.md",
+        "question-escalation-chain.md",
+        "selective-huddle-protocol.md",
+    )
+
+    @staticmethod
+    def _extract_tool_description(path: Path) -> str:
+        """First sentence of a tool's module docstring, or its stem."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return path.stem
+        match = re.search(r'^"""(.+?)(?:\n|""")', text, re.MULTILINE | re.DOTALL)
+        if not match:
+            return path.stem
+        return " ".join(match.group(1).split()).rstrip(".") or path.stem
+
     def _plan_framework(self, p: ScaffoldPlan) -> None:
         fw = self._framework
         dst_custom = self._kit_dir() / layout.FRAMEWORK_SUBDIR
 
         # Core framework files
-        for name in ("agent-base.md", "agent-base-compact.md"):
+        for name in ("agent-base.md", "agent-base-compact.md", *self._PROTOCOL_DOCS):
             src = fw / name
             if src.is_file():
                 p.copies.append(FileCopy(src=src, dst=dst_custom / name, label=f"framework/{name}"))
@@ -796,6 +854,19 @@ class ProjectScaffolder:
                     label=f"framework/workflows/{_strip_tpl_suffix(wf.name)}",
                 ))
 
+        # Tools a shipped persona invokes by name. Only those: ``framework/tools/``
+        # holds fifty scripts, and a project has no use for the forty a persona
+        # never names. What the kit promises in a handler, it delivers.
+        tools_dst = self._tools_dir()
+        selected = set(self._resolved.archetypes or (self._resolved.archetype,))
+        for scope, names in self._SHIPPED_TOOLS.items():
+            if scope and scope not in selected:
+                continue
+            for name in names:
+                src = fw / "tools" / name
+                if src.is_file():
+                    p.copies.append(FileCopy(src=src, dst=tools_dst / name, label=f"tools/{name}"))
+
         # Memory system — kit code lives in the kit tier so updates reach it.
         code_dst = self._memory_code_dir()
         for name in ("maintenance.py", "session-save.py"):
@@ -813,7 +884,12 @@ class ProjectScaffolder:
 
         # Memory logs — seeded once, then owned and written by the project.
         mem_dst = self._memory_dir()
-        for tpl_name in ("contradiction-log.tpl.md", "failure-museum.tpl.md"):
+        # Every log an agent is told to load must exist at install time, even
+        # empty: "charger `dependency-graph.md`" is an instruction, and an
+        # instruction that resolves nowhere is one the agent cannot follow.
+        for tpl_name in ("contradiction-log.tpl.md", "failure-museum.tpl.md",
+                         "handoff-log.tpl.md", "dependency-graph.tpl.md",
+                         "network-topology.tpl.md", "oss-references.tpl.md"):
             src = fw / "memory" / tpl_name
             if src.is_file():
                 dst_name = tpl_name.replace(".tpl", "")
@@ -901,6 +977,20 @@ class ProjectScaffolder:
             dst=self._kit_dir() / "agent-manifest.csv",
             content="".join(manifest_lines),
             label="agent-manifest.csv",
+        ))
+
+        # Tool manifest — same contract as the agent manifest: the inventory a
+        # persona is told to load must describe what this project actually got.
+        tool_lines = ["name,file,description\n"]
+        for fc in sorted(p.copies, key=lambda c: c.dst.name):
+            if fc.dst.parent != self._tools_dir():
+                continue
+            desc = self._extract_tool_description(fc.src).replace(",", ";")
+            tool_lines.append(f"{fc.dst.stem},{fc.dst.name},{desc}\n")
+        p.templates.append(TemplateRender(
+            dst=self._kit_dir() / "tool-manifest.csv",
+            content="".join(tool_lines),
+            label="tool-manifest.csv",
         ))
 
         # Session branch metadata
