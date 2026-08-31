@@ -305,3 +305,87 @@ class TestArchives:
             encoding="utf-8",
         )
         assert roster_incoherences(tmp_path).routed_but_absent == ["dev"]
+
+
+class TestDeliverySurface:
+    """The check reads what the kit delivered, not the project's own work."""
+
+    def test_the_projects_own_documents_are_not_the_kits(self, tmp_path: Path) -> None:
+        """An audit that *reports* a broken path is a record, not a promise.
+
+        Scanning the whole tree read the Forge's dated audits — which quote the
+        very paths they found broken — as live instructions. Correcting them
+        would have falsified the record.
+        """
+        _install(tmp_path)
+        artifacts = tmp_path / "_grimoire-runtime-output" / "planning-artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "audit-2026-04-10.md").write_text(
+            "Les références cassées détectées dans `_grimoire/_config/custom/x.md`\n"
+            "montrent que le patrimoine ne suit plus la topologie.\n",
+            encoding="utf-8",
+        )
+        assert dead_path_references(tmp_path) == []
+
+    def test_a_hand_written_host_file_is_the_projects_business(self, tmp_path: Path) -> None:
+        """`.github/hooks/` is the project's; `.github/agents/` is the kit's."""
+        _install(tmp_path)
+        hooks = tmp_path / ".github" / "hooks" / "scripts"
+        hooks.mkdir(parents=True)
+        (hooks / "maison.sh").write_text(
+            "grep -E 'grimoire-kit/_grimoire/_memory/migration/' <<< \"$x\"\n",
+            encoding="utf-8",
+        )
+        assert dead_path_references(tmp_path) == []
+
+    def test_a_managed_host_file_is_still_read(self, tmp_path: Path) -> None:
+        """Narrowing must not blind the check to what the kit regenerates."""
+        _install(tmp_path)
+        # Le scaffolder n'écrit pas les surfaces hôtes ; l'émetteur si, et il y
+        # pose ce marqueur. On reproduit ce qu'il produit.
+        command = tmp_path / ".claude" / "commands" / "grimoire-status.md"
+        command.parent.mkdir(parents=True, exist_ok=True)
+        command.write_text(
+            "<!-- grimoire:managed — régénéré par `grimoire host sync`. -->\n"
+            "Lis `_grimoire/kit/absent.md`.\n",
+            encoding="utf-8",
+        )
+        assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/absent.md"]
+
+    def test_a_kit_owned_host_subtree_needs_no_marker(self, tmp_path: Path) -> None:
+        """`.github/prompts/` is the kit's by convention, marker or not."""
+        _install(tmp_path)
+        prompts = tmp_path / ".github" / "prompts"
+        prompts.mkdir(parents=True, exist_ok=True)
+        (prompts / "sans-marqueur.prompt.md").write_text(
+            "Lis `_grimoire/kit/nulle-part.md`.\n", encoding="utf-8",
+        )
+        assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/nulle-part.md"]
+
+
+class TestPathAnchoring:
+    def test_a_path_inside_another_tree_is_not_this_projects(self, tmp_path: Path) -> None:
+        """`grimoire-kit/_grimoire/kit/x` names a file in a different tree."""
+        _install(tmp_path)
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8")
+            + "\nVoir `grimoire-kit/_grimoire/kit/ailleurs.md`.\n",
+            encoding="utf-8",
+        )
+        assert dead_path_references(tmp_path) == []
+
+    def test_the_project_root_template_still_resolves(self, tmp_path: Path) -> None:
+        """`{project-root}/_grimoire/...` is the form nearly every persona uses.
+
+        Anchoring on any preceding slash would have silenced the check on the
+        majority of real references — the defect the whole module exists for.
+        """
+        _install(tmp_path)
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8")
+            + "\nCharger `{project-root}/_grimoire/kit/absent.md`.\n",
+            encoding="utf-8",
+        )
+        assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/absent.md"]
