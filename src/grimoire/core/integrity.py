@@ -64,20 +64,21 @@ _SKIPPED_DIRS = frozenset({
     ".git", ".venv", "node_modules", "__pycache__", "_grimoire-output", "_archived",
 })
 
-#: Trees the kit writes wholesale. Everything under them is its delivery — the
-#: host subtrees included: ``.github/agents/`` and its siblings are where the
-#: kit's own conventions say each artifact type lands.
+#: Trees the kit writes wholesale. Everything under them is its delivery.
+#:
+#: The host trees are deliberately almost absent here: their files carry the
+#: emitters' marker, which is a better answer than a list — it says who wrote
+#: *this* file, not who tends to write in *this* directory. Only the two
+#: subtrees the scaffolder fills without marking need naming.
 _DELIVERED_TREES = (
     "_grimoire/kit",
     "_grimoire/overrides",
     "_grimoire/_memory",
-    ".github/agents",
+    # Les seuls que le scaffolder écrit sans marqueur : partout ailleurs sous
+    # `.github/` et `.claude/`, ce sont les émetteurs hôtes qui écrivent, et ils
+    # marquent. Une liste se périme ; le marqueur, non.
     ".github/prompts",
     ".github/instructions",
-    ".github/skills",
-    ".claude/agents",
-    ".claude/commands",
-    ".claude/skills",
 )
 
 #: Trees the kit shares with the project: it writes managed files there, the

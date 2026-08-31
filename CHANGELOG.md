@@ -7,6 +7,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.35.4] - 2026-08-30
+
+### Corrigé
+
+- **C'est le marqueur qui dit ce que le kit a écrit, plus une liste de
+  répertoires.** La version précédente restreignait la vérification à une liste
+  de sous-arbres hôtes ; mais un projet peut poser sa propre compétence à côté
+  de celles du kit, dans le même répertoire, et elle était alors lue comme une
+  livraison. Les émetteurs hôtes marquent déjà chaque fichier qu'ils
+  régénèrent : le marqueur répond à la bonne question — qui a écrit *ce*
+  fichier — là où une liste répond à qui écrit d'habitude dans *ce* dossier, et
+  se périme. Seuls `.github/prompts/` et `.github/instructions/`, que le
+  scaffolder remplit sans marquer, restent nommés.
+  Mesuré : une installation saine ne rapporte plus rien, une installation
+  3.34.2 défectueuse rend toujours ses 56 chemins morts et ses neuf agents
+  fantômes, et un atelier réel passe de 3 signalements à 2 — les deux résidus
+  d'une installation antérieure qu'il lui restait à supprimer.
+
 ## [3.35.3] - 2026-08-30
 
 ### Corrigé

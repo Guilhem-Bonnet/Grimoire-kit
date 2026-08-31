@@ -389,3 +389,50 @@ class TestPathAnchoring:
             encoding="utf-8",
         )
         assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/absent.md"]
+
+
+class TestTheMarkerDecides:
+    """Who wrote *this* file, not who tends to write in *this* directory."""
+
+    def _host_file(self, root: Path, relative: str, *, managed: bool, body: str) -> Path:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        head = "<!-- grimoire:managed — régénéré par `grimoire host sync`. -->\n" if managed else ""
+        path.write_text(head + body, encoding="utf-8")
+        return path
+
+    def test_an_unmarked_skill_is_the_projects_own(self, tmp_path: Path) -> None:
+        """A project may add its own skill beside the kit's, in the same tree."""
+        _install(tmp_path)
+        self._host_file(
+            tmp_path, ".github/skills/maison/SKILL.md",
+            managed=False,
+            body="Stockage : `_grimoire/_memory/maison.jsonl`, créé au premier usage.\n",
+        )
+        assert dead_path_references(tmp_path) == []
+
+    def test_a_marked_skill_in_the_same_tree_is_read(self, tmp_path: Path) -> None:
+        """…and the kit's own, right next to it, still is."""
+        _install(tmp_path)
+        self._host_file(
+            tmp_path, ".github/skills/du-kit/SKILL.md",
+            managed=True,
+            body="Charger `_grimoire/kit/absent.md`.\n",
+        )
+        assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/absent.md"]
+
+    def test_a_prompt_needs_no_marker(self, tmp_path: Path) -> None:
+        """`.github/prompts/` is filled by the scaffolder, which marks nothing."""
+        _install(tmp_path)
+        self._host_file(
+            tmp_path, ".github/prompts/x.prompt.md",
+            managed=False,
+            body="Lis `_grimoire/kit/nulle-part.md`.\n",
+        )
+        assert [r.target for r in dead_path_references(tmp_path)] == ["_grimoire/kit/nulle-part.md"]
+
+    def test_a_healthy_install_reports_nothing(self, tmp_path: Path) -> None:
+        """The check must be silent on a correct project, or it teaches noise."""
+        _install(tmp_path, ("platform-engineering", "infra-ops"))
+        assert dead_path_references(tmp_path) == []
+        assert roster_incoherences(tmp_path).routed_but_absent == []
