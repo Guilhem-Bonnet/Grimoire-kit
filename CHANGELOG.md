@@ -7,6 +7,32 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.35.3] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité lit ce que le kit a livré, plus tout le
+  projet.** Elle parcourait l'arbre entier et lisait le travail propre du
+  projet comme s'il venait du kit : un audit daté qui *rapporte* un chemin
+  cassé, une ligne de journal générée qui en cite un, un hook écrit à la main.
+  Trois versions de suite ont retiré une de ces sources de bruit — dépôts
+  imbriqués, archives, désormais artefacts du projet ; c'étaient trois
+  symptômes d'un seul parcours trop large.
+  Ce que le kit livre est connaissable, pas devinable : les arbres qu'il
+  régénère (`_grimoire/kit/`, `_grimoire/overrides/`, `_grimoire/_memory/`, et
+  les sous-arbres hôtes que ses propres conventions lui attribuent), plus les
+  fichiers portant le marqueur `grimoire:managed` dans les répertoires qu'il
+  partage avec le projet. `.github/hooks/` et `.github/workflows/` restent au
+  projet. Mesuré sur un atelier : 21 signalements deviennent 3, tous réels,
+  sans rien perdre sur une installation défectueuse (56 chemins morts
+  toujours détectés sur une 3.34.2, et les neuf agents fantômes).
+
+- **Un chemin situé dans un autre arbre n'est plus compté comme manquant
+  ici.** `grimoire-kit/_grimoire/kit/x` désigne un fichier d'un dépôt voisin ;
+  la recherche en attrapait la fin et le déclarait absent du projet courant.
+  L'ancrage laisse évidemment passer `{project-root}/_grimoire/…`, la forme
+  qu'emploient presque toutes les personas.
+
 ## [3.35.2] - 2026-08-30
 
 ### Corrigé

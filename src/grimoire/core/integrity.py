@@ -44,7 +44,12 @@ _WRITTEN_ON_FIRST_USE = frozenset({
     "_grimoire/_memory/migration/weaviate-neo4j",
 })
 
-_PATH_RE = re.compile(r"_grimoire/[A-Za-z0-9_./-]+")
+#: Anchored on the left: ``grimoire-kit/_grimoire/kit/x`` names a path inside
+#: another tree, and matching its tail reported it as missing from this one.
+#: The slash of ``{project-root}/_grimoire/...`` must still pass — it is the
+#: form nearly every persona uses — so only a real directory segment before the
+#: slash disqualifies the match.
+_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-]/)(?<![A-Za-z0-9_.-])_grimoire/[A-Za-z0-9_./-]+")
 _AGENT_TAG_RE = re.compile(r'<agent\s+tag="([\w-]+)"')
 _READABLE_SUFFIXES = frozenset({".md", ".yaml", ".yml", ".csv", ".json", ".sh", ".py", ".toml"})
 
@@ -58,6 +63,40 @@ _READABLE_SUFFIXES = frozenset({".md", ".yaml", ".yml", ".csv", ".json", ".sh", 
 _SKIPPED_DIRS = frozenset({
     ".git", ".venv", "node_modules", "__pycache__", "_grimoire-output", "_archived",
 })
+
+#: Trees the kit writes wholesale. Everything under them is its delivery — the
+#: host subtrees included: ``.github/agents/`` and its siblings are where the
+#: kit's own conventions say each artifact type lands.
+_DELIVERED_TREES = (
+    "_grimoire/kit",
+    "_grimoire/overrides",
+    "_grimoire/_memory",
+    ".github/agents",
+    ".github/prompts",
+    ".github/instructions",
+    ".github/skills",
+    ".claude/agents",
+    ".claude/commands",
+    ".claude/skills",
+)
+
+#: Trees the kit shares with the project: it writes managed files there, the
+#: project writes its own beside them — ``.github/hooks/`` and ``.github/
+#: workflows/`` are the project's. Only files carrying the marker are in scope.
+_SHARED_TREES = (".claude", ".github", ".codex", ".cursor", ".gemini")
+
+#: Single files the kit writes at the project root.
+_DELIVERED_FILES = (
+    "project-context.yaml",
+    ".mcp.json",
+    ".pre-commit-config.yaml",
+    ".github/copilot-instructions.md",
+)
+
+#: Written by the kit's host emitters into a file they regenerate. A file
+#: without it in a shared tree is the project's own — see
+#: ``hosts/emitters/base.py``.
+_MANAGED_MARKER = "grimoire:managed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,17 +152,51 @@ def _nested_repository_roots(project_root: Path) -> set[Path]:
     return nested
 
 
+def _is_managed(path: Path) -> bool:
+    """Whether the kit regenerates this file, per the marker its emitters write."""
+    try:
+        with path.open(encoding="utf-8", errors="ignore") as handle:
+            return _MANAGED_MARKER in handle.read(2048)
+    except OSError:
+        return False
+
+
 def _readable_files(project_root: Path) -> list[Path]:
+    """The files the kit delivered into this project — and only those.
+
+    Scanning the whole tree read the project's own work as if the kit had
+    written it: a vendored clone, an audit that *reports* a broken path, a
+    generated log line quoting one, a hook the project wrote by hand. Three
+    releases in a row removed one such source of noise; they were symptoms of
+    one over-broad scan.
+
+    What the kit ships is knowable, not guessable: whole trees it regenerates,
+    plus the files carrying its emitters' managed marker in trees it shares
+    with the project.
+    """
     nested = _nested_repository_roots(project_root)
+
+    delivered: set[Path] = set()
+    for tree in _DELIVERED_TREES:
+        delivered.update((project_root / tree).rglob("*"))
+    delivered.update(project_root / name for name in _DELIVERED_FILES)
+
+    shared: set[Path] = set()
+    for tree in _SHARED_TREES:
+        shared.update((project_root / tree).rglob("*"))
+    shared -= delivered
+
     files: list[Path] = []
-    for path in sorted(project_root.rglob("*")):
-        relative = path.relative_to(project_root)
-        if any(part in _SKIPPED_DIRS for part in relative.parts):
+    for path in sorted(delivered | shared):
+        if not path.is_file() or path.suffix not in _READABLE_SUFFIXES:
+            continue
+        if any(part in _SKIPPED_DIRS for part in path.relative_to(project_root).parts):
             continue
         if any(root in path.parents for root in nested):
             continue
-        if path.is_file() and path.suffix in _READABLE_SUFFIXES:
-            files.append(path)
+        if path in shared and not _is_managed(path):
+            continue
+        files.append(path)
     return files
 
 
