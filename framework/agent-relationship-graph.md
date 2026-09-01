@@ -333,7 +333,7 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
 
-- Agent Manifest : `_grimoire/_config/agent-manifest.csv` — source statique des capabilities
+- Agent Manifest : `_grimoire/kit/agent-manifest.csv` — source statique des capabilities
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — KNOWN_AGENTS
 - Agent Caller : [framework/tools/agent-caller.py](tools/agent-caller.py) — CALL_HISTORY
 - Swarm Consensus : [framework/tools/swarm-consensus.py](tools/swarm-consensus.py) — AGENT_WEIGHTS

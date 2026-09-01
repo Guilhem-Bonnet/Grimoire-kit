@@ -795,10 +795,10 @@ bash grimoire-init.sh upgrade              # met à jour framework/ et archetype
 bash grimoire-init.sh upgrade --dry-run    # preview sans modification
 
 # Completion Contract — vérifier avant "terminé"
-bash _grimoire/_config/custom/cc-verify.sh
+bash _grimoire/kit/framework/cc-verify.sh
 
 # Self-Improvement Loop — analyser les patterns d'échec
-bash _grimoire/_config/custom/sil-collect.sh
+bash _grimoire/kit/framework/sil-collect.sh
 ```
 
 

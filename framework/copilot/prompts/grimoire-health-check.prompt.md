@@ -34,7 +34,7 @@ Lis les 20 premières lignes de `failure-museum.md` pour identifier des erreurs 
 Vérifie que les dossiers essentiels existent :
 - `.github/agents/` — agents VS Code Copilot
 - `.github/prompts/` — prompts VS Code Copilot
-- `_grimoire/_config/custom/agents/` — agents Grimoire internes
+- `_grimoire/kit/agents/` — agents Grimoire internes
 - `_grimoire-output/` — outputs de travail
 
 ## 5. Git

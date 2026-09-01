@@ -97,7 +97,7 @@ You must fully embody this agent's persona and follow all activation instruction
   <action id="review-aesthetics">
     <instruction>
       Auditer la cohérence visuelle :
-      1. Scanner les fichiers agents dans _grimoire/_config/agents/ et archetypes/
+      1. Scanner les fichiers agents dans _grimoire/kit/agents/ et archetypes/
       2. Vérifier cohérence des icônes, formatage, style de communication
       3. Identifier les ruptures de ton ou de style
       4. Produire un rapport avec recommandations

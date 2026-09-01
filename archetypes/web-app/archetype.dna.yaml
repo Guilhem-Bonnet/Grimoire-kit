@@ -75,13 +75,13 @@ tools_required:
     required: false
     check_command: "which chromium || which google-chrome || which chromium-browser"
   - name: tool-resolver
-    description: "Résolution et provisionnement d'outils (framework/tools/tool-resolver.py)"
+    description: "Résolution et provisionnement d'outils (_grimoire/kit/tools/tool-resolver.py)"
     required: true
-    check_command: "python3 framework/tools/tool-resolver.py --version"
+    check_command: "python3 _grimoire/kit/tools/tool-resolver.py --version"
   - name: web-browser
-    description: "Navigation web sandboxée (framework/tools/web-browser.py)"
+    description: "Navigation web sandboxée (_grimoire/kit/tools/web-browser.py)"
     required: false
-    check_command: "python3 framework/tools/web-browser.py --version"
+    check_command: "python3 _grimoire/kit/tools/web-browser.py --version"
 
 acceptance_criteria:
   - id: tests-written-before-code

@@ -173,7 +173,7 @@ prompt_enrichment:
 3. **Historique pertinent** — Q&A et décisions, pas le bavardage
 4. **Directives HUP** — toujours rappeler les règles anti-hallucination
 5. **Détection de livrable documentaire** — Si la tâche produit ou modifie un fichier `.md` (README, architecture, guide, changelog), l'orchestrateur DOIT :
-   - Charger `_grimoire/_memory/tech-writer-sidecar/documentation-standards.md` (ou équivalent projet)
+   - Charger la charte documentaire du projet si elle existe (`_grimoire/overrides/documentation-standards.md`) ; sinon appliquer CommonMark strict et le style du dépôt
    - Injecter les conventions dans `project_context.conventions`
    - Router vers tech-writer (Paige) ou enrichir le prompt du sub-agent actif avec la charte
    - Vérifier la conformité de l'output avant de le présenter à l'utilisateur

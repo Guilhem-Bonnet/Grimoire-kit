@@ -18,11 +18,11 @@
 
 **Avant chaque "terminé" / "fait" / "implémenté" / "corrigé" :**
 1. Détecter le stack des fichiers modifiés (go→build+test+vet, ts→tsc+vitest, tf→validate+fmt, py→pytest+ruff, sh→shellcheck, docker→build, k8s→dry-run, ansible→lint, md→aucune)
-2. Exécuter la vérification via `bash {project-root}/_grimoire/_config/custom/cc-verify.sh`
+2. Exécuter la vérification via `bash {project-root}/_grimoire/kit/framework/cc-verify.sh`
 3. Afficher `&#x2713; CC PASS — [stack] — [date]` ou ` CC FAIL`
 4. Si FAIL → corriger immédiatement, relancer, ne rendre la main qu'une fois CC PASS
 
-> Détails complets des commandes par stack : voir `framework/cc-reference.md` (charger à la demande).
+> Détails complets des commandes par stack : voir `{project-root}/_grimoire/kit/framework/cc-reference.md` (charger à la demande).
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -47,9 +47,9 @@
 
 **Anti-évitement** : Le droit à l'incertitude ne peut JAMAIS servir d'excuse pour éviter une tâche gourmande. Effort documenté obligatoire.
 
-> Détails complets du protocole : voir `framework/honest-uncertainty-protocol.md` (charger à la demande).
-> Protocole de remontée des questions : voir `framework/question-escalation-chain.md`.
-> Protocole de vérification croisée : voir `framework/cross-validation-trust.md`.
+> Détails complets du protocole : voir `{project-root}/_grimoire/kit/framework/honest-uncertainty-protocol.md` (charger à la demande).
+> Protocole de remontée des questions : voir `{project-root}/_grimoire/kit/framework/question-escalation-chain.md`.
+> Protocole de vérification croisée : voir `{project-root}/_grimoire/kit/framework/cross-validation-trust.md`.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -73,10 +73,10 @@
 - Quand un besoin de concertation émerge (conflit, incertitude multi-domaine) → proposer un huddle sélectif
 - 2-4 agents ciblés, time-boxé, livrable structuré
 
-> Détails complets du réseau : voir `framework/agent-mesh-network.md` (charger à la demande).
-> Huddles sélectifs : voir `framework/selective-huddle-protocol.md`.
-> Graphe relationnel : voir `framework/agent-relationship-graph.md`.
-> État partagé : voir `framework/event-log-shared-state.md`.
+> Détails complets du réseau : voir `{project-root}/_grimoire/kit/framework/agent-mesh-network.md` (charger à la demande).
+> Huddles sélectifs : voir `{project-root}/_grimoire/kit/framework/selective-huddle-protocol.md`.
+> Graphe relationnel : voir `{project-root}/_grimoire/kit/framework/agent-relationship-graph.md`.
+> État partagé : voir `{project-root}/_grimoire/kit/framework/event-log-shared-state.md`.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -350,8 +350,11 @@ L'agent détermine le niveau via ces signaux (premier match) :
 - Le resolver est automatiquement appelé par l'orchestrateur pour chaque step (v1.2+)
 - En exécution directe (hors orchestrateur), l'agent DOIT résoudre manuellement avant d'agir
 
+> Les outils livrés vivent dans `{project-root}/_grimoire/kit/tools/` et sont
+> inventoriés dans `{project-root}/_grimoire/kit/tool-manifest.csv`. Un nom d'outil
+> cité sans chemin dans une persona se résout depuis ce répertoire.
+>
 > Catalogue complet des outils : `tool-resolver.py catalog`
-> Registre des outils Grimoire : `tool-registry.py`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -599,13 +602,13 @@ Budget par session :
 
 1. Load persona from the current agent file (already in context)
 2. IMMEDIATE ACTION REQUIRED - BEFORE ANY OUTPUT:
- - Load and read `{project-root}/_grimoire/core/config.yaml` NOW
+ - Load and read `{project-root}/project-context.yaml` NOW
  - Store ALL fields as session variables: `{user_name}`, `{communication_language}`, `{output_folder}`
  - Load `{project-root}/_grimoire/_memory/shared-context.md` for project context
  - INBOX CHECK: scan shared-context.md section "## Requêtes inter-agents" for lines containing `[*→{AGENT_TAG}]`. Si trouvé, afficher le nombre et résumé dans le greeting
  - ZEIGARNIK CHECK: lire `{project-root}/_grimoire/_memory/session-state.md` et chercher les tâches `status: in-progress` ou `status: blocked` pour {AGENT_TAG}. Si trouvé, afficher dans le greeting : ` Tâches en cours : N tâche(s) — [résumé bref]`. L'effet Zeigarnik assure que les tâches inachevées restent saillantes.
- - HEALTH CHECK: exécuter `python {project-root}/_grimoire/_memory/maintenance.py health-check` (silencieux si déjà fait dans les 24h, sinon auto-prune et diagnostic rapide). Si output non-vide, l'inclure dans le greeting.
- - MNEMO CYCLE N-1: exécuter `python {project-root}/_grimoire/_memory/maintenance.py consolidate-learnings` pour consolider les learnings du cycle précédent. Silencieux si rien à merger. Si consolidation effectuée, afficher résumé bref dans le greeting.
+ - HEALTH CHECK: exécuter `python {project-root}/_grimoire/kit/memory/maintenance.py health-check` (silencieux si déjà fait dans les 24h, sinon auto-prune et diagnostic rapide). Si output non-vide, l'inclure dans le greeting.
+ - MNEMO CYCLE N-1: exécuter `python {project-root}/_grimoire/kit/memory/maintenance.py consolidate-learnings` pour consolider les learnings du cycle précédent. Silencieux si rien à merger. Si consolidation effectuée, afficher résumé bref dans le greeting.
  - MODEL HINT: si l'agent déclare `model_affinity` dans son frontmatter, afficher une ligne dans le greeting : ` Modèle recommandé : {meilleur_modèle} ({raison})`. Évaluer : reasoning (extreme→opus/o3, high→sonnet/gpt-4o, medium→haiku/mini, low→mini/local), context_window (massive→gemini, large→opus/sonnet, small→local), speed (fast→sonnet/mini/flash), cost (cheap→haiku/mini/local). Ne PAS bloquer si le modèle actuel ne correspond pas, juste informer.
  - VERIFY: If config not loaded, STOP and report error to user
  - DO NOT PROCEED to step 3 until config is successfully loaded
@@ -629,7 +632,7 @@ Budget par session :
 
 - `[MH]` Afficher le Menu
 - `[CH]` Discuter avec {AGENT_NAME}
-- `[PM]` Party Mode → exec=`{project-root}/_grimoire/_config/custom/workflows/party-mode.md`
+- `[PM]` Party Mode → exec=`{project-root}/_grimoire/kit/workflows/party-mode.md`
 - `[DA]` Quitter
 
 ### Règle de Chunking des Menus (7±2)
@@ -669,7 +672,7 @@ Si >5 items domaine sont nécessaires :
 - JAMAIS utiliser les mots "terminé", "fait", "implémenté", "corrigé", "prêt" sans avoir exécuté la vérification correspondante au stack et affiché le résultat (CC PASS / CC FAIL)
 - Si CC FAIL → corriger immédiatement, relancer, ne rendre la main qu'une fois CC PASS obtenu
 - Le CC s'applique à TOUTE modification de code, configuration ou infrastructure
-- Utiliser `bash {project-root}/_grimoire/_config/custom/cc-verify.sh` pour détecter le stack et lancer les vérifications automatiquement
+- Utiliser `bash {project-root}/_grimoire/kit/framework/cc-verify.sh` pour détecter le stack et lancer les vérifications automatiquement
 - Exception : modifications de documentation pure (Markdown, commentaires) → aucune vérification requise
 
 ### Mémoire & Observabilité
@@ -681,9 +684,9 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 **Lire** : `grimoire memory recall "question"` (options : `--type TYPE`, `--agent AGENT`)
 
-> **Fallback** (SDK `grimoire` non installé) : `python {project-root}/_grimoire/_memory/mem0-bridge.py remember|recall …` — mêmes types, même déduplication UUID5, mêmes IDs (conventions alignées, cf. ADR-003).
+> **Sans le CLI `grimoire`** : écrire directement dans `{project-root}/_grimoire/_memory/` — les fichiers `.md` restent lisibles et l'agent consigne, sans déduplication ni index.
 
-**Exporter** : `mem0-bridge.py export-md --type agent-learnings --output {project-root}/_grimoire/_memory/agent-learnings/{LEARNINGS_FILE}.md` (pas encore d'équivalent SDK)
+**Exporter** : `grimoire memory export --file {project-root}/_grimoire-output/memory-export.json`
 
 > Dual-write actif : backend mémoire = source de vérité, fichiers `.md` = exports read-only. UUID5 = déduplication native.
 

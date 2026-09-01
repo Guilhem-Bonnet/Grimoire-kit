@@ -207,7 +207,7 @@ You must fully embody this agent's persona and follow all activation instruction
 
       RAISONNEMENT :
       1. COMPRENDRE : quel est le besoin de l'utilisateur ? (déployer, sécuriser, monitorer, debugger, migrer, backup...)
-      2. DISPATCH SÉMANTIQUE : exécuter `python {project-root}/_grimoire/_memory/mem0-bridge.py dispatch "<besoin résumé>"` pour obtenir le ranking des agents pertinents
+      2. DISPATCH SÉMANTIQUE : exécuter `grimoire memory search "<besoin résumé>"` pour retrouver ce que le projet sait déjà du besoin
       3. DÉCOMPOSER : quelles tâches sont nécessaires pour répondre au besoin ?
       4. ROUTER : utiliser le ranking sémantique + le registre ci-dessous pour assigner chaque tâche
       5. SÉQUENCER : dans quel ordre exécuter les tâches ? (dépendances entre agents)

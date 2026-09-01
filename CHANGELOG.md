@@ -7,7 +7,174 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.35.4] - 2026-08-30
+
 ### Corrigé
+
+- **C'est le marqueur qui dit ce que le kit a écrit, plus une liste de
+  répertoires.** La version précédente restreignait la vérification à une liste
+  de sous-arbres hôtes ; mais un projet peut poser sa propre compétence à côté
+  de celles du kit, dans le même répertoire, et elle était alors lue comme une
+  livraison. Les émetteurs hôtes marquent déjà chaque fichier qu'ils
+  régénèrent : le marqueur répond à la bonne question — qui a écrit *ce*
+  fichier — là où une liste répond à qui écrit d'habitude dans *ce* dossier, et
+  se périme. Seuls `.github/prompts/` et `.github/instructions/`, que le
+  scaffolder remplit sans marquer, restent nommés.
+  Mesuré : une installation saine ne rapporte plus rien, une installation
+  3.34.2 défectueuse rend toujours ses 56 chemins morts et ses neuf agents
+  fantômes, et un atelier réel passe de 3 signalements à 2 — les deux résidus
+  d'une installation antérieure qu'il lui restait à supprimer.
+
+## [3.35.3] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité lit ce que le kit a livré, plus tout le
+  projet.** Elle parcourait l'arbre entier et lisait le travail propre du
+  projet comme s'il venait du kit : un audit daté qui *rapporte* un chemin
+  cassé, une ligne de journal générée qui en cite un, un hook écrit à la main.
+  Trois versions de suite ont retiré une de ces sources de bruit — dépôts
+  imbriqués, archives, désormais artefacts du projet ; c'étaient trois
+  symptômes d'un seul parcours trop large.
+  Ce que le kit livre est connaissable, pas devinable : les arbres qu'il
+  régénère (`_grimoire/kit/`, `_grimoire/overrides/`, `_grimoire/_memory/`, et
+  les sous-arbres hôtes que ses propres conventions lui attribuent), plus les
+  fichiers portant le marqueur `grimoire:managed` dans les répertoires qu'il
+  partage avec le projet. `.github/hooks/` et `.github/workflows/` restent au
+  projet. Mesuré sur un atelier : 21 signalements deviennent 3, tous réels,
+  sans rien perdre sur une installation défectueuse (56 chemins morts
+  toujours détectés sur une 3.34.2, et les neuf agents fantômes).
+
+- **Un chemin situé dans un autre arbre n'est plus compté comme manquant
+  ici.** `grimoire-kit/_grimoire/kit/x` désigne un fichier d'un dépôt voisin ;
+  la recherche en attrapait la fin et le déclarait absent du projet courant.
+  L'ancrage laisse évidemment passer `{project-root}/_grimoire/…`, la forme
+  qu'emploient presque toutes les personas.
+
+## [3.35.2] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité honore la convention d'archive.** Un agent
+  retiré et parqué sous `_archived/` conservait sa carte de routage d'époque ;
+  la vérification la lisait comme une carte vivante et ressuscitait les agents
+  que le projet avait délibérément retirés. La convention est déjà connue du
+  code de migration du kit — un fichier archivé est un fichier que le projet a
+  retiré, pas un fichier que le kit a livré. Une archive est un compte rendu de
+  ce qui fut vrai, pas une promesse.
+
+## [3.35.1] - 2026-08-30
+
+### Corrigé
+
+- **La vérification d'intégrité ignore les dépôts imbriqués.** Les deux checks
+  introduits en 3.35.0 parcouraient tout l'arbre du projet, clones vendorisés,
+  sous-modules et worktrees compris : un projet hébergeant un dépôt se voyait
+  reprocher les chemins de ce dépôt comme s'il les avait installés lui-même.
+  Constaté immédiatement à la mise à jour d'un atelier hébergeant un clone du
+  kit : 395 références mortes annoncées, dont 345 venaient du clone — non
+  réparables depuis `grimoire doctor`, et noyant les 50 qui étaient vraies.
+  Un répertoire portant son propre `.git` répond à son arbre, pas à celui du
+  projet englobant.
+
+## [3.35.0] - 2026-08-30
+
+### Corrigé
+
+- **Les chemins que le kit écrit dans un projet s'y résolvent.** Le passage aux
+  trois étages (`_grimoire/kit/`, `_grimoire/overrides/`) avait migré le code et
+  laissé le contenu livré derrière : une installation neuve recevait 99
+  références de chemin mortes, dont 23 vers `_grimoire/_config/`, le layout
+  pré-frontière que `core/layout.py` déclare dépassé. `agent-base.md` — le
+  fichier que tout agent charge en premier — en portait trois, dont le
+  Completion Contract, donc inatteignable pour qui suit le socle à la lettre.
+  La couche mémoire avait la même dérive : huit appels cherchaient
+  `maintenance.py` sous `_grimoire/_memory/` alors qu'il est déployé sous
+  `_grimoire/kit/memory/`. Les dix protocoles que le socle dit de charger à la
+  demande — vérification croisée, incertitude honnête, remontée des questions,
+  réseau d'agents — n'étaient déployés nulle part ; ils le sont. Les journaux
+  qu'un agent reçoit l'ordre de charger existent à l'installation, fût-ce
+  vides : `dependency-graph.md` était cité ligne 33 de huit personas, leur
+  étape d'activation, sans qu'aucun gabarit ne le livre.
+
+- **`grimoire hooks install` génère des hooks qui s'exécutent.** Le
+  `.pre-commit-config.yaml` produit pointait vers `framework/hooks/*.sh`, un
+  chemin que seul un clone du dépôt du kit possède : les quatre hooks Grimoire
+  échouaient au premier `pre-commit run`, dans tout projet. Les scripts sont
+  désormais miroités dans `_grimoire/kit/hooks/`, où la configuration et la
+  chaîne Mnemo les trouvent. Au passage, `_framework_hooks_dir()` résolvait les
+  données du paquet à la main et ratait l'installation editable ; elle passe
+  par `framework_path()`, qui gère les deux cas.
+
+- **Les outils qu'une persona appelle sont livrés.** `failure-museum.py`
+  existait dans le kit sans jamais sortir de la wheel, alors que le concierge
+  l'invoque dans son triage. Sont désormais déployés les outils qu'un contenu
+  livré appelle vraiment — cinq universels, trois de plus avec
+  `creative-studio` — et inventoriés dans un `tool-manifest.csv` généré comme
+  l'est déjà `agent-manifest.csv`. Les quarante que rien ne nomme restent hors
+  contrat. `mem0-bridge.py`, cité quinze fois dont depuis le socle et déployé
+  nulle part, cède la place au CLI `grimoire memory`, qui couvre chacune de ses
+  commandes — étape 2 de la transition prévue par l'ADR-003.
+
+- **La carte de routage du point d'entrée décrit ce projet.** Le concierge
+  livrait une liste d'agents écrite en dur, héritée d'une autre famille
+  d'archétypes : sur un projet d'infrastructure, neuf de ses onze agents
+  n'existaient pas, et dix-sept des dix-neuf réellement installés n'y
+  figuraient pas. Ce n'était pas une substitution manquée — le fichier ne
+  contenait aucun placeholder, et rien ne savait produire cette carte. Elle est
+  générée depuis les agents effectivement déployés. Un agent absent de la carte
+  n'est pas installé, et réciproquement.
+
+- **Les journaux de mémoire portent le nom du projet.** Deux conventions
+  restaient brutes pour deux raisons distinctes : `{{project_name}}` et
+  `{{init_date}}` parce que le répertoire mémoire n'était pas dans le périmètre
+  de rendu et qu'`init_date` n'existait dans aucune table de variables ;
+  `$project_name` parce que le journal de décisions était écrit sans passer par
+  le moteur de gabarit, alors que la valeur par défaut du contexte partagé,
+  huit lignes plus haut dans le même fichier, y passe. Chaque projet recevait
+  un musée des échecs intitulé `{{project_name}}`.
+
+- **La légende qui documente les placeholders ne se substitue plus
+  elle-même.** Le rendu remplaçait dans tout le fichier, y compris le bloc de
+  commentaire qui *explique* les marqueurs : la légende installée annonçait
+  « Stack — Nom de l'agent développement (ex: Amelia) ». Les légendes se
+  marquent `<!-- grimoire:legend` et traversent le rendu intactes.
+
+- **Les modèles de run ne sont plus rangés parmi les workflows.**
+  `workflow-graph.tpl.yaml` et `workflow-status.tpl.md` sont des formes à
+  copier dans un répertoire d'exécution — leur en-tête le dit. Le retrait du
+  suffixe `.tpl` leur ôtait ce signal et les installait à côté des vrais
+  workflows, si bien que leur distribution d'illustration (`dev/Amelia`,
+  `qa/Quinn`) se lisait comme la table de routage du projet. Ils vont dans
+  `workflows/examples/`.
+
+- **`standard fix --apply` n'annonce plus manquant ce qu'il vient d'écrire.**
+  Le reste à faire était calculé avant les écritures et imprimé après : un
+  succès se lisait comme un échec.
+
+- **La politique de garde juge l'action, plus la donnée qu'elle transporte.**
+  Les motifs destructifs étaient cherchés dans toute la chaîne de commande :
+  écrire un runbook par heredoc, rédiger un message de commit citant une
+  commande interdite ou créer une fixture de test suffisait à déclencher un
+  refus, alors que rien n'était exécuté — c'est-à-dire précisément le travail
+  attendu sur un archétype `infra-ops`. Les corps de heredoc et les chaînes
+  entre quotes sortent de l'inspection, sauf quand un shell est sur le point
+  de les lancer : ce qui suit `bash -c`, `eval`, `xargs`, `su -c`, `ssh` ou
+  `timeout` reste examiné, sans quoi le correctif ouvrait un contournement
+  d'une ligne.
+
+- **L'archive publiée par `publish_extension` ne dépend plus de l'heure qu'il
+  est.** La docstring promettait une archive déterministe et seuls les membres
+  du tar étaient normalisés ; `tarfile.open(..., "w:gz")` grave l'heure
+  courante dans l'en-tête gzip (champ MTIME, RFC 1952). Republier une extension
+  inchangée produisait deux sommes de contrôle dès que les deux publications
+  tombaient de part et d'autre d'une frontière de seconde. Le test associé ne
+  pouvait donc échouer que par malchance d'horloge, et rougissait au hasard en
+  intégration continue.
+
+- **`docs/sdk-guide.md` documente l'API qui existe.** L'exemple de résolution de
+  chemins montrait quatre propriétés de `PathResolver` — `grimoire_dir`,
+  `config_dir`, `memory_dir`, `agents_dir` — dont aucune n'a jamais existé.
 
 - **`host sync` ne remplace plus en silence un hook écrit à la main.**
   L'émetteur Copilot posait `managed=False` sur ses fichiers de hook, ce qui
@@ -89,6 +256,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   il y a deux classements à fusionner ; `--no-hybrid` force le backend seul.
 
 ### Ajouté
+
+- **`grimoire doctor` vérifie que ce qu'il installe tient debout.** Il
+  contrôlait que ses répertoires existaient, jamais que les chemins écrits dans
+  les fichiers qu'il venait d'installer menaient quelque part, ni que les agents
+  vers lesquels ils routent étaient installés : un projet passait 20/20 en
+  portant 99 chemins morts et une carte de routage dont neuf agents sur onze
+  n'existaient pas. Deux vérifications comblent l'angle mort — résolution des
+  chemins d'entrée livrés, cohérence de la carte de routage avec le manifeste.
+  Les deux se taisent sur un projet sans étage `_grimoire/kit/` : un arbre fait
+  main ou d'avant la frontière n'a rien fait livrer par le kit, et un contrôle
+  qu'on ignore est pire que pas de contrôle.
 
 - **Deux plans cibles** : `docs/flow-engine-target-plan.md` — brancher le
   noyau d'exécution qui existe mais n'est appelé par rien — et

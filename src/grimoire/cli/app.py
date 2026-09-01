@@ -450,6 +450,16 @@ def doctor(
                     ),
                 )
 
+    # 4quater. Kit integrity — le doctor vérifiait que ses répertoires existaient,
+    # jamais que les chemins écrits dans les fichiers qu'il venait d'installer
+    # menaient quelque part, ni que les agents vers lesquels ils routent étaient
+    # installés. Le détail des deux checks vit dans `core.integrity`.
+    with _timed_phase("kit_integrity"):
+        from grimoire.core.integrity import integrity_checks
+
+        for check_name, check_passed, check_detail in integrity_checks(target):
+            _record(check_name, passed=check_passed, detail=check_detail)
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()

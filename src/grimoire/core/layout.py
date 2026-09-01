@@ -40,6 +40,7 @@ WORKFLOWS_SUBDIR = "workflows"
 PROMPT_TEMPLATES_SUBDIR = "prompt-templates"
 FRAMEWORK_SUBDIR = "framework"
 MEMORY_CODE_SUBDIR = "memory"
+TOOLS_SUBDIR = "tools"
 
 #: Pre-boundary locations, still read so an unmigrated project keeps working.
 #: Order matters: most recent layout first. Kept until ``grimoire migrate`` has

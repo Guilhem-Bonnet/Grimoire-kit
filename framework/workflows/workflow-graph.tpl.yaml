@@ -8,12 +8,16 @@
 #
 # Usage : copier dans _grimoire-output/.runs/{run_id}/workflow-graph.yaml
 # et mettre à jour les statuts en temps réel.
+#
+# CECI EST UN EXEMPLE. Les agents qu'il nomme illustrent la forme du graphe ;
+# ce ne sont pas les agents de ce projet. Le roster réel est dans
+# _grimoire/kit/agent-manifest.csv.
 
 # ── Identité du workflow ─────────────────────────────────────────────────────
 workflow:
   id: "dev-story-20260227-143022"       # run_id unique
   name: "Dev Story US-042 — Auth JWT"   # Nom lisible
-  workflow_path: "_grimoire/bmm/workflows/4-implementation/dev-story/workflow.yaml"
+  workflow_path: "_grimoire/kit/workflows/subagent-orchestration.md"
   session_branch: "main"
   started_at: "2026-02-27T14:30:00Z"
   completed_at: null

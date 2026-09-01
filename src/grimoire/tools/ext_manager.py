@@ -22,6 +22,7 @@ Usage standalone::
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import re
@@ -382,7 +383,15 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
     dist_rel = Path("dist") / f"{ext_id}-{version}.tar.gz"
     dist_path = registry_dir / dist_rel
     dist_path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(dist_path, "w:gz") as tar:
+    # ``tarfile.open(..., "w:gz")`` normalise les membres via le filtre, mais
+    # grave l'heure courante dans l'en-tête gzip (MTIME, RFC 1952). Deux
+    # publications séparées par une frontière de seconde produisaient donc deux
+    # checksums pour un contenu identique — la promesse de la docstring n'était
+    # tenue que par chance. Le corps tar était déjà déterministe ; il ne
+    # manquait que l'enveloppe.
+    with dist_path.open("wb") as raw, gzip.GzipFile(
+        filename="", mode="wb", fileobj=raw, mtime=0,
+    ) as gz, tarfile.open(fileobj=gz, mode="w") as tar:
         for path in sorted(p for p in ext_dir.rglob("*") if p.is_file()):
             tar.add(path, arcname=path.relative_to(ext_dir).as_posix(), filter=_deterministic_filter)
     checksum = _sha256(dist_path)
