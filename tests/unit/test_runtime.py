@@ -137,3 +137,77 @@ def test_list_instances_filter_by_task(kernel):
     assert any(w.id == wfi.id for w in results)
     results_other = kernel.list_instances(task_id="GAO-other-001")
     assert not results_other
+
+
+# --- P0.4 : un contrat d'adapter unique --------------------------------------
+
+
+def test_slugify_has_a_single_definition() -> None:
+    """The identifier normalisation lives in one place, not three."""
+    import ast
+    from pathlib import Path as _Path
+
+    runtime = _Path(__file__).resolve().parent.parent.parent / "src" / "grimoire" / "runtime"
+    defs = [
+        f"{module.name}:{node.name}"
+        for module in runtime.rglob("*.py")
+        for node in ast.parse(module.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef) and node.name in {"slugify", "_slugify"}
+    ]
+    assert defs == ["adapter_base.py:slugify"], defs
+
+
+def test_every_adapter_satisfies_the_protocol() -> None:
+    """The three adapters expose the same entry point and identify their source."""
+    from grimoire.runtime.adapter_base import RecipeAdapter
+    from grimoire.runtime.crewai_adapter import CrewAIAdapter
+    from grimoire.runtime.gascity_converter import GasCityConverter
+    from grimoire.runtime.langgraph_adapter import LangGraphAdapter
+
+    adapters = [CrewAIAdapter(), LangGraphAdapter(), GasCityConverter()]
+    assert [a.source_id for a in adapters] == ["crewai", "langgraph", "gascity"]
+    for adapter in adapters:
+        assert isinstance(adapter, RecipeAdapter)
+        assert callable(adapter.to_recipe)
+
+
+@pytest.mark.parametrize(
+    ("adapter_path", "definition"),
+    [
+        ("crewai", {"name": "no-schema", "tasks": [{"id": "t1", "description": "d"}]}),
+        ("langgraph", {"name": "no-schema", "nodes": [{"id": "n1", "name": "N"}], "edges": []}),
+        ("gascity", {"name": "no-schema", "molecules": [{"id": "m1", "name": "M"}]}),
+    ],
+)
+def test_import_without_output_schema_is_not_ok(adapter_path: str, definition: dict) -> None:
+    """A definition that declares no output cannot be verified afterwards.
+
+    CrewAI and LangGraph already refused it; Gas City carried ``output_schema``
+    through without ever checking it, so an unverifiable formula reported ``ok``.
+    """
+    from grimoire.runtime.crewai_adapter import CrewAIAdapter
+    from grimoire.runtime.gascity_converter import GasCityConverter
+    from grimoire.runtime.langgraph_adapter import LangGraphAdapter
+
+    adapter = {"crewai": CrewAIAdapter, "langgraph": LangGraphAdapter, "gascity": GasCityConverter}[adapter_path]()
+    _recipe, report = adapter.to_recipe(definition)
+    assert report.ok is False
+
+
+def test_deprecated_entry_points_still_work() -> None:
+    """The pre-``to_recipe`` names remain, per the SemVer policy of ADR-002."""
+    from grimoire.runtime.crewai_adapter import CrewAIAdapter
+    from grimoire.runtime.gascity_converter import GasCityConverter
+    from grimoire.runtime.langgraph_adapter import LangGraphAdapter
+
+    assert callable(CrewAIAdapter().import_flow)
+    assert callable(LangGraphAdapter().import_graph)
+    assert callable(GasCityConverter().convert)
+
+
+def test_runtime_package_exports_the_recipe_surface() -> None:
+    """An adapter author imports everything they need from ``grimoire.runtime``."""
+    from grimoire import runtime
+
+    for name in ("Recipe", "RecipeStep", "VerificationGate", "RecipeAdapter", "ImportReport", "slugify"):
+        assert hasattr(runtime, name), name

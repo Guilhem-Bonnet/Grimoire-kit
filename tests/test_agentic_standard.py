@@ -1074,3 +1074,206 @@ def test_cli_gate_exits_nonzero_on_an_unknown_task(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert json.loads(result.output)["ok"] is False
+
+
+# ── P0.3 : chaque check émis déclare sa dimension ────────────────────────────
+
+
+_UNRESOLVABLE_EMISSIONS = frozenset({
+    "gate.compliance_score_missing",
+    "gate.decision_trace_missing",
+    "gate.evidence_pack_missing",
+})
+
+
+def _emitted_check_ids() -> set[str]:
+    """Every check id the kit can emit, resolved from the source.
+
+    Matching only ``_add_check(result, "literal", ...)`` misses two thirds of the
+    surface: ids are also built by f-string from a loop variable, by
+    ``_require_keys(check_prefix=..., keys=...)``, and by unpacking a table of
+    tuples.  A registry checked against literals alone therefore certifies
+    nothing about the dynamic ids — which is how ``gates.transition.*`` reached
+    the ``artifacts`` bucket, the very fault the registry was built to prevent.
+
+    Raises when a call site becomes unresolvable, rather than dropping it: a
+    silent omission here disarms every test that consumes this set.
+    """
+    import ast
+    import itertools
+
+    core = Path(__file__).resolve().parent.parent / "src" / "grimoire" / "core"
+    modules = [core / "agentic_standard.py", core / "standard_checks" / "verifiers.py",
+               core / "standard_checks" / "controls.py"]
+    trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
+             [*modules, core / "standard_checks" / "base.py"]}
+
+    module_constants: dict[str, set[str]] = {}
+    for tree in trees.values():
+        for node in tree.body:
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                continue
+            elements = node.value.keys if isinstance(node.value, ast.Dict) else (
+                node.value.elts if isinstance(node.value, (ast.Tuple, ast.List, ast.Set)) else [])
+            values = {e.value for e in elements if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+            if values:
+                module_constants[node.targets[0].id] = values
+
+    ids: set[str] = set()
+    unresolved: list[str] = []
+
+    def local_tables(function: ast.FunctionDef) -> dict[str, list[tuple[str | None, ...]]]:
+        """Rows of a literal table assigned inside ``function``, by variable name."""
+        tables: dict[str, list[tuple[str | None, ...]]] = {}
+        for node in ast.walk(function):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                continue
+            name, value = node.targets[0].id, node.value
+            if isinstance(value, (ast.Tuple, ast.List)) and value.elts and all(
+                    isinstance(e, (ast.Tuple, ast.List)) for e in value.elts):
+                tables[name] = [
+                    tuple(x.value if isinstance(x, ast.Constant) and isinstance(x.value, str) else None
+                          for x in row.elts)
+                    for row in value.elts
+                ]
+            elif isinstance(value, ast.Dict):
+                flat = {x.value for row in value.values if isinstance(row, (ast.Tuple, ast.List))
+                        for x in row.elts if isinstance(x, ast.Constant) and isinstance(x.value, str)}
+                if flat:
+                    tables[f"[]{name}"] = [(v,) for v in sorted(flat)]
+        return tables
+
+    def domain(node: ast.expr, tables: dict) -> list[tuple[str | None, ...]] | None:
+        """Rows a ``for`` iterable can yield, or None when not statically known."""
+        if isinstance(node, (ast.Tuple, ast.List)):
+            rows = []
+            for element in node.elts:
+                if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                    rows.append((element.value,))
+                elif isinstance(element, (ast.Tuple, ast.List)):
+                    rows.append(tuple(x.value if isinstance(x, ast.Constant) and isinstance(x.value, str)
+                                      else None for x in element.elts))
+                else:
+                    return None
+            return rows
+        if isinstance(node, ast.Name):
+            if node.id in tables:
+                return tables[node.id]
+            if node.id in module_constants:
+                return [(v,) for v in sorted(module_constants[node.id])]
+            return None
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            return tables.get(f"[]{node.value.id}")
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"items", "keys"} and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in module_constants):
+            return [(v, None) for v in sorted(module_constants[node.func.value.id])]
+        return None
+
+    def render(node: ast.expr, scope: dict[str, set[str]]) -> set[str] | None:
+        """Concrete ids a check-id expression can take, or None when unknown."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.Name):
+            return scope.get(node.id)
+        if not isinstance(node, ast.JoinedStr):
+            return None
+        chunks: list[set[str]] = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                chunks.append({str(part.value)})
+                continue
+            inner = part.value
+            base = inner.func.value if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) else inner
+            values = scope.get(base.id) if isinstance(base, ast.Name) else None
+            if values is None:
+                return None
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) and inner.func.attr == "replace":
+                old, new = (argument.value for argument in inner.args)
+                values = {v.replace(old, new) for v in values}
+            chunks.append(values)
+        return {"".join(combination) for combination in itertools.product(*chunks)}
+
+    def walk(node: ast.AST, scope: dict, tables: dict, inside_require_keys: bool) -> None:
+        if isinstance(node, ast.FunctionDef):
+            tables = {**tables, **local_tables(node)}
+            inside_require_keys = inside_require_keys or node.name == "_require_keys"
+        if isinstance(node, ast.For):
+            scope = dict(scope)
+            rows = domain(node.iter, tables)
+            target = node.target
+            names = ([e.id if isinstance(e, ast.Name) else None for e in target.elts]
+                     if isinstance(target, ast.Tuple) else
+                     [target.id] if isinstance(target, ast.Name) else [])
+            for position, name in enumerate(names):
+                if name is None:
+                    continue
+                if rows and all(row and position < len(row) and row[position] is not None for row in rows):
+                    scope[name] = {row[position] for row in rows}
+                else:
+                    scope.pop(name, None)
+        if isinstance(node, ast.Call):
+            called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if called == "_require_keys":
+                arguments = {kw.arg: kw.value for kw in node.keywords}
+                prefix, keys = arguments.get("check_prefix"), arguments.get("keys")
+                if isinstance(prefix, ast.Constant) and isinstance(keys, (ast.Tuple, ast.List)):
+                    ids.update(f"{prefix.value}.{key.value}_missing"
+                               for key in keys.elts if isinstance(key, ast.Constant))
+                else:
+                    unresolved.append(f"_require_keys ligne {node.lineno}")
+            elif called in {"_add_check", "StandardCheck"} and not inside_require_keys:
+                argument = (node.args[1] if called == "_add_check" and len(node.args) >= 2
+                            else next((kw.value for kw in node.keywords if kw.arg == "id"), None))
+                if argument is not None:
+                    rendered = render(argument, scope)
+                    if rendered:
+                        ids.update(rendered)
+                    else:
+                        unresolved.append(f"{called} ligne {node.lineno}: {ast.unparse(argument)}")
+        for child in ast.iter_child_nodes(node):
+            walk(child, scope, tables, inside_require_keys)
+
+    for path in modules:
+        walk(trees[path], {}, {}, False)
+
+    surprises = [site for site in unresolved if "gate.{key}_missing" not in site]
+    assert surprises == [], (
+        f"émissions de check non résolues — les déclarer dans _UNRESOLVABLE_EMISSIONS "
+        f"ou les rendre statiques : {surprises}"
+    )
+    return ids | set(_UNRESOLVABLE_EMISSIONS)
+
+
+def test_every_emitted_check_is_registered() -> None:
+    """No check reaches the score through a default bucket.
+
+    Routing used to be prefix matching, and an undeclared prefix fell silently
+    into ``artifacts``.  Fifteen ids were in that case — including the four
+    ``gates.*``, which the declared prefix ``gate.`` cannot match.  A silently
+    misrouted check is scored against the wrong dimension, which is the score
+    equivalent of a decorative lock.
+    """
+    from grimoire.core.standard_checks.registry import CHECK_DIMENSIONS
+
+    unregistered = sorted(_emitted_check_ids() - set(CHECK_DIMENSIONS))
+    assert unregistered == [], f"checks émis sans dimension déclarée : {unregistered}"
+
+
+def test_registry_declares_no_unknown_dimension() -> None:
+    """Every declared dimension is one the score actually weighs."""
+    from grimoire.core.agentic_standard import DEFAULT_SCORE_DIMENSIONS
+    from grimoire.core.standard_checks.registry import CHECK_DIMENSIONS
+
+    unknown = sorted(set(CHECK_DIMENSIONS.values()) - set(DEFAULT_SCORE_DIMENSIONS))
+    assert unknown == [], f"dimensions inconnues du score : {unknown}"
+
+
+def test_registry_has_no_stale_entry() -> None:
+    """The registry does not outlive the checks it declares."""
+    from grimoire.core.standard_checks.registry import CHECK_DIMENSIONS
+
+    stale = sorted(set(CHECK_DIMENSIONS) - _emitted_check_ids())
+    assert stale == [], f"entrées de registre sans check correspondant : {stale}"
