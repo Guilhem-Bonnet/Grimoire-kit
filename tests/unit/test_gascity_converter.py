@@ -85,8 +85,15 @@ class TestGasCityConverterReport:
             "recipe_id": "gc.f",
             "steps_converted": 2,
             "verification_gates": 1,
+            "missing_output_schema": False,
             "errors": ["boom"],
         }
+
+    def test_ok_false_when_output_schema_is_missing(self) -> None:
+        """Aligné sur le garde-fou CrewAI et LangGraph : pas de sortie déclarée, pas de ok."""
+        report = GasCityConverterReport(formula_name="f", recipe_id="gc.f")
+        report.missing_output_schema = True
+        assert report.ok is False
 
 
 class TestGasCityConverter:
@@ -107,6 +114,9 @@ class TestGasCityConverter:
                 },
                 {"id": "summarize", "name": "Summarize"},
             ],
+            # Une formule sans output_schema n'est pas vérifiable après coup : le
+            # converter la refuse désormais, comme les adapters CrewAI et LangGraph.
+            "output_schema": {"findings": {"type": "string"}},
             "tags": ["custom"],
         }
 
@@ -160,7 +170,9 @@ class TestGasCityConverter:
         assert [s.id for s in r1.steps] == [s.id for s in r2.steps]
 
     def test_empty_molecules_yields_no_steps(self) -> None:
-        recipe, report = GasCityConverter().convert({"name": "empty"})
+        recipe, report = GasCityConverter().convert(
+            {"name": "empty", "output_schema": {"result": {"type": "string"}}}
+        )
         assert recipe.steps == ()
         assert report.steps_converted == 0
         assert report.verification_gates == 0

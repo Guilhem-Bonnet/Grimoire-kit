@@ -30,12 +30,12 @@ Gas City formula format (YAML/JSON dict)::
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.evidence.schemas import EvidenceProfile
+from grimoire.runtime.adapter_base import slugify
 from grimoire.runtime.recipes import Recipe, RecipeStep, VerificationGate
 
 __all__ = [
@@ -118,11 +118,12 @@ class GasCityConverterReport:
     recipe_id: str
     steps_converted: int = 0
     verification_gates: int = 0
+    missing_output_schema: bool = False
     errors: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return len(self.errors) == 0
+        return len(self.errors) == 0 and not self.missing_output_schema
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -130,13 +131,9 @@ class GasCityConverterReport:
             "recipe_id": self.recipe_id,
             "steps_converted": self.steps_converted,
             "verification_gates": self.verification_gates,
+            "missing_output_schema": self.missing_output_schema,
             "errors": self.errors,
         }
-
-
-def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug[:64]
 
 
 class GasCityConverter:
@@ -149,7 +146,9 @@ class GasCityConverter:
         registry.register(recipe)
     """
 
-    def convert(
+    source_id = "gascity"
+
+    def to_recipe(
         self,
         formula: dict[str, Any] | GasCityFormula,
         *,
@@ -163,8 +162,15 @@ class GasCityConverter:
         if isinstance(formula, dict):
             formula = GasCityFormula.from_dict(formula)
 
-        recipe_id = f"{recipe_id_prefix}.{_slugify(formula.name)}"
+        recipe_id = f"{recipe_id_prefix}.{slugify(formula.name)}"
         report = GasCityConverterReport(formula_name=formula.name, recipe_id=recipe_id)
+        if not formula.output_schema:
+            # Même garde-fou que CrewAI et LangGraph : une définition qui ne déclare
+            # pas sa sortie ne peut pas être vérifiée après coup. Gas City portait
+            # `output_schema` jusqu'à la Recipe sans jamais l'exiger, donc une formule
+            # invérifiable se rapportait `ok`.
+            report.missing_output_schema = True
+            report.errors.append("Formula declares no output_schema; import is not verifiable.")
 
         steps: list[RecipeStep] = []
         gates: list[VerificationGate] = []
@@ -207,3 +213,12 @@ class GasCityConverter:
             updated_at=now,
         )
         return recipe, report
+
+    def convert(
+        self,
+        formula: dict[str, Any] | GasCityFormula,
+        *,
+        recipe_id_prefix: str = "gc",
+    ) -> tuple[Recipe, GasCityConverterReport]:
+        """Alias déprécié de :meth:`to_recipe`, conservé au titre de l'ADR-002."""
+        return self.to_recipe(formula, recipe_id_prefix=recipe_id_prefix)

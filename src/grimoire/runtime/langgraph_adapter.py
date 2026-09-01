@@ -39,12 +39,12 @@ M2 — Integration contract:
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.evidence.schemas import EvidenceProfile
+from grimoire.runtime.adapter_base import slugify
 from grimoire.runtime.recipes import Recipe, RecipeStep, VerificationGate
 from grimoire.traces.ledger import TraceLedger
 from grimoire.traces.schemas import TraceOutcome
@@ -145,10 +145,6 @@ class LangGraphImportReport:
         }
 
 
-def _slugify(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:64]
-
-
 def _build_edge_description(node: LangGraphNode, graph: LangGraphGraph) -> str:
     successors = [
         e.to_node for e in graph.edges if e.from_node == node.id and e.to_node != "END"
@@ -180,10 +176,12 @@ class LangGraphAdapter:
         safe_trace = LangGraphAdapter.normalize_graph_trace(raw_trace)
     """
 
+    source_id = "langgraph"
+
     def __init__(self, trace_ledger: TraceLedger | None = None) -> None:
         self._trace = trace_ledger
 
-    def import_graph(
+    def to_recipe(
         self,
         graph: dict[str, Any] | LangGraphGraph,
         *,
@@ -200,7 +198,7 @@ class LangGraphAdapter:
         if isinstance(graph, dict):
             graph = LangGraphGraph.from_dict(graph)
 
-        recipe_id = f"{recipe_id_prefix}.{_slugify(graph.name)}"
+        recipe_id = f"{recipe_id_prefix}.{slugify(graph.name)}"
         report = LangGraphImportReport(graph_name=graph.name, recipe_id=recipe_id)
 
         if not graph.output_schema:
@@ -253,7 +251,7 @@ class LangGraphAdapter:
 
         if self._trace:
             try:
-                run_id = f"langgraph-{_slugify(graph.name)}"
+                run_id = f"langgraph-{slugify(graph.name)}"
                 outcome = TraceOutcome.SUCCESS if report.ok else TraceOutcome.PARTIAL
                 self._trace.record(
                     run_id=run_id,
@@ -269,6 +267,15 @@ class LangGraphAdapter:
                 pass
 
         return recipe, report
+
+    def import_graph(
+        self,
+        graph: dict[str, Any] | LangGraphGraph,
+        *,
+        recipe_id_prefix: str = "langgraph",
+    ) -> tuple[Recipe, LangGraphImportReport]:
+        """Alias déprécié de :meth:`to_recipe`, conservé au titre de l'ADR-002."""
+        return self.to_recipe(graph, recipe_id_prefix=recipe_id_prefix)
 
     @staticmethod
     def normalize_graph_trace(raw_trace: dict[str, Any]) -> dict[str, Any]:

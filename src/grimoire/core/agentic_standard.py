@@ -53,6 +53,15 @@ from grimoire.core.standard_checks.controls import (
     _verify_k8s_agent_manifest,
     _verify_score_and_exceptions,
 )
+from grimoire.core.standard_checks.registry import (
+    DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
+)
+from grimoire.core.standard_checks.registry import (
+    DIMENSION_CHECK_PREFIXES as DIMENSION_CHECK_PREFIXES,
+)
+from grimoire.core.standard_checks.registry import (
+    dimension_for,
+)
 from grimoire.core.standard_checks.verifiers import (
     _verify_memory_policy,
     run_verifiers,
@@ -103,39 +112,6 @@ PROVIDER_DEFAULT_MODELS = {
     "anthropic": ("claude-sonnet-4.6", "claude-opus-4.7", "claude-haiku-4.5"),
     "google-gemini": ("gemini-family",),
     "local": ("local-open-weight",),
-}
-DIMENSION_CHECK_PREFIXES = {
-    "artifacts": ("artifact.", "yaml.", "manifest.", "mission."),
-    "provider_policy": ("providers.", "cost."),
-    "knowledge_registry": ("knowledge.", "knowledge_index.", "docgraph."),
-    "task_board": ("board.", "task."),
-    "memory_os": ("memory.os_",),
-    "memory_policy": ("memory.", "integrity."),
-    "context_contract": ("context.", "compression."),
-    "decision_graph": ("decision.", "council."),
-    "rule_packs": ("rules.", "guardrail."),
-    "hook_registry": ("hooks.", "tools.blast_radius", "privilege.", "firewall.", "workspace.", "surfaces."),
-    "observability_cockpit": ("promptver.",),
-    "orchestration_policy": ("orchestration.", "wsm.", "flowdsl.", "runtime.", "k8s."),
-    "evidence_gates": ("evidence.", "gate.", "visual.", "browser.", "claims."),
-    "runtime_journal": ("journal.",),
-    "ci_release_gate": ("release.", "merge.", "cluster.", "env."),
-}
-DEFAULT_SCORE_DIMENSIONS = {
-    "artifacts": 10,
-    "provider_policy": 10,
-    "knowledge_registry": 10,
-    "task_board": 10,
-    "memory_policy": 10,
-    "memory_os": 10,
-    "context_contract": 10,
-    "decision_graph": 6,
-    "rule_packs": 6,
-    "hook_registry": 6,
-    "orchestration_policy": 10,
-    "evidence_gates": 10,
-    "runtime_journal": 4,
-    "ci_release_gate": 6,
 }
 
 
@@ -1616,6 +1592,15 @@ def audit_runtime_events(project_root: Path) -> dict[str, Any]:
 
 
 def _dimension_for_check(check_id: str) -> str:
+    """Route a check to its score dimension, by explicit declaration.
+
+    The registry is authoritative. The prefix table remains a fallback for ids a
+    project emits itself, but every id this kit emits is declared —
+    ``test_every_emitted_check_is_registered`` enforces it.
+    """
+    declared = dimension_for(check_id)
+    if declared is not None:
+        return declared
     for dimension, prefixes in DIMENSION_CHECK_PREFIXES.items():
         if check_id.startswith(prefixes):
             return dimension
