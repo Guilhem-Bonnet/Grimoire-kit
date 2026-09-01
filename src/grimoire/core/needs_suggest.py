@@ -33,7 +33,7 @@ def _has_any(root: Path, patterns: tuple[str, ...]) -> tuple[str, ...]:
     found: list[str] = []
     for pattern in patterns:
         for hit in root.glob(pattern):
-            found.append(str(hit.relative_to(root)))
+            found.append(hit.relative_to(root).as_posix())
             break
     return tuple(found)
 

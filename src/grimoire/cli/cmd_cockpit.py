@@ -807,7 +807,7 @@ def scan(
     registered_paths = {p.get("path") for p in _load_registry()}
 
     def _rel(p: Path) -> str:
-        return "." if p == base else str(p.relative_to(base))
+        return "." if p == base else p.relative_to(base).as_posix()
 
     table = Table(title=f"Cockpit scan — {base}", title_style="bold")
     table.add_column("Path", style="cyan")

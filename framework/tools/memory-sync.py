@@ -268,7 +268,7 @@ class MemoryParser:
         except (OSError, UnicodeDecodeError):
             return []
 
-        relative = str(filepath.relative_to(project_root))
+        relative = filepath.relative_to(project_root).as_posix()
         filename = filepath.name
 
         if filename == "decisions-log.md":
@@ -550,7 +550,7 @@ class MemorySyncer:
         files = self._discover_memory_files()
 
         for filepath in files:
-            relative = str(filepath.relative_to(self.project_root))
+            relative = filepath.relative_to(self.project_root).as_posix()
             changed = self._state_mgr.file_changed(filepath)
 
             if changed:

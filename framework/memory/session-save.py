@@ -125,14 +125,14 @@ def save_session(
 """
 
     # Write current session state
-    SESSION_FILE.write_text(content)
+    SESSION_FILE.write_text(content, encoding="utf-8")
     print("✅ Session sauvegardée dans session-state.md")
     print(f"   Agent: {agent} | Date: {date_str}")
 
     # Archive in session-summaries/
     SESSION_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
     archive_file = SESSION_SUMMARIES_DIR / f"{date_file}-{agent}.md"
-    archive_file.write_text(content)
+    archive_file.write_text(content, encoding="utf-8")
     print(f"   Archive: session-summaries/{archive_file.name}")
 
 

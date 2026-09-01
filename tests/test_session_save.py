@@ -136,7 +136,7 @@ class TestSaveSession(unittest.TestCase):
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.ss.save_session(agent="dev")
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         # Should have proper Markdown headers
         self.assertIn("# État de Session", content)
         self.assertIn("## Dernière Session", content)
