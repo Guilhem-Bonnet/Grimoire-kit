@@ -460,7 +460,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         print("Comparaison des modes de condensation\n")
         for mode in VERBOSITY_MODES:
             r = condense(content, mode)
-            bar = "█" * int(r.ratio * 20)
+            bar = "#" * int(r.ratio * 20)
             print(f"   {mode:12s} {bar:20s} {r.condensed_words:5d} mots ({r.ratio:.0%})")
     return 0
 

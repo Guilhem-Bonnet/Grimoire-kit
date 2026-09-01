@@ -105,30 +105,30 @@ def _scan_project(project_root: Path) -> ArchScan:
     for pattern in ["**/agents/*.md", "**/agents/*.xml", "**/agents/*.yaml"]:
         for f in project_root.glob(pattern):
             if ".git" not in str(f):
-                scan.agents.append(str(f.relative_to(project_root)))
+                scan.agents.append(f.relative_to(project_root).as_posix())
 
     for pattern in ["**/workflows/**/*.md", "**/workflows/**/*.yaml", "**/workflows/**/*.xml"]:
         for f in project_root.glob(pattern):
             if ".git" not in str(f):
-                scan.workflows.append(str(f.relative_to(project_root)))
+                scan.workflows.append(f.relative_to(project_root).as_posix())
 
     for f in project_root.glob("**/tools/*.py"):
         if ".git" not in str(f) and "__pycache__" not in str(f):
-            scan.tools.append(str(f.relative_to(project_root)))
+            scan.tools.append(f.relative_to(project_root).as_posix())
 
     for pattern in ["**/*.yaml", "**/*.yml"]:
         for f in project_root.glob(pattern):
-            rel = str(f.relative_to(project_root))
+            rel = f.relative_to(project_root).as_posix()
             if ".git" not in rel and rel not in scan.workflows:
                 scan.configs.append(rel)
 
     for f in project_root.glob("**/docs/**/*.md"):
         if ".git" not in str(f):
-            scan.docs.append(str(f.relative_to(project_root)))
+            scan.docs.append(f.relative_to(project_root).as_posix())
 
     for f in project_root.glob("**/tests/**/*"):
         if ".git" not in str(f) and f.is_file() and "__pycache__" not in str(f):
-            scan.tests.append(str(f.relative_to(project_root)))
+            scan.tests.append(f.relative_to(project_root).as_posix())
 
     all_files = scan.agents + scan.workflows + scan.tools
     for fpath in all_files:
@@ -211,7 +211,7 @@ def _detect_manifest_mismatch(scan: ArchScan, project_root: Path) -> list[Disson
                     ):
                         dissonances.append(Dissonance(
                             "manifest", SEVERITY_MEDIUM,
-                            str(mpath.relative_to(project_root)),
+                            mpath.relative_to(project_root).as_posix(),
                             f"'{name}' référencé dans le manifest mais pas trouvé",
                             "Vérifier si l'agent existe ou retirer du manifest",
                         ))

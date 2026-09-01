@@ -219,7 +219,7 @@ We decided to use Qdrant for vector storage.
 Adopted Python 3.12 for new features.
 """
         f = self.tmpdir / "decisions-log.md"
-        f.write_text(content)
+        f.write_text(content, encoding="utf-8")
         sections = self.mod.SectionParser.parse_file(f, self.tmpdir)
         self.assertGreater(len(sections), 0)
 
@@ -279,7 +279,7 @@ This is an old decision that should be summarized.
 This is a recent decision that should be kept.
 - Reason: just happened
 - Impact: ongoing
-""")
+""", encoding="utf-8")
         return memory_dir
 
     def test_init_defaults(self):

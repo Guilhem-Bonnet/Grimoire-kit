@@ -1,0 +1,30 @@
+# Les scripts shell doivent garder des fins de ligne LF dans la copie de
+# travail, sur toutes les plateformes.
+#
+# Les runners Windows de GitHub ont `core.autocrlf=true` par défaut. Sans cette
+# règle, `actions/checkout` convertit les 40 scripts `.sh` du dépôt en CRLF, et
+# bash refuse de les exécuter :
+#
+#     grimoire-init.sh: ligne 13: $'\r': commande introuvable
+#     grimoire-init.sh: ligne 14: set: pipefail: nom d'option non valable
+#
+# Le même piège attend tout contributeur qui clone sous Windows avec la
+# configuration git par défaut. La règle vaut donc pour le dépôt, pas
+# seulement pour la CI.
+*.sh text eol=lf
+
+# Même raison : ces fichiers sont lus par un interpréteur, pas par un éditeur
+# Windows. Les garder en LF évite qu'un `\r` traîne dans une valeur lue.
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# Les artefacts binaires ne doivent subir aucune conversion.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

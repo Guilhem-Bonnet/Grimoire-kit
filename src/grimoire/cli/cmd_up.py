@@ -499,7 +499,7 @@ def repair_project_artifacts(target: Path) -> list[str]:
         # Report only what actually changed, so --fix stays a no-op on a
         # healthy project even though it regenerates everything.
         if write_text_if_changed(template.dst, template.content):
-            written.append(template.label or str(template.dst.relative_to(target)))
+            written.append(template.label or template.dst.relative_to(target).as_posix())
     # Les fichiers par hôte appartiennent aux émetteurs : ils sont régénérés
     # ici et nulle part ailleurs, pour qu'un seul écrivain possède le chemin.
     written.extend(_sync_host_surfaces(target))

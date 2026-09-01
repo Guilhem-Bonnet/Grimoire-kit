@@ -442,7 +442,7 @@ def migrate_command(
 
     if fmt == "json":
         typer.echo(json.dumps({
-            "snapshot": str(snapshot.relative_to(target)),
+            "snapshot": snapshot.relative_to(target).as_posix(),
             "moved_to_overrides": [v.destination for v in plan.overrides],
             "regenerated": len(regenerated),
         }, indent=2))

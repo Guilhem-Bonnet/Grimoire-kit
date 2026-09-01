@@ -207,7 +207,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-''')
+''', encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(len(tools), 1)
@@ -239,7 +239,7 @@ if __name__ == "__main__":
 
     def test_description_extraction(self):
         tool_file = self.tools_dir / "extractor.py"
-        tool_file.write_text('"""\nextractor.py — Extract data from files.\n"""\nEXTRACTOR_VERSION = "0.1.0"\n')
+        tool_file.write_text('"""\nextractor.py — Extract data from files.\n"""\nEXTRACTOR_VERSION = "0.1.0"\n', encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(len(tools), 1)
@@ -247,7 +247,7 @@ if __name__ == "__main__":
 
     def test_tags_detection(self):
         tool_file = self.tools_dir / "rag-search.py"
-        tool_file.write_text('"""\nrag-search.py — Search with Qdrant.\n"""\n')
+        tool_file.write_text('"""\nrag-search.py — Search with Qdrant.\n"""\n', encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertIn("rag", tools[0].tags)
@@ -263,7 +263,8 @@ class TestToolRegistry(unittest.TestCase):
         self.tools_dir.mkdir(parents=True)
         # Create sample tools
         (self.tools_dir / "tool-a.py").write_text(
-            '"""\ntool-a.py — Tool A description.\n"""\nTOOL_A_VERSION = "1.0.0"\n'
+            '"""\ntool-a.py — Tool A description.\n"""\nTOOL_A_VERSION = "1.0.0"\n',
+            encoding="utf-8",
         )
         (self.tools_dir / "tool-b.sh").write_text("#!/bin/bash\n# Tool B shell\n")
         (self.tools_dir / "tool-c.md").write_text("# Tool C Guide\n")

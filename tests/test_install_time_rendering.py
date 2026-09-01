@@ -134,3 +134,22 @@ def test_fix_apply_does_not_relist_what_it_just_wrote(tmp_path: Path) -> None:
     assert not any("mission-brief" in line for line in outstanding), (
         "un fichier écrit avec succès est réaffiché comme manquant :\n" + result.output
     )
+
+
+def test_reported_paths_are_posix_on_every_platform() -> None:
+    r"""A path the CLI reports keeps the same shape wherever it was produced.
+
+    `str(Path)` yields the separator of the running OS, so `standard fix --apply`
+    announced `_grimoire/standard/x` on Linux and `_grimoire\standard\x` on
+    Windows — on screen and in the JSON payload alike. The assertion above was
+    written against the Linux shape and only ever ran there, the Windows job
+    dying earlier; it broke the moment that job got far enough to reach it.
+
+    This guard is trivially true on POSIX and load-bearing on Windows, which is
+    exactly where the defect lives.
+    """
+    from grimoire.cli.cmd_standard import _paths
+
+    assert _paths([Path("_grimoire/standard/mission-brief.md")]) == [
+        "_grimoire/standard/mission-brief.md"
+    ]
