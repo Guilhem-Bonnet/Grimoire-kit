@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.agentic_standard import get_profile, load_profile_map
-from grimoire.data.__init__ import framework_path
+from grimoire.data import framework_path
 
 TRACEABILITY_PATH = Path("agentic-standard/traceability.yaml")
 REQUIREMENT_ID = re.compile(r"^AG-[A-Z]{3}-\d{3}$")
