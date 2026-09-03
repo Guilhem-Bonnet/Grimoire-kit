@@ -102,7 +102,6 @@ class board_lock:  # noqa: N801 — context manager léger
         try:
             self._fh = self._lock_path.open("w", encoding="utf-8")
             import fcntl
-
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         except (ImportError, OSError):
             pass
@@ -112,7 +111,6 @@ class board_lock:  # noqa: N801 — context manager léger
         if self._fh is not None:
             try:
                 import fcntl
-
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
             except (ImportError, OSError):
                 pass

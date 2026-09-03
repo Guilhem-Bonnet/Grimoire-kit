@@ -306,7 +306,6 @@ def generate_test_suite(
             prompt="Comment évalues-tu la qualité visuelle de tes créations ? Quels critères ?",
             expected_traits=["vision", "critère", "score", "itér", "juger", "qualité"],
         ))
-
         tests.append(TestCase(
             test_id=f"vision-iterate-{name}",
             category="vision",
@@ -503,7 +502,6 @@ def run_benchmark(
         suite_result = run_test_suite(ap, suite_type, project_root)
         bench.agents.append(suite_result.agent_name)
         bench.scores[suite_result.agent_name] = suite_result.score
-
         # Per-category breakdown
         cat_scores: dict[str, list[float]] = {}
         for r in suite_result.results:

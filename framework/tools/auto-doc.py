@@ -243,14 +243,12 @@ def detect_drifts(project_root: Path) -> DocReport:
                         expected=f"{actual}",
                         line=i,
                     ))
-
         # Missing test files (only for per-file format)
         table_files = set()
         for line in readme_lines:
             match = re.search(r"\|\s*`?(test_\w+\.py)`?\s*\|", line)
             if match:
                 table_files.add(match.group(1))
-
         for fname in tests_per_file:
             if fname not in table_files:
                 report.drifts.append(DriftItem(

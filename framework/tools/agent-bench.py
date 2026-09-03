@@ -145,11 +145,9 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
         content = "\n".join(current_content_lines).strip()
         if not content:
             return
-
         ts = current_header.get("ts", "")
         ag = current_header.get("agent", "system").strip().lower()
         st = current_header.get("story", "").strip()
-
         # Filtres
         if since_dt and ts:
             try:

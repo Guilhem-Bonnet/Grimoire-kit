@@ -269,7 +269,6 @@ class TaskClassifier:
         """Classifie une requête en complexité et type de tâche."""
         lower = prompt.lower()
         prompt_len = len(prompt)
-
         # Score par niveau
         scores: dict[str, float] = {
             Complexity.EXPERT: 0.0,
@@ -278,7 +277,6 @@ class TaskClassifier:
             Complexity.TRIVIAL: 0.0,
         }
         matched: list[str] = []
-
         for keyword in self.expert:
             if keyword in lower:
                 scores[Complexity.EXPERT] += 2.0

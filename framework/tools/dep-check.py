@@ -75,9 +75,7 @@ def scan_dependencies(project_root: Path) -> dict[str, list[str]]:
                 tool_file.read_text(encoding="utf-8", errors="ignore"))
         except OSError:
             continue
-
         deps: set[str] = set()
-
         # 1. _load_tool() calls
         for match in _LOAD_TOOL_RE.finditer(content):
             dep = match.group(1)

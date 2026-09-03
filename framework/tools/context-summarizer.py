@@ -223,10 +223,8 @@ class SectionParser:
             content = filepath.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return []
-
         relative = filepath.relative_to(project_root).as_posix()
         sections: list[Section] = []
-
         # Split par H2 (## heading)
         parts = re.split(r"^(##\s+.+)$", content, flags=re.MULTILINE)
 

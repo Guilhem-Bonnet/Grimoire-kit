@@ -146,7 +146,6 @@ def _count_failure_sections(path: Path, since: str | None = None) -> dict:
             current_severity = "important"
         elif "Micro-Erreurs" in line or "[ok]" in line:
             current_severity = "micro"
-
         # Détecter une entrée
         if line.startswith("### ["):
             if in_entry:
@@ -155,13 +154,11 @@ def _count_failure_sections(path: Path, since: str | None = None) -> dict:
                     result["with_rule"] += 1
                 if has_lesson:
                     result["with_lesson"] += 1
-
             match = date_pattern.search(line)
             entry_date = match.group(1) if match else ""
             if since and entry_date and entry_date < since:
                 in_entry = False
                 continue
-
             in_entry = True
             has_rule = False
             has_lesson = False

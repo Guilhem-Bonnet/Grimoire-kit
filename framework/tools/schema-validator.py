@@ -142,13 +142,11 @@ def _parse_yaml_basic(text: str) -> tuple[dict | None, str | None]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
         # Top-level key
         if not line[0].isspace() and ":" in stripped:
             key = stripped.split(":", 1)[0].strip()
             val = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
             current_key = key
-
             # Remove quotes and handle types
             if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]

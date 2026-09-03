@@ -98,12 +98,10 @@ def load_project_context(path: Path) -> UserConfig:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
         # Top-level sections: no leading whitespace
         if line and not line[0].isspace() and ":" in stripped:
             current_section = stripped.split(":")[0].strip()
             continue
-
         # Indented fields
         if current_section == "project" and stripped.startswith("name:"):
             config.project_name = _parse_yaml_value(stripped)

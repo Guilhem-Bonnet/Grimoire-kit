@@ -249,12 +249,10 @@ class SynapseTracer:
     ) -> _Span:
         """
         Ouvre un span tracé en context manager.
-
         Capture automatiquement, à la sortie du bloc ``with`` : la durée, l'issue
         (ok/error sur exception), le coût, le nombre de retries, le lien causal
         parent→enfant (pile de spans), et — si renseignés — le modèle/provider et
         les tokens in/out (coût alors calculé via la table de prix du modèle).
-
         Usage::
 
             with tracer.span("llm", "generate", agent="dev", model="claude-opus-4-8") as s:

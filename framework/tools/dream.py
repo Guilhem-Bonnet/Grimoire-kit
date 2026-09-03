@@ -302,11 +302,9 @@ def _parse_pheromone_board(project_root: Path,
     for p in data.get("pheromones", []):
         if p.get("resolved", False):
             continue
-
         # Skip dream's own pheromones UNLESS they got reinforced (= feedback signal)
         if p.get("emitter") == "dream-mode" and p.get("reinforcements", 0) == 0:
             continue
-
         # Date filter
         ts = p.get("timestamp", "")
         entry_date = ts[:10] if len(ts) >= 10 else ""

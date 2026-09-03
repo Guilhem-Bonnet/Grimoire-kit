@@ -287,7 +287,6 @@ class TokenBudgetEnforcer:
         Retourne: list[(filepath, tokens, priority)]
         """
         files: list[tuple[str, int, int]] = []
-
         # Scan memory / agent files
         for pattern, prio in [
             ("_grimoire/_memory/*.md", 1),
@@ -302,7 +301,6 @@ class TokenBudgetEnforcer:
                     files.append((f.relative_to(self.project_root).as_posix(), tokens, prio))
                 except OSError:
                     continue
-
         return files
 
     def check(self) -> BudgetStatus:

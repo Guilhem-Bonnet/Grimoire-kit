@@ -65,10 +65,8 @@ try:
 except ImportError:  # Windows
     try:
         import msvcrt
-
         def _lock_exclusive(fh) -> None:
             msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
-
         def _unlock(fh) -> None:
             fh.seek(0)
             msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)

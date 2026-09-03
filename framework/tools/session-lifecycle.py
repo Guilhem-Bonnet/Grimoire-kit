@@ -295,13 +295,11 @@ def _hook_session_chain(project_root: Path, lifecycle_result: LifecycleResult) -
     try:
         chain_path = project_root / SESSION_CHAIN_FILE
         chain_path.parent.mkdir(parents=True, exist_ok=True)
-
         # Build session summary from hook results
         hook_summaries = []
         for h in lifecycle_result.hooks:
             if h.status == "completed" and h.message:
                 hook_summaries.append(h.message)
-
         entry = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "phase": lifecycle_result.phase,

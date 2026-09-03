@@ -130,13 +130,11 @@ class MemoryParser:
         """Parse decisions-log.md — format: ## {date} — {titre}."""
         entries: list[MemoryEntry] = []
         sections = re.split(r"^(##\s+.+)$", content, flags=re.MULTILINE)
-
         heading = ""
         for section in sections:
             stripped = section.strip()
             if not stripped:
                 continue
-
             header_match = re.match(r"^##\s+(.+)$", stripped)
             if header_match:
                 heading = header_match.group(1)

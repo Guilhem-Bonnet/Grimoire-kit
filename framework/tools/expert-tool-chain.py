@@ -515,7 +515,6 @@ def mcp_etc_record_iteration(
                 profile_id = entry.get("profile", "")
                 brief = entry.get("brief", "")
                 break
-
         if profile_id:
             result["next_prompt"] = build_creation_prompt(
                 profile_id, brief,

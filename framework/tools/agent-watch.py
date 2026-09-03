@@ -568,13 +568,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         icon = sev_icons.get(report.severity, "[-]")
         print(f"\n  {icon} Drift Check: {report.agent_name} — {report.severity.upper()} ({report.overall_drift:.1%})")
         print(f"  Baseline: {report.baseline_timestamp[:16]} -> Now: {report.timestamp[:16]}\n")
-
         for v in report.vectors:
             if v["dimension"] == "file_hash":
                 continue
             vi = sev_icons.get(v["severity"], "[-]")
             print(f"  {vi} {v['dimension']:15s} {v['drift_score']:.0%} — {v['detail']}")
-
         if report.alerts:
             print("\n  Alertes:")
             for a in report.alerts:

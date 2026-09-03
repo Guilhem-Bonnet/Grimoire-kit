@@ -148,14 +148,12 @@ def parse_trace(path: Path) -> tuple[list[TraceEntry], list[str]]:
                 if current_session not in sessions:
                     sessions.append(current_session)
             continue
-
         sm = _SESSION_RE.match(line)
         if sm:
             current_session = sm.group(1)
             if current_session not in sessions:
                 sessions.append(current_session)
             continue
-
         m = _TRACE_RE.match(line)
         if m:
             entries.append(TraceEntry(
@@ -222,7 +220,6 @@ def _parse_yaml_simple(text: str) -> dict:
         stripped = raw_line.split("#")[0].rstrip()  # remove comments
         if not stripped:
             continue
-
         indent = len(raw_line) - len(raw_line.lstrip())
 
         # Pop stack to find parent at correct indent level

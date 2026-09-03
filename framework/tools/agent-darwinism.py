@@ -283,11 +283,9 @@ def parse_trace_stats(trace_path: Path,
         content = "\n".join(content_lines).strip()
         if not content:
             return
-
         ts = current_header.get("ts", "")
         ag = current_header.get("agent", "system").strip().lower()
         story = current_header.get("story", "").strip()
-
         if since_dt and ts:
             try:
                 entry_dt = datetime.fromisoformat(ts.replace(" ", "T"))

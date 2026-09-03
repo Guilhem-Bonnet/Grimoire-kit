@@ -98,7 +98,6 @@ class GrimoireTool:
         """Export au format MCP tool."""
         properties = {}
         required = []
-
         for param in self.parameters:
             prop = {"type": param.param_type, "description": param.description}
             if param.enum:
@@ -108,7 +107,6 @@ class GrimoireTool:
             properties[param.name] = prop
             if param.required:
                 required.append(param.name)
-
         schema = {
             "name": self.name,
             "description": self.description,

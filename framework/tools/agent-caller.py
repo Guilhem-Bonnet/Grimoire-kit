@@ -210,7 +210,6 @@ class TraceWriter:
         """Ajoute une entrée de trace."""
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ")
         entry = f"[{timestamp}] [{agent}] [{event_type}] {payload}\n"
-
         self.trace_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.trace_file, "a", encoding="utf-8") as f:
             f.write(entry)
@@ -265,7 +264,6 @@ class CallHistoryManager:
         entries = self._load()
         if not entries:
             return {"total_calls": 0}
-
         total = len(entries)
         success = sum(1 for e in entries if e.get("status") == "success")
         simulated = sum(1 for e in entries if e.get("status") == "simulated")

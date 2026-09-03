@@ -226,10 +226,8 @@ class Reranker:
     ) -> list[RetrievedChunk]:
         """Reranke les chunks par heuristiques contextuelles."""
         query_keywords = set(re.findall(r"\w+", query.lower()))
-
         for chunk in chunks:
             boost = 0.0
-
             # Agent match : source_file contient l'agent_id
             if agent_id and agent_id.lower() in chunk.source_file.lower():
                 boost += self.boosts.get("agent_match", 0.0)

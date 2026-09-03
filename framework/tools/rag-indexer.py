@@ -250,9 +250,7 @@ class ChunkingStrategy:
         current_heading = ""
         current_text_lines: list[str] = []
         chunk_idx = 0
-
         lines = content.split("\n")
-
         for line in lines:
             # Détecter les headers
             header_match = re.match(r"^(#{1,3})\s+(.+)", line)

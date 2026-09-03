@@ -219,7 +219,6 @@ def check_git_state(project_root: Path) -> list[Check]:
                 message=f"{len(conflicted)} fichier(s) en conflit de merge : {', '.join(conflicted[:3])}",
                 fix_hint="Résoudre les conflits avant de continuer",
             ))
-
         # Vérifier les modifications non committées dans _grimoire
         result = subprocess.run(
             ["git", "status", "--porcelain", "--", "_grimoire/"],
@@ -317,7 +316,6 @@ def check_story_readiness(project_root: Path, story_path: str) -> list[Check]:
 
     try:
         content = story_file.read_text(encoding="utf-8")
-
         # Placeholders non remplis
         placeholders = re.findall(r'\{\{[^}]+\}\}', content)
         if placeholders:

@@ -749,11 +749,9 @@ def do_recommend_models(
         affinity = parse_model_affinity(ap)
         if not affinity:
             continue
-
         # Calculer les tokens de l'agent avec le modèle par défaut
         budget = compute_budget(ap, project_root, DEFAULT_MODEL)
         agent_tokens = budget.total_tokens
-
         # Scorer chaque modèle
         scores: list[tuple[str, float]] = []
         for mid, profile in profiles_to_use.items():

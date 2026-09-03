@@ -144,7 +144,6 @@ def read_stream(project_root: Path, agent: str | None = None,
             try:
                 data = json.loads(line)
                 entry = ReasoningEntry.from_dict(data)
-
                 # Filtres
                 if agent and agent.lower() not in entry.agent.lower():
                     continue
@@ -154,7 +153,6 @@ def read_stream(project_root: Path, agent: str | None = None,
                     continue
                 if since and entry.timestamp[:10] < since:
                     continue
-
                 entries.append(entry)
             except (json.JSONDecodeError, KeyError):
                 continue

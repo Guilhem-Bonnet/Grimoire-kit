@@ -234,7 +234,6 @@ def analyze_document(content: str) -> DocumentAnalysis:
             continue
         if in_code_block:
             continue
-
         if stripped.startswith("#"):
             header = stripped.lstrip("#").strip()
             analysis.headers.append(header)
@@ -242,7 +241,6 @@ def analyze_document(content: str) -> DocumentAnalysis:
             section_lines[current_section] = []
         elif current_section and stripped:
             section_lines[current_section].append(stripped)
-
         # Count sentences
         analysis.total_sentences += stripped.count(".") + stripped.count("!") + stripped.count("?")
 

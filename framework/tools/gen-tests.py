@@ -255,7 +255,6 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
         safe_trait = to_snake(trait_name)
         filename = f"test_{safe_trait}{tmpl['ext']}"
         filepath = Path(output_dir) / filename
-
         with open(filepath, "w", encoding="utf-8") as f:
             # Header
             header = tmpl["header"].format(
@@ -266,7 +265,6 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
                 date=date_str,
             )
             f.write(header)
-
             # Tests
             for item in trait_items:
                 test_id = to_snake(item["id"])
