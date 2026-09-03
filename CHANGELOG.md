@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.37.0] - 2026-09-03
+
 ### Ajouté
 
 - **Le bridge trace chaque artefact vers les exigences de la norme.** Le
