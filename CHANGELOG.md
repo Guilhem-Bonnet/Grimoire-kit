@@ -9,6 +9,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Deux artefacts que la norme rend obligatoires et que le kit ne livrait
+  pas.** Le claim ledger (AG-QUA-002, exigé dès le premier niveau) relie chaque
+  affirmation qui pèse sur une décision à ce qui la prouve : `claim-ledger.md`
+  est généré aux côtés de l'evidence pack pour tous les profils. Le registre des
+  surfaces runtime (AG-TOL-007 et AG-RET-006, exigés dès `governed`) donne à
+  chaque hook, agent, policy ou sortie un owner, un mode, une rétention et un
+  statut : `runtime-surface-registry.yaml` est généré pour `governed` et
+  `production`. Deux vérificateurs les lisent : un registre encore vierge est un
+  avertissement, il attend d'être rempli ; une affirmation dite prouvée sans
+  preuve, ou — en profil gouverné — utilisée sans l'être, et une surface sans
+  owner sont des erreurs. Un projet déjà enrôlé les reçoit par
+  `grimoire standard fix --apply`.
+
+### Ajouté
+
 - **La persona d'entrée se choisit par projet.** Elle était `concierge` en dur :
   `collect_agents` acceptait un autre nom, mais son seul appelant ne le passait
   jamais. Un projet qui porte déjà son propre point d'entrée — un orchestrateur

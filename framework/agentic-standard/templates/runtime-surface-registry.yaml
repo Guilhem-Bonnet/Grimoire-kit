@@ -1,0 +1,55 @@
+$schema: "grimoire-agentic-standard-runtime-surface-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Registre des surfaces runtime : ce qui contrôle les agents, ce qu'ils produisent, ce qui a dérivé, ce qui a été nettoyé."
+
+# Surfaces de contrôle : prompts, skills, agents, workflows, hooks, policies, MCP.
+# Chaque surface porte un owner, un mode de déploiement et un statut.
+control_surfaces: []
+# - id: CTRL-001
+#   surface: ".claude/settings.json"
+#   type: hook            # prompt | skill | agent | workflow | hook | policy | mcp
+#   owner: ""
+#   mode: enforced        # draft | shadow | canary | enforced | retired
+#   risk: moyen           # faible | moyen | élevé | critique
+#   validation: ""        # ce qui a prouvé que la surface fait ce qu'elle dit
+#   status: active        # active | archived | superseded | obsolete
+
+# Surfaces de sortie : ce que les agents écrivent, avec rétention et indexation.
+output_surfaces: []
+# - id: OUT-001
+#   artifact: "_grimoire-output/evidence/"
+#   type: preuve          # plan | preuve | trace | rapport | capture | log | mémoire
+#   mission: ""
+#   sensitivity: interne  # public | interne | confidentiel | secret
+#   retention: projet     # durable | projet | court terme | purge
+#   indexable: true
+#   expires_at: ""
+#   status: active
+
+# Dérive constatée entre ce qu'une surface déclare et ce qui s'exécute.
+drift: []
+# - id: DRIFT-001
+#   source: ""
+#   target: ""
+#   drift: ""
+#   impact: ""
+#   action: corriger runtime   # corriger doc | corriger runtime | archiver | purger
+
+# Journal des nettoyages : chaque décision de conserver, archiver, désindexer ou purger.
+cleanup: []
+# - date: ""
+#   surface: ""
+#   action: archiver      # conserver | archiver | désindexer | purger
+#   justification: ""
+#   validation: ""
+
+allowed:
+  types: [prompt, skill, agent, workflow, hook, policy, mcp]
+  modes: [draft, shadow, canary, enforced, retired]
+  risks: [faible, moyen, élevé, critique]
+  statuses: [active, archived, superseded, obsolete]
+  output_types: [plan, preuve, trace, rapport, capture, log, mémoire]
+  sensitivities: [public, interne, confidentiel, secret]
+  retentions: [durable, projet, "court terme", purge]

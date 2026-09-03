@@ -16,6 +16,21 @@ Le pont vit dans :
 - `framework/agentic-standard/templates/`
 - `archetypes/agentic-standard/`
 
+## Artefacts obligatoires de la norme
+
+Deux artefacts que la norme exige et que les profils livrent désormais :
+
+| Artefact | Exigence | Profils | Fichier |
+|---|---|---|---|
+| Claim ledger | AG-QUA-002 — une affirmation sans preuve reste une hypothèse | tous | `_grimoire-output/evidence/<task>/claim-ledger.md` |
+| Registre des surfaces runtime | AG-TOL-007, AG-RET-006 — owner, mode, rétention, statut par surface | `governed`, `production` | `_grimoire/standard/runtime-surface-registry.yaml` |
+
+`grimoire standard verify` les lit. Un registre vierge est un avertissement :
+il attend d'être rempli. Une affirmation marquée `prouvé` sans source, une
+affirmation `utiliser` qui n'est pas prouvée en profil gouverné, une surface de
+contrôle sans owner : erreurs. Un projet déjà enrôlé reçoit les deux fichiers
+par `grimoire standard fix --apply`.
+
 ## Profils de conformité opérationnelle
 
 | Profil | Usage | Artefacts minimaux |

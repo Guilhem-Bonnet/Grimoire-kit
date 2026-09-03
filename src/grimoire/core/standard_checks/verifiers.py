@@ -439,6 +439,90 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
         )
 
 
+def _verify_claim_ledger(
+    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
+) -> None:
+    """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
+
+    Un registre encore vierge est un avertissement : il attend d'être rempli.
+    Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou —
+    en profil governed et production — une affirmation utilisée alors qu'elle
+    n'est pas prouvée, et une synthèse laissée vide.
+    """
+    rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    strict = profile.id in {"governed", "production"}
+    template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
+    rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
+    if not rows:
+        _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
+    for line in rows:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 7:
+            _add_check(result, "claims.row_invalid", "warning", f"Claim row is malformed: {line[:60]}", path=rel_path)
+            continue
+        claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
+        if status == "prouvé" and not proof:
+            _add_check(
+                result, "claims.proved_without_evidence", "error",
+                f"{claim_id} is marked prouvé with no source or evidence.", path=rel_path,
+            )
+        if decision == "utiliser" and status != "prouvé":
+            _add_check(
+                result, "claims.used_unproved", "error" if strict else "warning",
+                f"{claim_id} is used while its status is {status}.", path=rel_path,
+            )
+    if strict and rows and "| Affirmations bloquantes non prouvées |  |" in text:
+        _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
+
+
+def _verify_runtime_surface_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-TOL-007 et AG-RET-006 : chaque surface runtime a un owner, un mode, un statut, une rétention."""
+    rel_path = STANDARD_DIR / "runtime-surface-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    strict = profile.id in {"governed", "production"}
+    raw_allowed = data.get("allowed")
+    allowed: dict[str, Any] = raw_allowed if isinstance(raw_allowed, dict) else {}
+    controls = data.get("control_surfaces") or []
+    outputs = data.get("output_surfaces") or []
+    if not controls:
+        _add_check(
+            result, "surfaces.no_control_surface", "warning",
+            "No control surface is registered: hooks, agents and policies run unowned.", path=rel_path,
+        )
+    for entry in controls if isinstance(controls, list) else []:
+        if not isinstance(entry, dict):
+            _add_check(result, "surfaces.control_invalid", "warning", "A control surface entry is not a mapping.", path=rel_path)
+            continue
+        sid = str(entry.get("id", "?"))
+        for key in ("surface", "owner", "mode", "status"):
+            if not entry.get(key):
+                _add_check(
+                    result, f"surfaces.control_{key}_missing", "error" if strict else "warning",
+                    f"{sid} has no {key}.", path=rel_path,
+                )
+        for key, allowed_key in (("type", "types"), ("mode", "modes"), ("risk", "risks"), ("status", "statuses")):
+            value = entry.get(key)
+            values = allowed.get(allowed_key)
+            if value and isinstance(values, list) and value not in values:
+                _add_check(result, f"surfaces.control_{key}_unknown", "warning", f"{sid}: {key} {value!r} is not an allowed value.", path=rel_path)
+    for entry in outputs if isinstance(outputs, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        sid = str(entry.get("id", "?"))
+        if not entry.get("retention"):
+            _add_check(
+                result, "surfaces.output_retention_missing", "error" if strict else "warning",
+                f"{sid} declares no retention.", path=rel_path,
+            )
+        if "indexable" not in entry:
+            _add_check(result, "surfaces.output_indexable_missing", "warning", f"{sid} does not say whether it is indexable.", path=rel_path)
+
+
 def _verify_compliance_declaration(root: Path, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "compliance-declaration.md"
     text = _text_file(root, rel_path)

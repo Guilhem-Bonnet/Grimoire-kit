@@ -42,6 +42,10 @@
    "version": "3.24.0",
    "path": "framework/hooks/pre-commit-cc.sh"
   },
+  "047bae93713f6ab16c4c6708f5e59511ce401ca28b8cec602f8bfe94d77c3128": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
+  },
   "0504d12328d73ec9f9da9f169500da5de740827f2577d8e86a509eb9dd9adf49": {
    "version": "3.35.0",
    "path": "archetypes/creative-studio/archetype.dna.yaml"
@@ -845,6 +849,10 @@
   "490245e552117cd7cec6d54bc984e1b7f0899f81820e29c6da439c1a3e44f1f6": {
    "version": "3.35.0",
    "path": "framework/memory/handoff-log.tpl.md"
+  },
+  "499d9872cbe52459b0622972731a61d6dcb27976bf1afa230c9e4568c80c64f6": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
   },
   "49c66445f80d41a6a5531df7970230d8f5368439719ef0b8bfda59633727e820": {
    "version": "3.21.1",

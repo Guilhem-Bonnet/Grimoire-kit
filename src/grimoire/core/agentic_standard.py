@@ -74,6 +74,7 @@ from grimoire.core.standard_checks.controls import (
     _verify_workspace_isolation,
 )
 from grimoire.core.standard_checks.verifiers import (
+    _verify_claim_ledger,
     _verify_compliance_declaration,
     _verify_context_contract,
     _verify_decision_graph,
@@ -89,6 +90,7 @@ from grimoire.core.standard_checks.verifiers import (
     _verify_profile_specific_controls,
     _verify_provider_registry,
     _verify_rule_packs,
+    _verify_runtime_surface_registry,
     _verify_task_board,
     _verify_task_envelope,
 )
@@ -149,10 +151,10 @@ DIMENSION_CHECK_PREFIXES = {
     "context_contract": ("context.", "compression."),
     "decision_graph": ("decision.", "council."),
     "rule_packs": ("rules.", "guardrail."),
-    "hook_registry": ("hooks.", "tools.blast_radius", "privilege.", "firewall.", "workspace."),
+    "hook_registry": ("hooks.", "tools.blast_radius", "privilege.", "firewall.", "workspace.", "surfaces."),
     "observability_cockpit": ("promptver.",),
     "orchestration_policy": ("orchestration.", "wsm.", "flowdsl.", "runtime.", "k8s."),
-    "evidence_gates": ("evidence.", "gate.", "visual.", "browser."),
+    "evidence_gates": ("evidence.", "gate.", "visual.", "browser.", "claims."),
     "runtime_journal": ("journal.",),
     "ci_release_gate": ("release.", "merge.", "cluster.", "env."),
 }
@@ -1020,6 +1022,7 @@ def verify_standard_profile(
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)
+    _verify_claim_ledger(root, profile, task_id, result)
     _verify_compliance_declaration(root, result)
     _verify_profile_specific_controls(root, profile, result)
     _verify_task_board(root, profile, result)
@@ -1028,6 +1031,7 @@ def verify_standard_profile(
     _verify_decision_graph(root, result)
     _verify_rule_packs(root, result)
     _verify_hook_registry(root, result)
+    _verify_runtime_surface_registry(root, profile, result)
     _verify_orchestration_policy(root, result)
     _verify_evidence_gates(root, result)
     _verify_pattern_catalog(root, result)
