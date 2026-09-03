@@ -60,6 +60,39 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.
 
+## Persona d'entrée
+
+Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui
+tranche quand une demande ne désigne pas clairement un rôle. Aucun hôte ne sait
+ouvrir une session *à l'intérieur* d'un agent : Claude Code n'instancie un
+sous-agent que par son outil Agent, Copilot que par le sélecteur de chat. Ce
+n'est pas un réglage manquant, c'est une propriété des hôtes, et le catalogue
+la déclare : `agent_autostart` est faux sur les cinq profils, et
+`grimoire host list` le remonte comme une dégradation avec son substitut.
+
+Le substitut est fourni là où un hook `session_start` s'exécute : le hook remet
+la persona à la boucle principale, avant la directive du standard. La session
+n'est pas ouverte dans l'agent — elle en adopte la persona en gardant toute la
+surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix.
+
+```text
+[Grimoire — persona d'entrée]
+Cette session adopte la persona d'entrée du projet dans sa boucle principale,
+sans sous-agent : **concierge** — Concierge — Triage, clarification, routage…
+
+1. Lis `_grimoire/kit/agents/concierge.md` en entier avant de répondre…
+2. Tiens sa frontière d'outils pour ce que tu fais toi-même : read, search, edit, execute.
+3. Tu restes la boucle principale : dispatcher un sous-agent reste un choix.
+```
+
+Sur un hôte sans hook `session_start`, la persona d'entrée est nommée dans le
+fichier d'instructions ; c'est le seul endroit qui reste.
+
+Un projet qui porte déjà son propre point d'entrée — un orchestrateur chargé
+par `CLAUDE.md`, par exemple — en reçoit un second : la persona d'entrée n'est
+pas encore configurable par projet. C'est l'objet de
+[#247](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/247).
+
 ## Gouvernance
 
 Les hooks générés dépendent de l'enrôlement du projet dans le standard agentique.

@@ -39,6 +39,11 @@ ses gates.
 | `blueprints.html` | Éditeur de flows (Studio) : composer, connecter, valider, simuler, compiler |
 | `memory.html` · `kanban.html` · `observability.html` | Observer : mémoire, tableau gouverné, télémétrie — **du projet servi, ou rien** |
 
+Les pages partagées avec le site publié — accueil, portefeuille — gardent leur
+habillage vitrine, mais l'atelier sait qu'il est servi en local : ni lien vers
+la démo publique, ni invitation à installer ce qui tourne déjà. Le passage vers
+`atelier.html` reste offert en un lien.
+
 ### Changer de projet
 
 Le bouton de projet, en haut de la barre latérale, ouvre le sélecteur : les

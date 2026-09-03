@@ -2,26 +2,26 @@
 
 ## Dernière release
 
-### 3.5.0 — Installation par besoins et parité 15 patterns
+### 3.36.0 — L'atelier montre le vrai projet, la persona d'entrée entre en session
 
-La release `3.5.0` enrichit le runtime agentique standard avec une installation modulaire et la parité complète des patterns:
-
-- **Installation par besoins** — `grimoire standard needs`, `standard plan --needs ...`, `standard init --needs/--pattern/--memory/--interactive` et `standard doctor`. Un besoin projet est résolu en profil + patterns + artefacts + extras technologiques, tracé dans un `install-manifest.yaml` auditable. Voir [Installation par besoins](standard/install-by-needs.md).
-- **Catalogue étendu 9 → 15 patterns** — ajout de `code-graph-projection` (neo4j), `governed-agent-orchestration`, `governed-knowledge-indexing`, `mission-evidence-ledger`, `tool-mediation-gate` (mcp) et `provider-cost-slo`, plus la parité R8/R9/R10 (`redis-hot-memory-soft-gate`, `governed-hook-gateway`, `skill-classification-matrix`, `governed-observability-cockpit`).
-- **Memory OS cible sur `main`** — socle Weaviate + Neo4j + SQLite sidecar, migration Qdrant → Weaviate/Neo4j, projections graph/vector et commandes `grimoire memory graph/vector/gate`, vérifiés par `grimoire standard init/verify/audit/score/gate`.
-- package publié sur PyPI et validé par smoke install avec `grimoire-kit 3.5.0`.
-
-Voir aussi la [release GitHub v3.5.0](https://github.com/Guilhem-Bonnet/Grimoire-kit/releases/tag/v3.5.0).
-
-### 3.4.4 — Runtime standard prêt pour PyPI
-
-La release `3.4.4` stabilise la publication du runtime agentique standard:
-
-- CI SDK multi-OS stabilisée autour des commandes `grimoire standard`;
-- tests du runtime standard rendus portables Linux, macOS et Windows;
-- package publié sur PyPI et validé par smoke install avec `grimoire-kit 3.4.4`.
-
-Voir aussi la [release GitHub v3.4.4](https://github.com/Guilhem-Bonnet/Grimoire-kit/releases/tag/v3.4.4).
+- **`grimoire serve` pilote les projets de la machine.** `GET /api/projects`,
+  découverte par `scan`, sélection qui re-racine le serveur, `grimoire up`
+  depuis l'interface. Les couches de télémétrie inventées disparaissent : un
+  projet sans activité affiche son état vide, et la démonstration devient
+  opt-in (`--demo`, `GRIMOIRE_SITE_DEMO=1`), réservée à la vitrine publique.
+  Voir [Atelier local & blueprints](serve-blueprints.md).
+- **La persona d'entrée entre dans la session.** Aucun hôte ne sait ouvrir une
+  session dans un agent ; le hook `session_start` remet la persona à la boucle
+  principale. Le manque est déclaré par hôte (`agent_autostart`) avec son
+  substitut. Voir [Surfaces hôtes](hosts.md#persona-dentree).
+- **Les six workflows d'orchestration sont invocables.** Boomerang, subagent,
+  party-mode, incident-response, state-checkpoint, repo-map-generator étaient
+  installés dans chaque projet et listés nulle part. `grimoire workflows list`
+  indexe les deux familles, `workflows teams` rend les manifestes d'équipe,
+  `install` et `show` atteignent une orchestration. Voir
+  [Référence CLI](cli-reference.md#workflows).
+- **L'atelier local ne propose plus la démo ni « pip install »** à qui
+  l'exécute déjà.
 
 ## Historique complet
 
