@@ -2,26 +2,27 @@
 
 ## Dernière release
 
-### 3.36.0 — L'atelier montre le vrai projet, la persona d'entrée entre en session
+### 3.37.0 — Le bridge trace la norme, Windows compte, l'identité se déclare
 
-- **`grimoire serve` pilote les projets de la machine.** `GET /api/projects`,
-  découverte par `scan`, sélection qui re-racine le serveur, `grimoire up`
-  depuis l'interface. Les couches de télémétrie inventées disparaissent : un
-  projet sans activité affiche son état vide, et la démonstration devient
-  opt-in (`--demo`, `GRIMOIRE_SITE_DEMO=1`), réservée à la vitrine publique.
-  Voir [Atelier local & blueprints](serve-blueprints.md).
-- **La persona d'entrée entre dans la session.** Aucun hôte ne sait ouvrir une
-  session dans un agent ; le hook `session_start` remet la persona à la boucle
-  principale. Le manque est déclaré par hôte (`agent_autostart`) avec son
-  substitut. Voir [Surfaces hôtes](hosts.md#persona-dentree).
-- **Les six workflows d'orchestration sont invocables.** Boomerang, subagent,
-  party-mode, incident-response, state-checkpoint, repo-map-generator étaient
-  installés dans chaque projet et listés nulle part. `grimoire workflows list`
-  indexe les deux familles, `workflows teams` rend les manifestes d'équipe,
-  `install` et `show` atteignent une orchestration. Voir
-  [Référence CLI](cli-reference.md#workflows).
-- **L'atelier local ne propose plus la démo ni « pip install »** à qui
-  l'exécute déjà.
+- **Le bridge du standard est tracé.** La révision de la norme est épinglée et
+  `grimoire standard upstream` détecte quand elle avance ; `traceability.yaml`
+  relie chaque artefact et chaque famille de vérificateurs aux exigences `AG-*`
+  et contrôles `CTRL-*` avec citation, et `grimoire standard traceability` rend
+  la matrice et les trous par niveau. Deux artefacts que la norme rend
+  obligatoires sont livrés : le claim ledger (tous profils) et le registre des
+  surfaces runtime (`governed`, `production`). Voir
+  [Intégration du standard](standard/integration.md).
+- **La persona d'entrée se choisit par projet** (`agents.entry`) ; un projet
+  qui porte déjà son orchestrateur déclare `""`. Voir
+  [Surfaces hôtes](hosts.md#persona-dentree).
+- **`grimoire setup` écrit la source de vérité** qu'il déclare, puis vérifie les
+  miroirs contre le fichier relu.
+- **Windows est bloquant en CI.** Quarante-six outils ne meurent plus sur une
+  console cp1252, le dernier rouge réel est corrigé, la jambe Windows des
+  tests d'outils compte comme ubuntu.
+- **Le garde de release vérifie que chaque changement fusionné a son entrée,
+  au bon endroit** — le cas des trente-huit blocs égarés de la 3.36.0 ne peut
+  plus se reproduire en silence.
 
 ## Historique complet
 
