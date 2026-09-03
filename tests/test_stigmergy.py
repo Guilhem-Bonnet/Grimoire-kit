@@ -738,7 +738,7 @@ class TestCLI(unittest.TestCase):
 
     def _run(self, *args) -> subprocess.CompletedProcess:
         cmd = [sys.executable, str(TOOL), "--project-root", str(self.root), *list(args)]
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
 
     def test_cli_no_command(self):
         r = self._run()
