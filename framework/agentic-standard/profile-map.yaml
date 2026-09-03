@@ -167,6 +167,7 @@ profiles:
     display_name: "Starter"
     target: "Individual or small project adopting a minimal standard-aware flow."
     maturity: 1
+    level: N1
     required_artifacts:
       - mission_brief
       - task_envelope
@@ -188,6 +189,7 @@ profiles:
     display_name: "Controlled"
     target: "Team project requiring repeatable governance and provider-neutral LLM routing."
     maturity: 2
+    level: N2
     required_artifacts:
       - mission_brief
       - task_envelope
@@ -215,6 +217,7 @@ profiles:
     display_name: "Orchestrated"
     target: "Multi-agent flow with advanced context routing and external knowledge grafting."
     maturity: 3
+    level: N3
     required_artifacts:
       - mission_brief
       - task_board
@@ -253,6 +256,7 @@ profiles:
     display_name: "Governed"
     target: "Organization-grade flow with policy, audit, and environment-aware controls."
     maturity: 4
+    level: N4
     required_artifacts:
       - mission_brief
       - task_board
@@ -302,6 +306,7 @@ profiles:
     display_name: "Production"
     target: "Enterprise or public critical flow with SLOs, dry-runs, cost controls, and release gates."
     maturity: 5
+    level: N5
     required_artifacts:
       - mission_brief
       - task_board

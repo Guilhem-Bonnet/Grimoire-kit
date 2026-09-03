@@ -24,6 +24,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Le bridge trace chaque artefact vers les exigences de la norme.** Le
+  profile-map parlait en noms d'artefacts propres au kit ; `grep AG-` sur le
+  bridge rendait zéro ligne. `traceability.yaml` relie les 43 types d'artefacts
+  et les familles de vérificateurs aux `AG-*` et `CTRL-*` qu'ils satisfont, avec
+  la citation de la matrice normative qui justifie chaque lien — et une raison
+  pour chaque artefact qui n'en a pas (dix-sept). Chaque profil porte son niveau
+  de conformité, N1 à N5. `grimoire standard traceability` rend la matrice d'un
+  profil et les exigences obligatoires à son niveau que rien ne couvre encore.
+  C'est l'artefact qu'AG-AUD-001 demande.
 - **Le garde de release vérifie que chaque changement fusionné a son entrée,
   au bon endroit.** Il vérifiait qu'`[Unreleased]` était vide et que la section
   la plus récente portait le numéro publié — deux propriétés vraies sur la
