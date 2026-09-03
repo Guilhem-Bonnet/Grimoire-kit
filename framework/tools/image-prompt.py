@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -126,15 +127,12 @@ def generate_prompt(
         aspect_ratio: Ratio (16:9, 1:1, etc.).
         quality: Ajouter des modificateurs de qualité.
         negative: Éléments à exclure (pour stable-diffusion).
-
     Returns:
         ImagePrompt avec le prompt final assemblé.
     """
     preset = STYLE_PRESETS.get(style, STYLE_PRESETS["generic"])
     sep = preset["separator"]
-
     parts: list[str] = [description.strip()]
-
     if art_style:
         parts.append(art_style)
     if lighting:
@@ -368,6 +366,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
 

@@ -302,11 +302,9 @@ def _parse_pheromone_board(project_root: Path,
     for p in data.get("pheromones", []):
         if p.get("resolved", False):
             continue
-
         # Skip dream's own pheromones UNLESS they got reinforced (= feedback signal)
         if p.get("emitter") == "dream-mode" and p.get("reinforcements", 0) == 0:
             continue
-
         # Date filter
         ts = p.get("timestamp", "")
         entry_date = ts[:10] if len(ts) >= 10 else ""
@@ -1114,6 +1112,8 @@ def write_journal(content: str, project_root: Path, dry_run: bool = False) -> Pa
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Dream Mode — consolidation hors-session et insights émergents",
         formatter_class=argparse.RawDescriptionHelpFormatter,

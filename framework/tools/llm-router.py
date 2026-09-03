@@ -269,7 +269,6 @@ class TaskClassifier:
         """Classifie une requête en complexité et type de tâche."""
         lower = prompt.lower()
         prompt_len = len(prompt)
-
         # Score par niveau
         scores: dict[str, float] = {
             Complexity.EXPERT: 0.0,
@@ -278,7 +277,6 @@ class TaskClassifier:
             Complexity.TRIVIAL: 0.0,
         }
         matched: list[str] = []
-
         for keyword in self.expert:
             if keyword in lower:
                 scores[Complexity.EXPERT] += 2.0
@@ -750,6 +748,8 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="LLM Router — Route les requêtes agents vers le modèle LLM optimal",
         formatter_class=argparse.RawDescriptionHelpFormatter,

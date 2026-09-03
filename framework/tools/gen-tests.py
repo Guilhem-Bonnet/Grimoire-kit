@@ -255,7 +255,6 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
         safe_trait = to_snake(trait_name)
         filename = f"test_{safe_trait}{tmpl['ext']}"
         filepath = Path(output_dir) / filename
-
         with open(filepath, "w", encoding="utf-8") as f:
             # Header
             header = tmpl["header"].format(
@@ -266,7 +265,6 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
                 date=date_str,
             )
             f.write(header)
-
             # Tests
             for item in trait_items:
                 test_id = to_snake(item["id"])
@@ -321,6 +319,8 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Génère des squelettes de tests depuis les acceptance_criteria d'un DNA archétype Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

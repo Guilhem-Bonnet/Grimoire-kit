@@ -44,8 +44,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   owner sont des erreurs. Un projet déjà enrôlé les reçoit par
   `grimoire standard fix --apply`.
 
-### Ajouté
-
 - **La persona d'entrée se choisit par projet.** Elle était `concierge` en dur :
   `collect_agents` acceptait un autre nom, mais son seul appelant ne le passait
   jamais. Un projet qui porte déjà son propre point d'entrée — un orchestrateur
@@ -64,6 +62,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   vérifié) ou 1 (aucun pin). La CI du bridge l'exécute en avertissement.
 
 ### Corrigé
+
+- **Quarante-six outils de `framework/tools/` ne meurent plus sur une console
+  cp1252.** Filets de tableau, flèches, coches : chacun levait
+  `UnicodeEncodeError` sur une simple commande de lecture chez un utilisateur
+  Windows — une classe, pas un incident, révélée par la matrice Windows de
+  #191. Le correctif est de classe et tient en deux lignes en tête de chaque
+  `main()` : la sortie est reconfigurée en UTF-8 avec remplacement, et un flux
+  sans `reconfigure` est laissé en paix. Pas de module partagé : ces outils
+  sont chargés de trois façons — script, `import_module`, chargeur par chemin —
+  et seul un code sans import survit aux trois. Un test prouve d'abord qu'une console
+  cp1252 meurt bien sur un filet, puis que le même texte passe ; un autre
+  refuse tout outil qui imprime hors cp1252 sans forcer l'UTF-8. Aucune variable
+  d'environnement posée en CI : la matrice ne verdit que si le bug est corrigé.
 
 - **`grimoire setup` écrit la source de vérité qu'il déclare.** Les options
   `--user`, `--lang`, `--doc-lang` et `--skill-level` vivaient dans un objet en

@@ -330,7 +330,6 @@ def get_expertise_context(profile_id: str) -> str:
     profile = EXPERTISE_PROFILES.get(profile_id)
     if not profile:
         return f"Unknown profile: {profile_id}"
-
     lines = [
         f"# Expert Context: {profile['name']}",
         f"Domain: {profile['domain']}",
@@ -515,7 +514,6 @@ def mcp_etc_record_iteration(
                 profile_id = entry.get("profile", "")
                 brief = entry.get("brief", "")
                 break
-
         if profile_id:
             result["next_prompt"] = build_creation_prompt(
                 profile_id, brief,
@@ -678,6 +676,8 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Expert Tool Chain — MCP expertise + vision loop for agents",
     )

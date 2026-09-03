@@ -226,10 +226,8 @@ class Reranker:
     ) -> list[RetrievedChunk]:
         """Reranke les chunks par heuristiques contextuelles."""
         query_keywords = set(re.findall(r"\w+", query.lower()))
-
         for chunk in chunks:
             boost = 0.0
-
             # Agent match : source_file contient l'agent_id
             if agent_id and agent_id.lower() in chunk.source_file.lower():
                 boost += self.boosts.get("agent_match", 0.0)
@@ -725,6 +723,8 @@ def _print_augmented(aug: AugmentedPrompt) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="RAG Retriever — Retrieval sémantique Grimoire pour enrichir le contexte agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,

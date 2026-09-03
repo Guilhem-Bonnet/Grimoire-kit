@@ -234,7 +234,6 @@ def analyze_document(content: str) -> DocumentAnalysis:
             continue
         if in_code_block:
             continue
-
         if stripped.startswith("#"):
             header = stripped.lstrip("#").strip()
             analysis.headers.append(header)
@@ -242,7 +241,6 @@ def analyze_document(content: str) -> DocumentAnalysis:
             section_lines[current_section] = []
         elif current_section and stripped:
             section_lines[current_section].append(stripped)
-
         # Count sentences
         analysis.total_sentences += stripped.count(".") + stripped.count("!") + stripped.count("?")
 
@@ -496,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:

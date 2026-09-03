@@ -65,10 +65,8 @@ try:
 except ImportError:  # Windows
     try:
         import msvcrt
-
         def _lock_exclusive(fh) -> None:
             msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
-
         def _unlock(fh) -> None:
             fh.seek(0)
             msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
@@ -838,6 +836,8 @@ def _intensity_bar(intensity: float, width: int = 10) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Stigmergy — coordination par phéromones numériques",
         formatter_class=argparse.RawDescriptionHelpFormatter,

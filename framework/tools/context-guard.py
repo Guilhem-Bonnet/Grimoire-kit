@@ -749,11 +749,9 @@ def do_recommend_models(
         affinity = parse_model_affinity(ap)
         if not affinity:
             continue
-
         # Calculer les tokens de l'agent avec le modèle par défaut
         budget = compute_budget(ap, project_root, DEFAULT_MODEL)
         agent_tokens = budget.total_tokens
-
         # Scorer chaque modèle
         scores: list[tuple[str, float]] = []
         for mid, profile in profiles_to_use.items():
@@ -955,6 +953,8 @@ def print_summary_table(budgets: list[AgentBudget]) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Context Budget Guard — estime le budget de contexte LLM par agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,

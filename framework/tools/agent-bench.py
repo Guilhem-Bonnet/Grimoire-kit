@@ -145,11 +145,9 @@ def parse_trace(trace_path: Path, since: str | None = None, agent_filter: str | 
         content = "\n".join(current_content_lines).strip()
         if not content:
             return
-
         ts = current_header.get("ts", "")
         ag = current_header.get("agent", "system").strip().lower()
         st = current_header.get("story", "").strip()
-
         # Filtres
         if since_dt and ts:
             try:
@@ -516,6 +514,8 @@ def summary_line(session: SessionMetrics) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Benchmark — métriques de performance depuis Grimoire_TRACE",
         formatter_class=argparse.RawDescriptionHelpFormatter,

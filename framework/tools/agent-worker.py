@@ -298,7 +298,6 @@ class AgentWorkerManager:
         """Résout le modèle via LLM Router ou défaut."""
         agent_info = KNOWN_AGENTS.get(agent_id, {})
         tier = agent_info.get("suggested_model_tier", "mid")
-
         if self._router_mod:
             try:
                 router_cls = getattr(self._router_mod, "LLMRouter", None)
@@ -313,7 +312,6 @@ class AgentWorkerManager:
                     agent_id,
                     _exc,
                 )
-
         # Fallback
         tier_defaults = {
             "high": "claude-sonnet-4-20250514",
@@ -535,6 +533,8 @@ def _print_workers(wl: WorkerList) -> None:
 
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Agent Worker — Workers isolés pour agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

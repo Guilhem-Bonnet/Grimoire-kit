@@ -210,7 +210,6 @@ class InProcessBus(MessageBus):
     def send(self, message: AgentMessage) -> DeliveryResult:
         with self._lock:
             recipients = []
-
             if message.recipient == BROADCAST_RECIPIENT:
                 # Broadcast: envoie à tous les agents connus
                 for agent_id in list(self._queues.keys()):
@@ -221,7 +220,6 @@ class InProcessBus(MessageBus):
                             recipients.append(agent_id)
                         else:
                             self._stats_dropped += 1
-
                 # Also deliver to subscribers of "broadcast"
                 for agent_id, subs in self._subscriptions.items():
                     if "broadcast" in subs and agent_id != message.sender and agent_id not in recipients:
@@ -596,6 +594,8 @@ def _print_stats(stats: BusStats) -> None:
 
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Message Bus — Communication inter-agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

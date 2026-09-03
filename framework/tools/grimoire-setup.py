@@ -98,12 +98,10 @@ def load_project_context(path: Path) -> UserConfig:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
         # Top-level sections: no leading whitespace
         if line and not line[0].isspace() and ":" in stripped:
             current_section = stripped.split(":")[0].strip()
             continue
-
         # Indented fields
         if current_section == "project" and stripped.startswith("name:"):
             config.project_name = _parse_yaml_value(stripped)
@@ -400,6 +398,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
 

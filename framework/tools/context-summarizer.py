@@ -223,10 +223,8 @@ class SectionParser:
             content = filepath.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return []
-
         relative = filepath.relative_to(project_root).as_posix()
         sections: list[Section] = []
-
         # Split par H2 (## heading)
         parts = re.split(r"^(##\s+.+)$", content, flags=re.MULTILINE)
 
@@ -803,6 +801,8 @@ def _print_preview(sections: list[Section]) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Context Summarizer — Résumé automatique du contexte ancien Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
