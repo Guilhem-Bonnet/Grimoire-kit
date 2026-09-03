@@ -16,6 +16,33 @@ Le pont vit dans :
 - `framework/agentic-standard/templates/`
 - `archetypes/agentic-standard/`
 
+## Version du standard tracée
+
+Le bridge ne redéfinit pas la norme : il la trace. Pour que « aligné sur le
+standard » soit vérifiable, `profile-map.yaml` épingle la révision exacte du
+corpus normatif contre laquelle il a été réconcilié :
+
+```yaml
+metadata:
+  upstream_standard:
+    remote: "https://github.com/Guilhem-Bonnet/processus-developpement-agentique.git"
+    commit: "53b2c34258580bd965631bcc186b21947b44c71e"
+    pinned_on: "2026-06-12"
+```
+
+`grimoire standard upstream` compare cette révision à la tête distante :
+
+| Sortie | Sens |
+|---|---|
+| 0 | la révision épinglée est la tête distante |
+| 2 | le standard a avancé — réconcilier le profile-map, puis mettre à jour `commit` |
+| 3 | distant injoignable — non vérifié, ce qui n'est pas « à jour » |
+| 1 | aucune révision épinglée |
+
+La CI du bridge exécute cette vérification en avertissement : une dérive du
+corpus est un signal à traiter, pas une raison de refuser un commit qui ne
+l'a pas causée.
+
 ## Artefacts obligatoires de la norme
 
 Deux artefacts que la norme exige et que les profils livrent désormais :

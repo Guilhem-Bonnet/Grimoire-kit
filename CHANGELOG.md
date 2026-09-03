@@ -32,6 +32,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   la persona (`concierge` par défaut) ou, vide, déclare qu'il n'en faut aucune.
   `host status` montre la persona retenue et signale une clé qui nomme un agent
   absent au lieu d'en inventer un. Le schéma et `lint` connaissent la clé.
+- **Le bridge épingle la révision du standard qu'il trace.** `profile-map.yaml`
+  nommait le corpus normatif par nom de dépôt et chemin de fichier, sans SHA ni
+  date : impossible de dire si le bridge avait été relu après le dernier commit
+  de la norme autrement qu'en comparant les deux dépôts à la main.
+  `metadata.upstream_standard` porte désormais `remote`, `commit` et
+  `pinned_on` ; `grimoire standard upstream` compare la révision épinglée à la
+  tête distante et sort 0, 2 (le standard a avancé), 3 (injoignable, donc non
+  vérifié) ou 1 (aucun pin). La CI du bridge l'exécute en avertissement.
+
+### Corrigé
+
+- **`grimoire setup` écrit la source de vérité qu'il déclare.** Les options
+  `--user`, `--lang`, `--doc-lang` et `--skill-level` vivaient dans un objet en
+  mémoire : `apply` ne réécrivait que `copilot-instructions.md`, puis vérifiait
+  ce miroir contre l'objet en mémoire et annonçait « All config files are in
+  sync » — au-dessus de la divergence qu'il venait de créer, que `setup --check`
+  signalait la seconde d'après. `apply` écrit désormais la section `user:` de
+  `project-context.yaml` en premier — en la créant si le projet est antérieur à
+  son introduction, sans toucher `project.name` — puis les miroirs, puis vérifie
+  les miroirs contre le fichier relu. Un « in sync » ne peut plus être annoncé
+  au-dessus d'une divergence.
 
 ## [3.36.0] - 2026-09-03
 

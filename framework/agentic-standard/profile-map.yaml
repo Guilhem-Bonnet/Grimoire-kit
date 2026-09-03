@@ -7,6 +7,12 @@ metadata:
   upstream_standard:
     name: "Standard de structure agentique"
     repository: "processus-developpement-agentique"
+    remote: "https://github.com/Guilhem-Bonnet/processus-developpement-agentique.git"
+    # The exact revision this map was reconciled against. `grimoire standard
+    # upstream` compares it to the remote head: a standard that moved without
+    # the map following is a drift, not a detail.
+    commit: "53b2c34258580bd965631bcc186b21947b44c71e"
+    pinned_on: "2026-06-12"
     canonical_entrypoint: "docs/norme-structure-agentique.md"
     normative_matrix: "docs/matrice-normative-maitresse.md"
   intent: >

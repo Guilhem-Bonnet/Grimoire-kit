@@ -1,6 +1,9 @@
 """``grimoire setup`` — synchronise user configuration across project config files.
 
-Source of truth: ``project-context.yaml``
+Source of truth: ``project-context.yaml`` — ``apply`` writes it first, then the
+mirrors, then verifies the mirrors against the file it just wrote. Verifying
+against the values held in memory reported "in sync" over a divergence the
+command had itself created.
 
 Target files (when they exist):
   - ``.github/copilot-instructions.md``
@@ -95,6 +98,75 @@ def load_user_values(path: Path) -> UserValues:
     return vals
 
 
+# ── Source of truth ──────────────────────────────────────────────────────────
+
+_USER_KEYS: tuple[tuple[str, str], ...] = (
+    ("name", "user_name"),
+    ("language", "communication_language"),
+    ("document_language", "document_output_language"),
+    ("skill_level", "user_skill_level"),
+)
+
+
+def _section_span(lines: list[str], section: str) -> tuple[int, int] | None:
+    """Line range ``[start, end)`` of a top-level ``section:`` block, or ``None``."""
+    start = next((i for i, ln in enumerate(lines) if ln.rstrip() == f"{section}:"), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines):
+        ln = lines[end]
+        if ln.strip() and not ln[0].isspace() and not ln.lstrip().startswith("#"):
+            break
+        end += 1
+    return start, end
+
+
+def _apply_project_context(path: Path, vals: UserValues) -> bool:
+    """Write the user values into the ``user:`` section of *path*.
+
+    Scoped to that section on purpose: ``project:`` carries a ``name`` key
+    too, and a file-wide ``^name:`` substitution would rename the project.
+    A missing section is created after ``project:``; the rest of the file —
+    comments, ordering, other sections — is left as it was.
+    """
+    if not path.is_file():
+        return False
+    original = path.read_text(encoding="utf-8")
+    lines = original.split("\n")
+    wanted = {key: getattr(vals, attr) for key, attr in _USER_KEYS if getattr(vals, attr)}
+    if not wanted:
+        return False
+
+    span = _section_span(lines, "user")
+    if span is None:
+        project = _section_span(lines, "project")
+        insert_at = project[1] if project else len(lines)
+        block = ["user:"] + [f'  {key}: "{value}"' for key, value in wanted.items()] + [""]
+        lines[insert_at:insert_at] = block
+    else:
+        start, end = span
+        seen: set[str] = set()
+        for i in range(start + 1, end):
+            stripped = lines[i].strip()
+            for key in wanted:
+                if stripped.startswith(f"{key}:"):
+                    indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
+                    lines[i] = f'{indent}{key}: "{wanted[key]}"'
+                    seen.add(key)
+        missing = [f'  {key}: "{value}"' for key, value in wanted.items() if key not in seen]
+        tail = end
+        while tail > start + 1 and not lines[tail - 1].strip():
+            tail -= 1
+        lines[tail:tail] = missing
+
+    updated = "\n".join(lines)
+    if updated == original:
+        return False
+    path.write_text(updated, encoding="utf-8")
+    return True
+
+
 # ── Check / Apply helpers ─────────────────────────────────────────────────────
 
 
@@ -161,8 +233,12 @@ def check(project_root: Path, vals: UserValues) -> SetupResult:
 
 
 def apply(project_root: Path, vals: UserValues) -> SetupResult:
-    """Write *vals* into every target file, return a report."""
+    """Write *vals* into the source of truth, then every mirror, return a report."""
     result = SetupResult()
+
+    pcy = project_root / "project-context.yaml"
+    if _apply_project_context(pcy, vals):
+        result.updated_files.append("project-context.yaml")
 
     ci = project_root / ".github" / "copilot-instructions.md"
     if ci.exists():
@@ -171,6 +247,8 @@ def apply(project_root: Path, vals: UserValues) -> SetupResult:
     else:
         result.skipped_files.append(".github/copilot-instructions.md")
 
-    # Post-apply verification
-    result.diffs = check(project_root, vals).diffs
+    # Post-apply verification — against the file, not the values in memory.
+    # That is the only comparison that can catch a write that did not land.
+    truth = load_user_values(pcy) if pcy.is_file() else vals
+    result.diffs = check(project_root, truth).diffs
     return result

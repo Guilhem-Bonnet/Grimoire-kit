@@ -1186,6 +1186,10 @@
    "version": "3.35.0",
    "path": "framework/tools/preflight-check.py"
   },
+  "67f4e0742d072c6f3250e195a6fdfe33fdeb3b95279e0c9af3d1c7bf61785ed9": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
+  },
   "68382239f3df37413b6bd66c07a156ce63b1034e11ac438e7792a77cf1b8bc75": {
    "version": "3.4.3",
    "path": "framework/tools/harmony-check.py"
