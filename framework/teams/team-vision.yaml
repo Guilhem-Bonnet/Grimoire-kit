@@ -29,7 +29,7 @@ team:
     required:
       - name: "project-context.yaml"
         description: "Contexte projet : nom, stack, utilisateurs cibles, contraintes"
-        path_pattern: "_grimoire/_memory/project-context.yaml"
+        path_pattern: "project-context.yaml"
     optional:
       - name: "competitive-data"
         description: "Données marché existantes, analyses concurrentes"

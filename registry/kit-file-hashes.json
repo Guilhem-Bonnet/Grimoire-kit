@@ -26,6 +26,10 @@
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/k8s-navigator.md"
   },
+  "03126a473e8ef1a8db7d097eb8b79314e0f535cab82e22783f8a466eecccb286": {
+   "version": "3.35.4",
+   "path": "framework/teams/team-vision.yaml"
+  },
   "0377e32fa32e66cf30d88c42339ef119f5a4b1231ee2876ef45ad60b502a54b6": {
    "version": "3.4.2",
    "path": "framework/prompt-templates/dependency-updates.md"
