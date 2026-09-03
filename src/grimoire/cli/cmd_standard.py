@@ -80,7 +80,16 @@ def _get_fmt(ctx: typer.Context) -> str:
 
 
 def _paths(paths: list[Path]) -> list[str]:
-    return [str(path) for path in paths]
+    """Render paths POSIX-style, as every other user-facing surface does.
+
+    ``str(Path)`` yields the separator of the running OS, so the same project
+    produced ``_grimoire/standard/x`` on Linux and ``_grimoire\\standard\\x`` on
+    Windows — in the JSON payload as much as on screen. A machine-readable path
+    that changes shape with the writer's platform cannot be compared, and the
+    repository already settled the question elsewhere (`hosts/emitters`,
+    `cmd_migrate`, `core/integrity`) by emitting ``as_posix()``.
+    """
+    return [path.as_posix() for path in paths]
 
 
 def _checks(result: StandardVerificationResult) -> list[dict[str, str | None]]:
@@ -105,7 +114,7 @@ def _remediation_json(actions: Sequence[StandardRemediationAction]) -> list[dict
             "check_id": action.check_id,
             "severity": action.severity,
             "action": action.action,
-            "path": str(action.path) if action.path else None,
+            "path": action.path.as_posix() if action.path else None,
             "message": action.message,
         }
         for action in actions
@@ -1175,13 +1184,20 @@ def fix(
         return
     action_label = "Would apply" if dry_run else "Applied safe subset of"
     console.print(f"[cyan]{action_label}[/cyan] {len(actions)} remediation action(s)")
-    if apply_result is not None:
+    if apply_result is None:
+        remaining = actions
+    else:
         for path in apply_result.written:
-            console.print(f"  [green][OK][/green] wrote {path}")
+            console.print(f"  [green][OK][/green] wrote {path.as_posix()}")
         for skipped in apply_result.skipped:
             console.print(f"  [yellow]↷[/yellow] skipped {skipped}")
-    for action in actions:
-        path_text = f" ({action.path})" if action.path else ""
+        # ``actions`` is the plan from *before* the writes. Reprinting it whole
+        # listed every file that had just been written as still missing, so a
+        # successful run read like a failed one. Only what the apply did not
+        # resolve is still outstanding.
+        remaining = propose_remediation_actions(project_root, task_id=task_id, profile_id=profile)
+    for action in remaining:
+        path_text = f" ({action.path.as_posix()})" if action.path else ""
         console.print(f"  [yellow]![/yellow] {action.action}: {action.check_id}{path_text}")
 
 

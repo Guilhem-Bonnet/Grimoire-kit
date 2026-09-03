@@ -299,7 +299,7 @@ class TokenBudgetEnforcer:
                 try:
                     size = f.stat().st_size
                     tokens = size // CHARS_PER_TOKEN
-                    files.append((str(f.relative_to(self.project_root)), tokens, prio))
+                    files.append((f.relative_to(self.project_root).as_posix(), tokens, prio))
                 except OSError:
                     continue
 
@@ -642,7 +642,7 @@ def _print_status(status: BudgetStatus) -> None:
     # Bar chart
     bar_width = 50
     filled = int(status.usage_pct * bar_width)
-    bar = "█" * filled + "░" * (bar_width - filled)
+    bar = "#" * filled + "." * (bar_width - filled)
     print(f"  [{bar}] {status.usage_pct:.1%}")
 
     # Thresholds markers

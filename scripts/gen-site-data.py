@@ -8,8 +8,14 @@ Writes JSON consumed by the static site (web/data/*.json):
 The site reads these via fetch. For the vitrine they are committed snapshots;
 the local "view mode" regenerates them against the current project.
 
+Demo padding (representative traces, template kanban cards, a synthetic vector
+cloud) is OPT-IN via ``--demo`` and exists only for the public vitrine, which has
+no runtime of its own to show. Without the flag every layer reports what the
+project actually holds — an empty observatory stays empty. A local tool that
+invents a runtime is worse than one that admits it has nothing to display.
+
 Usage:
-    python scripts/gen-site-data.py [--root .] [--with-tests]
+    python scripts/gen-site-data.py [--root .] [--with-tests] [--demo]
 """
 from __future__ import annotations
 
@@ -219,17 +225,22 @@ _DEMO_TASKS = [
 ]
 
 
-def build_taskboard(root: Path) -> dict | None:
-    """Governed agentic kanban — from the project's task-board.yaml if present,
-    else the standard template (flagged is_demo for the vitrine)."""
+def build_taskboard(root: Path, *, demo: bool = False) -> dict | None:
+    """Governed agentic kanban — from the project's task-board.yaml if present.
+
+    Without ``demo`` the template fallback is refused: a project with no board
+    gets no board. Padding the template with showcase cards would put ten
+    invented tasks under the name of a project that has none.
+    """
     if yaml is None:
         return None
     candidates = [
         root / "_grimoire/standard/task-board.yaml",
         root / "_grimoire/_config/standard/task-board.yaml",
         *sorted(root.glob("_grimoire-output/**/task-board.yaml")),
-        root / "framework/agentic-standard/templates/task-board.yaml",  # fallback = template/demo
     ]
+    if demo:  # vitrine only — the standard template stands in for a real board
+        candidates.append(root / "framework/agentic-standard/templates/task-board.yaml")
     src = next((c for c in candidates if c.is_file()), None)
     if src is None:
         return None
@@ -503,9 +514,15 @@ def _live_spans(root: Path) -> list[dict]:
         return []
 
 
-def build_observatory(root: Path) -> dict | None:
-    """Runtime data for observability/game-ui — from `observatory.py export`
-    if the project has runtime data, else a representative demo snapshot."""
+def build_observatory(root: Path, *, demo: bool = False) -> dict | None:
+    """Runtime data for observability/game-ui — from `observatory.py export`.
+
+    Without runtime data the layer is empty, and stays empty unless ``demo``
+    is set. The representative snapshot backdates its traces to a few minutes
+    ago: shown for a project that never ran an agent, it reads as live activity.
+    That is the single most misleading thing this generator can emit, so it now
+    only happens for the public vitrine, which asks for it explicitly.
+    """
     obs_tool = root / "framework/tools/observatory.py"
     data = None
     if obs_tool.is_file():
@@ -524,6 +541,13 @@ def build_observatory(root: Path) -> dict | None:
         out = data
         out["is_demo"] = False
         out["spans"] = _live_spans(root)
+    elif not demo:
+        out = {
+            "is_demo": False,
+            "traces": [], "events": [], "agents": [], "relationships": [],
+            "shared_state": {}, "sessions": [], "agent_ids": [],
+            "event_types": [], "spans": [],
+        }
     else:
         base = _d.datetime.now(_d.UTC)
         traces = [
@@ -1175,8 +1199,31 @@ def _memory_lint(root: Path) -> dict:
         return {}
 
 
-def build_memory(root: Path) -> dict:
-    """Couche données du Memory Manager (lecture : inspection + vault + consoles)."""
+def _real_vector_projection(root: Path, entries: list[dict]) -> dict | None:
+    """Nuage 2D des embeddings réellement stockés, ou ``None``.
+
+    ``None`` est la réponse exacte d'un backend lexical ou fichier : il n'a pas
+    d'embedding. La page affiche alors son état vide, qui dit la vérité — un
+    nuage tiré au sort se lisait exactement comme un vrai.
+    """
+    try:
+        from grimoire.tools.memory_vectors import projection
+    except ImportError:  # script lancé hors du paquet installé
+        return None
+    types = {str(e.get("id", "")): str(e.get("type", "memory")) for e in entries}
+    try:
+        return projection(root, types_by_id=types)
+    except OSError:
+        return None
+
+
+def build_memory(root: Path, *, demo: bool = False) -> dict:
+    """Couche données du Memory Manager (lecture : inspection + vault + consoles).
+
+    Sans ``demo``, la projection vectorielle reste nulle plutôt que d'afficher
+    un nuage tiré au sort : un graphe d'embeddings inventé se lit exactement
+    comme un vrai.
+    """
     entries, total = _memory_entries(root)
     health = _memory_health(root)
     lint = _memory_lint(root)
@@ -1198,7 +1245,9 @@ def build_memory(root: Path) -> dict:
         })(health.get("contradictions", 0), health.get("failures", 0),
            health.get("learnings_files", 0), health.get("decisions", 0)),
         "graph": _memory_graph(entries),
-        "vector_projection": _vector_projection_demo(),
+        "vector_projection": (
+            _vector_projection_demo() if demo else _real_vector_projection(root, entries)
+        ),
         "lint": lint,
         "lint_health": lint_health,
         "consoles": _MEMORY_CONSOLES,
@@ -1244,15 +1293,33 @@ def _write(out_dir: Path, name: str, data: dict) -> None:
     (out_dir / name).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def build_project(root: Path, out_dir: Path, with_tests: bool) -> dict:
+def build_health(root: Path) -> dict:
+    """Alignement kit, flows et activité — importé du kit, jamais recalculé ici.
+
+    Le portefeuille a besoin de ces trois réponses par projet sans faire N
+    requêtes. Elles viennent de ``grimoire.tools.project_health``, seule source :
+    dupliquer ici la datation par digest la ferait diverger au premier
+    changement de format du catalogue.
+    """
+    try:
+        from grimoire.tools.project_health import project_health
+    except ImportError:  # script lancé hors du paquet installé
+        return {}
+    try:
+        return project_health(root)
+    except OSError:  # best-effort : un projet illisible n'arrête pas la génération
+        return {}
+
+
+def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = False) -> dict:
     """Génère tous les JSON d'un projet dans out_dir et renvoie une fiche d'en-tête (portefeuille)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     meta = build_meta(root, with_tests)
     _write(out_dir, "meta.json", meta)
-    board = build_taskboard(root)
+    board = build_taskboard(root, demo=demo)
     if board is not None:
         _write(out_dir, "taskboard.json", board)
-    obs = build_observatory(root) or {}
+    obs = build_observatory(root, demo=demo) or {}
     _write(out_dir, "observatory.json", obs)
     act = build_activity(root)
     _write(out_dir, "activity.json", act)
@@ -1260,13 +1327,19 @@ def build_project(root: Path, out_dir: Path, with_tests: bool) -> dict:
     ins["efficiency"] = _efficiency(meta, act, ins)
     ins["freshness"] = _freshness(act, ins)
     _write(out_dir, "insights.json", ins)
-    mem = build_memory(root)
+    mem = build_memory(root, demo=demo)
     _write(out_dir, "memory.json", mem)
+    # Pas de `health.json` : la fiche d'en-tête porte déjà ce dont le
+    # portefeuille a besoin, et `/api/health` sert la vérité fraîche sur les
+    # deux hôtes. Une couche générée en plus se périmerait entre deux
+    # régénérations et pourrait contredire l'API — le défaut même que cette
+    # branche referme.
+    health = build_health(root)
     # Fiche d'en-tête pour la vue portefeuille
     af = (ins.get("governance", {}).get("antifragile") or {})
     return {
         "version": meta.get("version"),
-        "is_demo": obs.get("is_demo", True),
+        "is_demo": bool(obs.get("is_demo", demo)),
         "commits_total": act.get("git", {}).get("commits_total", 0),
         "commits_7d": act.get("git", {}).get("commits_7d", 0),
         "total_cost_usd": obs.get("metrics", {}).get("total_cost_usd", 0),
@@ -1275,6 +1348,25 @@ def build_project(root: Path, out_dir: Path, with_tests: bool) -> dict:
         "ci_status": act.get("tracking", {}).get("ci_status", "unknown"),
         "antifragile": af.get("score"),
         "antifragile_level": af.get("level"),
+        "kit_installed": (health.get("kit") or {}).get("installed"),
+        "kit_aligned": (health.get("kit") or {}).get("aligned"),
+        "kit_up_to_date": (health.get("kit") or {}).get("upToDate", False),
+        "kit_behind": (health.get("kit") or {}).get("behind", 0),
+        "kit_scaffolded": (health.get("kit") or {}).get("scaffolded", False),
+        "flows": [
+            {"id": f["id"], "name": f["name"], "nodes": f["nodes"], "validated": f["validated"]}
+            for f in (health.get("flows") or [])
+        ],
+        "active": (health.get("activity") or {}).get("active", False),
+        "running": (health.get("activity") or {}).get("running", False),
+        "runs": [
+            {"recipe": r["recipe"], "status": r["status"], "step": r["step"],
+             "silent": r["silent"], "pendingSteps": r["pendingSteps"]}
+            for r in ((health.get("activity") or {}).get("runs") or [])
+        ],
+        "last_event_at": (health.get("activity") or {}).get("lastEventAt"),
+        "last_event_label": (health.get("activity") or {}).get("lastEventLabel"),
+        "in_flight": (health.get("activity") or {}).get("inFlight") or [],
         "memory_backend": mem.get("backend", {}).get("active"),
         "memory_entries": mem.get("store", {}).get("total_entries", 0),
         "contradictions": mem.get("counts_by_type", {}).get("contradictions", 0),
@@ -1291,6 +1383,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--registry", type=Path, default=None,
                     help="JSON list [{name, path}] de projets → mode multi-projets (cockpit local)")
     ap.add_argument("--name", default=None, help="nom du projet (mono-projet)")
+    ap.add_argument("--demo", action="store_true",
+                    help="autoriser le remplissage de démonstration (VITRINE publique uniquement) : "
+                         "traces représentatives, cartes kanban du template, nuage vectoriel synthétique")
     args = ap.parse_args(argv)
     root = args.root.resolve()
     out_dir = (args.out_dir.resolve() if args.out_dir else root / "web" / "data")
@@ -1311,7 +1406,7 @@ def main(argv: list[str]) -> int:
         name = proj.get("name") or proot.name
         slug = _slug(proj.get("slug") or name)
         pdir = out_dir / "projects" / slug
-        head = build_project(proot, pdir, args.with_tests)
+        head = build_project(proot, pdir, args.with_tests, demo=args.demo)
         head.update(slug=slug, name=name, path=str(proot))
         heads.append(head)
         # Le projet primaire alimente aussi le flat data/ (rétro-compat vitrine mono-projet)
@@ -1325,6 +1420,7 @@ def main(argv: list[str]) -> int:
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "primary": heads[0]["slug"] if heads else None,
         "multi": len(heads) > 1,
+        "demo": bool(args.demo),
         "projects": heads,
     }
     _write(out_dir, "projects.json", index)

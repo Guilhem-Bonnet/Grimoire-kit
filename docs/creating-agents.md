@@ -147,7 +147,7 @@ Vérifier que le endpoint /api/auth/login :
 
 ### 5. Enregistrer l'agent
 
-Ajouter dans `_grimoire/_config/agent-manifest.csv` :
+Ajouter dans `_grimoire/kit/agent-manifest.csv` :
 
 ```csv
 "mon-nouvel-agent","Gardien","Sécurité Applicative","shield-pulse","security-app","custom","_grimoire/kit/agents/mon-nouvel-agent.md"
@@ -196,7 +196,7 @@ DON'T USE WHEN:
 -->
 ```
 
-Cette clause est extraite automatiquement par `mem0-bridge.py dispatch` pour le routage contextuel.
+Cette clause est lue par l'orchestrateur au moment du routage.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
@@ -209,7 +209,7 @@ Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'e
 Les `<example>` dans les prompts sont essentiels. Un agent sans exemples produit des résultats génériques. Incluez des commandes, chemins et valeurs spécifiques à votre projet.
 
 ### Keywords pour le dispatch
-Si vous utilisez `mem0-bridge.py dispatch`, ajoutez votre agent dans `project-context.yaml` :
+Pour que le routage sémantique retrouve votre agent, ajoutez-le dans `project-context.yaml` :
 
 ```yaml
 agents:
@@ -224,8 +224,8 @@ agents:
 
 ```bash
 # Vérifier la cohérence
-python _grimoire/_memory/maintenance.py context-drift
+python _grimoire/kit/memory/maintenance.py context-drift
 
 # Tester le dispatch
-python _grimoire/_memory/mem0-bridge.py dispatch "vérifier la sécurité des endpoints API"
+grimoire memory search "vérifier la sécurité des endpoints API"
 ```

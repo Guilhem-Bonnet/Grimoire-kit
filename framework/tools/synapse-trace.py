@@ -566,11 +566,11 @@ class _Span:
             self.parent_span_id = stack[-1].span_id
             self.trace_id = stack[-1].trace_id
         stack.append(self)
-        self._start = time.monotonic()
+        self._start = time.perf_counter()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        elapsed_ms = (time.monotonic() - self._start) * 1000
+        elapsed_ms = (time.perf_counter() - self._start) * 1000
         if exc_type is not None and self.status == "ok":
             self.status = "error"
             self.details.setdefault("error", str(exc)[:200])

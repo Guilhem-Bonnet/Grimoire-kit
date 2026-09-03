@@ -18,16 +18,13 @@ Usage standalone::
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
-import time
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.blueprint_checkpoint import (
     checkpoint_lint,
@@ -98,13 +95,27 @@ from grimoire.tools.ext_manager import (
     load_manifest,
     remove_extension,
 )
-from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.memory_link import memory_link_status
+from grimoire.tools.project_health import BLUEPRINTS_RELPATH, flows, project_health
+from grimoire.tools.project_registry import (
+    DEFAULT_SCAN_DEPTH,
+    browse,
+    looks_grimoire,
+    path_for_slug,
+    projects_payload,
+    register_project,
+    resolve_within_allowed,
+    scan_payload,
+    set_selected_slug,
+    slug_for_path,
+)
 from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
+from grimoire.tools.project_update import update_project
+from grimoire.tools.serve_data import DataLayer
+from grimoire.tools.serve_data import resolve as resolve_data
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
-BLUEPRINTS_RELPATH = Path("_grimoire") / "blueprints"
 
 ARTIFACT_SURFACES = {
     "agents": (".github/agents", "*.agent.md"),
@@ -124,6 +135,7 @@ class ForgeAPI:
         self.project_root = project_root.resolve()
         self.kit_root = kit_root.resolve()
         self.ui_dir = ui_dir.resolve() if ui_dir else None
+        self._data: DataLayer | None = None
 
     # ── état ──────────────────────────────────────────────────────────────
 
@@ -136,14 +148,113 @@ class ForgeAPI:
             if version_file.is_file()
             else "dev",
             "ui": str(self.ui_dir) if self.ui_dir else None,
+            # L'UI partage ses pages entre la vitrine publique et l'atelier
+            # local. Le dire explicitement évite qu'elle retombe sur les
+            # instantanés de démonstration quand une couche projet manque.
+            "env": "local",
+            "demo": False,
+            "slug": slug_for_path(self.project_root),
         }
+
+    # ── projets de la machine (découverte, sélection) ─────────────────────
+
+    @property
+    def data(self) -> DataLayer:
+        """Couche de données du projet servi (générée, jamais bundlée)."""
+        if self._data is None:
+            self._data = DataLayer(self.project_root)
+        return self._data
+
+    def projects_view(self) -> dict[str, Any]:
+        """Registre de la machine, avec le projet servi comme sélection.
+
+        Le projet servi figure toujours dans la liste, même s'il vient d'être
+        ouvert : une découverte qui oublie le projet sous les yeux n'en est pas
+        une.
+        """
+        payload = projects_payload(selected=slug_for_path(self.project_root))
+        if not any(p["path"] == str(self.project_root) for p in payload["projects"]):
+            payload["projects"].insert(
+                0,
+                {
+                    "slug": "",
+                    "name": self.project_root.name,
+                    "path": str(self.project_root),
+                    "exists": self.project_root.is_dir(),
+                    "is_grimoire": looks_grimoire(self.project_root),
+                    "managed": (self.project_root / "_grimoire").exists(),
+                    "unregistered": True,
+                },
+            )
+        payload["served"] = str(self.project_root)
+        return payload
+
+    def project_add(self, raw_path: str) -> dict[str, Any]:
+        """Enrôle un chemin donné à la main. Idempotent.
+
+        Le chemin vient d'une requête : il doit tomber sous une racine permise,
+        comme la navigation et le scan.
+        """
+        proot = resolve_within_allowed(raw_path, self.project_root)
+        if not proot.is_dir():
+            msg = f"pas un dossier : {proot}"
+            raise FileNotFoundError(msg)
+        slug = register_project(proot) or slug_for_path(proot)
+        return {"slug": slug, "path": str(proot), "added": True,
+                "is_grimoire": looks_grimoire(proot)}
+
+    def project_scan(self, raw_root: str, depth: int = DEFAULT_SCAN_DEPTH) -> dict[str, Any]:
+        """Découvre les projets sous une racine. N'enrôle rien."""
+        return scan_payload(raw_root, depth, self.project_root)
+
+    def browse_view(self, raw_path: str | None) -> dict[str, Any]:
+        """Navigation dossier par dossier, pour choisir un projet à la main."""
+        return browse(raw_path, self.project_root)
+
+    def select_project(self, *, slug: str = "", path: str = "") -> dict[str, Any]:
+        """Re-racine le serveur sur un autre projet de la machine.
+
+        ``grimoire serve`` reste un serveur unique : changer de projet déplace
+        la racine servie plutôt que d'exiger un second processus. Le projet
+        choisi est enrôlé au passage — c'est ainsi que le registre se remplit
+        de ce qu'on ouvre vraiment.
+        """
+        target: Path | None = None
+        if path:
+            candidate = Path(path).expanduser()
+            target = candidate.resolve() if candidate.is_dir() else None
+        elif slug:
+            registered = path_for_slug(slug)
+            target = registered.resolve() if registered and registered.is_dir() else None
+        if target is None:
+            msg = f"projet introuvable : {path or slug or '(vide)'}"
+            raise FileNotFoundError(msg)
+        register_project(target)
+        resolved_slug = slug_for_path(target)
+        if resolved_slug:
+            set_selected_slug(resolved_slug)
+        self.project_root = target
+        self.data.retarget(target)
+        self.data.refresh()
+        return self.status()
+
+    def data_status(self) -> dict[str, Any]:
+        return self.data.status()
+
+    def data_refresh(self) -> dict[str, Any]:
+        return {**self.data.refresh(), **self.data.status()}
+
+    def data_file(self, rel: str) -> Path | None:
+        """Fichier réel derrière ``data/<rel>``, ou ``None``."""
+        bundled = (self.ui_dir / "data") if self.ui_dir else None
+        return resolve_data(rel, self.project_root, bundled)
 
     def setup_view(self) -> dict[str, Any]:
         artifacts: dict[str, list[str]] = {}
         for kind, (rel, pattern) in ARTIFACT_SURFACES.items():
             base = self.project_root / rel
             artifacts[kind] = sorted(
-                str(p.relative_to(self.project_root)) for p in base.glob(pattern)
+                p.relative_to(self.project_root).as_posix() for p in base.glob(pattern)
             ) if base.is_dir() else []
         return {
             "artifacts": artifacts,
@@ -181,6 +292,36 @@ class ForgeAPI:
     def memory_link_view(self) -> dict[str, Any]:
         """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume."""
         return memory_link_status(self.project_root)
+
+    def health_view(self) -> dict[str, Any]:
+        """Alignement kit, flows et activité réelle — vue du portefeuille."""
+        return project_health(self.project_root)
+
+    def project_update(
+        self, *, dry_run: bool = True, slug: str = "", path: str = ""
+    ) -> dict[str, Any]:
+        """Aligne un projet sur le kit installé (``grimoire up``).
+
+        La cible par défaut est le projet servi, mais l'UI est partagée avec le
+        portefeuille, qui liste TOUS les projets de la machine : ignorer la
+        cible demandée ferait écrire ``grimoire up`` dans le dépôt servi alors
+        que l'utilisateur a cliqué sur un autre. Une cible inconnue est refusée
+        plutôt que repliée sur le projet courant.
+        """
+        target = self.project_root
+        if path:
+            candidate = Path(path).expanduser()
+            if not candidate.is_dir():
+                msg = f"projet introuvable : {path}"
+                raise FileNotFoundError(msg)
+            target = candidate.resolve()
+        elif slug:
+            registered = path_for_slug(slug)
+            if registered is None or not registered.is_dir():
+                msg = f"projet introuvable : {slug}"
+                raise FileNotFoundError(msg)
+            target = registered.resolve()
+        return update_project(target, dry_run=dry_run)
 
     # ── extensions ────────────────────────────────────────────────────────
 
@@ -236,23 +377,13 @@ class ForgeAPI:
         return path
 
     def blueprints_list(self) -> list[dict[str, Any]]:
-        base = self.project_root / BLUEPRINTS_RELPATH
-        result = []
-        if base.is_dir():
-            for p in sorted(base.glob("*.blueprint.json")):
-                try:
-                    bp = json.loads(p.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    continue
-                result.append(
-                    {
-                        "id": bp.get("id", p.stem.replace(".blueprint", "")),
-                        "name": bp.get("name", ""),
-                        "nodes": len(bp.get("nodes", [])),
-                        "edges": len(bp.get("edges", [])),
-                    }
-                )
-        return result
+        """Inventaire des blueprints — même lecture que la vue santé.
+
+        Deux parcours du même dossier finiraient par répondre différemment sur
+        le même projet ; l'inventaire est donc celui de ``project_health``, à
+        quelques champs de métadonnées près qui ne gênent aucun consommateur.
+        """
+        return flows(self.project_root)
 
     def blueprint_get(self, bp_id: str) -> dict[str, Any]:
         path = self._blueprint_path(bp_id)
@@ -1201,273 +1332,29 @@ class ForgeAPI:
 
 
 def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    """Handler HTTP de l'atelier — implémenté dans :mod:`grimoire.tools.forge_http`.
 
-        def log_message(self, fmt: str, *args: Any) -> None:  # silencieux par défaut
-            pass
+    Ré-exporté ici pour que les appelants historiques (et les tests) n'aient pas
+    à connaître la coupe interne entre métier et transport.
+    """
+    from grimoire.tools.forge_http import make_handler as _make_handler
 
-        def _json(self, payload: Any, code: int = 200) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _error(self, message: str, code: int = 400) -> None:
-            self._json({"error": message}, code)
-
-        def _body(self) -> dict[str, Any]:
-            length = int(self.headers.get("Content-Length", 0))
-            if not length:
-                return {}
-            return cast(dict[str, Any], json.loads(self.rfile.read(length).decode("utf-8")))
-
-        def _guard_mutation(self) -> bool:
-            """Anti CSRF / DNS-rebinding vers localhost (backend-permissif).
-
-            Refuse toute mutation dont le Host n'est pas la loopback, ou dont
-            l'Origin (si présent, cas navigateur) est cross-origin. Un outil
-            local ne doit répondre qu'à sa propre UI, pas à une page tierce
-            ouverte dans le navigateur de l'utilisateur.
-            """
-            host = (self.headers.get("Host") or "").split(":")[0].lower()
-            if host not in ("127.0.0.1", "localhost", "::1", ""):
-                self._error("hôte non autorisé", 403)
-                return False
-            origin = self.headers.get("Origin")
-            if origin:
-                from urllib.parse import urlparse
-
-                oh = urlparse(origin).hostname or ""
-                if oh.lower() not in ("127.0.0.1", "localhost", "::1"):
-                    self._error("origine non autorisée", 403)
-                    return False
-            return True
-
-        def _governed_event(self, action: str, **fields: Any) -> None:
-            """Trace gouvernée d'une mutation serve (QUA-08), fail-open."""
-            try:
-                path = (
-                    api.project_root / "_grimoire-runtime-output"
-                    / "hook-runtime" / "serve-mutations.jsonl"
-                )
-                path.parent.mkdir(parents=True, exist_ok=True)
-                entry = {
-                    "ts": datetime.now(UTC).isoformat(),
-                    "source": "serve", "action": action, **fields,
-                }
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            except OSError:
-                pass
-
-        # ── GET ───────────────────────────────────────────────────────────
-
-        def do_GET(self) -> None:
-            path = self.path.split("?")[0]
-            try:
-                if path == "/api/events":
-                    self._sse()
-                    return
-                payload = api_get(api, path, parse_qs(urlparse(self.path).query))
-                if payload is not API_GET_UNHANDLED:
-                    self._json(payload)
-                elif path.startswith("/api/blueprints/"):
-                    # Surface atelier : le cockpit multi-projet n'y touche pas.
-                    if path.endswith("/diff"):
-                        self._json(api.blueprint_diff(path.split("/")[3]))
-                    else:
-                        self._json(api.blueprint_get(path.rsplit("/", 1)[1]))
-                else:
-                    self._static(path)
-            except FileNotFoundError as exc:
-                self._error(f"introuvable : {exc}", 404)
-            except (ValueError, json.JSONDecodeError) as exc:
-                self._error(str(exc))
-
-        # ── POST / PUT / DELETE ───────────────────────────────────────────
-
-        def do_POST(self) -> None:
-            path = self.path.split("?")[0]
-            if not self._guard_mutation():
-                return
-            try:
-                body = self._body()
-                if path == "/api/extensions/add":
-                    result = api.extension_add(str(body.get("source", "")))
-                    self._governed_event("extension.add", id=result.extension_id,
-                                         version=result.version)
-                    self._json(
-                        {
-                            "installed": result.extension_id,
-                            "version": result.version,
-                            "copied": list(result.copied),
-                            "skipped": list(result.skipped),
-                        }
-                    )
-                elif path == "/api/extensions/remove":
-                    api.extension_remove(str(body.get("id", "")))
-                    self._governed_event("extension.remove", id=str(body.get("id", "")))
-                    self._json({"removed": body.get("id")})
-                elif path in ("/api/setup", "/api/setup/plan"):
-                    self._json(api.setup_plan(body))
-                elif path.startswith("/api/features/"):
-                    feature_id = path.rsplit("/", 1)[1]
-                    try:
-                        enabled = bool(body.get("enabled"))
-                        toggled = api.feature_toggle(feature_id, enabled)
-                        self._governed_event("feature.toggle", id=feature_id, enabled=enabled)
-                        self._json(toggled)
-                    except KeyError:
-                        self._error(f"feature inconnue : {feature_id}", 404)
-                elif path.startswith("/api/blueprints/") and path.endswith("/validate"):
-                    bp_id = path.split("/")[3]
-                    blueprint = body or api.blueprint_get(bp_id)
-                    self._json(api.blueprint_lint(blueprint))
-                elif path.startswith("/api/blueprints/") and path.endswith("/simulate"):
-                    bp_id = path.split("/")[3]
-                    blueprint = body or api.blueprint_get(bp_id)
-                    qs = parse_qs(urlparse(self.path).query)
-                    inject = None
-                    if qs.get("injectNode"):
-                        inject = {
-                            "nodeId": qs["injectNode"][0],
-                            "class": qs.get("injectClass", ["unknown"])[0],
-                        }
-                    self._json(api.blueprint_simulate(blueprint, inject_failure=inject))
-                elif path.startswith("/api/blueprints/") and path.endswith("/compile"):
-                    bp_id = path.split("/")[3]
-                    blueprint = body or api.blueprint_get(bp_id)
-                    compiled = api.blueprint_compile(blueprint)
-                    self._governed_event("blueprint.compile", id=bp_id,
-                                         artifact=compiled.get("artifact"))
-                    self._json(compiled)
-                else:
-                    self._error("route inconnue", 404)
-            except ExtensionError as exc:
-                self._error(str(exc), 422)
-            except FileNotFoundError as exc:
-                self._error(f"introuvable : {exc}", 404)
-            except (ValueError, json.JSONDecodeError) as exc:
-                self._error(str(exc))
-
-        def do_PUT(self) -> None:
-            path = self.path.split("?")[0]
-            if not self._guard_mutation():
-                return
-            try:
-                if path.startswith("/api/blueprints/"):
-                    bp_id = path.rsplit("/", 1)[1]
-                    saved = api.blueprint_put(bp_id, self._body())
-                    self._governed_event("blueprint.put", id=bp_id)
-                    self._json(saved)
-                else:
-                    self._error("route inconnue", 404)
-            except (ValueError, json.JSONDecodeError) as exc:
-                self._error(str(exc))
-
-        # ── SSE ───────────────────────────────────────────────────────────
-
-        def _sse(self) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            offsets = {name: p.stat().st_size for name, p in api.event_files()}
-            try:
-                while True:
-                    for name, p in api.event_files():
-                        size = p.stat().st_size
-                        start = offsets.get(name, size)
-                        if size > start:
-                            with p.open("r", encoding="utf-8", errors="replace") as f:
-                                f.seek(start)
-                                for line in f:
-                                    line = line.strip()
-                                    if line:
-                                        self.wfile.write(
-                                            f"event: {name}\ndata: {line}\n\n".encode()
-                                        )
-                            offsets[name] = size
-                    self.wfile.write(b": keepalive\n\n")
-                    self.wfile.flush()
-                    time.sleep(1)
-            except (BrokenPipeError, ConnectionResetError):
-                return
-
-        # ── statique ──────────────────────────────────────────────────────
-
-        def _static(self, path: str) -> None:
-            if api.ui_dir is None:
-                self._json({"grimoire": "serve", "hint": "API disponible sous /api/"}, 200)
-                return
-            rel = path.lstrip("/") or "index.html"
-            target = (api.ui_dir / rel).resolve()
-            # is_relative_to évite la confusion de préfixe (/a/web vs /a/web2).
-            if not target.is_relative_to(api.ui_dir.resolve()):
-                self._error("chemin refusé", 403)
-                return
-            if target.is_dir():
-                target = target / "index.html"
-            if not target.is_file():
-                self._error("introuvable", 404)
-                return
-            content_types = {
-                ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
-                ".json": "application/json", ".svg": "image/svg+xml",
-                ".png": "image/png", ".ico": "image/x-icon",
-            }
-            body = target.read_bytes()
-            self.send_response(200)
-            self.send_header(
-                "Content-Type",
-                content_types.get(target.suffix, "application/octet-stream"),
-            )
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    return Handler
+    return _make_handler(api)
 
 
 def serve(
     project_root: Path, kit_root: Path, ui_dir: Path | None, port: int
 ) -> ThreadingHTTPServer:
-    api = ForgeAPI(project_root, kit_root, ui_dir)
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
-    return server
+    """Serveur de l'atelier, prêt à répondre sur la loopback."""
+    from grimoire.tools.forge_http import serve as _serve
+
+    return _serve(project_root, kit_root, ui_dir, port)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="grimoire serve", description="Mode local Forge")
-    parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--kit-root", type=Path, default=Path(__file__).parents[3].parent)
-    parser.add_argument("--ui-dir", type=Path, default=None)
-    parser.add_argument("--port", type=int, default=4173)
-    args = parser.parse_args(argv)
+    from grimoire.tools.forge_http import main as _main
 
-    ui_dir = args.ui_dir
-    if ui_dir is None:
-        candidate = args.kit_root.parent / "web" / "public"
-        if candidate.is_dir():
-            ui_dir = candidate
-        else:
-            # UI embarquée dans le paquet (wheel ou editable)
-            from grimoire.data import web_path
-
-            packaged = web_path()
-            ui_dir = packaged if packaged.is_dir() else None
-
-    server = serve(args.project_root, args.kit_root, ui_dir, args.port)
-    print(f"grimoire serve — http://127.0.0.1:{args.port}/ (UI : {ui_dir or 'API seule'})")
-    print("Ctrl+C pour arrêter.")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        server.shutdown()
-    return 0
+    return _main(argv)
 
 
 if __name__ == "__main__":

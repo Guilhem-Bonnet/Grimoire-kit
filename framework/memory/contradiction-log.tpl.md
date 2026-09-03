@@ -1,6 +1,6 @@
 # Log des Contradictions — {{project_name}}
 
-> Mis à jour automatiquement par `maintenance.py memory-audit` et par les agents via mem0-bridge.
+> Mis à jour automatiquement par `maintenance.py memory-audit` et par les agents via `grimoire memory`.
 > Une contradiction = deux mémoires incompatibles sur le même sujet.
 > Résolution = archiver l'ancienne, conserver la plus récente (sauf décision architecturale).
 

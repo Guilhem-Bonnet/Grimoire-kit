@@ -11,6 +11,12 @@
 #   scripts/serve-site.sh 8420            # port custom
 #   scripts/serve-site.sh 8420 /chemin/projet-instrumente   # cibler un autre projet
 #   scripts/serve-site.sh 8420 . registry.json   # COCKPIT MULTI-PROJETS (gouverne N projets)
+#   GRIMOIRE_SITE_DEMO=1 scripts/serve-site.sh    # remplissage de démo (VITRINE publique)
+#
+# Par défaut le data layer ne contient QUE ce que le projet possède réellement :
+# un projet sans runtime a un observatoire vide. Le remplissage représentatif
+# (traces, cartes kanban, nuage vectoriel) sert la vitrine publique, qui n'a pas
+# de runtime à montrer — il s'active explicitement via GRIMOIRE_SITE_DEMO=1.
 #
 # Le registre est une liste JSON [{"name": "...", "path": "/abs/path"}] ; le site
 # expose alors un découpage par projet (?project=<slug>) + une vue portefeuille.
@@ -21,6 +27,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${1:-8420}"
 TARGET="$(cd "${2:-$HERE}" && pwd)"
 REGISTRY="${3:-}"
+DEMO_ARGS=()
+[ "${GRIMOIRE_SITE_DEMO:-0}" = "1" ] && DEMO_ARGS=(--demo)
 
 PY="python3"
 [ -x "$HERE/.venv/bin/python" ] && PY="$HERE/.venv/bin/python"
@@ -32,9 +40,9 @@ if [ -n "$REGISTRY" ] && [ -f "$REGISTRY" ]; then
 else
   echo "→ Régénération du data layer depuis : $TARGET"
 fi
-if ! "$PY" "$HERE/scripts/gen-site-data.py" --root "$TARGET" --out-dir "$HERE/web/data" --with-tests "${REG_ARGS[@]}"; then
+if ! "$PY" "$HERE/scripts/gen-site-data.py" --root "$TARGET" --out-dir "$HERE/web/data" --with-tests "${REG_ARGS[@]}" "${DEMO_ARGS[@]}"; then
   echo "  (collecte pytest indisponible — comptages de tests en repli)"
-  "$PY" "$HERE/scripts/gen-site-data.py" --root "$TARGET" --out-dir "$HERE/web/data" "${REG_ARGS[@]}"
+  "$PY" "$HERE/scripts/gen-site-data.py" --root "$TARGET" --out-dir "$HERE/web/data" "${REG_ARGS[@]}" "${DEMO_ARGS[@]}"
 fi
 
 echo ""

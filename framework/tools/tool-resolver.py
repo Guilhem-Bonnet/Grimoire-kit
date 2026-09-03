@@ -537,7 +537,7 @@ def plan_provision(provider: dict[str, Any]) -> list[ProvisionAction]:
         actions.append(ProvisionAction(
             provider_id=provider.get("id", ""),
             method="mcp_enable",
-            command=f"Activer le serveur MCP '{server}' dans _grimoire/_config/mcp-servers.json",
+            command=f"Activer le serveur MCP '{server}' dans .mcp.json",
             package=server,
             safe=True,
             requires_confirmation=True,

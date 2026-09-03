@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from grimoire.cli import cmd_cockpit
 from grimoire.cli.app import app
+from grimoire.tools import project_registry
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def _tree(tmp_path: Path) -> Path:
 
 
 def _registry_paths() -> set[str]:
-    return {p["path"] for p in cmd_cockpit._load_registry()}
+    return {p["path"] for p in project_registry.load_registry()}
 
 
 # ── Crawl helper ──────────────────────────────────────────────────────────────
@@ -50,19 +50,19 @@ def _registry_paths() -> set[str]:
 class TestCrawl:
     def test_finds_projects_and_classifies(self, tmp_path: Path) -> None:
         root = _tree(tmp_path)
-        found = {c.path.name: c.managed for c in cmd_cockpit._crawl_projects(root, 4)}
+        found = {c.path.name: c.managed for c in project_registry.crawl_projects(root, 4)}
         assert found == {"alpha": True, "beta": True, "gamma": False}
 
     def test_project_is_a_leaf(self, tmp_path: Path) -> None:
         root = _tree(tmp_path)
         inner = root / "gamma" / "sub"
         (inner / ".git").mkdir(parents=True)
-        names = {c.path.name for c in cmd_cockpit._crawl_projects(root, 4)}
+        names = {c.path.name for c in project_registry.crawl_projects(root, 4)}
         assert "sub" not in names
 
     def test_depth_bound(self, tmp_path: Path) -> None:
         root = _tree(tmp_path)
-        names = {c.path.name for c in cmd_cockpit._crawl_projects(root, 1)}
+        names = {c.path.name for c in project_registry.crawl_projects(root, 1)}
         assert names == {"alpha", "gamma"}  # nested/beta is at depth 2
 
     def test_symlinks_not_followed(self, tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ class TestCrawl:
         root = tmp_path / "dev2"
         root.mkdir()
         (root / "link").symlink_to(outside, target_is_directory=True)
-        assert cmd_cockpit._crawl_projects(root, 4) == []
+        assert project_registry.crawl_projects(root, 4) == []
 
     def test_permission_error_does_not_crash(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -86,7 +86,7 @@ class TestCrawl:
             return real_iterdir(self)
 
         monkeypatch.setattr(Path, "iterdir", fake_iterdir)
-        names = {c.path.name for c in cmd_cockpit._crawl_projects(root, 4)}
+        names = {c.path.name for c in project_registry.crawl_projects(root, 4)}
         assert names == {"alpha", "beta", "gamma"}
 
 
@@ -115,20 +115,20 @@ class TestScanCommand:
         res = runner.invoke(app, ["cockpit", "scan", str(root), "--yes"])
         assert res.exit_code == 0
         assert "Nothing new to enrol" in res.output
-        assert len(cmd_cockpit._load_registry()) == 2
+        assert len(project_registry.load_registry()) == 2
 
     def test_interactive_confirm_declined(self, runner: CliRunner, tmp_path: Path) -> None:
         root = _tree(tmp_path)
         res = runner.invoke(app, ["cockpit", "scan", str(root)], input="n\n")
         assert res.exit_code == 0
-        assert cmd_cockpit._load_registry() == []
+        assert project_registry.load_registry() == []
         assert "Nothing enrolled" in res.output
 
     def test_interactive_confirm_accepted(self, runner: CliRunner, tmp_path: Path) -> None:
         root = _tree(tmp_path)
         res = runner.invoke(app, ["cockpit", "scan", str(root)], input="y\n")
         assert res.exit_code == 0
-        assert len(cmd_cockpit._load_registry()) == 2
+        assert len(project_registry.load_registry()) == 2
 
     def test_single_global_confirmation(self, runner: CliRunner, tmp_path: Path) -> None:
         root = _tree(tmp_path)
@@ -172,4 +172,4 @@ class TestScanCommand:
         monkeypatch.setattr(Path, "iterdir", fake_iterdir)
         res = runner.invoke(app, ["cockpit", "scan", str(root), "--yes"])
         assert res.exit_code == 0
-        assert len(cmd_cockpit._load_registry()) == 2
+        assert len(project_registry.load_registry()) == 2

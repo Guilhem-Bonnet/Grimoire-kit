@@ -104,7 +104,7 @@ def check_grimoire_structure(project_root: Path) -> list[Check]:
     checks = []
     required = [
         ("_grimoire", "Dossier _grimoire"),
-        ("_grimoire/_config", "Dossier config"),
+        ("_grimoire/kit", "Dossier du kit"),
         ("_grimoire/_memory", "Dossier mémoire"),
     ]
 

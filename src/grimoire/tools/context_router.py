@@ -155,14 +155,14 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     agent_base = compact_base if compact_base.exists() else full_base
     if agent_base.exists():
         entries.append(FileEntry(
-            path=str(agent_base.relative_to(project_root)),
+            path=agent_base.relative_to(project_root).as_posix(),
             priority=Priority.P0_ALWAYS,
             estimated_tokens=_file_tokens(agent_base),
             reason="Base protocol",
         ))
     if agent_base == compact_base and full_base.exists():
         entries.append(FileEntry(
-            path=str(full_base.relative_to(project_root)),
+            path=full_base.relative_to(project_root).as_posix(),
             priority=Priority.P4_ON_REQUEST,
             estimated_tokens=_file_tokens(full_base),
             reason="Full base protocol (on demand)",
@@ -178,7 +178,7 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
                 continue
             if agent_tag.lower() in af.stem.lower():
                 entries.append(FileEntry(
-                    path=str(af.relative_to(project_root)),
+                    path=af.relative_to(project_root).as_posix(),
                     priority=Priority.P0_ALWAYS,
                     estimated_tokens=_file_tokens(af),
                     reason="Agent persona",
@@ -200,7 +200,7 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     for fpath, reason in p1_files:
         if fpath.exists():
             entries.append(FileEntry(
-                path=str(fpath.relative_to(project_root)),
+                path=fpath.relative_to(project_root).as_posix(),
                 priority=Priority.P1_SESSION,
                 estimated_tokens=_file_tokens(fpath),
                 reason=reason,
@@ -210,7 +210,7 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     session = mem / "session-state.md"
     if session.exists():
         entries.append(FileEntry(
-            path=str(session.relative_to(project_root)),
+            path=session.relative_to(project_root).as_posix(),
             priority=Priority.P2_TASK,
             estimated_tokens=_file_tokens(session),
             reason="Session state",
@@ -222,7 +222,7 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
         fpath = mem / name
         if fpath.exists():
             entries.append(FileEntry(
-                path=str(fpath.relative_to(project_root)),
+                path=fpath.relative_to(project_root).as_posix(),
                 priority=Priority.P3_LAZY,
                 estimated_tokens=_file_tokens(fpath),
                 reason=reason,
@@ -233,7 +233,7 @@ def discover_context_files(project_root: Path, agent_tag: str) -> list[FileEntry
     if archives.exists():
         for af in sorted(archives.glob("*.md")):
             entries.append(FileEntry(
-                path=str(af.relative_to(project_root)),
+                path=af.relative_to(project_root).as_posix(),
                 priority=Priority.P4_ON_REQUEST,
                 estimated_tokens=_file_tokens(af),
                 reason=f"Archive ({af.stem})",

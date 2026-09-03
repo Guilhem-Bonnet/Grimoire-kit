@@ -1057,7 +1057,7 @@ Exemples :
                     "remaining_tokens": b.remaining_tokens,
                     "files": [
                         {
-                            "path": str(f.path.relative_to(project_root)) if f.path.is_relative_to(project_root) else str(f.path),
+                            "path": f.path.relative_to(project_root).as_posix() if f.path.is_relative_to(project_root) else str(f.path),
                             "role": f.role,
                             "tokens": f.tokens,
                             "loaded": f.loaded,

@@ -450,7 +450,7 @@ class ChunkingStrategy:
         except (OSError, UnicodeDecodeError):
             return []
 
-        relative = str(filepath.relative_to(project_root))
+        relative = filepath.relative_to(project_root).as_posix()
         suffix = filepath.suffix.lower()
 
         if suffix == ".md":

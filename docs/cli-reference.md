@@ -835,6 +835,39 @@ Voir [Mode local & blueprints](serve-blueprints.md).
 Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
 utiliser la forme longue : `python -m grimoire.tools.forge_server`.
 
+### Projets de la machine
+
+Le bouton de projet, en haut de la barre latérale, ouvre le sélecteur. Trois
+entrées, parce qu'il y a trois situations :
+
+| Entrée | Ce qu'elle fait |
+| --- | --- |
+| Liste | Les projets déjà connus de la machine (registre partagé avec `grimoire cockpit`). Un clic re-route le serveur sur le projet choisi. |
+| Parcourir | Navigation dossier par dossier depuis `$HOME`, ou chemin absolu collé. Les projets sont signalés au passage. |
+| Scanner | Parcours borné d'une racine (profondeur 4 par défaut). Le scan **propose** : rien n'est enrôlé sans sélection explicite. |
+
+Le projet servi est enrôlé au registre à l'ouverture, s'il porte un marqueur
+(`.git`, `project-context.yaml`, `_grimoire/`). Ouvrir un projet n'écrit rien
+dans son arbre : registre et couche de données vivent sous
+`~/.grimoire/`. Purger les entrées mortes : `grimoire cockpit prune`.
+
+### Données affichées : celles du projet, ou rien
+
+Observatoire, Mémoire et Kanban lisent une couche générée sur **le projet
+servi** (`gen-site-data.py`, régénérée en arrière-plan au démarrage et à chaque
+changement de projet). Tant qu'elle n'existe pas, ces pages sont vides et le
+disent.
+
+Le site embarqué dans la wheel contient aussi l'instantané de la vitrine
+publique — des projets de démonstration et les chiffres du dépôt du kit. Il
+n'est jamais servi en local : afficher 141 entrées mémoire et des traces
+d'agents vieilles de deux minutes pour un projet qui n'a rien lancé est pire
+qu'une page vide. Seules les références du kit (catalogue de patterns,
+marketplace, anatomie) restent servies telles quelles.
+
+L'état de la couche est visible sur le tableau de bord, chip **données** ; un
+clic la régénère (`POST /api/data/refresh`).
+
 ## `grimoire features`
 
 Canaux de features : **stable** (contrat SemVer), **beta** (opt-in par projet,

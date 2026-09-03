@@ -165,7 +165,7 @@ merge:
   save_to: "_grimoire-output/implementation-artifacts/auth-validated.md"
 ```
 
-> Référence complète : `framework/cross-validation-trust.md` (BM-52)
+> Référence complète : `../framework/cross-validation-trust.md` (BM-52)
 
 ### Pattern 5 — Orchestration avec HUP + QEC (BM-50/51)
 
@@ -189,7 +189,7 @@ on_escalation:
   max_questions_per_lot: 7         # chunking 7±2
 ```
 
-> Référence complète : `framework/honest-uncertainty-protocol.md` (BM-50) · `framework/question-escalation-chain.md` (BM-51)
+> Référence complète : `../framework/honest-uncertainty-protocol.md` (BM-50) · `../framework/question-escalation-chain.md` (BM-51)
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
@@ -241,7 +241,7 @@ Pour les workflows complexes avec dépendances mixtes, utiliser `type: hybrid-or
 ```
 
 Le HPE construit le DAG, identifie le chemin critique, et exécute en parallèle
-tout ce qui peut l'être. Voir `framework/hybrid-parallelism-engine.md` (BM-58) pour les détails.
+tout ce qui peut l'être. Voir `../framework/hybrid-parallelism-engine.md` (BM-58) pour les détails.
 
 
 *BM-19 Subagent Orchestration Protocol | framework/workflows/subagent-orchestration.md*

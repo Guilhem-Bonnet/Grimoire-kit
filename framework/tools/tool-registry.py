@@ -323,7 +323,7 @@ class ToolDiscoverer:
         if "agent" in name.lower() or "caller" in name.lower():
             tags.append("multi-agent")
 
-        relative = str(filepath.relative_to(self.project_root))
+        relative = filepath.relative_to(self.project_root).as_posix()
         return GrimoireTool(
             name=name,
             description=description or f"Grimoire tool: {name}",
@@ -352,7 +352,7 @@ class ToolDiscoverer:
                 description = stripped[2:].strip()
                 break
 
-        relative = str(filepath.relative_to(self.project_root))
+        relative = filepath.relative_to(self.project_root).as_posix()
         return GrimoireTool(
             name=name,
             description=description or f"Shell tool: {name}",
@@ -376,7 +376,7 @@ class ToolDiscoverer:
         if h1_match:
             description = h1_match.group(1).strip()
 
-        relative = str(filepath.relative_to(self.project_root))
+        relative = filepath.relative_to(self.project_root).as_posix()
         return GrimoireTool(
             name=name,
             description=description or f"Documentation: {name}",

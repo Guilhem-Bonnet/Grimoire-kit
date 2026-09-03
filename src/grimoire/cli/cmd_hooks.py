@@ -15,12 +15,14 @@ import json
 import shutil
 import stat
 import subprocess
-from importlib import resources
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
+
+from grimoire.core import layout
+from grimoire.data import framework_path
 
 hooks_app = typer.Typer(help="Install and inspect Grimoire git hooks.")
 console = Console(stderr=True)
@@ -35,6 +37,10 @@ _HOOK_MAP: dict[str, str] = {
     "pre-push": "pre-push.sh",
 }
 _MNEMO_SOURCE = "mnemo-consolidate.sh"
+#: Where the hook scripts become callable *from the project*. ``.git/hooks/``
+#: holds the copies git runs; pre-commit needs a tracked path it can spawn,
+#: and ``framework/hooks/`` only exists in a checkout of the kit itself.
+_PROJECT_HOOKS_DIR = f"{layout.KIT_DIR}/hooks"
 _PRECOMMIT_CONFIG_TEMPLATE = ".pre-commit-config.tpl.yaml"
 
 
@@ -73,13 +79,14 @@ def _framework_hooks_dir(project_root: Path) -> Path | None:
     ):
         if candidate.is_dir():
             return candidate
+    # ``framework_path()`` already resolves both a wheel install and an editable
+    # one; resolving the package data directly missed the editable case, where
+    # the framework lives at the repository root rather than under the package.
     try:
-        bundled = Path(str(resources.files("grimoire") / "data" / "framework" / "hooks"))
-        if bundled.is_dir():
-            return bundled
-    except (ModuleNotFoundError, TypeError):
-        pass
-    return None
+        bundled = framework_path() / "hooks"
+    except FileNotFoundError:
+        return None
+    return bundled if bundled.is_dir() else None
 
 
 def _is_grimoire_hook(path: Path) -> bool:
@@ -236,6 +243,20 @@ def hooks_install(
         dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         installed.append(hook_name)
 
+    # Mirror the scripts into the kit tier. Without this, both the generated
+    # ``.pre-commit-config.yaml`` and the Mnemo chain call ``framework/hooks/…``,
+    # a path that exists only in a checkout of the kit — every hook fails on the
+    # first run in a real project.
+    project_hooks = root / _PROJECT_HOOKS_DIR
+    project_hooks.mkdir(parents=True, exist_ok=True)
+    for src_name in (*_HOOK_MAP.values(), _MNEMO_SOURCE):
+        src_file = sources / src_name
+        if not src_file.is_file():
+            continue
+        dst_file = project_hooks / src_name
+        shutil.copyfile(src_file, dst_file)
+        dst_file.chmod(dst_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
     # Inject Mnemo consolidation into a Grimoire pre-commit if absent.
     mnemo_src = sources / _MNEMO_SOURCE
     precommit = hooks_dir / "pre-commit"
@@ -246,7 +267,7 @@ def hooks_install(
             with precommit.open("a", encoding="utf-8") as fh:
                 fh.write(
                     "\n# Grimoire Mnemo consolidation\n"
-                    'bash "$(git rev-parse --show-toplevel)/framework/hooks/mnemo-consolidate.sh"\n'
+                    f'bash "$(git rev-parse --show-toplevel)/{_PROJECT_HOOKS_DIR}/{_MNEMO_SOURCE}"\n'
                 )
             mnemo_injected = True
 
@@ -255,7 +276,10 @@ def hooks_install(
     template = sources / _PRECOMMIT_CONFIG_TEMPLATE
     config_dst = root / ".pre-commit-config.yaml"
     if template.is_file() and not config_dst.exists():
-        shutil.copyfile(template, config_dst)
+        rendered = template.read_text(encoding="utf-8").replace(
+            "framework/hooks/", f"{_PROJECT_HOOKS_DIR}/",
+        )
+        config_dst.write_text(rendered, encoding="utf-8")
         config_written = True
 
     if _get_fmt(ctx) == "json":

@@ -224,7 +224,7 @@ class SectionParser:
         except (OSError, UnicodeDecodeError):
             return []
 
-        relative = str(filepath.relative_to(project_root))
+        relative = filepath.relative_to(project_root).as_posix()
         sections: list[Section] = []
 
         # Split par H2 (## heading)
@@ -454,7 +454,7 @@ class ContextSummarizer:
             # Générer le digest
             digest_filename = f"digest-{filepath.stem}-{now_str}.md"
             digest = Digest(
-                source_file=str(filepath.relative_to(self.project_root)),
+                source_file=filepath.relative_to(self.project_root).as_posix(),
                 digest_file=f"{ARCHIVES_DIR}/{digest_filename}",
                 created_at=now_str,
             )

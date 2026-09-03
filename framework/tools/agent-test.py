@@ -682,7 +682,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
             cats = result.category_scores.get(agent_name, {})
             for cat, cat_score in cats.items():
                 bar_len = int(cat_score * 20)
-                bar = "█" * bar_len + "░" * (20 - bar_len)
+                bar = "#" * bar_len + "." * (20 - bar_len)
                 print(f"    {cat:12s} {bar} {cat_score:.2f}")
     return 0
 

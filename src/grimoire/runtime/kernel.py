@@ -56,7 +56,8 @@ class RuntimeKernel:
         ctx = ExecutionContext(run_id=..., mission_id=..., ...)
         wfi = kernel.create_instance(ctx, recipe_id="recipe.pack.convert-gascity")
         kernel.start(wfi.id, ctx)
-        kernel.checkpoint(wfi.id, ctx, step_id="parse", completed=["read-source"], pending=["lock"])
+        kernel.checkpoint(wfi.id, ctx, step_id="parse",
+                          completed_steps=["read-source"], pending_steps=["lock"])
         kernel.complete(wfi.id, ctx)
     """
 

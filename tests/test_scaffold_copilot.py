@@ -92,7 +92,7 @@ class TestPlanDirectoriesIncludesCopilot:
         plan = ScaffoldPlan()
         scaffolder._plan_directories(plan)
 
-        names = {str(d) for d in plan.directories}
+        names = {d.as_posix() for d in plan.directories}
         for expected in (
             "_grimoire/kit/agents",
             "_grimoire/kit/teams",  # manifestes d'équipe, installés par cette PR
@@ -129,10 +129,10 @@ class TestPlanCopilotPrompts:
         
         prompt_copies = [
             c for c in plan.copies 
-            if ".github/prompts" in str(c.dst)
+            if ".github/prompts" in c.dst.as_posix()
         ]
         for copy in prompt_copies:
-            assert ".github/prompts" in str(copy.dst)
+            assert ".github/prompts" in copy.dst.as_posix()
             assert copy.dst.suffix == ".md"
 
     def test_plan_copilot_prompts_names(self, scaffolder):
@@ -142,7 +142,7 @@ class TestPlanCopilotPrompts:
         
         prompt_copies = [
             c for c in plan.copies 
-            if ".github/prompts" in str(c.dst)
+            if ".github/prompts" in c.dst.as_posix()
         ]
         names = [c.dst.stem for c in prompt_copies]
         
@@ -174,7 +174,7 @@ class TestPlanCopilotPrompts:
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
 
-        bootstrap = [c for c in plan.copies if "session-bootstrap" in str(c.dst)]
+        bootstrap = [c for c in plan.copies if "session-bootstrap" in c.dst.as_posix()]
         assert len(bootstrap) == 1
         assert bootstrap[0].tier == TIER_KIT
 
@@ -189,7 +189,7 @@ class TestPlanCopilotInstructions:
         
         instruction_renders = [
             t for t in plan.templates 
-            if ".github/instructions" in str(t.dst)
+            if ".github/instructions" in t.dst.as_posix()
         ]
         assert len(instruction_renders) >= 1
 
@@ -200,10 +200,10 @@ class TestPlanCopilotInstructions:
         
         instruction_renders = [
             t for t in plan.templates 
-            if ".github/instructions" in str(t.dst)
+            if ".github/instructions" in t.dst.as_posix()
         ]
         for render in instruction_renders:
-            assert ".github/instructions" in str(render.dst)
+            assert ".github/instructions" in render.dst.as_posix()
             assert render.dst.suffix == ".md"
 
     def test_plan_copilot_instructions_substitutes_variables(self, scaffolder):
@@ -213,7 +213,7 @@ class TestPlanCopilotInstructions:
         
         instruction_renders = [
             t for t in plan.templates 
-            if ".github/instructions" in str(t.dst)
+            if ".github/instructions" in t.dst.as_posix()
         ]
         assert len(instruction_renders) > 0
         
@@ -234,7 +234,7 @@ class TestPlanCopilotInstructions:
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_instruction_files(plan)
 
-        renders = [tpl for tpl in plan.templates if "grimoire-project" in str(tpl.dst)]
+        renders = [tpl for tpl in plan.templates if "grimoire-project" in tpl.dst.as_posix()]
         assert len(renders) == 1
         assert renders[0].tier == TIER_KIT
 
@@ -276,7 +276,7 @@ class TestFullScaffoldPlan:
         """Verify a complete plan has Copilot dirs."""
         plan = scaffolder.plan()
         
-        dir_strs = [str(d) for d in plan.directories]
+        dir_strs = [d.as_posix() for d in plan.directories]
         assert any(".github/prompts" in d for d in dir_strs)
         assert any(".github/instructions" in d for d in dir_strs)
 
@@ -287,7 +287,7 @@ class TestFullScaffoldPlan:
         # Should have prompts
         prompts = [
             c for c in plan.copies 
-            if ".github/prompts" in str(c.dst)
+            if ".github/prompts" in c.dst.as_posix()
         ]
         # Trois : ceux qu'une commande du SDK ne remplace pas.
         assert len(prompts) == 3
@@ -295,7 +295,7 @@ class TestFullScaffoldPlan:
         # Should have instructions
         instructions = [
             t for t in plan.templates 
-            if ".github/instructions" in str(t.dst)
+            if ".github/instructions" in t.dst.as_posix()
         ]
         assert len(instructions) >= 1
 
@@ -313,8 +313,8 @@ class TestFullScaffoldPlan:
 
         plan = scaffolder.plan()
 
-        assert [c for c in plan.copies if "session-bootstrap" in str(c.dst)]
-        assert [t for t in plan.templates if "grimoire-project" in str(t.dst)]
+        assert [c for c in plan.copies if "session-bootstrap" in c.dst.as_posix()]
+        assert [t for t in plan.templates if "grimoire-project" in t.dst.as_posix()]
 
         # project-context.yaml and the instruction file carry the user's own
         # content: seeded once, never rewritten.

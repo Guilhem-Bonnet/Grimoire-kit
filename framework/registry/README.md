@@ -96,7 +96,7 @@ Lors d'un `install`, le script :
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Registre local (`_grimoire/_config/installed-archetypes.yaml`)
+## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Registre local (`project-context.yaml` → `installed_archetypes:`)
 
 Créé automatiquement à l'init et mis à jour par chaque `install` :
 

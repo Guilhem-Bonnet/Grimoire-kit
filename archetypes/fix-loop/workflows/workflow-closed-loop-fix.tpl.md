@@ -4,7 +4,7 @@ version: 2.7
 description: Orchestre une boucle de correction fermée avec validation automatique bout-en-bout. Aucun "done" sans preuve d'exécution. Sévérité adaptative, escalade gauntlet sur déclencheur, gate oracle, borne de convergence, guardrails destructifs, rollback par context_type, délégation agents experts, META-REVIEW auto-amélioration.
 ---
 
-<!--
+<!-- grimoire:legend
 PLACEHOLDERS — résolus à l'installation depuis les agents réellement présents
 dans le projet ; un rôle sans agent installé rend « aucun » et le workflow
 reste en mode SOLO :
@@ -61,7 +61,7 @@ CHALLENGER + GATEKEEPER forment le *gauntlet* : le passage adversarial coûteux 
 
 ## INITIALISATION
 
-1. Charger `{project-root}/_grimoire/core/config.yaml` → stocker `{user_name}`, `{communication_language}`
+1. Charger `{project-root}/project-context.yaml` → stocker `{user_name}`, `{communication_language}`
 2. Charger `{project-root}/_grimoire/_memory/shared-context.md` → contexte projet + section `## Configuration Loop` → récupérer `max_iterations` si présent
 3. Charger `{project-root}/_grimoire/_memory/agent-learnings/fix-loop-patterns.md` si existant → stocker les patterns en session
 4. Charger `{project-root}/_grimoire/_memory/dependency-graph.md` → disponible pour surface_impact auto-discovery
@@ -863,7 +863,7 @@ Alimentation automatique `fix-loop-patterns.md` : si `iteration > 1`, copier `it
    ```
    Si `iteration > 1` → ajouter une clé `iteration_history` dans le pattern avec le contenu de `iteration_lessons[]`.
    *(Les fixes S3 ne sont pas enregistrés dans les patterns — trop faible valeur, risque de dilution.)*
-2. `python {project-root}/_grimoire/_memory/mem0-bridge.py add fix-loop "[résumé]"` — si disponible.
+2. `grimoire memory remember "[résumé]" --type failures --agent fix-loop` — si disponible.
    > **Non-bloquant :** si le script échoue ou timeout (>10s), ne pas interrompre le rapport.
    > Loguer un warning dans `shared-context.md` : `- [ ] [loop→user] mem0 indisponible — pattern non persisté | session=[session-id] | [timestamp]` et continuer.
 3. Si `iteration > 1` → `decisions-log.md` : synthèse des échecs (extraire de `iteration_lessons[]`)
@@ -1164,7 +1164,7 @@ En **Party Mode** :
 - **`context_type_previous` dans FER** : rempli par Phase 2.2 quand context_type change
 - **INITIALISATION multi-FER** : liste tous les `fer-*.yaml` non clôturés et propose le choix
 - **Troncage stdout 200+300** : 200 premiers + 300 derniers chars — le récap est en fin d'output
-- **`mem0-bridge.py` non-bloquant** : échec mémorisé dans shared-context.md sans interrompre
+- **`grimoire memory` non-bloquant** : échec mémorisé dans shared-context.md sans interrompre
 - **Borne de sortie boucle Challenger** : `challenger_failures` >= 3 → ESCALADE
 - **Suppression FER conditionnelle** : Phase 7 supprime si false/declined ; Phase 8 supprime à sa fin
 - **Backup `.bak` conditionnel** : `[ -f fichier ]` avant `cp` — pas d'erreur si nouveau fichier

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-CC_SCRIPT="$PROJECT_ROOT/_grimoire/kit/framework/cc-verify.sh"; [[ -f "$CC_SCRIPT" ]] || CC_SCRIPT="$PROJECT_ROOT/_grimoire/_config/custom/cc-verify.sh"
+CC_SCRIPT="$PROJECT_ROOT/_grimoire/kit/framework/cc-verify.sh"; [[ -f "$CC_SCRIPT" ]] || CC_SCRIPT="$PROJECT_ROOT/_grimoire/kit/framework/cc-verify.sh"
 
 # Outillage du venv projet prioritaire (pytest/ruff/mypy du projet, pas du système)
 [[ -d "$PROJECT_ROOT/.venv/bin" ]] && export PATH="$PROJECT_ROOT/.venv/bin:$PATH"

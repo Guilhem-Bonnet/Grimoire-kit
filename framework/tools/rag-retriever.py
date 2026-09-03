@@ -594,7 +594,7 @@ def file_based_fallback(
                     continue
 
                 score = matches / len(keywords)
-                relative = str(md_file.relative_to(project_root))
+                relative = md_file.relative_to(project_root).as_posix()
 
                 scored_chunks.append((score, RetrievedChunk(
                     text=stripped[:2000],
@@ -667,7 +667,7 @@ def _print_retrieval(result: RetrievalResult) -> None:
 
     print(f"  {'-' * 60}")
     for i, chunk in enumerate(result.chunks, 1):
-        score_bar = "█" * int(chunk.final_score * 10)
+        score_bar = "#" * int(chunk.final_score * 10)
         print(f"\n  [{i}] {chunk.source_file}")
         print(f"      Score: {chunk.final_score} {score_bar}")
         if chunk.rerank_score != 0:

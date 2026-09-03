@@ -9,7 +9,7 @@ team: team-ops
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-<!--
+<!-- grimoire:legend
 Ces {{placeholders}} sont résolus à l'installation depuis les agents réellement
 présents dans le projet ; un rôle sans agent installé rend « aucun ».
  {{ops_agent}} - Agent infrastructure/provisioning (ex: Forge)
