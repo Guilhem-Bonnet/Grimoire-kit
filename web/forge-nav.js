@@ -6,6 +6,9 @@
   /* Mode atelier : le chrome vitrine (topbar + footer) ne s'injecte pas.
      Les helpers de motion (reveal, dividers, compteurs) restent actifs. */
   const MODE_ATELIER = document.documentElement.classList.contains('mode-atelier');
+  /* Servi par `grimoire serve` (127.0.0.1) plutôt que publié : la démo et
+     l'invitation à installer n'ont pas de sens, le projet réel est à côté. */
+  const LOCAL = window.GrimoireLocal === true;
 
   /* ── Active page detection ── */
   const path = location.pathname.replace(/\/$/, '').split('/').pop() || 'index';
@@ -46,22 +49,24 @@
             <div id="forge-projects-mount"></div>
           </div>
           <ul class="nav-links" role="list">
-            <li><a href="demo.html"          class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>
+            ${LOCAL ? '' : `<li><a href="demo.html"          class="${isActive('demo.html') ? 'active' : ''}">DÉMO</a></li>`}
             <li><a href="patterns.html"      class="${isActive('patterns.html') ? 'active' : ''}">PATTERNS</a></li>
             <li><a href="extensions.html"    class="${isActive('extensions.html') ? 'active' : ''}">EXTENSIONS</a></li>
             <li><a href="portfolio.html"     class="${isActive('portfolio.html') ? 'active' : ''}">PORTEFEUILLE</a></li>
             <li><a href="documentation.html" class="${isActive('documentation.html') ? 'active' : ''}">DOCS</a></li>
           </ul>
           <div class="nav-atelier" id="nav-atelier">
-            <button class="nav-cta" id="nav-atelier-btn" type="button">LANCER L'ATELIER →</button>
-            <div class="nav-atelier-panel" id="nav-atelier-panel" hidden>
+            ${LOCAL
+              ? `<a class="nav-cta" href="atelier.html">OUVRIR L'ATELIER →</a>`
+              : `<button class="nav-cta" id="nav-atelier-btn" type="button">LANCER L'ATELIER →</button>`}
+            ${LOCAL ? '' : `<div class="nav-atelier-panel" id="nav-atelier-panel" hidden>
               <span class="nap-lbl">DANS VOTRE TERMINAL</span>
               <code>pip install grimoire-kit</code>
               <code>grimoire serve</code>
               <p>Le même site s'ouvre en <b>mode atelier</b> : projet, éditeur de blueprints, extensions — l'API locale active les capacités.</p>
               <a class="nap-open" href="atelier.html">OUVRIR L'ATELIER →</a>
               <a class="nap-gh" href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener">GitHub ↗</a>
-            </div>
+            </div>`}
           </div>
         </div>
       </div>`;
@@ -194,7 +199,7 @@
           <div class="footer-col">
             <h4>EXPLORER</h4>
             <ul>
-              <li><a href="demo.html">Démo</a></li>
+              ${LOCAL ? '' : '<li><a href="demo.html">Démo</a></li>'}
               <li><a href="patterns.html">Patterns</a></li>
               <li><a href="extensions.html">Extensions</a></li>
               <li><a href="portfolio.html">Portefeuille</a></li>
