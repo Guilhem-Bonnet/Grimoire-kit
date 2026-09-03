@@ -201,20 +201,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        include:
-          # Windows rapporte sans bloquer, le temps que l'issue #192 soit
-          # traitée : 45 des 108 outils impriment des caractères hors cp1252 et
-          # meurent en `UnicodeEncodeError` sur une console Windows. C'est un
-          # défaut de classe, pas un incident de ce lot — et le corriger demande
-          # une passe sur les outils, pas sur la CI.
-          #
-          # `continue-on-error` n'est pas l'ancien `|| true` : l'échec reste
-          # visible dans l'interface et dans le résumé, il ne se déguise pas en
-          # succès. Il se retire dès que #192 est close, et ce job redevient
-          # bloquant sur les deux plateformes.
-          - os: windows-latest
-            soft: true
-    continue-on-error: ${{ matrix.soft == true }}
+    # Windows est bloquant, comme ubuntu. La jambe a rapporté sans bloquer le
+    # temps que #192 (45 outils morts en cp1252) et le dernier rouge réel
+    # (#257, un chemin comparé en str) soient traités ; c'est fait, et un job
+    # qu'on ignore en permanence ne protège rien.
     steps:
       - uses: actions/checkout@v7
 
