@@ -219,7 +219,7 @@ def host_status(
                 degradations=[d.to_dict() for d in plan.degradations],
                 capability_gaps=[g.surface for g in gaps_for(profile)],
                 agents_with_inferred_tools=[a.name for a in surface.agents if a.tools_origin == "inferred"],
-                entry_agent=(surface.entry_agent().name if surface.entry_agent() else ""),
+                entry_agent=(entry.name if (entry := surface.entry_agent()) else ""),
                 entry_agent_declared=entry_agent_name(project_root),
             )
         )

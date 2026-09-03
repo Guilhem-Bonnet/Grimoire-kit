@@ -189,7 +189,8 @@ def entry_agent_name(project_root: Path) -> str:
     path = project_root / "project-context.yaml"
     if not path.is_file():
         return DEFAULT_ENTRY_AGENT
-    from grimoire.core.config import GrimoireConfig, GrimoireConfigError
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
 
     try:
         return GrimoireConfig.from_yaml(path).agents.entry
