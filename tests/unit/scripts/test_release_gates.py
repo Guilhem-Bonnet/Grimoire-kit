@@ -223,6 +223,81 @@ class TestChangelogRefuses:
         assert changelog.main() == 1
 
 
+def _commit(root: Path, message: str) -> None:
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message], cwd=root, check=True)
+
+
+@pytest.fixture
+def released_repo(changelog: ModuleType) -> ModuleType:
+    """Un dépôt avec un tag, puis des commits par-dessus ; le garde lit git."""
+    root = changelog.REPO
+    _git_repo(root)
+    _track(root, "CHANGELOG.md", _HEADER + "## [Unreleased]\n\n## [3.36.0] - 2026-09-03\n\n- **Livré.** Oui.\n")
+    _track(root, "version.txt", "3.36.0\n")
+    _commit(root, "chore: release 3.36.0")
+    subprocess.run(["git", "tag", "-a", "v3.36.0", "-m", "v3.36.0"], cwd=root, check=True)
+    return changelog
+
+
+def _merge_with_entry(module: ModuleType, subject: str, title: str, *, under: str = "Unreleased") -> None:
+    """Un commit qui ajoute une entrée — sous `under`, comme git le ferait par contexte."""
+    text = module.CHANGELOG.read_text(encoding="utf-8")
+    marker = f"## [{under}]" + (" - 2026-09-03" if under != "Unreleased" else "")
+    assert marker in text, marker
+    text = text.replace(marker + "\n", marker + f"\n\n- **{title}** Détail.\n", 1)
+    _track(module.REPO, "CHANGELOG.md", text)
+    _commit(module.REPO, subject)
+
+
+class TestChangelogCoverage:
+    """Le cas de la 3.36.0 : Unreleased vide, et pourtant deux PR sans entrée, trente-huit blocs égarés."""
+
+    def _close(self, module: ModuleType, version: str) -> None:
+        text = module.CHANGELOG.read_text(encoding="utf-8")
+        module.CHANGELOG.write_text(text.replace("## [Unreleased]\n", f"## [Unreleased]\n\n## [{version}] - 2026-09-04\n", 1), encoding="utf-8")
+        module.VERSION_FILE.write_text(f"{version}\n", encoding="utf-8")
+
+    def test_a_feature_merged_without_an_entry_is_refused(
+        self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _commit(released_repo.REPO, "feat(hosts): quelque chose de visible (#233)")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 1
+        assert "sans toucher CHANGELOG.md" in capsys.readouterr().err
+
+    def test_an_entry_that_slid_under_a_published_version_is_refused(
+        self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Git a recalé l'entrée par contexte sous [3.36.0], déjà taguée : elle n'est annoncée nulle part."""
+        _merge_with_entry(released_repo, "feat(serve): le vrai projet (#232)", "Le vrai projet.", under="3.36.0")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 1
+        assert "glissé sous une version déjà publiée" in capsys.readouterr().err
+
+    def test_a_chore_needs_no_entry(self, released_repo: ModuleType) -> None:
+        _commit(released_repo.REPO, "chore(ci): bump d'une action")
+        _commit(released_repo.REPO, "docs: une phrase")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 0
+
+    def test_every_feature_with_its_entry_in_the_right_place_passes(self, released_repo: ModuleType) -> None:
+        _merge_with_entry(released_repo, "feat(a): une chose (#1)", "Une chose.")
+        _merge_with_entry(released_repo, "fix(b): une autre (#2)", "Une autre.")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 0
+
+    def test_without_a_reachable_tag_coverage_is_unverified_not_fine(
+        self, changelog: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = changelog.REPO
+        _git_repo(root)
+        _state(changelog, "3.36.0", "## [Unreleased]\n\n## [3.36.0] - 2026-09-03\n\n- livré\n")
+        _track(root, "CHANGELOG.md", changelog.CHANGELOG.read_text(encoding="utf-8"))
+        _commit(root, "chore: release 3.36.0")
+        assert changelog.main() == 1
+        assert "non vérifiée" in capsys.readouterr().err
+
+
 class TestChangelogAccepts:
     def test_a_closed_section_matching_the_version(self, changelog: ModuleType) -> None:
         _state(changelog, "3.34.2", "## [Unreleased]\n\n## [3.34.2] - 2026-08-28\n\n- livré\n")

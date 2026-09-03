@@ -24,6 +24,32 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Le garde de release vérifie que chaque changement fusionné a son entrée,
+  au bon endroit.** Il vérifiait qu'`[Unreleased]` était vide et que la section
+  la plus récente portait le numéro publié — deux propriétés vraies sur la
+  3.36.0 alors que deux PR n'avaient aucune entrée et que trente-huit blocs de
+  deux autres avaient glissé sous `[3.35.0]`, une version publiée sans eux : une
+  PR ouverte avant une release et fusionnée après voit git recaler ses lignes
+  par contexte. Pour chaque commit `feat`, `fix` ou `perf` depuis le dernier
+  tag, le garde exige qu'il touche `CHANGELOG.md` et que chaque titre d'entrée
+  qu'il a ajouté soit aujourd'hui sous la version publiée ou sous
+  `[Unreleased]`. Sans tag atteignable, la couverture est déclarée non vérifiée
+  — et non vérifié n'est pas vérifié.
+- **Deux artefacts que la norme rend obligatoires et que le kit ne livrait
+  pas.** Le claim ledger (AG-QUA-002, exigé dès le premier niveau) relie chaque
+  affirmation qui pèse sur une décision à ce qui la prouve : `claim-ledger.md`
+  est généré aux côtés de l'evidence pack pour tous les profils. Le registre des
+  surfaces runtime (AG-TOL-007 et AG-RET-006, exigés dès `governed`) donne à
+  chaque hook, agent, policy ou sortie un owner, un mode, une rétention et un
+  statut : `runtime-surface-registry.yaml` est généré pour `governed` et
+  `production`. Deux vérificateurs les lisent : un registre encore vierge est un
+  avertissement, il attend d'être rempli ; une affirmation dite prouvée sans
+  preuve, ou — en profil gouverné — utilisée sans l'être, et une surface sans
+  owner sont des erreurs. Un projet déjà enrôlé les reçoit par
+  `grimoire standard fix --apply`.
+
+### Ajouté
+
 - **La persona d'entrée se choisit par projet.** Elle était `concierge` en dur :
   `collect_agents` acceptait un autre nom, mais son seul appelant ne le passait
   jamais. Un projet qui porte déjà son propre point d'entrée — un orchestrateur
@@ -40,6 +66,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `pinned_on` ; `grimoire standard upstream` compare la révision épinglée à la
   tête distante et sort 0, 2 (le standard a avancé), 3 (injoignable, donc non
   vérifié) ou 1 (aucun pin). La CI du bridge l'exécute en avertissement.
+
+### Corrigé
+
+- **`grimoire setup` écrit la source de vérité qu'il déclare.** Les options
+  `--user`, `--lang`, `--doc-lang` et `--skill-level` vivaient dans un objet en
+  mémoire : `apply` ne réécrivait que `copilot-instructions.md`, puis vérifiait
+  ce miroir contre l'objet en mémoire et annonçait « All config files are in
+  sync » — au-dessus de la divergence qu'il venait de créer, que `setup --check`
+  signalait la seconde d'après. `apply` écrit désormais la section `user:` de
+  `project-context.yaml` en premier — en la créant si le projet est antérieur à
+  son introduction, sans toucher `project.name` — puis les miroirs, puis vérifie
+  les miroirs contre le fichier relu. Un « in sync » ne peut plus être annoncé
+  au-dessus d'une divergence.
 
 ## [3.36.0] - 2026-09-03
 

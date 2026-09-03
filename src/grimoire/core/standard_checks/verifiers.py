@@ -30,6 +30,28 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.controls import (
+    _verify_blast_radius_policy,
+    _verify_browser_tool_contract,
+    _verify_cluster_action_policy,
+    _verify_compression_gate,
+    _verify_cost_registry,
+    _verify_decision_council,
+    _verify_doc_graph_pipeline,
+    _verify_environment_policy,
+    _verify_flow_dsl_manifest,
+    _verify_guardrail_contract,
+    _verify_memory_integrity,
+    _verify_merge_lane,
+    _verify_privilege_boundary,
+    _verify_prompt_firewall,
+    _verify_prompt_version_log,
+    _verify_remote_hygiene,
+    _verify_runtime_provider_contract,
+    _verify_visual_evidence,
+    _verify_workflow_state_manifest,
+    _verify_workspace_isolation,
+)
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
@@ -437,6 +459,90 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
             "Evidence inventory has no concrete evidence rows.",
             path=rel_path,
         )
+
+
+def _verify_claim_ledger(
+    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
+) -> None:
+    """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
+
+    Un registre encore vierge est un avertissement : il attend d'être rempli.
+    Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou —
+    en profil governed et production — une affirmation utilisée alors qu'elle
+    n'est pas prouvée, et une synthèse laissée vide.
+    """
+    rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    strict = profile.id in {"governed", "production"}
+    template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
+    rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
+    if not rows:
+        _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
+    for line in rows:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 7:
+            _add_check(result, "claims.row_invalid", "warning", f"Claim row is malformed: {line[:60]}", path=rel_path)
+            continue
+        claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
+        if status == "prouvé" and not proof:
+            _add_check(
+                result, "claims.proved_without_evidence", "error",
+                f"{claim_id} is marked prouvé with no source or evidence.", path=rel_path,
+            )
+        if decision == "utiliser" and status != "prouvé":
+            _add_check(
+                result, "claims.used_unproved", "error" if strict else "warning",
+                f"{claim_id} is used while its status is {status}.", path=rel_path,
+            )
+    if strict and rows and "| Affirmations bloquantes non prouvées |  |" in text:
+        _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
+
+
+def _verify_runtime_surface_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-TOL-007 et AG-RET-006 : chaque surface runtime a un owner, un mode, un statut, une rétention."""
+    rel_path = STANDARD_DIR / "runtime-surface-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    strict = profile.id in {"governed", "production"}
+    raw_allowed = data.get("allowed")
+    allowed: dict[str, Any] = raw_allowed if isinstance(raw_allowed, dict) else {}
+    controls = data.get("control_surfaces") or []
+    outputs = data.get("output_surfaces") or []
+    if not controls:
+        _add_check(
+            result, "surfaces.no_control_surface", "warning",
+            "No control surface is registered: hooks, agents and policies run unowned.", path=rel_path,
+        )
+    for entry in controls if isinstance(controls, list) else []:
+        if not isinstance(entry, dict):
+            _add_check(result, "surfaces.control_invalid", "warning", "A control surface entry is not a mapping.", path=rel_path)
+            continue
+        sid = str(entry.get("id", "?"))
+        for key in ("surface", "owner", "mode", "status"):
+            if not entry.get(key):
+                _add_check(
+                    result, f"surfaces.control_{key}_missing", "error" if strict else "warning",
+                    f"{sid} has no {key}.", path=rel_path,
+                )
+        for key, allowed_key in (("type", "types"), ("mode", "modes"), ("risk", "risks"), ("status", "statuses")):
+            value = entry.get(key)
+            values = allowed.get(allowed_key)
+            if value and isinstance(values, list) and value not in values:
+                _add_check(result, f"surfaces.control_{key}_unknown", "warning", f"{sid}: {key} {value!r} is not an allowed value.", path=rel_path)
+    for entry in outputs if isinstance(outputs, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        sid = str(entry.get("id", "?"))
+        if not entry.get("retention"):
+            _add_check(
+                result, "surfaces.output_retention_missing", "error" if strict else "warning",
+                f"{sid} declares no retention.", path=rel_path,
+            )
+        if "indexable" not in entry:
+            _add_check(result, "surfaces.output_indexable_missing", "warning", f"{sid} does not say whether it is indexable.", path=rel_path)
 
 
 def _verify_compliance_declaration(root: Path, result: StandardVerificationResult) -> None:
@@ -977,3 +1083,51 @@ def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> N
                 f"Pattern {pattern.get('id')!r} required_artifacts must be a list.",
                 path=rel_path,
             )
+
+
+def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult) -> None:
+    """Run every verifier, in the order the artifacts build on each other.
+
+    Extracted from ``agentic_standard.verify_standard_profile``: that module
+    is grandfathered by the code ratchet and may only shrink, and this list
+    is the one thing every new artifact has to grow.
+    """
+    _verify_manifest(root, profile, task_id, result)
+    _verify_mission_brief(root, profile, result)
+    _verify_provider_registry(root, profile, result)
+    _verify_knowledge_registry(root, profile, result)
+    _verify_task_envelope(root, profile, task_id, result)
+    _verify_evidence_pack(root, task_id, result)
+    _verify_claim_ledger(root, profile, task_id, result)
+    _verify_compliance_declaration(root, result)
+    _verify_profile_specific_controls(root, profile, result)
+    _verify_task_board(root, profile, result)
+    _verify_memory_policy(root, profile, result)
+    _verify_context_contract(root, result)
+    _verify_decision_graph(root, result)
+    _verify_rule_packs(root, result)
+    _verify_hook_registry(root, result)
+    _verify_runtime_surface_registry(root, profile, result)
+    _verify_orchestration_policy(root, result)
+    _verify_evidence_gates(root, result)
+    _verify_pattern_catalog(root, result)
+    _verify_blast_radius_policy(root, profile, result)
+    _verify_privilege_boundary(root, profile, result)
+    _verify_prompt_firewall(root, profile, result)
+    _verify_remote_hygiene(root, result)
+    _verify_decision_council(root, result)
+    _verify_compression_gate(root, result)
+    _verify_memory_integrity(root, result)
+    _verify_merge_lane(root, result)
+    _verify_cost_registry(root, result)
+    _verify_guardrail_contract(root, result)
+    _verify_visual_evidence(root, result)
+    _verify_workspace_isolation(root, result)
+    _verify_environment_policy(root, result)
+    _verify_browser_tool_contract(root, result)
+    _verify_runtime_provider_contract(root, result)
+    _verify_prompt_version_log(root, result)
+    _verify_cluster_action_policy(root, result)
+    _verify_doc_graph_pipeline(root, result)
+    _verify_flow_dsl_manifest(root, result)
+    _verify_workflow_state_manifest(root, result)

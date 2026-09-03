@@ -20,6 +20,15 @@ Deux propriétés, pas une :
 la section la plus récente porte le numéro de ``version.txt``
     Sinon la note publiée décrit une autre version que celle qu'on publie.
 
+chaque changement fusionné depuis le dernier tag a son entrée, au bon endroit
+    Une PR ouverte avant une release et fusionnée après voit git recaler ses
+    lignes par contexte : trente-huit blocs de deux PR se sont retrouvés sous
+    une version publiée sans eux, et deux PR n'avaient aucune entrée. Ni l'une
+    ni l'autre propriété précédente ne le voyait — ``[Unreleased]`` était vide.
+    Pour chaque commit ``feat``/``fix``/``perf`` depuis le dernier tag : il
+    touche ``CHANGELOG.md``, et chaque titre d'entrée qu'il a ajouté se trouve
+    aujourd'hui dans la section de la version publiée ou dans ``[Unreleased]``.
+
 Usage::
 
     scripts/check-changelog-release.py
@@ -37,6 +46,69 @@ VERSION_FILE = REPO / "version.txt"
 
 #: Un titre de section versionnée : ``## [3.34.0] - 2026-08-28``.
 SECTION = re.compile(r"(?m)^## \[(?P<version>[^\]]+)\]")
+
+#: Les types de commit qui doivent laisser une trace dans la note de version.
+NOTEWORTHY = re.compile(r"^(feat|fix|perf)(\([^)]*\))?!?:")
+#: Le titre d'une entrée : ``- **Ce que ça change.** Le reste…``
+ENTRY_TITLE = re.compile(r"^\+?- \*\*\*?(?P<title>.+?)\*\*", re.MULTILINE)
+
+
+def _git(repo: Path, *args: str) -> str | None:
+    import subprocess
+
+    try:
+        proc = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _section_bodies(text: str) -> dict[str, str]:
+    """Version → corps de section, dans l'ordre du fichier."""
+    matches = list(SECTION.finditer(text))
+    bodies: dict[str, str] = {}
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        bodies[m.group("version")] = text[m.start():end]
+    return bodies
+
+
+def coverage_problems(repo: Path, text: str, version: str) -> list[str]:
+    """Les changements fusionnés depuis le dernier tag que la note ne couvre pas, ou mal.
+
+    Renvoie une liste de problèmes lisibles. Sans dépôt git ou sans tag,
+    renvoie un seul problème qui dit que la couverture n'a pas pu être vérifiée
+    — non vérifié n'est pas vérifié.
+    """
+    if _git(repo, "rev-parse", "--git-dir") is None:
+        # Pas un dépôt git : la couverture n'a pas d'objet. Les deux autres
+        # propriétés restent vérifiées sur le fichier seul.
+        return []
+    tag = (_git(repo, "describe", "--tags", "--abbrev=0", "HEAD^") or "").strip()
+    if not tag:
+        return ["couverture non vérifiée : aucun tag atteignable depuis HEAD^ (dépôt shallow ?)"]
+    log = _git(repo, "log", "--format=%H%x00%s", f"{tag}..HEAD") or ""
+    bodies = _section_bodies(text)
+    current = bodies.get(version, "") + bodies.get("Unreleased", "")
+    current_titles = {m.group("title").strip() for m in ENTRY_TITLE.finditer(current.replace("\n  ", " "))}
+    problems: list[str] = []
+    for line in log.splitlines():
+        sha, _, subject = line.partition("\x00")
+        if not NOTEWORTHY.match(subject):
+            continue
+        touched = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha) or ""
+        if "CHANGELOG.md" not in touched.split():
+            problems.append(f"{sha[:8]} {subject[:70]} — fusionné depuis {tag} sans toucher CHANGELOG.md")
+            continue
+        diff = _git(repo, "show", sha, "--format=", "--", "CHANGELOG.md") or ""
+        added = [m.group("title").strip() for m in ENTRY_TITLE.finditer(diff) if m.group(0).startswith("+")]
+        for title in added:
+            if title not in current_titles:
+                problems.append(
+                    f"{sha[:8]} — l'entrée « {title[:60]} » n'est ni sous [{version}] ni sous [Unreleased] : "
+                    "elle a glissé sous une version déjà publiée"
+                )
+    return problems
 
 
 def main() -> int:
@@ -73,6 +145,8 @@ def main() -> int:
             f"{version} — la note publiée décrirait une autre version."
         )
 
+    problems.extend(coverage_problems(REPO, text, version))
+
     if problems:
         print(f"::error::CHANGELOG.md ne décrit pas la version {version}", file=sys.stderr)
         for problem in problems:
@@ -84,7 +158,10 @@ def main() -> int:
         )
         return 1
 
-    print(f"CHANGELOG à jour — [{version}] est la section la plus récente, [Unreleased] est vide")
+    print(
+        f"CHANGELOG à jour — [{version}] est la section la plus récente, [Unreleased] est vide, "
+        "chaque changement fusionné depuis le dernier tag y est"
+    )
     return 0
 
 
