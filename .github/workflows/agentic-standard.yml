@@ -75,5 +75,21 @@ jobs:
           assert "dimensions" in payload
           PY
 
+      - name: Le standard amont a-t-il avancé depuis la révision épinglée ?
+        # Non bloquant : une dérive du corpus normatif est un signal à réconcilier
+        # dans profile-map.yaml, pas une raison de refuser ce commit.
+        continue-on-error: true
+        run: |
+          set +e
+          grimoire standard upstream
+          status=$?
+          set -e
+          if [[ "$status" -eq 2 ]]; then
+            echo "::warning::Le standard amont a avancé : réconcilier framework/agentic-standard/profile-map.yaml et mettre à jour metadata.upstream_standard.commit."
+          elif [[ "$status" -eq 3 ]]; then
+            echo "::warning::Standard amont injoignable — alignement non vérifié."
+          fi
+          exit "$status"
+
       - name: Build docs
         run: python -m mkdocs build --strict

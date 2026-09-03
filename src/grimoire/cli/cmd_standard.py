@@ -264,6 +264,35 @@ def profiles(ctx: typer.Context) -> None:
     console.print(table)
 
 
+@standard_app.command("upstream")
+def upstream(ctx: typer.Context) -> None:
+    """Le standard amont a-t-il avancé depuis la révision que le bridge trace ?
+
+    Sortie 0 : la révision épinglée est la tête distante. 2 : le standard a
+    avancé, le profile-map est à réconcilier. 3 : distant injoignable — non
+    vérifié, ce qui n'est pas « à jour ». 1 : aucune révision épinglée.
+    """
+    from grimoire.core.standard_upstream import upstream_status
+
+    status = upstream_status()
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(status.to_dict(), indent=2, ensure_ascii=False))
+        raise typer.Exit(status.exit_code)
+    short = status.pinned_commit[:8] or "—"
+    if status.state == "pinned":
+        console.print(f"[green]OK[/green] standard {status.repository} épinglé à {short} ({status.pinned_on}) — tête distante identique")
+    elif status.state == "ahead":
+        console.print(
+            f"[yellow]DÉRIVE[/yellow] standard {status.repository} : épinglé {short} ({status.pinned_on}), "
+            f"tête distante {(status.remote_head or '')[:8]} — réconcilier profile-map.yaml puis mettre à jour `commit`."
+        )
+    elif status.state == "unreachable":
+        console.print(f"[yellow]NON VÉRIFIÉ[/yellow] {status.remote} injoignable — épinglé {short}, tête distante inconnue")
+    else:
+        console.print("[red]AUCUN PIN[/red] metadata.upstream_standard.commit est absent de profile-map.yaml")
+    raise typer.Exit(status.exit_code)
+
+
 @standard_app.command("detect-providers")
 def detect_providers(ctx: typer.Context) -> None:
     """Detect non-secret provider availability signals."""
