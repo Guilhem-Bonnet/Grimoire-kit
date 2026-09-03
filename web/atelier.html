@@ -258,6 +258,9 @@
           <span class="at-chip">${exts.length} extension${exts.length > 1 ? 's' : ''}</span>
           <span class="at-chip">${arts.length} compilation${arts.length > 1 ? 's' : ''} (session)</span>
           <span class="at-chip" id="hub-mem" title="Lien projet ↔ base mémoire (/api/memory/status)">mémoire : …</span>
+          <button class="at-chip" id="hub-data" title="Couche de données du projet (observatoire, kanban, mémoire) — cliquer pour régénérer">données : …</button>
+          <span class="at-chip" id="hub-kit" title="Alignement sur le kit installé (/api/health)">kit : …</span>
+          <span class="at-chip" id="hub-activity" title="Dernière trace écrite par ce projet">activité : …</span>
           ${lastArt ? `<span class="at-chip acc">dernière compilation · ${relTime(lastArt.when)}</span>` : ''}
         </div>
 
@@ -297,6 +300,74 @@
     function bind(proj) {
       if (!proj) return;
       $('#hub-new').addEventListener('click', openWizard);
+      // Alignement kit et activité : mêmes faits que le portefeuille, même
+      // source (/api/health). Les deux surfaces doivent dire la même chose.
+      (async () => {
+        const kitChip = $('#hub-kit'), actChip = $('#hub-activity');
+        if (!kitChip || !actChip) return;
+        try {
+          const h = await Atelier.api('/api/health');
+          const k = h.kit || {};
+          if (k.upToDate) {
+            kitChip.classList.add('acc');
+            kitChip.textContent = 'kit ' + (k.installed || '') + ' · aligné ✓';
+          } else if (k.behind > 0) {
+            kitChip.textContent = 'kit ' + (k.aligned || '?') + ' · ' + k.behind + ' fichier(s) en retard';
+            kitChip.style.color = 'var(--data-amber)';
+            kitChip.title = 'Alignez le projet : grimoire up .';
+          } else {
+            kitChip.textContent = k.scaffolded ? 'kit : non aligné' : 'kit : projet non initialisé';
+          }
+          const a = h.activity || {};
+          const live = (a.runs || []).filter(r => !r.silent);
+          if (live.length) {
+            actChip.classList.add('acc');
+            actChip.textContent = live.length + ' run' + (live.length > 1 ? 's' : '') +
+              ' en cours' + (live[0].step ? ' · ' + live[0].step : '');
+            actChip.title = live.map(r => r.recipe + (r.step ? ' → ' + r.step : '')).join(' · ');
+            return;
+          }
+          if (a.active) {
+            actChip.classList.add('acc');
+            actChip.textContent = 'actif · ' + relTime(Date.parse(a.lastEventAt));
+          } else if (a.lastEventAt) {
+            actChip.textContent = 'dernière trace · ' + relTime(Date.parse(a.lastEventAt));
+          } else {
+            actChip.textContent = 'aucune trace';
+          }
+          if ((a.inFlight || []).length) {
+            actChip.title = 'En cours : ' + a.inFlight.map(t => t.title || t.id).join(' · ');
+          }
+        } catch (e) {
+          kitChip.textContent = 'kit : indisponible';
+          actChip.textContent = 'activité : indisponible';
+        }
+      })();
+      // Les pages Observatoire / Mémoire / Kanban lisent une couche générée sur
+      // CE projet. Tant qu'elle n'existe pas, elles sont vides — et le disent.
+      // Rien n'est emprunté à l'instantané de la vitrine embarqué dans la wheel.
+      (async () => {
+        const chip = $('#hub-data'); if (!chip) return;
+        const LABEL = { ready: 'à jour', generating: 'génération…', failed: 'échec', idle: 'non générée' };
+        async function paint() {
+          try {
+            const st = await Atelier.api('/api/data/status');
+            chip.textContent = 'données : ' + (LABEL[st.state] || st.state) +
+              (st.generatedAt ? ' · ' + relTime(Date.parse(st.generatedAt)) : '');
+            chip.classList.toggle('acc', st.state === 'ready');
+            chip.style.color = st.state === 'failed' ? 'var(--data-red)' : '';
+            chip.title = st.error || (st.dataDir ? 'couche du projet : ' + st.dataDir : '');
+            if (st.state === 'generating') setTimeout(paint, 1500);
+          } catch (e) { chip.textContent = 'données : hors ligne'; }
+        }
+        chip.addEventListener('click', async () => {
+          chip.textContent = 'données : génération…';
+          try { await Atelier.api('/api/data/refresh', { method: 'POST', body: '{}' }); }
+          catch (e) { Atelier.toast('Régénération refusée : ' + esc(String(e.message || e))); }
+          paint();
+        });
+        paint();
+      })();
       // B1 — lien projet <-> BDD : état du backend mémoire, best-effort.
       (async () => {
         const chip = $('#hub-mem'); if (!chip) return;

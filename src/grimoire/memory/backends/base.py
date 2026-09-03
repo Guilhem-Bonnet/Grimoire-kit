@@ -92,6 +92,16 @@ class MemoryBackend(abc.ABC):
         """Total number of stored entries."""
         ...
 
+    def vectors(self, *, limit: int = 300) -> list[tuple[str, list[float]]]:
+        """``(entry_id, embedding)`` pairs, for backends that keep vectors.
+
+        Not abstract, and empty by default: most backends are lexical or
+        file-based and simply have no embedding to hand back. Returning an
+        empty list is the truthful answer for them — a caller that fabricates a
+        projection from nothing shows a cloud that means nothing.
+        """
+        return []
+
     @abc.abstractmethod
     def health_check(self) -> BackendStatus:
         """Check backend health and return status."""

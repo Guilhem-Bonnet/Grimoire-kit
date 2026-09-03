@@ -602,3 +602,31 @@ html.mode-vitrine .at-scroll { overflow: visible; padding: 96px 40px 72px; }
 /* Pages atelier pleine largeur (Observatoire, Mémoire, Kanban) :
    leurs sections gèrent leurs propres gouttières. */
 .at-scroll.flush { padding: 0; }
+
+/* ── Sélecteur de projets (bouton du haut → vrai choix) ── */
+.at-status-tag.warn { background: rgba(248,113,113,0.12); color: var(--data-red); }
+.at-proj-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 6px; background: var(--elev-2);
+}
+.at-proj-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+  align-items: center; text-align: left; width: 100%;
+  padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--ink); cursor: pointer;
+  font-family: inherit; font-size: 0.82rem;
+}
+.at-proj-row:hover:not(:disabled) { border-color: var(--accent-dim); background: var(--elev-1); }
+.at-proj-row:disabled { opacity: 0.45; cursor: not-allowed; }
+.at-proj-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.at-proj-row.as-label { cursor: pointer; grid-template-columns: auto 1fr auto; }
+.at-proj-row.as-label input { accent-color: var(--accent); }
+.at-proj-name { font-weight: 500; }
+.at-proj-path {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.at-proj-tags { display: flex; gap: 5px; justify-self: end; }

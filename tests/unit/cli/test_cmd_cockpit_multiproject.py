@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli import cmd_cockpit
 from grimoire.cli.app import app
+from grimoire.tools import project_registry
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def _post_json(port: int, path: str, payload: dict[str, Any]) -> tuple[int, dict
 def duo_server(tmp_path: Path):  # type: ignore[no-untyped-def]
     """Two registered projects, served by the cockpit handler."""
     alpha, beta = _project(tmp_path, "alpha"), _project(tmp_path, "beta")
-    cmd_cockpit._save_registry([
+    project_registry.save_registry([
         {"name": "Alpha", "path": str(alpha), "slug": "alpha"},
         {"name": "Beta", "path": str(beta), "slug": "beta"},
     ])
@@ -152,13 +153,13 @@ def test_static_files_still_served(duo_server: Any, tmp_path: Path) -> None:
 def test_selection_falls_back_when_the_project_disappears(duo_server: Any) -> None:
     port, alpha, _beta = duo_server
     _post_json(port, "/api/projects/select", {"slug": "beta"})
-    cmd_cockpit._save_registry([{"name": "Alpha", "path": str(alpha), "slug": "alpha"}])
+    project_registry.save_registry([{"name": "Alpha", "path": str(alpha), "slug": "alpha"}])
     assert _get_api(port, "/api/status")[1]["projectRoot"] == str(alpha)
 
 
 def test_prune_drops_dead_paths(runner: CliRunner, tmp_path: Path) -> None:
     alive = _project(tmp_path, "alive")
-    cmd_cockpit._save_registry([
+    project_registry.save_registry([
         {"name": "Alive", "path": str(alive), "slug": "alive"},
         {"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"},
     ])
@@ -166,14 +167,14 @@ def test_prune_drops_dead_paths(runner: CliRunner, tmp_path: Path) -> None:
     # confirmation, et un CliRunner sans entrée avorterait sur le prompt.
     result = runner.invoke(app, ["cockpit", "prune", "--yes"])
     assert result.exit_code == 0
-    assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["alive"]
+    assert [p["slug"] for p in project_registry.load_registry()] == ["alive"]
 
 
 def test_prune_dry_run_changes_nothing(runner: CliRunner, tmp_path: Path) -> None:
-    cmd_cockpit._save_registry([{"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"}])
+    project_registry.save_registry([{"name": "Gone", "path": str(tmp_path / "gone"), "slug": "gone"}])
     result = runner.invoke(app, ["cockpit", "prune", "--dry-run"])
     assert result.exit_code == 0
-    assert [p["slug"] for p in cmd_cockpit._load_registry()] == ["gone"]
+    assert [p["slug"] for p in project_registry.load_registry()] == ["gone"]
 
 
 # ── Garde argv du dispatch mémoire ───────────────────────────────────────────
@@ -187,7 +188,7 @@ class _FakeProc:
 @pytest.fixture
 def solo_server(tmp_path: Path):  # type: ignore[no-untyped-def]
     proj = _project(tmp_path, "served")
-    cmd_cockpit._save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
+    project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
     )

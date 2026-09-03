@@ -945,9 +945,16 @@
       const nx = v => 10 + (x1 > x0 ? (v - x0) / (x1 - x0) : 0.5) * (W - 20);
       const ny = v => 10 + (y1 > y0 ? (v - y0) / (y1 - y0) : 0.5) * (H - 20);
       svg.innerHTML = pts.map(p =>
-        `<circle cx="${nx(p.x).toFixed(1)}" cy="${ny(p.y).toFixed(1)}" r="2.6" fill="${tc(p.type)}"><title>${esc(p.type || '')}</title></circle>`).join('');
+        `<circle cx="${nx(p.x).toFixed(1)}" cy="${ny(p.y).toFixed(1)}" r="2.6" fill="${tc(p.type)}"><title>${esc(p.type || '')}${p.id ? ' · ' + esc(p.id) : ''}</title></circle>`).join('') +
+        (proj.dimensions ? `<text x="150" y="194" text-anchor="middle" style="fill:var(--ink-muted);font-family:var(--font-mono);font-size:8px">ACP · ${proj.sampled} vecteurs · ${proj.dimensions} dimensions</text>` : '');
     } else {
-      svg.innerHTML = '<text x="150" y="105" text-anchor="middle" style="fill:var(--ink-muted);font-family:var(--font-mono);font-size:10px">pas de projection — vecteurs absents</text>';
+      /* Dire POURQUOI il n'y a rien. « Vecteurs absents » laissait croire à une
+         panne alors qu'un backend lexical n'en produit simplement pas. */
+      const why = backendName
+        ? `backend ${String(backendName).toLowerCase()} — pas d\u2019embeddings à projeter`
+        : 'aucun backend mémoire configuré';
+      svg.innerHTML = '<text x="150" y="105" text-anchor="middle" style="fill:var(--ink-muted);' +
+        'font-family:var(--font-mono);font-size:9px">' + esc(why) + '</text>';
     }
   })();
 

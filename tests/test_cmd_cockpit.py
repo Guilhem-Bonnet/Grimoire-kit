@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli import cmd_cockpit
 from grimoire.cli.app import app
+from grimoire.tools import project_registry
 
 
 @pytest.fixture
@@ -36,16 +37,17 @@ def _project(tmp_path: Path, name: str) -> Path:
 
 
 def test_slug() -> None:
-    assert cmd_cockpit._slug("Atlas Ops") == "atlas-ops"
-    assert cmd_cockpit._slug("Grimoire/Kit!") == "grimoire-kit"
-    assert cmd_cockpit._slug("///") == "project"
+    """Le registre est partagé avec l'atelier : sa logique vit dans le module commun."""
+    assert project_registry.slugify("Atlas Ops") == "atlas-ops"
+    assert project_registry.slugify("Grimoire/Kit!") == "grimoire-kit"
+    assert project_registry.slugify("///") == "project"
 
 
 def test_add_and_list(runner: CliRunner, tmp_path: Path) -> None:
     proj = _project(tmp_path, "alpha")
     res = runner.invoke(app, ["cockpit", "add", str(proj), "--name", "Alpha"])
     assert res.exit_code == 0
-    reg = cmd_cockpit._load_registry()
+    reg = project_registry.load_registry()
     assert reg == [{"name": "Alpha", "path": str(proj.resolve()), "slug": "alpha"}]
 
     res = runner.invoke(app, ["cockpit", "list"])
@@ -57,7 +59,7 @@ def test_add_is_idempotent(runner: CliRunner, tmp_path: Path) -> None:
     proj = _project(tmp_path, "beta")
     runner.invoke(app, ["cockpit", "add", str(proj)])
     runner.invoke(app, ["cockpit", "add", str(proj)])
-    assert len(cmd_cockpit._load_registry()) == 1
+    assert len(project_registry.load_registry()) == 1
 
 
 def test_slug_collision_disambiguated(runner: CliRunner, tmp_path: Path) -> None:
@@ -65,14 +67,14 @@ def test_slug_collision_disambiguated(runner: CliRunner, tmp_path: Path) -> None
     b = _project(tmp_path, "b")
     runner.invoke(app, ["cockpit", "add", str(a), "--name", "Same"])
     runner.invoke(app, ["cockpit", "add", str(b), "--name", "Same"])
-    slugs = sorted(p["slug"] for p in cmd_cockpit._load_registry())
+    slugs = sorted(p["slug"] for p in project_registry.load_registry())
     assert slugs == ["same", "same-2"]
 
 
 def test_add_rejects_missing_dir(runner: CliRunner, tmp_path: Path) -> None:
     res = runner.invoke(app, ["cockpit", "add", str(tmp_path / "nope")])
     assert res.exit_code == 1
-    assert cmd_cockpit._load_registry() == []
+    assert project_registry.load_registry() == []
 
 
 def test_remove(runner: CliRunner, tmp_path: Path) -> None:
@@ -80,7 +82,7 @@ def test_remove(runner: CliRunner, tmp_path: Path) -> None:
     runner.invoke(app, ["cockpit", "add", str(proj), "--name", "Gamma"])
     res = runner.invoke(app, ["cockpit", "remove", "gamma"])
     assert res.exit_code == 0
-    assert cmd_cockpit._load_registry() == []
+    assert project_registry.load_registry() == []
 
 
 class _FakeHTTPD:
@@ -97,9 +99,12 @@ class _FakeHTTPD:
 
 
 def test_refresh_empty_registry(runner: CliRunner) -> None:
+    """Registre vide = cockpit vide. Amorcer la démo montrait les chiffres d'un
+    autre projet comme s'ils étaient ceux de la machine."""
     res = runner.invoke(app, ["cockpit", "refresh"])
     assert res.exit_code == 0
-    assert "démo" in res.output  # bundled demo data kept as fallback
+    assert "démo" not in res.output
+    assert "scan" in res.output  # on dit comment le remplir
 
 
 def test_serve_no_refresh_mocked(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +217,7 @@ def test_generate_data_warns_on_subprocess_failure(
 
 def test_resolve_project_path(tmp_path: Path) -> None:
     proj = _project(tmp_path, "zeta")
-    cmd_cockpit._save_registry([{"name": "Zeta", "path": str(proj), "slug": "zeta"}])
+    project_registry.save_registry([{"name": "Zeta", "path": str(proj), "slug": "zeta"}])
     assert cmd_cockpit._resolve_project_path("zeta") == proj
     assert cmd_cockpit._resolve_project_path("") == proj  # empty → first
     assert cmd_cockpit._resolve_project_path("unknown") is None
@@ -237,7 +242,7 @@ def test_init_hook_registers_project(tmp_path: Path) -> None:
 
     proj = _project(tmp_path, "fromsetup")
     cmd_init._maybe_register_cockpit(proj, "From Setup", "text")
-    assert "from-setup" in [p["slug"] for p in cmd_cockpit._load_registry()]
+    assert "from-setup" in [p["slug"] for p in project_registry.load_registry()]
 
 
 def test_init_hook_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,7 +250,7 @@ def test_init_hook_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setenv("GRIMOIRE_NO_COCKPIT", "1")
     cmd_init._maybe_register_cockpit(_project(tmp_path, "skip"), "Skip", "text")
-    assert cmd_cockpit._load_registry() == []
+    assert project_registry.load_registry() == []
 
 
 def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -265,7 +270,7 @@ def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 @pytest.fixture
 def api_server(tmp_path: Path):  # type: ignore[no-untyped-def]
     proj = _project(tmp_path, "served")
-    cmd_cockpit._save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
+    project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
     )
@@ -385,15 +390,23 @@ def test_api_404_on_other_path(api_server: int) -> None:
         assert exc.code == 404
 
 
-def test_sync_site_seeds_demo_and_preserves_generated_data(tmp_path: Path) -> None:
+def test_sync_site_copies_kit_layers_but_never_the_vitrine_snapshot(tmp_path: Path) -> None:
     serve = tmp_path / "serve"
 
-    # First sync: bundled site copied + data/ seeded from the demo fallback.
     cmd_cockpit._sync_site(serve)
     assert (serve / "forge-nav.js").is_file()
-    assert (serve / "data" / "projects.json").is_file()
+    # Références du kit : identiques pour tout le monde, aucune donnée projet.
+    assert (serve / "data" / "catalogue-export.json").is_file()
+    # Instantané de la vitrine : projets inventés, chiffres d'un autre dépôt.
+    for layer in ("projects.json", "memory.json", "observatory.json", "taskboard.json"):
+        assert not (serve / "data" / layer).exists(), f"{layer} amorcé depuis la vitrine"
+    assert not (serve / "data" / "projects").exists()
 
-    # A later refresh owns data/ — a re-sync must NOT clobber it.
+
+def test_sync_site_preserves_generated_data(tmp_path: Path) -> None:
+    """``_generate_data`` est propriétaire de ``data/`` : une resync ne l'écrase pas."""
+    serve = tmp_path / "serve"
+    cmd_cockpit._sync_site(serve)
     sentinel = serve / "data" / "projects.json"
     sentinel.write_text('{"generated": true}', encoding="utf-8")
     cmd_cockpit._sync_site(serve)

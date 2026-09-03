@@ -131,12 +131,21 @@
       const hit = REGISTRY.projects.find((p) => p.path === path);
       if (hit && hit.slug) return hit.slug;
     }
+    /* En local, le projet servi est la seule vérité : sans appariement par
+       chemin on reste sur la couche plate — qui est la sienne. Retomber sur le
+       projet primaire du registre affichait la mémoire et les traces d'un
+       AUTRE dépôt sous le nom de celui qu'on venait d'ouvrir. */
+    if (ONLINE) return null;
     return REGISTRY.selected || REGISTRY.primary || REGISTRY.projects[0].slug || null;
   }
 
   async function loadRegistry() {
     if (ONLINE) {
-      try { return await api('/api/projects'); } catch (e) { /* hôte mono-projet */ }
+      /* Hôte local : le registre de la machine fait foi, et son absence est un
+         registre vide. `data/projects.json` embarqué décrit la galerie de la
+         vitrine (Atlas Ops, Sentinel Sec…) : s'y replier ici peuplerait
+         l'atelier de projets qui n'existent pas. */
+      try { return await api('/api/projects'); } catch (e) { return null; }
     }
     try { return await fetchJson('data/projects.json', { cache: 'no-store' }); }
     catch (e) { return null; }
@@ -554,6 +563,46 @@
     }
   }
 
+
+  /* ── Sélecteur de projets ──
+     L'implémentation vit dans `project-picker.js`, partagée avec le
+     portefeuille du cockpit : deux hôtes, une seule question, une seule UI.
+     Chargée à la demande — une page qui ne l'ouvre jamais ne la télécharge pas. */
+  function ensurePicker() {
+    if (window.GrimoirePicker) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'project-picker.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('project-picker.js introuvable'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function openProjectPicker() {
+    if (!ONLINE) {
+      Atelier.toast('API locale indisponible — lancez <code>grimoire serve</code> depuis un projet.');
+      return;
+    }
+    try { await ensurePicker(); }
+    catch (e) { Atelier.toast(Atelier.esc(String(e.message || e))); return; }
+    window.GrimoirePicker.open({
+      api,
+      esc: Atelier.esc,
+      toast: Atelier.toast,
+      servedPath: PROJECT && PROJECT.path,
+      selectionHint: "choisir un projet re-route l'atelier dessus",
+      onSelected(status) {
+        Atelier.toast('Atelier re-routé sur <b>' + Atelier.esc(status.projectRoot) + '</b>', { good: true });
+        /* Le serveur a changé de racine : tout l'état de page (blueprints,
+           extensions, couche de données) appartient à l'ancien projet. */
+        setTimeout(() => location.reload(), 350);
+      },
+    });
+  }
+
+  Atelier.openProjectPicker = openProjectPicker;
+
   window.Atelier = Atelier;
 
   /* ══ Injection du chrome ══ */
@@ -584,7 +633,7 @@
     if (mount) {
       mount.innerHTML = `
         <a class="at-logo" href="index.html">GRIMOIRE&nbsp;<span>KIT</span></a>
-        <button class="at-project${noProj ? ' empty' : ''}" id="at-project-btn" title="${noProj ? 'Aucun projet' : Atelier.esc(proj.path || '')}">
+        <button class="at-project${noProj ? ' empty' : ''}" id="at-project-btn" title="${noProj ? 'Aucun projet — ouvrir le sélecteur' : Atelier.esc(proj.path || '') + ' — changer de projet'}">
           <span class="dot"></span>
           <span class="name">${noProj ? 'aucun projet' : Atelier.esc(proj.name)}</span>
           <span class="caret">▾</span>
@@ -605,7 +654,12 @@
         </div>`;
 
       const btn = document.getElementById('at-project-btn');
-      if (btn) { btn.addEventListener('click', () => { location.href = 'atelier.html'; }); }
+      if (btn) {
+        btn.addEventListener('click', () => {
+          if (ONLINE) openProjectPicker();
+          else location.href = 'atelier.html';
+        });
+      }
     }
 
     const status = document.getElementById('atelier-status');
