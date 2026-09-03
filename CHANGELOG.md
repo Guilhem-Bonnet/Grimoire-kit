@@ -9,6 +9,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Le garde de release vérifie que chaque changement fusionné a son entrée,
+  au bon endroit.** Il vérifiait qu'`[Unreleased]` était vide et que la section
+  la plus récente portait le numéro publié — deux propriétés vraies sur la
+  3.36.0 alors que deux PR n'avaient aucune entrée et que trente-huit blocs de
+  deux autres avaient glissé sous `[3.35.0]`, une version publiée sans eux : une
+  PR ouverte avant une release et fusionnée après voit git recaler ses lignes
+  par contexte. Pour chaque commit `feat`, `fix` ou `perf` depuis le dernier
+  tag, le garde exige qu'il touche `CHANGELOG.md` et que chaque titre d'entrée
+  qu'il a ajouté soit aujourd'hui sous la version publiée ou sous
+  `[Unreleased]`. Sans tag atteignable, la couverture est déclarée non vérifiée
+  — et non vérifié n'est pas vérifié.
 - **Deux artefacts que la norme rend obligatoires et que le kit ne livrait
   pas.** Le claim ledger (AG-QUA-002, exigé dès le premier niveau) relie chaque
   affirmation qui pèse sur une décision à ce qui la prouve : `claim-ledger.md`
