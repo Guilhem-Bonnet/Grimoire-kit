@@ -330,7 +330,6 @@ def get_expertise_context(profile_id: str) -> str:
     profile = EXPERTISE_PROFILES.get(profile_id)
     if not profile:
         return f"Unknown profile: {profile_id}"
-
     lines = [
         f"# Expert Context: {profile['name']}",
         f"Domain: {profile['domain']}",

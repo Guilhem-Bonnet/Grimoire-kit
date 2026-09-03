@@ -127,15 +127,12 @@ def generate_prompt(
         aspect_ratio: Ratio (16:9, 1:1, etc.).
         quality: Ajouter des modificateurs de qualité.
         negative: Éléments à exclure (pour stable-diffusion).
-
     Returns:
         ImagePrompt avec le prompt final assemblé.
     """
     preset = STYLE_PRESETS.get(style, STYLE_PRESETS["generic"])
     sep = preset["separator"]
-
     parts: list[str] = [description.strip()]
-
     if art_style:
         parts.append(art_style)
     if lighting:

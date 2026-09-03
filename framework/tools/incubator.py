@@ -144,10 +144,8 @@ def next_id(ideas: list[Idea]) -> str:
 def check_viability(idea: Idea, project_root: Path) -> dict[str, bool]:
     """Vérifie les conditions de viabilité d'une idée."""
     checks = {}
-
     # Alignment — a des tags pertinents ou description non-vide
     checks["alignment"] = len(idea.description) > 20 and len(idea.tags) > 0
-
     # Feasibility — pas de blockers explicites
     blockers = ["impossible", "blocked", "dépend de", "requires external"]
     checks["feasibility"] = not any(b in idea.description.lower() for b in blockers)

@@ -166,7 +166,6 @@ def _extract_tech_signals(proposal: str) -> dict:
 def _score_criterion(proposal: str, criterion: str, signals: dict) -> float:
     """Score heuristique d'un critère (0.0-1.0, 1.0 = bon)."""
     criterion_lower = criterion.lower()
-
     # Complexité : plus c'est long + deps = plus complexe
     if "complexité" in criterion_lower or "complexity" in criterion_lower:
         base = 0.7
@@ -175,7 +174,6 @@ def _score_criterion(proposal: str, criterion: str, signals: dict) -> float:
         if signals["word_count"] > 50:
             base -= 0.1
         return max(0.1, min(1.0, base))
-
     # Performance
     if "performance" in criterion_lower:
         return 0.5 if signals["has_performance"] else 0.7

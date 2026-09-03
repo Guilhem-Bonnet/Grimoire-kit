@@ -602,6 +602,10 @@
    "version": "3.16.0",
    "path": "framework/tools/orchestrator.py"
   },
+  "29e91fee7a37a66dddc99671ab690604ebbe02dbe08d065c46a661416dc0bc1d": {
+   "version": "3.36.0",
+   "path": "framework/tools/failure-museum.py"
+  },
   "2a05ae50f2e26b2f0852cbd981f7f9d84268c208fc399ce63f75e14e2b5acad6": {
    "version": "3.12.0",
    "path": "archetypes/stack/agents/docker-expert.dna.yaml"
@@ -1053,6 +1057,10 @@
   "4e55470e8a35941f6c50a92aecb2587518008adeae932e9f699a91e74aeea18b": {
    "version": "3.36.0",
    "path": "framework/tools/rag-retriever.py"
+  },
+  "4e639ef0061e42d37d422102b5293b091f711ffd959b48daf580191cee4f0f04": {
+   "version": "3.36.0",
+   "path": "framework/tools/expert-tool-chain.py"
   },
   "4e6cc045cdbbe0aa4bf073db4b55f1898fe9c585096cd0d924a3146129baed11": {
    "version": "3.24.0",
@@ -1697,6 +1705,10 @@
   "76c3876c46db652f49103c1916b93dd4bd71d8ecd5d1a199a49a9779f023d7bf": {
    "version": "3.10.2",
    "path": "framework/memory/session-save.py"
+  },
+  "77197916deb06729da44d684bc3e89b0bb8ea1907bdf87ff314d6c8f45d3ead6": {
+   "version": "3.36.0",
+   "path": "framework/tools/incubator.py"
   },
   "775e6ec2955bc0fa574326c1c7930d1e9f721ded321a152fe64249fd28a57971": {
    "version": "3.32.0",
@@ -2850,6 +2862,10 @@
    "version": "3.4.2",
    "path": "framework/copilot/instructions/grimoire-project.instructions.md"
   },
+  "c5f680a1b4aa9c60e6247159cd48b9e0577410ebd7cf4f3103aaf0353fdc698e": {
+   "version": "3.36.0",
+   "path": "framework/tools/adversarial-consensus.py"
+  },
   "c60f772488de53d62806fae36b8a05350cc05fd109e6f5c10bb1ccd6134acc9c": {
    "version": "3.35.0",
    "path": "framework/copilot/prompts/grimoire-status.prompt.md"
@@ -2893,6 +2909,10 @@
   "c7ef77543a7d052d41a30acbed3ad7508df00a17a5442747520745f2d220a9cd": {
    "version": "3.16.0",
    "path": "framework/tools/memory-lint.py"
+  },
+  "c7f3f94268c7f82ede9cd2dec2e2f3e8a07bfc844349370589f07704d0cc1ab2": {
+   "version": "3.36.0",
+   "path": "framework/tools/agent-integrity.py"
   },
   "c816bc8391054d52eaf22c3e51c8936a32eb053170a2feb0b10828fc855ea86c": {
    "version": "3.36.0",
@@ -2989,6 +3009,10 @@
   "ce49eab2beb03a0678fe6bb9885e6dc4ee54921184e5f4c251a48b0bd6a37ada": {
    "version": "3.4.2",
    "path": "framework/tools/agent-watch.py"
+  },
+  "ce4ad887a6b8a40b2ac4105a6c00e6d5b77843d5d96ccb9c12280f4d70195db6": {
+   "version": "3.36.0",
+   "path": "framework/tools/swarm-consensus.py"
   },
   "ce5534c00fb49b9ba74919cbf43671c73af45965a145d86f331c25ec462ca744": {
    "version": "3.35.0",
@@ -3397,6 +3421,10 @@
   "ebbe25d2f7a47d73609a147057ed4b636c497bd52b1f485354418f61c4ab7e7c": {
    "version": "3.36.0",
    "path": "framework/tools/web-browser.py"
+  },
+  "ebeff253a9e61e1082883b4f00326356309e87564f629c0933ecc99f2f448c0e": {
+   "version": "3.36.0",
+   "path": "framework/tools/image-prompt.py"
   },
   "ec00085ed2d17b2a5b5ba6bc243098870b32037cce0dc46faf80127f8ed49a60": {
    "version": "3.35.4",
