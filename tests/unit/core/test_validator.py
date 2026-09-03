@@ -258,3 +258,17 @@ class TestUnknownKeys:
         unknown_errs = [e for e in errs if "zzzzz_garbage" in e.message]
         assert len(unknown_errs) == 1
         assert unknown_errs[0].suggestion == ""
+
+
+def test_agents_entry_is_a_known_key() -> None:
+    """La persona d'entrée se déclare dans project-context.yaml ; lint ne doit pas la signaler."""
+    from grimoire.core.validator import _KNOWN_AGENTS_KEYS
+
+    assert "entry" in _KNOWN_AGENTS_KEYS
+
+
+def test_schema_declares_agents_entry() -> None:
+    from grimoire.core.schema import generate_schema
+
+    agents = generate_schema()["properties"]["agents"]["properties"]
+    assert "entry" in agents

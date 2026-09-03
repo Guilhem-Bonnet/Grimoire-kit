@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **La persona d'entrée se choisit par projet.** Elle était `concierge` en dur :
+  `collect_agents` acceptait un autre nom, mais son seul appelant ne le passait
+  jamais. Un projet qui porte déjà son propre point d'entrée — un orchestrateur
+  chargé par `CLAUDE.md` — en recevait un second à chaque `session_start`, sans
+  rien qui dise lequel prime. `agents.entry` dans `project-context.yaml` nomme
+  la persona (`concierge` par défaut) ou, vide, déclare qu'il n'en faut aucune.
+  `host status` montre la persona retenue et signale une clé qui nomme un agent
+  absent au lieu d'en inventer un. Le schéma et `lint` connaissent la clé.
 - **Le bridge épingle la révision du standard qu'il trace.** `profile-map.yaml`
   nommait le corpus normatif par nom de dépôt et chemin de fichier, sans SHA ni
   date : impossible de dire si le bridge avait été relu après le dernier commit
