@@ -14,7 +14,7 @@
 3. **Plan/Act** — `[PLAN]` = structurer sans modifier · `[ACT]` = exécuter directement (défaut) · `[THINK]` = explorer ≥3 options → décider → documenter
 4. **Grice** — *Quantité* : dire exactement ce qu'il faut · *Qualité* : rien sans preuve · *Pertinence* : répondre à la question · *Manière* : clair, ordonné, sans ambiguïté
 5. **Chunking 7±2** — Max 7 items par liste/menu/phase. Au-delà → sous-grouper
-6. **Mémoire** — Dual-write Qdrant + fichiers via `grimoire memory remember/recall` (fallback `mem0-bridge.py`) · Lazy-load · Log contradictions
+6. **Mémoire** — Dual-write Qdrant + fichiers via `grimoire memory remember/recall` (sans le CLI : écriture directe dans `_grimoire/_memory/`) · Lazy-load · Log contradictions
 7. **Communication** — Langue : `{communication_language}` · Écrire dans fichiers, jamais proposer du code à copier · Ne pas demander confirmation
 8. **Mesh (AMN)** — S'enregistrer au registry · Observer l'état partagé ELSS · P2P pour questions ciblées (max 5 échanges) · Émettre events sur actions significatives · Décisions finales toujours via SOG
 9. **ALS (Autonomy Level System)** — L1 (local/réversible) = fonce · L2 (nouveau fichier/CI) = fonce + notifie · L3 (architecture/partagé) = plan → validation → exécute · L4 (prod/destructif) = chaque step supervisé. Expert = Joueur par défaut sur L1/L2.

@@ -639,7 +639,7 @@ def render_report(result: AntifragileResult) -> str:
     # Score visuel
     filled = int(result.global_score / 5)
     empty = 20 - filled
-    bar = "█" * filled + "░" * empty
+    bar = "#" * filled + "." * empty
     lines.append(f"## Score Global : `{bar}` {result.global_score}/100")
     lines.extend(["", "---", ""])
 
@@ -840,7 +840,7 @@ def main():
         # Sortie compacte
         icon = LEVEL_ICONS.get(result.level, "")
         filled = int(result.global_score / 5)
-        bar = "█" * filled + "░" * (20 - filled)
+        bar = "#" * filled + "." * (20 - filled)
         print(f"{icon} Anti-Fragile Score : {bar} {result.global_score}/100 ({result.level})")
         print(f"   {result.summary}")
         print()

@@ -22,7 +22,7 @@ You must fully embody this agent's persona and follow all activation instruction
       </step>
       <step n="3">Remember: user's name is {user_name}</step>
       <step n="4">Charger {project-root}/_grimoire/_memory/shared-context.md pour connaître le projet</step>
-      <step n="4b">Si le fichier existe, charger {project-root}/_grimoire/_config/archetype.dna.yaml pour connaître les traits, contraintes et valeurs du projet (guide le comportement de tous les agents)</step>
+      <step n="4b">Si le fichier existe, charger {project-root}/_grimoire/kit/archetype.dna.yaml pour connaître les traits, contraintes et valeurs du projet (guide le comportement de tous les agents)</step>
       <step n="5">FIRST-RUN DETECTION:
           1. Charger {project-root}/_grimoire/_memory/session-state.md
           2. Si le fichier contient "first_run: true" → mode first-run (voir step 5b)
@@ -112,19 +112,11 @@ Après les réponses :
   </persona>
 
   <knowledge>
-    <!-- Agent routing map — loaded at activation -->
+    <!-- Agent routing map — généré à l'installation depuis les agents
+         réellement déployés. Ne pas éditer à la main : `grimoire up` le
+         régénère. Un agent absent d'ici n'est pas installé. -->
     <agents>
-      <agent tag="dev" name="Amelia" strengths="code, tests, implementation, bug-fix, refactoring" use_when="Écrire du code, corriger un bug, implémenter une feature, TDD"/>
-      <agent tag="architect" name="Winston" strengths="design, API, infra, patterns, scalabilité" use_when="Décisions d'architecture, refonte système, choix tech, schéma de données"/>
-      <agent tag="pm" name="John" strengths="PRD, requirements, stakeholders, priorités" use_when="Définir un produit, écrire un PRD, prioriser le backlog, user interviews"/>
-      <agent tag="analyst" name="Mary" strengths="marché, concurrence, domaine, research" use_when="Étude de marché, analyse concurrentielle, veille sectorielle"/>
-      <agent tag="qa" name="Quinn" strengths="tests, E2E, couverture, automatisation" use_when="Écrire des tests, stratégie de test, couverture, CI"/>
-      <agent tag="sm" name="Bob" strengths="sprints, stories, agile, workflow" use_when="Planifier un sprint, découper en stories, orchestrer un workflow"/>
-      <agent tag="tech-writer" name="Paige" strengths="docs, Mermaid, standards" use_when="Écrire de la doc, diagrammes, guides, README"/>
-      <agent tag="ux-designer" name="Sally" strengths="UX, wireframes, interaction design" use_when="Design d'interface, parcours utilisateur, accessibilité"/>
-      <agent tag="art-director" name="Frida" strengths="identité visuelle, formatage, design system" use_when="Charte graphique, cohérence visuelle, templates de formatage"/>
-      <agent tag="creative-toolsmith" name="Vulcan" strengths="outils, scripts, framework extension" use_when="Créer un outil, étendre le framework, automatiser"/>
-      <agent tag="quick-flow-solo-dev" name="Barry" strengths="rapidité, lean, minimum ceremony" use_when="Petit projet, prototype rapide, spec minimale"/>
+{{agent_routing_map}}
     </agents>
   </knowledge>
 

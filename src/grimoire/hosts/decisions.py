@@ -141,6 +141,63 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bdocker\s+system\s+prune\b.*-a", "full docker prune"),
 )
 
+#: Where a quoted string stops being data and becomes a command again: whatever
+#: is handed to these is executed, so it stays under inspection.
+_EVAL_INTRODUCER = re.compile(
+    r"(?:\b(?:bash|sh|zsh|dash|ksh|ash)\s+(?:-[A-Za-z]*\s+)*-[A-Za-z]*c"
+    r"|\beval|\bxargs(?:\s+-\S+)*|\bsu\s+-c|\bssh\s+\S+|\btimeout\s+\S+)\s*$"
+)
+
+#: Single- or double-quoted runs, the shape shell arguments take when they carry
+#: prose: a commit message, a ``--description``, a log line.
+_QUOTED_RE = re.compile(r"'[^']*'|\"(?:[^\"\\\\]|\\\\.)*\"")
+
+#: ``<<TAG`` / ``<<'TAG'`` / ``<<-TAG``, opening a body the command *writes*.
+_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _strip_heredoc_bodies(command: str) -> str:
+    """Drop every heredoc body, keeping the redirection that opened it.
+
+    A heredoc body is data the command writes to a file. The shell never runs
+    it, so nothing inside it can be a destructive action.
+    """
+    out = command
+    for match in _HEREDOC_OPEN_RE.finditer(command):
+        tag = re.escape(match.group(2))
+        body = re.compile(
+            rf"({re.escape(match.group(0))}).*?^[ \t]*{tag}[ \t]*$",
+            re.DOTALL | re.MULTILINE,
+        )
+        out = body.sub(r"\1", out, count=1)
+    return out
+
+
+def command_surface(command: str) -> str:
+    """The part of *command* the shell will execute, with carried data removed.
+
+    Matching the destructive patterns against the whole command line meant the
+    policy refused a heredoc that *documented* a dangerous command, and a commit
+    message that merely named one — while the same words written through an
+    editing tool passed, because those carry no command string at all. Reading
+    data as if it were an action was the defect; the asymmetry was the symptom.
+
+    Quoted text is dropped, *except* where a shell is about to run it: what
+    follows ``bash -c``, ``eval`` or ``xargs`` is executed and stays inspected.
+    """
+    surface = _strip_heredoc_bodies(command)
+    out: list[str] = []
+    cursor = 0
+    for quoted in _QUOTED_RE.finditer(surface):
+        preceding = surface[cursor:quoted.start()]
+        out.append(preceding)
+        # Keep the quotes as a word boundary so ``rm -rf`` cannot be spliced
+        # together out of two neighbouring fragments.
+        out.append(quoted.group(0) if _EVAL_INTRODUCER.search(preceding.rstrip()) else " ")
+        cursor = quoted.end()
+    out.append(surface[cursor:])
+    return "".join(out)
+
 
 @dataclass(frozen=True, slots=True)
 class ToolFacts:
@@ -216,8 +273,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     destructive_reason = ""
     if command:
+        surface = command_surface(command)
         for pattern, label in _DESTRUCTIVE_PATTERNS:
-            if re.search(pattern, command, flags=re.IGNORECASE):
+            if re.search(pattern, surface, flags=re.IGNORECASE):
                 destructive_reason = label
                 break
 

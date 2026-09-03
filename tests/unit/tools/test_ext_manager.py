@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import struct
+import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -217,6 +220,33 @@ class TestRegistry:
         assert first["checksum"] == second["checksum"]
         index = json.loads((registry / "registry.json").read_text(encoding="utf-8"))
         assert len(index["extensions"]["demo-ext"]["versions"]) == 1
+
+    def test_publish_is_deterministic_across_a_second_boundary(
+        self, ext_dir: Path, tmp_path: Path
+    ) -> None:
+        """The gzip header carries a timestamp; the tar body never did.
+
+        Both publishes used to land in the same second on a fast machine, so the
+        test above passed by luck and went red whenever CI straddled a boundary.
+        Advancing the clock makes the defect deterministic instead of seasonal.
+        """
+        registry = tmp_path / "registry"
+        first = publish_extension(ext_dir, registry)
+
+        real_time = time.time
+        with mock.patch.object(time, "time", lambda: real_time() + 3600):
+            second = publish_extension(ext_dir, registry)
+
+        assert first["checksum"] == second["checksum"]
+
+    def test_archive_header_carries_no_timestamp(
+        self, ext_dir: Path, tmp_path: Path
+    ) -> None:
+        """MTIME is bytes 4..8 of a gzip member header (RFC 1952)."""
+        registry = tmp_path / "registry"
+        publish_extension(ext_dir, registry)
+        archive = registry / "dist" / "demo-ext-0.1.0.tar.gz"
+        assert struct.unpack("<I", archive.read_bytes()[4:8])[0] == 0
 
     def test_install_from_registry(
         self, ext_dir: Path, project_root: Path, tmp_path: Path

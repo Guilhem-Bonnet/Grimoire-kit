@@ -8,7 +8,9 @@ correctly without touching real project data.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -21,11 +23,77 @@ INIT_SCRIPT = KIT_DIR / "grimoire-init.sh"
 GRIMOIRE_SH = KIT_DIR / "grimoire.sh"
 
 
+def _find_bash() -> str | None:
+    """Un `bash` capable d'exécuter un script, ou None.
+
+    Sur Windows, `bash` tout court résout vers `C:\\Windows\\System32\\bash.exe`
+    — le lanceur WSL, qui précède Git Bash dans le PATH des runners. Sans
+    distribution installée il sort en erreur avec un message UTF-16, et douze
+    tests échouaient en accusant `grimoire-init.sh` d'un défaut qui n'est pas le
+    sien.
+
+    On cherche donc Git Bash d'abord, et on ne se rabat sur le PATH que si ce
+    qu'on y trouve n'est pas le lanceur WSL.
+    """
+    if sys.platform == "win32":
+        for candidate in (
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ):
+            if Path(candidate).is_file():
+                return candidate
+        found = shutil.which("bash")
+        if found and "System32" not in found:
+            return found
+        return None
+    return shutil.which("bash")
+
+
+BASH = _find_bash()
+
+# `grimoire-init.sh`, `grimoire.sh` et `install.sh` sont des points d'entrée
+# Unix. Ces tests ne s'exécutent pas sous Windows, et c'est un choix explicite
+# plutôt qu'un oubli.
+#
+# Le job `framework-tests` existe pour les 108 outils Python de
+# `framework/tools/` — l'issue #33 avait montré un `import fcntl` fatal
+# découvert par un utilisateur et non par la CI. Faire tourner en plus des
+# installeurs bash sous Git Bash n'a jamais été son objet, et le dépôt prévoit
+# la résorption de ces scripts vers le CLI Python (`planning/resorption-bash.md`).
+#
+# Mesuré : sous Windows, chacune des 26 invocations atteint le timeout de 30 s,
+# soit treize minutes pour un job qui n'apprend rien — et le job mourait avant
+# que pytest n'imprime la moindre trace. Le coût est réel, l'information nulle.
+#
+# Lever ce skip demande de traiter d'abord la portabilité des scripts eux-mêmes
+# (chemins Windows, outils Unix supposés présents), qui est le chantier de
+# résorption, pas celui de la CI.
+requires_bash = pytest.mark.skipif(
+    BASH is None or sys.platform == "win32",
+    reason=(
+        "points d'entrée Unix : sans bash utilisable, ou sous Windows où leur "
+        "portabilité n'est pas assurée (voir planning/resorption-bash.md)"
+    ),
+)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
 def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subprocess.CompletedProcess:
-    """Run a command, return CompletedProcess."""
+    """Run a command, return CompletedProcess.
+
+    `stdin` est explicitement fermé. `grimoire-init.sh` contient des invites
+    interactives (`read -p "Continuer ? (y/N)"`) : sans stdin fermé, le script
+    attend une réponse qui ne viendra jamais. Sous Linux la CI ferme déjà stdin
+    et `read` reçoit EOF tout de suite, ce qui masquait le problème ; sous
+    Windows le descripteur hérité ne se ferme pas, et le job s'est trouvé bloqué
+    plus de quarante minutes là où ubuntu finissait en secondes.
+
+    Le `timeout` ne suffit pas à rattraper ce cas : il tue bien `bash`, mais
+    `communicate()` continue d'attendre la fermeture du tube tant qu'un
+    petit-fils le tient.
+    """
     run_env = {**os.environ, **(env or {})}
     return subprocess.run(
         args,
@@ -34,6 +102,7 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
         text=True,
         timeout=30,
         env=run_env,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -97,7 +166,7 @@ def _create_copilot_instructions(base: Path) -> Path:
     """Create .github/copilot-instructions.md with Grimoire marker."""
     ci = base / ".github" / "copilot-instructions.md"
     ci.parent.mkdir(parents=True, exist_ok=True)
-    ci.write_text("# Copilot Instructions\n> Auto-généré par Grimoire Custom Kit v3.1.0\n")
+    ci.write_text("# Copilot Instructions\n> Auto-généré par Grimoire Custom Kit v3.1.0\n", encoding="utf-8")
     return ci
 
 
@@ -125,18 +194,19 @@ def empty_dir(tmp_path):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@requires_bash
 class TestCmdReset:
     """Tests for the reset command."""
 
     def test_reset_help(self, project_dir):
         """--help prints usage and exits 0."""
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--help"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--help"], cwd=project_dir)
         assert result.returncode == 0
         assert "Remet l'installation" in result.stdout
 
     def test_reset_no_grimoire(self, empty_dir):
         """Reset on a directory without _grimoire/ fails."""
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--yes"], cwd=empty_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=empty_dir)
         assert result.returncode != 0
         assert "Pas de projet Grimoire" in result.stderr
 
@@ -146,7 +216,7 @@ class TestCmdReset:
         ab = (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text()
         assert ab == "# old agent-base"
 
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--dry-run"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--dry-run"], cwd=project_dir)
         assert result.returncode == 0
         assert "Dry-run" in result.stdout
 
@@ -158,7 +228,7 @@ class TestCmdReset:
         sc = project_dir / "_grimoire" / "_memory" / "shared-context.md"
         sc.write_text("# Important context I wrote")
 
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         # Memory should be preserved
@@ -170,7 +240,7 @@ class TestCmdReset:
         custom = project_dir / "_grimoire" / "_config" / "custom" / "agents" / "my-custom-agent.md"
         assert custom.exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         assert custom.exists()
@@ -178,7 +248,7 @@ class TestCmdReset:
 
     def test_hard_reset_dry_run(self, project_dir):
         """Hard reset dry-run doesn't delete anything."""
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--hard", "--dry-run"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--hard", "--dry-run"], cwd=project_dir)
         assert result.returncode == 0
         assert "Dry-run" in result.stdout
 
@@ -190,7 +260,7 @@ class TestCmdReset:
         custom = project_dir / "_grimoire" / "_memory" / "shared-context.md"
         assert custom.exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--hard", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--hard", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         # Structure should be recreated
@@ -202,7 +272,7 @@ class TestCmdReset:
 
     def test_reset_unknown_option_fails(self, project_dir):
         """Unknown option causes error."""
-        result = _run(["bash", str(INIT_SCRIPT), "reset", "--nonexistent"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "reset", "--nonexistent"], cwd=project_dir)
         assert result.returncode != 0
 
 
@@ -211,18 +281,19 @@ class TestCmdReset:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@requires_bash
 class TestCmdUninstall:
     """Tests for the uninstall command."""
 
     def test_uninstall_help(self, project_dir):
         """--help prints usage and exits 0."""
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--help"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--help"], cwd=project_dir)
         assert result.returncode == 0
         assert "Supprime complètement" in result.stdout
 
     def test_uninstall_no_grimoire(self, empty_dir):
         """Uninstall on an empty dir fails."""
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes"], cwd=empty_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=empty_dir)
         assert result.returncode != 0
 
     def test_uninstall_removes_grimoire(self, project_dir):
@@ -230,7 +301,7 @@ class TestCmdUninstall:
         assert (project_dir / "_grimoire").exists()
         assert (project_dir / "_grimoire-output").exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         assert not (project_dir / "_grimoire").exists()
@@ -241,7 +312,7 @@ class TestCmdUninstall:
         ci = project_dir / ".github" / "copilot-instructions.md"
         assert ci.exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         assert not ci.exists()
@@ -251,7 +322,7 @@ class TestCmdUninstall:
         ctx = project_dir / "project-context.yaml"
         assert ctx.exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
         assert result.returncode == 0
 
         assert not ctx.exists()
@@ -261,7 +332,7 @@ class TestCmdUninstall:
         ctx = project_dir / "project-context.yaml"
         assert ctx.exists()
 
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes", "--keep-config"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes", "--keep-config"], cwd=project_dir)
         assert result.returncode == 0
 
         assert ctx.exists()
@@ -269,7 +340,7 @@ class TestCmdUninstall:
 
     def test_uninstall_success_message(self, project_dir):
         """Success message is displayed."""
-        result = _run(["bash", str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
         assert result.returncode == 0
         assert "désinstallé avec succès" in result.stdout
 
@@ -279,18 +350,19 @@ class TestCmdUninstall:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@requires_bash
 class TestCmdQuickUpdate:
     """Tests for the quick-update command."""
 
     def test_quickupdate_help(self, project_dir):
         """--help prints usage and exits 0."""
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update", "--help"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--help"], cwd=project_dir)
         assert result.returncode == 0
         assert "Mise à jour rapide" in result.stdout
 
     def test_quickupdate_no_grimoire(self, empty_dir):
         """Quick-update on an empty dir fails."""
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update"], cwd=empty_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=empty_dir)
         assert result.returncode != 0
 
     def test_quickupdate_dry_run(self, project_dir):
@@ -298,7 +370,7 @@ class TestCmdQuickUpdate:
         ab = project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md"
         original = ab.read_text()
 
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update", "--dry-run"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--dry-run"], cwd=project_dir)
         assert result.returncode == 0
         assert "Dry-run" in result.stdout
 
@@ -309,7 +381,7 @@ class TestCmdQuickUpdate:
         custom = project_dir / "_grimoire" / "_config" / "custom" / "agents" / "my-custom-agent.md"
         original = custom.read_text()
 
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
         assert result.returncode == 0
 
         assert custom.read_text() == original
@@ -319,20 +391,20 @@ class TestCmdQuickUpdate:
         sc = project_dir / "_grimoire" / "_memory" / "shared-context.md"
         sc.write_text("# My precious context")
 
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
         assert result.returncode == 0
 
         assert sc.read_text() == "# My precious context"
 
     def test_quickupdate_reports_counts(self, project_dir):
         """Output mentions update counts."""
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
         assert result.returncode == 0
         assert "mis à jour" in result.stdout
 
     def test_quickupdate_unknown_option_fails(self, project_dir):
         """Unknown option causes error."""
-        result = _run(["bash", str(INIT_SCRIPT), "quick-update", "--nonexistent"], cwd=project_dir)
+        result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--nonexistent"], cwd=project_dir)
         assert result.returncode != 0
 
 
@@ -341,24 +413,25 @@ class TestCmdQuickUpdate:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@requires_bash
 class TestGrimoireShRouting:
     """Tests that grimoire.sh correctly routes to new commands."""
 
     def test_help_shows_reset(self):
         """grimoire help lists the reset command."""
-        result = _run(["bash", str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
+        result = _run([BASH, str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
         assert result.returncode == 0
         assert "reset" in result.stdout
 
     def test_help_shows_uninstall(self):
         """grimoire help lists the uninstall command."""
-        result = _run(["bash", str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
+        result = _run([BASH, str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
         assert result.returncode == 0
         assert "uninstall" in result.stdout
 
     def test_help_shows_quick_update(self):
         """grimoire help lists the quick-update command."""
-        result = _run(["bash", str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
+        result = _run([BASH, str(GRIMOIRE_SH), "help"], cwd=KIT_DIR)
         assert result.returncode == 0
         assert "quick-update" in result.stdout
 
@@ -370,6 +443,7 @@ class TestGrimoireShRouting:
 INSTALL_SH = KIT_DIR / "install.sh"
 
 
+@requires_bash
 class TestInstallSh:
     """Tests for the bootstrap install.sh."""
 
@@ -379,7 +453,7 @@ class TestInstallSh:
 
     def test_install_sh_help(self):
         """--help prints usage."""
-        result = _run(["bash", str(INSTALL_SH), "--help"], cwd=KIT_DIR)
+        result = _run([BASH, str(INSTALL_SH), "--help"], cwd=KIT_DIR)
         assert result.returncode == 0
         assert "Bootstrap Installer" in result.stdout
 

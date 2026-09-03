@@ -259,12 +259,18 @@ class TestReadFileSafe(unittest.TestCase):
         self.cg = importlib.import_module("context-guard")
 
     def test_existing_file(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        # Le fichier est refermé avant d'être relu : sous Windows, un fichier
+        # encore ouvert ne peut être ni rouvert ni effacé (WinError 32).
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             f.write("hello world")
-            f.flush()
-            result = self.cg.read_file_safe(Path(f.name))
+            path = Path(f.name)
+        try:
+            result = self.cg.read_file_safe(path)
             self.assertEqual(result, "hello world")
-            Path(f.name).unlink()
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_missing_file(self):
         result = self.cg.read_file_safe(Path("/nonexistent/file.txt"))
@@ -379,15 +385,19 @@ class TestFileLoad(unittest.TestCase):
         self.cg = importlib.import_module("context-guard")
 
     def test_compute_existing_file(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as f:
             f.write("# Test agent\n" * 100)
-            f.flush()
-            fl = self.cg.FileLoad(path=Path(f.name), role="agent-definition")
+            path = Path(f.name)
+        try:
+            fl = self.cg.FileLoad(path=path, role="agent-definition")
             fl.compute()
             self.assertTrue(fl.loaded)
             self.assertGreater(fl.tokens, 0)
             self.assertIn("# Test agent", fl.content)
-            Path(f.name).unlink()
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_compute_missing_file(self):
         fl = self.cg.FileLoad(path=Path("/nonexistent.md"), role="memory")

@@ -110,7 +110,7 @@ class MergeEngine:
             if not src_file.is_file():
                 continue
 
-            rel = str(src_file.relative_to(self._source))
+            rel = src_file.relative_to(self._source).as_posix()
             target_file = self._target / rel
 
             if target_file.exists():
@@ -124,7 +124,7 @@ class MergeEngine:
             else:
                 files_to_create.append(rel)
                 # Check if parent dir needs creation
-                rel_parent = str(target_file.parent.relative_to(self._target))
+                rel_parent = target_file.parent.relative_to(self._target).as_posix()
                 if rel_parent != "." and not target_file.parent.is_dir() and rel_parent not in dirs_to_create:
                     dirs_to_create.append(rel_parent)
 

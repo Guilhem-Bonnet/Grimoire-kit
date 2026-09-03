@@ -750,7 +750,7 @@ def install_proposal(
     print()
     print("   Étapes suivantes :")
     print("   1. Réviser les [TODO] dans le fichier agent")
-    print("   2. Ajouter dans _grimoire/_config/agent-manifest.csv")
+    print("   2. Ajouter dans _grimoire/kit/agent-manifest.csv")
     print("   3. Lancer Sentinel [AA] pour l\'audit qualité")
     print("   4. Tester l\'agent en session Copilot Chat")
 
@@ -830,7 +830,7 @@ Exemples :
                         default="custom",
                         help="Archétype de référence pour l\'agent (défaut: custom)")
     parser.add_argument("--manifest", metavar="PATH",
-                        default="_grimoire/_config/agent-manifest.csv")
+                        default="_grimoire/kit/agent-manifest.csv")
 
     args = parser.parse_args()
 

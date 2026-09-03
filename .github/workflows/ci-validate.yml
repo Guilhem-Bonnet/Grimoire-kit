@@ -192,6 +192,11 @@ jobs:
     name: "Framework Tools Tests (pytest, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: bash-syntax
+    # Un job qui pend consomme un runner jusqu'à la limite de six heures sans
+    # rien apprendre. Celui-ci a tenu quarante minutes sur une invite
+    # interactive de `grimoire-init.sh`, quand ubuntu finissait en secondes :
+    # mieux vaut un échec net et rapide.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

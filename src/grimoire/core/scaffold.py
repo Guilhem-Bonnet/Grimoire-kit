@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path, PurePath
 from string import Template
 from typing import ClassVar
@@ -39,16 +40,33 @@ def _is_agent_markdown(path: PurePath) -> bool:
     return path.suffix == ".md" and "agents" in path.parts
 
 
+#: A comment block that *documents* the placeholders rather than using them.
+#: Substituting inside it turns the legend into nonsense — the installed file
+#: read "Stack - Nom de l'agent développement (ex: Amelia)", where "Stack" had
+#: replaced the ``{{dev_agent_name}}`` the line exists to explain.
+_LEGEND_RE = re.compile(r"<!--\s*grimoire:legend\b.*?-->", re.DOTALL)
+
+
 def _render_placeholders(text: str, variables: dict[str, str]) -> str:
-    """Substitute ``{{key}}`` for known keys only.
+    """Substitute ``{{key}}`` for known keys only, outside legend blocks.
 
     Unknown placeholders are left intact on purpose: the blank agent template
     of the ``minimal`` archetype ships ``{{agent_name}}`` as a fill-in-the-blank,
     and blanking it would destroy what the file is for.
     """
-    for key, value in variables.items():
-        text = text.replace("{{" + key + "}}", value)
-    return text
+    def _substitute(chunk: str) -> str:
+        for key, value in variables.items():
+            chunk = chunk.replace("{{" + key + "}}", value)
+        return chunk
+
+    out: list[str] = []
+    cursor = 0
+    for legend in _LEGEND_RE.finditer(text):
+        out.append(_substitute(text[cursor:legend.start()]))
+        out.append(legend.group(0))
+        cursor = legend.end()
+    out.append(_substitute(text[cursor:]))
+    return "".join(out)
 
 
 def _strip_tpl_suffix(name: str) -> str:
@@ -324,7 +342,7 @@ $agents_table
 | `_grimoire/_memory/decisions-log.md` | Journal des décisions architecturales | Auto-alimenté par les agents |
 | `_grimoire/_memory/failure-museum.md` | Catalogue erreurs + résolutions | Auto-alimenté |
 | `project-context.yaml` | Config globale (name, stack, language) | Modifier si besoin |
-| `_grimoire/_config/archetype.dna.yaml` | Traits et contraintes de l'archétype | Ne pas modifier sans raison |
+| `_grimoire/kit/archetype.dna.yaml` | Traits et contraintes de l'archétype | Ne pas modifier sans raison |
 
 ## File Ownership
 
@@ -332,7 +350,7 @@ $agents_table
 |---------|-------------|-------|
 | `_grimoire/_memory/shared-context.md` | Tous les agents | Lecture/écriture |
 | `_grimoire/_memory/decisions-log.md` | Agents décisionnels | Écriture, utilisateurs lecture |
-| `_grimoire/_config/archetype.dna.yaml` | Grimoire Kit | Ne pas modifier sans raison |
+| `_grimoire/kit/archetype.dna.yaml` | Grimoire Kit | Ne pas modifier sans raison |
 | `project-context.yaml` | Équipe projet | Configurable |
 
 ## Project Context
@@ -453,10 +471,10 @@ class ProjectScaffolder:
             if d.is_dir():
                 continue  # already there: not work this run did
             d.mkdir(parents=True, exist_ok=True)
-            result.created_dirs.append(str(d.relative_to(self._target)))
+            result.created_dirs.append(d.relative_to(self._target).as_posix())
 
         for fc in plan.copies:
-            label = fc.label or str(fc.dst.relative_to(self._target))
+            label = fc.label or fc.dst.relative_to(self._target).as_posix()
             if fc.tier == TIER_SEED and fc.dst.exists() and not self._force:
                 result.preserved_files.append(label)
                 continue
@@ -478,7 +496,7 @@ class ProjectScaffolder:
             result.copied_files.append(label)
 
         for tr in plan.templates:
-            label = tr.label or str(tr.dst.relative_to(self._target))
+            label = tr.label or tr.dst.relative_to(self._target).as_posix()
             if tr.tier == TIER_SEED and tr.dst.exists() and not self._force:
                 result.preserved_files.append(label)
                 continue
@@ -506,6 +524,10 @@ class ProjectScaffolder:
     def _memory_code_dir(self) -> Path:
         """Kit-provided memory helpers — code, so it belongs to the kit tier."""
         return self._kit_dir() / layout.MEMORY_CODE_SUBDIR
+
+    def _tools_dir(self) -> Path:
+        """Kit-provided tools a persona invokes by name."""
+        return self._kit_dir() / layout.TOOLS_SUBDIR
 
     def _workflows_dir(self) -> Path:
         return self._kit_dir() / layout.WORKFLOWS_SUBDIR
@@ -552,6 +574,7 @@ class ProjectScaffolder:
         variables["tech_stack_list"] = ", ".join(stacks) if stacks else "stack non détectée"
         variables["user_name"] = self._user_name
         variables["project_name"] = self._project_name
+        variables["init_date"] = date.today().isoformat()
         return variables
 
     @staticmethod
@@ -622,6 +645,30 @@ class ProjectScaffolder:
         ]
         p.directories.extend(dirs)
 
+    def _agent_routing_map(self, p: ScaffoldPlan) -> str:
+        """Render the router's knowledge of who is installed, from who is installed.
+
+        The entry-point persona shipped a hardcoded roster from another archetype
+        family: on an infra project, nine of its eleven agents did not exist and
+        seventeen of the nineteen that did were absent from it. A routing map is
+        the one thing in the kit that cannot be written ahead of time — it is a
+        fact about *this* install, so it is generated here, once every agent is
+        planned.
+        """
+        rows: list[str] = []
+        for fc in sorted(p.copies, key=lambda c: c.dst.name):
+            if not fc.src.is_file() or not _is_agent_markdown(fc.dst):
+                continue
+            identity = self._agent_identity(fc.src)
+            if identity is None:
+                continue
+            tag, persona = identity
+            role = self._extract_agent_description(fc.src).replace('"', "'")
+            rows.append(
+                f'      <agent tag="{tag}" name="{persona}" role="{role}"/>'
+            )
+        return "\n".join(rows) if rows else "      <!-- aucun agent installé -->"
+
     def _plan_placeholder_rendering(self, p: ScaffoldPlan) -> None:
         """Resolve template placeholders in the agents and workflows being installed.
 
@@ -639,7 +686,11 @@ class ProjectScaffolder:
                 planned_agents.setdefault(*identity)
 
         variables = self._archetype_render_vars(planned_agents)
-        renderable = {self._agents_dir(), self._workflows_dir()}
+        variables["agent_routing_map"] = self._agent_routing_map(p)
+        # The memory seeds carry ``{{project_name}}`` and ``{{init_date}}`` in
+        # their titles. Leaving them out of the render scope shipped every
+        # project a failure museum named after a placeholder.
+        renderable = {self._agents_dir(), self._workflows_dir(), self._memory_dir()}
         for fc in p.copies:
             if not fc.src.is_file() or fc.dst.parent not in renderable:
                 continue
@@ -758,12 +809,74 @@ class ProjectScaffolder:
                         label="feature/vectus",
                     ))
 
+    #: Protocol references ``agent-base.md`` tells every agent to load on demand.
+    #: The socle is deployed, so its siblings must be too: a "voir
+    #: ``framework/x.md``" that resolves nowhere is an instruction no agent can
+    #: follow. Kept explicit rather than globbing ``framework/*.md`` — the
+    #: directory also holds schemas and kit-internal notes a project never reads.
+    #: Tools a shipped persona or the socle *invokes* — an ``exec=`` item or a
+    #: numbered step, not a passing mention. ``framework/tools/`` holds fifty
+    #: scripts; a project has no use for the forty nothing calls, and shipping
+    #: them all would put 1.3 MB of unreferenced code in every install.
+    #:
+    #: ``""`` is the always-deployed set: ``agent-base.md`` and the meta agents
+    #: ship with every archetype, so what they call must always resolve.
+    _SHIPPED_TOOLS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "": (
+            "failure-museum.py",     # concierge #triage, #failure-check
+            "dep-check.py",          # creative-toolsmith [DC] menu item
+            "grimoire-mcp-tools.py",  # creative-toolsmith, MCP discovery
+            "tool-resolver.py",      # agent-base.md, tool resolution protocol
+            "web-browser.py",        # agent-base.md — "TOUJOURS disponible"
+        ),
+        "creative-studio": (
+            "image-prompt.py",       # content-creator
+            "expert-tool-chain.py",  # illustration-expert, blender-expert
+            "vision-judge.py",       # illustration-expert, blender-expert
+            "agent-test.py",         # tools_required de l'archétype
+            "agent-watch.py",        # tools_required de l'archétype
+        ),
+    }
+
+    #: Files whose own header says to copy them somewhere else before use. They
+    #: are shapes to fill in, not workflows to run.
+    _WORKFLOW_MODELS: ClassVar[frozenset[str]] = frozenset({
+        "workflow-graph.tpl.yaml",
+        "workflow-status.tpl.md",
+        "github-cc-check.yml.tpl",
+    })
+
+    _PROTOCOL_DOCS: ClassVar[tuple[str, ...]] = (
+        "agent-mesh-network.md",
+        "agent-relationship-graph.md",
+        "cc-reference.md",
+        "cross-validation-trust.md",
+        "event-log-shared-state.md",
+        "honest-uncertainty-protocol.md",
+        "hybrid-parallelism-engine.md",
+        "orchestrator-gateway.md",
+        "question-escalation-chain.md",
+        "selective-huddle-protocol.md",
+    )
+
+    @staticmethod
+    def _extract_tool_description(path: Path) -> str:
+        """First sentence of a tool's module docstring, or its stem."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return path.stem
+        match = re.search(r'^"""(.+?)(?:\n|""")', text, re.MULTILINE | re.DOTALL)
+        if not match:
+            return path.stem
+        return " ".join(match.group(1).split()).rstrip(".") or path.stem
+
     def _plan_framework(self, p: ScaffoldPlan) -> None:
         fw = self._framework
         dst_custom = self._kit_dir() / layout.FRAMEWORK_SUBDIR
 
         # Core framework files
-        for name in ("agent-base.md", "agent-base-compact.md"):
+        for name in ("agent-base.md", "agent-base-compact.md", *self._PROTOCOL_DOCS):
             src = fw / name
             if src.is_file():
                 p.copies.append(FileCopy(src=src, dst=dst_custom / name, label=f"framework/{name}"))
@@ -785,16 +898,34 @@ class ProjectScaffolder:
 
         # Workflows — file by file rather than as a directory, so the placeholder
         # pass can reach them and the `.tpl` marker gets stripped like everywhere else.
+        #
+        # Models go to ``examples/``. Stripping ``.tpl`` from a file whose header
+        # says "copier dans _grimoire-output/.runs/{run_id}/" left it sitting
+        # beside the real workflows, named like one — so its illustrative roster
+        # (``dev/Amelia``, ``qa/Quinn``) read as this project's routing table.
         wf_src = fw / "workflows"
         if wf_src.is_dir():
             for wf in sorted(wf_src.iterdir()):
                 if not wf.is_file():
                     continue
-                p.copies.append(FileCopy(
-                    src=wf,
-                    dst=self._workflows_dir() / _strip_tpl_suffix(wf.name),
-                    label=f"framework/workflows/{_strip_tpl_suffix(wf.name)}",
-                ))
+                name = _strip_tpl_suffix(wf.name)
+                is_model = wf.name in self._WORKFLOW_MODELS
+                dst_dir = self._workflows_dir() / "examples" if is_model else self._workflows_dir()
+                label = "framework/workflows/" + ("examples/" if is_model else "") + name
+                p.copies.append(FileCopy(src=wf, dst=dst_dir / name, label=label))
+
+        # Tools a shipped persona invokes by name. Only those: ``framework/tools/``
+        # holds fifty scripts, and a project has no use for the forty a persona
+        # never names. What the kit promises in a handler, it delivers.
+        tools_dst = self._tools_dir()
+        selected = set(self._resolved.archetypes or (self._resolved.archetype,))
+        for scope, names in self._SHIPPED_TOOLS.items():
+            if scope and scope not in selected:
+                continue
+            for name in names:
+                src = fw / "tools" / name
+                if src.is_file():
+                    p.copies.append(FileCopy(src=src, dst=tools_dst / name, label=f"tools/{name}"))
 
         # Memory system — kit code lives in the kit tier so updates reach it.
         code_dst = self._memory_code_dir()
@@ -813,7 +944,12 @@ class ProjectScaffolder:
 
         # Memory logs — seeded once, then owned and written by the project.
         mem_dst = self._memory_dir()
-        for tpl_name in ("contradiction-log.tpl.md", "failure-museum.tpl.md"):
+        # Every log an agent is told to load must exist at install time, even
+        # empty: "charger `dependency-graph.md`" is an instruction, and an
+        # instruction that resolves nowhere is one the agent cannot follow.
+        for tpl_name in ("contradiction-log.tpl.md", "failure-museum.tpl.md",
+                         "handoff-log.tpl.md", "dependency-graph.tpl.md",
+                         "network-topology.tpl.md", "oss-references.tpl.md"):
             src = fw / "memory" / tpl_name
             if src.is_file():
                 dst_name = tpl_name.replace(".tpl", "")
@@ -875,7 +1011,7 @@ class ProjectScaffolder:
         # Decisions log
         p.templates.append(TemplateRender(
             dst=self._memory_dir() / "decisions-log.md",
-            content=_DECISIONS_LOG,
+            content=Template(_DECISIONS_LOG).safe_substitute(v),
             label="decisions-log.md",
             tier=TIER_SEED,
         ))
@@ -895,12 +1031,26 @@ class ProjectScaffolder:
                 continue
             name = fc.dst.stem
             category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
-            desc = self._extract_agent_description(fc.src).replace(",", ";")
+            desc = self._extract_agent_description(fc.src).replace(",", ";").replace("'", "''")
             manifest_lines.append(f"{name},{name}.md,{category},{desc},\n")
         p.templates.append(TemplateRender(
             dst=self._kit_dir() / "agent-manifest.csv",
             content="".join(manifest_lines),
             label="agent-manifest.csv",
+        ))
+
+        # Tool manifest — same contract as the agent manifest: the inventory a
+        # persona is told to load must describe what this project actually got.
+        tool_lines = ["name,file,description\n"]
+        for fc in sorted(p.copies, key=lambda c: c.dst.name):
+            if fc.dst.parent != self._tools_dir():
+                continue
+            desc = self._extract_tool_description(fc.src).replace(",", ";")
+            tool_lines.append(f"{fc.dst.stem},{fc.dst.name},{desc}\n")
+        p.templates.append(TemplateRender(
+            dst=self._kit_dir() / "tool-manifest.csv",
+            content="".join(tool_lines),
+            label="tool-manifest.csv",
         ))
 
         # Session branch metadata
@@ -920,7 +1070,7 @@ class ProjectScaffolder:
             return "Grimoire agent"
         m = re.search(r'^description:\s*["\']?(.+?)["\']?\s*$', text, re.MULTILINE)
         if m:
-            return m.group(1).replace("'", "''")
+            return m.group(1)
         return "Grimoire agent"
 
     def _plan_copilot_prompts(self, p: ScaffoldPlan) -> None:

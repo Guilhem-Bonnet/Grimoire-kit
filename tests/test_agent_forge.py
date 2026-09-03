@@ -173,7 +173,7 @@ class TestScanGapsFromSharedContext(unittest.TestCase):
 
     def test_no_gaps(self):
         f = self.tmpdir / "shared-context.md"
-        f.write_text("# Shared Context\n## Requêtes inter-agents\n## Autre section\n")
+        f.write_text("# Shared Context\n## Requêtes inter-agents\n## Autre section\n", encoding="utf-8")
         gaps = self.forge.scan_gaps_from_shared_context(f)
         self.assertEqual(len(gaps), 0)
 
