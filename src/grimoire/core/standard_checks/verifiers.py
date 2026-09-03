@@ -30,6 +30,28 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.controls import (
+    _verify_blast_radius_policy,
+    _verify_browser_tool_contract,
+    _verify_cluster_action_policy,
+    _verify_compression_gate,
+    _verify_cost_registry,
+    _verify_decision_council,
+    _verify_doc_graph_pipeline,
+    _verify_environment_policy,
+    _verify_flow_dsl_manifest,
+    _verify_guardrail_contract,
+    _verify_memory_integrity,
+    _verify_merge_lane,
+    _verify_privilege_boundary,
+    _verify_prompt_firewall,
+    _verify_prompt_version_log,
+    _verify_remote_hygiene,
+    _verify_runtime_provider_contract,
+    _verify_visual_evidence,
+    _verify_workflow_state_manifest,
+    _verify_workspace_isolation,
+)
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
@@ -1061,3 +1083,51 @@ def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> N
                 f"Pattern {pattern.get('id')!r} required_artifacts must be a list.",
                 path=rel_path,
             )
+
+
+def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult) -> None:
+    """Run every verifier, in the order the artifacts build on each other.
+
+    Extracted from ``agentic_standard.verify_standard_profile``: that module
+    is grandfathered by the code ratchet and may only shrink, and this list
+    is the one thing every new artifact has to grow.
+    """
+    _verify_manifest(root, profile, task_id, result)
+    _verify_mission_brief(root, profile, result)
+    _verify_provider_registry(root, profile, result)
+    _verify_knowledge_registry(root, profile, result)
+    _verify_task_envelope(root, profile, task_id, result)
+    _verify_evidence_pack(root, task_id, result)
+    _verify_claim_ledger(root, profile, task_id, result)
+    _verify_compliance_declaration(root, result)
+    _verify_profile_specific_controls(root, profile, result)
+    _verify_task_board(root, profile, result)
+    _verify_memory_policy(root, profile, result)
+    _verify_context_contract(root, result)
+    _verify_decision_graph(root, result)
+    _verify_rule_packs(root, result)
+    _verify_hook_registry(root, result)
+    _verify_runtime_surface_registry(root, profile, result)
+    _verify_orchestration_policy(root, result)
+    _verify_evidence_gates(root, result)
+    _verify_pattern_catalog(root, result)
+    _verify_blast_radius_policy(root, profile, result)
+    _verify_privilege_boundary(root, profile, result)
+    _verify_prompt_firewall(root, profile, result)
+    _verify_remote_hygiene(root, result)
+    _verify_decision_council(root, result)
+    _verify_compression_gate(root, result)
+    _verify_memory_integrity(root, result)
+    _verify_merge_lane(root, result)
+    _verify_cost_registry(root, result)
+    _verify_guardrail_contract(root, result)
+    _verify_visual_evidence(root, result)
+    _verify_workspace_isolation(root, result)
+    _verify_environment_policy(root, result)
+    _verify_browser_tool_contract(root, result)
+    _verify_runtime_provider_contract(root, result)
+    _verify_prompt_version_log(root, result)
+    _verify_cluster_action_policy(root, result)
+    _verify_doc_graph_pipeline(root, result)
+    _verify_flow_dsl_manifest(root, result)
+    _verify_workflow_state_manifest(root, result)
