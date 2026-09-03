@@ -220,6 +220,11 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
 automatiquement ; l'appel manuel sert après l'ajout ou la modification d'une
 persona.
 
+`host list` remonte aussi ce qu'un hôte ne sait pas exécuter, avec le substitut
+retenu — dont l'ouverture d'une session dans un agent, qu'aucun hôte ne sait
+faire : la persona d'entrée est alors remise à la boucle principale par le hook
+`session_start`. Voir [Persona d'entrée](hosts.md#persona-dentree).
+
 ## Standard agentique gouverné
 
 Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).
