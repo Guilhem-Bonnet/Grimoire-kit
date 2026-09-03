@@ -88,10 +88,17 @@ sans sous-agent : **concierge** — Concierge — Triage, clarification, routage
 Sur un hôte sans hook `session_start`, la persona d'entrée est nommée dans le
 fichier d'instructions ; c'est le seul endroit qui reste.
 
+La persona d'entrée se déclare dans `project-context.yaml` :
+
+```yaml
+agents:
+  entry: "concierge"   # défaut ; une autre persona du projet ; "" pour aucune
+```
+
 Un projet qui porte déjà son propre point d'entrée — un orchestrateur chargé
-par `CLAUDE.md`, par exemple — en reçoit un second : la persona d'entrée n'est
-pas encore configurable par projet. C'est l'objet de
-[#247](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/247).
+par `CLAUDE.md`, par exemple — déclare `entry: ""` et n'en reçoit pas un
+second. `grimoire host status` montre la persona retenue, et signale une clé
+qui nomme un agent que le projet n'a pas plutôt que d'en inventer un.
 
 ## Gouvernance
 
