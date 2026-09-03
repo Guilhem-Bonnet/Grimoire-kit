@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.antifragile_score")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -724,6 +726,7 @@ def render_trend(history: list[dict]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Anti-Fragile Score — mesure la résilience adaptative du système",
         formatter_class=argparse.RawDescriptionHelpFormatter,

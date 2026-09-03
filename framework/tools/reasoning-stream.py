@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import _stdio
+
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 STREAM_FILE = "reasoning-stream.jsonl"
@@ -534,6 +536,7 @@ def render_stats(entries: list[ReasoningEntry]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Reasoning Stream — flux de raisonnement structuré",
         formatter_class=argparse.RawDescriptionHelpFormatter,

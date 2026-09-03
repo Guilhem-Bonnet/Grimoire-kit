@@ -30,6 +30,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import _stdio
+
 try:
     import yaml
 except ImportError:
@@ -573,6 +575,7 @@ def report_to_dict(report: ValidationReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Schema Validator — valide les configs YAML",
         formatter_class=argparse.RawDescriptionHelpFormatter,

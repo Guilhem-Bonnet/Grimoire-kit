@@ -31,6 +31,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import _stdio
+
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 LINT_VERSION = "1.1.0"
@@ -756,6 +758,7 @@ def report_to_dict(report: LintReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Memory Lint — vérification de cohérence mémoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

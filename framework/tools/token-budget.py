@@ -38,6 +38,8 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.token_budget")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -705,6 +707,7 @@ def _print_enforcement(report: EnforcementReport) -> None:
 
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Token Budget Enforcer — Enforcement automatique du budget token Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

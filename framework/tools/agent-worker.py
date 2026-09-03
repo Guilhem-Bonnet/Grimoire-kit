@@ -48,6 +48,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.agent_worker")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -535,6 +537,7 @@ def _print_workers(wl: WorkerList) -> None:
 
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Agent Worker — Workers isolés pour agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

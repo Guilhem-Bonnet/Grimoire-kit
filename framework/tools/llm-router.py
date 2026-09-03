@@ -39,6 +39,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+import _stdio
+
 _log = logging.getLogger("grimoire.llm_router")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -750,6 +752,7 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="LLM Router — Route les requêtes agents vers le modèle LLM optimal",
         formatter_class=argparse.RawDescriptionHelpFormatter,

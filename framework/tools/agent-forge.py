@@ -27,6 +27,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.agent_forge")
 
 # ── Taxonomie domaine → profil agent ─────────────────────────────────────────
@@ -791,6 +793,7 @@ def list_proposals(proposals_dir: Path) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Forge — génère des scaffolds d\'agents depuis des besoins détectés",
         formatter_class=argparse.RawDescriptionHelpFormatter,

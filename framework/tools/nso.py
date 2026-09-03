@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.nso")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -733,6 +735,7 @@ def retro_to_dict(report: RetroReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Nervous System Orchestrator — orchestre tout le système nerveux",
         formatter_class=argparse.RawDescriptionHelpFormatter,

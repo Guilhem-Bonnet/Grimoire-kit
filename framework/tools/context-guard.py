@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.context_guard")
 
 # ── Modèles LLM — fenêtres de contexte connues (en tokens) ──────────────────
@@ -955,6 +957,7 @@ def print_summary_table(budgets: list[AgentBudget]) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Context Budget Guard — estime le budget de contexte LLM par agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,

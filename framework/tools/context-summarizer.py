@@ -41,6 +41,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 # ── Version ──────────────────────────────────────────────────────────────────
 
 CONTEXT_SUMMARIZER_VERSION = "1.2.0"
@@ -803,6 +805,7 @@ def _print_preview(sections: list[Section]) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Context Summarizer — Résumé automatique du contexte ancien Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

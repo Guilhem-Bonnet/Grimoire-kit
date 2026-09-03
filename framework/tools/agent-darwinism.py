@@ -44,6 +44,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.agent_darwinism")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -880,6 +882,7 @@ def render_lineage(agent_id: str,
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Darwinism — sélection naturelle des agents",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.dream")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -1114,6 +1116,7 @@ def write_journal(content: str, project_root: Path, dry_run: bool = False) -> Pa
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Dream Mode — consolidation hors-session et insights émergents",
         formatter_class=argparse.RawDescriptionHelpFormatter,

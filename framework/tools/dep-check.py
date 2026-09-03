@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _stdio
+
 DEP_CHECK_VERSION = "1.0.0"
 
 
@@ -263,6 +265,7 @@ def cmd_cycles(args: argparse.Namespace) -> int:
 # ── Main ─────────────────────────────────────────────────────────
 
 def main() -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Tool Dependency Checker")
     parser.add_argument("--project-root", required=True)

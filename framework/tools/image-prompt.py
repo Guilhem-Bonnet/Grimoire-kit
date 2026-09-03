@@ -25,6 +25,8 @@ import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.image_prompt")
 
 IMAGE_PROMPT_VERSION = "1.0.0"
@@ -368,6 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = build_parser()
     args = parser.parse_args(argv)
 

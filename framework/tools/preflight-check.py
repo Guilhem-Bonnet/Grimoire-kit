@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.preflight_check")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -714,6 +716,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = build_parser()
     args = parser.parse_args()
 

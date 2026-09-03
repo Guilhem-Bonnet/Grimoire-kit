@@ -41,6 +41,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import _stdio
+
 _log = logging.getLogger("grimoire.vision_judge")
 
 VISION_JUDGE_VERSION = "1.0.0"
@@ -663,6 +665,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Vision Judge — Visual Quality Assessment for Agent Outputs",
     )

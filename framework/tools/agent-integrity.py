@@ -29,6 +29,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import _stdio
+
 VERSION = "1.0.0"
 
 INTEGRITY_DIR = "_grimoire-output/.agent-integrity"
@@ -155,6 +157,7 @@ def mcp_agent_integrity(project_root: str, action: str = "verify") -> dict:
 
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         prog="agent-integrity",
         description="Vérification d'intégrité des fichiers agents",

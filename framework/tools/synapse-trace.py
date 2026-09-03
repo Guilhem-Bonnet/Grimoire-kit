@@ -42,6 +42,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import _stdio
+
 # ── Version ──────────────────────────────────────────────────────────────────
 
 SYNAPSE_TRACE_VERSION = "1.1.0"
@@ -727,6 +729,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = _build_parser()
     args = parser.parse_args(argv)
 

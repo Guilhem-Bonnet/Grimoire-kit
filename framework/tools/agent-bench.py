@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.agent_bench")
 
 # ── Structures ────────────────────────────────────────────────────────────────
@@ -516,6 +518,7 @@ def summary_line(session: SessionMetrics) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Benchmark — métriques de performance depuis Grimoire_TRACE",
         formatter_class=argparse.RawDescriptionHelpFormatter,

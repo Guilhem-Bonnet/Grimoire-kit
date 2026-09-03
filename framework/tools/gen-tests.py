@@ -24,6 +24,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import _stdio
+
 try:
     import yaml
 except ImportError:
@@ -321,6 +323,7 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Génère des squelettes de tests depuis les acceptance_criteria d'un DNA archétype Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

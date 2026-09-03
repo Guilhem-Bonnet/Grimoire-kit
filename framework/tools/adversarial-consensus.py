@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.adversarial_consensus")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -618,6 +620,7 @@ def render_stats(history: list[dict]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         description="Grimoire Adversarial Consensus Protocol — décisions critiques validées par consensus BFT",
         formatter_class=argparse.RawDescriptionHelpFormatter,

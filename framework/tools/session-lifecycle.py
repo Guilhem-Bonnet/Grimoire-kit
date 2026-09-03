@@ -33,6 +33,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import _stdio
+
 # ── Version ──────────────────────────────────────────────────────────────────
 
 SESSION_LIFECYCLE_VERSION = "1.1.1"
@@ -515,6 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = build_parser()
     args = parser.parse_args()
 

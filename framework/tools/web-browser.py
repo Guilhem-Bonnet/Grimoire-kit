@@ -51,6 +51,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import _stdio
+
 _log = logging.getLogger("grimoire.web_browser")
 
 WEB_BROWSER_VERSION = "1.0.0"
@@ -934,6 +936,7 @@ def _render_status(result: BrowserStatus) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = argparse.ArgumentParser(
         prog="web-browser",
         description="Navigateur web sandboxé pour agents Grimoire",

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import _stdio
+
 SETUP_VERSION = "1.0.0"
 
 # ── Data Classes ──────────────────────────────────────────────────────────────
@@ -400,6 +402,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = build_parser()
     args = parser.parse_args(argv)
 

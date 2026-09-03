@@ -50,6 +50,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import _stdio
+
 _log = logging.getLogger("grimoire.tool_resolver")
 
 TOOL_RESOLVER_VERSION = "1.0.0"
@@ -1193,6 +1195,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
     parser = _build_parser()
     args = parser.parse_args()
 
