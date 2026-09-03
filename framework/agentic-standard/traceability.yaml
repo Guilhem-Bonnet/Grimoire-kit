@@ -1,0 +1,294 @@
+$schema: "grimoire-agentic-standard-traceability/v1"
+
+# Ce que chaque artefact du bridge satisfait dans la norme amont, et ce que
+# chaque vérificateur contrôle. Un lien n'est posé que si la norme nomme
+# l'objet que l'artefact produit (colonne « preuves minimales » de la matrice
+# normative, ou nom du contrôle au catalogue). Un lien seulement conceptuel est
+# une ligne vide avec sa raison — pas une invention.
+#
+# C'est l'artefact que la norme exige en AG-AUD-001 : conformité déclarée
+# reliée à exigence, contrôle, preuve. `grimoire standard traceability` le rend.
+
+metadata:
+  upstream_commit: "53b2c34258580bd965631bcc186b21947b44c71e"
+  reconciled_on: "2026-09-03"
+  sources:
+    - "docs/matrice-normative-maitresse.md"
+    - "docs/exigences-normatives-structure-agentique.md"
+    - "docs/niveaux-conformite-agentique.md"
+    - "docs/catalogue-controles-agentiques.md"
+
+# Profils du kit → niveaux de conformité de la norme (N0 à N5).
+levels:
+  starter: N1
+  controlled: N2
+  orchestrated: N3
+  governed: N4
+  production: N5
+
+# Contrôles définis au catalogue mais cités par aucune exigence de la matrice :
+# un artefact qui ne se rattache qu'à l'un d'eux n'a pas d'exigence AG-* citable.
+controls_without_requirement: [CTRL-DRY-002, CTRL-SEC-002, CTRL-UI-001]
+
+artifacts:
+  mission_brief:
+    requirements: [AG-MIS-001, AG-MIS-002, AG-MIS-004]
+    controls: [CTRL-MIS-001]
+    evidence: "matrice L20-L23 (brief agentique, carte Kanban, brief enrichi) ; exigences L11, L12, L14"
+    note: "AG-MIS-003 partiel : Flow objectives sans section 'critères d'acceptation' nommée."
+  task_envelope:
+    requirements: [AG-ORC-002]
+    controls: [CTRL-TOL-001]
+    evidence: "matrice L26 (task envelope, nom identique) ; exigences L22"
+  claim_ledger:
+    requirements: [AG-QUA-002]
+    controls: [CTRL-QUA-001]
+    evidence: "matrice L57 (claim ledger, nom identique) ; exigences L73 ; docs/modeles/claim-ledger.md"
+  runtime_surface_registry:
+    requirements: [AG-TOL-007, AG-RET-006]
+    controls: [CTRL-OBS-001]
+    evidence: "matrice L55 (registre des surfaces runtime), L74 ; exigences L66, L100 ; docs/modeles/registre-surfaces-runtime.md"
+  evidence_pack:
+    requirements: [AG-MIS-003, AG-QUA-001, AG-QUA-006]
+    controls: [CTRL-MIS-001, CTRL-QUA-002]
+    evidence: "matrice L22, L56, L61 (evidence pack) ; exigences L13, L72, L77"
+  compliance_declaration:
+    requirements: []
+    controls: []
+    reason: "Aucune ligne de la matrice ne nomme une déclaration de conformité. AG-AUD-002 (exception record) exigerait approbateur, contrôle compensatoire et expiration, absents du modèle."
+  knowledge_source_registry:
+    requirements: [AG-CTX-002, AG-CTX-005]
+    controls: [CTRL-CTX-001, CTRL-SRC-001, CTRL-RET-002]
+    evidence: "matrice L32 (source registry), L35 (freshness report) ; exigences L33, L36"
+    note: "AG-CTX-005 partiel : divulgation d'une source périmée, pas de blocage ni de désindexation."
+  llm_provider_registry:
+    requirements: [AG-LLM-001, AG-LLM-002, AG-LLM-005, AG-LLM-006]
+    controls: [CTRL-MOD-001, CTRL-SEC-001, CTRL-MOD-002]
+    evidence: "matrice L43, L44, L47, L48 ; exigences L49, L50, L53, L54"
+    note: "AG-LLM-006 faible : 'enabled' sans état deprecated/disallowed."
+  task_board:
+    requirements: [AG-ORC-001]
+    controls: [CTRL-MIS-001]
+    evidence: "matrice L25 (carte Kanban) ; exigences L21"
+    note: "La part 'mission ledger' de la même ligne relève d'AG-ORC-006, portée par decision_graph."
+  memory_policy:
+    requirements: [AG-CTX-003, AG-CTX-004, AG-CTX-006, AG-CTX-007, AG-RET-008]
+    controls: [CTRL-CTX-003, CTRL-RET-001]
+    evidence: "matrice L33, L34, L36, L37, L76 ; exigences L34, L35, L37, L38, L102"
+  context_contract:
+    requirements: [AG-CTX-001, AG-CTX-010]
+    controls: [CTRL-CTX-001, CTRL-CTX-002]
+    evidence: "matrice L31 (context profile, context pack), L40 ; exigences L32, L41"
+  decision_graph:
+    requirements: [AG-ORC-006]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L30 (mission ledger event) ; exigences L26"
+  rule_packs:
+    requirements: []
+    controls: []
+    reason: "Mécanisme d'application, cité comme preuve par aucune exigence ; chaque règle porte sa propre source normative."
+  hook_registry:
+    requirements: [AG-TOL-006, AG-DYN-002, AG-DYN-005]
+    controls: [CTRL-PAT-001]
+    evidence: "matrice L54 (hook registry, nom identique), L77 ; exigences L65, L109, L112"
+    note: "AG-DYN-001, -003, -004 sans champ correspondant (gap réel)."
+  orchestration_policy:
+    requirements: [AG-ORC-003, AG-QUA-004]
+    controls: [CTRL-QUA-001, CTRL-AUT-001]
+    evidence: "matrice L27 (handoff packet), L59 (RACI) ; exigences L23, L75"
+    note: "AG-ORC-003 couvert par le modèle (handoffs:) mais le vérificateur ne lit que roles: — trou de vérification."
+  evidence_gates:
+    requirements: [AG-QUA-008]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L63 (workflow state manifest, transition event) ; exigences L79"
+  pattern_catalog:
+    requirements: [AG-PAT-001, AG-PAT-002, AG-PAT-004]
+    controls: [CTRL-PAT-001]
+    evidence: "matrice L78 (pattern record, maturity matrix) ; exigences L118, L119, L121"
+    note: "Pas de champ problem/anti_pattern (AG-PAT-001), source_normative interne au kit et non AG-* (AG-PAT-002), pas de superseded_by (AG-PAT-004)."
+  compliance_score:
+    requirements: [AG-AUD-004]
+    controls: [CTRL-PAT-001]
+    evidence: "matrice L82 (audit report) ; exigences L130"
+    note: "Faible : seuils par profil, sans écarts ni risques résiduels."
+  remediation_plan:
+    requirements: []
+    controls: []
+    reason: "Artefact d'exécution des remédiations de rule_packs ; nommé comme preuve par aucune exigence."
+  accepted_risks:
+    requirements: [AG-AUD-002]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L80 (exception record) ; exigences L128"
+    note: "Sans champ 'risque' ni 'contrôle compensatoire' explicites."
+  waivers:
+    requirements: [AG-AUD-002]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L80 ; exigences L128"
+  observability_policy:
+    requirements: [AG-OBS-001, AG-OBS-002]
+    controls: [CTRL-OBS-001, CTRL-OBS-002]
+    evidence: "matrice L83 (telemetry events), L84 (telemetry privacy gate) ; exigences L131, L132"
+  blast_radius_policy:
+    requirements: [AG-TOL-002]
+    controls: [CTRL-TOL-002, CTRL-DRY-001]
+    evidence: "matrice L50 (policy decision, dry-run) ; exigences L61"
+  privilege_boundary:
+    requirements: [AG-TOL-004]
+    controls: [CTRL-SEC-003, CTRL-SEC-001]
+    evidence: "catalogue L32 (env scrub, token non transmis) ; matrice L52 ; exigences L63"
+  prompt_firewall:
+    requirements: []
+    controls: [CTRL-SEC-002]
+    reason: "CTRL-SEC-002 (prompt injection firewall) correspond exactement au modèle mais n'est cité par aucune exigence de la matrice."
+  remote_hygiene:
+    requirements: [AG-CTX-002]
+    controls: [CTRL-SRC-001]
+    evidence: "catalogue L45 (remote hygiene guard, nom identique) ; matrice L32"
+  decision_council:
+    requirements: []
+    controls: []
+    reason: "Aucun contrôle ni exigence sur quorum ou veto."
+  compression_gate:
+    requirements: []
+    controls: []
+    reason: "Aucun contrôle sur la compression de contexte ; AG-CTX-012 porte sur le budget, pas la préservation."
+  memory_integrity:
+    requirements: [AG-CTX-008, AG-INC-005]
+    controls: [CTRL-CTX-003, CTRL-RET-001]
+    evidence: "matrice L38 (memory audit), L68 (memory contamination response) ; exigences L39, L89"
+  merge_lane:
+    requirements: []
+    controls: []
+    reason: "Aucune exigence sur la classification des échecs de fusion."
+  cost_registry:
+    requirements: [AG-INC-004, AG-OBS-004]
+    controls: [CTRL-SLO-001]
+    evidence: "matrice L67 (dashboard, SLO), L86 ; exigences L88, L134"
+  guardrail_contract:
+    requirements: []
+    controls: []
+    reason: "Aucun contrôle nommé 'guardrail' au catalogue."
+  visual_evidence:
+    requirements: []
+    controls: [CTRL-UI-001]
+    reason: "CTRL-UI-001 (visual evidence gate) correspond au modèle mais n'est cité par aucune exigence."
+  workspace_isolation:
+    requirements: []
+    controls: []
+    reason: "Aucun contrôle sur l'isolation d'espace de travail."
+  environment_policy:
+    requirements: []
+    controls: []
+    reason: "Aucune exigence ne nomme local/CI/staging/production."
+  browser_tool_contract:
+    requirements: []
+    controls: [CTRL-UI-001]
+    reason: "Même situation que visual_evidence."
+  runtime_provider_contract:
+    requirements: []
+    controls: []
+    reason: "AG-TOL-007 porte sur un registre de surfaces, pas sur un contrat de cycle de vie."
+  prompt_version_log:
+    requirements: [AG-LLM-003]
+    controls: [CTRL-EVL-001]
+    evidence: "matrice L45 (eval dataset record) ; exigences L51"
+    note: "Pointeur vers les evals, pas le dataset record lui-même."
+  cluster_action_policy:
+    requirements: []
+    controls: [CTRL-DRY-002]
+    reason: "CTRL-DRY-002 (cluster dry-run gate) correspond au modèle mais n'est cité par aucune exigence."
+  doc_graph_pipeline:
+    requirements: [AG-CTX-011]
+    controls: [CTRL-CTX-003]
+    evidence: "matrice L41 (contradiction report) ; exigences L42"
+    note: "Obligatoire dès N2 dans la norme ; classé production dans le catalogue du kit et requis par aucun profil."
+  flow_dsl_manifest:
+    requirements: []
+    controls: []
+    reason: "Aucune exigence sur un manifeste de flux."
+  workflow_state_manifest:
+    requirements: [AG-QUA-008]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L63 (workflow state manifest, nom identique) ; exigences L79"
+  k8s_agent_manifest:
+    requirements: []
+    controls: []
+    reason: "Aucune exigence sur Kubernetes."
+
+# Vérificateurs de standard_checks/ : quel contrôle chaque famille de check_id instancie.
+verifiers:
+  manifest: {prefix: "manifest.", controls: [CTRL-MIS-001]}
+  mission: {prefix: "mission.", controls: [CTRL-MIS-001]}
+  providers: {prefix: "providers.", controls: [CTRL-MOD-001, CTRL-SEC-001]}
+  knowledge: {prefix: "knowledge.", controls: [CTRL-CTX-001, CTRL-SRC-001, CTRL-CTX-003]}
+  task: {prefix: "task.", controls: [CTRL-TOL-001, CTRL-QUA-002]}
+  evidence: {prefix: "evidence.", controls: [CTRL-QUA-002]}
+  compliance: {prefix: "compliance.", controls: [CTRL-QUA-003]}
+  profile: {prefix: "profile.", controls: [CTRL-OBS-001, CTRL-DRY-001]}
+  board: {prefix: "board.", controls: [CTRL-MIS-001, CTRL-QUA-003]}
+  memory: {prefix: "memory.", controls: [CTRL-RET-001, CTRL-CTX-003]}
+  context: {prefix: "context.", controls: [CTRL-CTX-001, CTRL-SEC-001]}
+  decision: {prefix: "decision.", controls: [CTRL-QUA-003]}
+  rules: {prefix: "rules.", controls: [], reason: "Forme des règles ; chaque règle référence son propre contrôle."}
+  hooks: {prefix: "hooks.", controls: [CTRL-PAT-001]}
+  orchestration: {prefix: "orchestration.", controls: [CTRL-AUT-001], note: "Ne lit que roles: ; handoffs: (AG-ORC-003) non vérifié."}
+  gates: {prefix: "gates.", controls: [CTRL-QUA-003]}
+  patterns: {prefix: "patterns.", controls: [CTRL-PAT-001]}
+  score: {prefix: "score.", controls: [CTRL-QUA-003]}
+  risks: {prefix: "risks.", controls: [CTRL-QUA-003]}
+  waivers: {prefix: "waivers.", controls: [CTRL-QUA-003]}
+  tools: {prefix: "tools.", controls: [CTRL-TOL-002]}
+  privilege: {prefix: "privilege.", controls: [CTRL-SEC-003]}
+  firewall: {prefix: "firewall.", controls: [CTRL-SEC-002]}
+  remote: {prefix: "remote.", controls: [CTRL-SRC-001]}
+  council: {prefix: "council.", controls: []}
+  compression: {prefix: "compression.", controls: []}
+  integrity: {prefix: "integrity.", controls: [CTRL-CTX-003, CTRL-RET-001]}
+  merge: {prefix: "merge.", controls: []}
+  cost: {prefix: "cost.", controls: [CTRL-SLO-001]}
+  guardrail: {prefix: "guardrail.", controls: []}
+  visual: {prefix: "visual.", controls: [CTRL-UI-001]}
+  workspace: {prefix: "workspace.", controls: []}
+  env: {prefix: "env.", controls: []}
+  browser: {prefix: "browser.", controls: [CTRL-UI-001]}
+  runtime: {prefix: "runtime.", controls: []}
+  promptver: {prefix: "promptver.", controls: [CTRL-EVL-001]}
+  cluster: {prefix: "cluster.", controls: [CTRL-DRY-002]}
+  docgraph: {prefix: "docgraph.", controls: [CTRL-CTX-003]}
+  flowdsl: {prefix: "flowdsl.", controls: []}
+  wsm: {prefix: "wsm.", controls: [CTRL-QUA-003]}
+  k8s: {prefix: "k8s.", controls: []}
+  claims: {prefix: "claims.", controls: [CTRL-QUA-001]}
+  surfaces: {prefix: "surfaces.", controls: [CTRL-OBS-001]}
+  artifact: {prefix: "artifact.", controls: [], reason: "Présence des fichiers requis par le profil ; prérequis, pas un contrôle de la norme."}
+  gate: {prefix: "gate.", controls: [CTRL-QUA-003]}
+  journal: {prefix: "journal.", controls: [CTRL-OBS-001]}
+  knowledge_index: {prefix: "knowledge_index.", controls: [CTRL-CTX-001]}
+  release: {prefix: "release.", controls: [CTRL-QUA-003]}
+  yaml: {prefix: "yaml.", controls: [], reason: "Syntaxe YAML ; prérequis technique."}
+
+# Exigences obligatoires à un niveau que le kit ne couvre par aucun artefact.
+# Cumulatif : un trou de N1 reste un trou à N4.
+gaps:
+  N1:
+    - {id: AG-QUA-003, label: "Dossier d'acceptation client", evidence: "exigences L74 ; matrice L58"}
+    - {id: AG-RET-001, label: "Registre de rétention de tout artefact produit", evidence: "exigences L95 ; matrice L69"}
+  N2:
+    - {id: AG-TOL-001, label: "Registre d'outils avec risque et permissions", evidence: "exigences L60 ; matrice L49"}
+    - {id: AG-TOL-003, label: "Contrat MCP (owner, scopes, timeout, logs)", evidence: "exigences L62 ; matrice L51"}
+    - {id: AG-TOL-005, label: "Erreurs d'outil capturées comme preuve ou incident", evidence: "exigences L64 ; matrice L53"}
+    - {id: AG-INC-001, label: "Containment d'anomalie critique", evidence: "exigences L85 ; matrice L64"}
+    - {id: AG-RET-003, label: "Sources remplacées pointant vers leur remplacement", evidence: "exigences L97 ; matrice L71"}
+    - {id: AG-RET-004, label: "Nettoyage périodique TTL, doublons, obsolescence", evidence: "exigences L98 ; matrice L72"}
+    - {id: AG-RET-005, label: "Purge de mémoire contaminée suivie comme incident", evidence: "exigences L99 ; matrice L73"}
+  N3:
+    - {id: AG-ORC-004, label: "Limitation du WIP, pas de délégation ouverte", evidence: "exigences L24 ; matrice L28"}
+  N4:
+    - {id: AG-INC-002, label: "Incident : containment, correction, purge, prévention", evidence: "exigences L86 ; matrice L65"}
+    - {id: AG-INC-003, label: "Incidents récurrents alimentant evals, hooks, gouvernance", evidence: "exigences L87 ; matrice L66"}
+    - {id: AG-DYN-001, label: "Création dynamique répondant à un gap identifié", evidence: "exigences L108"}
+    - {id: AG-DYN-003, label: "Artefact éphémère avec règle d'expiration", evidence: "exigences L110"}
+    - {id: AG-DYN-004, label: "Promotion vers durable justifiée", evidence: "exigences L111"}
+    - {id: AG-AUD-001, label: "Matrice de traçabilité exigence, contrôle, preuve, verdict", evidence: "exigences L127 ; matrice L79", note: "Ce fichier en est le premier lot."}
+    - {id: AG-AUD-003, label: "Matrice risques, contrôles, preuves", evidence: "exigences L129 ; matrice L81"}
+  N5: []

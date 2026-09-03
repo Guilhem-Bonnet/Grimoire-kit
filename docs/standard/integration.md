@@ -43,6 +43,25 @@ La CI du bridge exécute cette vérification en avertissement : une dérive du
 corpus est un signal à traiter, pas une raison de refuser un commit qui ne
 l'a pas causée.
 
+## Traçabilité vers la norme
+
+`framework/agentic-standard/traceability.yaml` relie chaque artefact du bridge
+aux exigences `AG-*` et aux contrôles `CTRL-*` de la norme, avec la citation
+qui justifie le lien, et chaque profil du kit à un niveau de conformité
+(`starter` → N1 … `production` → N5). Un lien n'est posé que si la norme nomme
+l'objet que l'artefact produit ; une entrée sans lien dit pourquoi.
+
+```bash
+grimoire standard traceability --profile governed
+grimoire -o json standard traceability
+```
+
+La commande rend, pour les artefacts requis par le profil, les exigences et
+contrôles satisfaits, puis les exigences obligatoires jusqu'au niveau atteint
+que le kit ne couvre par aucun artefact — les trous, cumulés de N1 au niveau
+demandé. C'est la matrice qu'AG-AUD-001 exige : une conformité déclarée reliée
+à exigence, contrôle et preuve, plutôt qu'affirmée.
+
 ## Artefacts obligatoires de la norme
 
 Deux artefacts que la norme exige et que les profils livrent désormais :

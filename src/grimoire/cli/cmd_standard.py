@@ -293,6 +293,52 @@ def upstream(ctx: typer.Context) -> None:
     raise typer.Exit(status.exit_code)
 
 
+_trace_profile_opt = typer.Option(None, "--profile", help="Profil du kit (défaut : governed).")
+
+
+@standard_app.command("traceability")
+def traceability(ctx: typer.Context, profile: str | None = _trace_profile_opt) -> None:
+    """La matrice de traçabilité vers la norme : artefacts, exigences, contrôles, trous.
+
+    Pour chaque artefact requis par le profil, les exigences AG-* et les
+    contrôles CTRL-* qu'il satisfait, avec la citation qui le justifie ; puis les
+    exigences obligatoires au niveau atteint que le kit ne couvre par rien.
+    """
+    from grimoire.core.standard_traceability import matrix_for
+
+    matrix = matrix_for(profile or "governed")
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(matrix.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(
+        f"[bold]{matrix.profile_id}[/bold] — niveau {matrix.level} — standard @ {matrix.upstream_commit[:8]} — "
+        f"{len(matrix.covered_requirements)} exigence(s) couverte(s), {len(matrix.gaps)} trou(s) au niveau"
+    )
+    table = Table(title="Artefacts requis → norme")
+    table.add_column("Artefact")
+    table.add_column("Exigences")
+    table.add_column("Contrôles")
+    table.add_column("Justification")
+    for trace in matrix.artifacts:
+        if not trace.required:
+            continue
+        table.add_row(
+            trace.artifact_type,
+            ", ".join(trace.requirements) or "[dim]aucune citable[/dim]",
+            ", ".join(trace.controls) or "—",
+            trace.evidence[:90],
+        )
+    console.print(table)
+    if matrix.gaps:
+        gaps = Table(title=f"Exigences obligatoires jusqu'à {matrix.level} sans artefact")
+        gaps.add_column("Exigence")
+        gaps.add_column("Objet")
+        for gap in matrix.gaps:
+            gaps.add_row(gap.get("id", ""), gap.get("label", ""))
+        console.print(gaps)
+
+
+
 @standard_app.command("detect-providers")
 def detect_providers(ctx: typer.Context) -> None:
     """Detect non-secret provider availability signals."""
