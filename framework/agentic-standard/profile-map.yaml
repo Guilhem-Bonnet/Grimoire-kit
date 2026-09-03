@@ -38,6 +38,12 @@ artifact_types:
   task_envelope:
     template: "framework/agentic-standard/templates/task-envelope.md"
     purpose: "Wrap an agentic task with state, context inputs, tools, checks, and evidence gates."
+  claim_ledger:
+    template: "framework/agentic-standard/templates/claim-ledger.md"
+    purpose: "Tie every claim that weighs on a decision or a delivery to the evidence that proves it (AG-QUA-002)."
+  runtime_surface_registry:
+    template: "framework/agentic-standard/templates/runtime-surface-registry.yaml"
+    purpose: "Register control and output surfaces with owner, mode, retention and drift (AG-TOL-007, AG-RET-006)."
   evidence_pack:
     template: "framework/agentic-standard/templates/evidence-pack.md"
     purpose: "Collect proof that a task, workflow, or release satisfied its declared controls."
@@ -165,6 +171,7 @@ profiles:
       - mission_brief
       - task_envelope
       - evidence_pack
+      - claim_ledger
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -185,6 +192,7 @@ profiles:
       - mission_brief
       - task_envelope
       - evidence_pack
+      - claim_ledger
       - llm_provider_registry
       - compliance_declaration
     recommended_archetypes:
@@ -212,6 +220,7 @@ profiles:
       - task_board
       - task_envelope
       - evidence_pack
+      - claim_ledger
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -249,6 +258,7 @@ profiles:
       - task_board
       - task_envelope
       - evidence_pack
+      - claim_ledger
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -257,6 +267,7 @@ profiles:
       - decision_graph
       - rule_packs
       - hook_registry
+      - runtime_surface_registry
       - orchestration_policy
       - evidence_gates
       - pattern_catalog
@@ -296,6 +307,7 @@ profiles:
       - task_board
       - task_envelope
       - evidence_pack
+      - claim_ledger
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -304,6 +316,7 @@ profiles:
       - decision_graph
       - rule_packs
       - hook_registry
+      - runtime_surface_registry
       - orchestration_policy
       - evidence_gates
       - pattern_catalog
@@ -334,6 +347,8 @@ generation_targets:
   project_root:
     - path: "_grimoire/standard/mission-brief.md"
       source_artifact: mission_brief
+    - path: "_grimoire/standard/runtime-surface-registry.yaml"
+      source_artifact: runtime_surface_registry
     - path: "_grimoire/standard/compliance-declaration.md"
       source_artifact: compliance_declaration
     - path: "_grimoire/standard/knowledge-source-registry.yaml"
@@ -415,3 +430,5 @@ generation_targets:
       source_artifact: task_envelope
     - path: "_grimoire-output/evidence/{task-id}/evidence-pack.md"
       source_artifact: evidence_pack
+    - path: "_grimoire-output/evidence/{task-id}/claim-ledger.md"
+      source_artifact: claim_ledger
