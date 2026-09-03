@@ -204,13 +204,18 @@ class AgentsConfig:
 
     archetype: str = "minimal"
     custom_agents: tuple[str, ...] = ()
+    #: Persona that answers when a request names no role. ``""`` means the
+    #: project brings its own entry point and wants none injected.
+    entry: str = "concierge"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentsConfig:
         raw = data.get("custom_agents") or []
+        entry = data.get("entry", "concierge")
         return cls(
             archetype=str(data.get("archetype", "minimal")),
             custom_agents=tuple(str(a) for a in raw),
+            entry="" if entry is None else str(entry).strip(),
         )
 
 

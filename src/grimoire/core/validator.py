@@ -85,7 +85,7 @@ _KNOWN_MEMORY_KEYS = frozenset({
 })
 
 _KNOWN_AGENTS_KEYS = frozenset({
-    "archetype", "custom_agents",
+    "archetype", "custom_agents", "entry",
 })
 
 

@@ -232,6 +232,15 @@ def _agents_schema() -> dict[str, Any]:
                 "default": "minimal",
                 "description": "Agent archetype to use.",
             },
+            "entry": {
+                "type": "string",
+                "default": "concierge",
+                "description": (
+                    "Persona that answers when a request names no role. "
+                    "Injected into the main loop at session start, since no host "
+                    "can open a session inside an agent. Empty string: none."
+                ),
+            },
             "custom_agents": {
                 "type": "array",
                 "items": {"type": "string"},

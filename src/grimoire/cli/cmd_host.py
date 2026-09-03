@@ -21,7 +21,7 @@ from rich.table import Table
 from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
-from grimoire.hosts.collect import build_surface, collect_commands
+from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 from grimoire.hosts.runtime import parse_event, run_hook
 from grimoire.hosts.surface import Enforcement
@@ -59,6 +59,11 @@ class _HostStatus:
     degradations: list[dict[str, str]] = field(default_factory=list)
     capability_gaps: list[str] = field(default_factory=list)
     agents_with_inferred_tools: list[str] = field(default_factory=list)
+    #: Persona d'entrée retenue ; vide si le projet n'en veut aucune ou si la
+    #: clé nomme un agent qui n'existe pas. La clé déclarée est gardée à part
+    #: pour que l'écart soit visible.
+    entry_agent: str = ""
+    entry_agent_declared: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +77,8 @@ class _HostStatus:
             "degradations": self.degradations,
             "capability_gaps": self.capability_gaps,
             "agents_with_inferred_tools": self.agents_with_inferred_tools,
+            "entry_agent": self.entry_agent,
+            "entry_agent_declared": self.entry_agent_declared,
         }
 
 
@@ -212,6 +219,8 @@ def host_status(
                 degradations=[d.to_dict() for d in plan.degradations],
                 capability_gaps=[g.surface for g in gaps_for(profile)],
                 agents_with_inferred_tools=[a.name for a in surface.agents if a.tools_origin == "inferred"],
+                entry_agent=(surface.entry_agent().name if surface.entry_agent() else ""),
+                entry_agent_declared=entry_agent_name(project_root),
             )
         )
 
@@ -237,6 +246,15 @@ def host_status(
                 "  [dim]frontière d'outils déduite (ajoutez `tools:` au fichier d'agent pour la fixer) :[/dim] "
                 + ", ".join(item.agents_with_inferred_tools)
             )
+        if item.entry_agent:
+            console.print(f"  persona d'entrée : {item.entry_agent}")
+        elif item.entry_agent_declared:
+            console.print(
+                f"  [yellow]persona d'entrée `{item.entry_agent_declared}` déclarée dans "
+                "project-context.yaml, mais aucun agent ne porte ce nom[/yellow]"
+            )
+        else:
+            console.print("  [dim]aucune persona d'entrée (agents.entry vide)[/dim]")
     raise typer.Exit(0 if all(item.in_sync for item in payload) else 1)
 
 
