@@ -95,15 +95,29 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
     petit-fils le tient.
     """
     run_env = {**os.environ, **(env or {})}
+    # Décodage explicite : sous Windows, `text=True` seul décode en cp1252, et
+    # un script qui parle français casse le décodage avant qu'on lise quoi que
+    # ce soit. `replace` garde la sortie lisible, jamais vide.
     return subprocess.run(
         args,
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=30,
         env=run_env,
         stdin=subprocess.DEVNULL,
     )
+
+
+def _explain(result: subprocess.CompletedProcess) -> str:
+    """Ce qu'un échec doit montrer : le code, et ce que le script a dit.
+
+    Seize tests Windows échouaient en `assert 1 == 0` avec une sortie vide dans
+    l'assertion — sans stderr, la cause restait une devinette (#231).
+    """
+    return f"rc={result.returncode}\n--- stdout ---\n{result.stdout[-1500:]}\n--- stderr ---\n{result.stderr[-1500:]}"
 
 
 def _create_fake_grimoire(base: Path) -> Path:
@@ -201,14 +215,14 @@ class TestCmdReset:
     def test_reset_help(self, project_dir):
         """--help prints usage and exits 0."""
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--help"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Remet l'installation" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Remet l'installation" in result.stdout, _explain(result)
 
     def test_reset_no_grimoire(self, empty_dir):
         """Reset on a directory without _grimoire/ fails."""
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=empty_dir)
-        assert result.returncode != 0
-        assert "Pas de projet Grimoire" in result.stderr
+        assert result.returncode != 0, _explain(result)
+        assert "Pas de projet Grimoire" in result.stderr, _explain(result)
 
     def test_soft_reset_dry_run(self, project_dir):
         """Dry-run soft reset doesn't modify files."""
@@ -217,8 +231,8 @@ class TestCmdReset:
         assert ab == "# old agent-base"
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--dry-run"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Dry-run" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Dry-run" in result.stdout, _explain(result)
 
         # File should be unchanged
         assert (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text() == ab
@@ -229,7 +243,7 @@ class TestCmdReset:
         sc.write_text("# Important context I wrote")
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         # Memory should be preserved
         assert sc.exists()
@@ -241,7 +255,7 @@ class TestCmdReset:
         assert custom.exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert custom.exists()
         assert custom.read_text() == "# Custom"
@@ -249,8 +263,8 @@ class TestCmdReset:
     def test_hard_reset_dry_run(self, project_dir):
         """Hard reset dry-run doesn't delete anything."""
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--hard", "--dry-run"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Dry-run" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Dry-run" in result.stdout, _explain(result)
 
         # _grimoire/ should still exist
         assert (project_dir / "_grimoire").exists()
@@ -261,7 +275,7 @@ class TestCmdReset:
         assert custom.exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--hard", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         # Structure should be recreated
         assert (project_dir / "_grimoire" / "_config" / "custom" / "agents").is_dir()
@@ -273,7 +287,7 @@ class TestCmdReset:
     def test_reset_unknown_option_fails(self, project_dir):
         """Unknown option causes error."""
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--nonexistent"], cwd=project_dir)
-        assert result.returncode != 0
+        assert result.returncode != 0, _explain(result)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -288,13 +302,13 @@ class TestCmdUninstall:
     def test_uninstall_help(self, project_dir):
         """--help prints usage and exits 0."""
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--help"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Supprime complètement" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Supprime complètement" in result.stdout, _explain(result)
 
     def test_uninstall_no_grimoire(self, empty_dir):
         """Uninstall on an empty dir fails."""
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=empty_dir)
-        assert result.returncode != 0
+        assert result.returncode != 0, _explain(result)
 
     def test_uninstall_removes_grimoire(self, project_dir):
         """Uninstall --yes removes _grimoire/ and _grimoire-output/."""
@@ -302,7 +316,7 @@ class TestCmdUninstall:
         assert (project_dir / "_grimoire-output").exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert not (project_dir / "_grimoire").exists()
         assert not (project_dir / "_grimoire-output").exists()
@@ -313,7 +327,7 @@ class TestCmdUninstall:
         assert ci.exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert not ci.exists()
 
@@ -323,7 +337,7 @@ class TestCmdUninstall:
         assert ctx.exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert not ctx.exists()
 
@@ -333,7 +347,7 @@ class TestCmdUninstall:
         assert ctx.exists()
 
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes", "--keep-config"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert ctx.exists()
         assert not (project_dir / "_grimoire").exists()
@@ -341,8 +355,8 @@ class TestCmdUninstall:
     def test_uninstall_success_message(self, project_dir):
         """Success message is displayed."""
         result = _run([BASH, str(INIT_SCRIPT), "uninstall", "--yes"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "désinstallé avec succès" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "désinstallé avec succès" in result.stdout, _explain(result)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -357,13 +371,13 @@ class TestCmdQuickUpdate:
     def test_quickupdate_help(self, project_dir):
         """--help prints usage and exits 0."""
         result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--help"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Mise à jour rapide" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Mise à jour rapide" in result.stdout, _explain(result)
 
     def test_quickupdate_no_grimoire(self, empty_dir):
         """Quick-update on an empty dir fails."""
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=empty_dir)
-        assert result.returncode != 0
+        assert result.returncode != 0, _explain(result)
 
     def test_quickupdate_dry_run(self, project_dir):
         """Dry-run doesn't modify files."""
@@ -371,8 +385,8 @@ class TestCmdQuickUpdate:
         original = ab.read_text()
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--dry-run"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "Dry-run" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "Dry-run" in result.stdout, _explain(result)
 
         assert ab.read_text() == original
 
@@ -382,7 +396,7 @@ class TestCmdQuickUpdate:
         original = custom.read_text()
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert custom.read_text() == original
 
@@ -392,20 +406,20 @@ class TestCmdQuickUpdate:
         sc.write_text("# My precious context")
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
-        assert result.returncode == 0
+        assert result.returncode == 0, _explain(result)
 
         assert sc.read_text() == "# My precious context"
 
     def test_quickupdate_reports_counts(self, project_dir):
         """Output mentions update counts."""
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
-        assert result.returncode == 0
-        assert "mis à jour" in result.stdout
+        assert result.returncode == 0, _explain(result)
+        assert "mis à jour" in result.stdout, _explain(result)
 
     def test_quickupdate_unknown_option_fails(self, project_dir):
         """Unknown option causes error."""
         result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--nonexistent"], cwd=project_dir)
-        assert result.returncode != 0
+        assert result.returncode != 0, _explain(result)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
