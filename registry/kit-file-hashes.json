@@ -2278,6 +2278,10 @@
    "version": "3.4.2",
    "path": "archetypes/creative-studio/shared-context.tpl.md"
   },
+  "b8897ff32598188514dccd916182a428c20d69673d25b8e85bada85d5d9f4227": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
+  },
   "b8bbf3dbcb2988a755e67be2c5bcf8e00d1e90ba6262a73ce81405bf14404a7b": {
    "version": "3.4.2",
    "path": "framework/tools/skill-validator.py"
@@ -2994,6 +2998,10 @@
    "version": "3.4.2",
    "path": "framework/tools/quantum-branch.py"
   },
+  "f0b87ec73514e53b459effb6f9541b00f1a76ee189e3bc443b5921e4eab6ac26": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/templates/runtime-surface-registry.yaml"
+  },
   "f10c3cb0a9302b5f03ef841571ccb30966391c04dc1414af9f2abbb07ecb36e1": {
    "version": "3.4.2",
    "path": "framework/tools/semantic-chain.py"
@@ -3057,6 +3065,10 @@
   "f5b8f8b529c5a81665bf1ac798ec4a32de02931fb966c1d8be2a965ca126e1de": {
    "version": "3.32.0",
    "path": "archetypes/creative-studio/agents/content-creator.md"
+  },
+  "f5dd59cc2eba171379b42ec6864839b8fd0a46ee6a62286b14f8f4e9d4c31c6e": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/templates/claim-ledger.md"
   },
   "f651378cad3d87d9b681e945e91b61209e998765f714801ded8fe5ed195256e1": {
    "version": "3.12.0",
