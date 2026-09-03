@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **`grimoire setup` écrit la source de vérité qu'il déclare.** Les options
+  `--user`, `--lang`, `--doc-lang` et `--skill-level` vivaient dans un objet en
+  mémoire : `apply` ne réécrivait que `copilot-instructions.md`, puis vérifiait
+  ce miroir contre l'objet en mémoire et annonçait « All config files are in
+  sync » — au-dessus de la divergence qu'il venait de créer, que `setup --check`
+  signalait la seconde d'après. `apply` écrit désormais la section `user:` de
+  `project-context.yaml` en premier — en la créant si le projet est antérieur à
+  son introduction, sans toucher `project.name` — puis les miroirs, puis vérifie
+  les miroirs contre le fichier relu. Un « in sync » ne peut plus être annoncé
+  au-dessus d'une divergence.
+
 ## [3.36.0] - 2026-09-03
 
 ### Ajouté

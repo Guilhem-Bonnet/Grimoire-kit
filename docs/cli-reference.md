@@ -690,11 +690,20 @@ Les opérations sont enregistrées automatiquement dans `_grimoire/_memory/.grim
 
 ### `grimoire setup`
 
-Configuration interactive du projet.
+Synchronise l'identité du projet — utilisateur, langues, niveau — entre
+`project-context.yaml`, la source de vérité, et les fichiers qui la reflètent
+(`.github/copilot-instructions.md`).
 
 ```bash
-grimoire setup [PATH]
+grimoire setup [PATH] --check                       # audit seul, sortie 1 si un miroir diverge
+grimoire setup [PATH] --sync                        # réécrire les miroirs depuis project-context.yaml
+grimoire setup [PATH] --user Guilhem --skill-level expert --lang Français --doc-lang Français
 ```
+
+Une option écrit d'abord la section `user:` de `project-context.yaml` — créée
+si le projet est antérieur à son introduction — puis les miroirs ; la
+vérification finale relit le fichier et compare les miroirs à lui. Un
+« All config files are in sync » n'est donc annoncé que s'il est vrai.
 
 ### `grimoire repair`
 
