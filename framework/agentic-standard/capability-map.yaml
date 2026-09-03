@@ -69,7 +69,7 @@ patterns:
     category: provider
     artifacts: [llm_provider_registry]
     rules: [provider.no-undeclared-route]
-    checks: [providers.default_unknown]
+    checks: [providers.default_unknown, providers.routing_policy_weak]
     tech_extras: []
     profile_min: controlled
   runtime-journal:

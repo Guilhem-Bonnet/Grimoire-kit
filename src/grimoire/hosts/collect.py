@@ -175,8 +175,37 @@ def _agent_name(declared: object, path: Path) -> str | None:
     return path.stem if _SAFE_NAME.match(path.stem) else None
 
 
-def collect_agents(project_root: Path, *, entry_point: str = "concierge") -> tuple[AgentSpec, ...]:
-    """Read the project's personas into host-neutral specs."""
+DEFAULT_ENTRY_AGENT = "concierge"
+
+
+def entry_agent_name(project_root: Path) -> str:
+    """The persona ``project-context.yaml`` designates as entry point.
+
+    ``agents.entry`` — ``concierge`` when the file or the key is absent, and
+    the empty string when the project declares it brings its own entry point.
+    A config that fails to parse is reported by ``lint`` and ``doctor``; here
+    it falls back to the default rather than turning a hook into a crash.
+    """
+    path = project_root / "project-context.yaml"
+    if not path.is_file():
+        return DEFAULT_ENTRY_AGENT
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+
+    try:
+        return GrimoireConfig.from_yaml(path).agents.entry
+    except GrimoireConfigError:
+        return DEFAULT_ENTRY_AGENT
+
+
+def collect_agents(project_root: Path, *, entry_point: str | None = None) -> tuple[AgentSpec, ...]:
+    """Read the project's personas into host-neutral specs.
+
+    *entry_point* defaults to what the project declares (``agents.entry``);
+    pass it explicitly to override.
+    """
+    if entry_point is None:
+        entry_point = entry_agent_name(project_root)
     specs: list[AgentSpec] = []
     for path in _agent_files(project_root):
         try:
@@ -204,7 +233,7 @@ def collect_agents(project_root: Path, *, entry_point: str = "concierge") -> tup
                 definition_ref=definition_ref,
                 tools=tools,
                 affinity=ModelAffinity.from_frontmatter(meta.get("model_affinity")),
-                entry_point=name == entry_point,
+                entry_point=bool(entry_point) and name == entry_point,
                 tools_origin="declared" if declared else "inferred",
             )
         )

@@ -610,6 +610,42 @@ def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
     assert "concierge" in rendered["hookSpecificOutput"]["additionalContext"]
 
 
+def _configure_entry(root: Path, entry: str | None) -> None:
+    """Écrit un project-context.yaml minimal ; ``None`` omet la clé."""
+    lines = ['project:', '  name: "hosts-test"', '  type: "library"', 'agents:', '  archetype: "minimal"']
+    if entry is not None:
+        lines.append(f'  entry: "{entry}"')
+    (root / "project-context.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_the_entry_persona_defaults_to_concierge_without_a_config(project: Path) -> None:
+    surface = build_surface(project)
+    assert surface.entry_agent() is not None and surface.entry_agent().name == "concierge"
+
+
+def test_the_project_designates_its_entry_persona(project: Path) -> None:
+    """Un projet qui a son propre point d'entrée ne doit pas en recevoir un second."""
+    _configure_entry(project, "scribe")
+    names = {a.name: a.entry_point for a in collect_agents(project)}
+    assert names == {"concierge": False, "scribe": True}
+    context = _session_start(project)
+    assert "**scribe**" in context and "**concierge**" not in context
+
+
+def test_an_empty_entry_means_no_entry_persona(project: Path) -> None:
+    """Vide n'est pas absent : c'est la déclaration « je porte déjà mon point d'entrée »."""
+    _configure_entry(project, "")
+    assert build_surface(project).entry_agent() is None
+    assert entry_persona_context(project) == ("", "")
+    assert _session_start(project) == activation_context_text(project, task_id="bootstrap")
+
+
+def test_an_entry_that_names_no_agent_is_reported_not_invented(project: Path) -> None:
+    _configure_entry(project, "fantome")
+    assert build_surface(project).entry_agent() is None
+    assert entry_persona_context(project) == ("", "")
+
+
 def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
     """Le manque est déclaré, pas commenté — et chaque hôte nomme son substitut."""
     del project
