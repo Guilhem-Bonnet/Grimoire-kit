@@ -74,13 +74,11 @@ def _sha256(path: Path) -> str:
 def _collect_agent_files(project_root: Path) -> dict[str, str]:
     """Collecte tous les fichiers agents et leurs SHA256."""
     checksums: dict[str, str] = {}
-
     for pattern in AGENT_PATTERNS:
         for f in project_root.glob(pattern):
             if f.is_file():
                 rel = f.relative_to(project_root).as_posix()
                 checksums[rel] = _sha256(f)
-
     return checksums
 
 
@@ -155,6 +153,8 @@ def mcp_agent_integrity(project_root: str, action: str = "verify") -> dict:
 
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="agent-integrity",
         description="Vérification d'intégrité des fichiers agents",

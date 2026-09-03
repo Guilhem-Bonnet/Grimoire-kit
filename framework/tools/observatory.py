@@ -39,6 +39,7 @@ import http.server
 import json
 import os
 import re
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -147,14 +148,12 @@ def parse_trace(path: Path) -> tuple[list[TraceEntry], list[str]]:
                 if current_session not in sessions:
                     sessions.append(current_session)
             continue
-
         sm = _SESSION_RE.match(line)
         if sm:
             current_session = sm.group(1)
             if current_session not in sessions:
                 sessions.append(current_session)
             continue
-
         m = _TRACE_RE.match(line)
         if m:
             entries.append(TraceEntry(
@@ -221,7 +220,6 @@ def _parse_yaml_simple(text: str) -> dict:
         stripped = raw_line.split("#")[0].rstrip()  # remove comments
         if not stripped:
             continue
-
         indent = len(raw_line) - len(raw_line.lstrip())
 
         # Pop stack to find parent at correct indent level
@@ -1908,6 +1906,8 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="observatory",
         description="Grimoire Observatory — Interactive Visual Dashboard",

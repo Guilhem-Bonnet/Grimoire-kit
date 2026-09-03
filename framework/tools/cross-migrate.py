@@ -247,12 +247,10 @@ def export_rules(project_root: Path,
                 results.append(ExportedRule(
                     category=current_category, rule=current_rule,
                     lesson=current_lesson, date=current_date))
-
             current_date = _parse_date_from_line(line)
             if since and current_date and current_date < since:
                 in_entry = False
                 continue
-
             in_entry = True
             current_rule = ""
             current_lesson = ""
@@ -723,6 +721,8 @@ def render_diff(bundle: MigrationBundle, project_root: Path) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Cross-Project Migration — export/import d'artefacts",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -283,11 +283,9 @@ def parse_trace_stats(trace_path: Path,
         content = "\n".join(content_lines).strip()
         if not content:
             return
-
         ts = current_header.get("ts", "")
         ag = current_header.get("agent", "system").strip().lower()
         story = current_header.get("story", "").strip()
-
         if since_dt and ts:
             try:
                 entry_dt = datetime.fromisoformat(ts.replace(" ", "T"))
@@ -880,6 +878,8 @@ def render_lineage(agent_id: str,
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Darwinism — sélection naturelle des agents",
         formatter_class=argparse.RawDescriptionHelpFormatter,

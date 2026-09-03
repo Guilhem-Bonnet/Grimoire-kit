@@ -568,13 +568,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         icon = sev_icons.get(report.severity, "[-]")
         print(f"\n  {icon} Drift Check: {report.agent_name} — {report.severity.upper()} ({report.overall_drift:.1%})")
         print(f"  Baseline: {report.baseline_timestamp[:16]} -> Now: {report.timestamp[:16]}\n")
-
         for v in report.vectors:
             if v["dimension"] == "file_hash":
                 continue
             vi = sev_icons.get(v["severity"], "[-]")
             print(f"  {vi} {v['dimension']:15s} {v['drift_score']:.0%} — {v['detail']}")
-
         if report.alerts:
             print("\n  Alertes:")
             for a in report.alerts:
@@ -647,6 +645,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = _build_parser()
     args = parser.parse_args()
 

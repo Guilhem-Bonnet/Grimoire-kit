@@ -1006,12 +1006,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         print(json.dumps(asdict(plan), indent=2, ensure_ascii=False))
     else:
         print(f"\n  Résolution : \"{plan.intent}\"\n")
-
         if plan.matched_capabilities:
             print(f"  Capabilities identifiées : {', '.join(plan.matched_capabilities)}\n")
         else:
             print("  [!]  Aucune capability identifiée pour cette intention.\n")
-
         if plan.ready_to_use:
             print(f"  [OK] Outils PRÊTS ({len(plan.ready_to_use)}) :")
             for c in plan.ready_to_use:
@@ -1019,7 +1017,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 print(f"       Tools: {', '.join(c['tools_offered'])}")
                 if c.get("note"):
                     print(f"       {c['note']}")
-
         if plan.provision_needed:
             print(f"\n  Provision nécessaire ({len(plan.provision_needed)}) :")
             for a in plan.provision_needed:
@@ -1193,6 +1190,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = _build_parser()
     args = parser.parse_args()
 

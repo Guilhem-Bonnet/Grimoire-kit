@@ -502,9 +502,7 @@ def check_chronological_consistency(files: list[MemoryFile]) -> list[LintIssue]:
         dated_entries = [(d, t) for d, t in mf.entries if d]
         if len(dated_entries) < 2:
             continue
-
         dates = [d for d, _ in dated_entries]
-
         # Calculer si c'est ascendant ou descendant
         asc_count = sum(1 for i in range(1, len(dates)) if dates[i] >= dates[i - 1])
         desc_count = sum(1 for i in range(1, len(dates)) if dates[i] <= dates[i - 1])
@@ -756,6 +754,8 @@ def report_to_dict(report: LintReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Memory Lint — vérification de cohérence mémoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -175,7 +175,6 @@ class PageContent:
     content_type: str = ""
     elapsed_ms: int = 0
     method: str = ""  # "playwright" ou "urllib"
-
     def to_dict(self) -> dict:
         d = asdict(self)
         # Tronquer le texte si trop long
@@ -196,7 +195,6 @@ class ScreenshotResult:
     height: int = 0
     elapsed_ms: int = 0
     error: str = ""
-
     def to_dict(self) -> dict:
         d = asdict(self)
         # Ne pas inclure le base64 dans le JSON de sortie (trop gros)
@@ -934,6 +932,8 @@ def _render_status(result: BrowserStatus) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="web-browser",
         description="Navigateur web sandboxé pour agents Grimoire",

@@ -25,6 +25,7 @@ import argparse
 import json
 import logging
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -145,7 +146,6 @@ def _count_failure_sections(path: Path, since: str | None = None) -> dict:
             current_severity = "important"
         elif "Micro-Erreurs" in line or "[ok]" in line:
             current_severity = "micro"
-
         # Détecter une entrée
         if line.startswith("### ["):
             if in_entry:
@@ -154,13 +154,11 @@ def _count_failure_sections(path: Path, since: str | None = None) -> dict:
                     result["with_rule"] += 1
                 if has_lesson:
                     result["with_lesson"] += 1
-
             match = date_pattern.search(line)
             entry_date = match.group(1) if match else ""
             if since and entry_date and entry_date < since:
                 in_entry = False
                 continue
-
             in_entry = True
             has_rule = False
             has_lesson = False
@@ -724,6 +722,8 @@ def render_trend(history: list[dict]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Anti-Fragile Score — mesure la résilience adaptative du système",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -124,7 +124,6 @@ def _run_dream(project_root: Path | str, since: str | None = None,
         effective_since = since
         if since == "auto":
             effective_since = mod.read_last_dream_timestamp(project_root)
-
         sources = mod.collect_sources(project_root, effective_since)
         if not sources:
             return PhaseResult(
@@ -133,7 +132,6 @@ def _run_dream(project_root: Path | str, since: str | None = None,
                 summary="Aucune source mémoire",
                 data={"insights": 0, "sources": 0},
             )
-
         if quick:
             insights = mod.dream_quick(project_root, effective_since,
                                        _sources=sources)
@@ -733,6 +731,8 @@ def retro_to_dict(report: RetroReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Nervous System Orchestrator — orchestre tout le système nerveux",
         formatter_class=argparse.RawDescriptionHelpFormatter,

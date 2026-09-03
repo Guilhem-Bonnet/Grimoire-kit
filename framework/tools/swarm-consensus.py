@@ -113,13 +113,11 @@ def process_votes(topic: str, votes_dict: dict[str, bool],
                   mode: str = "MAJORITY", domain: str = "technical") -> VoteResult:
     """Traite les votes et calcule le consensus."""
     result = VoteResult(topic=topic, mode=mode)
-
     for agent, value in votes_dict.items():
         weight = 1.0
         if mode == "SWARM" and agent in AGENT_WEIGHTS:
             weight = AGENT_WEIGHTS[agent].get(domain, 0.5)
         result.votes.append(Vote(agent=agent, value=value, weight=weight))
-
     if not result.votes:
         return result
 
@@ -384,6 +382,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:

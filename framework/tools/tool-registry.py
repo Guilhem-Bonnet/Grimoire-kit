@@ -98,7 +98,6 @@ class GrimoireTool:
         """Export au format MCP tool."""
         properties = {}
         required = []
-
         for param in self.parameters:
             prop = {"type": param.param_type, "description": param.description}
             if param.enum:
@@ -108,7 +107,6 @@ class GrimoireTool:
             properties[param.name] = prop
             if param.required:
                 required.append(param.name)
-
         schema = {
             "name": self.name,
             "description": self.description,
@@ -616,6 +614,8 @@ def _print_stats(stats: RegistryStats) -> None:
 
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Tool Registry — Registry unifié des outils Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

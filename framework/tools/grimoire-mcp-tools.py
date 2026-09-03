@@ -301,7 +301,6 @@ def _extract_tool_info(func) -> dict:
     for param_name, param in sig.parameters.items():
         if param_name in ("self", "cls"):
             continue
-
         # JSON type from annotation
         annotation = param.annotation
         if annotation != inspect.Parameter.empty:
@@ -310,7 +309,6 @@ def _extract_tool_info(func) -> dict:
             type_name = type_name.replace("Path", "str").split("|")[0].strip().split("[")[0]
         else:
             type_name = "str"
-
         json_type = _python_type_to_json(type_name)
 
         prop: dict = {"type": json_type}
@@ -806,6 +804,8 @@ async def _run_server():
 
 def main():
     """Point d'entrée."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     # Mode info si --version ou --help
     if "--version" in sys.argv:
         print(f"grimoire-mcp-tools {Grimoire_MCP_TOOLS_VERSION}")

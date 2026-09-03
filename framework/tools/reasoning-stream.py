@@ -144,7 +144,6 @@ def read_stream(project_root: Path, agent: str | None = None,
             try:
                 data = json.loads(line)
                 entry = ReasoningEntry.from_dict(data)
-
                 # Filtres
                 if agent and agent.lower() not in entry.agent.lower():
                     continue
@@ -154,7 +153,6 @@ def read_stream(project_root: Path, agent: str | None = None,
                     continue
                 if since and entry.timestamp[:10] < since:
                     continue
-
                 entries.append(entry)
             except (json.JSONDecodeError, KeyError):
                 continue
@@ -534,6 +532,8 @@ def render_stats(entries: list[ReasoningEntry]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Reasoning Stream — flux de raisonnement structuré",
         formatter_class=argparse.RawDescriptionHelpFormatter,

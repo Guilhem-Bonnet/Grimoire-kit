@@ -130,13 +130,11 @@ class MemoryParser:
         """Parse decisions-log.md — format: ## {date} — {titre}."""
         entries: list[MemoryEntry] = []
         sections = re.split(r"^(##\s+.+)$", content, flags=re.MULTILINE)
-
         heading = ""
         for section in sections:
             stripped = section.strip()
             if not stripped:
                 continue
-
             header_match = re.match(r"^##\s+(.+)$", stripped)
             if header_match:
                 heading = header_match.group(1)
@@ -742,6 +740,8 @@ def _print_diff(diffs: list[DiffEntry]) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Memory Sync — Synchronisation bidirectionnelle mémoire Grimoire <-> Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,

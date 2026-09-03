@@ -250,9 +250,7 @@ class ChunkingStrategy:
         current_heading = ""
         current_text_lines: list[str] = []
         chunk_idx = 0
-
         lines = content.split("\n")
-
         for line in lines:
             # Détecter les headers
             header_match = re.match(r"^(#{1,3})\s+(.+)", line)
@@ -991,6 +989,8 @@ def _print_search_results(results: list[SearchResult]) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="RAG Indexer — Pipeline d'indexation Grimoire -> Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,

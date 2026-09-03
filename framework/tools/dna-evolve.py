@@ -246,7 +246,6 @@ def analyze_trace(
         agent_m = re.search(r"\[AGENT:([^\]]+)\]|agent:\s*([a-z-]+)", line, re.IGNORECASE)
         if agent_m:
             current_agent = (agent_m.group(1) or agent_m.group(2) or current_agent).strip()
-
         # Détecter les outils
         for tool_name, pattern in KNOWN_TOOLS_PATTERNS.items():
             if re.search(pattern, line, re.IGNORECASE):
@@ -369,7 +368,6 @@ def generate_mutations(
             continue
         if tool_data.count < MIN_OCCURRENCES_FOR_TOOL:
             continue
-
         confidence = "high" if tool_data.count >= 15 else ("medium" if tool_data.count >= 8 else "low")
         agents_str = ", ".join(sorted(tool_data.agents)[:3])
 
@@ -649,6 +647,8 @@ def apply_patch(patch_path: Path, dna: DNASnapshot) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire DNA Evolution Engine — fait évoluer la DNA d'un archétype depuis l'usage réel",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -579,7 +579,6 @@ def generate_menu_and_prompts(profile: dict, agent_name: str, cc_check: str) -> 
         label = pattern.replace("-", " ").title()
         keyword = pattern.split("-")[0]
         action_id = pattern
-
         menu_items += MENU_ITEM_TEMPLATE.format(
             cmd=cmd, keyword=keyword, action_id=action_id, label=label
         )
@@ -791,6 +790,8 @@ def list_proposals(proposals_dir: Path) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Agent Forge — génère des scaffolds d\'agents depuis des besoins détectés",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -897,7 +898,6 @@ Exemples :
     for proposal in proposals:
         out_path = save_proposal(proposal, proposals_dir, args.archetype)
         saved_paths.append(out_path)
-
         # Résumé du proposal
         print(f"[OK] Proposal généré : {out_path.name}")
         print(f"   Domaine  : {proposal.domain_key} ({proposal.agent_icon})")

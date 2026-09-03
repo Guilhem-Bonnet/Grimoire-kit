@@ -128,7 +128,7 @@ class TestHtml(unittest.TestCase):
 
 class TestCLI(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, timeout=15)
+        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
 
     def test_status_command(self):
         with tempfile.TemporaryDirectory() as tmp:

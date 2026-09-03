@@ -102,7 +102,6 @@ class board_lock:  # noqa: N801 — context manager léger
         try:
             self._fh = self._lock_path.open("w", encoding="utf-8")
             import fcntl
-
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         except (ImportError, OSError):
             pass
@@ -112,7 +111,6 @@ class board_lock:  # noqa: N801 — context manager léger
         if self._fh is not None:
             try:
                 import fcntl
-
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
             except (ImportError, OSError):
                 pass
@@ -376,6 +374,8 @@ def _emit_context(text: str, event_name: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     args = argv if argv is not None else sys.argv[1:]
     action = args[0] if args else ""
     try:

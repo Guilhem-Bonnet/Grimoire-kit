@@ -142,13 +142,11 @@ def _parse_yaml_basic(text: str) -> tuple[dict | None, str | None]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
         # Top-level key
         if not line[0].isspace() and ":" in stripped:
             key = stripped.split(":", 1)[0].strip()
             val = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
             current_key = key
-
             # Remove quotes and handle types
             if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]
@@ -573,6 +571,8 @@ def report_to_dict(report: ValidationReport) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Schema Validator — valide les configs YAML",
         formatter_class=argparse.RawDescriptionHelpFormatter,

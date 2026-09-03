@@ -14,7 +14,6 @@ Usage:
         --root-cause "@dataclass crash when module not in sys.modules" \
         --fix "Register module in sys.modules before exec_module" \
         --rule "Always sys.modules[name]=mod before spec.loader.exec_module(mod)"
-
     python failure-museum.py --project-root . list
     python failure-museum.py --project-root . list --severity high
     python failure-museum.py --project-root . search --query "dataclass"
@@ -162,7 +161,6 @@ def cmd_add(root: Path, args: argparse.Namespace) -> int:
     """Add a new failure to the museum."""
     entries = load_failures(root)
     fid, seq = next_failure_id(entries)
-
     agents_list = [a.strip() for a in args.agents.split(",") if a.strip()] if args.agents else []
     tags_list = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
 
@@ -458,6 +456,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
     root = args.project_root.resolve()

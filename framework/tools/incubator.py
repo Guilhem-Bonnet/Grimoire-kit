@@ -144,10 +144,8 @@ def next_id(ideas: list[Idea]) -> str:
 def check_viability(idea: Idea, project_root: Path) -> dict[str, bool]:
     """Vérifie les conditions de viabilité d'une idée."""
     checks = {}
-
     # Alignment — a des tags pertinents ou description non-vide
     checks["alignment"] = len(idea.description) > 20 and len(idea.tags) > 0
-
     # Feasibility — pas de blockers explicites
     blockers = ["impossible", "blocked", "dépend de", "requires external"]
     checks["feasibility"] = not any(b in idea.description.lower() for b in blockers)
@@ -382,6 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:

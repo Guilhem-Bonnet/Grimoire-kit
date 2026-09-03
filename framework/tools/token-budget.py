@@ -287,7 +287,6 @@ class TokenBudgetEnforcer:
         Retourne: list[(filepath, tokens, priority)]
         """
         files: list[tuple[str, int, int]] = []
-
         # Scan memory / agent files
         for pattern, prio in [
             ("_grimoire/_memory/*.md", 1),
@@ -302,7 +301,6 @@ class TokenBudgetEnforcer:
                     files.append((f.relative_to(self.project_root).as_posix(), tokens, prio))
                 except OSError:
                     continue
-
         return files
 
     def check(self) -> BudgetStatus:
@@ -705,6 +703,8 @@ def _print_enforcement(report: EnforcementReport) -> None:
 
 
 def main() -> None:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Token Budget Enforcer — Enforcement automatique du budget token Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
