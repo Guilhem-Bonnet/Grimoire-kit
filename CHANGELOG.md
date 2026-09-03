@@ -17,6 +17,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   la persona (`concierge` par défaut) ou, vide, déclare qu'il n'en faut aucune.
   `host status` montre la persona retenue et signale une clé qui nomme un agent
   absent au lieu d'en inventer un. Le schéma et `lint` connaissent la clé.
+- **Le bridge épingle la révision du standard qu'il trace.** `profile-map.yaml`
+  nommait le corpus normatif par nom de dépôt et chemin de fichier, sans SHA ni
+  date : impossible de dire si le bridge avait été relu après le dernier commit
+  de la norme autrement qu'en comparant les deux dépôts à la main.
+  `metadata.upstream_standard` porte désormais `remote`, `commit` et
+  `pinned_on` ; `grimoire standard upstream` compare la révision épinglée à la
+  tête distante et sort 0, 2 (le standard a avancé), 3 (injoignable, donc non
+  vérifié) ou 1 (aucun pin). La CI du bridge l'exécute en avertissement.
 
 ## [3.36.0] - 2026-09-03
 
