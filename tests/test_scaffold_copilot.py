@@ -118,7 +118,7 @@ class TestPlanCopilotPrompts:
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
 
-        stems = {c.dst.stem.removesuffix(".prompt") for c in plan.copies if ".github/prompts" in str(c.dst)}
+        stems = {c.dst.stem.removesuffix(".prompt") for c in plan.copies if ".github/prompts" in c.dst.as_posix()}
 
         assert stems == {"grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap"}
 
