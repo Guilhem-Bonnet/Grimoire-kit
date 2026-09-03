@@ -258,6 +258,10 @@
    "version": "3.24.0",
    "path": "framework/hooks/pre-push.sh"
   },
+  "161bd3ee3492159701523cffa17177d30bb46195c22f7751b740737c186e9c35": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/traceability.yaml"
+  },
   "16631f79ac267eebf03b52c43302d1b4fd06181af45ee9af0dd042737d31a5b0": {
    "version": "3.21.1",
    "path": "framework/tools/semantic-chain.py"
@@ -2945,6 +2949,10 @@
   "ec91850a23a93a6bbb8e7cdb17e35b22666196a78ef53e2d8616464f80ed1807": {
    "version": "3.32.0",
    "path": "archetypes/stack/agents/typescript-expert.md"
+  },
+  "ece16f585809cc4510f4f3df44c0a348a9be47d26955962981de31ffd38b4329": {
+   "version": "3.36.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
   },
   "ecfccea1a52c289c53636535476945f9ad37cadc050e9ef05c3081ec10aacc9c": {
    "version": "3.16.0",
