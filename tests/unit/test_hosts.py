@@ -15,14 +15,17 @@ import pytest
 from grimoire.bridges.schemas import HostId
 from grimoire.core import layout
 from grimoire.core.agentic_standard import setup_standard_profile
+from grimoire.core.claude_activation import activation_context_text
 from grimoire.hosts.capabilities import gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_agents, default_permissions, infer_tools, parse_frontmatter
 from grimoire.hosts.decisions import (
     HookInput,
     Outcome,
     classify_tool,
+    decide_activation,
     decide_evidence_gate,
     decide_tool_policy,
+    entry_persona_context,
 )
 from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 from grimoire.hosts.emitters.claude_code import _matcher
@@ -337,8 +340,17 @@ def test_every_credential_family_is_declared_in_both_forms() -> None:
 
 @pytest.mark.parametrize(
     "probe",
-    [".env", "app/.env.local", "app/.npmrc", "x/.pypirc", "~/.ssh/id_ecdsa",
-     "secrets/token", "certs/a.p12", "k/credentials.json", "sa/service-account-prod.json"],
+    [
+        ".env",
+        "app/.env.local",
+        "app/.npmrc",
+        "x/.pypirc",
+        "~/.ssh/id_ecdsa",
+        "secrets/token",
+        "certs/a.p12",
+        "k/credentials.json",
+        "sa/service-account-prod.json",
+    ],
 )
 def test_each_credential_family_is_actually_detected(probe: str) -> None:
     assert classify_tool("Read", {"file_path": probe}).secret_target, probe
@@ -499,8 +511,7 @@ def _copilot_hook_plan(project: Path) -> tuple[object, object]:
 
 
 _HAND_WRITTEN_HOOK = (
-    '{"hooks": {"SessionStart": [{"type": "command", '
-    '"command": "MAISON-NE-PAS-ECRASER.sh", "timeout": 10}]}}\n'
+    '{"hooks": {"SessionStart": [{"type": "command", "command": "MAISON-NE-PAS-ECRASER.sh", "timeout": 10}]}}\n'
 )
 
 
@@ -530,10 +541,13 @@ def test_copilot_sync_still_updates_its_own_hook(project: Path) -> None:
     plan, hook = _copilot_hook_plan(project)
     target = project / hook.relpath
     target.parent.mkdir(parents=True, exist_ok=True)
-    stale = json.dumps(
-        {"hooks": {"SessionStart": [{"type": "command", "command": "grimoire-hook --host copilot", "timeout": 5}]}},
-        indent=2,
-    ) + "\n"
+    stale = (
+        json.dumps(
+            {"hooks": {"SessionStart": [{"type": "command", "command": "grimoire-hook --host copilot", "timeout": 5}]}},
+            indent=2,
+        )
+        + "\n"
+    )
     target.write_text(stale, encoding="utf-8")
 
     result = apply_plan(plan, project)
@@ -552,3 +566,59 @@ def test_copilot_sync_force_overwrites_a_hand_written_hook(project: Path) -> Non
     apply_plan(plan, project, force=True)
 
     assert target.read_text(encoding="utf-8") == hook.content
+
+
+# ── Persona d'entrée ─────────────────────────────────────────────────────────
+
+
+def _session_start(root: Path) -> str:
+    return decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=root)).context
+
+
+def test_the_entry_persona_reaches_the_session_start_context(project: Path) -> None:
+    """Le contrat entier : la désignation `entry_point` sort du hook."""
+    context = _session_start(project)
+    assert "concierge" in context, "la persona d'entrée n'atteint pas la session"
+    assert "_grimoire/_config/custom/agents/concierge.md" in context, "sans chemin, rien à lire"
+    assert "scribe" not in context, "seule la persona d'entrée est injectée"
+
+
+def test_the_validated_directive_survives_the_persona(project: Path) -> None:
+    """La persona s'ajoute au standard, elle ne le remplace pas.
+
+    Le mécanisme d'activation a été mesuré 40/40 contre 0/40. L'écraser pour
+    faire de la place à une persona échangerait un effet prouvé contre un
+    effet supposé.
+    """
+    context = _session_start(project)
+    assert "[Grimoire Standard — activation]" in context
+    assert context.index("[Grimoire — persona d'entrée]") < context.index("[Grimoire Standard — activation]")
+
+
+def test_a_project_without_an_entry_persona_keeps_the_bare_directive(tmp_path: Path) -> None:
+    _write_agent(tmp_path, "scribe", "Tu rédiges la documentation.")
+    assert entry_persona_context(tmp_path) == ("", "")
+    assert _session_start(tmp_path) == activation_context_text(tmp_path, task_id="bootstrap")
+
+
+def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
+    """Sans trace dans `detail`, une injection muette est indistinguable d'une absence."""
+    rendered, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    assert decision.detail["entry_agent"] == "concierge"
+    assert "concierge" in rendered["hookSpecificOutput"]["additionalContext"]
+
+
+def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
+    """Le manque est déclaré, pas commenté — et chaque hôte nomme son substitut."""
+    del project
+    for host_id in supported_hosts():
+        profile = profile_for(host_id)
+        assert not profile.agent_autostart, f"{host_id.value} prétend démarrer dans un agent"
+        gap = next((g for g in gaps_for(profile) if g.surface == "agent_autostart"), None)
+        assert gap is not None, f"{host_id.value} tait le manque au lieu de le dégrader"
+        if profile.supports_event(HookEvent.SESSION_START):
+            assert "session_start" in gap.fallback
+        else:
+            assert profile.instructions_entrypoint in gap.fallback
