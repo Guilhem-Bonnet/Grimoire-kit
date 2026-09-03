@@ -1,4 +1,6 @@
 ---
+kind: command
+deprecated_by: 'grimoire doctor'
 description: 'Health check complet du projet Grimoire — agents, mémoire, config, intégrité'
 agent: 'agent'
 tools: ['read', 'search', 'execute']

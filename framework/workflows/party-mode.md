@@ -1,11 +1,12 @@
-<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
-
-name: party-mode
-description: Discussion multi-agents sur un même sujet — chaque persona parle depuis sa spécialité, l'utilisateur arbitre
+---
+kind: orchestration
+description: "Discussion multi-agents sur un même sujet — chaque persona parle depuis sa spécialité, l'utilisateur arbitre"
 triggers:
- - décision qui engage plusieurs domaines
- - avis contradictoires attendus
- - cadrage flou avant de choisir une direction
+  - décision qui engage plusieurs domaines
+  - avis contradictoires attendus
+  - cadrage flou avant de choisir une direction
+---
+<p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
 # <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Workflow Party Mode
 

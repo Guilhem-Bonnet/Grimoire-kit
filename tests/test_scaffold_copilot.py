@@ -82,30 +82,45 @@ class TestPlanDirectoriesIncludesCopilot:
         assert agents_path in plan.directories
 
     def test_plan_directories_count(self, scaffolder):
-        """The planned directories cover both tiers of the boundary."""
+        """The planned directories cover both tiers of the boundary.
+
+        Le compte est vérifié, mais il ne suffit pas : un nombre seul ne dit pas
+        *lesquels*, et il tombe à chaque ajout sans rien apprendre à qui le
+        relit. Les répertoires structurants sont donc nommés — c'est eux que le
+        test protège, le compte n'est qu'un garde contre les doublons.
+        """
         plan = ScaffoldPlan()
         scaffolder._plan_directories(plan)
 
-        assert len(plan.directories) == 17
         names = {d.as_posix() for d in plan.directories}
-        assert any("_grimoire/kit/agents" in n for n in names)
-        assert any("_grimoire/overrides/agents" in n for n in names)
+        for expected in (
+            "_grimoire/kit/agents",
+            "_grimoire/kit/teams",  # manifestes d'équipe, installés par cette PR
+            "_grimoire/overrides/agents",
+        ):
+            assert any(expected in n for n in names), f"{expected} absent du plan"
+
+        assert len(plan.directories) == 18
+        assert len(names) == len(plan.directories), "un répertoire est planifié deux fois"
 
 
 class TestPlanCopilotPrompts:
     """Test _plan_copilot_prompts() copies workflow prompts."""
 
-    def test_plan_copilot_prompts_copies_all_prompts(self, scaffolder):
-        """Verify all 7 prompts are copied."""
+    def test_plan_copilot_prompts_skips_the_replaced_ones(self, scaffolder):
+        """Un projet neuf ne reçoit que les prompts qui apportent quelque chose.
+
+        Quatre des sept redisaient une commande du SDK — `status`, `doctor`,
+        `doctor --fix`, `check`. Ils restent livrés et installables à la
+        demande, mais les déployer d'office remplissait `.github/prompts` de
+        doublons.
+        """
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
-        
-        # Extract prompt copies
-        prompt_copies = [
-            c for c in plan.copies 
-            if ".github/prompts" in c.dst.as_posix()
-        ]
-        assert len(prompt_copies) == 7
+
+        stems = {c.dst.stem.removesuffix(".prompt") for c in plan.copies if ".github/prompts" in str(c.dst)}
+
+        assert stems == {"grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap"}
 
     def test_plan_copilot_prompts_destination(self, scaffolder):
         """Verify all prompts go to .github/prompts/."""
@@ -131,18 +146,19 @@ class TestPlanCopilotPrompts:
         ]
         names = [c.dst.stem for c in prompt_copies]
         
+        # Les prompts qui synthétisent : rien dans le SDK ne les remplace.
         expected_stems = [
             "grimoire-changelog",
             "grimoire-dream",
-            "grimoire-health-check",
-            "grimoire-pre-push",
-            "grimoire-self-heal",
             "grimoire-session-bootstrap",
-            "grimoire-status",
         ]
-        
+
         for expected in expected_stems:
             assert any(expected in n for n in names)
+
+        # Ceux qu'une commande remplace ne sont plus déployés d'office.
+        for replaced in ("grimoire-status", "grimoire-health-check", "grimoire-self-heal", "grimoire-pre-push"):
+            assert not any(replaced in n for n in names), replaced
 
     def test_existing_prompt_is_updated_not_frozen(self, scaffolder, temp_project):
         """A prompt already on disk is refreshed, not skipped.
@@ -273,8 +289,9 @@ class TestFullScaffoldPlan:
             c for c in plan.copies 
             if ".github/prompts" in c.dst.as_posix()
         ]
-        assert len(prompts) == 7
-        
+        # Trois : ceux qu'une commande du SDK ne remplace pas.
+        assert len(prompts) == 3
+
         # Should have instructions
         instructions = [
             t for t in plan.templates 

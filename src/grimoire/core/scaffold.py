@@ -27,6 +27,7 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
 from grimoire.memory import profiles as memory_profiles
+from grimoire.workflows import registry as workflow_registry
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -532,6 +533,9 @@ class ProjectScaffolder:
     def _workflows_dir(self) -> Path:
         return self._kit_dir() / layout.WORKFLOWS_SUBDIR
 
+    def _teams_dir(self) -> Path:
+        return self._kit_dir() / layout.TEAMS_SUBDIR
+
     # Delegation roles a template may reference, each mapped to the agent tags
     # that can fill it, most specific first.
     #
@@ -631,6 +635,7 @@ class ProjectScaffolder:
             base / layout.KIT_DIR / layout.AGENTS_SUBDIR,
             base / layout.KIT_DIR / layout.PROMPT_TEMPLATES_SUBDIR,
             base / layout.KIT_DIR / layout.WORKFLOWS_SUBDIR,
+            base / layout.KIT_DIR / layout.TEAMS_SUBDIR,
             base / layout.KIT_DIR / layout.FRAMEWORK_SUBDIR,
             base / layout.OVERRIDES_DIR / layout.AGENTS_SUBDIR,
             base / "_grimoire" / "_memory" / "agent-learnings",
@@ -927,6 +932,18 @@ class ProjectScaffolder:
                 if src.is_file():
                     p.copies.append(FileCopy(src=src, dst=tools_dst / name, label=f"tools/{name}"))
 
+        # Team manifests — a workflow declaring `team:` resolves against these.
+        # Installed rather than only read from the wheel, so a project can adapt
+        # a roster without forking the kit.
+        teams_src = fw / "teams"
+        if teams_src.is_dir():
+            for manifest in sorted(teams_src.glob("*.yaml")):
+                p.copies.append(FileCopy(
+                    src=manifest,
+                    dst=self._teams_dir() / manifest.name,
+                    label=f"framework/teams/{manifest.name}",
+                ))
+
         # Memory system — kit code lives in the kit tier so updates reach it.
         code_dst = self._memory_code_dir()
         for name in ("maintenance.py", "session-save.py"):
@@ -1080,6 +1097,10 @@ class ProjectScaffolder:
             return
         gh_prompts = self._target / ".github" / "prompts"
         for prompt_file in sorted(prompts_src.glob("*.prompt.md")):
+            # Un prompt qui redit une commande CLI n'est plus déployé dans les
+            # projets neufs. Il reste livré : ceux qui l'ont gardent le leur.
+            if workflow_registry.is_deprecated_file(prompt_file):
+                continue
             p.copies.append(FileCopy(
                 src=prompt_file,
                 dst=gh_prompts / prompt_file.name,

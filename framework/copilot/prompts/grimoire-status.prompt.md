@@ -1,4 +1,6 @@
 ---
+kind: command
+deprecated_by: 'grimoire status'
 description: 'Tableau de bord Grimoire — agents actifs, mémoire, activité récente, état projet'
 agent: 'agent'
 tools: ['read', 'search']

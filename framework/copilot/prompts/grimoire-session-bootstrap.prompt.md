@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Bootstrap une nouvelle session Grimoire — contexte projet, historique, état git, santé'
 agent: 'agent'
 tools: ['read', 'search', 'execute']

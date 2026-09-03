@@ -176,6 +176,52 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   chemins montrait quatre propriétés de `PathResolver` — `grimoire_dir`,
   `config_dir`, `memory_dir`, `agents_dir` — dont aucune n'a jamais existé.
 
+- **Quatre prompts livrés redisaient une commande du SDK.**
+  `/grimoire-status`, `/grimoire-health-check`, `/grimoire-self-heal` et
+  `/grimoire-pre-push` refont ce que `grimoire status`, `doctor`,
+  `doctor --fix` et `check` font déjà — et occupaient la moitié du catalogue,
+  qui donnait l'impression d'un produit sachant seulement diagnostiquer. Ils
+  déclarent désormais la commande qui les remplace, sortent de la vue par
+  défaut (`--all` les montre) et ne sont plus déployés dans les projets neufs.
+  Ils restent livrés et installables : un projet qui les a ne les perd pas, et
+  `workflows doctor` ne les réclame plus. Les trois autres —
+  `/grimoire-changelog`, `/grimoire-dream`, `/grimoire-session-bootstrap` —
+  lisent l'historique et la mémoire pour en tirer une synthèse, ce qu'aucune
+  commande ne fait : ils restent de plein droit.
+- **Les champs `team` et `patterns` étaient déclarés et vides.** Deux
+  workflows de plus déclarent leur équipe — `subagent-orchestration` nomme le
+  roster de `team-build`, et la spécialité de `team-ops` contient « Incident
+  Response » — et trois citent le pattern qu'ils instancient (`ORC-01` pour
+  les deux orchestrateurs, `ORC-09` pour le checkpoint d'état). Les trois
+  restants n'en déclarent aucun : leurs fichiers ne l'ancrent pas, et le
+  deviner contredirait la règle qui veut qu'une description soit dérivée de
+  son artefact. Deux tests refusent un identifiant de pattern hors catalogue
+  et une équipe qui ne se résout pas.
+- **Le catalogue de workflows ne montrait que la moitié de ce que le kit
+  installe.** `grimoire workflows list` n'indexait que `.github/prompts/` :
+  sept prompts d'hygiène, qui doublent pour la plupart une commande CLI. Les
+  six workflows d'orchestration multi-agents — boomerang, subagent,
+  party-mode, incident-response, state-checkpoint, repo-map-generator — sont
+  déposés par le scaffold dans le tier kit et n'étaient listés par aucune
+  surface : installés dans chaque projet, invocables depuis nulle part. Le
+  catalogue indexe désormais les deux familles, avec la nature de chaque
+  workflow, les agents qu'il mobilise et sa provenance ; `--kind` filtre.
+- **Les manifestes d'équipe avaient un schéma, trois fichiers et aucun
+  lecteur.** `framework/teams/` décrit la chaîne vision → build → ops :
+  membres et rôles, contrats d'entrée et de sortie, phases de livraison,
+  outils autorisés, condition de handoff. Rien dans le SDK ne les chargeait.
+  Ils sont désormais installés dans le projet, résolus par tier, affichés par
+  `grimoire workflows teams`, et rendus par `workflows show` quand un workflow
+  déclare `team:`.
+- **`workflows show` et `workflows install` ne pouvaient pas atteindre une
+  orchestration.** Les deux résolvaient en `<slug>.prompt.md`, un nom que les
+  workflows d'orchestration ne portent pas. `install` résout désormais dans le
+  cadre livré, sans la précédence de lecture qui lui rendait la copie du
+  projet, et dépose chaque workflow là où sa nature l'exige.
+- **Deux workflows livrés perdaient leur frontmatter en silence.** Leur
+  description contenait un `:` non échappé ; le YAML échouait, le parseur
+  renvoyait un dictionnaire vide, et le workflow arrivait sans nom ni agents.
+  Un test paramétré sur les fichiers livrés ferme le cas.
 - **`host sync` ne remplace plus en silence un hook écrit à la main.**
   L'émetteur Copilot posait `managed=False` sur ses fichiers de hook, ce qui
   désactivait entièrement le contrôle de préservation : le drapeau confondait
@@ -343,6 +389,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Les deux se taisent sur un projet sans étage `_grimoire/kit/` : un arbre fait
   main ou d'avant la frontière n'a rien fait livrer par le kit, et un contrôle
   qu'on ignore est pire que pas de contrôle.
+- **Les workflows se déclarent.** Un frontmatter `kind` / `description` /
+  `agents` / `team` / `triggers` fait entrer un workflow au catalogue, plutôt
+  que de le deviner depuis son emplacement — sous `workflows/` vivent aussi
+  des gabarits de rapport rendus à chaque run. Les six orchestrations et les
+  sept commandes livrées le portent désormais.
+- **`grimoire workflows teams`** — les équipes disponibles, leurs membres et
+  la chaîne de handoff.
 
 - **Deux plans cibles** : `docs/flow-engine-target-plan.md` — brancher le
   noyau d'exécution qui existe mais n'est appelé par rien — et

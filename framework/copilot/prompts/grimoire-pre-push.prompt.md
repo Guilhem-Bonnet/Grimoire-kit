@@ -1,4 +1,6 @@
 ---
+kind: command
+deprecated_by: 'grimoire check'
 description: 'Validation pre-push — intégrité agents, qualité code, mémoire, tests si disponibles'
 agent: 'agent'
 tools: ['read', 'search', 'execute']

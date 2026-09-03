@@ -1,4 +1,5 @@
 ---
+kind: command
 description: 'Dream Mode — consolidation hors-session, patterns cross-domaine, insights émergents'
 agent: 'agent'
 tools: ['read', 'search']
