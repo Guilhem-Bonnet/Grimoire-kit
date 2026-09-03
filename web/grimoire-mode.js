@@ -34,6 +34,11 @@
      cassé. */
   var elsewhere = location.protocol === 'file:'
     || /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  /* L'origine est une dimension à part du mode : une page vitrine servie par
+     `grimoire serve` reste habillée en vitrine, mais l'utilisateur est déjà
+     dans l'atelier. Le chrome lit ce drapeau pour ne pas lui proposer
+     d'installer ce qu'il exécute, ni la démo publique à la place de son projet. */
+  window.GrimoireLocal = elsewhere;
   window.GrimoireDocsBase = elsewhere
     ? 'https://guilhem-bonnet.github.io/Grimoire-kit/docs/'
     : 'docs/';
