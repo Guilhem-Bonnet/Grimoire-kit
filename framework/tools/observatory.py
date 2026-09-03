@@ -39,12 +39,11 @@ import http.server
 import json
 import os
 import re
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-import _stdio
 
 # ── Version ──────────────────────────────────────────────────────────────────
 
@@ -1910,7 +1909,8 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="observatory",
         description="Grimoire Observatory — Interactive Visual Dashboard",

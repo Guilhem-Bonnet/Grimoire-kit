@@ -13,9 +13,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cp1252.** Filets de tableau, flèches, coches : chacun levait
   `UnicodeEncodeError` sur une simple commande de lecture chez un utilisateur
   Windows — une classe, pas un incident, révélée par la matrice Windows de
-  #191. Le correctif est de classe : `_stdio.force_utf8()` en tête de chaque
-  `main()` reconfigure la sortie en UTF-8 avec remplacement, et laisse en paix un
-  flux qui n'a pas d'encodage à corriger. Un test prouve d'abord qu'une console
+  #191. Le correctif est de classe et tient en deux lignes en tête de chaque
+  `main()` : la sortie est reconfigurée en UTF-8 avec remplacement, et un flux
+  sans `reconfigure` est laissé en paix. Pas de module partagé : ces outils
+  sont chargés de trois façons — script, `import_module`, chargeur par chemin —
+  et seul un code sans import survit aux trois. Un test prouve d'abord qu'une console
   cp1252 meurt bien sur un filet, puis que le même texte passe ; un autre
   refuse tout outil qui imprime hors cp1252 sans forcer l'UTF-8. Aucune variable
   d'environnement posée en CI : la matrice ne verdit que si le bug est corrigé.

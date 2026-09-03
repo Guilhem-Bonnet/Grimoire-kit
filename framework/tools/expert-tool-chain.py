@@ -39,8 +39,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import _stdio
-
 _log = logging.getLogger("grimoire.expert_tool_chain")
 
 ETC_VERSION = "1.0.0"
@@ -680,7 +678,8 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Expert Tool Chain — MCP expertise + vision loop for agents",
     )

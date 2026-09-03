@@ -39,8 +39,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-import _stdio
-
 _log = logging.getLogger("grimoire.llm_router")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -752,7 +750,8 @@ def _print_stats(router: LLMRouter, recommend: bool = False) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="LLM Router — Route les requêtes agents vers le modèle LLM optimal",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -25,11 +25,10 @@ import argparse
 import json
 import logging
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-
-import _stdio
 
 _log = logging.getLogger("grimoire.antifragile_score")
 
@@ -726,7 +725,8 @@ def render_trend(history: list[dict]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Anti-Fragile Score — mesure la résilience adaptative du système",
         formatter_class=argparse.RawDescriptionHelpFormatter,

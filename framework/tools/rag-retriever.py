@@ -39,8 +39,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import _stdio
-
 # ── Version ──────────────────────────────────────────────────────────────────
 
 RAG_RETRIEVER_VERSION = "1.0.0"
@@ -727,7 +725,8 @@ def _print_augmented(aug: AugmentedPrompt) -> None:
 
 def main() -> None:
     """Point d'entrée CLI."""
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="RAG Retriever — Retrieval sémantique Grimoire pour enrichir le contexte agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,

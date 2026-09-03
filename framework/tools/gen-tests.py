@@ -24,8 +24,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import _stdio
-
 try:
     import yaml
 except ImportError:
@@ -323,7 +321,8 @@ def generate_tests(dna: dict, framework: str, output_dir: str, dna_path: str) ->
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Génère des squelettes de tests depuis les acceptance_criteria d'un DNA archétype Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

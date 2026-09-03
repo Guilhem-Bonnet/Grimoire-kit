@@ -38,8 +38,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-import _stdio
-
 _log = logging.getLogger("grimoire.dna_evolve")
 
 # ── Structures ────────────────────────────────────────────────────────────────
@@ -651,7 +649,8 @@ def apply_patch(patch_path: Path, dna: DNASnapshot) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire DNA Evolution Engine — fait évoluer la DNA d'un archétype depuis l'usage réel",
         formatter_class=argparse.RawDescriptionHelpFormatter,

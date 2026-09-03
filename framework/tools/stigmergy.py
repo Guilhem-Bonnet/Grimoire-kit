@@ -52,8 +52,6 @@ from datetime import UTC, datetime
 from math import pow as mpow
 from pathlib import Path
 
-import _stdio
-
 # ── Verrou fichier portable (issue #33 : fcntl est POSIX-only) ────────────────
 
 try:
@@ -840,7 +838,8 @@ def _intensity_bar(intensity: float, width: int = 10) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Grimoire Stigmergy — coordination par phéromones numériques",
         formatter_class=argparse.RawDescriptionHelpFormatter,

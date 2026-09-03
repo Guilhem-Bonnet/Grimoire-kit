@@ -376,6 +376,8 @@ def _emit_context(text: str, event_name: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     args = argv if argv is not None else sys.argv[1:]
     action = args[0] if args else ""
     try:

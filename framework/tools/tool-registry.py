@@ -43,8 +43,6 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import _stdio
-
 _log = logging.getLogger("grimoire.tool_registry")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -618,7 +616,8 @@ def _print_stats(stats: RegistryStats) -> None:
 
 
 def main() -> None:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Tool Registry — Registry unifié des outils Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,

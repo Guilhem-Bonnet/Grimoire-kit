@@ -41,8 +41,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-import _stdio
-
 _log = logging.getLogger("grimoire.vision_judge")
 
 VISION_JUDGE_VERSION = "1.0.0"
@@ -181,7 +179,6 @@ RUBRICS: dict[str, dict[str, Any]] = {
 @dataclass
 class CriterionScore:
     """Score pour un critère individuel."""
-
     name: str = ""
     score: float = 0.0  # 0.0 - 1.0
     weight: float = 0.0
@@ -191,7 +188,6 @@ class CriterionScore:
 @dataclass
 class VisionVerdict:
     """Verdict complet d'évaluation visuelle."""
-
     image_path: str = ""
     rubric_used: str = ""
     criteria_scores: list[dict[str, Any]] = field(default_factory=list)
@@ -665,7 +661,8 @@ def cmd_batch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Vision Judge — Visual Quality Assessment for Agent Outputs",
     )

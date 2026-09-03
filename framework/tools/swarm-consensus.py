@@ -43,8 +43,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import _stdio
-
 _log = logging.getLogger("grimoire.swarm_consensus")
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -386,7 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:

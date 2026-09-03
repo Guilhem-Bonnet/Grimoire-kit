@@ -48,8 +48,6 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import _stdio
-
 _log = logging.getLogger("grimoire.message_bus")
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -598,7 +596,8 @@ def _print_stats(stats: BusStats) -> None:
 
 
 def main() -> None:
-    _stdio.force_utf8()  # console Windows cp1252 : voir framework/tools/_stdio.py
+    for _s in (sys.stdout, sys.stderr):  # console Windows cp1252 : jamais UnicodeEncodeError (#192)
+        getattr(_s, "reconfigure", lambda **_: None)(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Message Bus — Communication inter-agents Grimoire",
         formatter_class=argparse.RawDescriptionHelpFormatter,
