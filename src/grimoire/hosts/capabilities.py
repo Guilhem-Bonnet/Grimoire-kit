@@ -51,6 +51,13 @@ class HostProfile:
     commands_native: bool = False
     #: Hooks can refuse a tool call or a turn closure, not merely inject text.
     blocking_hooks: bool = False
+    #: Can be told to open a session *inside* a named agent.
+    #: False everywhere on purpose: Claude Code instantiates a sub-agent file
+    #: only through its Agent tool, Copilot only through the chat dropdown.
+    #: The field exists so the substitute below is a declared degradation
+    #: rather than folklore — and so the day a host ships the capability, the
+    #: emitters read a flag instead of being rewritten.
+    agent_autostart: bool = False
     #: Has a declarative allow/deny/ask permission table.
     permissions_native: bool = False
     #: Reads an MCP client configuration.
@@ -83,6 +90,7 @@ class HostProfile:
                 "skills": self.skills_native,
                 "commands": self.commands_native,
                 "blocking_hooks": self.blocking_hooks,
+                "agent_autostart": self.agent_autostart,
                 "permissions": self.permissions_native,
                 "mcp": self.mcp_native,
                 "plugin_packaging": self.plugin_packaging,
@@ -104,7 +112,7 @@ CLAUDE_CODE_PROFILE = HostProfile(
     mcp_native=True,
     plugin_packaging=True,
     instructions_entrypoint="CLAUDE.md",
-    notes="Every Grimoire surface has a native counterpart; nothing degrades.",
+    notes="Every surface has a native counterpart except starting inside an agent, which no host offers.",
 )
 
 COPILOT_PROFILE = HostProfile(
@@ -221,6 +229,17 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
         gaps.append(CapabilityGap("skills", "skills inlined as a catalog in the instructions entrypoint"))
     if not profile.commands_native:
         gaps.append(CapabilityGap("commands", "commands listed as CLI invocations the agent must run"))
+    if not profile.agent_autostart:
+        # A host that cannot enter an agent can still be handed its persona.
+        # Where session_start runs, the hook injects it into the main loop;
+        # where it does not, the entrypoint file is the only place left.
+        if profile.supports_event(HookEvent.SESSION_START):
+            fallback = "entry persona injected into the main loop by the session_start hook"
+            events: tuple[str, ...] = (HookEvent.SESSION_START.value,)
+        else:
+            fallback = f"entry persona named in {profile.instructions_entrypoint or 'the instructions entrypoint'}"
+            events = ()
+        gaps.append(CapabilityGap("agent_autostart", fallback, events))
     if not profile.blocking_hooks:
         missing = tuple(e.value for e in HookEvent if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))

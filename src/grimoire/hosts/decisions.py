@@ -370,15 +370,65 @@ def _policy_request(hook: HookInput, facts: ToolFacts, task_id: str, risk: str) 
 # ── Decisions ────────────────────────────────────────────────────────────────
 
 
-def decide_activation(hook: HookInput) -> Decision:
-    """Session start: hand the agent the project's standing directive.
+def entry_persona_context(project_root: Path) -> tuple[str, str]:
+    """The session-start stand-in for an agent no host can be told to open.
 
-    Validated 40/40 by the 2026-07-09 campaign against 0/40 without it — an
-    unread standard is an inert standard.
+    ``collect_agents`` has always marked one persona ``entry_point``, and
+    ``ProjectSurface.entry_agent`` has always known how to find it — but until
+    this call site existed, the designation only changed a sentence *inside*
+    the sub-agent file, which nothing reads until someone has already chosen to
+    route there. A point of entry nobody enters is a label.
+
+    So the persona is handed to the main loop instead of being launched into.
+    That is not a smaller version of autostart: the session keeps the host's
+    full tool surface and can still dispatch sub-agents. It is the one thing
+    every host with a ``session_start`` hook makes possible.
+
+    Returns ``(text, name)``; both empty when the project designates no entry.
+    """
+    from grimoire.hosts.collect import collect_agents
+    from grimoire.hosts.surface import ProjectSurface
+
+    try:
+        agents = collect_agents(project_root)
+    except OSError:
+        return "", ""
+    entry = ProjectSurface(project_name=project_root.name, agents=agents).entry_agent()
+    if entry is None:
+        return "", ""
+    tools = ", ".join(v.value for v in entry.tools)
+    text = f"""[Grimoire — persona d'entrée]
+Aucun hôte ne sait ouvrir une session à l'intérieur d'un agent. Cette session
+adopte donc la persona d'entrée du projet dans sa boucle principale, sans
+sous-agent : **{entry.name}** — {entry.description}
+
+1. Lis `{entry.definition_ref}` en entier avant de répondre : ce fichier porte
+   la persona, ses règles et son protocole d'activation. Applique-les.
+2. Tiens sa frontière d'outils pour ce que tu fais toi-même : {tools}.
+3. Tu restes la boucle principale : dispatcher un sous-agent reste un choix que
+   tu justifies, jamais un passage obligé.
+"""
+    return text, entry.name
+
+
+def decide_activation(hook: HookInput) -> Decision:
+    """Session start: hand the agent its persona, then the standing directive.
+
+    The directive was validated 40/40 by the 2026-07-09 campaign against 0/40
+    without it — an unread standard is an inert standard. It stays last on
+    purpose: it is the part measured, and the part closest to the user's first
+    message. The persona goes first because identity frames the protocol, not
+    the reverse.
     """
     task_id = active_task_id(hook.project_root)
-    context = activation_context_text(hook.project_root, task_id=task_id)
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={"task_id": task_id})
+    directive = activation_context_text(hook.project_root, task_id=task_id)
+    persona, entry_name = entry_persona_context(hook.project_root)
+    context = f"{persona}\n{directive}" if persona else directive
+    return Decision(
+        outcome=Outcome.ALLOW,
+        context=context,
+        detail={"task_id": task_id, "entry_agent": entry_name},
+    )
 
 
 def decide_task_context(hook: HookInput) -> Decision:
