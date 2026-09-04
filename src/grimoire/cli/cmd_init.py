@@ -31,6 +31,7 @@ from grimoire.__version__ import __version__
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
+from grimoire.hosts.sync import sync_host_surfaces
 from grimoire.memory import profiles as memory_profiles
 
 console = Console(stderr=True)
@@ -941,7 +942,9 @@ def run_init(
 
     # Phase 6: Execute
     result = scaffolder.execute(plan)
-    _sync_host_surfaces(target)
+    surfaces = sync_host_surfaces(target)
+    if not surfaces.ok:
+        console.print(f"[yellow]![/yellow] {surfaces.warning}")
 
     qdrant_docker_started = False
     qdrant_docker_message = ""
@@ -977,26 +980,3 @@ def run_init(
     _maybe_register_cockpit(target, project_name, fmt)
 
 
-def _sync_host_surfaces(target: Path) -> list[str]:
-    """Render the project onto every known host right after scaffolding.
-
-    A project is only as capable as the surfaces its host can execute, and a
-    surface nobody generated is a surface nobody has. Failures are swallowed on
-    purpose: an emitter problem must not fail an otherwise successful install —
-    `grimoire host status` reports the drift, `grimoire host sync` fixes it.
-    """
-    try:
-        from grimoire.hosts.collect import build_surface
-        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
-
-        surface = build_surface(target)
-        written: list[str] = []
-        for host_id in supported_hosts():
-            emitter = emitter_for(host_id)
-            if emitter is None:  # pragma: no cover - registry is complete
-                continue
-            result = apply_plan(emitter.plan(surface, target), target)
-            written.extend(result.written)
-        return written
-    except Exception:
-        return []

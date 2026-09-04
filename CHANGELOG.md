@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Le rendu des surfaces hôtes dit quand il échoue.** `init`, `doctor --fix`
+  et `standard init` régénéraient agents, skills, commandes et hooks derrière
+  trois copies d'un `except Exception: return []`, chacune justifiée par
+  « `host status` rapportera la dérive ». Un projet dont les surfaces ne se
+  rendaient pas sortait donc d'`init` avec un rapport vert et aucun hook, et
+  `doctor --fix` affichait « 22/22 checks passed ». Un seul écrivain désormais
+  (`grimoire.hosts.sync`), qui rend l'échec en donnée et l'écrit sur stderr ;
+  les trois commandes affichent l'avertissement, et `standard init -o json`
+  le porte dans `host_surfaces`.
+
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
   Mesuré sur les 262 identifiants que le kit émet aujourd'hui : **26 étaient
