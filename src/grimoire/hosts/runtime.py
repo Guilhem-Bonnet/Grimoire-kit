@@ -223,7 +223,11 @@ def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, laten
         from grimoire.traces.schemas import TraceOutcome
 
         detail = decision.detail
-        task_id = str(detail.get("task_id") or "")
+        # Le seul flux qui ignorait la tâche : la décision de policy ne la porte
+        # pas dans son détail, donc chaque refus d'outil était journalisé sous
+        # un task_id vide et `grimoire task trace` ne pouvait pas le retrouver.
+        # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
+        task_id = str(detail.get("task_id") or active_task_id(hook.project_root))
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
         tool_calls = []
         if hook.event is HookEvent.PRE_TOOL_USE:
