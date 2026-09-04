@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
+from ruamel.yaml import YAML
 
 _WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "publish.yml"
 
@@ -19,7 +19,7 @@ _WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "pub
 def jobs() -> dict[str, dict]:
     if not _WORKFLOW.is_file():
         pytest.skip("dépôt source uniquement")
-    return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    return YAML(typ="safe").load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
 
 
 def test_no_job_is_allowed_to_fail_silently(jobs: dict[str, dict]) -> None:
