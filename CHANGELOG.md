@@ -9,6 +9,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
+  artefact.** `grimoire standard traceability` listait dix-sept exigences
+  `AG-*` obligatoires jusqu'à N4 que le kit ne couvrait par rien (#246). Six
+  artefacts les ferment, chacun avec son gabarit, son vérificateur et ses
+  tests : le dossier d'acceptation (AG-QUA-003, tous profils), le registre de
+  rétention (AG-RET-001/003/004/005, tous profils), le registre d'outils avec
+  contrats MCP et capture des erreurs (AG-TOL-001/003/005, dès `controlled`),
+  le registre d'incidents avec politique de containment (AG-INC-001/002/003,
+  dès `controlled`), la matrice risques/contrôles/preuves pré-remplie des
+  défauts IA que la norme nomme (AG-AUD-003, AG-QUA-005, dès `controlled`) et
+  le registre des capacités dynamiques (AG-DYN-001 à -005, dès `governed`).
+  Deux exigences tiennent dans un champ : le bloc `wip:` d'`orchestration-policy`
+  (AG-ORC-004 — une délégation `allowed` est une erreur) et la section
+  `Traceability` de la déclaration de conformité (AG-AUD-001). Pour celle-ci,
+  `grimoire standard traceability <projet>` joint désormais à la matrice le
+  verdict que `standard verify` rend sur chaque artefact, et compte les
+  exigences effectivement vérifiées. Un projet neuf vérifie sans erreur
+  nouvelle sur les cinq profils ; un projet enrôlé reçoit les fichiers par
+  `standard fix --apply`. Deux tests interdisent le retour des trous : les
+  dix-sept identifiants doivent rester couverts par un artefact requis au
+  niveau où la norme les attend, et la section `gaps` doit rester vide.
 - **Les agents lisent, réclament et clôturent leurs tâches par MCP (L3,
   #138).** Le serveur MCP expose `task_list_ready`, `task_show`, `task_claim`,
   `task_update` (move / block / close) et `task_context`. Ils appellent le

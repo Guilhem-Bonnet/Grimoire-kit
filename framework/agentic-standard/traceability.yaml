@@ -11,7 +11,7 @@ $schema: "grimoire-agentic-standard-traceability/v1"
 
 metadata:
   upstream_commit: "53b2c34258580bd965631bcc186b21947b44c71e"
-  reconciled_on: "2026-09-03"
+  reconciled_on: "2026-09-04"
   sources:
     - "docs/matrice-normative-maitresse.md"
     - "docs/exigences-normatives-structure-agentique.md"
@@ -52,10 +52,37 @@ artifacts:
     requirements: [AG-MIS-003, AG-QUA-001, AG-QUA-006]
     controls: [CTRL-MIS-001, CTRL-QUA-002]
     evidence: "matrice L22, L56, L61 (evidence pack) ; exigences L13, L72, L77"
+  acceptance_record:
+    requirements: [AG-QUA-003, AG-QUA-007]
+    controls: [CTRL-QUA-003]
+    evidence: "matrice L58 (dossier d'acceptation), L62 (verification verdict) ; exigences L74, L78 ; docs/modeles/dossier-acceptation.md"
+    note: "AG-QUA-007 partiel : la décision accepter/refuser/ajuster est portée ; incident et escalade relèvent d'incident_registry."
+  retention_registry:
+    requirements: [AG-RET-001, AG-RET-002, AG-RET-003, AG-RET-004, AG-RET-005]
+    controls: [CTRL-RET-001, CTRL-RET-002, CTRL-INC-001]
+    evidence: "matrice L69 (retention registry), L70 (retention decision), L71 (superseded_by), L72 (cleanup report), L73 (purge event, incident) ; exigences L95-L99 ; docs/modeles/registre-retention-connaissances.md"
+  tool_registry:
+    requirements: [AG-TOL-001, AG-TOL-003, AG-TOL-005]
+    controls: [CTRL-TOL-001, CTRL-OBS-001]
+    evidence: "matrice L49 (tool registry, MCP contract), L51 (contrat MCP), L53 (post-tool event, incident) ; exigences L60, L62, L64 ; docs/modeles/contrat-mcp.md"
+    note: "AG-TOL-005 : la politique de capture est déclarée ici ; l'événement post-outil lui-même est produit par hook_registry (post_tool_call) et versé dans evidence_pack ou incident_registry."
+  incident_registry:
+    requirements: [AG-INC-001, AG-INC-002, AG-INC-003]
+    controls: [CTRL-INC-001, CTRL-EVL-001]
+    evidence: "matrice L64 (incident containment), L65 (incident report), L66 (post-mortem, eval update) ; exigences L85-L87 ; docs/modeles/incident-agentique.md ; docs/incidents-et-reprise-agentique.md"
+  risk_control_matrix:
+    requirements: [AG-AUD-003, AG-QUA-005]
+    controls: [CTRL-PAT-001]
+    evidence: "matrice L81 (risk-control-evidence matrix), L60 (registre risques IA) ; exigences L129, L76 ; docs/matrice-risques-controles-preuves.md ; docs/modeles/registre-risques-ia.md"
+  capability_registry:
+    requirements: [AG-DYN-001, AG-DYN-002, AG-DYN-003, AG-DYN-004, AG-DYN-005]
+    controls: [CTRL-PAT-001]
+    evidence: "matrice L77 (capability pack, skill record, lifecycle status) ; exigences L108-L112 ; docs/modeles/capability-pack.md, skill-record.md ; docs/runtime-agentique-et-surfaces-gouvernees.md L95-L110"
   compliance_declaration:
-    requirements: []
-    controls: []
-    reason: "Aucune ligne de la matrice ne nomme une déclaration de conformité. AG-AUD-002 (exception record) exigerait approbateur, contrôle compensatoire et expiration, absents du modèle."
+    requirements: [AG-AUD-001]
+    controls: [CTRL-OBS-001]
+    evidence: "matrice L79 (traceability matrix) ; exigences L127 — la déclaration cite la matrice (ce fichier, rendu par `grimoire standard traceability <projet>`) et le verdict de `standard verify` par artefact"
+    note: "AG-AUD-002 (exception record) reste porté par accepted_risks et waivers."
   knowledge_source_registry:
     requirements: [AG-CTX-002, AG-CTX-005]
     controls: [CTRL-CTX-001, CTRL-SRC-001, CTRL-RET-002]
@@ -91,11 +118,11 @@ artifacts:
     requirements: [AG-TOL-006, AG-DYN-002, AG-DYN-005]
     controls: [CTRL-PAT-001]
     evidence: "matrice L54 (hook registry, nom identique), L77 ; exigences L65, L109, L112"
-    note: "AG-DYN-001, -003, -004 sans champ correspondant (gap réel)."
+    note: "AG-DYN-001, -003, -004 sont portés par capability_registry, qui reprend aussi -002 et -005."
   orchestration_policy:
-    requirements: [AG-ORC-003, AG-QUA-004]
-    controls: [CTRL-QUA-001, CTRL-AUT-001]
-    evidence: "matrice L27 (handoff packet), L59 (RACI) ; exigences L23, L75"
+    requirements: [AG-ORC-003, AG-ORC-004, AG-QUA-004]
+    controls: [CTRL-QUA-001, CTRL-AUT-001, CTRL-OBS-001]
+    evidence: "matrice L27 (handoff packet), L28 (WIP, délégation ouverte), L59 (RACI) ; exigences L23, L24, L75"
     note: "AG-ORC-003 couvert par le modèle (handoffs:) mais le vérificateur ne lit que roles: — trou de vérification."
   evidence_gates:
     requirements: [AG-QUA-008]
@@ -259,6 +286,12 @@ verifiers:
   wsm: {prefix: "wsm.", controls: [CTRL-QUA-003]}
   k8s: {prefix: "k8s.", controls: []}
   claims: {prefix: "claims.", controls: [CTRL-QUA-001]}
+  acceptance: {prefix: "acceptance.", controls: [CTRL-QUA-003]}
+  retention: {prefix: "retention.", controls: [CTRL-RET-001, CTRL-RET-002, CTRL-INC-001]}
+  toolreg: {prefix: "toolreg.", controls: [CTRL-TOL-001]}
+  incidents: {prefix: "incidents.", controls: [CTRL-INC-001, CTRL-EVL-001]}
+  riskmatrix: {prefix: "riskmatrix.", controls: [CTRL-PAT-001]}
+  capabilities: {prefix: "capabilities.", controls: [CTRL-PAT-001]}
   surfaces: {prefix: "surfaces.", controls: [CTRL-OBS-001]}
   artifact: {prefix: "artifact.", controls: [], reason: "Présence des fichiers requis par le profil ; prérequis, pas un contrôle de la norme."}
   gate: {prefix: "gate.", controls: [CTRL-QUA-003]}
@@ -268,27 +301,15 @@ verifiers:
   yaml: {prefix: "yaml.", controls: [], reason: "Syntaxe YAML ; prérequis technique."}
 
 # Exigences obligatoires à un niveau que le kit ne couvre par aucun artefact.
-# Cumulatif : un trou de N1 reste un trou à N4.
+# Cumulatif : un trou de N1 reste un trou à N4. Vide depuis le 2026-09-04 :
+# les dix-sept trous du 2026-09-03 sont couverts par acceptance_record,
+# retention_registry, tool_registry, incident_registry, risk_control_matrix,
+# capability_registry, le bloc wip: d'orchestration_policy et la section
+# Traceability de compliance_declaration. Ce qui reste partiel est dit dans
+# la note de l'artefact concerné, pas caché ici.
 gaps:
-  N1:
-    - {id: AG-QUA-003, label: "Dossier d'acceptation client", evidence: "exigences L74 ; matrice L58"}
-    - {id: AG-RET-001, label: "Registre de rétention de tout artefact produit", evidence: "exigences L95 ; matrice L69"}
-  N2:
-    - {id: AG-TOL-001, label: "Registre d'outils avec risque et permissions", evidence: "exigences L60 ; matrice L49"}
-    - {id: AG-TOL-003, label: "Contrat MCP (owner, scopes, timeout, logs)", evidence: "exigences L62 ; matrice L51"}
-    - {id: AG-TOL-005, label: "Erreurs d'outil capturées comme preuve ou incident", evidence: "exigences L64 ; matrice L53"}
-    - {id: AG-INC-001, label: "Containment d'anomalie critique", evidence: "exigences L85 ; matrice L64"}
-    - {id: AG-RET-003, label: "Sources remplacées pointant vers leur remplacement", evidence: "exigences L97 ; matrice L71"}
-    - {id: AG-RET-004, label: "Nettoyage périodique TTL, doublons, obsolescence", evidence: "exigences L98 ; matrice L72"}
-    - {id: AG-RET-005, label: "Purge de mémoire contaminée suivie comme incident", evidence: "exigences L99 ; matrice L73"}
-  N3:
-    - {id: AG-ORC-004, label: "Limitation du WIP, pas de délégation ouverte", evidence: "exigences L24 ; matrice L28"}
-  N4:
-    - {id: AG-INC-002, label: "Incident : containment, correction, purge, prévention", evidence: "exigences L86 ; matrice L65"}
-    - {id: AG-INC-003, label: "Incidents récurrents alimentant evals, hooks, gouvernance", evidence: "exigences L87 ; matrice L66"}
-    - {id: AG-DYN-001, label: "Création dynamique répondant à un gap identifié", evidence: "exigences L108"}
-    - {id: AG-DYN-003, label: "Artefact éphémère avec règle d'expiration", evidence: "exigences L110"}
-    - {id: AG-DYN-004, label: "Promotion vers durable justifiée", evidence: "exigences L111"}
-    - {id: AG-AUD-001, label: "Matrice de traçabilité exigence, contrôle, preuve, verdict", evidence: "exigences L127 ; matrice L79", note: "Ce fichier en est le premier lot."}
-    - {id: AG-AUD-003, label: "Matrice risques, contrôles, preuves", evidence: "exigences L129 ; matrice L81"}
+  N1: []
+  N2: []
+  N3: []
+  N4: []
   N5: []

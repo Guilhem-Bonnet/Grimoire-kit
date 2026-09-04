@@ -47,6 +47,24 @@ artifact_types:
   evidence_pack:
     template: "framework/agentic-standard/templates/evidence-pack.md"
     purpose: "Collect proof that a task, workflow, or release satisfied its declared controls."
+  acceptance_record:
+    template: "framework/agentic-standard/templates/acceptance-record.md"
+    purpose: "Let the client or validator accept, refuse or adjust a business deliverable against its criteria and their proof (AG-QUA-003)."
+  retention_registry:
+    template: "framework/agentic-standard/templates/retention-registry.yaml"
+    purpose: "Give every produced artifact a destination, point superseded sources to their replacement, log cleanups and purges (AG-RET-001, AG-RET-003, AG-RET-004, AG-RET-005)."
+  tool_registry:
+    template: "framework/agentic-standard/templates/tool-registry.yaml"
+    purpose: "Register tools with risk and permissions, MCP servers as contracts, and how tool errors become evidence or incidents (AG-TOL-001, AG-TOL-003, AG-TOL-005)."
+  incident_registry:
+    template: "framework/agentic-standard/templates/incident-registry.yaml"
+    purpose: "Declare what a critical anomaly stops, and record each incident with containment, correction, memory purge and prevention (AG-INC-001, AG-INC-002, AG-INC-003)."
+  risk_control_matrix:
+    template: "framework/agentic-standard/templates/risk-control-matrix.yaml"
+    purpose: "Tie every named risk, plausible AI defects first, to its controls and the evidence that they hold (AG-AUD-003, AG-QUA-005)."
+  capability_registry:
+    template: "framework/agentic-standard/templates/capability-registry.yaml"
+    purpose: "Register dynamically created capabilities with their gap, durability, expiry and promotion evidence (AG-DYN-001 to AG-DYN-005)."
   compliance_declaration:
     template: "framework/agentic-standard/templates/compliance-declaration.md"
     purpose: "Declare profile-level conformance with explicit gaps and accepted deviations."
@@ -173,6 +191,8 @@ profiles:
       - task_envelope
       - evidence_pack
       - claim_ledger
+      - acceptance_record
+      - retention_registry
     recommended_archetypes:
       - minimal
       - agentic-standard
@@ -195,6 +215,11 @@ profiles:
       - task_envelope
       - evidence_pack
       - claim_ledger
+      - acceptance_record
+      - retention_registry
+      - tool_registry
+      - incident_registry
+      - risk_control_matrix
       - llm_provider_registry
       - compliance_declaration
     recommended_archetypes:
@@ -224,6 +249,11 @@ profiles:
       - task_envelope
       - evidence_pack
       - claim_ledger
+      - acceptance_record
+      - retention_registry
+      - tool_registry
+      - incident_registry
+      - risk_control_matrix
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -263,6 +293,12 @@ profiles:
       - task_envelope
       - evidence_pack
       - claim_ledger
+      - acceptance_record
+      - retention_registry
+      - tool_registry
+      - incident_registry
+      - risk_control_matrix
+      - capability_registry
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -313,6 +349,12 @@ profiles:
       - task_envelope
       - evidence_pack
       - claim_ledger
+      - acceptance_record
+      - retention_registry
+      - tool_registry
+      - incident_registry
+      - risk_control_matrix
+      - capability_registry
       - knowledge_source_registry
       - llm_provider_registry
       - compliance_declaration
@@ -354,6 +396,16 @@ generation_targets:
       source_artifact: mission_brief
     - path: "_grimoire/standard/runtime-surface-registry.yaml"
       source_artifact: runtime_surface_registry
+    - path: "_grimoire/standard/retention-registry.yaml"
+      source_artifact: retention_registry
+    - path: "_grimoire/standard/tool-registry.yaml"
+      source_artifact: tool_registry
+    - path: "_grimoire/standard/incident-registry.yaml"
+      source_artifact: incident_registry
+    - path: "_grimoire/standard/risk-control-matrix.yaml"
+      source_artifact: risk_control_matrix
+    - path: "_grimoire/standard/capability-registry.yaml"
+      source_artifact: capability_registry
     - path: "_grimoire/standard/compliance-declaration.md"
       source_artifact: compliance_declaration
     - path: "_grimoire/standard/knowledge-source-registry.yaml"
@@ -437,3 +489,5 @@ generation_targets:
       source_artifact: evidence_pack
     - path: "_grimoire-output/evidence/{task-id}/claim-ledger.md"
       source_artifact: claim_ledger
+    - path: "_grimoire-output/evidence/{task-id}/acceptance-record.md"
+      source_artifact: acceptance_record
