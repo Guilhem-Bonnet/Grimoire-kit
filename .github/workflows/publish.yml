@@ -51,6 +51,11 @@ jobs:
           name: sbom
           path: sbom/
 
+  # La pré-vérification avant publication, c'est ce job : la wheel construite
+  # est installée dans un runner neuf, sur chaque Python supporté, et doit
+  # démarrer. Il n'y a pas d'étage TestPyPI — il n'a jamais tourné (le projet
+  # n'y a jamais été enregistré, #195) et affichait une vérification qui
+  # n'avait pas lieu. En local, avant le tag : `make wheel-check`.
   test:
     name: "Smoke test"
     runs-on: ubuntu-latest
@@ -76,28 +81,6 @@ jobs:
           pip install dist/*.whl
           grimoire --version
           python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
-
-  publish-testpypi:
-    name: "Publish to TestPyPI"
-    runs-on: ubuntu-latest
-    # PyPI publishing is opt-in: set repo variable GRIMOIRE_ENABLE_PYPI=true to enable.
-    # Disabled by default so a release tag produces a GitHub Release only.
-    if: ${{ vars.GRIMOIRE_ENABLE_PYPI == 'true' }}
-    needs: [build, test]
-    environment: testpypi
-    # TestPyPI is optional — don't block PyPI publish if it fails
-    continue-on-error: true
-    steps:
-      - name: Download dist
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
 
   publish-pypi:
     name: "Publish to PyPI"

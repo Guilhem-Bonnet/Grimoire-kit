@@ -18,6 +18,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   waivées n'ont de correctif sur aucune version. La borne reste, son
   commentaire dit pourquoi, et les trois waivers sont reconduits au
   2027-02-28 après revérification OSV du 2026-09-04.
+
+- **L'étage TestPyPI, qui n'a jamais tourné, disparaît de `publish.yml`.** Le
+  projet n'a jamais été enregistré sur test.pypi.org : le job échouait à
+  chaque tag et son `continue-on-error` le faisait passer pour une
+  pré-vérification (#195). Ce qui vérifie réellement qu'une version
+  s'installe est nommé et documenté dans `CONTRIBUTING.md` : `make
+  wheel-check` (wheel installée dans un venv neuf) avant le tag, les jobs
+  `build` et `test` de `publish.yml` au tag, dont `publish-pypi` dépend sans
+  `continue-on-error`. La cible `make publish-test` disparaît avec l'étage.
 ### Ajouté
 
 - **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
@@ -54,6 +63,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Les hooks ne dégradent plus en silence.** Quatre gardes pouvaient passer
+  au vert sans l'avoir mérité, et le défaut n'est apparu qu'en écrivant le
+  contrôle négatif. (1) Une décision qui plantait rendait `ALLOW` — sur
+  `PreToolUse`, c'est `permissionDecision: allow`, et l'hôte n'affiche pas le
+  contexte explicatif : le plantage du moteur de politique était une
+  auto-approbation sans trace. Un appel que la politique n'a pas pu juger
+  rend désormais `ask`, avec la cause dans le motif ; les hôtes qui ne savent
+  pas demander la reçoivent en contexte. (2) Un gate de preuve qu'on ne sait
+  pas évaluer — task-board illisible — laissait fermer une tâche `governed`
+  avec un contexte que l'hôte ne lit pas sur `Stop` ; il bloque désormais une
+  fois, en nommant le fichier à réparer, et `stop_hook_active` garantit que
+  le second `Stop` passe. Les profils non bloquants sont prévenus, pas
+  bloqués. (3) Le message système annonçait « capsule écrite avant
+  compaction » même quand le disque avait refusé ; il dit maintenant qu'elle
+  n'a pas été écrite, et pourquoi — et la capsule est écrite même quand les
+  gates sont inévaluables, avec l'identifiant de tâche et le profil, les deux
+  faits que la fenêtre suivante ne sait pas reconstruire. (4) Un verdict
+  non bloquant sur `Stop` ne vivait que dans `additionalContext`, qu'aucun
+  hôte ne lit à cet événement ; il est aussi rendu en `systemMessage`.
+
 - **Deux étapes de CI ne pouvaient pas échouer, une troisième ne pouvait pas
   se prononcer.** Le verdict sur `grimoire-init.sh doctor` soustrayait trois
   `grep -c` l'un de l'autre — toute ligne citant Qdrant ou un chemin attendu
@@ -83,7 +112,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `grimoire standard activation-context` sans `--task-id` résout la tâche
   courante au lieu de `bootstrap`. La règle est documentée dans la référence
   CLI (« Quelle tâche la session porte »).
-
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
