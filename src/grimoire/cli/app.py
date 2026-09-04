@@ -12,7 +12,7 @@ import signal
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
@@ -21,7 +21,6 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
-from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
 from grimoire.cli.cmd_blueprint import blueprint_app
 from grimoire.cli.cmd_cadrage import cadrage_app
 from grimoire.cli.cmd_cockpit import cockpit_app
@@ -30,6 +29,7 @@ from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
 from grimoire.cli.cmd_hooks import hooks_app
+from grimoire.cli.cmd_host import host_app
 from grimoire.cli.cmd_init import KNOWN_ARCHETYPES as _KNOWN_ARCHETYPES
 from grimoire.cli.cmd_init import KNOWN_BACKENDS as _KNOWN_BACKENDS
 from grimoire.cli.cmd_memory_lexical import memory_app
@@ -39,6 +39,7 @@ from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
 from grimoire.cli.cmd_up import up as up_command
 from grimoire.cli.cmd_upgrade import upgrade_command
+from grimoire.cli.workflow_catalog import WF_DESCRIPTIONS as _WF_DESCRIPTIONS
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -623,6 +624,12 @@ def status(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _status_spinner(msg: str, *, show: bool = True) -> Any:
+    """Return a Rich Status spinner (or a no-op context manager when silent)."""
+    if show:
+        return console.status(f"[bold]{msg}[/bold]", spinner="dots")
+    return nullcontext()
+
 
 # ── grimoire add / remove ─────────────────────────────────────────────────────────
 
@@ -930,18 +937,8 @@ app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")
+app.add_typer(host_app, name="host", rich_help_panel="Project")
 app.command("serve", rich_help_panel="Project")(serve_cmd)
-
-
-_WF_DESCRIPTIONS: dict[str, str] = {
-    "grimoire-session-bootstrap": "Reprendre le travail avec contexte complet",
-    "grimoire-health-check": "Diagnostic global de santé projet",
-    "grimoire-dream": "Consolider les apprentissages inter-sessions",
-    "grimoire-pre-push": "Valider avant push (tests/lint/checks)",
-    "grimoire-changelog": "Générer un changelog depuis l'historique",
-    "grimoire-status": "Obtenir un snapshot rapide du projet",
-    "grimoire-self-heal": "Diagnostiquer et réparer les pannes courantes",
-}
 
 
 def _workflow_source_dirs(project_root: Path) -> list[tuple[str, Path]]:
@@ -2179,6 +2176,7 @@ def plugins_list(ctx: typer.Context) -> None:
     console.print()
 
 
+
 # ── grimoire merge ────────────────────────────────────────────────────────────────
 
 _merge_from_arg = typer.Argument(..., help="Source directory to merge from.")
@@ -2445,7 +2443,46 @@ def env_cmd(ctx: typer.Context) -> None:
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
 
+_AUDIT_FILENAME = ".grimoire-audit.jsonl"
 _AUDIT_MAX_ENTRIES = 5000
+
+
+def _log_operation(command: str, args: dict[str, Any] | None = None, *, ok: bool = True) -> None:
+    """Append an entry to the project audit log (best-effort, silent on failure)."""
+    import datetime as _dt
+
+    try:
+        from grimoire.tools._common import find_project_root
+
+        root = find_project_root()
+    except FileNotFoundError:
+        return
+    log_dir = root / "_grimoire" / "_memory"
+    if not log_dir.is_dir():
+        return
+    log_file = log_dir / _AUDIT_FILENAME
+    record = {
+        "ts": _dt.datetime.now(tz=_dt.UTC).isoformat(),
+        "v": __version__,
+        "cmd": command,
+        "ok": ok,
+    }
+    if args:
+        record["args"] = {k: str(v) for k, v in args.items()}
+    try:
+        with open(log_file, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+        # Truncate if too large — single handle avoids race between read and write
+        with open(log_file, "r+", encoding="utf-8") as fh:
+            lines = fh.readlines()
+            if len(lines) > _AUDIT_MAX_ENTRIES:
+                keep = lines[-_AUDIT_MAX_ENTRIES:]
+                fh.seek(0)
+                fh.writelines(keep)
+                fh.truncate()
+    except OSError as exc:
+        if os.environ.get("GRIMOIRE_DEBUG"):
+            console.print(f"[dim]Audit log write failed: {exc}[/dim]")
 
 
 @app.command("history", rich_help_panel="Info")

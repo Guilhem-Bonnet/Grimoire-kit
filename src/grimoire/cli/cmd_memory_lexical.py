@@ -13,6 +13,12 @@ import json
 
 import typer
 
+# Importés pour leur effet de bord d'enregistrement : câblent `memory up`,
+# `memory status` et `memory shared` sur memory_app.
+from grimoire.cli import (
+    cmd_memory_ops,  # noqa: F401
+    cmd_memory_shared,  # noqa: F401
+)
 from grimoire.cli.cmd_memory import (
     _get_fmt,
     _graph_exclude_opt,
@@ -25,7 +31,10 @@ from grimoire.cli.cmd_memory import (
     vector_app,
 )
 
-__all__ = ["memory_app", "vector_app"]
+# Imported for its registration side effect: wires `memory bundle` onto memory_app.
+from grimoire.cli.cmd_memory_bundle import bundle_app
+
+__all__ = ["bundle_app", "memory_app", "vector_app"]
 
 _docs_paths_opt = typer.Option("docs,README.md", "--paths", help="Comma-separated files or directories to index.")
 

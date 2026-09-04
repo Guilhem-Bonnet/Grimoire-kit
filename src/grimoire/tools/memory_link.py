@@ -86,11 +86,40 @@ def backend_catalogue() -> dict[str, Any]:
     }
 
 
+def _store_graph_parity(manager: Any, entries: int) -> dict[str, Any]:
+    """Dérive store ↔ graphe : le signal qu'une projection cassée produit.
+
+    Trois COUNT sur Neo4j — assez léger pour une route de statut, là où
+    ``memory graph verify`` reconstruit tout le code graph. Dict vide quand
+    aucun graphe n'est câblé : une absence de graphe n'est pas une dérive.
+    """
+    graph = getattr(manager, "memory_graph", None)
+    if graph is None:
+        return {}
+    try:
+        stats = graph.stats()
+        graph_memories = int(stats.get("memories", 0))
+        vector_objects = int(stats.get("weaviate_objects", 0))
+    except Exception as exc:  # une sonde de statut ne casse jamais la route
+        return {"error": str(exc)}
+    return {
+        "storeEntries": entries,
+        "graphMemories": graph_memories,
+        "graphVectorObjects": vector_objects,
+        "drift": entries - graph_memories,
+        "ok": entries == graph_memories == vector_objects,
+    }
+
+
 def memory_link_status(project_root: Path) -> dict[str, Any]:
     """Statut du lien projet ↔ BDD mémoire, best-effort.
 
     États : ``uninitialized`` (pas de config projet), ``unavailable``
     (backend configuré mais injoignable/non installé), ``ok``.
+
+    Porte aussi le contrat de couches du Memory OS (``layers``) et la dérive
+    store ↔ graphe (``parity``), pour que le cockpit affiche l'état réel des
+    sept couches au lieu de le déduire d'heuristiques de fichiers.
     """
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
@@ -104,6 +133,9 @@ def memory_link_status(project_root: Path) -> dict[str, Any]:
         "available": False,
         "entries": None,
         "error": None,
+        "detail": {},
+        "layers": [],
+        "parity": {},
     }
     # Lecture stricte au root servi (pas de remontée d'arborescence : un projet
     # non initialisé ne doit pas hériter de la config d'un parent).
@@ -116,6 +148,7 @@ def memory_link_status(project_root: Path) -> dict[str, Any]:
         status["error"] = str(exc)
         return status
     status["configuredBackend"] = cfg.memory.backend
+    health = None
     try:
         from grimoire.memory.manager import MemoryManager
 
@@ -124,8 +157,23 @@ def memory_link_status(project_root: Path) -> dict[str, Any]:
         status["resolvedBackend"] = health.backend
         status["available"] = health.healthy
         status["entries"] = health.entries
+        status["detail"] = dict(health.detail)
         status["state"] = "ok" if health.healthy else "unavailable"
+        status["parity"] = _store_graph_parity(mgr, health.entries)
     except (GrimoireMemoryError, ImportError, OSError, ValueError) as exc:
         status["state"] = "unavailable"
         status["error"] = str(exc)
+
+    # Le contrat de couches se calcule depuis la config : il reste disponible
+    # même quand le backend est mort — c'est précisément là qu'on en a besoin.
+    try:
+        from grimoire.memory.architecture import build_memory_architecture_status
+
+        architecture = build_memory_architecture_status(
+            cfg, project_root=project_root, backend_status=health
+        )
+        status["layers"] = [layer.to_dict() for layer in architecture.layers]
+        status["layerProfile"] = architecture.profile
+    except (ImportError, OSError, ValueError) as exc:
+        status["error"] = status["error"] or str(exc)
     return status

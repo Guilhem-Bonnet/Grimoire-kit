@@ -15,7 +15,6 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scaffold import (
     TIER_KIT,
     TIER_SEED,
-    FileCopy,
     ProjectScaffolder,
     ScaffoldPlan,
 )
@@ -222,57 +221,6 @@ class TestPlanCopilotInstructions:
         renders = [tpl for tpl in plan.templates if "grimoire-project" in str(tpl.dst)]
         assert len(renders) == 1
         assert renders[0].tier == TIER_KIT
-
-
-class TestAgentWrappers:
-    """Test that agent wrappers are enhanced with proper activation steps."""
-
-    def test_plan_agent_wrappers_creates_wrappers(self, scaffolder):
-        """Verify agent wrappers are generated."""
-        plan = ScaffoldPlan()
-        # Add a mock agent to the plan
-        agent_src = scaffolder._target / "test-agent.md"
-        agent_src.write_text("---\n\n---\n# Test\n")
-        plan.copies.append(FileCopy(
-            src=agent_src,
-            dst=scaffolder._target / "_grimoire" / "kit" / "agents" / "test-agent.md",
-            label="test/test-agent"
-        ))
-        
-        scaffolder._plan_agent_wrappers(plan)
-        
-        # Should generate a wrapper template
-        wrappers = [
-            t for t in plan.templates 
-            if ".agent.md" in str(t.dst)
-        ]
-        assert len(wrappers) > 0
-
-    def test_agent_wrapper_includes_activation_instructions(self, scaffolder):
-        """Verify wrappers include 5-step activation."""
-        plan = ScaffoldPlan()
-        agent_src = scaffolder._target / "test-agent.md"
-        agent_src.write_text("---\n\n---\n# Test\n")
-        plan.copies.append(FileCopy(
-            src=agent_src,
-            dst=scaffolder._target / "_grimoire" / "kit" / "agents" / "test-agent.md",
-            label="test/test-agent"
-        ))
-        
-        scaffolder._plan_agent_wrappers(plan)
-        
-        wrappers = [
-            t for t in plan.templates 
-            if ".agent.md" in str(t.dst)
-        ]
-        assert len(wrappers) > 0
-        
-        wrapper = wrappers[0]
-        # Check for activation steps
-        assert "Load the full agent definition" in wrapper.content
-        assert "Load project context" in wrapper.content
-        assert "Load memory config" in wrapper.content
-        assert "Follow ALL activation steps" in wrapper.content
 
 
 class TestAddToFrameworkPath:

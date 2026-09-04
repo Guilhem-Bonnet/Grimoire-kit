@@ -15,7 +15,6 @@ from typing import Any
 import typer
 from rich.console import Console
 
-from grimoire.cli._shared import _log_operation, _status_spinner
 from grimoire.tools._common import load_yaml, save_yaml
 
 console = Console(stderr=True)
@@ -215,6 +214,10 @@ def upgrade_command(
         else:
             console.print("[red]No v2 project-context.yaml found at this path.[/red]")
         raise typer.Exit(1)
+
+    # Imported here, not at module scope: app.py imports this module, so a
+    # top-level import would close the cycle.
+    from grimoire.cli.app import _log_operation, _status_spinner
 
     plan = plan_upgrade(target)
     quiet = (ctx.obj or {}).get("quiet", False)

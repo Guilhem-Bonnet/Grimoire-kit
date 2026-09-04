@@ -1,0 +1,161 @@
+# Surfaces hôtes
+
+Un projet Grimoire décrit des personas, des compétences, des commandes et une
+gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, Codex, Cursor,
+Gemini CLI — expose une part de cela sous forme **exécutable** : fichiers de
+sous-agents chargés dans leur propre fenêtre de contexte, compétences chargées à
+la demande, commandes utilisateur, hooks de cycle de vie capables de refuser une
+action ou une clôture, table de permissions déclarative.
+
+Décrire un projet en prose et laisser chaque hôte la lire plafonne tout le monde
+au plus petit dénominateur commun. La couche « surfaces hôtes » fait l'inverse :
+**une description host-neutre du projet, un émetteur par hôte**.
+
+```text
+projet (agents, standard, mémoire)
+        │
+        ▼
+  ProjectSurface  ← description host-neutre, construite une fois
+        │
+        ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}
+        └──▶ émetteur prose        → AGENTS.md · GEMINI.md · .cursor/rules
+```
+
+La règle de gouvernance, elle, n'est écrite qu'une fois. Le module de décisions
+est du Python host-neutre ; le module de wire format le traduit dans le JSON de
+chaque hôte. Un refus formulé sous Claude Code est **le même texte** que sous
+Copilot, parce que c'est la même décision.
+
+## Commandes
+
+| Commande | Effet |
+|---|---|
+| `grimoire host list` | Hôtes connus, ce que chacun sait exécuter, hôte détecté |
+| `grimoire host surface` | Description host-neutre du projet |
+| `grimoire host sync --host all` | Génère les surfaces (ajouter `--dry-run` pour voir sans écrire) |
+| `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
+
+`grimoire init`, `grimoire up --fix` et `grimoire standard init` appellent la
+synchronisation automatiquement. Un appel manuel n'est nécessaire qu'après avoir
+ajouté ou modifié une persona.
+
+## Ce que chaque hôte exécute
+
+| Hôte | Sous-agents | Compétences | Commandes | Hooks bloquants | Permissions |
+|---|---|---|---|---|---|
+| Claude Code | oui | oui | oui | oui | oui |
+| GitHub Copilot | oui | oui | oui | oui | non |
+| Codex | non | non | non | non | non |
+| Cursor | non | non | non | non | non |
+| Gemini CLI | non | non | non | non | non |
+
+Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
+comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
+
+- Copilot n'a pas de table de permissions déclarative : les mêmes règles sont
+  appliquées par le hook `PreToolUse`, avec la même formulation de refus.
+- Les hôtes en prose n'ont pas de hooks : la gouvernance y est énoncée comme
+  règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
+  dit explicitement plutôt que de laisser croire à une protection.
+
+## Gouvernance
+
+Les hooks générés dépendent de l'enrôlement du projet dans le standard agentique.
+
+| Événement | Décision | Portée |
+|---|---|---|
+| `session_start` | directive de session | toujours |
+| `pre_tool_use` | politique d'outils (destructif, secrets) | toujours, **bloquant** |
+| `user_prompt_submit` | nomme la tâche courante | projet enrôlé |
+| `post_tool_use` | rappel de preuve après écriture | projet enrôlé |
+| `pre_compact` | capsule de gouvernance avant compaction | projet enrôlé |
+| `subagent_stop` | état des gates, sans bloquer | projet enrôlé |
+| `stop` | gates de preuve | projet enrôlé, **bloquant** |
+
+Un projet non enrôlé ne reçoit aucun hook de gate : un gate inexistant ne peut
+pas être rouge, et bloquer sur son absence ferait du hook un piège.
+
+### Le hook `stop`
+
+C'est le seul endroit où la règle du kit — « une clôture sans gates verts est une
+tâche non terminée » — devient une contrainte plutôt qu'une consigne. Sur les
+profils `governed` et `production`, une tâche dont les gates sont rouges voit sa
+clôture refusée, avec la liste de ce qui manque.
+
+Trois garde-fous encadrent ce refus :
+
+1. **Pas de boucle** — si l'hôte relance déjà l'agent à cause d'un blocage
+   précédent, le hook laisse passer.
+2. **Pas de blocage à vide** — un projet non enrôlé, un profil `starter`, ou une
+   tâche encore à l'état `proposed` ne bloquent jamais. Ce dernier cas est
+   signalé : un gate vert parce que rien n'est encore exigé ne protège rien, et
+   le hook le dit au lieu de laisser croire le contraire.
+3. **Pas de panne fatale** — un `task-board.yaml` cassé ou une exception dans une
+   décision sortent en « autorisé », avec l'erreur en contexte. Un hook qui
+   plante ne doit pas rendre une session inutilisable.
+
+### Politique d'outils
+
+La décision `pre_tool_use` fait passer chaque appel mutant par le moteur de
+politique du kit. Le nom de l'outil est lu dans le vocabulaire de n'importe quel
+hôte (`Bash` comme `run_in_terminal`, `Edit` comme `replace_string_in_file`),
+puis classé en famille neutre.
+
+| Constat | Verdict |
+|---|---|
+| Suppression récursive, force push, `terraform destroy`, `kubectl delete`… | refus sous les profils non stricts, confirmation demandée en strict |
+| Lecture d'un fichier de secrets (`.env`, clés privées, `credentials.json`…) | refus à tous les profils |
+| Appel en lecture seule | autorisé sans traitement |
+
+## Frontière d'outils des personas
+
+Chaque persona est projetée avec une frontière d'outils. Elle vient du champ
+`tools:` de son frontmatter quand il existe :
+
+```yaml
+---
+name: "scribe"
+description: "Scribe — documentation"
+tools: ["read", "search", "edit"]
+---
+```
+
+Sans ce champ, la frontière est **déduite** du texte de la persona : lecture et
+recherche toujours, écriture et exécution seulement sur un signal explicite.
+`grimoire host status` liste les personas dont la frontière est déduite —
+l'ajout d'un `tools:` explicite est la façon de la figer.
+
+Verbes disponibles : `read`, `search`, `edit`, `execute`, `web`. Chaque émetteur
+les traduit dans le vocabulaire de son hôte.
+
+## Fichiers générés et fichiers à vous
+
+Les fichiers générés portent un marqueur `grimoire:managed`. La synchronisation
+ne réécrit qu'eux :
+
+- un fichier écrit à la main à un chemin géré est **préservé** et signalé comme
+  conflit (`--force` pour l'écraser sciemment) ;
+- `.claude/settings.json` n'est jamais réécrit en bloc : seules les entrées de
+  hooks appartenant au kit sont remplacées, le reste de la configuration est
+  conservé tel quel ;
+- une synchronisation répétée ne produit aucune écriture si rien n'a changé.
+
+Pour personnaliser durablement, modifier la source — la persona dans
+`_grimoire/`, la compétence ou la commande du kit — puis resynchroniser.
+
+Chaque chemin a un seul propriétaire. `.github/agents/` appartient à l'émetteur
+Copilot, `.github/prompts/` au scaffolder pour les workflows du kit, et
+`.claude/**` à l'émetteur Claude Code. Deux générateurs sur un même fichier
+produisent un conflit permanent, jamais un contenu stable.
+
+## Hôtes sans émetteur
+
+Un client MCP quelconque atteint la même surface par les outils du serveur
+Grimoire : `grimoire_host_status` pour l'inventaire, `grimoire_skill` et
+`grimoire_command` pour charger un corps à la demande. C'est le repli pour un
+hôte que le kit ne connaît pas encore.
+
+Ajouter un hôte se fait en écrivant un émetteur et un profil de capacités ; ni la
+description du projet, ni les règles de gouvernance ne changent.

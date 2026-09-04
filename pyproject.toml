@@ -51,8 +51,15 @@ mcp = ["mcp>=1.0,<3"]
 #
 # Borner par réflexe aurait créé des conflits de résolution chez les
 # utilisateurs sans rien protéger. Re-tester avant d'ajouter une borne.
-qdrant = ["qdrant-client>=1.9", "sentence-transformers>=3.0", "torch>=2.13.0"]
-weaviate = ["sentence-transformers>=3.0", "torch>=2.13.0"]
+# fastembed remplace sentence-transformers + torch : 203 Mo contre 4,8 Go pour le
+# meme modele par defaut (mesure du 2026-08-26). Les deux moteurs produisent des
+# vecteurs identiques a 2e-7 pres — l export ONNX de Qdrant est fidele, pas
+# quantifie — donc la bascule ne demande aucun re-index. Borne basse en 0.8 :
+# les versions anterieures retombaient sur un telechargement distant malgre
+# HF_HUB_OFFLINE (qdrant/fastembed#615, #218). sentence-transformers reste
+# supporte a l execution quand il est deja installe, mais n est plus tire.
+qdrant = ["qdrant-client>=1.9", "fastembed>=0.8"]
+weaviate = ["fastembed>=0.8"]
 neo4j = ["neo4j>=5.0"]
 # Consommé par src/grimoire/memory/hot.py (RedisHotMemory, cache chaud du
 # Memory OS) via un import dynamique — invisible à un grep `import redis`,
@@ -153,6 +160,8 @@ module = [
     "weaviate.*",
     "qdrant_client.*",
     "sentence_transformers.*",
+    "fastembed.*",
+    "huggingface_hub.*",
     "redis.*",
     "ollama.*",
     "jsonschema.*",

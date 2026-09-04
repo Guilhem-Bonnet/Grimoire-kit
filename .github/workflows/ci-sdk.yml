@@ -14,10 +14,11 @@ on:
       # 2026-07-13 — la #71 path-filtrée n'avait jamais lancé ces tests).
       - "evals/tasks/**"
       - "evals/collect.py"
-      # Lus par tests/test_agentic_standard.py : une PR YAML-only sur le
-      # standard doit exécuter les tests d'intégrité référentielle, sinon ils
-      # sont inertes exactement sur les PR qu'ils doivent garder.
-      - "framework/agentic-standard/**"
+      # Gouvernent le job dep-audit : sans eux dans le filtre, ajouter un
+      # waiver ou en laisser expirer un ne relance jamais l'audit qu'ils
+      # pilotent — le controle serait modifie sans etre reverifie.
+      - ".github/security/**"
+      - "scripts/depaudit-waivers.py"
   pull_request:
     branches: [main]
     paths:
@@ -27,7 +28,11 @@ on:
       - "pyproject.toml"
       - "evals/tasks/**"
       - "evals/collect.py"
-      - "framework/agentic-standard/**"
+      # Gouvernent le job dep-audit : sans eux dans le filtre, ajouter un
+      # waiver ou en laisser expirer un ne relance jamais l'audit qu'ils
+      # pilotent — le controle serait modifie sans etre reverifie.
+      - ".github/security/**"
+      - "scripts/depaudit-waivers.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

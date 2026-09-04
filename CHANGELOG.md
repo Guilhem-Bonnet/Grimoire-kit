@@ -9,49 +9,140 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **Surfaces hôtes (`grimoire host`)** — un projet ne se décrivait aux hôtes
+  qu'en prose : `CLAUDE.md` pointait vers `.github/copilot-instructions.md`, et
+  tout ce qu'un hôte sait exécuter — sous-agents à contexte propre, compétences
+  chargées à la demande, commandes utilisateur, hooks capables de refuser,
+  permissions déclaratives — restait inutilisé. Le kit construit désormais une
+  **description host-neutre** du projet (`grimoire.hosts.surface`) et la rend
+  par un émetteur dédié : `.claude/{agents,skills,commands}` et `settings.json`
+  pour Claude Code, `.github/{agents,skills,prompts,hooks}` pour Copilot, un
+  catalogue explicite pour Codex, Cursor et Gemini CLI. Commandes :
+  `grimoire host list | surface | sync | status | run`. La synchronisation est
+  déclenchée automatiquement par `grimoire init`, `grimoire up --fix` et
+  `grimoire standard init`. Voir `docs/hosts.md`.
+
+- **Gouvernance opposable, identique sur tous les hôtes** — les règles vivent
+  dans un module de décisions host-neutre (`grimoire.hosts.decisions`), traduit
+  dans le JSON de chaque hôte par `grimoire.hosts.runtime`. Un refus sous
+  Copilot est le même texte que sous Claude Code, parce que c'est la même
+  décision. Le hook `stop` refuse la clôture d'une tâche gouvernée dont les
+  gates de preuve sont rouges — la consigne « une clôture sans gates verts est
+  une tâche non terminée » devient une contrainte. Trois garde-fous : pas de
+  blocage répété (`stop_hook_active`), pas de blocage sur un projet non enrôlé
+  ou un profil non gouverné, pas de panne fatale (un projet cassé sort en
+  « autorisé » avec l'erreur en contexte).
+
+- **`PolicyEngine` branché en production** — le moteur de politique et ses
+  règles OWASP n'étaient instanciés que par les fixtures d'évals. Le hook
+  `pre_tool_use` lui soumet désormais chaque appel mutant, en lisant le
+  vocabulaire d'outils de n'importe quel hôte (`Bash` comme `run_in_terminal`,
+  `Edit` comme `replace_string_in_file`). Suppressions récursives, force push,
+  destructions d'infrastructure et lectures de fichiers de secrets sont
+  refusées ou soumises à confirmation selon le profil de risque.
+
+- **Frontière d'outils par persona** — le champ `tools:` du frontmatter d'un
+  agent fixe sa frontière ; sans lui, elle est déduite du texte de la persona
+  (lecture et recherche toujours, écriture et exécution sur signal explicite).
+  `grimoire host status` liste les personas dont la frontière est déduite.
+
+- **Compétences et commandes livrées** — protocole de preuve, dispatch de
+  persona et mémoire projet comme compétences chargées à la demande ; six
+  commandes (`grimoire-status`, `-gate`, `-proof`, `-verify`, `-recall`,
+  `-doctor`) rendues comme commandes natives sur les hôtes qui en ont.
+
+- **Outils MCP `grimoire_host_status`, `grimoire_skill`, `grimoire_command`** —
+  un client MCP sans émetteur dédié atteint la même surface, compétences et
+  commandes chargeables à la demande comprises.
+
+- **Hôtes Cursor et Gemini CLI** au registre de capacités, avec leurs manifestes.
+
 - **Frontière kit/overrides** — un projet Grimoire sépare désormais ce que le kit
   génère (`_grimoire/kit/`, régénéré à chaque mise à jour) de ce que le projet
   possède (`_grimoire/overrides/`, jamais écrasé, prioritaire à la résolution).
   Une customisation se fait en déposant un fichier dans `overrides/` — elle
   survit à toutes les mises à jour par construction, sans plus dépendre d'une
   heuristique.
+
 - **`grimoire migrate`** — opération unique qui fait passer un projet existant
   sur cette frontière : le contenu que le kit a déjà livré (reconnu par
   empreinte dans `registry/kit-file-hashes.json`) est régénéré, tout le reste
   part dans `overrides/`. Snapshot systématique, `--restore <horodatage>` pour
   revenir en arrière, `--adopt-kit` pour reprendre la version du kit sur les
   fichiers qui la masquaient sans raison. Après migration, `grimoire up` suffit.
+
 - **Manifeste de génération du standard** (`_grimoire/standard/.generated.json`)
   — enregistre l'empreinte de chaque artefact écrit par le kit, ce qui permet de
   distinguer « policy que le kit a générée » de « décision que le projet a
   prise ». Les premières suivent les mises à jour, les secondes ne sont jamais
   touchées.
 
-### Modifié
+- **`grimoire memory shared`** — mémoire transverse entre projets, pour qu'un
+  agent spécialiste accumule du savoir réutilisable sans corrompre celui des
+  autres. Trois règles traitent les modes de corruption connus :
+  **la frontière est physique** (un store séparé, pas une collection filtrée
+  par métadonnée — un filtre oublié mélange deux projets sans rien signaler),
+  **la promotion est refusée par défaut** (un souvenir ne monte que s'il reste
+  vrai quand on efface le nom du projet : « l'app X utilise Postgres 16 » est
+  un fait de projet, « les migrations Alembic cassent quand deux heads
+  coexistent » est un motif), et **la confiance décroît** (un motif non
+  revérifié est servi comme hypothèse, calcul fait à la lecture — une
+  décroissance qui dépend d'un ordonnanceur est une décroissance qui n'arrive
+  pas). `promote` écrit avec provenance, `confirm` restaure la fraîcheur,
+  `recall` restitue en deux passes étiquetées, jamais fusionnées : un motif
+  appris ailleurs ne doit pas être présenté avec l'assurance d'un fait vérifié
+  ici. Opt-in via `memory.shared_collection`, vide par défaut.
 
-- **`grimoire standard verify` ne laisse plus supprimer un artefact activé par un
-  besoin.** La vérification recalculait l'ensemble requis depuis le seul profil,
-  alors que `setup_standard_profile` avait déjà persisté la liste complète —
-  extras compris — dans `_grimoire/standard/standard-profile.yaml`. Après
-  `standard init --needs solo-prototyping`, supprimer
-  `_grimoire/standard/evidence-gates.yaml` laissait `ok=true, missing=[]`. La
-  liste enregistrée fait désormais foi. **Rupture assumée** : un projet dont les
-  artefacts d'extras ont disparu passe de vert à rouge sans qu'une ligne de son
-  code ait bougé — c'est précisément ce que le contrôle doit signaler. La remise
-  en conformité se fait par `grimoire up`, qui régénère le tier kit en préservant
-  waivers, scores et task board.
-- **`grimoire standard gate check --strict` sort en 2 sur les cinq profils.**
-  L'escalade était réservée à `governed` et `production` : un projet `starter`,
-  `controlled` ou `orchestrated` ne pouvait pas casser un pipeline, quel que soit
-  le nombre de preuves manquantes.
-- **Les sorties JSON du standard portent un schéma versionné.** `verify`, `audit`,
-  `score` et `gate check` émettent une clé `schema`
-  (`grimoire.standard-<verbe>/v1`) et leur ensemble de clés de premier niveau est
-  verrouillé par un test : une CI tierce qui les parse dispose enfin d'un contrat,
-  là où le schéma pouvait changer en correctif.
-- Les blocs `paths:` de `ci-sdk.yml` incluent `framework/agentic-standard/**` :
-  une PR qui ne modifie que du YAML du standard déclenchait `agentic-standard.yml`
-  et `ci-validate.yml`, mais pas les tests de `tests/test_agentic_standard.py`.
+- **`grimoire memory up`** — met en place la stack mémoire complète, que
+  `grimoire init` laissait à moitié câblée : il détecte un backend vectoriel et
+  écrit `memory.backend`, mais `neo4j_uri`, `knowledge_graph`, `memory_graph`,
+  `code_graph`, `task_memory` et `redis_url` restaient commentés dans
+  `project-context.tpl.yaml` sans que rien ne les décommente. Trois profils
+  (`lexical`, `vector`, `full`). Règle centrale : **on n'active que ce qui
+  répond** — écrire `memory_graph: neo4j` alors que Neo4j est éteint produirait
+  une config qui échoue en silence au runtime, donc un service injoignable est
+  signalé avec sa commande de démarrage, pas activé. La comparaison porte sur ce
+  qui est écrit dans le fichier et non sur les valeurs par défaut : sinon
+  `neo4j_password_env` ne serait jamais écrit et rien n'indiquerait quelle
+  variable exporter. Plan par défaut, écriture sur `--apply`, idempotent,
+  commentaires du YAML préservés.
+
+- **`grimoire memory bundle`** — transport d'un modèle d'embedding vers un site
+  sans accès sortant. `export` construit une archive depuis un repo Hub ou un
+  répertoire local, `install` refuse toute archive dont un fichier ne correspond
+  pas au SHA-256 déclaré au manifeste, `verify` recontrôle les empreintes puis
+  charge le modèle avec les sockets sortantes bloquées — un moteur qui retombe
+  sur un téléchargement distant échoue au lieu de réussir. `install --configure`
+  renseigne `memory.embedding_model` dans `project-context.yaml` en préservant
+  les commentaires. Grimoire ne redistribue aucun poids : l'archive est produite
+  par l'opérateur depuis la source de son choix. Voir `docs/memory-system.md`.
+
+- **Sondes Weaviate, Neo4j et Redis dans `grimoire doctor`** — la commande ne
+  vérifiait que Qdrant et Ollama, donc la stack cible du Memory OS était
+  invisible du diagnostic. Les sondes ne parlent que si le projet route
+  réellement la couche, pour qu'un projet en `local` ne récolte pas trois
+  avertissements pour des services qu'il n'utilise pas. La sonde Neo4j signale
+  le cas où la socket répond alors que la variable de mot de passe est absente :
+  chaque écriture de graphe échouerait alors silencieusement à
+  l'authentification.
+
+- **Bloc `parity` dans `grimoire memory status`** — compare les entrées du store
+  aux nœuds mémoire Neo4j et à leurs références `WeaviateObject`. C'est le
+  signal qui détecte un objet écrit d'un côté sans contrepartie de l'autre.
+  Trois `COUNT`, assez léger pour une commande de statut, là où
+  `memory graph verify` reconstruit tout le code graph.
+
+- **`grimoire cockpit prune`** — retire du registre les projets dont le chemin a
+  disparu. Le registre accumulait une entrée par projet enrôlé sans jamais en
+  retirer : chaque projet supprimé ou déplacé y laissait un pointeur mort, et
+  rien n'offrait de les nettoyer autrement qu'un par un via `cockpit remove`.
+  Sur un poste de développement, 6 327 entrées mortes sur 6 460. Prudent par
+  défaut — un répertoire encore présent a pu être enrôlé délibérément, donc
+  seule l'absence du chemin justifie un retrait ; `--stale` élargit aux chemins
+  présents mais sans marqueur Grimoire. `--dry-run` montre le plan, la purge
+  demande confirmation sauf `--yes`.
+
+### Modifié
 
 - **`grimoire up` met réellement à jour un projet existant.** Auparavant il
   s'arrêtait dès que `project-context.yaml` existait : agents, framework,
@@ -59,20 +150,107 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   pour toute la vie du projet. Il régénère maintenant le tier kit et rafraîchit
   les artefacts standard non modifiés. L'écriture est différentielle : sans
   nouvelle version, rien n'est réécrit et rien n'est rapporté.
+
 - Les prompts, fichiers d'instructions, passerelles d'assistants et wrappers
   d'agents ne sont plus protégés par un `if fichier existe : ne rien faire` —
   ils appartiennent au kit et suivent sa version. `.mcp.json`, le contexte
   projet et les journaux mémoire restent, eux, écrits une seule fois.
-- Les wrappers `.github/agents/*.agent.md` pointent vers la définition résolue :
+
+- **`.github/agents/` a un seul propriétaire** — le scaffolder générait un
+  wrapper à frontière d'outils fixe (`read, search` ou `read, search, execute`)
+  pointant vers un chemin d'agent codé en dur, et l'émetteur Copilot réécrivait
+  le même fichier avec la frontière réellement résolue et le vrai chemin de la
+  persona. Deux écrivains pour un chemin : `_plan_agent_wrappers` est retiré du
+  scaffolder, l'émetteur est seul propriétaire. Les garanties que les tests du
+  scaffolder épinglaient (frontmatter, `user-invocable`, référence au fichier
+  d'agent, fichier écrit à la main préservé) sont épinglées sur l'émetteur.
+  Le wrapper pointe la définition résolue par la frontière kit/overrides :
   l'override du projet quand il existe, la version du kit sinon.
+
+- **`grimoire memory status` ne sort plus en erreur sur un backend mort.** Un
+  diagnostic qui échoue quand son sujet échoue ne sert à rien : la commande
+  reporte désormais le contrat des sept couches, calculé depuis la config, plus
+  la raison de l'indisponibilité. Le marqueur de santé `[OK]` / `[XX]` était par
+  ailleurs invisible, Rich interprétant les crochets comme des balises.
+
+- **`memory_link_status()` porte le contrat de couches et la parité**, donc
+  l'atelier et le cockpit lisent la même source au lieu de la déduire chacun de
+  son côté.
+
+- **La page mémoire du cockpit lit l'état réel.** Elle rendait un instantané
+  généré qui devinait le backend depuis la présence d'un répertoire et lisait le
+  store legacy ; ses cinq pseudo-couches ne correspondaient à aucune couche du
+  runtime. Elle interroge maintenant l'API locale et affiche les sept couches
+  réelles avec leur état, avec repli sur l'instantané si aucune API ne répond.
+
+- `memory up` et `memory status` vivent dans `grimoire.cli.cmd_memory_ops`,
+  chaîné depuis `cmd_memory_lexical` : le ratchet R2 interdit à `cmd_memory` de
+  grossir, et il rétrécit de 56 lignes.
+
+- **fastembed remplace sentence-transformers et torch** dans les extras
+  `[qdrant]` et `[weaviate]`. Mesure : la pile passe de **4,8 Go à 203 Mo** pour
+  le même modèle par défaut, dont 2,7 Go de wheels `nvidia/*` et 689 Mo de
+  triton qui n'avaient aucune raison d'être là — la CI les retéléchargeait à
+  chaque run. Aucun re-index n'est nécessaire : les deux moteurs produisent des
+  vecteurs identiques à 2e-7 près par composante (écart de cosinus 5e-13, top-1
+  à top-10 inchangés sur 40 entrées et 10 requêtes), l'export ONNX de Qdrant
+  étant fidèle et non quantifié. `sentence-transformers` reste utilisé à
+  l'exécution s'il est déjà installé. Nouveau module
+  `grimoire.memory.embedding`, partagé par les backends Qdrant et Weaviate.
+
+- **La dimension des vecteurs n'est plus lue dans une table** — elle vient d'un
+  vecteur sonde au chargement, donc elle est juste pour tout modèle, y compris
+  inconnu. L'ancienne table retombait silencieusement sur 384.
+
+- **Le backend Qdrant refuse une collection d'une autre largeur** que le modèle
+  courant, au lieu d'écrire des vecteurs incohérents dans un store existant.
+
+- Nouvelles clés `memory.embedding_model_path`, `memory.embedding_cache_dir` et
+  `memory.embedding_offline`. `memory bundle verify --embed` prouve désormais le
+  chargement avec le moteur réellement installé, fastembed compris.
+
+- **`grimoire init` interroge le réseau, plus le service** — la question porte
+  désormais sur l'egress, et un projet déclaré sans accès sortant est généré en
+  `retrieval_mode: lexical`. Le démarrage de Qdrant via Docker reste proposé
+  quand l'egress existe, mais **par défaut non** au lieu de par défaut oui.
+
+- **Sonde `env_embedding_model`** dans `grimoire up` et `grimoire doctor` :
+  signale sans réseau ni téléchargement un `embedding_model_path` cassé, un
+  `embedding_offline` sans modèle local, ou un bundle installé mais non câblé.
 
 ### Corrigé
 
 - La propagation d'identité vers `.github/copilot-instructions.md` écrasait le
   champ suivant lorsqu'une valeur était vide (`\s*` franchissait le saut de
   ligne). Un projet sans `user.name` y perdait son réglage de langue.
+
 - Le kit copiait ses propres `__pycache__` dans les projets.
 
+- **Détection d'hôte** — `HostBridge.detect()` identifiait Claude Code sur la
+  présence d'`ANTHROPIC_API_KEY` et Codex sur `OPENAI_API_KEY`. Une clé
+  d'API dit qui paie les jetons, pas quel hôte s'exécute : toute session
+  exportant les deux était mal routée. La détection repose désormais sur des
+  marqueurs de processus (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_ENV`…).
+
+- **`CLAUDE_CODE_CLI_MANIFEST`** déclarait `user_prompt_submit: False`. Claude
+  Code expose bien cet événement ; le manifeste en excluait le seul hook capable
+  d'enrichir un prompt avant que le modèle ne le lise.
+
+- **Fenêtres de contexte des variantes longues** — `resolve_window` résolvait
+  `claude-opus-5[1m]` vers la fenêtre standard de sa famille, sous-évaluant le
+  budget d'un facteur cinq. Un marqueur explicite (`[1m]`, `-1m`, `:1m`) est
+  désormais lu avant la famille.
+
+- **Fusion JSON des émetteurs** — une variable de boucle réutilisée faisait
+  passer le texte du fichier précédent à la fonction de fusion quand le fichier
+  cible n'existait pas encore.
+
+- **Suite de tests rouge sans l'extra `mcp`** — `tests/unit/mcp/test_server.py`
+  importait `grimoire.mcp.server` au niveau module : sans `grimoire-kit[mcp]`
+  installé, pytest remontait une *erreur de collecte* et toute la suite passait
+  au rouge. Un `pytest.importorskip` énonce le même fait sans en faire un échec.
+  C'est ce qui rendait le hook pre-commit systématiquement rouge en local, et
+  donc `--no-verify` systématique.
 
 ## [3.32.0] - 2026-08-18
 

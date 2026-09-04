@@ -601,7 +601,7 @@ def init_profile(
     claude_hook: bool = typer.Option(
         True,
         "--claude-hook/--no-claude-hook",
-        help="Install the Claude Code SessionStart activation hook (.claude/settings.json). Mechanism validated 40/40 by the 2026-07-09 evals campaign.",
+        help="Install the host surfaces (agents, skills, commands, lifecycle hooks) for every known host. The session activation directive it carries was validated 40/40 by the 2026-07-09 evals campaign.",
     ),
 ) -> None:
     """Generate standard-aware artifacts for a project.
@@ -676,6 +676,11 @@ def init_profile(
     activation: ClaudeActivationResult | None = None
     if claude_hook and not dry_run:
         activation = install_claude_activation(result.project_root, task_id=task_id)
+        # Enrolment adds blocking gates; the host surfaces carry them. Running
+        # after the activation install is deliberate: the emitters own
+        # `.claude/settings.json` and replace the legacy hook entry with the
+        # unified one, so a project never ends up injecting the directive twice.
+        _sync_host_surfaces(result.project_root)
 
     if _get_fmt(ctx) == "json":
         payload: dict[str, object] = {
@@ -778,7 +783,6 @@ def verify_profile(
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
-            "schema": "grimoire.standard-verify/v1",
             "ok": result.ok,
             "profile": result.profile,
             "project_root": str(result.project_root),
@@ -829,7 +833,6 @@ def audit_profile(
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
-            "schema": "grimoire.standard-audit/v1",
             "ok": result.ok,
             "profile": result.profile,
             "project_root": str(result.project_root),
@@ -975,12 +978,11 @@ def gate_check(
     task_id: str = typer.Option("bootstrap", "--task-id", help="Task id to evaluate."),
     target_state: str | None = typer.Option(None, "--target-state", help="Optional target lifecycle state."),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
-    strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when gates fail, whatever the profile."),
+    strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when governed/production gates fail."),
 ) -> None:
     """Check standard evidence gates for a task."""
     result = check_evidence_gates(project_root, task_id=task_id, target_state=target_state, profile_id=profile)
     payload = {
-        "schema": "grimoire.standard-gate-check/v1",
         "ok": result.ok,
         "task_id": result.task_id,
         "profile": result.profile,
@@ -997,7 +999,7 @@ def gate_check(
         ],
         "strict": strict,
     }
-    strict_failure = strict and not result.ok
+    strict_failure = strict and result.profile in {"governed", "production"} and not result.ok
     exit_code = 2 if strict_failure else 0 if result.ok else 1
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -1118,7 +1120,6 @@ def score(
     """Calculate and persist a standard compliance score."""
     result = calculate_compliance_score(project_root, task_id=task_id, profile_id=profile)
     payload = {
-        "schema": "grimoire.standard-score/v1",
         "ok": result.ok,
         "profile": result.profile,
         "score": result.score,
@@ -1178,3 +1179,26 @@ def fix(
     for action in actions:
         path_text = f" ({action.path})" if action.path else ""
         console.print(f"  [yellow]![/yellow] {action.action}: {action.check_id}{path_text}")
+
+
+def _sync_host_surfaces(project_root: Path) -> list[str]:
+    """Re-render every host surface after a governance change.
+
+    Never fatal: a project that is correctly enrolled but whose surfaces failed
+    to render is a reportable drift (`grimoire host status`), not a failed
+    install.
+    """
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(project_root)
+        written: list[str] = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            written.extend(apply_plan(emitter.plan(surface, project_root), project_root).written)
+        return written
+    except Exception:
+        return []

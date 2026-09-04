@@ -61,7 +61,7 @@ flowchart TD
 | `auto` | Résolution automatique | Selon la cible choisie | Sélectionne `weaviate-server` si `weaviate_url` est défini, sinon `ollama`, sinon `qdrant-server`, sinon `local` |
 | `local` | Stockage JSON simple | Aucune | Écrit dans `_grimoire/_memory/{collection_prefix}.json` |
 | `lexical` | Recherche lexicale sans vecteur | Aucune | sqlite FTS5 (BM25, accent-insensible) dans `_grimoire/_memory/memory-lexical.sqlite`. Zéro DB vectorielle, zéro service, zéro réseau |
-| `qdrant-local` | Recherche sémantique locale | `grimoire-kit[qdrant]` | Utilise `qdrant-client` et `sentence-transformers` |
+| `qdrant-local` | Recherche sémantique locale | `grimoire-kit[qdrant]` | Utilise `qdrant-client` et fastembed |
 | `qdrant-server` | Recherche sémantique via serveur Qdrant | `grimoire-kit[qdrant]` | Requiert `qdrant_url` |
 | `weaviate-server` | Recherche sémantique via serveur Weaviate | `grimoire-kit[weaviate]` | Requiert `weaviate_url`; peut être couplé à Neo4j |
 | `mempalace` | Backend palais expérimental | `grimoire-kit[mempalace]` | Repose sur ChromaDB et conserve les métadonnées `wing/hall/room` |
@@ -92,6 +92,237 @@ Pour peupler le store à partir de la connaissance déjà sur disque :
 ```bash
 python framework/memory/mem0-bridge.py seed --no-vector
 ```
+
+## Mise en place et diagnostic
+
+`grimoire init` détecte un backend vectoriel et écrit `memory.backend`, mais il
+s'arrête là : les clés de graphe et de mémoire chaude restent commentées dans
+le template. `grimoire memory up` comble cet écart.
+
+```bash
+grimoire memory up                    # plan, rien n'est écrit
+grimoire memory up --apply            # écrit le bloc memory:
+grimoire memory up --profile vector   # vecteurs sans graphe
+```
+
+| Profil | Couvre |
+| --- | --- |
+| `lexical` | FTS5 BM25, aucune dépendance, aucun service |
+| `vector` | backend vectoriel seul |
+| `full` | vecteurs + graphe + code + tâches + mémoire chaude |
+
+**On n'active que ce qui répond.** Écrire `memory_graph: neo4j` alors que Neo4j
+est éteint produirait une config qui échoue silencieusement au runtime : un
+service injoignable est signalé avec sa commande de démarrage, pas activé. La
+commande distingue « service éteint » de « extra pip absent », parce que le
+remède diffère.
+
+La comparaison porte sur ce qui est écrit dans le fichier, pas sur les valeurs
+par défaut de la configuration. Sans cela `neo4j_password_env` — qui vaut déjà
+`GRIMOIRE_NEO4J_PASSWORD` par défaut — ne serait jamais écrit, et rien
+n'indiquerait à l'opérateur quelle variable exporter. L'écriture préserve les
+commentaires du YAML et est idempotente.
+
+### Ce que `memory status` révèle
+
+`grimoire memory status` ne sort jamais en erreur, même quand le backend ne peut
+pas démarrer : un diagnostic qui meurt avec son sujet ne sert à rien. Il affiche
+alors le contrat des sept couches, calculé depuis la configuration, et la raison
+de l'indisponibilité.
+
+Le bloc `parity` compare trois compteurs :
+
+| Compteur | Source |
+| --- | --- |
+| `store` | entrées du backend durable |
+| `graph` | nœuds `GrimoireMemory` dans Neo4j |
+| `vectors` | références `WeaviateObject` dans Neo4j |
+
+Un écart signale un objet écrit d'un côté sans contrepartie de l'autre — le
+« lien brisé » que rien ne remontait jusqu'ici. Le remède est
+`grimoire memory gate --sync`. La sonde reste légère (trois `COUNT`), là où
+`grimoire memory graph verify` reconstruit tout le code graph.
+
+### Sondes d'environnement
+
+`grimoire doctor` sonde Weaviate, Neo4j et Redis en plus de Qdrant et Ollama,
+mais **seulement si le projet route réellement la couche** : un projet en
+`local` ne récolte pas d'avertissements pour des services qu'il n'utilise pas.
+
+La sonde Neo4j couvre un mode de panne silencieux : quand la socket répond mais
+que la variable `neo4j_password_env` est absente, chaque écriture de graphe
+échoue à l'authentification sans que rien ne le dise.
+## Mémoire transverse entre projets
+
+Un agent spécialiste devrait accumuler du savoir réutilisable d'un projet à
+l'autre. Le faire naïvement corrompt la connaissance : confusion entre projets,
+fait périmé servi comme vrai, contamination, auto-confirmation, et fuite entre
+projets cloisonnés.
+
+```yaml
+memory:
+  shared_collection: "GrimoireShared"   # vide = désactivé
+```
+
+Opt-in délibérément : rien ne traverse la frontière d'un projet sans
+déclaration.
+
+### La frontière est physique
+
+Le savoir transverse vit dans un **store séparé**, pas dans une collection
+partagée filtrée par métadonnée. Un filtre oublié ne fuit pas un peu : il
+mélange deux projets sans rien signaler. Sur les backends serveur, c'est une
+autre collection ; sur les backends fichier, une racine au niveau machine
+(`~/.grimoire/shared`, ou `GRIMOIRE_SHARED_HOME`).
+
+### La promotion est refusée par défaut
+
+Un souvenir ne monte que s'il reste vrai **quand on efface le nom du projet**.
+
+| Ne monte pas | Peut monter |
+| --- | --- |
+| « l'app X utilise Postgres 16 » | « les migrations Alembic cassent quand deux heads coexistent » |
+| « le endpoint /auth de Y renvoie 401 » | « FastAPI + OAuth2 : le refresh token doit être httponly » |
+
+La garde refuse un texte qui nomme son projet, cite une URL, un chemin absolu
+ou une adresse locale — autant de marqueurs d'un état particulier plutôt que
+d'un motif reproductible. `--force` passe outre, mais l'inscrit dans la
+provenance : un contournement doit rester visible à la relecture.
+
+```bash
+grimoire memory shared promote "les migrations Alembic cassent quand deux heads coexistent" -d alembic
+grimoire memory shared confirm <id>     # ce motif tient aussi ici
+grimoire memory shared recall "alembic heads"
+```
+
+### La confiance décroît
+
+| Depuis la dernière confirmation | État | Restitution |
+| --- | --- | --- |
+| ≤ 90 jours | `current` | servi comme motif établi |
+| ≤ 270 jours | `aging` | « appris ailleurs, non revérifié récemment » |
+| au-delà, ou contredit | `hypothesis` | « à vérifier avant usage » |
+
+Le calcul se fait **à la lecture**, sans tâche de fond. Une entrée contredite
+ailleurs tombe en hypothèse quel que soit son âge. Rien n'est supprimé,
+seulement déclassé : une connaissance périmée reste utile à qui sait qu'elle
+est périmée. `confirm` est le seul mécanisme qui restaure la confiance.
+
+### Restitution en deux passes
+
+`recall` cherche d'abord dans le projet, puis dans le transverse, et **ne
+fusionne jamais sans étiquette**. Le projet passe en premier : la vérité locale
+prime sur le motif importé, conformément à l'ordre d'autorité ORC-06 (source
+active > preuve vérifiée > mémoire durable > similarité). Chaque résultat
+transverse porte sa provenance (`learned_in`, `confirmed_in`) et sa fraîcheur.
+## Moteur d'embedding
+
+Les backends `qdrant-*` et `weaviate-server` passent par
+[memory/embedding.py](api-reference.md), qui choisit le moteur disponible :
+
+| Moteur | Statut | Poids installé |
+| --- | --- | --- |
+| `fastembed` | Défaut, tiré par les extras | 203 Mo |
+| `sentence-transformers` | Repli, utilisé seulement s'il est déjà présent | 4,8 Go (torch + wheels CUDA) |
+
+Mesure du 2026-08-26, même modèle par défaut dans les deux cas. Les extras
+`[qdrant]` et `[weaviate]` ne tirent plus torch.
+
+La bascule ne demande aucun re-index : sur
+`sentence-transformers/all-MiniLM-L6-v2`, les deux moteurs produisent des
+vecteurs identiques à 2e-7 près par composante, soit un écart de cosinus de
+5e-13. L'export ONNX publié par Qdrant est fidèle, pas quantifié. Vérifié sur
+un corpus de 40 entrées et 10 requêtes : recouvrement top-1 à top-10 de 1,000
+et ordre de classement identique.
+
+La dimension n'est jamais devinée depuis une table de correspondance : elle est
+lue sur un vecteur sonde au chargement, donc juste pour n'importe quel modèle.
+Si une collection Qdrant existante a une autre largeur que le modèle courant,
+le backend refuse de démarrer au lieu d'écrire des vecteurs incohérents.
+
+Clés de `project-context.yaml` :
+
+```yaml
+memory:
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  embedding_model_path: ""     # répertoire local, court-circuite tout réseau
+  embedding_cache_dir: ""      # où le moteur peut stocker ce qu'il télécharge
+  embedding_offline: false     # force les commutateurs hors-ligne du hub
+```
+
+Changer de modèle à dimension égale n'est pas détectable côté serveur : cela
+demande un ré-index explicite des souvenirs existants.
+
+## Modèle d'embedding sur site fermé
+
+Le mode lexical ci-dessus ne demande aucun modèle. Pour garder la recherche
+sémantique sans accès sortant, le modèle d'embedding se transporte dans un
+*bundle* : une archive construite sur une machine connectée, vérifiée par
+empreinte à l'arrivée.
+
+Qdrant en auto-hébergement ne génère aucun vecteur — l'inférence est toujours
+côté client. Un bundle transporte donc le modèle, pas un service.
+
+Sur la machine connectée :
+
+```bash
+grimoire memory bundle export \
+  --model sentence-transformers/all-MiniLM-L6-v2 \
+  --out grimoire-embedding-bundle.tar.gz
+```
+
+`--model` accepte aussi un répertoire de modèle déjà téléchargé, ce qui évite
+toute dépendance au Hub si le modèle vient d'un miroir interne.
+
+Sur le site fermé :
+
+```bash
+grimoire memory bundle install grimoire-embedding-bundle.tar.gz --configure
+grimoire memory bundle verify ~/.cache/grimoire/embeddings/<modele>
+```
+
+`install` recalcule le SHA-256 de chaque fichier déclaré au manifeste et refuse
+l'installation au moindre écart : aucun modèle partiel ou altéré n'atterrit sur
+le disque. `--configure` renseigne `memory.embedding_model` dans
+`project-context.yaml` en préservant les commentaires du fichier.
+
+`verify` va plus loin que les empreintes : il charge réellement le modèle avec
+les sockets sortantes bloquées. Un moteur qui retomberait silencieusement sur un
+téléchargement distant échoue au lieu de réussir — c'est ce qui distingue un
+chemin hors-ligne prouvé d'un chemin hors-ligne supposé.
+
+| Commande | Rôle |
+| --- | --- |
+| `memory bundle export` | Construit l'archive depuis un repo Hub ou un répertoire local |
+| `memory bundle install` | Vérifie les empreintes et installe, `--configure` câble le projet |
+| `memory bundle verify` | Recontrôle les empreintes et prouve le chargement hors-ligne |
+| `memory bundle where` | Affiche la racine d'installation par défaut |
+
+La racine d'installation suit `GRIMOIRE_EMBEDDING_CACHE`, puis `XDG_CACHE_HOME`,
+et vaut `~/.cache/grimoire/embeddings` par défaut.
+
+Grimoire ne redistribue aucun poids de modèle : l'archive est produite par
+l'opérateur, depuis la source de son choix.
+
+## Choix à l'initialisation
+
+`grimoire init` ne demande plus « veut-on Qdrant ? » mais « cette machine a-t-elle
+un accès réseau sortant ? ». La différence n'est pas cosmétique : proposer un
+conteneur vectoriel à une machine qui ne peut pas atteindre un modèle
+d'embedding produit un store qu'on ne pourra jamais remplir.
+
+- **Pas d'egress** — le projet est généré en `vector_database: false` et
+  `retrieval_mode: lexical`. Aucun modèle, aucun service, aucun réseau. Le
+  passage au sémantique reste ouvert plus tard via `memory bundle install`.
+- **Egress disponible** — Qdrant via Docker est proposé, **par défaut non**.
+  Démarrer un conteneur et son volume persistant au premier lancement n'est pas
+  quelque chose qui se fait dans le dos de l'utilisateur.
+
+`grimoire up` et `grimoire doctor` exposent une sonde `env_embedding_model` qui
+ne télécharge rien et ne contacte personne : elle lit ce que le projet déclare
+et regarde sur le disque. Elle signale un `embedding_model_path` qui ne pointe
+sur rien, un `embedding_offline` sans modèle local, et un bundle installé mais
+non câblé.
 
 ## Taxonomie palais
 
@@ -184,7 +415,9 @@ La surface publique passe par `grimoire memory`.
 
 | Domaine | Commandes |
 | --- | --- |
+| Mise en place | `grimoire memory up` |
 | Santé et inspection | `grimoire memory status`, `grimoire memory taxonomy` |
+| Mémoire transverse | `grimoire memory shared promote`, `confirm`, `recall` |
 | Recherche et listing | `grimoire memory search`, `grimoire memory list` |
 | Échange JSON | `grimoire memory export`, `grimoire memory import` |
 | Migration Weaviate + Neo4j | `grimoire memory migrate export-bundle`, `import-weaviate`, `import-neo4j`, `verify` |

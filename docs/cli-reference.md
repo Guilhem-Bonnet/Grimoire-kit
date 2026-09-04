@@ -188,6 +188,24 @@ Code de sortie `1` si un problème est détecté.
 
 ---
 
+## Surfaces hôtes
+
+Le groupe `grimoire host` projette le projet sur ce que chaque hôte sait
+exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
+
+| Commande | Description |
+|---|---|
+| `grimoire host list` | Hôtes connus, surfaces natives de chacun, hôte détecté |
+| `grimoire host surface` | Description host-neutre du projet |
+| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`) |
+| `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
+| `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
+
+`grimoire init`, `grimoire up --fix` et `grimoire standard init` synchronisent
+automatiquement ; l'appel manuel sert après l'ajout ou la modification d'une
+persona.
+
 ## Standard agentique gouverné
 
 Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](governed-controls.md).

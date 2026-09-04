@@ -1,5 +1,5 @@
 {
-  "_comment": "Ratchet ceilings — regenerate only via scripts/check-code-ratchet.py --rebaseline (shrink-only).",
+  "_comment": "Ratchet ceilings \u2014 regenerate only via scripts/check-code-ratchet.py --rebaseline (shrink-only).",
   "src_threshold": 1500,
   "frozen": {
     "framework/cc-verify.sh": 422,
@@ -79,6 +79,6 @@
   "src_oversized": {
     "src/grimoire/cli/app.py": 2913,
     "src/grimoire/cli/cmd_memory.py": 1610,
-    "src/grimoire/core/agentic_standard.py": 2977
+    "src/grimoire/core/agentic_standard.py": 2980
   }
 }

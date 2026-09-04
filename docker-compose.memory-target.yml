@@ -1,0 +1,55 @@
+# Docker Compose - Weaviate + Neo4j target memory stack for Grimoire
+#
+# Generated for projects using memory.backend: weaviate-server.
+#
+# Usage:
+#   docker compose -f docker-compose.memory-target.yml up -d
+#   docker compose -f docker-compose.memory-target.yml down
+
+services:
+  weaviate:
+    image: semitechnologies/weaviate:1.35.19
+    ports:
+      - "${GRIMOIRE_WEAVIATE_PORT:-8080}:8080"
+      - "${GRIMOIRE_WEAVIATE_GRPC_PORT:-50051}:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: "node1"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/v1/.well-known/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.26.25
+    ports:
+      - "${GRIMOIRE_NEO4J_HTTP_PORT:-7474}:7474"
+      - "${GRIMOIRE_NEO4J_BOLT_PORT:-7687}:7687"
+    environment:
+      NEO4J_AUTH: "${GRIMOIRE_NEO4J_AUTH:-neo4j/grimoire-dev-password}"
+      GRIMOIRE_NEO4J_PASSWORD: "${GRIMOIRE_NEO4J_PASSWORD:-grimoire-dev-password}"
+      NEO4J_dbms_security_auth__enabled: "true"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $${GRIMOIRE_NEO4J_PASSWORD:-grimoire-dev-password} 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  weaviate_data:
+  neo4j_data:
+  neo4j_logs:

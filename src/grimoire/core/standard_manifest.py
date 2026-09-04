@@ -23,10 +23,22 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
-if TYPE_CHECKING:  # pragma: no cover - typing only, the runtime never needs it
-    from grimoire.core.agentic_standard import StandardProfile
+
+class RenderableProfile(Protocol):
+    """What the renderer needs of a profile, and nothing more.
+
+    Declared here rather than imported from :mod:`grimoire.core.agentic_standard`
+    so the dependency stays one-way: that module imports this one at runtime,
+    and this one never reaches back. A ``TYPE_CHECKING`` import would read as a
+    cycle to any tool that does not model the guard — and it would also hide
+    how little of the profile is actually used.
+    """
+
+    @property
+    def id(self) -> str:
+        """Identifier of the declared profile, e.g. ``governed``."""
 
 #: Root of the standard artifacts, relative to the project root.
 STANDARD_DIR = Path("_grimoire/standard")
@@ -158,7 +170,7 @@ def _render_template(
     template: str,
     *,
     project_name: str,
-    profile: StandardProfile,
+    profile: RenderableProfile,
     generated_at: str,
 ) -> str:
     text_project_name = _single_line_value(project_name)

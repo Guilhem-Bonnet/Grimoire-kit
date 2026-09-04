@@ -59,3 +59,12 @@ def test_unknown_and_empty_fall_back_to_default() -> None:
 def test_normalisation_is_case_and_space_tolerant() -> None:
     assert resolve_window(" Claude-Sonnet-4.6 ") == 200_000
     assert model_windows.resolve_window("GPT-5.4") == 272_000
+
+
+def test_long_context_variants_are_not_budgeted_as_standard_ones() -> None:
+    """A 1M variant resolved to its family window under-budgets it 5x."""
+    assert resolve_window("claude-opus-5[1m]") == 1_000_000
+    assert resolve_window("claude-sonnet-5[1m]") == 1_000_000
+    assert resolve_window("claude-sonnet-4-5-1m") == 1_000_000
+    # The family id alone keeps its published standard window.
+    assert resolve_window("claude-opus-5") == 200_000

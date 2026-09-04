@@ -45,6 +45,7 @@ _SUBPROCESS_TIMEOUT = 2.0
 _QDRANT_DEFAULT_URL = "http://localhost:6333"
 _OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
+_MEMORY_TARGET_COMPOSE_FILE = "docker-compose.memory-target.yml"
 _QDRANT_DOCKER_RUN = (
     "docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant"
 )
@@ -148,6 +149,103 @@ def check_qdrant(target: Path | None = None) -> EnvCheck:
     )
 
 
+def _memory_config(target: Path) -> Any | None:
+    """Best-effort ``memory:`` section of *target*, or ``None`` when unreadable.
+
+    Probes for Weaviate / Neo4j / Redis are emitted only when the project
+    actually declares them, so an unconfigured project never collects three
+    warnings about services it does not use.
+    """
+    config_path = target / "project-context.yaml"
+    if not config_path.is_file():
+        return None
+    try:
+        return GrimoireConfig.from_yaml(config_path).memory
+    except (GrimoireConfigError, OSError):
+        return None
+
+
+def check_weaviate(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Weaviate server reachable?
+
+    Returns ``None`` when the project does not declare Weaviate.
+    """
+    mem = _memory_config(target) if target is not None else None
+    url = (mem.weaviate_url if mem else "").strip()
+    if not url and not (mem and mem.backend == "weaviate-server"):
+        return None
+    url = url or "http://localhost:8080"
+    if _tcp_reachable(url, 8080):
+        return EnvCheck("env_weaviate", passed=True, level="ok", detail=f"Weaviate reachable at {url}")
+    remedy = f"docker compose -f {_MEMORY_TARGET_COMPOSE_FILE} up -d"
+    if target is not None and not (target / _MEMORY_TARGET_COMPOSE_FILE).is_file():
+        remedy = "docker run -d --name weaviate -p 8080:8080 semitechnologies/weaviate"
+    return EnvCheck(
+        "env_weaviate",
+        passed=True,
+        level="warn",
+        detail=f"Weaviate declared but not reachable at {url} (semantic memory is down)",
+        remedy=remedy,
+    )
+
+
+def check_neo4j(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Neo4j graph reachable, with its password set?
+
+    Returns ``None`` when no Memory OS layer is routed to Neo4j.  A missing
+    password environment variable is reported even when the socket answers:
+    every graph write would fail on authentication, silently, at runtime.
+    """
+    mem = _memory_config(target) if target is not None else None
+    if mem is None:
+        return None
+    routed = mem.neo4j_uri.strip() or any(
+        layer == "neo4j"
+        for layer in (mem.knowledge_graph, mem.memory_graph, mem.code_graph, mem.task_memory)
+    )
+    if not routed:
+        return None
+    url = mem.neo4j_uri.strip() or "bolt://localhost:7687"
+    if not _tcp_reachable(url, 7687):
+        return EnvCheck(
+            "env_neo4j",
+            passed=True,
+            level="warn",
+            detail=f"Neo4j declared but not reachable at {url} (graph projections are down)",
+            remedy=f"docker compose -f {_MEMORY_TARGET_COMPOSE_FILE} up -d",
+        )
+    password_env = mem.neo4j_password_env or "GRIMOIRE_NEO4J_PASSWORD"
+    if not os.environ.get(password_env, "").strip():
+        return EnvCheck(
+            "env_neo4j",
+            passed=True,
+            level="warn",
+            detail=f"Neo4j reachable at {url} but ${password_env} is unset — graph writes will fail to authenticate",
+            remedy=f"export {password_env}=<password>",
+        )
+    return EnvCheck("env_neo4j", passed=True, level="ok", detail=f"Neo4j reachable at {url} (${password_env} set)")
+
+
+def check_redis(target: Path | None = None) -> EnvCheck | None:
+    """Optional: is the declared Redis hot-memory layer reachable?
+
+    Returns ``None`` when the project does not route short-term memory to Redis.
+    """
+    mem = _memory_config(target) if target is not None else None
+    if mem is None or (mem.short_term_backend != "redis" and not mem.redis_url.strip()):
+        return None
+    url = mem.redis_url.strip() or "redis://localhost:6379/0"
+    if _tcp_reachable(url, 6379):
+        return EnvCheck("env_redis", passed=True, level="ok", detail=f"Redis hot memory reachable at {url}")
+    return EnvCheck(
+        "env_redis",
+        passed=True,
+        level="warn",
+        detail=f"Redis declared but not reachable at {url} (hot memory is down, durable stores unaffected)",
+        remedy="docker run -d --name grimoire-redis -p 6379:6379 redis:7-alpine",
+    )
+
+
 def check_ollama() -> EnvCheck:
     """Optional: is Ollama reachable (GRIMOIRE_OLLAMA_URL or localhost:11434)?"""
     url = os.environ.get("GRIMOIRE_OLLAMA_URL", "").strip() or _OLLAMA_DEFAULT_URL
@@ -159,6 +257,73 @@ def check_ollama() -> EnvCheck:
         level="warn",
         detail=f"Ollama not reachable at {url} (optional, local embeddings)",
         remedy="ollama serve (install: https://ollama.com/download)",
+    )
+
+
+def check_embedding_model(target: Path | None = None) -> EnvCheck:
+    """Is a local embedding model reachable without going to the network?
+
+    Never downloads and never probes a remote host: it only reads what the
+    project declares and looks on disk. A closed site needs to know this before
+    the first search, not during it.
+    """
+    from grimoire.memory.bundle import default_install_root
+
+    cfg = _load_config_quiet(target) if target is not None else None
+    mem = cfg.memory if cfg is not None else None
+
+    if mem is not None and (not mem.vector_database or mem.retrieval_mode == "lexical"):
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="ok",
+            detail="lexical retrieval — no embedding model needed",
+        )
+
+    model_path = (mem.embedding_model_path if mem is not None else "").strip()
+    if model_path:
+        resolved = Path(model_path).expanduser()
+        if resolved.is_dir() and any(resolved.iterdir()):
+            return EnvCheck(
+                "env_embedding_model",
+                passed=True,
+                level="ok",
+                detail=f"embedding model available offline at {resolved}",
+            )
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="warn",
+            detail=f"memory.embedding_model_path points at nothing usable: {resolved}",
+            remedy="grimoire memory bundle install <archive> --configure",
+        )
+
+    installed = default_install_root()
+    bundles = sorted(p.parent.name for p in installed.glob("*/model") if p.is_dir()) if installed.is_dir() else []
+    if bundles:
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="info",
+            detail=f"bundle(s) installed but not wired in: {', '.join(bundles)}",
+            remedy="set memory.embedding_model_path, or re-run bundle install --configure",
+        )
+
+    offline = bool(mem.embedding_offline) if mem is not None else False
+    if offline:
+        return EnvCheck(
+            "env_embedding_model",
+            passed=True,
+            level="warn",
+            detail="memory.embedding_offline is set but no local model is declared",
+            remedy="grimoire memory bundle install <archive> --configure",
+        )
+    return EnvCheck(
+        "env_embedding_model",
+        passed=True,
+        level="info",
+        detail="no local embedding model — the first search will download one",
+        remedy="on a closed site: grimoire memory bundle export, then install",
     )
 
 
@@ -267,13 +432,20 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
 
 
 def run_env_checks(target: Path) -> list[EnvCheck]:
-    """Run every fast environment probe for *target*. Never raises."""
+    """Run every fast environment probe for *target*. Never raises.
+
+    The Memory OS probes (Weaviate, Neo4j, Redis) return ``None`` when the
+    project does not declare that layer, so they are filtered out here.
+    """
+    optional_memory = (check_weaviate(target), check_neo4j(target), check_redis(target))
     return [
         check_venv(),
         check_uv(),
         check_docker(),
         check_qdrant(target),
+        *[chk for chk in optional_memory if chk is not None],
         check_ollama(),
+        check_embedding_model(target),
         *check_mcp_json(target),
     ]
 
@@ -291,7 +463,7 @@ def repair_project_artifacts(target: Path) -> list[str]:
     Returns the list of regenerated labels (relative paths).
     """
     from grimoire.core.archetype_resolver import ResolvedArchetype
-    from grimoire.core.scaffold import FileCopy, ProjectScaffolder, ScaffoldPlan
+    from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
 
     target = target.resolve()
     cfg = _load_config_quiet(target)
@@ -314,14 +486,10 @@ def repair_project_artifacts(target: Path) -> list[str]:
     )
 
     plan = ScaffoldPlan()
-    for _stem, agent_file in sorted(layout.layered_files(target, layout.AGENTS_SUBDIR).items()):
-        if agent_file.name.endswith(".tpl.md"):
-            continue
-        # Feed deployed agents to the wrapper planner as pseudo-copies.
-        plan.copies.append(FileCopy(src=agent_file, dst=agent_file, label=agent_file.stem))
     # Intentional reuse of ProjectScaffolder's planning internals so the
-    # regenerated artifacts stay identical to what `grimoire init` produces.
-    scaffolder._plan_agent_wrappers(plan)
+    # regenerated artifact stays identical to what `grimoire init` produces.
+    # Per-host agent files are not planned here: they belong to the host
+    # emitters, and `_sync_host_surfaces` below regenerates them.
     scaffolder._plan_mcp_config(plan)
 
     written: list[str] = []
@@ -332,6 +500,9 @@ def repair_project_artifacts(target: Path) -> list[str]:
         # healthy project even though it regenerates everything.
         if write_text_if_changed(template.dst, template.content):
             written.append(template.label or str(template.dst.relative_to(target)))
+    # Les fichiers par hôte appartiennent aux émetteurs : ils sont régénérés
+    # ici et nulle part ailleurs, pour qu'un seul écrivain possède le chemin.
+    written.extend(_sync_host_surfaces(target))
     return written
 
 
@@ -882,3 +1053,21 @@ def up(
 
     if state.failed:
         raise typer.Exit(1)
+
+
+def _sync_host_surfaces(target: Path) -> list[str]:
+    """Regenerate the per-host surfaces (agents, skills, commands, hooks)."""
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(target)
+        written: list[str] = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            written.extend(apply_plan(emitter.plan(surface, target), target).written)
+        return written
+    except Exception:
+        return []

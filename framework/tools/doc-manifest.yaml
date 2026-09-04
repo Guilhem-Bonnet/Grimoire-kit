@@ -1,0 +1,97 @@
+# ═══════════════════════════════════════════════════════════════════
+# DOC MANIFEST — Source → Mirror mapping for doc-as-code governance
+# ═══════════════════════════════════════════════════════════════════
+#
+# Ce fichier est la SOURCE DE VÉRITÉ du système doc-as-code.
+# Il déclare quels fichiers de code imposent une mise à jour de quels
+# fichiers de doc. Lu par `auto-doc.py drift-check` et par le hook
+# PostToolUse `grimoire-doc-drift.sh`.
+#
+# Gouvernance :
+#   - Modifier ce fichier = passer en PR review (pas d'auto-update).
+#   - Chaque mapping a une `severity` :
+#       * blocking   → tool call refusé si drift non résolu
+#       * enforcing  → additionalContext injecté, pas de blocage
+#       * info       → logué dans JSONL, aucune pression
+#
+# Schéma d'un mapping :
+#   - source: <path relatif au project-root>     (exclusif avec source_glob)
+#     source_glob: <glob pattern>                 (exclusif avec source)
+#     mirrors: [<liste de docs à vérifier>]
+#     severity: blocking | enforcing | info
+#     require:  [<liste de règles déterministes>]  # optionnel
+#     triggers: [<liste de patterns déclencheurs>] # optionnel
+#
+# Règles `require` supportées (v1) :
+#   - public_signatures  : signatures des classes/fonctions publiques cohérentes
+#   - changelog_entry    : une entrée dans CHANGELOG.md pour le fichier modifié
+#   - agent_list         : la liste des agents mentionnés dans le mirror reflète le code
+#   - cli_commands       : les commandes CLI documentées = celles exposées
+#   - test_count         : compteurs de tests synchronisés (legacy auto-doc)
+#
+# Patterns `triggers` : si le diff du source contient ces patterns, le mirror
+# doit aussi avoir été touché dans la même tâche.
+
+version: 1
+
+mappings:
+  # ─── SDK Python — API publique ────────────────────────────────────
+  - source_glob: "src/grimoire/mcp/**/*.py"
+    mirrors: [docs/mcp-integration.md]
+    severity: enforcing
+    require: [public_signatures]
+
+  - source_glob: "src/grimoire/cli/**/*.py"
+    mirrors: [docs/cli-reference.md]
+    severity: enforcing
+    require: [cli_commands]
+
+  - source_glob: "src/grimoire/memory/backends/*.py"
+    mirrors: [docs/memory-system.md]
+    severity: enforcing
+    require: [public_signatures]
+
+  - source: src/grimoire/core/orchestrator.py
+    mirrors: [docs/concepts.md, docs/adr-001-no-multi-llm.md]
+    severity: blocking
+    triggers: ["def ", "class ", "multi[_-]?llm", "parallel", "concurrent"]
+
+  # ─── Pyproject — dépendances déclarées ────────────────────────────
+  - source: pyproject.toml
+    mirrors: [docs/getting-started.md, README.md]
+    severity: enforcing
+    triggers: ["[project.optional-dependencies]", "[project.scripts]"]
+
+  # ─── Agents runtime — liste des agents disponibles ────────────────
+  - source_glob: "_grimoire-runtime/bmm/agents/*.md"
+    mirrors: [docs/creating-agents.md]
+    severity: enforcing
+    require: [agent_list]
+
+  - source_glob: "_grimoire-runtime/cis/agents/*.md"
+    mirrors: [docs/creating-agents.md]
+    severity: enforcing
+    require: [agent_list]
+
+  # ─── Landing web — synchro avec la réalité du projet ──────────────
+  # Critique : la page publique doit toujours refléter les chiffres réels.
+  - source_glob: "tests/**/test_*.py"
+    mirrors: [web/index.html, README.md]
+    severity: info
+    require: [test_count]
+
+  - source_glob: ".github/agents/*.agent.md"
+    mirrors: [web/index.html]
+    severity: info
+    require: [agent_list]
+
+  # ─── Workflows / tasks ────────────────────────────────────────────
+  - source: .vscode/tasks.json
+    mirrors: [docs/vscode-setup.md]
+    severity: enforcing
+    triggers: ["\"label\":"]
+
+  # ─── ADR — toute modif d'ADR doit mettre à jour l'index ───────────
+  - source_glob: "docs/adr-*.md"
+    mirrors: [docs/index.md, mkdocs.yml]
+    severity: info

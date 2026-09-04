@@ -74,6 +74,7 @@ def write_text_if_changed(dst: Path, content: str) -> bool:
         if dst.read_text(encoding="utf-8") == content:
             return False
     except (OSError, UnicodeDecodeError):
+        # Absent ou illisible : il n'y a rien à comparer, on écrit.
         pass
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(content, encoding="utf-8")
@@ -402,8 +403,10 @@ class ProjectScaffolder:
         scan: ScanResult | None,
         resolved: ResolvedArchetype,
         backend: str,
+        offline: bool = False,
         force: bool = False,
     ) -> None:
+        self._offline = offline
         self._target = target.resolve()
         self._project_name = project_name
         self._user_name = user_name
@@ -430,7 +433,6 @@ class ProjectScaffolder:
         self._plan_feature_agents(p)
         self._plan_framework(p)
         self._plan_templates(p)
-        self._plan_agent_wrappers(p)
         self._plan_copilot_prompts(p)
         self._plan_copilot_instruction_files(p)
         self._plan_copilot_instructions(p)
@@ -568,9 +570,13 @@ class ProjectScaffolder:
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
         archetype_list = ", ".join(f'"{a}"' for a in archetypes)
         memory_extra = ""
-        memory_layers = """  layer_profile: "standard"
-  vector_database: true
-  retrieval_mode: "vector"
+        # A project declared without egress cannot reach an embedding model:
+        # lexical is the only mode that actually works there.
+        vector_line = "false" if self._offline else "true"
+        mode_line = "lexical" if self._offline else "vector"
+        memory_layers = f"""  layer_profile: "standard"
+  vector_database: {vector_line}
+  retrieval_mode: "{mode_line}"
   short_term_backend: "sqlite"
   redis_url: ""
   knowledge_graph: "sqlite-sidecar"
@@ -934,62 +940,6 @@ class ProjectScaffolder:
             tier=TIER_SEED,
         ))
 
-    def _plan_agent_wrappers(self, p: ScaffoldPlan) -> None:
-        """Generate .github/agents/*.agent.md wrappers for VS Code discovery."""
-        gh_agents = self._target / ".github" / "agents"
-        concierge_name = "concierge"
-        for fc in p.copies:
-            if not _is_agent_markdown(fc.dst):
-                continue
-            name = fc.dst.stem
-            wrapper_dst = gh_agents / f"{name}.agent.md"
-            desc = self._extract_agent_description(fc.src)
-            is_entry = name == concierge_name
-            tools = "['read', 'search', 'execute']" if is_entry else "['read', 'search']"
-            lines = [
-                "---",
-                f"description: '{desc}'",
-                f"tools: {tools}",
-            ]
-            if not is_entry:
-                lines.append("user-invocable: false")
-            lines.append("---")
-            lines.append("")
-            # Richer activation instructions
-            lines.append(f"You are activating the **{name}** Grimoire agent.")
-            lines.append("")
-            lines.append("Follow these steps IN ORDER:")
-            lines.append("")
-            definition = self._agent_definition_ref(name)
-            lines.append(f"1. **Load the full agent definition**: Read `{{{{project-root}}}}/{definition}` completely — this file contains the persona, capabilities, and all behaviour instructions.")
-            lines.append("2. **Load project context**: Read `{project-root}/_grimoire/_memory/shared-context.md` to understand the current project.")
-            lines.append("3. **Load memory config**: Read `{project-root}/_grimoire/_memory/config.yaml` to get `user_name` and `communication_language`.")
-            lines.append("4. **Follow ALL activation steps** defined in the agent file — they specify the greeting, menu, and behaviour.")
-            lines.append("5. **Never break character** — stay in persona until the user explicitly exits.")
-            lines.append("")
-            if is_entry:
-                lines.append("> This is the **entry-point agent**. When uncertain which agent the user needs, route here first.")
-            else:
-                lines.append("> This agent is **internally routed** — it may receive tasks from other agents via `_grimoire/_memory/handoff-log.md`.")
-            lines.append("")
-            p.templates.append(TemplateRender(
-                dst=wrapper_dst,
-                content="\n".join(lines),
-                label=f".github/agents/{name}.agent.md",
-            ))
-
-    def _agent_definition_ref(self, name: str) -> str:
-        """Project-relative path the wrapper should read for agent *name*.
-
-        Points at the override when the project has one, so customising an
-        agent is a matter of dropping a file in ``_grimoire/overrides/agents/``
-        — no wrapper editing, nothing that a regeneration would undo.
-        """
-        override = layout.overrides_dir(self._target) / layout.AGENTS_SUBDIR / f"{name}.md"
-        if override.is_file():
-            return f"{layout.OVERRIDES_DIR}/{layout.AGENTS_SUBDIR}/{name}.md"
-        return f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/{name}.md"
-
     @staticmethod
     def _extract_agent_description(src: Path) -> str:
         """Extract description from internal agent YAML frontmatter."""
@@ -1071,6 +1021,9 @@ class ProjectScaffolder:
                 f"@{canonical}\n"
             ),
             "AGENTS.md": (
+                # Marked as generated: `grimoire host sync` replaces this
+                # pointer with the full catalog on hosts that read AGENTS.md.
+                "<!-- grimoire:managed -->\n"
                 f"# {name} — Agent instructions\n\n"
                 "Ce projet utilise **Grimoire Kit**. Source de vérité des instructions "
                 f"agent : [`{canonical}`]({canonical}).\n\n"
@@ -1078,6 +1031,7 @@ class ProjectScaffolder:
                 "agents, workflows, mémoire et standard agentique gouverné y sont décrits.\n"
             ),
             "GEMINI.md": (
+                "<!-- grimoire:managed -->\n"
                 f"# {name} — Gemini CLI\n\n"
                 "Ce projet utilise **Grimoire Kit**. Instructions agent canoniques : "
                 f"[`{canonical}`]({canonical}).\n"

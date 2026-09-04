@@ -16,7 +16,6 @@ from rich.table import Table
 
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
-from grimoire.memory.architecture import build_memory_architecture_status
 from grimoire.memory.manager import MemoryManager
 from grimoire.memory.taxonomy import flatten_taxonomy, run_memory_search
 
@@ -922,61 +921,6 @@ def memory_migrate_verify(
 
 def _parse_source_collections(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
-
-
-# ── grimoire memory status ────────────────────────────────────────────────────
-
-
-@memory_app.command("status")
-def memory_status(ctx: typer.Context) -> None:
-    """Show memory backend health, entry count, and configuration."""
-    mgr, cfg, root = _load_manager_context()
-    health = mgr.health_check()
-    total = mgr.count()
-    facts = mgr.facts_stats() if hasattr(mgr, "facts_stats") else {}
-    diary = mgr.diary_stats() if hasattr(mgr, "diary_stats") else {}
-    architecture = build_memory_architecture_status(cfg, project_root=root, backend_status=health)
-    fmt = _get_fmt(ctx)
-
-    if fmt == "json":
-        typer.echo(json.dumps({
-            "backend": health.backend,
-            "healthy": health.healthy,
-            "entries": total,
-            "detail": health.detail,
-            "facts": facts,
-            "diary": diary,
-            "architecture": architecture.to_dict(),
-        }, indent=2, default=str))
-        return
-
-    status_icon = "[green][OK][/green]" if health.healthy else "[red][x][/red]"
-    console.print(f"{status_icon} Backend: [bold]{health.backend}[/bold]")
-    console.print(f"  Entries : {total}")
-    if health.detail:
-        for k, v in health.detail.items():
-            console.print(f"  {k}: {v}")
-    if facts:
-        console.print(f"  Facts   : {facts.get('facts', 0)} active={facts.get('active_facts', 0)}")
-    if diary:
-        console.print(f"  Diary   : {diary.get('diary_entries', 0)} entries across {diary.get('agents', 0)} agents")
-
-    console.print("\n[bold]Memory OS layers[/bold]")
-    tbl = Table(show_header=True)
-    tbl.add_column("Layer")
-    tbl.add_column("State")
-    tbl.add_column("Backend")
-    tbl.add_column("Next")
-    for layer in architecture.layers:
-        state_style = {
-            "ready": "green",
-            "partial": "yellow",
-            "planned": "cyan",
-            "disabled": "dim",
-        }.get(layer.state, "white")
-        next_action = layer.next_actions[0] if layer.next_actions else "—"
-        tbl.add_row(layer.label, f"[{state_style}]{layer.state}[/{state_style}]", layer.backend, next_action)
-    console.print(tbl)
 
 
 # ── grimoire memory search ────────────────────────────────────────────────────

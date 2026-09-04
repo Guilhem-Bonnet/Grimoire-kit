@@ -95,8 +95,24 @@
     if (!r.ok) throw new Error(url + ' -> ' + r.status);
     return r.json();
   }
-  /* Le site peut vivre à la racine ou sous un sous-chemin (Pages). */
+  /* Le site peut vivre à la racine ou sous un sous-chemin (Pages), et servir
+     un projet parmi N. Ordre de résolution : couche du projet courant, puis
+     la couche plate (rétro-compat vitrine mono-projet), puis la racine. */
+  /* Couches réellement écrites par projet (cf. build_project dans
+     scripts/gen-site-data.py). Le reste — catalogue, extensions, architecture,
+     couverture — est propre au kit et vit dans la couche plate. Le test
+     test_project_scoped_layers_match_the_generator garde les deux en phase. */
+  const PROJECT_SCOPED = new Set([
+    'meta.json', 'taskboard.json', 'observatory.json',
+    'activity.json', 'insights.json', 'memory.json'
+  ]);
+
   async function fetchData(name) {
+    const slug = PROJECT_SCOPED.has(name) ? SLUG : null;
+    if (slug) {
+      try { return await fetchJson('data/projects/' + slug + '/' + name, { cache: 'no-store' }); }
+      catch (e) { /* projet sans cette couche : on retombe sur le plat */ }
+    }
     try { return await fetchJson('data/' + name, { cache: 'no-store' }); }
     catch (e) { return fetchJson('/data/' + name, { cache: 'no-store' }); }
   }
@@ -105,8 +121,32 @@
     return fetchJson(path, o);
   }
 
+  /* Slug de la couche de données d'un projet : appariement par chemin dans le
+     registre, repli sur le projet primaire. Sans registre (vitrine mono-projet
+     sur Pages) : null, et fetchData reste sur la couche plate. */
+  function resolveSlug(proj) {
+    if (!REGISTRY || !Array.isArray(REGISTRY.projects) || !REGISTRY.projects.length) return null;
+    const path = proj && proj.path;
+    if (path) {
+      const hit = REGISTRY.projects.find((p) => p.path === path);
+      if (hit && hit.slug) return hit.slug;
+    }
+    return REGISTRY.selected || REGISTRY.primary || REGISTRY.projects[0].slug || null;
+  }
+
+  async function loadRegistry() {
+    if (ONLINE) {
+      try { return await api('/api/projects'); } catch (e) { /* hôte mono-projet */ }
+    }
+    try { return await fetchJson('data/projects.json', { cache: 'no-store' }); }
+    catch (e) { return null; }
+  }
+
   /* ── État interne (caches remplis par init) ── */
   let ONLINE = false;
+  let READONLY = false;       // hôte cockpit : lectures multi-projets, pas d'écriture
+  let SLUG = null;            // projet dont on lit la couche de données
+  let REGISTRY = null;        // data/projects.json (ou /api/projects en ligne)
   let STATUS = null;          // /api/status
   let SETUP = null;           // /api/setup (artifacts par surface)
   let PROJECT = lsRead(LS.project, null);
@@ -118,8 +158,12 @@
   const Atelier = {
     LS,
     online: false,
+    readOnly: false,
     status: null,
     api,
+    fetchData,
+    slug() { return SLUG; },
+    registry() { return REGISTRY; },
     setupInfo() { return SETUP; },
     esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -128,12 +172,16 @@
     /* ── Projet (cache sync, vérité = API) ── */
     project() { return PROJECT; },
     async setProject(p) {
-      if (ONLINE && p && p.path) {
+      if (ONLINE && p && (p.slug || p.path)) {
         try {
-          await api('/api/projects/select', { method: 'POST', body: JSON.stringify({ path: p.path }) });
-        } catch (e) { /* endpoint absent : on garde la sélection locale */ }
+          await api('/api/projects/select', {
+            method: 'POST',
+            body: JSON.stringify({ slug: p.slug || '', path: p.path || '' })
+          });
+        } catch (e) { /* hôte mono-projet : on garde la sélection locale */ }
       }
       PROJECT = p; lsWrite(LS.project, p);
+      SLUG = (p && p.slug) || resolveSlug(p);
       await refreshProjectCaches();
       Atelier.refreshChrome();
     },
@@ -148,6 +196,7 @@
     /* ── Extensions installées (cache sync + API optimiste) ── */
     installedExts() { return INSTALLED.slice(); },
     installExt(id) {
+      if (READONLY) { Atelier.toast('Cockpit en lecture seule — utilise l\'atelier du projet pour installer.'); return; }
       if (!INSTALLED.includes(id)) INSTALLED.push(id);
       if (ONLINE) {
         api('/api/extensions/add', { method: 'POST', body: JSON.stringify({ source: id }) })
@@ -163,6 +212,7 @@
       }
     },
     removeExt(id) {
+      if (READONLY) { Atelier.toast('Cockpit en lecture seule — utilise l\'atelier du projet pour installer.'); return; }
       INSTALLED = INSTALLED.filter(x => x !== id);
       if (ONLINE) {
         api('/api/extensions/remove', { method: 'POST', body: JSON.stringify({ id }) })
@@ -467,8 +517,15 @@
       ONLINE = true;
       Atelier.online = true;
       Atelier.status = STATUS;
+      /* L'hôte cockpit sert N projets en lecture : les mutations de l'atelier
+         n'y existent pas, on ne les propose donc pas. */
+      READONLY = STATUS.readOnly === true;
+      Atelier.readOnly = READONLY;
+      REGISTRY = await loadRegistry();
       const root = STATUS.projectRoot || '';
       PROJECT = { name: root.split('/').filter(Boolean).pop() || 'projet', path: root };
+      PROJECT.slug = resolveSlug(PROJECT);
+      SLUG = PROJECT.slug;
       lsWrite(LS.project, PROJECT);
       await refreshProjectCaches();
     } catch (e) {
@@ -477,6 +534,9 @@
       /* Sans API : pas de projet actif — l'atelier affiche le premier
          lancement avec les commandes d'installation réelles. */
       PROJECT = null;
+      /* La vitrine statique reste multi-projets : le registre généré suffit. */
+      REGISTRY = await loadRegistry();
+      SLUG = resolveSlug(lsRead(LS.project, null));
     }
     Atelier.refreshChrome();
     guardToolPages();

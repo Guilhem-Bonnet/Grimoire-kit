@@ -121,6 +121,9 @@ class MemoryConfig:
     retrieval_mode: str = "vector"
     collection_prefix: str = "grimoire"
     embedding_model: str = ""
+    embedding_cache_dir: str = ""
+    embedding_model_path: str = ""
+    embedding_offline: bool = False
     qdrant_url: str = ""
     weaviate_url: str = ""
     weaviate_api_key_env: str = "GRIMOIRE_WEAVIATE_API_KEY"
@@ -134,6 +137,10 @@ class MemoryConfig:
     migration_bundle_path: str = ""
     mempalace_path: str = ""
     ollama_url: str = ""
+    # Memoire transverse : nom de la collection partagee entre projets. Vide =
+    # desactivee. Opt-in deliberement : rien ne doit traverser la frontiere
+    # d'un projet sans declaration explicite.
+    shared_collection: str = ""
     layer_profile: str = "standard"
     short_term_backend: str = "sqlite"
     redis_url: str = ""
@@ -163,6 +170,9 @@ class MemoryConfig:
             retrieval_mode=str(data.get("retrieval_mode", "vector")),
             collection_prefix=str(data.get("collection_prefix", "grimoire")),
             embedding_model=str(data.get("embedding_model", "")),
+            embedding_cache_dir=str(data.get("embedding_cache_dir", "")),
+            embedding_model_path=str(data.get("embedding_model_path", "")),
+            embedding_offline=bool(data.get("embedding_offline", False)),
             qdrant_url=str(data.get("qdrant_url", "")),
             weaviate_url=str(data.get("weaviate_url", "")),
             weaviate_api_key_env=str(data.get("weaviate_api_key_env", "GRIMOIRE_WEAVIATE_API_KEY")),
@@ -176,6 +186,7 @@ class MemoryConfig:
             migration_bundle_path=str(data.get("migration_bundle_path", "")),
             mempalace_path=str(data.get("mempalace_path", "")),
             ollama_url=str(data.get("ollama_url", "")),
+            shared_collection=str(data.get("shared_collection", "")),
             layer_profile=str(data.get("layer_profile", "standard")),
             short_term_backend=short_term_backend,
             redis_url=str(data.get("redis_url", "")),

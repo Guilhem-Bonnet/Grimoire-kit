@@ -18,10 +18,13 @@ from grimoire.cli.cmd_up import (
     EnvCheck,
     check_docker,
     check_mcp_json,
+    check_neo4j,
     check_ollama,
     check_qdrant,
+    check_redis,
     check_uv,
     check_venv,
+    check_weaviate,
     repair_project_artifacts,
     run_env_checks,
 )
@@ -242,6 +245,131 @@ class TestCheckMcpJson:
         assert checks[0].passed is True
 
 
+# ── Unit: Memory OS probes (declared-only) ───────────────────────────────────
+
+
+def _write_memory_config(root: Path, body: str) -> None:
+    """Minimal project config carrying only the ``memory:`` keys under test."""
+    (root / "project-context.yaml").write_text(
+        'project:\n  name: "probe"\n\nmemory:\n' + body, encoding="utf-8"
+    )
+
+
+class TestCheckWeaviate:
+    def test_silent_when_not_declared(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "local"\n')
+        assert check_weaviate(tmp_path) is None
+
+    def test_silent_without_project_config(self, tmp_path: Path) -> None:
+        assert check_weaviate(tmp_path) is None
+
+    def test_ok_when_reachable(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "weaviate-server"\n  weaviate_url: "http://localhost:8080"\n')
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=True):
+            chk = check_weaviate(tmp_path)
+        assert chk is not None
+        assert chk.level == "ok"
+
+    def test_warns_when_declared_but_down(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "weaviate-server"\n  weaviate_url: "http://localhost:8080"\n')
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=False):
+            chk = check_weaviate(tmp_path)
+        assert chk is not None
+        assert chk.level == "warn"
+        assert chk.passed is True  # informative, never blocking
+        assert "not reachable" in chk.detail
+
+
+class TestCheckNeo4j:
+    def test_silent_when_no_layer_routed(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "local"\n')
+        assert check_neo4j(tmp_path) is None
+
+    def test_declared_via_layer_without_uri(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "local"\n  memory_graph: "neo4j"\n')
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=False):
+            chk = check_neo4j(tmp_path)
+        assert chk is not None
+        assert chk.level == "warn"
+
+    def test_reachable_but_password_unset_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The silent failure mode: socket answers, every graph write fails auth."""
+        _write_memory_config(
+            tmp_path,
+            '  backend: "local"\n  neo4j_uri: "bolt://localhost:7687"\n  memory_graph: "neo4j"\n',
+        )
+        monkeypatch.delenv("GRIMOIRE_NEO4J_PASSWORD", raising=False)
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=True):
+            chk = check_neo4j(tmp_path)
+        assert chk is not None
+        assert chk.level == "warn"
+        assert "GRIMOIRE_NEO4J_PASSWORD" in chk.detail
+
+    def test_ok_when_reachable_and_password_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_memory_config(
+            tmp_path,
+            '  backend: "local"\n  neo4j_uri: "bolt://localhost:7687"\n  memory_graph: "neo4j"\n',
+        )
+        monkeypatch.setenv("GRIMOIRE_NEO4J_PASSWORD", "secret")
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=True):
+            chk = check_neo4j(tmp_path)
+        assert chk is not None
+        assert chk.level == "ok"
+
+    def test_custom_password_env_is_honoured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_memory_config(
+            tmp_path,
+            '  backend: "local"\n  neo4j_uri: "bolt://localhost:7687"\n'
+            '  neo4j_password_env: "MY_NEO4J_PW"\n  memory_graph: "neo4j"\n',
+        )
+        monkeypatch.delenv("MY_NEO4J_PW", raising=False)
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=True):
+            chk = check_neo4j(tmp_path)
+        assert chk is not None
+        assert "MY_NEO4J_PW" in chk.detail
+
+
+class TestCheckRedis:
+    def test_silent_when_short_term_is_sqlite(self, tmp_path: Path) -> None:
+        _write_memory_config(tmp_path, '  backend: "local"\n')
+        assert check_redis(tmp_path) is None
+
+    def test_ok_when_reachable(self, tmp_path: Path) -> None:
+        _write_memory_config(
+            tmp_path,
+            '  backend: "local"\n  short_term_backend: "redis"\n  redis_url: "redis://localhost:6379/0"\n',
+        )
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=True):
+            chk = check_redis(tmp_path)
+        assert chk is not None
+        assert chk.level == "ok"
+
+    def test_warns_when_declared_but_down(self, tmp_path: Path) -> None:
+        _write_memory_config(
+            tmp_path,
+            '  backend: "local"\n  short_term_backend: "redis"\n  redis_url: "redis://localhost:6379/0"\n',
+        )
+        with patch("grimoire.cli.cmd_up._tcp_reachable", return_value=False):
+            chk = check_redis(tmp_path)
+        assert chk is not None
+        assert chk.level == "warn"
+        assert "durable stores unaffected" in chk.detail
+
+
+class TestMemoryConfigHelper:
+    def test_unparsable_config_is_not_fatal(self, tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text("memory: [broken", encoding="utf-8")
+        assert check_weaviate(tmp_path) is None
+        assert check_neo4j(tmp_path) is None
+        assert check_redis(tmp_path) is None
+
+
 class TestRunEnvChecks:
     def test_never_raises_and_returns_all_probes(self, tmp_path: Path) -> None:
         with (
@@ -253,6 +381,24 @@ class TestRunEnvChecks:
         assert {"env_venv", "env_uv", "env_docker", "env_qdrant", "env_ollama"} <= names
         assert all(isinstance(c, EnvCheck) for c in checks)
         # No service available → warnings only, never hard failures
+        assert all(c.passed for c in checks)
+        # Undeclared Memory OS layers stay silent instead of adding noise
+        assert not {"env_weaviate", "env_neo4j", "env_redis"} & names
+
+    def test_declared_memory_layers_are_probed(self, tmp_path: Path) -> None:
+        _write_memory_config(
+            tmp_path,
+            '  backend: "weaviate-server"\n  weaviate_url: "http://localhost:8080"\n'
+            '  neo4j_uri: "bolt://localhost:7687"\n  memory_graph: "neo4j"\n'
+            '  short_term_backend: "redis"\n  redis_url: "redis://localhost:6379/0"\n',
+        )
+        with (
+            patch("grimoire.cli.cmd_up.shutil.which", return_value=None),
+            patch("grimoire.cli.cmd_up.socket.create_connection", side_effect=OSError("down")),
+        ):
+            checks = run_env_checks(tmp_path)
+        names = {c.name for c in checks}
+        assert {"env_weaviate", "env_neo4j", "env_redis"} <= names
         assert all(c.passed for c in checks)
 
 
@@ -370,4 +516,8 @@ class TestDoctorFix:
         agents.mkdir(parents=True)
         (agents / "custom-agent.tpl.md").write_text("---\ndescription: tpl\n---\n", encoding="utf-8")
         written = repair_project_artifacts(init_project)
-        assert written == [".mcp.json"]
+        # Repair also projects the project onto each host surface, so the list
+        # is no longer a single entry. What must hold is unchanged: a blank
+        # template is not a deployed agent and reaches no host.
+        assert ".mcp.json" in written
+        assert not [label for label in written if "custom-agent" in label]
