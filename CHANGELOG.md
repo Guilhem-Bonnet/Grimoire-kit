@@ -18,7 +18,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `core/standard_checks/registry.py`, et trois tests interdisent la dérive : un
   check sans déclaration, une dimension inconnue du score, une entrée de
   registre sans check correspondant. La table de préfixes subsiste en repli
-  pour les checks qu'un projet émet lui-même.
+  pour les checks qu'un projet émet lui-même. Les dix-sept checks `claims.*` et
+  `surfaces.*` arrivés avec la 3.37.0 sont déclarés avec les autres.
 
 - **Deux checks étaient comptés sur une dimension sans poids, donc jamais
   comptés.** `observability_cockpit` figurait dans la table de routage sans
