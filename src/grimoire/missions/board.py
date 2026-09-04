@@ -14,6 +14,7 @@ pas l'état de départ, seulement une classe d'équivalence.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.schemas import DependencyKind, RiskProfile, TaskState
@@ -27,6 +28,7 @@ __all__ = [
     "board_status_of",
     "build_board",
     "task_state_of",
+    "write_board",
 ]
 
 # Ordre normatif du cycle de vie, tel que le vérificateur du standard l'attend.
@@ -184,3 +186,22 @@ _TRANSITIONS: dict[str, dict[str, list[str]]] = {
     "accepted_to_released": {"requires": ["compliance_score", "release_authorization"]},
     "any_to_blocked": {"requires": ["blocker_reason", "remediation_plan"]},
 }
+
+
+def write_board(dest: Path, board: dict[str, Any]) -> None:
+    """Écrit une projection là où on la demande, en YAML lisible.
+
+    Seul point d'écriture du board : ``task board export`` et chaque transition
+    du :class:`~grimoire.missions.service.TaskService` passent par ici.
+    """
+    import io
+
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.default_flow_style = False
+    yaml.width = 120
+    stream = io.StringIO()
+    yaml.dump(board, stream)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(stream.getvalue(), encoding="utf-8")

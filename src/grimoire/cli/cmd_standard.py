@@ -835,16 +835,21 @@ def init_profile(
 @standard_app.command("activation-context")
 def activation_context(
     project_root: Path = typer.Argument(Path(), help="Project root holding .claude/."),  # noqa: B008
-    task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id referenced by the built-in directive."),
+    task_id: str = typer.Option("", "--task-id", help="Task id the directive names (default: the session's active task)."),
 ) -> None:
     """Print the session activation directive (consumed by the Claude Code SessionStart hook).
 
     Prefers the project's .claude/activation-context.md when present so teams
     can tailor the directive; falls back to the built-in one validated by the
-    2026-07-09 evals campaign. Raw output on purpose: stdout is injected as
-    session context by the hook.
+    2026-07-09 evals campaign. Without --task-id, the task is the one the
+    session resolves: GRIMOIRE_TASK_ID, then the Mission Ledger's active claim,
+    then the board's in_progress card, then bootstrap. Raw output on purpose:
+    stdout is injected as session context by the hook.
     """
-    typer.echo(activation_context_text(project_root, task_id=task_id), nl=False)
+    from grimoire.core.standard_state import active_task_id
+
+    resolved = task_id or active_task_id(project_root)
+    typer.echo(activation_context_text(project_root, task_id=resolved), nl=False)
 
 
 def _run_pip_install(pip_target: str) -> bool:

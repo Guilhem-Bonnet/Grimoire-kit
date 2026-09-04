@@ -162,9 +162,13 @@ d'activation au démarrage de chaque session — le mécanisme validé
 les artefacts seuls produisaient 0/40 d'engagement :
 
 - la directive vit dans `.claude/activation-context.md` (éditable par
-  projet, jamais écrasée si présente) ;
-- le hook exécute `grimoire standard activation-context`, portable et
-  versionné avec le kit ;
+  projet, jamais écrasée si présente) ; c'est un gabarit : `{task_id}` y
+  est remplacé, à chaque session, par la tâche courante — le claim actif
+  du Mission Ledger, ou `GRIMOIRE_TASK_ID`, ou `bootstrap` (ordre complet
+  dans la [référence CLI](../cli-reference.md#quelle-tâche-la-session-porte)) ;
+- le hook exécute `grimoire-hook --host claude --event SessionStart`, qui
+  rend la même directive que `grimoire standard activation-context`,
+  portable et versionné avec le kit ;
 - fusion non destructive dans un `settings.json` existant ; un fichier
   malformé est laissé intact (le hook est alors sauté avec un
   avertissement) ;
