@@ -27,6 +27,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   wheel-check` (wheel installée dans un venv neuf) avant le tag, les jobs
   `build` et `test` de `publish.yml` au tag, dont `publish-pypi` dépend sans
   `continue-on-error`. La cible `make publish-test` disparaît avec l'étage.
+
 ### Ajouté
 
 - **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
