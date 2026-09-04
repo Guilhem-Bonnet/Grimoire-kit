@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -86,26 +87,92 @@ def active_profile_id(project_root: Path) -> str:
     return str(profile) if profile else "starter"
 
 
-def active_task_id(project_root: Path, *, env: Mapping[str, str] | None = None) -> str:
-    """Task a lifecycle hook should evaluate.
+#: Le Mission Ledger, source des tâches (ADR-005). Lu ici sans importer le
+#: module missions tant que le fichier n'existe pas : le chemin des hooks reste
+#: léger sur un projet qui n'a jamais ouvert de tâche.
+LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
+#: Un opérateur ou un agent dit qui il est ; les claims des autres ne comptent plus.
+ACTOR_ENV = "GRIMOIRE_ACTOR"
+TASK_ENV = "GRIMOIRE_TASK_ID"
 
-    Resolution order: ``GRIMOIRE_TASK_ID`` (an operator saying which task this
-    session is about), then the board's single ``in_progress`` task, then
-    ``bootstrap``. Two concurrent in-progress tasks are ambiguous, so the board
-    is ignored rather than guessed at.
+
+@dataclass(frozen=True, slots=True)
+class ActiveTask:
+    """La tâche qu'une session porte, et d'où la réponse vient.
+
+    ``source`` vaut ``env`` (``GRIMOIRE_TASK_ID``), ``ledger_claim`` (claim actif
+    du Mission Ledger), ``board`` (unique carte ``in_progress`` du board) ou
+    ``bootstrap`` (rien ne désigne de tâche). Une réponse qui ne dit pas d'où
+    elle vient ne se vérifie pas.
+    """
+
+    task_id: str
+    source: str
+
+
+def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
+    """Tâches ``claimed`` ou ``running`` du ledger — celles de *actor* seulement s'il est nommé.
+
+    Ne lève jamais : un ledger illisible vaut « aucun claim », et la résolution
+    continue sur le board.
+    """
+    events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+    if not events.is_file():
+        return []
+    try:
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.schemas import TaskState
+
+        tasks = MissionLedger(events.parent).list_tasks()
+    except Exception:  # frontière de hook : ne jamais casser une session
+        return []
+    active = [t for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING)]
+    if actor:
+        active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
+    return [t.id for t in active]
+
+
+def resolve_active_task(project_root: Path, *, env: Mapping[str, str] | None = None) -> ActiveTask:
+    """Task a lifecycle hook should evaluate, with the rule that chose it.
+
+    Resolution order:
+
+    1. ``GRIMOIRE_TASK_ID`` — an operator saying which task this session is about.
+    2. The Mission Ledger's active claim: the single ``claimed``/``running``
+       task, restricted to ``GRIMOIRE_ACTOR``'s claims when that is set. The
+       ledger is the source (ADR-005); a claim is visible here the moment it is
+       written, whether or not the board has been re-projected since.
+    3. The board's single ``in_progress`` task — a project whose board was
+       written by hand, or imported, and has no ledger.
+    4. ``bootstrap``.
+
+    Two concurrent claims (or two in-progress cards) are ambiguous: that level
+    is skipped rather than guessed at, and ``GRIMOIRE_TASK_ID`` decides.
     """
     environ = os.environ if env is None else env
-    override = str(environ.get("GRIMOIRE_TASK_ID", "")).strip()
+    override = str(environ.get(TASK_ENV, "")).strip()
     if override:
-        return normalize_task_id(override)
+        return ActiveTask(normalize_task_id(override), "env")
+
+    claimed = claimed_task_ids(project_root, actor=str(environ.get(ACTOR_ENV, "")).strip())
+    if len(claimed) == 1:
+        try:
+            return ActiveTask(normalize_task_id(claimed[0]), "ledger_claim")
+        except ValueError:
+            pass
+
     tasks = _load_mapping(project_root.resolve() / TASK_BOARD_RELPATH).get("tasks")
-    if not isinstance(tasks, list):
-        return "bootstrap"
-    in_progress = [
-        str(task.get("task_id", ""))
-        for task in tasks
-        if isinstance(task, dict) and str(task.get("status", "")) == "in_progress" and task.get("task_id")
-    ]
-    if len(in_progress) == 1:
-        return normalize_task_id(in_progress[0])
-    return "bootstrap"
+    if isinstance(tasks, list):
+        in_progress = [
+            str(task.get("task_id", ""))
+            for task in tasks
+            if isinstance(task, dict) and str(task.get("status", "")) == "in_progress" and task.get("task_id")
+        ]
+        if len(in_progress) == 1:
+            return ActiveTask(normalize_task_id(in_progress[0]), "board")
+    return ActiveTask("bootstrap", "bootstrap")
+
+
+def active_task_id(project_root: Path, *, env: Mapping[str, str] | None = None) -> str:
+    """Task a lifecycle hook should evaluate — see :func:`resolve_active_task`."""
+    return resolve_active_task(project_root, env=env).task_id

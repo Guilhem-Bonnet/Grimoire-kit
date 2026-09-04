@@ -44,7 +44,11 @@ def test_install_on_pristine_project(tmp_path: Path) -> None:
     assert _session_start_commands(tmp_path) == [HOOK_COMMAND]
     directive = (tmp_path / ACTIVATION_CONTEXT_RELPATH).read_text(encoding="utf-8")
     assert "[Grimoire Standard — activation]" in directive
-    assert "gate check --task-id bootstrap --strict" in directive
+    # Le fichier est un gabarit : la tâche est résolue à chaque session, pas
+    # figée à l'installation — c'était le défaut de l'issue #138.
+    assert "gate check --task-id {task_id} --strict" in directive
+    assert "gate check --task-id bootstrap --strict" in activation_context_text(tmp_path)
+    assert "gate check --task-id GAO-x-001 --strict" in activation_context_text(tmp_path, task_id="GAO-x-001")
 
 
 def test_install_is_idempotent(tmp_path: Path) -> None:
@@ -113,12 +117,31 @@ def test_custom_context_file_is_never_overwritten(tmp_path: Path) -> None:
     assert activation_context_text(tmp_path) == "directive maison\n"
 
 
-def test_directive_follows_task_id(tmp_path: Path) -> None:
+def test_directive_follows_the_session_task_not_the_install_one(tmp_path: Path) -> None:
     install_claude_activation(tmp_path, task_id="sprint-7")
-    directive = (tmp_path / ACTIVATION_CONTEXT_RELPATH).read_text(encoding="utf-8")
-    assert "evidence/sprint-7/task-envelope.md" in directive
-    assert "gate check --task-id sprint-7 --strict" in directive
-    assert activation_context_text(tmp_path, task_id="ignored") == directive
+    directive = activation_context_text(tmp_path, task_id="sprint-8")
+    assert "evidence/sprint-8/task-envelope.md" in directive
+    assert "gate check --task-id sprint-8 --strict" in directive
+    assert "sprint-7" not in directive
+
+
+def test_a_legacy_default_file_with_a_literal_bootstrap_follows_the_task(tmp_path: Path) -> None:
+    """Les projets enrôlés avant le gabarit portent `bootstrap` en dur ; tant que
+    le fichier est le défaut intact, il ne doit pas continuer à nommer la
+    mauvaise tâche."""
+    context_path = tmp_path / ACTIVATION_CONTEXT_RELPATH
+    context_path.parent.mkdir(parents=True)
+    context_path.write_text(default_activation_directive("bootstrap"), encoding="utf-8")
+    directive = activation_context_text(tmp_path, task_id="GAO-reel-001")
+    assert "evidence/GAO-reel-001/task-envelope.md" in directive
+    assert "bootstrap" not in directive
+
+
+def test_a_tailored_file_is_returned_as_written(tmp_path: Path) -> None:
+    context_path = tmp_path / ACTIVATION_CONTEXT_RELPATH
+    context_path.parent.mkdir(parents=True)
+    context_path.write_text("Ma directive pour {task_id}, avec bootstrap dedans.\n", encoding="utf-8")
+    assert activation_context_text(tmp_path, task_id="T-1") == "Ma directive pour T-1, avec bootstrap dedans.\n"
 
 
 def test_default_directive_matches_preregistered_mechanism() -> None:
