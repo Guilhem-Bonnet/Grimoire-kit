@@ -391,3 +391,55 @@ def task_context(
         typer.echo(json.dumps(artifact.data, indent=2, ensure_ascii=False, default=str))
         return
     console.print(f"[green]OK[/green] context bundle de {task_id} → {artifact.path}")
+
+
+@task_app.command("trace")
+def task_trace(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche (ou `bootstrap`).")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    kernel_root: Annotated[Path, typer.Option("--kernel-root", help="Racine du RuntimeKernel.")] = Path("_grimoire-runtime-output/runtime"),
+    causes_only: Annotated[bool, typer.Option("--causes", help="N'afficher que ce qui explique un arrêt.")] = False,
+) -> None:
+    """Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, preuves.
+
+    Lit le Mission Ledger, le TraceLedger des hooks, le RuntimeKernel et
+    l'EvidenceService, indexés par tâche et triés dans le temps. Une source
+    absente est dite absente ; rien n'est créé, rien n'est inventé.
+    """
+    from grimoire.missions.trace import build_task_timeline
+
+    timeline = build_task_timeline(project_root.resolve(), task_id, ledger_root=ledger_root, kernel_root=kernel_root)
+    if timeline.is_empty:
+        console.print(f"[red]✗[/red] Aucune trace de {task_id} : ni au ledger, ni dans les journaux.")
+        absentes = [k for k, v in timeline.sources.items() if v is None]
+        if absentes:
+            console.print(f"[dim]journaux absents : {', '.join(absentes)}[/dim]")
+        console.print("[dim]`grimoire task list` montre ce que le ledger porte.[/dim]")
+        raise typer.Exit(1)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(timeline.to_dict(), indent=2, ensure_ascii=False, default=str))
+        return
+
+    if timeline.task is not None:
+        console.print(f"[bold]{timeline.task.id}[/bold] — {timeline.task.title}  [dim]({timeline.task.status.value})[/dim]")
+    else:
+        console.print(f"[bold]{task_id}[/bold]  [dim](inconnue du ledger — journaux seulement)[/dim]")
+    absentes = [k for k, v in timeline.sources.items() if v is None]
+    if absentes:
+        console.print(f"[dim]sources absentes : {', '.join(absentes)}[/dim]")
+
+    entries = timeline.causes if causes_only else timeline.entries
+    for entry in entries:
+        marque = "[red]✗[/red]" if entry.failure else " "
+        heure = entry.at[11:19] if len(entry.at) >= 19 else entry.at
+        console.print(f"  {marque} {escape(heure)}  [dim]{entry.source:8}[/dim] {escape(entry.summary)}")
+
+    causes = timeline.causes
+    if causes:
+        console.print(f"\n[red]Cause(s) d'arrêt : {len(causes)}[/red]")
+        for entry in causes:
+            console.print(f"  - {escape(entry.summary)}  [dim]({entry.source}, {entry.kind})[/dim]")
+    else:
+        console.print("\n[green]Aucune cause d'arrêt enregistrée.[/green]")
