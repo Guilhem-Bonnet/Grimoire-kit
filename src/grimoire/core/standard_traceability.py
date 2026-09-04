@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,10 @@ class ArtifactTrace:
         }
 
 
+VERDICTS = ("ok", "warning", "error", "absent")
+"""Verdict of ``standard verify`` on one artifact, worst check first."""
+
+
 @dataclass(frozen=True, slots=True)
 class TraceabilityMatrix:
     profile_id: str
@@ -64,6 +69,8 @@ class TraceabilityMatrix:
     upstream_commit: str
     artifacts: tuple[ArtifactTrace, ...]
     gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
+    verdicts: dict[str, str] = field(default_factory=dict)
+    """Per required artifact, once joined with a project: see :func:`with_verdicts`."""
 
     @property
     def covered_requirements(self) -> tuple[str, ...]:
@@ -74,8 +81,18 @@ class TraceabilityMatrix:
                     seen.setdefault(req, None)
         return tuple(seen)
 
+    @property
+    def verified_requirements(self) -> tuple[str, ...]:
+        """Requirements whose artifact exists and verifies without error in the joined project."""
+        seen: dict[str, None] = {}
+        for trace in self.artifacts:
+            if trace.required and self.verdicts.get(trace.artifact_type) in {"ok", "warning"}:
+                for req in trace.requirements:
+                    seen.setdefault(req, None)
+        return tuple(seen)
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "profile": self.profile_id,
             "level": self.level,
             "upstream_commit": self.upstream_commit,
@@ -83,6 +100,10 @@ class TraceabilityMatrix:
             "artifacts": [a.to_dict() for a in self.artifacts],
             "gaps": list(self.gaps),
         }
+        if self.verdicts:
+            data["verdicts"] = dict(self.verdicts)
+            data["verified_requirements"] = list(self.verified_requirements)
+        return data
 
 
 def level_for(profile_id: str) -> str:
@@ -123,3 +144,46 @@ def matrix_for(profile_id: str) -> TraceabilityMatrix:
 
 def declared_artifact_types() -> set[str]:
     return set(load_profile_map().get("artifact_types", {}))
+
+
+def _artifact_of(path: Path, targets: dict[str, str]) -> str | None:
+    """The artifact type whose generation target *path* instantiates, if any."""
+    text = path.as_posix()
+    for artifact_type, target in targets.items():
+        if fnmatch(text, target.replace("{task-id}", "*")):
+            return artifact_type
+    return None
+
+
+def with_verdicts(matrix: TraceabilityMatrix, project_root: Path, *, task_id: str = "bootstrap") -> TraceabilityMatrix:
+    """Join the matrix with what ``standard verify`` says of *project_root*.
+
+    AG-AUD-001 asks that declared conformance tie requirement, control,
+    evidence **and verdict**. The first three are data; the verdict is what
+    the verifiers say of each required artifact, worst check first: ``absent``
+    when the file is missing, else ``error``, ``warning`` or ``ok``.
+    """
+    from grimoire.core.agentic_standard import _generation_targets, verify_standard_profile
+
+    result = verify_standard_profile(project_root, profile_id=matrix.profile_id, task_id=task_id)
+    targets = _generation_targets()
+    rank = {v: i for i, v in enumerate(VERDICTS)}
+    verdicts = {trace.artifact_type: "ok" for trace in matrix.artifacts if trace.required}
+
+    def worsen(artifact_type: str | None, verdict: str) -> None:
+        if artifact_type in verdicts and rank[verdict] > rank[verdicts[artifact_type]]:
+            verdicts[artifact_type] = verdict
+
+    for missing in result.missing:
+        worsen(_artifact_of(Path(missing), targets), "absent")
+    for check in result.checks:
+        if check.path is not None and check.severity in {"error", "warning"}:
+            worsen(_artifact_of(Path(check.path), targets), check.severity)
+    return TraceabilityMatrix(
+        profile_id=matrix.profile_id,
+        level=matrix.level,
+        upstream_commit=matrix.upstream_commit,
+        artifacts=matrix.artifacts,
+        gaps=matrix.gaps,
+        verdicts=verdicts,
+    )
