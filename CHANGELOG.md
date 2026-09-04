@@ -20,6 +20,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   2027-02-28 après revérification OSV du 2026-09-04.
 ### Ajouté
 
+- **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
+  artefact.** `grimoire standard traceability` listait dix-sept exigences
+  `AG-*` obligatoires jusqu'à N4 que le kit ne couvrait par rien (#246). Six
+  artefacts les ferment, chacun avec son gabarit, son vérificateur et ses
+  tests : le dossier d'acceptation (AG-QUA-003, tous profils), le registre de
+  rétention (AG-RET-001/003/004/005, tous profils), le registre d'outils avec
+  contrats MCP et capture des erreurs (AG-TOL-001/003/005, dès `controlled`),
+  le registre d'incidents avec politique de containment (AG-INC-001/002/003,
+  dès `controlled`), la matrice risques/contrôles/preuves pré-remplie des
+  défauts IA que la norme nomme (AG-AUD-003, AG-QUA-005, dès `controlled`) et
+  le registre des capacités dynamiques (AG-DYN-001 à -005, dès `governed`).
+  Deux exigences tiennent dans un champ : le bloc `wip:` d'`orchestration-policy`
+  (AG-ORC-004 — une délégation `allowed` est une erreur) et la section
+  `Traceability` de la déclaration de conformité (AG-AUD-001). Pour celle-ci,
+  `grimoire standard traceability <projet>` joint désormais à la matrice le
+  verdict que `standard verify` rend sur chaque artefact, et compte les
+  exigences effectivement vérifiées. Un projet neuf vérifie sans erreur
+  nouvelle sur les cinq profils ; un projet enrôlé reçoit les fichiers par
+  `standard fix --apply`. Deux tests interdisent le retour des trous : les
+  dix-sept identifiants doivent rester couverts par un artefact requis au
+  niveau où la norme les attend, et la section `gaps` doit rester vide.
 - **Les agents lisent, réclament et clôturent leurs tâches par MCP (L3,
   #138).** Le serveur MCP expose `task_list_ready`, `task_show`, `task_claim`,
   `task_update` (move / block / close) et `task_context`. Ils appellent le
@@ -32,6 +53,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   prouver, clore ; le board projeté passe `ready → in_progress → accepted`.
 
 ### Corrigé
+
+- **Deux étapes de CI ne pouvaient pas échouer, une troisième ne pouvait pas
+  se prononcer.** Le verdict sur `grimoire-init.sh doctor` soustrayait trois
+  `grep -c` l'un de l'autre — toute ligne citant Qdrant ou un chemin attendu
+  comptait en négatif, erreur ou non, et un doctor qui n'avait pas tourné
+  laissait un fichier vide, zéro erreur, étape verte ; `scripts/ci-doctor-gate.py`
+  exige la bannière du doctor et fait échouer l'étape sur toute ligne `✗`
+  hors manques attendus, en la nommant (six contrôles négatifs). L'étape de
+  dérive du standard amont sortait en 2 ou 3 sous `continue-on-error` : rouge
+  en permanence, ignorée par tous, et une vraie erreur de la commande passait
+  au même rouge ignoré ; les deux cas connus sont dits en avertissement et
+  sortent en 0, tout autre statut échoue. Enfin le job `standard`, check
+  requis par la protection de `main`, était filtré par chemins : sur une PR
+  qui ne touchait pas le standard il restait « attendu » sans jamais se
+  prononcer et la PR ne pouvait pas être fusionnée — un garde qui bloque tout
+  ce qu'il ne regarde pas. Il tourne sur chaque PR.
 
 - **Le hook SessionStart nommait toujours `bootstrap`, quelle que soit la
   tâche réclamée.** Deux causes, toutes deux vérifiées sur un projet neuf :

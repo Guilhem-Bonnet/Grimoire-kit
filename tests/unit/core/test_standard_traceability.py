@@ -72,13 +72,30 @@ def test_every_check_prefix_the_kit_scores_has_a_verifier_entry() -> None:
             assert root in prefixes, f"{dimension}: {prefix} n'est rattaché à aucun contrôle"
 
 
-def test_gaps_accumulate_with_the_level() -> None:
-    assert len(matrix_for("starter").gaps) < len(matrix_for("governed").gaps)
-    assert {g["id"] for g in matrix_for("starter").gaps} <= {g["id"] for g in matrix_for("governed").gaps}
-    # AG-QUA-002 (claim ledger) est comblé depuis que le kit livre l'artefact ;
-    # le dossier d'acceptation client, lui, reste un trou dès N1.
-    assert "AG-QUA-003" in {g["id"] for g in matrix_for("starter").gaps}
-    assert "AG-QUA-002" not in {g["id"] for g in matrix_for("governed").gaps}
+# Les dix-sept exigences obligatoires que la matrice du 2026-09-03 laissait
+# sans artefact, avec le premier niveau où la norme les attend. Chacune doit
+# être portée par un artefact *requis* par le profil de ce niveau — sinon le
+# trou est revenu, quoi que dise la section gaps.
+SEVENTEEN = {
+    "AG-QUA-003": "starter", "AG-RET-001": "starter",
+    "AG-TOL-001": "controlled", "AG-TOL-003": "controlled", "AG-TOL-005": "controlled",
+    "AG-INC-001": "controlled", "AG-RET-003": "controlled", "AG-RET-004": "controlled",
+    "AG-RET-005": "controlled",
+    "AG-ORC-004": "orchestrated",
+    "AG-INC-002": "governed", "AG-INC-003": "governed", "AG-DYN-001": "governed",
+    "AG-DYN-003": "governed", "AG-DYN-004": "governed", "AG-AUD-001": "governed",
+    "AG-AUD-003": "governed",
+}
+
+
+def test_the_seventeen_former_gaps_are_covered_at_their_level() -> None:
+    for requirement, profile in SEVENTEEN.items():
+        assert requirement in matrix_for(profile).covered_requirements, (requirement, profile)
+
+
+def test_no_level_leaves_an_unjustified_gap() -> None:
+    for profile in ("starter", "controlled", "orchestrated", "governed", "production"):
+        assert matrix_for(profile).gaps == (), profile
 
 
 def test_cli_renders_the_matrix_as_json() -> None:

@@ -30,6 +30,12 @@
 | Google Gemini | unknown |  |  |
 | Local/open-weight | unknown |  |  |
 
+## Traceability
+
+- Matrix: `grimoire standard traceability .` — requirement, control, evidence and verdict for every required artifact
+- Level reached:
+- Last verdict:
+
 ## Non-conformities
 
 | Item | Severity | Remediation | Owner |
