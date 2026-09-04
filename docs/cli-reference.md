@@ -243,6 +243,8 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard doctor` | Vérifier la disponibilité des extras technologiques |
 | `grimoire standard pattern` | Lister / inspecter les patterns |
 | `grimoire standard detect-providers` | Détecter les providers LLM disponibles |
+| `grimoire standard traceability [projet]` | Matrice exigences / contrôles / preuves de la norme ; avec un projet, le verdict de `verify` par artefact |
+| `grimoire standard upstream` | Le standard amont a-t-il avancé depuis la révision épinglée (sortie 0/2/3) |
 
 Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, `rules`, `hooks`, `gate`, `events`, `pattern`, `knowledge`.
 
