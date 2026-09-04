@@ -74,6 +74,49 @@ Dans `claude_desktop_config.json` :
 | `grimoire_memory_store` | Stocker un texte en mémoire sémantique |
 | `grimoire_memory_search` | Recherche sémantique dans la mémoire |
 | `grimoire_add_agent` | Ajouter un agent au projet |
+| `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates |
+| `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur |
+| `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant |
+| `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera |
+| `task_claim` | Réclamer une tâche prête (`ready → claimed`) |
+| `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche |
+| `task_context` | Sur quelle tâche la session est, et son context bundle |
+
+### Les tâches : un outil, pas du texte dans un prompt
+
+Les cinq outils `task_*` appellent le même service que `grimoire task`
+(`grimoire.missions.service.TaskService`), donc le même gate de preuve
+(`_grimoire/standard/evidence-gates.yaml`). Une transition que le CLI refuse,
+MCP la refuse pour la même raison, et le refus est structuré :
+
+```json
+{
+  "blocked": true,
+  "task_id": "GAO-exposer-les-001",
+  "transition": "ready_to_in_progress",
+  "strictness": "hard_fail",
+  "refusals": [
+    {
+      "evidence": "context_bundle",
+      "reason": "context bundle absent",
+      "remedy": "attendu : _grimoire-output/context/GAO-exposer-les-001/context-bundle.yaml"
+    }
+  ]
+}
+```
+
+Rien n'est écrit au ledger sur un refus. Après une transition acceptée, le board
+`_grimoire/standard/task-board.yaml` est reprojeté, et le hook `SessionStart`
+de la session suivante nomme la tâche réclamée : `task_context` sans argument
+rend `{"task_id": ..., "resolved_from": "ledger_claim"}`. Pour qu'un agent ne
+se voie attribuer que ses propres claims, poser `GRIMOIRE_ACTOR` à la valeur
+passée en `actor` à `task_claim` (règle complète dans la
+[référence CLI](cli-reference.md#quelle-tâche-la-session-porte)).
+
+Le parcours nominal d'un agent : `task_list_ready` → `task_context(task_id)`
+(produit le bundle que le gate exige) → `task_claim` → `task_update(move,
+running)` → travail et preuves → `task_update(move, needs_verification)` →
+`task_update(close)`.
 
 ## Exemples d'utilisation
 
