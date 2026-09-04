@@ -1,0 +1,60 @@
+$schema: "grimoire-agentic-standard-risk-control-matrix/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Chaque risque nommé a ses contrôles et la preuve qui montre qu'ils tiennent ; les défauts IA plausibles sont anticipés avant qu'ils n'arrivent."
+
+# Les cinq risques ci-dessous sont ceux que la norme nomme comme défauts IA
+# plausibles. Le projet les garde, les ajuste ou les retire — avec un owner.
+risks:
+  - id: RISK-001
+    risk: "Faux Done : une tâche déclarée terminée sans preuve"
+    category: defaut_ia         # defaut_ia | contexte | outil | process | securite | cout
+    likelihood: moyenne         # faible | moyenne | élevée
+    impact: élevé               # faible | moyen | élevé | critique
+    controls: [CTRL-QUA-002, evidence-pack]
+    evidence: "_grimoire-output/evidence/{task-id}/evidence-pack.md ; grimoire standard verify"
+    owner: ""
+    status: active              # active | accepted | mitigated | retired
+  - id: RISK-002
+    risk: "Affirmation non prouvée réutilisée dans une décision"
+    category: defaut_ia
+    likelihood: élevée
+    impact: moyen
+    controls: [CTRL-QUA-001, claim-ledger]
+    evidence: "_grimoire-output/evidence/{task-id}/claim-ledger.md ; check claims.used_unproved"
+    owner: ""
+    status: active
+  - id: RISK-003
+    risk: "Mémoire polluée ou périmée réinjectée dans un run"
+    category: contexte
+    likelihood: moyenne
+    impact: élevé
+    controls: [CTRL-CTX-003, CTRL-RET-001, retention-registry]
+    evidence: "_grimoire/standard/retention-registry.yaml ; purges suivies comme incidents"
+    owner: ""
+    status: active
+  - id: RISK-004
+    risk: "Contenu externe non fiable devenu instruction (prompt injection)"
+    category: securite
+    likelihood: moyenne
+    impact: élevé
+    controls: [CTRL-SEC-002, tool-registry]
+    evidence: "_grimoire/standard/tool-registry.yaml ; scopes et journalisation MCP"
+    owner: ""
+    status: active
+  - id: RISK-005
+    risk: "Action destructive, externe ou coûteuse sans validation"
+    category: outil
+    likelihood: faible
+    impact: critique
+    controls: [CTRL-TOL-002, incident-registry]
+    evidence: "_grimoire/standard/incident-registry.yaml ; containment.on_critical"
+    owner: ""
+    status: active
+
+allowed:
+  categories: [defaut_ia, contexte, outil, process, securite, cout]
+  likelihoods: [faible, moyenne, élevée]
+  impacts: [faible, moyen, élevé, critique]
+  statuses: [active, accepted, mitigated, retired]
