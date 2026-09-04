@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Modifié
+
+- **La borne `chromadb<0.7` est un choix instruit, plus un héritage.** Mesuré
+  sur deux venv jetables (#174) : les sept appels que le backend `mempalace`
+  fait au client embarqué rendent les mêmes clés en 0.6.3 et 1.5.9, un palais
+  0.6 se relit tel quel en 1.x — et pas l'inverse — et la suite mémoire est
+  verte sous 1.5.9. Lever la borne n'apporte rien et ajouterait une CVE
+  d'injection pré-authentification au périmètre audité ; les trois CVE
+  waivées n'ont de correctif sur aucune version. La borne reste, son
+  commentaire dit pourquoi, et les trois waivers sont reconduits au
+  2027-02-28 après revérification OSV du 2026-09-04.
+
 ### Corrigé
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
