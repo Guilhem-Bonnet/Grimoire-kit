@@ -4,8 +4,10 @@ Premier maillon : l'export du task board depuis le Mission Ledger (ADR-005). Le
 ledger est la source ; ``_grimoire/standard/task-board.yaml`` est régénéré depuis
 lui, jamais l'inverse.
 
-Les commandes d'écriture sur le ledger arrivent au lot suivant (issue #137) ;
-cette porte d'entrée existe pour qu'elles aient déjà leur place.
+Les commandes d'écriture (issue #137) rendent ici ce que
+:class:`grimoire.missions.service.TaskService` décide : la logique — machine à
+états, gate de preuve, écriture, reprojection du board — vit dans le service,
+que le serveur MCP appelle aussi (issue #138). Ce module ne fait que présenter.
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ def board_export(
     Le fichier produit est un artefact de sortie : l'éditer à la main ne change
     rien au ledger, et le prochain export l'écrasera.
     """
-    from grimoire.missions.board import build_board
+    from grimoire.missions.board import build_board, write_board
     from grimoire.missions.ledger import MissionLedger
 
     root = project_root.resolve()
@@ -68,7 +70,7 @@ def board_export(
         typer.echo(json.dumps(board, indent=2, ensure_ascii=False))
         return
 
-    _write_yaml(dest, board)
+    write_board(dest, board)
     counts = _counts(board)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"path": str(dest), "tasks": len(board["tasks"]), "by_status": counts}, indent=2, ensure_ascii=False))
@@ -86,20 +88,6 @@ def _counts(board: dict[str, Any]) -> dict[str, int]:
     return out
 
 
-def _write_yaml(dest: Path, data: dict[str, Any]) -> None:
-    import io
-
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.default_flow_style = False
-    yaml.width = 120
-    stream = io.StringIO()
-    yaml.dump(data, stream)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(stream.getvalue(), encoding="utf-8")
-
-
 # ── Surface d'écriture (issue #137) ───────────────────────────────────────────
 # Chaque transition franchit deux portes : la machine à états du ledger, qui dit
 # si le mouvement est concevable, et le gate de preuve, qui dit s'il est mérité.
@@ -111,73 +99,68 @@ _LEDGER_ROOT = Annotated[Path, typer.Option("--ledger-root", help="Racine du Mis
 _ACTOR = Annotated[str, typer.Option("--actor", help="Qui agit.")]
 
 
-def _ledger(project_root: Path, ledger_root: Path) -> Any:
-    from grimoire.missions.ledger import MissionLedger
+def _service(project_root: Path, ledger_root: Path) -> Any:
+    from grimoire.missions.service import TaskService
 
-    root = project_root.resolve()
-    path = ledger_root if ledger_root.is_absolute() else root / ledger_root
-    return MissionLedger(path)
+    return TaskService(project_root, ledger_root)
 
 
-def _require_task(ledger: Any, task_id: str) -> Any:
-    task = ledger.get_task(task_id)
-    if task is None:
-        console.print(f"[red]✗[/red] Tâche inconnue : {task_id}")
+def _require_task(service: Any, task_id: str) -> Any:
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    try:
+        return service.require(task_id)
+    except GrimoireMissionError as exc:
+        console.print(f"[red]✗[/red] {exc}")
         console.print("[dim]`grimoire task list` montre ce que le ledger porte.[/dim]")
+        raise typer.Exit(1) from exc
+
+
+def _refuse(ctx: typer.Context, refused: Any) -> None:
+    """Rendre un refus de gate : en JSON tel quel, en texte preuve par preuve."""
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(refused.to_dict(), indent=2, ensure_ascii=False))
         raise typer.Exit(1)
-    return task
-
-
-def _gate_or_exit(ctx: typer.Context, project_root: Path, task: Any, target: Any) -> None:
-    """Opposer le gate de preuve avant d'écrire quoi que ce soit dans le ledger.
-
-    L'ordre compte : refuser après avoir appendé laisserait un événement que
-    rien ne justifie, dans un journal qui ne se réécrit pas.
-    """
-    from grimoire.missions.board import board_status_of
-    from grimoire.missions.gates import check_transition
-
-    verdict = check_transition(
-        project_root.resolve(), task, board_status_of(task.status), board_status_of(target)
-    )
-    if not verdict.refusals:
-        return
-
-    if _fmt(ctx) == "json" and verdict.blocked:
-        typer.echo(json.dumps({
-            "blocked": True,
-            "transition": verdict.transition_id,
-            "refusals": [{"evidence": r.evidence, "reason": r.reason, "remedy": r.remedy}
-                         for r in verdict.refusals],
-        }, indent=2, ensure_ascii=False))
-        raise typer.Exit(1)
-
-    marque = "[red]✗[/red]" if verdict.blocked else "[yellow]![/yellow]"
-    console.print(f"{marque} Gate de preuve « {verdict.transition_id} » : "
+    verdict = refused.verdict
+    console.print(f"[red]✗[/red] Gate de preuve « {verdict.transition_id} » : "
                   f"{len(verdict.refusals)} exigence(s) non satisfaite(s)")
     for refusal in verdict.refusals:
         console.print(f"  - {refusal.evidence} : {refusal.reason}")
         console.print(f"    [dim]{refusal.remedy}[/dim]")
-    if verdict.blocked:
-        raise typer.Exit(1)
-    console.print(f"[dim]Profil « {verdict.strictness} » : signalé, non bloquant.[/dim]")
+    raise typer.Exit(1)
 
 
 def _transition(
     ctx: typer.Context, task_id: str, target: Any, project_root: Path, ledger_root: Path,
-    actor: str, reason: str = "",
+    actor: str, reason: str = "", *, claim: Any = None,
 ) -> None:
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.service import TaskRefusedError
 
-    ledger = _ledger(project_root, ledger_root)
-    task = _require_task(ledger, task_id)
-    _gate_or_exit(ctx, project_root, task, target)
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
     try:
-        moved = ledger.transition_task(task_id, target, actor_id=actor, reason=reason)
+        move = service.transition(task_id, target, actor, reason, claim=claim)
+    except TaskRefusedError as refused:
+        _refuse(ctx, refused)
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
-    _emit_task(ctx, moved, f"{task.status.value} → {moved.status.value}")
+    _emit_move(ctx, move)
+
+
+def _emit_move(ctx: typer.Context, move: Any) -> None:
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(move.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if move.advisories:
+        console.print(f"[yellow]![/yellow] Gate de preuve « {move.verdict.transition_id} » : "
+                      f"{len(move.advisories)} exigence(s) non satisfaite(s)")
+        for line in move.advisories:
+            console.print(f"  - {line}")
+        console.print(f"[dim]Profil « {move.verdict.strictness} » : signalé, non bloquant.[/dim]")
+    task = move.task
+    console.print(f"[green]OK[/green] {task.id} — {task.title} [dim]({move.previous.value} → {task.status.value})[/dim]")
 
 
 def _emit_task(ctx: typer.Context, task: Any, note: str = "") -> None:
@@ -207,7 +190,8 @@ def task_add(
     """
     from grimoire.core.exceptions import GrimoireError
 
-    ledger = _ledger(project_root, ledger_root)
+    service = _service(project_root, ledger_root)
+    ledger = service.ledger
     mission_id = mission
     if not mission_id:
         missions = ledger.list_missions()
@@ -225,6 +209,7 @@ def task_add(
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
+    service.project_board()
     _emit_task(ctx, task, "proposed")
 
 
@@ -239,9 +224,7 @@ def task_list(
     """Liste les tâches du ledger, avec leur colonne de board."""
     from grimoire.missions.board import board_status_of
 
-    tasks = _ledger(project_root, ledger_root).list_tasks(mission)
-    if status:
-        tasks = [t for t in tasks if t.status.value == status]
+    tasks = _service(project_root, ledger_root).list_tasks(mission, status)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps([t.to_dict() for t in tasks], indent=2, ensure_ascii=False))
         return
@@ -266,7 +249,7 @@ def task_show(
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import GatesFileError, declared_transitions
 
-    task = _require_task(_ledger(project_root, ledger_root), task_id)
+    task = _require_task(_service(project_root, ledger_root), task_id)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(task.to_dict(), indent=2, ensure_ascii=False))
         return
@@ -297,18 +280,10 @@ def task_claim(
     actor: _ACTOR = "cli",
 ) -> None:
     """Réclame une tâche prête : ready → claimed."""
-    from grimoire.core.exceptions import GrimoireError
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TaskClaim, TaskState
 
-    ledger = _ledger(project_root, ledger_root)
-    task = _require_task(ledger, task_id)
-    _gate_or_exit(ctx, project_root, task, TaskState.CLAIMED)
-    try:
-        claimed = ledger.claim_task(task_id, actor, host, exclusive_files=tuple(files or ()))
-    except GrimoireError as exc:
-        console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(1) from exc
-    _emit_task(ctx, claimed, f"réclamée par {actor}")
+    claim = TaskClaim(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
+    _transition(ctx, task_id, TaskState.CLAIMED, project_root, ledger_root, actor, claim=claim)
 
 
 @task_app.command("move")
@@ -380,19 +355,20 @@ def task_link(
     """Déclare une dépendance entre deux tâches."""
     from grimoire.missions.schemas import DependencyKind
 
-    ledger = _ledger(project_root, ledger_root)
-    task = _require_task(ledger, task_id)
-    _require_task(ledger, depends_on)
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    _require_task(service, depends_on)
     try:
         dependency_kind = DependencyKind(kind)
     except ValueError:
         console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
         console.print("[dim]natures : " + ", ".join(k.value for k in DependencyKind) + "[/dim]")
         raise typer.Exit(1) from None
-    ledger.append_event(
+    service.ledger.append_event(
         "task.linked", task.id, "task", actor,
         {"task_id": task.id, "depends_on": depends_on, "kind": dependency_kind.value},
     )
+    service.project_board()
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"task": task.id, "depends_on": depends_on, "kind": dependency_kind.value}, indent=2))
         return
@@ -412,10 +388,9 @@ def task_context(
     rien ne garantissait qu'il désigne une tâche réelle. Ici l'identifiant vient
     du ledger, et une tâche inconnue est refusée avant tout calcul.
     """
-    from grimoire.core.agentic_standard import build_context_bundle
-
-    _require_task(_ledger(project_root, ledger_root), task_id)
-    artifact = build_context_bundle(project_root.resolve(), task_id=task_id)
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    artifact = service.context(task_id)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(artifact.data, indent=2, ensure_ascii=False, default=str))
         return
