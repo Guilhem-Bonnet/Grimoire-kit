@@ -19,11 +19,15 @@ from grimoire.core.claude_activation import activation_context_text
 from grimoire.hosts.capabilities import gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_agents, default_permissions, infer_tools, parse_frontmatter
 from grimoire.hosts.decisions import (
+    DECISIONS,
+    Decision,
     HookInput,
     Outcome,
     classify_tool,
     decide_activation,
+    decide_context_capsule,
     decide_evidence_gate,
+    decide_subagent_gate,
     decide_tool_policy,
     entry_persona_context,
 )
@@ -422,10 +426,44 @@ def test_a_green_gate_on_a_proposed_task_says_it_protects_nothing(governed: Path
     assert "ne protège rien" in decision.context
 
 
-def test_a_broken_project_does_not_brick_the_session(governed: Path) -> None:
+def test_a_broken_governed_project_blocks_once_and_says_why(governed: Path) -> None:
+    """Un gate qu'on ne sait pas évaluer n'est pas un gate vert.
+
+    Avant : un task-board illisible rendait ALLOW avec un contexte que l'hôte
+    n'affiche pas sur Stop — la clôture passait, en silence, précisément dans
+    le profil qui promet de la refuser.
+    """
     (governed / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
     decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.outcome is Outcome.BLOCK
+    assert "non évaluables" in decision.reason
+    assert "task-board.yaml" in decision.reason
+    # ...et ne rend jamais la session inquittable : le second Stop passe.
+    again = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, stop_active=True))
+    assert again.outcome is Outcome.ALLOW
+
+
+def test_a_broken_unguarded_project_is_told_not_blocked(project: Path) -> None:
+    setup_standard_profile(project, profile_id="orchestrated", task_id="bootstrap")
+    (project / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=project))
     assert decision.outcome is Outcome.ALLOW
+    assert "non évaluables" in decision.context
+
+
+def test_a_subagent_gate_that_cannot_be_evaluated_says_so(governed: Path) -> None:
+    (governed / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
+    decision = decide_subagent_gate(HookInput(event=HookEvent.SUBAGENT_STOP, project_root=governed))
+    assert decision.outcome is Outcome.ALLOW
+    assert "non évaluables" in decision.context
+
+
+def test_a_capsule_survives_gates_that_cannot_be_evaluated(governed: Path) -> None:
+    """La compaction est le moment où l'on perd tout ; la capsule dit ce qu'elle sait."""
+    (governed / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
+    decision = decide_context_capsule(HookInput(event=HookEvent.PRE_COMPACT, project_root=governed))
+    assert "non évaluables" in decision.context
+    assert "governed" in decision.context
 
 
 # ── Wire format ──────────────────────────────────────────────────────────────
@@ -484,6 +522,66 @@ def test_the_compaction_capsule_outlives_the_context(governed: Path) -> None:
     assert capsule.is_file()
     assert "bootstrap" in capsule.read_text(encoding="utf-8")
     assert "systemMessage" in rendered
+
+
+def test_a_capsule_that_could_not_be_written_is_not_claimed_written(governed: Path) -> None:
+    """Le message système disait « capsule écrite » même quand le disque avait refusé."""
+    dest = governed / "_grimoire-output/context/bootstrap/compaction-capsule.md"
+    dest.mkdir(parents=True)  # un dossier à la place du fichier : l'écriture échoue
+    rendered, decision, _ = run_hook(
+        {"hook_event_name": "PreCompact", "cwd": str(governed)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    assert "capsule" not in decision.detail
+    assert decision.detail["capsule_error"]
+    assert "non écrite" in rendered["systemMessage"]
+    assert not rendered["systemMessage"].startswith("[Grimoire] capsule de gouvernance écrite")
+
+
+def _crash(_hook: HookInput) -> Decision:
+    raise RuntimeError("moteur de politique cassé")
+
+
+def test_a_crashing_policy_asks_instead_of_allowing(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une garde qui plante n'est pas une garde qui autorise.
+
+    Avant : l'exception devenait ``permissionDecision: allow`` — l'hôte
+    n'affiche pas ``additionalContext`` sur PreToolUse, donc l'auto-approbation
+    ne laissait aucune trace visible.
+    """
+    monkeypatch.setitem(DECISIONS, "grimoire.tool-policy", _crash)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(governed),
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf build"},
+    }
+    claude, decision, _ = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert decision.outcome is Outcome.ASK
+    assert claude["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert "moteur de politique cassé" in claude["hookSpecificOutput"]["permissionDecisionReason"]
+    copilot, _, _ = run_hook(payload, host_id=HostId.CODEX)
+    assert "moteur de politique cassé" in copilot["hookSpecificOutput"]["additionalContext"]
+
+
+def test_a_crashing_non_tool_decision_keeps_the_session_and_says_so(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(DECISIONS, "grimoire.task-context", _crash)
+    rendered, decision, _ = run_hook(
+        {"hook_event_name": "UserPromptSubmit", "cwd": str(governed)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    assert decision.outcome is Outcome.ALLOW
+    assert "moteur de politique cassé" in rendered["hookSpecificOutput"]["additionalContext"]
+
+
+def test_a_non_blocking_stop_verdict_is_still_visible(project: Path) -> None:
+    """Sur Stop, l'hôte ne lit pas ``additionalContext`` : un verdict non
+    bloquant qui n'y vivait qu'en contexte était un verdict que personne ne
+    voyait."""
+    setup_standard_profile(project, profile_id="orchestrated", task_id="bootstrap")
+    _set_task_in_progress(project)
+    (project / "_grimoire-output/context/bootstrap/context-bundle.yaml").unlink(missing_ok=True)
+    rendered, decision, _ = run_hook({"hook_event_name": "Stop", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI)
+    assert decision.outcome is Outcome.ALLOW
+    assert "rouges" in rendered["systemMessage"]
 
 
 # ── Capabilities ─────────────────────────────────────────────────────────────
