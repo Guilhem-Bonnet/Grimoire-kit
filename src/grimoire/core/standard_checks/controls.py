@@ -8,6 +8,7 @@ StandardVerificationResult via _add_check. Les identifiants qu'elles
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from grimoire.core.standard_checks.base import (
     StandardProfile,
@@ -15,8 +16,9 @@ from grimoire.core.standard_checks.base import (
     _add_check,
     _is_inside_root,
     _load_yaml_file,
+    _text_file,
 )
-from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.core.standard_generation import EVIDENCE_DIR, STANDARD_DIR
 
 
 def _verify_score_and_exceptions(root: Path, result: StandardVerificationResult) -> None:
@@ -773,3 +775,292 @@ def _verify_k8s_agent_manifest(root: Path, result: StandardVerificationResult) -
             "K8s agent manifest should enable OTel telemetry.",
             path=rel_path,
         )
+
+
+# ---------------------------------------------------------------------------
+# Les artefacts qui ferment les dix-sept exigences AG-* sans artefact (#246).
+# Un registre vierge est un avertissement ; une déclaration fausse — un
+# critère « passé » sans preuve, une source remplacée sans remplaçante, un
+# incident fermé sans prévention — est une erreur dès que le profil est
+# gouverné, un avertissement avant.
+# ---------------------------------------------------------------------------
+
+
+def _strict(profile: StandardProfile) -> bool:
+    return profile.id in {"governed", "production"}
+
+
+def _cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _verify_acceptance_record(
+    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
+) -> None:
+    """AG-QUA-003 : le livrable est accepté ou refusé par celui qui le reçoit, sur des critères prouvés."""
+    rel_path = EVIDENCE_DIR / task_id / "acceptance-record.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    severity = "error" if _strict(profile) else "warning"
+    template_row = "| AC-001 |  |  | à vérifier |"
+    rows = [line for line in text.splitlines() if line.startswith("| AC-") and line.strip() != template_row]
+    if not rows:
+        _add_check(result, "acceptance.empty", "warning", "Acceptance record still holds only the template criterion.", path=rel_path)
+    failed = False
+    for line in rows:
+        cells = _cells(line)
+        if len(cells) < 4:
+            _add_check(result, "acceptance.row_invalid", "warning", f"Criterion row is malformed: {line[:60]}", path=rel_path)
+            continue
+        criterion_id, _criterion, proof, status = cells[:4]
+        if status == "passé" and not proof:
+            _add_check(
+                result, "acceptance.passed_without_evidence", "error",
+                f"{criterion_id} is marked passé with no proof.", path=rel_path,
+            )
+        failed = failed or status == "échoué"
+    decisions = [
+        _cells(line) for line in text.splitlines()
+        if line.startswith("| ") and _cells(line)[0] in {"accepté", "refusé", "ajustement demandé", "en attente"}
+    ]
+    for cells in decisions:
+        decision, validator, date = [*cells, "", "", ""][:3]
+        if decision == "en attente":
+            _add_check(result, "acceptance.decision_pending", "warning", "No acceptance decision has been recorded yet.", path=rel_path)
+        elif decision == "accepté":
+            if not validator or not date:
+                _add_check(
+                    result, "acceptance.accepted_without_validator", "error",
+                    "The deliverable is marked accepté without a named validator and a date.", path=rel_path,
+                )
+            if failed:
+                _add_check(
+                    result, "acceptance.accepted_with_failed_criterion", severity,
+                    "The deliverable is marked accepté while a criterion is échoué.", path=rel_path,
+                )
+
+
+def _allowed_values(data: dict[str, Any], key: str) -> list[str]:
+    raw = data.get("allowed")
+    values = raw.get(key) if isinstance(raw, dict) else None
+    return [str(v) for v in values] if isinstance(values, list) else []
+
+
+def _entries(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    raw = data.get(key)
+    return [entry for entry in raw if isinstance(entry, dict)] if isinstance(raw, list) else []
+
+
+def _verify_retention_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-RET-001, -003, -004, -005 : destination de chaque artefact, remplaçante, nettoyages, purges suivies."""
+    rel_path = STANDARD_DIR / "retention-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if _strict(profile) else "warning"
+    statuses = _allowed_values(data, "statuses")
+    artifacts = _entries(data, "artifacts")
+    if not artifacts:
+        _add_check(result, "retention.no_artifact", "warning", "Retention registry lists no produced artifact.", path=rel_path)
+    for entry in artifacts:
+        rid = str(entry.get("id", "?"))
+        retention = str(entry.get("retention") or "")
+        if not retention:
+            _add_check(result, "retention.artifact_retention_missing", severity, f"{rid} has no destination (retention).", path=rel_path)
+        elif retention != "durable" and not entry.get("expires_at"):
+            _add_check(result, "retention.expiry_missing", "warning", f"{rid} is {retention!r} without expires_at.", path=rel_path)
+        if "indexable" not in entry:
+            _add_check(result, "retention.artifact_indexable_missing", "warning", f"{rid} does not say whether it is indexable.", path=rel_path)
+        status = str(entry.get("status") or "")
+        if statuses and status and status not in statuses:
+            _add_check(result, "retention.artifact_status_unknown", "warning", f"{rid}: status {status!r} is not an allowed value.", path=rel_path)
+        if status == "superseded" and not entry.get("superseded_by"):
+            _add_check(
+                result, "retention.superseded_without_replacement", "error",
+                f"{rid} is superseded but names no replacement.", path=rel_path,
+            )
+    cleanups = _entries(data, "cleanup")
+    if not cleanups:
+        _add_check(result, "retention.no_cleanup", "warning", "No periodic cleanup has been recorded yet.", path=rel_path)
+    for entry in cleanups:
+        if not entry.get("next_review"):
+            _add_check(result, "retention.cleanup_next_review_missing", severity, "A cleanup entry sets no next_review.", path=rel_path)
+    for entry in _entries(data, "purges"):
+        if not entry.get("incident_id"):
+            _add_check(
+                result, "retention.purge_without_incident", severity,
+                f"Purge of {entry.get('target', '?')!r} is not tracked as an incident.", path=rel_path,
+            )
+
+
+def _verify_tool_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-TOL-001, -003, -005 : outils avec risque et permissions, contrats MCP, capture des erreurs."""
+    rel_path = STANDARD_DIR / "tool-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if _strict(profile) else "warning"
+    risks = _allowed_values(data, "risks")
+    permissions = _allowed_values(data, "permissions")
+    tools = _entries(data, "tools")
+    if not tools:
+        _add_check(result, "toolreg.no_tool", "warning", "Tool registry lists no tool.", path=rel_path)
+    for tool in tools:
+        tid = str(tool.get("id", "?"))
+        risk = str(tool.get("risk") or "")
+        if not risk:
+            _add_check(result, "toolreg.tool_risk_missing", severity, f"{tid} declares no risk.", path=rel_path)
+        elif risks and risk not in risks:
+            _add_check(result, "toolreg.tool_risk_unknown", "warning", f"{tid}: risk {risk!r} is not an allowed value.", path=rel_path)
+        perms = tool.get("permissions")
+        if not isinstance(perms, list) or not perms:
+            _add_check(result, "toolreg.tool_permissions_missing", severity, f"{tid} declares no permissions.", path=rel_path)
+        elif permissions and any(str(p) not in permissions for p in perms):
+            _add_check(result, "toolreg.tool_permission_unknown", "warning", f"{tid} uses a permission outside the allowed set.", path=rel_path)
+    for server in _entries(data, "mcp_servers"):
+        sid = str(server.get("id", "?"))
+        for key in ("owner", "scopes", "timeout_s", "logging"):
+            if server.get(key) in (None, "", []):
+                _add_check(result, f"toolreg.mcp_{key}_missing", severity, f"MCP server {sid} has no {key}.", path=rel_path)
+    capture = data.get("error_capture")
+    if not isinstance(capture, dict) or not capture.get("policy"):
+        _add_check(result, "toolreg.error_capture_missing", "error", "Tool registry does not say how tool errors are captured.", path=rel_path)
+    else:
+        policies = _allowed_values(data, "policies")
+        if policies and str(capture.get("policy")) not in policies:
+            _add_check(result, "toolreg.error_capture_policy_unknown", "error", f"error_capture.policy {capture.get('policy')!r} is not evidence or incident.", path=rel_path)
+
+
+def _verify_incident_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-INC-001, -002, -003 : containment déclaré, incidents complets, récurrences capitalisées."""
+    rel_path = STANDARD_DIR / "incident-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if _strict(profile) else "warning"
+    containment = data.get("containment")
+    if not isinstance(containment, dict):
+        _add_check(result, "incidents.containment_policy_missing", "error", "Incident registry declares no containment policy.", path=rel_path)
+    else:
+        actions = _allowed_values(data, "on_critical")
+        action = str(containment.get("on_critical") or "")
+        if not action or (actions and action not in actions):
+            _add_check(result, "incidents.containment_action_unknown", "error", f"containment.on_critical {action!r} must be stop or reduce_autonomy.", path=rel_path)
+        if not containment.get("critical_severities"):
+            _add_check(result, "incidents.containment_severities_missing", "error", "containment.critical_severities is empty: nothing would ever stop.", path=rel_path)
+        if not containment.get("escalate_to"):
+            _add_check(result, "incidents.containment_escalation_missing", "warning", "containment.escalate_to names nobody.", path=rel_path)
+    severities = _allowed_values(data, "severities")
+    statuses = _allowed_values(data, "statuses")
+    for incident in _entries(data, "incidents"):
+        iid = str(incident.get("id", "?"))
+        status = str(incident.get("status") or "")
+        if severities and str(incident.get("severity") or "") not in severities:
+            _add_check(result, "incidents.severity_unknown", "warning", f"{iid}: severity is not an allowed value.", path=rel_path)
+        if statuses and status not in statuses:
+            _add_check(result, "incidents.status_unknown", "warning", f"{iid}: status {status!r} is not an allowed value.", path=rel_path)
+        closed = status in {"corrigé", "fermé"}
+        for key in ("containment", "correction", "memory_purge", "prevention"):
+            if key != "containment" and not closed:
+                continue
+            if not incident.get(key):
+                _add_check(result, f"incidents.{key}_missing", severity, f"{iid} ({status}) has no {key}.", path=rel_path)
+        if incident.get("recurrence_of") and not incident.get("feeds"):
+            _add_check(
+                result, "incidents.recurrence_without_feedback", severity,
+                f"{iid} recurs from {incident.get('recurrence_of')} but feeds no eval, hook or governance rule.", path=rel_path,
+            )
+
+
+def _verify_risk_control_matrix(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-AUD-003, AG-QUA-005 : chaque risque a ses contrôles et sa preuve."""
+    rel_path = STANDARD_DIR / "risk-control-matrix.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if _strict(profile) else "warning"
+    risks = _entries(data, "risks")
+    if not risks:
+        _add_check(result, "riskmatrix.none", severity, "Risk-control matrix names no risk.", path=rel_path)
+        return
+    likelihoods = _allowed_values(data, "likelihoods")
+    impacts = _allowed_values(data, "impacts")
+    statuses = _allowed_values(data, "statuses")
+    unowned = 0
+    for risk in risks:
+        rid = str(risk.get("id", "?"))
+        controls = risk.get("controls")
+        if not isinstance(controls, list) or not controls:
+            _add_check(result, "riskmatrix.controls_missing", severity, f"{rid} is mitigated by no control.", path=rel_path)
+        if not risk.get("evidence"):
+            _add_check(result, "riskmatrix.evidence_missing", severity, f"{rid} names no evidence that its controls hold.", path=rel_path)
+        if (likelihoods and str(risk.get("likelihood") or "") not in likelihoods) or (impacts and str(risk.get("impact") or "") not in impacts):
+            _add_check(result, "riskmatrix.level_unknown", "warning", f"{rid}: likelihood or impact is not an allowed value.", path=rel_path)
+        if statuses and str(risk.get("status") or "") not in statuses:
+            _add_check(result, "riskmatrix.status_unknown", "warning", f"{rid}: status is not an allowed value.", path=rel_path)
+        unowned += not risk.get("owner")
+    if unowned:
+        _add_check(result, "riskmatrix.owner_missing", "warning", f"{unowned} risk(s) have no owner.", path=rel_path)
+
+
+def _verify_capability_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-DYN-001 à -005 : gap nommé, durabilité classée, expiration ou promotion justifiée."""
+    rel_path = STANDARD_DIR / "capability-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if _strict(profile) else "warning"
+    kinds = _allowed_values(data, "kinds")
+    durabilities = _allowed_values(data, "durabilities")
+    statuses = _allowed_values(data, "statuses")
+    for cap in _entries(data, "capabilities"):
+        cid = str(cap.get("id", "?"))
+        if not cap.get("gap"):
+            _add_check(result, "capabilities.gap_missing", severity, f"{cid} answers no identified gap.", path=rel_path)
+        durability = str(cap.get("durability") or "")
+        if durability not in (durabilities or ["ephemeral", "durable"]):
+            _add_check(result, "capabilities.durability_invalid", "error", f"{cid}: durability {durability!r} must be ephemeral or durable.", path=rel_path)
+        if durability == "ephemeral" and not cap.get("expires_at"):
+            _add_check(result, "capabilities.ephemeral_without_expiry", severity, f"{cid} is ephemeral with no expiry or purge rule.", path=rel_path)
+        raw_promotion = cap.get("promotion")
+        promotion: dict[str, Any] = raw_promotion if isinstance(raw_promotion, dict) else {}
+        if durability == "durable" and cap.get("promoted_from") and not all(promotion.get(k) for k in ("usage", "value", "validation")):
+            _add_check(result, "capabilities.promotion_unjustified", severity, f"{cid} was promoted without usage, value and validation.", path=rel_path)
+        if kinds and str(cap.get("kind") or "") not in kinds:
+            _add_check(result, "capabilities.kind_unknown", "warning", f"{cid}: kind is not an allowed value.", path=rel_path)
+        if statuses and str(cap.get("status") or "") not in statuses:
+            _add_check(result, "capabilities.status_unknown", "warning", f"{cid}: status is not an allowed value.", path=rel_path)
+
+
+def _verify_wip_limits(root: Path, result: StandardVerificationResult) -> None:
+    """AG-ORC-004 : le WIP est borné et rien n'est délégué sans task envelope."""
+    rel_path = STANDARD_DIR / "orchestration-policy.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    wip = data.get("wip")
+    if not isinstance(wip, dict):
+        _add_check(result, "orchestration.wip_missing", "warning", "Orchestration policy sets no WIP limit (wip:).", path=rel_path)
+        return
+    for key in ("limit_per_role", "limit_global"):
+        value = wip.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            _add_check(result, "orchestration.wip_limit_invalid", "error", f"wip.{key} must be a positive integer, got {value!r}.", path=rel_path)
+    if str(wip.get("open_delegation") or "") not in {"forbidden", "envelope_required"}:
+        _add_check(
+            result, "orchestration.wip_open_delegation_invalid", "error",
+            "wip.open_delegation must be forbidden or envelope_required: an open delegation has no task envelope.", path=rel_path,
+        )
+
+
+def _verify_compliance_traceability(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """AG-AUD-001 : la déclaration de conformité cite la matrice et un verdict."""
+    rel_path = STANDARD_DIR / "compliance-declaration.md"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    if "## Traceability" not in text:
+        _add_check(result, "compliance.traceability_missing", "warning", "Compliance declaration has no Traceability section.", path=rel_path)
+    elif _strict(profile) and "- Last verdict:\n" in text:
+        _add_check(result, "compliance.verdict_missing", "warning", "Compliance declaration records no verification verdict.", path=rel_path)

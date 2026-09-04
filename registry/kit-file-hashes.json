@@ -170,6 +170,10 @@
    "version": "3.35.0",
    "path": "framework/tools/vision-judge.py"
   },
+  "0c96baddf86d02760648f0da8112a83a1cdc80ff3432f59ef2b52e6ebaf940d5": {
+   "version": "3.37.0",
+   "path": "framework/agentic-standard/traceability.yaml"
+  },
   "0c9e37f5ba6a6e7a6019e154e512a1e1db4e0c7ac45a4631e3d55ed797dd1054": {
    "version": "3.16.0",
    "path": "framework/tools/grimoire-setup.py"
@@ -937,6 +941,10 @@
   "4ac1eb7202ab74eadd8a3668377fe671338757637d3d87b8f99bfabd04048c00": {
    "version": "3.36.0",
    "path": "framework/tools/context-summarizer.py"
+  },
+  "4b4bc263d96169bc4405a419051759c76b7cc07515714732da2c520c30568b98": {
+   "version": "3.37.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "4b6b6ad9d2c069cbd272fcf6f76edf1fcf516983291c1a0b2575e8f8ec653a99": {
    "version": "3.4.2",
@@ -1989,6 +1997,10 @@
   "9bd11567bb3b291b47ce17d97f65758d50ad3ed42bd176c153969fef992bc069": {
    "version": "3.4.2",
    "path": "framework/agent-base-compact.md"
+  },
+  "9c7aab5df2a0d7a54aa0ba5289f2e6aed789ab4ed4a124c75161ba65a737ab45": {
+   "version": "3.37.0",
+   "path": "framework/agentic-standard/templates/compliance-declaration.md"
   },
   "9cd72a3b0fa6640394aa818a3b1f639699a91e220c4daf4793f96a84fb6b3850": {
    "version": "3.4.2",
@@ -3065,6 +3077,10 @@
   "e8c34440c25773d6b36b672fb94bf9a46fdf7ccb1602636d7c7d8cabe3292d23": {
    "version": "3.4.2",
    "path": "archetypes/infra-ops/agents/ops-engineer.md"
+  },
+  "e9942880c80e43fddac59207bcce588f4dfdc06f12f02e1d95c8acaf71513e94": {
+   "version": "3.37.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
   },
   "e99c0d858ed68ce4afd2fcc1f0f748d520ec0e1825902584415008786120926b": {
    "version": "3.24.0",

@@ -117,21 +117,14 @@ jobs:
 
       - name: Run doctor (skip Qdrant en CI)
         run: |
-          # La vérif Qdrant va échouer gracieusement en CI — on filtre les erreurs Qdrant
-          bash grimoire-init.sh doctor 2>&1 | tee doctor-output.txt || true
-          # Vérifier qu'il n'y a pas d'erreurs críticas non-Qdrant
-          CRIT=$(grep -c "✗\|FAIL\|ERROR" doctor-output.txt || true)
-          QDRANT=$(grep -c "Qdrant\|qdrant" doctor-output.txt || true)
-          # En CI, _grimoire/_config/ et _grimoire-output/ n'existent pas (repo SDK, pas projet initialisé)
-          CI_EXPECTED=$(grep -c "_grimoire/_config/\|_grimoire-output/\|project-context.yaml" doctor-output.txt || true)
-          REAL_ERRORS=$((CRIT - QDRANT - CI_EXPECTED))
-          echo "Erreurs critiques (hors Qdrant, hors CI-expected) : $REAL_ERRORS"
-          if [[ $REAL_ERRORS -gt 0 ]]; then
-            echo "❌ Trop d'erreurs critiques détectées (hors Qdrant)"
-            cat doctor-output.txt
-            exit 1
-          fi
-          echo "✅ Doctor OK (hors connectivité Qdrant)"
+          # `doctor` sort toujours en 0 : c'est un diagnostic, pas un gate. Le
+          # verdict se lit dans sa sortie, et l'ancienne lecture ne pouvait pas
+          # échouer : trois `grep -c` soustraits l'un de l'autre, où toute ligne
+          # citant Qdrant ou un chemin attendu comptait en négatif qu'elle soit
+          # une erreur ou non — et un doctor qui n'avait pas tourné laissait un
+          # fichier vide, zéro erreur, étape verte.
+          bash grimoire-init.sh doctor 2>&1 | tee doctor-output.txt
+          python scripts/ci-doctor-gate.py doctor-output.txt
 
   # ── 6. Context Budget Guard ───────────────────────────────────────────────
   context-guard:

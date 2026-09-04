@@ -1,6 +1,11 @@
 name: Agentic standard
 
 on:
+  # Pas de filtre de chemins sur les PR : le job `standard` est un check
+  # requis par la protection de `main`. Filtré, il ne se lançait pas sur une
+  # PR qui ne touchait pas le standard, restait « attendu » sans jamais se
+  # prononcer, et la PR ne pouvait pas être fusionnée — un garde qui bloque
+  # tout ce qu'il ne regarde pas. Le filtre reste sur `push`.
   pull_request:
   push:
     branches: [main, feat/agentic-standard-bridge]
@@ -68,20 +73,23 @@ jobs:
           PY
 
       - name: Le standard amont a-t-il avancé depuis la révision épinglée ?
-        # Non bloquant : une dérive du corpus normatif est un signal à réconcilier
-        # dans profile-map.yaml, pas une raison de refuser ce commit.
-        continue-on-error: true
+        # Une dérive du corpus normatif (2) ou un amont injoignable (3) est un
+        # avertissement, pas une raison de refuser ce commit. L'ancienne étape
+        # sortait avec ce statut sous `continue-on-error` : rouge en permanence,
+        # ignorée par tous — et une vraie erreur de la commande (1) passait au
+        # même rouge ignoré. Les deux cas connus sont dits et sortent en 0 ;
+        # tout autre statut fait échouer l'étape, sans filet.
         run: |
           set +e
           grimoire standard upstream
           status=$?
           set -e
-          if [[ "$status" -eq 2 ]]; then
-            echo "::warning::Le standard amont a avancé : réconcilier framework/agentic-standard/profile-map.yaml et mettre à jour metadata.upstream_standard.commit."
-          elif [[ "$status" -eq 3 ]]; then
-            echo "::warning::Standard amont injoignable — alignement non vérifié."
-          fi
-          exit "$status"
+          case "$status" in
+            0) ;;
+            2) echo "::warning::Le standard amont a avancé : réconcilier framework/agentic-standard/profile-map.yaml et mettre à jour metadata.upstream_standard.commit." ;;
+            3) echo "::warning::Standard amont injoignable — alignement non vérifié." ;;
+            *) echo "::error::grimoire standard upstream a échoué (statut $status)"; exit "$status" ;;
+          esac
 
       - name: Build docs
         run: python -m mkdocs build --strict

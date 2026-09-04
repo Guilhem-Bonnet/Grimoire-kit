@@ -55,3 +55,8 @@ handoffs:
   - from: context_orchestrator
     to: release_governor
     requires: ["context_bundle", "decision_trace", "evidence_pack"]
+# Travail en cours borné, et aucune délégation sans task envelope.
+wip:
+  limit_per_role: 2
+  limit_global: 5
+  open_delegation: forbidden    # forbidden | envelope_required

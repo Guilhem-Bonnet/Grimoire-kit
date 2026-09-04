@@ -549,7 +549,7 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
-        return Decision(context=f"[Grimoire] Gates non évaluables : {exc}", detail={"error": str(exc)})
+        return _unevaluable_gate(task_id, profile, exc)
 
     if ok:
         if detail.get("state") in _STATES_WITHOUT_EVIDENCE:
@@ -565,7 +565,7 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
                 detail=detail,
             )
         return Decision(detail=detail)
-    if profile not in {"governed", "production"}:
+    if profile not in _BLOCKING_PROFILES:
         return Decision(
             context=(f"[Grimoire] Gates de preuve rouges pour {task_id} (profil {profile}, non bloquant) :\n{summary}"),
             detail=detail,
@@ -580,6 +580,43 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
 
 
+def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
+    """A gate that cannot be evaluated is not a green gate.
+
+    It used to render ``ALLOW`` with an explanatory context — and on ``Stop``
+    no host reads that context, so an unreadable task board closed a governed
+    task in silence, exactly where the profile promises a refusal. The rule is
+    now the same as for red gates: the profiles that block, block, with the
+    cause in the reason; the others are told. ``stop_active`` still guarantees
+    the second ``Stop`` goes through, so a broken board costs one turn, never
+    the session.
+    """
+    cause = f"{type(exc).__name__}: {exc}"
+    detail = {"task_id": task_id, "profile": profile, "error": cause, "ok": False}
+    remedy = (
+        f"Répare _grimoire/standard/task-board.yaml (ou l'artefact nommé ci-dessus) puis relance "
+        f"`grimoire standard gate check --task-id {task_id} --strict`."
+    )
+    if profile in _BLOCKING_PROFILES:
+        return Decision(
+            outcome=Outcome.BLOCK,
+            reason=(
+                f"[Grimoire] Tâche {task_id} : gates de preuve non évaluables (profil {profile}) — {cause}\n"
+                f"{remedy} Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
+            ),
+            detail=detail,
+        )
+    return Decision(
+        context=f"[Grimoire] Gates de preuve non évaluables pour {task_id} (profil {profile}, non bloquant) : {cause}\n{remedy}",
+        detail=detail,
+    )
+
+
+#: Profiles whose ``Stop`` hook refuses a closure — red gates and unevaluable
+#: gates alike. Kept in one place so the two paths cannot drift apart.
+_BLOCKING_PROFILES = frozenset({"governed", "production"})
+
+
 def decide_subagent_gate(hook: HookInput) -> Decision:
     """Subagent stop: report gate state upward without blocking the sub-agent.
 
@@ -592,7 +629,10 @@ def decide_subagent_gate(hook: HookInput) -> Decision:
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
-        return Decision(detail={"error": str(exc)})
+        return Decision(
+            context=f"[Grimoire] Sous-agent terminé, gates non évaluables pour {task_id} : {type(exc).__name__}: {exc}",
+            detail={"task_id": task_id, "error": str(exc)},
+        )
     if ok:
         return Decision(detail=detail)
     return Decision(
@@ -614,7 +654,10 @@ def decide_context_capsule(hook: HookInput) -> Decision:
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
-        return Decision(detail={"error": str(exc)})
+        # The gates are unknown, the task id and profile are not: the next
+        # window needs those two facts more than it needs a verdict.
+        ok, summary = False, f"non évaluables — {type(exc).__name__}: {exc}"
+        detail = {"task_id": task_id, "profile": profile, "error": str(exc)}
     state = "verts" if ok else f"rouges :\n{summary}"
     context = (
         f"[Grimoire — capsule] Tâche {task_id}, profil {profile}. Gates de preuve {state}\n"
@@ -655,8 +698,32 @@ def run_decision(decision_id: str, hook: HookInput) -> Decision:
     try:
         return func(hook)
     except Exception as exc:
+        return _failed_decision(decision_id, hook, exc)
+
+
+def _failed_decision(decision_id: str, hook: HookInput, exc: Exception) -> Decision:
+    """What a crashed decision becomes — never an approval.
+
+    Before this, any exception here rendered ``ALLOW``; on a blocking host
+    that is ``permissionDecision: allow``, and the explanatory context is not
+    a field the host reads on ``PreToolUse``. A guardrail that crashed was an
+    auto-approval with no visible trace. A call the policy could not judge is
+    now handed back to the user (``ask``) with the cause in the reason; every
+    other event keeps the session alive and says what broke.
+    """
+    cause = f"{type(exc).__name__}: {exc}"
+    detail = {"error": cause, "decision": decision_id}
+    if hook.event is HookEvent.PRE_TOOL_USE:
         return Decision(
-            outcome=Outcome.ALLOW,
-            context=f"[Grimoire] hook {decision_id} en erreur, session non bloquée : {exc}",
-            detail={"error": str(exc), "decision": decision_id},
+            outcome=Outcome.ASK,
+            reason=(
+                f"[Grimoire] hook {decision_id} en erreur — {cause}. "
+                f"La politique n'a pas pu juger {hook.tool_name or 'cet appel'} : à toi de décider."
+            ),
+            detail=detail,
         )
+    return Decision(
+        outcome=Outcome.ALLOW,
+        context=f"[Grimoire] hook {decision_id} en erreur, session non bloquée : {cause}",
+        detail=detail,
+    )
