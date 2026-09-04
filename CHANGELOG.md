@@ -29,6 +29,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   fichiers illisibles avec leur cause, et `workflows teams` les affiche — en
   texte et dans `unreadable` en JSON.
 
+- **Deux étapes de CI ne pouvaient pas échouer, une troisième ne pouvait pas
+  se prononcer.** Le verdict sur `grimoire-init.sh doctor` soustrayait trois
+  `grep -c` l'un de l'autre — toute ligne citant Qdrant ou un chemin attendu
+  comptait en négatif, erreur ou non, et un doctor qui n'avait pas tourné
+  laissait un fichier vide, zéro erreur, étape verte ; `scripts/ci-doctor-gate.py`
+  exige la bannière du doctor et fait échouer l'étape sur toute ligne `✗`
+  hors manques attendus, en la nommant (six contrôles négatifs). L'étape de
+  dérive du standard amont sortait en 2 ou 3 sous `continue-on-error` : rouge
+  en permanence, ignorée par tous, et une vraie erreur de la commande passait
+  au même rouge ignoré ; les deux cas connus sont dits en avertissement et
+  sortent en 0, tout autre statut échoue. Enfin le job `standard`, check
+  requis par la protection de `main`, était filtré par chemins : sur une PR
+  qui ne touchait pas le standard il restait « attendu » sans jamais se
+  prononcer et la PR ne pouvait pas être fusionnée — un garde qui bloque tout
+  ce qu'il ne regarde pas. Il tourne sur chaque PR.
+
 - **Le hook SessionStart nommait toujours `bootstrap`, quelle que soit la
   tâche réclamée.** Deux causes, toutes deux vérifiées sur un projet neuf :
   `.claude/activation-context.md`, écrit par `standard init`, portait
