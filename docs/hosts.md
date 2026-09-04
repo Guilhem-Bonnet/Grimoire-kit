@@ -239,7 +239,7 @@ canal que tous partagent**, et le serveur Grimoire y expose les trois primitives
 |---|---|---|
 | Prompts | les commandes du projet | des slash commands, sans émetteur |
 | Resources | les compétences, sous `grimoire://skill/<slug>` | un corps chargeable à la demande |
-| Tools | `grimoire_host_status`, `grimoire_skill`, `grimoire_command`, … | l'inventaire et l'état |
+| Tools | `grimoire_host_status`, `grimoire_skill`, `grimoire_command`, `task_list_ready`, `task_claim`, … | l'inventaire, l'état, et les tâches du ledger |
 
 C'est la réponse à « peu importe l'hôte » — pour le **contenu**. La
 **contrainte** (hooks, permissions) reste l'affaire des émetteurs : MCP
