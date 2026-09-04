@@ -1,0 +1,37 @@
+$schema: "grimoire-agentic-standard-incident-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Une anomalie critique stoppe ou réduit l'autonomie ; tout incident définit containment, correction, purge mémoire et prévention ; un incident récurrent alimente evals, hooks ou gouvernance."
+
+# Containment : ce qui se passe dès qu'une anomalie critique est détectée.
+containment:
+  critical_severities: [élevée, critique]
+  on_critical: stop                 # stop | reduce_autonomy
+  reduced_autonomy_level: observe   # niveau imposé si reduce_autonomy
+  suspend_task: true                # la carte passe en blocked
+  block_tools: [shell, network, mcp]
+  escalate_to: ""                   # owner ou rôle qui reprend la main
+
+# Incidents : un par anomalie, ouvert à la détection, fermé après prévention.
+incidents: []
+# - id: INC-001
+#   date: ""
+#   severity: moyenne          # faible | moyenne | élevée | critique
+#   status: ouvert             # ouvert | contenu | corrigé | fermé
+#   kind: faux_done            # faux_done | mauvais_patch | fuite_donnees | action_externe | prompt_injection | memoire_fausse | cout | design | securite | erreur_outil
+#   detected_by: hook          # hook | qa | securite | client | observabilite | agent
+#   task_id: ""
+#   containment: ""            # ce qui a été stoppé ou isolé
+#   correction: ""             # rollback, patch, rotation
+#   memory_purge: ""           # mémoire ou cache invalidé, ou « aucune »
+#   prevention: ""             # hook, eval, prompt, test ou doc ajouté
+#   recurrence_of: ""          # id d'un incident antérieur de même cause
+#   feeds: []                  # evals | hooks | governance — obligatoire si récurrent
+
+allowed:
+  severities: [faible, moyenne, élevée, critique]
+  statuses: [ouvert, contenu, corrigé, fermé]
+  kinds: [faux_done, mauvais_patch, fuite_donnees, action_externe, prompt_injection, memoire_fausse, cout, design, securite, erreur_outil]
+  on_critical: [stop, reduce_autonomy]
+  feeds: [evals, hooks, governance]

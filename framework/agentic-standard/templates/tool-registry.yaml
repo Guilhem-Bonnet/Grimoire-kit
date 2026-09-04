@@ -1,0 +1,48 @@
+$schema: "grimoire-agentic-standard-tool-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Tout outil est inscrit avec son risque et ses permissions ; toute intégration MCP est un contrat ; toute erreur d'outil devient une preuve ou un incident."
+
+# Outils que les agents peuvent appeler. Les deux premiers existent sur tout hôte.
+tools:
+  - id: TOOL-001
+    name: shell
+    kind: shell               # shell | file | search | network | browser | mcp | model
+    risk: élevé               # faible | moyen | élevé | critique
+    permissions: [read, execute]   # read | write | execute | network | external
+    owner: ""
+  - id: TOOL-002
+    name: file-edit
+    kind: file
+    risk: moyen
+    permissions: [read, write]
+    owner: ""
+
+# Serveurs MCP : owner, scopes minimaux, timeout, journalisation.
+mcp_servers: []
+# - id: MCP-001
+#   server: ""
+#   owner: ""
+#   scopes: []              # allowlist minimale : lecture, écriture, cibles
+#   timeout_s: 30
+#   logging:
+#     requests: true
+#     errors: true
+#     secrets_masked: true
+#   environment: local      # local | staging | production | externe
+#   risk: moyen
+#   human_validation: "écriture, production ou données sensibles"
+
+# Erreurs d'outil : preuve par défaut, incident à partir d'une gravité.
+error_capture:
+  policy: evidence            # evidence | incident
+  evidence_target: "_grimoire-output/evidence/{task-id}/evidence-pack.md"
+  incident_from_severity: élevée
+  incident_target: "_grimoire/standard/incident-registry.yaml"
+
+allowed:
+  kinds: [shell, file, search, network, browser, mcp, model]
+  risks: [faible, moyen, élevé, critique]
+  permissions: [read, write, execute, network, external]
+  policies: [evidence, incident]
