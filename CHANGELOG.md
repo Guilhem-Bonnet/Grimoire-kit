@@ -22,6 +22,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un manifeste d'équipe illisible est nommé, plus omis.** `parse_team`
+  répondait `None` pour « pas une équipe » comme pour « YAML cassé » : l'équipe
+  manquait à `workflows teams` sans une ligne. Le chargeur distingue les deux
+  (`TeamManifestError`), `load_team_catalog` rend les équipes lues et les
+  fichiers illisibles avec leur cause, et `workflows teams` les affiche — en
+  texte et dans `unreadable` en JSON.
+
 - **Le hook SessionStart nommait toujours `bootstrap`, quelle que soit la
   tâche réclamée.** Deux causes, toutes deux vérifiées sur un projet neuf :
   `.claude/activation-context.md`, écrit par `standard init`, portait
