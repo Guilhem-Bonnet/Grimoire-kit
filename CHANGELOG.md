@@ -7,6 +7,56 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Le score ne route plus les checks par correspondance de préfixe.** Un
+  préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
+  Mesuré sur les 262 identifiants que le kit émet aujourd'hui : **26 étaient
+  mal dirigés** — les huit `gates.*`, que le préfixe déclaré `gate.` ne peut
+  pas atteindre ; les douze `patterns.*` et les quatre `remote.*`, qu'aucun
+  préfixe ne nommait. Chaque check émis est désormais déclaré dans
+  `core/standard_checks/registry.py`, et trois tests interdisent la dérive : un
+  check sans déclaration, une dimension inconnue du score, une entrée de
+  registre sans check correspondant. La table de préfixes subsiste en repli
+  pour les checks qu'un projet émet lui-même. Les dix-sept checks `claims.*` et
+  `surfaces.*` arrivés avec la 3.37.0 sont déclarés avec les autres.
+
+- **Deux checks étaient comptés sur une dimension sans poids, donc jamais
+  comptés.** `observability_cockpit` figurait dans la table de routage sans
+  entrée dans les poids ; or le calcul rend `100` dès que le poids est nul
+  (`percentage = ... if weight else 100`). Les deux `promptver.*` marquaient
+  donc 100 % quoi qu'il arrive, tout en ne pesant rien : verts à l'affichage,
+  absents du résultat. Ils rejoignent `runtime_journal`, la dimension
+  d'observabilité réellement pondérée.
+
+  Ces deux corrections laissent le score inchangé sur un projet fraîchement
+  scaffoldé — vérifié sur les cinq profils, dimension par dimension, aucun des
+  checks concernés ne s'y déclenche. Elles ne changent le score que là où ces
+  checks tombent, ce qui était précisément le défaut.
+
+- **Le contrat d'adapter de runtime externe est unifié.** Il existait trois
+  fois : un `_slugify` identique dans les trois adapters, une méthode d'entrée
+  nommée successivement `import_flow`, `import_graph` puis `convert`, et aucune
+  surface commune entre les trois rapports. `runtime/adapter_base.py` fournit
+  l'unique `slugify`, un protocole `ImportReport` et un protocole
+  `RecipeAdapter` dont la méthode canonique est `to_recipe`. Les anciens noms
+  restent en alias, conformément à l'ADR-002. `grimoire.runtime` exporte
+  désormais `Recipe`, `RecipeStep` et `VerificationGate`, qu'un auteur
+  d'adapter devait importer depuis un sous-module.
+
+  La valeur de `VerificationGate.blocking` n'est **pas** uniformisée, et c'est
+  délibéré : le `blocking=False` de CrewAI et LangGraph est ce qui fait
+  atterrir une tâche importée en `NEEDS_VERIFICATION` au lieu de se clôturer
+  seule ; le `blocking=True` de Gas City porte sur les molécules qui déclarent
+  exiger une preuve. Les deux sémantiques sont justes.
+
+- **`GasCityConverter` vérifie enfin l'`output_schema`.** Il le transportait
+  jusqu'à la `Recipe` sans jamais l'exiger, là où CrewAI et LangGraph refusent
+  une définition qui ne déclare pas sa sortie : une formule invérifiable
+  rendait `ok`. Son rapport gagne `missing_output_schema`, présent dans
+  `to_dict()`. **Rupture assumée** : une formule sans `output_schema` est
+  désormais refusée.
+
 ## [3.37.0] - 2026-09-03
 
 ### Ajouté

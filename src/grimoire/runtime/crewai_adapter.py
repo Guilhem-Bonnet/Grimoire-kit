@@ -45,12 +45,12 @@ M2 — Integration contract:
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.evidence.schemas import EvidenceProfile
+from grimoire.runtime.adapter_base import slugify
 from grimoire.runtime.recipes import Recipe, RecipeStep, VerificationGate
 from grimoire.traces.ledger import TraceLedger
 from grimoire.traces.schemas import TraceOutcome
@@ -132,10 +132,6 @@ class CrewAIImportReport:
         }
 
 
-def _slugify(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:64]
-
-
 class CrewAIAdapter:
     """Import CrewAI flow definitions as Grimoire Recipes.
 
@@ -148,10 +144,12 @@ class CrewAIAdapter:
         safe_trace = CrewAIAdapter.normalize_crewai_trace(raw_trace)
     """
 
+    source_id = "crewai"
+
     def __init__(self, trace_ledger: TraceLedger | None = None) -> None:
         self._trace = trace_ledger
 
-    def import_flow(
+    def to_recipe(
         self,
         flow: dict[str, Any] | CrewAIFlow,
         *,
@@ -167,7 +165,7 @@ class CrewAIAdapter:
         if isinstance(flow, dict):
             flow = CrewAIFlow.from_dict(flow)
 
-        recipe_id = f"{recipe_id_prefix}.{_slugify(flow.name)}"
+        recipe_id = f"{recipe_id_prefix}.{slugify(flow.name)}"
         report = CrewAIImportReport(flow_name=flow.name, recipe_id=recipe_id)
 
         if not flow.output_schema:
@@ -220,7 +218,7 @@ class CrewAIAdapter:
 
         if self._trace:
             try:
-                run_id = f"crewai-{_slugify(flow.name)}"
+                run_id = f"crewai-{slugify(flow.name)}"
                 outcome = TraceOutcome.SUCCESS if report.ok else TraceOutcome.PARTIAL
                 self._trace.record(
                     run_id=run_id,
@@ -237,6 +235,15 @@ class CrewAIAdapter:
                 report.errors.append(f"Trace record: {exc}")
 
         return recipe, report
+
+    def import_flow(
+        self,
+        flow: dict[str, Any] | CrewAIFlow,
+        *,
+        recipe_id_prefix: str = "crewai",
+    ) -> tuple[Recipe, CrewAIImportReport]:
+        """Alias déprécié de :meth:`to_recipe`, conservé au titre de l'ADR-002."""
+        return self.to_recipe(flow, recipe_id_prefix=recipe_id_prefix)
 
     @staticmethod
     def normalize_crewai_trace(raw: dict[str, Any]) -> dict[str, Any]:
