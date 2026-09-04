@@ -129,23 +129,27 @@ def normalize_input(
     )
 
 
-def _persist_capsule(hook: HookInput, decision: Decision) -> Path | None:
+def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, str]:
     """Write the pre-compaction capsule where the next window can find it.
 
     No host injects context *into* a compaction, so a capsule that only exists
     in the hook's stdout dies with the old window. On disk it outlives it, and
     the session-start decision can read it back.
+
+    Returns ``(path, "")`` when written, ``(None, cause)`` when the disk
+    refused — the caller says so instead of announcing a capsule that is not
+    there.
     """
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
-        return None
+        return None, ""
     task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root))
     dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(decision.context + "\n", encoding="utf-8")
-    except OSError:
-        return None
-    return dest
+    except OSError as exc:
+        return None, f"{dest}: {type(exc).__name__}: {exc}"
+    return dest, ""
 
 
 def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, Any]:
@@ -160,7 +164,8 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             specific["permissionDecision"] = mapping.get(decision.outcome, "allow")
             if decision.reason:
                 specific["permissionDecisionReason"] = decision.reason
-        elif decision.is_refusal and decision.reason:
+        elif decision.reason:
+            # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
         payload["hookSpecificOutput"] = specific
         return payload
@@ -173,6 +178,9 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         if decision.context:
             specific["additionalContext"] = decision.context
             payload["hookSpecificOutput"] = specific
+            # No host reads additionalContext on a stop event; a non-blocking
+            # verdict that lived only there was a verdict nobody saw.
+            payload["systemMessage"] = decision.context
         return payload
 
     if decision.context:
@@ -180,8 +188,15 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         payload["hookSpecificOutput"] = specific
     if hook.event is HookEvent.PRE_COMPACT and decision.context:
         # Nothing consumes additionalContext during a compaction; say plainly
-        # where the capsule went instead of pretending it was injected.
-        payload["systemMessage"] = "[Grimoire] capsule de gouvernance écrite avant compaction."
+        # where the capsule went — or that it went nowhere — instead of
+        # pretending it was injected.
+        capsule_error = str(decision.detail.get("capsule_error") or "")
+        payload["systemMessage"] = (
+            f"[Grimoire] capsule de gouvernance non écrite avant compaction ({capsule_error}) : "
+            "le contexte de tâche ne survivra pas à la compaction."
+            if capsule_error
+            else "[Grimoire] capsule de gouvernance écrite avant compaction."
+        )
     return payload
 
 
@@ -223,7 +238,11 @@ def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, laten
         from grimoire.traces.schemas import TraceOutcome
 
         detail = decision.detail
-        task_id = str(detail.get("task_id") or "")
+        # Le seul flux qui ignorait la tâche : la décision de policy ne la porte
+        # pas dans son détail, donc chaque refus d'outil était journalisé sous
+        # un task_id vide et `grimoire task trace` ne pouvait pas le retrouver.
+        # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
+        task_id = str(detail.get("task_id") or active_task_id(hook.project_root))
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
         tool_calls = []
         if hook.event is HookEvent.PRE_TOOL_USE:
@@ -285,13 +304,14 @@ def run_hook(
     decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
     latency_ms = (time.perf_counter() - started) * 1000
     _record_decision(hook, decision, host_id, latency_ms)
-    capsule = _persist_capsule(hook, decision)
-    if capsule is not None:
+    capsule, capsule_error = _persist_capsule(hook, decision)
+    if capsule is not None or capsule_error:
+        stamp = {"capsule": str(capsule)} if capsule is not None else {"capsule_error": capsule_error}
         decision = Decision(
             outcome=decision.outcome,
             reason=decision.reason,
             context=decision.context,
-            detail={**decision.detail, "capsule": str(capsule)},
+            detail={**decision.detail, **stamp},
         )
     return render(decision, hook, host_id), decision, hook
 

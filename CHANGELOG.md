@@ -7,7 +7,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Modifié
+
+- **L'étage TestPyPI, qui n'a jamais tourné, disparaît de `publish.yml`.** Le
+  projet n'a jamais été enregistré sur test.pypi.org : le job échouait à
+  chaque tag et son `continue-on-error` le faisait passer pour une
+  pré-vérification (#195). Ce qui vérifie réellement qu'une version
+  s'installe est nommé et documenté dans `CONTRIBUTING.md` : `make
+  wheel-check` (wheel installée dans un venv neuf) avant le tag, les jobs
+  `build` et `test` de `publish.yml` au tag, dont `publish-pypi` dépend sans
+  `continue-on-error`. La cible `make publish-test` disparaît avec l'étage.
 ### Ajouté
+
+- **`grimoire task trace <id>` — la cause d'un arrêt sans ouvrir un fichier
+  (L4, #139).** Timeline unifiée d'une tâche, lue depuis les quatre journaux
+  qui portaient déjà le `task_id` sans que rien ne les lise ensemble : Mission
+  Ledger (transitions, incidents), TraceLedger des hooks (outils refusés par la
+  policy, clôtures refusées), RuntimeKernel (run events, checkpoints, abort et
+  sa raison), EvidenceService (packs, verdicts). Les entrées qui expliquent un
+  arrêt sont marquées et reprises en « Cause(s) d'arrêt » ; `--causes` les
+  isole, `--output json` rend tout. Aucune source absente n'est inventée, aucun
+  dossier n'est créé en lisant, et la stack legacy `observatory.py` n'est pas
+  sollicitée. Deux écritures rendent cela possible : le gateway de hooks —
+  seul écrivain du TraceLedger — porte désormais le `task_id` résolu sur chaque
+  événement (les refus de policy étaient journalisés sous un identifiant vide,
+  donc introuvables par tâche), et un gate de transition rouge laisse une trace
+  `grimoire.task-gate` (au TraceLedger, jamais au Mission Ledger : un refus
+  n'est pas un changement d'état).
 
 - **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
   artefact.** `grimoire standard traceability` listait dix-sept exigences
@@ -43,6 +69,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
+  filtraient les `pull_request` par chemin : une PR qui ne touchait ni `src/`
+  ni `tests/` ne déclenchait aucun des checks que la protection de `main`
+  exige depuis le 2026-09-04, et restait bloquée sans jamais avoir été
+  vérifiée — le contraire de ce qu'un check requis promet. Les filtres
+  restent sur `push` ; sur une PR, tout tourne. Même retrait pour
+  `agentic-standard.yml`, dont le check `standard` est requis.
+- **Les hooks ne dégradent plus en silence.** Quatre gardes pouvaient passer
+  au vert sans l'avoir mérité, et le défaut n'est apparu qu'en écrivant le
+  contrôle négatif. (1) Une décision qui plantait rendait `ALLOW` — sur
+  `PreToolUse`, c'est `permissionDecision: allow`, et l'hôte n'affiche pas le
+  contexte explicatif : le plantage du moteur de politique était une
+  auto-approbation sans trace. Un appel que la politique n'a pas pu juger
+  rend désormais `ask`, avec la cause dans le motif ; les hôtes qui ne savent
+  pas demander la reçoivent en contexte. (2) Un gate de preuve qu'on ne sait
+  pas évaluer — task-board illisible — laissait fermer une tâche `governed`
+  avec un contexte que l'hôte ne lit pas sur `Stop` ; il bloque désormais une
+  fois, en nommant le fichier à réparer, et `stop_hook_active` garantit que
+  le second `Stop` passe. Les profils non bloquants sont prévenus, pas
+  bloqués. (3) Le message système annonçait « capsule écrite avant
+  compaction » même quand le disque avait refusé ; il dit maintenant qu'elle
+  n'a pas été écrite, et pourquoi — et la capsule est écrite même quand les
+  gates sont inévaluables, avec l'identifiant de tâche et le profil, les deux
+  faits que la fenêtre suivante ne sait pas reconstruire. (4) Un verdict
+  non bloquant sur `Stop` ne vivait que dans `additionalContext`, qu'aucun
+  hôte ne lit à cet événement ; il est aussi rendu en `systemMessage`.
+
 - **Deux étapes de CI ne pouvaient pas échouer, une troisième ne pouvait pas
   se prononcer.** Le verdict sur `grimoire-init.sh doctor` soustrayait trois
   `grep -c` l'un de l'autre — toute ligne citant Qdrant ou un chemin attendu
@@ -72,7 +125,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `grimoire standard activation-context` sans `--task-id` résout la tâche
   courante au lieu de `bootstrap`. La règle est documentée dans la référence
   CLI (« Quelle tâche la session porte »).
-
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.

@@ -133,6 +133,34 @@ perdre son historique de revue.
 2. Ajouter dans le `LocalRegistry`
 3. Documenter dans `docs/archetype-guide.md`
 
+## Publier une release
+
+Il n'y a pas d'étage TestPyPI : le projet n'y a jamais été enregistré, et un
+job qui affiche une pré-vérification sans l'exécuter est pire qu'aucun (#195).
+Ce qui vérifie qu'une version s'installe avant qu'elle ne parte sur PyPI —
+où un numéro consommé l'est définitivement :
+
+1. **Avant le tag, en local** — `make release VERSION=x.y.z` construit la
+   wheel puis exécute `make wheel-check` : installation de la wheel dans un
+   venv neuf (`.wheel-check-venv/`), `grimoire --version`, import du SDK.
+   Une wheel qui ne démarre pas ne se tague pas.
+2. **Au tag, dans `release.yml`** — trois gardes bloquants : le tag et
+   `version.txt` disent la même chose, `scripts/gen-kit-hashes.py --check`
+   couvre les fichiers livrés, `scripts/check-changelog-release.py` décrit la
+   version publiée.
+3. **Au tag, dans `publish.yml`** — le job `build` installe la wheel qu'il
+   vient de construire ; le job `test` la réinstalle dans un runner neuf sur
+   chaque Python supporté et importe le SDK. `publish-pypi` dépend des deux :
+   rien ne part si l'un échoue, et aucun job n'est en `continue-on-error`.
+
+```bash
+make release VERSION=x.y.z      # check + hashes + build + wheel-check
+git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json
+git commit -m "chore: release x.y.z"
+git tag -a vx.y.z -m "Release x.y.z"
+git push origin main --tags     # publish.yml prend le relais
+```
+
 ## Questions ?
 
 Ouvrir une issue sur GitHub.

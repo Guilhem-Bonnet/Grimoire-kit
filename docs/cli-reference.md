@@ -272,6 +272,7 @@ prochain export l'écrase.
 | `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
+| `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
@@ -286,6 +287,29 @@ reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` pr�
 Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_list_ready`,
 `task_show`, `task_claim`, `task_update`, `task_context`) : même service, même
 gate, même refus. Voir [Intégration MCP](mcp-integration.md).
+
+### Pourquoi une tâche s'est arrêtée
+
+`grimoire task trace <id>` lit quatre journaux qui portent chacun le `task_id`
+— le Mission Ledger (transitions, incidents), le TraceLedger des hooks (outils
+autorisés ou **refusés par la policy**, clôtures refusées, **gates de
+transition rouges**), le RuntimeKernel (run events, checkpoints, **abort et sa
+raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
+Les entrées qui expliquent un arrêt sont marquées et reprises dans une section
+« Cause(s) d'arrêt » ; `--causes` n'affiche qu'elles ; `--output json` rend la
+timeline complète avec ses sources. Une source absente est nommée comme telle ;
+rien n'est créé, rien n'est inventé. `bootstrap` se trace aussi — c'est là que
+les hooks écrivent tant qu'aucune tâche n'est réclamée.
+
+```text
+GAO-livrer-la-ti-001 — Livrer la timeline  (running)
+    21:14:39  ledger   ready → claimed par claude (claim claude@claude-code)
+  ✗ 21:14:40  hooks    Bash refusé par la policy (args 3f2a9c1e0b7d4e11)
+  ✗ 21:14:41  gate     gate « in_progress_to_review » refuse la transition — manque : evidence_pack, decision_trace
+  ✗ 21:14:42  runtime  workflow WFI-recipe-livraison-001 abandonné — raison : suite pytest rouge
+
+Cause(s) d'arrêt : 3
+```
 
 ### Quelle tâche la session porte
 
