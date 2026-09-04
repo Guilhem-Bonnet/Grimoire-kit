@@ -48,16 +48,37 @@ Une clôture sans gates verts est une tâche non terminée.
 """
 
 
+#: Ce que le fichier de projet écrit à la place de l'identifiant : la tâche
+#: change à chaque session, le fichier non.
+TASK_ID_PLACEHOLDER = "{task_id}"
+
+
 def default_activation_directive(task_id: str = "bootstrap") -> str:
     """Directive validated by the 2026-07-09 activated-arm campaign."""
-    return _DIRECTIVE_TEMPLATE.format(task_id=task_id)
+    return _DIRECTIVE_TEMPLATE.replace(TASK_ID_PLACEHOLDER, task_id)
+
+
+def activation_directive_template() -> str:
+    """The directive as installed in a project: ``{task_id}`` left for the session to fill."""
+    return _DIRECTIVE_TEMPLATE
 
 
 def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> str:
-    """Project-level directive if present, built-in default otherwise."""
+    """Project-level directive if present, built-in default otherwise — for *task_id*.
+
+    The project file is a template: ``{task_id}`` is filled with the task the
+    session resolved. Files installed before that placeholder existed carry a
+    literal ``bootstrap``; when such a file is the untouched default, it is
+    rendered as the default — a directive that names the wrong task was the
+    defect this fixes, not a customisation to preserve. A file a team edited is
+    returned as written, placeholder filled if it kept one.
+    """
     context_path = project_root / ACTIVATION_CONTEXT_RELPATH
     if context_path.is_file():
-        return context_path.read_text(encoding="utf-8")
+        text = context_path.read_text(encoding="utf-8")
+        if text == default_activation_directive("bootstrap"):
+            return default_activation_directive(task_id)
+        return text.replace(TASK_ID_PLACEHOLDER, task_id)
     return default_activation_directive(task_id)
 
 
@@ -99,8 +120,10 @@ def install_claude_activation(
     written: list[Path] = []
     context_path = project_root / ACTIVATION_CONTEXT_RELPATH
     if not context_path.exists():
+        # Le fichier reste un gabarit : la tâche est résolue à chaque session
+        # (claim du ledger, board, ``GRIMOIRE_TASK_ID``), pas figée à l'install.
         context_path.parent.mkdir(parents=True, exist_ok=True)
-        context_path.write_text(default_activation_directive(task_id), encoding="utf-8")
+        context_path.write_text(activation_directive_template(), encoding="utf-8")
         written.append(ACTIVATION_CONTEXT_RELPATH)
 
     settings_path = project_root / SETTINGS_RELPATH

@@ -2,14 +2,6 @@ name: Agentic standard
 
 on:
   pull_request:
-    paths:
-      - "archetypes/agentic-standard/**"
-      - "framework/agentic-standard/**"
-      - "src/grimoire/core/agentic_standard.py"
-      - "src/grimoire/cli/cmd_standard.py"
-      - "tests/test_agentic_standard.py"
-      - "docs/standard/integration.md"
-      - ".github/workflows/agentic-standard.yml"
   push:
     branches: [main, feat/agentic-standard-bridge]
     paths:

@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Les agents lisent, réclament et clôturent leurs tâches par MCP (L3,
+  #138).** Le serveur MCP expose `task_list_ready`, `task_show`, `task_claim`,
+  `task_update` (move / block / close) et `task_context`. Ils appellent le
+  service que `grimoire task` appelle désormais aussi
+  (`grimoire.missions.service.TaskService`) : même machine à états, même gate
+  de preuve, même refus structuré — la preuve manquante et le remède, et rien
+  d'écrit au ledger. Un contrôle négatif échoue si l'un des deux contourne le
+  gate. Prouvé par un vrai client du SDK `mcp` sur un projet enrôlé en
+  `governed` : lister, réclamer, déplacer, être refusé sans pack de preuve,
+  prouver, clore ; le board projeté passe `ready → in_progress → accepted`.
+
 ### Corrigé
 
 - **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
@@ -14,7 +27,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ni `tests/` ne déclenchait aucun des checks que la protection de `main`
   exige depuis le 2026-09-04, et restait bloquée sans jamais avoir été
   vérifiée — le contraire de ce qu'un check requis promet. Les filtres
-  restent sur `push` ; sur une PR, tout tourne.
+  restent sur `push` ; sur une PR, tout tourne. Même retrait pour
+  `agentic-standard.yml`, dont le check `standard` est requis.
+- **Le hook SessionStart nommait toujours `bootstrap`, quelle que soit la
+  tâche réclamée.** Deux causes, toutes deux vérifiées sur un projet neuf :
+  `.claude/activation-context.md`, écrit par `standard init`, portait
+  `bootstrap` en dur et primait sur la tâche résolue ; et la résolution ne
+  lisait que le board, une projection que rien ne régénérait après un claim.
+  Le fichier installé est désormais un gabarit (`{task_id}`), un fichier
+  ancien resté au défaut est rendu avec la tâche courante, et la résolution
+  préfère le **claim actif du Mission Ledger** (`claimed` / `running`,
+  restreint à `GRIMOIRE_ACTOR` s'il est posé) au board, sous `GRIMOIRE_TASK_ID`.
+  Chaque écriture de `grimoire task` reprojette le board du standard ;
+  `grimoire standard activation-context` sans `--task-id` résout la tâche
+  courante au lieu de `bootstrap`. La règle est documentée dans la référence
+  CLI (« Quelle tâche la session porte »).
+
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
