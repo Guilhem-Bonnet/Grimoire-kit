@@ -9,6 +9,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un fichier de gates illisible ne laisse plus passer toutes les
+  transitions.** `evidence-gates.yaml` cassé était lu comme `{}` : aucune
+  transition déclarée, donc aucune gardée, donc `task move` et `task close`
+  passaient sans preuve — le gate était d'autant plus vert que son fichier
+  était abîmé, à rebours de ce que le module promet. Le lecteur distingue
+  désormais « absent » (aucune transition) de « illisible » (`GatesFileError`)
+  : `check_transition` rend un verdict bloquant `hard_fail` qui nomme le
+  fichier et la cause, `task show` le signale au lieu de se taire, et un
+  registre de fournisseurs cassé dit « illisible » au lieu du faux diagnostic
+  « aucun fournisseur activé ».
+
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
   Mesuré sur les 262 identifiants que le kit émet aujourd'hui : **26 étaient

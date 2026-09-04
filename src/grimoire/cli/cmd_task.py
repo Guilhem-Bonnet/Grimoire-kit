@@ -264,7 +264,7 @@ def task_show(
 ) -> None:
     """Détaille une tâche, et ce que son prochain pas exigera."""
     from grimoire.missions.board import board_status_of
-    from grimoire.missions.gates import declared_transitions
+    from grimoire.missions.gates import GatesFileError, declared_transitions
 
     task = _require_task(_ledger(project_root, ledger_root), task_id)
     if _fmt(ctx) == "json":
@@ -276,8 +276,12 @@ def task_show(
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     here = board_status_of(task.status)
-    exigences = {to: e.get("required_evidence", [])
-                 for (src, to), e in declared_transitions(project_root.resolve()).items() if src == here}
+    try:
+        transitions = declared_transitions(project_root.resolve())
+    except GatesFileError as exc:
+        console.print(f"  [yellow]![/yellow] {exc} — aucune transition ne passera tant qu'il n'est pas réparé")
+        return
+    exigences = {to: e.get("required_evidence", []) for (src, to), e in transitions.items() if src == here}
     for to, req in exigences.items():
         console.print(f"  [dim]vers {to} : {', '.join(str(r) for r in req)}[/dim]")
 

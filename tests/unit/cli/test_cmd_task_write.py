@@ -236,3 +236,23 @@ def test_context_produit_le_bundle_de_la_tache(projet: Path) -> None:
     res = run(projet, "context", tid)
     assert res.exit_code == 0, res.output
     assert tid in res.output
+
+
+# ── un fichier de gates cassé n'ouvre pas la porte ──────────────────────────
+
+def test_un_fichier_de_gates_illisible_bloque_la_transition_et_le_dit(projet: Path) -> None:
+    tid = ajoute(projet)
+    (projet / GATES_FILE).write_text("transitions: [oups", encoding="utf-8")
+    res = run(projet, "move", tid, "--to", "ready")
+    assert res.exit_code == 1
+    assert "evidence-gates.yaml" in res.output
+    assert "illisible" in res.output
+
+
+def test_show_signale_un_fichier_de_gates_illisible_au_lieu_de_se_taire(projet: Path) -> None:
+    tid = ajoute(projet)
+    (projet / GATES_FILE).write_text("transitions: [oups", encoding="utf-8")
+    res = run(projet, "show", tid)
+    assert res.exit_code == 0, res.output
+    assert "evidence-gates.yaml" in res.output
+    assert "illisible" in res.output

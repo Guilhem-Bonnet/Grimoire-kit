@@ -31,6 +31,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_profile_manifest import read_profile
 from grimoire.evidence import EvidenceService, VerdictResult
@@ -39,6 +40,7 @@ __all__ = [
     "GATES_FILE",
     "GateRefusal",
     "GateVerdict",
+    "GatesFileError",
     "check_transition",
     "declared_transitions",
 ]
@@ -91,19 +93,55 @@ class GateVerdict:
         return self.transition_id != ""
 
 
+class GatesFileError(GrimoireMissionError):
+    """Un fichier du standard existe mais ne se lit pas.
+
+    Rendre ``{}`` à la place — ce que faisait le lecteur — transformait un
+    fichier de gates abîmé en fichier sans transition : chaque passage devenait
+    libre, et le gate était d'autant plus vert que son fichier était cassé.
+    """
+
+    def __init__(self, rel: Path, cause: str) -> None:
+        self.rel = rel
+        self.cause = cause
+        super().__init__(f"{rel.as_posix()} illisible : {cause}")
+
+
 def _yaml_mapping(root: Path, rel: Path) -> dict[str, Any]:
+    """Le fichier *rel* comme table ; ``{}`` s'il n'existe pas, erreur s'il est cassé."""
     path = root / rel
     if not path.is_file():
         return {}
     try:
         data = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
-    except (YAMLError, OSError):
+    except (YAMLError, OSError, UnicodeDecodeError) as exc:
+        raise GatesFileError(rel, f"{type(exc).__name__}: {exc}") from exc
+    if data is None:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise GatesFileError(rel, f"attendu une table YAML, trouvé {type(data).__name__}")
+    return data
+
+
+def _unreadable_verdict(exc: GatesFileError) -> GateVerdict:
+    """Un fichier de gates illisible ferme toutes les portes, en le disant."""
+    return GateVerdict(
+        transition_id=exc.rel.name,
+        strictness=_UNKNOWN_PROFILE_STRICTNESS,
+        refusals=(GateRefusal(
+            exc.rel.as_posix(),
+            f"fichier de gates illisible — {exc.cause}",
+            "réparer le YAML ; tant qu'il est illisible, aucune transition ne passe",
+        ),),
+    )
 
 
 def declared_transitions(root: Path) -> dict[tuple[str, str], dict[str, Any]]:
-    """Transitions déclarées, indexées par (depuis, vers) en vocabulaire board."""
+    """Transitions déclarées, indexées par (depuis, vers) en vocabulaire board.
+
+    Lève :class:`GatesFileError` si le fichier existe et ne se lit pas : un
+    appelant qui veut la liste doit savoir qu'il n'en a pas une.
+    """
     gates = _yaml_mapping(root, GATES_FILE)
     out: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in gates.get("transitions", []) or []:
@@ -171,7 +209,10 @@ def _resolve_owner(root: Path, task: Any, name: str) -> GateRefusal | None:
 
 
 def _resolve_provider_policy(root: Path, task: Any, name: str) -> GateRefusal | None:
-    registry = _yaml_mapping(root, STANDARD_DIR / "llm-provider-registry.yaml")
+    try:
+        registry = _yaml_mapping(root, STANDARD_DIR / "llm-provider-registry.yaml")
+    except GatesFileError as exc:
+        return GateRefusal(name, f"registre illisible — {exc.cause}", f"réparer {exc.rel.as_posix()}")
     providers = registry.get("providers")
     if isinstance(providers, list) and any(
         isinstance(p, dict) and p.get("enabled") is True for p in providers
@@ -245,9 +286,13 @@ def check_transition(root: Path, task: Any, from_board: str, to_board: str) -> G
     `task` est un `MissionTask` ; le typage reste large pour que ce module ne
     dépende pas du ledger — il vérifie des artefacts, il ne transitionne rien.
     """
-    entry = declared_transitions(root).get((from_board, to_board))
+    try:
+        entry = declared_transitions(root).get((from_board, to_board))
+        strictness = _strictness(root)
+    except GatesFileError as exc:
+        return _unreadable_verdict(exc)
     if entry is None:
-        return GateVerdict("", _strictness(root), ())
+        return GateVerdict("", strictness, ())
 
     refusals: list[GateRefusal] = []
     for name in entry.get("required_evidence", []) or []:
@@ -267,4 +312,4 @@ def check_transition(root: Path, task: Any, from_board: str, to_board: str) -> G
         if refusal is not None:
             refusals.append(refusal)
 
-    return GateVerdict(str(entry.get("id", "")), _strictness(root), tuple(refusals))
+    return GateVerdict(str(entry.get("id", "")), strictness, tuple(refusals))
