@@ -39,7 +39,19 @@ pinned:
         dérive du modèle servi qui bloque H1. Design et règle A1-v3
         figés dans ACTIVATION-V2.md AVANT toute exécution de baseline-v3
         et APRÈS jugement d'activated-v2 (ordre divulgué).
-arms: [governed, baseline, activated, activated-v2, activated-v2-disclosed, baseline-v3]
+    - date: "2026-09-04"
+      note: >-
+        Campagne pré-enregistrée (reports/2026-09-04/PREREGISTRATION.md,
+        première après l'amendement A2) : ajout des bras `enforced`
+        (activation verbatim + hooks bloquants PreToolUse et Stop du kit
+        3.37.0, profil governed, bootstrap in_progress — mécanisme committé
+        dans witnesses/web-app-todo/enforced/) et `activated-v3` (référence
+        contemporaine, mécanisme activated inchangé). Prompts inchangés.
+        Pins : kit 3.37.0 (main @ 08a86d5f, venv du worktree), runner Claude
+        Code CLI 2.1.101 épinglé, claude-sonnet-4-6, Go 1.22.12 restauré.
+        Runner committé (evals/runner.py) ; règle d'arrêt budgétaire et repli
+        sous puissance figés avant tout run.
+arms: [governed, baseline, activated, activated-v2, activated-v2-disclosed, baseline-v3, activated-v3, enforced]
 repetitions_min: 5
 disclosed_prompt_template: >-
   Formulation figée du prompt du bras `activated-v2-disclosed` (exploratoire,

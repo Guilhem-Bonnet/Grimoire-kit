@@ -27,8 +27,20 @@ from grimoire.core.agentic_standard import (
     verify_standard_profile,
 )
 
-ARMS = ("governed", "baseline", "activated", "activated-v2", "activated-v2-disclosed", "baseline-v3")
-ENROLLED_ARMS = ("governed", "activated", "activated-v2", "activated-v2-disclosed")
+ARMS = (
+    "governed",
+    "baseline",
+    "activated",
+    "activated-v2",
+    "activated-v2-disclosed",
+    "baseline-v3",
+    "activated-v3",
+    "enforced",
+)
+ENROLLED_ARMS = ("governed", "activated", "activated-v2", "activated-v2-disclosed", "activated-v3", "enforced")
+#: Bras dont le gate est évalué à l'état ``review`` (mécanisme d'activation) :
+#: les bras activés et le bras enforced, qui partagent la même directive.
+REVIEW_GATE_ARMS = ("activated", "activated-v2", "activated-v2-disclosed", "activated-v3", "enforced")
 
 
 def collect_standard_metrics(
@@ -110,7 +122,7 @@ def collect_record(
         collect_standard_metrics(
             project_root.resolve(),
             standard_task_id,
-            gate_target_state="review" if arm.startswith("activated") else None,
+            gate_target_state="review" if arm in REVIEW_GATE_ARMS else None,
         )
         if arm in ENROLLED_ARMS
         else None
