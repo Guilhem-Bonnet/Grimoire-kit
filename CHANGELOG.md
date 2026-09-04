@@ -7,6 +7,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Modifié
+
+- **L'étage TestPyPI, qui n'a jamais tourné, disparaît de `publish.yml`.** Le
+  projet n'a jamais été enregistré sur test.pypi.org : le job échouait à
+  chaque tag et son `continue-on-error` le faisait passer pour une
+  pré-vérification (#195). Ce qui vérifie réellement qu'une version
+  s'installe est nommé et documenté dans `CONTRIBUTING.md` : `make
+  wheel-check` (wheel installée dans un venv neuf) avant le tag, les jobs
+  `build` et `test` de `publish.yml` au tag, dont `publish-pypi` dépend sans
+  `continue-on-error`. La cible `make publish-test` disparaît avec l'étage.
+
 ### Corrigé
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
