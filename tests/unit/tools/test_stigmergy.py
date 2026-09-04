@@ -142,6 +142,23 @@ class TestPersistence:
         b = load_board(root)
         assert len(b.pheromones) == 0
 
+    def test_a_corrupted_board_is_quarantined_not_overwritten(self, root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Un board tronqué (disque plein, écriture concurrente) était lu comme
+        vide, puis écrasé par le dépôt suivant : tout l'historique disparaissait
+        et `deposit_pheromone` rendait un Pheromone comme si de rien n'était."""
+        deposit_pheromone(root, ptype="ALERT", location="a.py", text="premier", emitter="t")
+        path = root / "_grimoire-output" / "pheromone-board.json"
+        corrompu = path.read_text(encoding="utf-8")[:40]
+        path.write_text(corrompu, encoding="utf-8")
+
+        assert deposit_pheromone(root, ptype="ALERT", location="b.py", text="second", emitter="t") is not None
+
+        survivants = list(path.parent.glob("pheromone-board.json.corrupt-*"))
+        assert len(survivants) == 1
+        assert survivants[0].read_text(encoding="utf-8") == corrompu
+        assert "corrompu" in capsys.readouterr().err
+        assert len(load_board(root).pheromones) == 1
+
 
 # ── Emit ──────────────────────────────────────────────────────────────────────
 

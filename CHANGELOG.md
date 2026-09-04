@@ -9,6 +9,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un pheromone board corrompu est mis de côté, plus écrasé.** Un board
+  tronqué (disque plein, deux hooks concurrents sans `flock`) était lu comme
+  vide, puis réécrit par le dépôt suivant : tout l'historique stigmergique
+  disparaissait et `deposit_pheromone` rendait un `Pheromone` comme si de
+  rien n'était. Le fichier illisible est désormais renommé
+  `pheromone-board.json.corrupt-<horodatage>` avant qu'un board vide reparte,
+  et une ligne sur stderr le dit. La copie autonome `framework/tools/` a le
+  même défaut, documenté en #265 (zone gelée).
+
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
   Mesuré sur les 262 identifiants que le kit émet aujourd'hui : **26 étaient

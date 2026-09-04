@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -259,14 +260,39 @@ def read_events(project_root: Path) -> list[dict[str, Any]]:
 
 
 def load_board(project_root: Path) -> PheromoneBoard:
+    """The project's board, or an empty one when there is none.
+
+    A board that exists but cannot be parsed is moved aside, never read as
+    empty: the next ``save_board`` would otherwise overwrite it, and a single
+    truncated write (full disk, two hooks racing without ``flock``) would
+    erase every signal ever emitted, with ``deposit_pheromone`` returning a
+    ``Pheromone`` as if nothing had happened.
+    """
     path = _board_path(project_root)
     if not path.exists():
         return PheromoneBoard()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return PheromoneBoard.from_dict(data)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+        _quarantine_board(path, exc)
         return PheromoneBoard()
+
+
+def _quarantine_board(path: Path, exc: Exception) -> None:
+    """Keep the unreadable board under a dated ``.corrupt-*`` name, and say so."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    aside = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        path.replace(aside)
+        where = f"mis de côté sous {aside.name}"
+    except OSError as move_exc:
+        where = f"impossible de le mettre de côté ({move_exc})"
+    print(
+        f"[stigmergy] pheromone board corrompu ({type(exc).__name__}: {exc}) — {where} ; "
+        "un board vide repart de zéro.",
+        file=sys.stderr,
+    )
 
 
 def save_board(project_root: Path, board: PheromoneBoard) -> None:
