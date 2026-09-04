@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Les agents lisent, réclament et clôturent leurs tâches par MCP (L3,
+  #138).** Le serveur MCP expose `task_list_ready`, `task_show`, `task_claim`,
+  `task_update` (move / block / close) et `task_context`. Ils appellent le
+  service que `grimoire task` appelle désormais aussi
+  (`grimoire.missions.service.TaskService`) : même machine à états, même gate
+  de preuve, même refus structuré — la preuve manquante et le remède, et rien
+  d'écrit au ledger. Un contrôle négatif échoue si l'un des deux contourne le
+  gate. Prouvé par un vrai client du SDK `mcp` sur un projet enrôlé en
+  `governed` : lister, réclamer, déplacer, être refusé sans pack de preuve,
+  prouver, clore ; le board projeté passe `ready → in_progress → accepted`.
+
 ### Corrigé
 
 - **Un pheromone board corrompu est mis de côté, plus écrasé.** Un board
@@ -17,6 +30,36 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `pheromone-board.json.corrupt-<horodatage>` avant qu'un board vide reparte,
   et une ligne sur stderr le dit. La copie autonome `framework/tools/` a le
   même défaut, documenté en #265 (zone gelée).
+
+- **Deux étapes de CI ne pouvaient pas échouer, une troisième ne pouvait pas
+  se prononcer.** Le verdict sur `grimoire-init.sh doctor` soustrayait trois
+  `grep -c` l'un de l'autre — toute ligne citant Qdrant ou un chemin attendu
+  comptait en négatif, erreur ou non, et un doctor qui n'avait pas tourné
+  laissait un fichier vide, zéro erreur, étape verte ; `scripts/ci-doctor-gate.py`
+  exige la bannière du doctor et fait échouer l'étape sur toute ligne `✗`
+  hors manques attendus, en la nommant (six contrôles négatifs). L'étape de
+  dérive du standard amont sortait en 2 ou 3 sous `continue-on-error` : rouge
+  en permanence, ignorée par tous, et une vraie erreur de la commande passait
+  au même rouge ignoré ; les deux cas connus sont dits en avertissement et
+  sortent en 0, tout autre statut échoue. Enfin le job `standard`, check
+  requis par la protection de `main`, était filtré par chemins : sur une PR
+  qui ne touchait pas le standard il restait « attendu » sans jamais se
+  prononcer et la PR ne pouvait pas être fusionnée — un garde qui bloque tout
+  ce qu'il ne regarde pas. Il tourne sur chaque PR.
+
+- **Le hook SessionStart nommait toujours `bootstrap`, quelle que soit la
+  tâche réclamée.** Deux causes, toutes deux vérifiées sur un projet neuf :
+  `.claude/activation-context.md`, écrit par `standard init`, portait
+  `bootstrap` en dur et primait sur la tâche résolue ; et la résolution ne
+  lisait que le board, une projection que rien ne régénérait après un claim.
+  Le fichier installé est désormais un gabarit (`{task_id}`), un fichier
+  ancien resté au défaut est rendu avec la tâche courante, et la résolution
+  préfère le **claim actif du Mission Ledger** (`claimed` / `running`,
+  restreint à `GRIMOIRE_ACTOR` s'il est posé) au board, sous `GRIMOIRE_TASK_ID`.
+  Chaque écriture de `grimoire task` reprojette le board du standard ;
+  `grimoire standard activation-context` sans `--task-id` résout la tâche
+  courante au lieu de `bootstrap`. La règle est documentée dans la référence
+  CLI (« Quelle tâche la session porte »).
 
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
