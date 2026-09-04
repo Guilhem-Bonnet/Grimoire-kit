@@ -480,6 +480,194 @@ def grimoire_standard_gate(
         return json.dumps({"error": str(exc)})
 
 
+# ── Tâches (issue #138) ───────────────────────────────────────────────────────
+#
+# Un agent ne pouvait pas savoir qu'un board existait : le serveur exposait la
+# configuration, la mémoire et le standard, aucune tâche. Ces cinq outils sont
+# la surface que Beads et Vibe Kanban donnent à leurs agents — un outil, pas du
+# texte dans un prompt. Ils appellent le même `TaskService` que `grimoire task`,
+# donc le même gate de preuve : une transition que le CLI refuse, MCP la
+# refuse, et le refus nomme la preuve manquante et le remède.
+
+_TASK_ACTIONS = ("move", "block", "close")
+
+
+def _task_service(project_path: str, ledger_root: str) -> Any:
+    from grimoire.missions.service import TaskService
+
+    return TaskService(Path(project_path).resolve(), Path(ledger_root))
+
+
+def _task_json(task: Any) -> dict[str, Any]:
+    from grimoire.missions.board import board_status_of
+
+    data: dict[str, Any] = task.to_dict()
+    data["board"] = board_status_of(task.status)
+    return data
+
+
+def _task_error(exc: Exception) -> str:
+    from grimoire.missions.service import TaskRefusedError
+
+    if isinstance(exc, TaskRefusedError):
+        return json.dumps(exc.to_dict(), indent=2, ensure_ascii=False)
+    return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def task_list_ready(
+    project_path: str = ".", mission: str = "", ledger_root: str = "_grimoire-runtime-output/ledger"
+) -> str:
+    """List the tasks an agent can claim now (ledger state `ready`).
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        mission: Restrict to one mission id. Empty string lists every mission.
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        service = _task_service(project_path, ledger_root)
+        if not service.has_ledger:
+            return json.dumps({"tasks": [], "count": 0, "note": "no Mission Ledger yet — `task add` opens one"})
+        tasks = service.list_ready(mission or None)
+        return json.dumps({"tasks": [_task_json(t) for t in tasks], "count": len(tasks)}, indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool()
+def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
+    """Show one task: state, acceptance, claim, and what each next move will require.
+
+    Args:
+        task_id: Ledger task id (as listed by task_list_ready).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    from grimoire.missions.board import board_status_of
+    from grimoire.missions.gates import declared_transitions
+
+    try:
+        service = _task_service(project_path, ledger_root)
+        task = service.require(task_id)
+        here = board_status_of(task.status)
+        requires = {
+            to: list(entry.get("required_evidence", []) or [])
+            for (src, to), entry in declared_transitions(service.project_root).items()
+            if src == here
+        }
+        payload = _task_json(task)
+        payload["next_moves_require"] = requires
+        return json.dumps(payload, indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool()
+def task_claim(
+    task_id: str,
+    actor: str = "mcp-agent",
+    host: str = "mcp",
+    project_path: str = ".",
+    ledger_root: str = "_grimoire-runtime-output/ledger",
+) -> str:
+    """Claim a ready task (ready → claimed). Refused, with the missing proof named, when the gate is red.
+
+    Args:
+        task_id: Ledger task id to claim.
+        actor: Who claims — the agent's name. Set GRIMOIRE_ACTOR to the same value so
+            the session's activation hook resolves this claim as the current task.
+        host: Runtime taking the task (default: "mcp").
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        move = _task_service(project_path, ledger_root).claim(task_id, actor, host)
+        return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool()
+def task_update(
+    task_id: str,
+    action: str,
+    to: str = "",
+    reason: str = "",
+    actor: str = "mcp-agent",
+    project_path: str = ".",
+    ledger_root: str = "_grimoire-runtime-output/ledger",
+) -> str:
+    """Move, block or close a task. Every transition passes the evidence gate: no proof, no move.
+
+    Args:
+        task_id: Ledger task id.
+        action: "move" (needs `to`), "block" (needs `reason`), or "close".
+        to: Target ledger state for "move" (ready, running, needs_verification, cancelled...).
+        reason: Why — required for "block", optional otherwise.
+        actor: Who acts (default: "mcp-agent").
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    from grimoire.missions.schemas import TaskState
+
+    if action not in _TASK_ACTIONS:
+        return json.dumps({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+    if action == "move":
+        try:
+            target = TaskState(to)
+        except ValueError:
+            return json.dumps({"error": f"unknown state {to!r}", "states": [s.value for s in TaskState]})
+    elif action == "block":
+        if not reason.strip():
+            return json.dumps({"error": "block requires a reason"})
+        target = TaskState.BLOCKED
+    else:
+        target = TaskState.CLOSED
+    try:
+        move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
+        return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool()
+def task_context(
+    task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
+) -> str:
+    """Which task this session is on, and its context bundle.
+
+    Args:
+        task_id: Ledger task id. Empty string resolves the session's active task
+            (GRIMOIRE_TASK_ID, then the ledger's active claim, then the board, then bootstrap).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    from grimoire.core.standard_state import resolve_active_task
+
+    root = Path(project_path).resolve()
+    try:
+        service = _task_service(project_path, ledger_root)
+        if task_id:
+            resolved, source = task_id, "argument"
+        else:
+            active = resolve_active_task(root)
+            resolved, source = active.task_id, active.source
+        payload: dict[str, Any] = {"task_id": resolved, "resolved_from": source}
+        task = service.ledger.get_task(resolved) if service.has_ledger else None
+        if task is not None:
+            payload["task"] = _task_json(task)
+            artifact = service.context(resolved)
+            payload["context_bundle_path"] = str(artifact.path)
+            payload["context_bundle"] = artifact.data
+        else:
+            payload["task"] = None
+            payload["note"] = "no ledger task with this id — evidence still goes under this task_id"
+        return json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
 # ── Host surfaces ─────────────────────────────────────────────────────────────
 #
 # A host that loads neither skill folders nor slash commands can still reach

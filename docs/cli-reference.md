@@ -263,9 +263,44 @@ prochain export l'écrase.
 | `grimoire task board export . --dry-run` | Afficher la projection sans écrire |
 | `grimoire task board export . --mission <id>` | N'exporter qu'une mission |
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
+| `grimoire task add "<titre>" -a "<critère>" [--owner <qui>]` | Ouvrir une tâche (un critère d'acceptation au moins) |
+| `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
+| `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
+| `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
+| `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
+| `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
+| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
+| `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
+| `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 
-Sans ledger, la commande refuse et sort en erreur plutôt que d'écrire un board
-vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
+Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
+board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
+
+Chaque écriture (`add`, `claim`, `move`, `block`, `close`, `link`) franchit deux
+portes avant de toucher le ledger : la machine à états, puis le gate de preuve de
+`_grimoire/standard/evidence-gates.yaml`. Un refus nomme la preuve manquante et le
+remède ; rien n'est écrit. Après une écriture acceptée, le board du standard est
+reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` présent)
+— plus besoin de relancer `task board export` pour qu'un claim se voie.
+
+Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_list_ready`,
+`task_show`, `task_claim`, `task_update`, `task_context`) : même service, même
+gate, même refus. Voir [Intégration MCP](mcp-integration.md).
+
+### Quelle tâche la session porte
+
+Les hooks (`SessionStart`, `UserPromptSubmit`, `Stop`) et `grimoire standard
+activation-context` résolvent la tâche courante dans cet ordre :
+
+1. `GRIMOIRE_TASK_ID` — un opérateur dit de quelle tâche la session parle ;
+2. le **claim actif du Mission Ledger** : l'unique tâche `claimed` ou `running`,
+   restreinte aux claims de `GRIMOIRE_ACTOR` quand cette variable est posée ;
+3. l'unique carte `in_progress` du board (projet sans ledger) ;
+4. `bootstrap`.
+
+Deux claims simultanés (ou deux cartes `in_progress`) sont ambigus : le niveau
+est sauté plutôt que deviné, et `GRIMOIRE_TASK_ID` tranche. `task_context` sans
+argument, côté MCP, rend la tâche résolue et la règle qui l'a choisie.
 
 Neuf états côté ledger se projettent sur les huit colonnes du standard. Les
 fusions sont décidées et testées : `claimed` et `running` deviennent
