@@ -9,6 +9,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
+  filtraient les `pull_request` par chemin : une PR qui ne touchait ni `src/`
+  ni `tests/` ne déclenchait aucun des checks que la protection de `main`
+  exige depuis le 2026-09-04, et restait bloquée sans jamais avoir été
+  vérifiée — le contraire de ce qu'un check requis promet. Les filtres
+  restent sur `push` ; sur une PR, tout tourne.
+
 - **Le score ne route plus les checks par correspondance de préfixe.** Un
   préfixe non déclaré tombait silencieusement dans le bucket `artifacts`.
   Mesuré sur les 262 identifiants que le kit émet aujourd'hui : **26 étaient
