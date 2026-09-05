@@ -1,0 +1,27 @@
+$schema: "grimoire-agentic-standard-capability-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Toute capacité créée en cours de route — agent, skill, workflow, hook, instruction — répond à un gap nommé, est classée éphémère ou durable, expire ou est promue avec preuve."
+
+# Vide tant que rien n'a été créé dynamiquement : c'est un état légitime.
+capabilities: []
+# - id: CAP-001
+#   name: ""
+#   kind: skill               # agent | skill | workflow | hook | instruction | prompt
+#   gap: ""                   # le besoin qu'aucune capacité existante ne couvrait
+#   durability: ephemeral     # ephemeral | durable
+#   expires_at: ""            # obligatoire si ephemeral : date ou règle de purge
+#   status: draft             # draft | experimental | canary | enforced | deprecated | retired
+#   owner: ""
+#   influences_orchestration: false   # si true, aussi inscrite dans hook-registry ou orchestration-policy
+#   promoted_from: ""         # id de l'artefact éphémère promu
+#   promotion:
+#     usage: ""               # combien de fois, sur quelles missions
+#     value: ""               # ce que ça a évité ou apporté
+#     validation: ""          # qui a validé, sur quelle preuve
+
+allowed:
+  kinds: [agent, skill, workflow, hook, instruction, prompt]
+  durabilities: [ephemeral, durable]
+  statuses: [draft, experimental, canary, enforced, deprecated, retired]

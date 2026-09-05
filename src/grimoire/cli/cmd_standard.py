@@ -18,6 +18,7 @@ from grimoire.core.agentic_standard import (
     StandardRemediationApplyResult,
     StandardRuntimeArtifact,
     StandardVerificationResult,
+    _read_manifest_profile,
     apply_remediation_actions,
     audit_runtime_events,
     build_context_bundle,
@@ -293,41 +294,63 @@ def upstream(ctx: typer.Context) -> None:
     raise typer.Exit(status.exit_code)
 
 
-_trace_profile_opt = typer.Option(None, "--profile", help="Profil du kit (défaut : governed).")
+_trace_profile_opt = typer.Option(None, "--profile", help="Profil du kit (défaut : celui du projet, sinon governed).")
+_trace_root_arg = typer.Argument(None, help="Projet enrôlé : ajoute le verdict de `standard verify` par artefact.")
+_trace_task_opt = typer.Option("bootstrap", "--task-id", help="Evidence task id du projet.")
+_VERDICT_STYLE = {"ok": "green", "warning": "yellow", "error": "red", "absent": "red"}
 
 
 @standard_app.command("traceability")
-def traceability(ctx: typer.Context, profile: str | None = _trace_profile_opt) -> None:
-    """La matrice de traçabilité vers la norme : artefacts, exigences, contrôles, trous.
+def traceability(
+    ctx: typer.Context,
+    project_root: Path | None = _trace_root_arg,
+    profile: str | None = _trace_profile_opt,
+    task_id: str = _trace_task_opt,
+) -> None:
+    """La matrice de traçabilité vers la norme : artefacts, exigences, contrôles, verdicts, trous.
 
     Pour chaque artefact requis par le profil, les exigences AG-* et les
-    contrôles CTRL-* qu'il satisfait, avec la citation qui le justifie ; puis les
-    exigences obligatoires au niveau atteint que le kit ne couvre par rien.
+    contrôles CTRL-* qu'il satisfait, avec la citation qui le justifie ; avec un
+    projet, le verdict que `standard verify` rend sur chacun (AG-AUD-001) ; puis
+    les exigences obligatoires au niveau atteint que le kit ne couvre par rien.
     """
-    from grimoire.core.standard_traceability import matrix_for
+    from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
+    if project_root is not None and profile is None:
+        profile = _read_manifest_profile(project_root.resolve())
     matrix = matrix_for(profile or "governed")
+    if project_root is not None:
+        matrix = with_verdicts(matrix, project_root, task_id=task_id)
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(matrix.to_dict(), indent=2, ensure_ascii=False))
         return
-    console.print(
+    summary = (
         f"[bold]{matrix.profile_id}[/bold] — niveau {matrix.level} — standard @ {matrix.upstream_commit[:8]} — "
         f"{len(matrix.covered_requirements)} exigence(s) couverte(s), {len(matrix.gaps)} trou(s) au niveau"
     )
+    if matrix.verdicts:
+        summary += f", {len(matrix.verified_requirements)} vérifiée(s) sur {project_root}"
+    console.print(summary)
     table = Table(title="Artefacts requis → norme")
     table.add_column("Artefact")
     table.add_column("Exigences")
     table.add_column("Contrôles")
+    if matrix.verdicts:
+        table.add_column("Verdict")
     table.add_column("Justification")
     for trace in matrix.artifacts:
         if not trace.required:
             continue
-        table.add_row(
+        row = [
             trace.artifact_type,
             ", ".join(trace.requirements) or "[dim]aucune citable[/dim]",
             ", ".join(trace.controls) or "—",
-            trace.evidence[:90],
-        )
+        ]
+        if matrix.verdicts:
+            verdict = matrix.verdicts.get(trace.artifact_type, "absent")
+            row.append(f"[{_VERDICT_STYLE[verdict]}]{verdict}[/{_VERDICT_STYLE[verdict]}]")
+        row.append(trace.evidence[:90])
+        table.add_row(*row)
     console.print(table)
     if matrix.gaps:
         gaps = Table(title=f"Exigences obligatoires jusqu'à {matrix.level} sans artefact")
@@ -829,16 +852,21 @@ def init_profile(
 @standard_app.command("activation-context")
 def activation_context(
     project_root: Path = typer.Argument(Path(), help="Project root holding .claude/."),  # noqa: B008
-    task_id: str = typer.Option("bootstrap", "--task-id", help="Evidence task id referenced by the built-in directive."),
+    task_id: str = typer.Option("", "--task-id", help="Task id the directive names (default: the session's active task)."),
 ) -> None:
     """Print the session activation directive (consumed by the Claude Code SessionStart hook).
 
     Prefers the project's .claude/activation-context.md when present so teams
     can tailor the directive; falls back to the built-in one validated by the
-    2026-07-09 evals campaign. Raw output on purpose: stdout is injected as
-    session context by the hook.
+    2026-07-09 evals campaign. Without --task-id, the task is the one the
+    session resolves: GRIMOIRE_TASK_ID, then the Mission Ledger's active claim,
+    then the board's in_progress card, then bootstrap. Raw output on purpose:
+    stdout is injected as session context by the hook.
     """
-    typer.echo(activation_context_text(project_root, task_id=task_id), nl=False)
+    from grimoire.core.standard_state import active_task_id
+
+    resolved = task_id or active_task_id(project_root)
+    typer.echo(activation_context_text(project_root, task_id=resolved), nl=False)
 
 
 def _run_pip_install(pip_target: str) -> bool:

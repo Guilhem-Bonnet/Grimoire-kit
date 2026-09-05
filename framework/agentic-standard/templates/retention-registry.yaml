@@ -1,0 +1,70 @@
+$schema: "grimoire-agentic-standard-retention-registry/v1"
+metadata:
+  project: ""
+  generated_by: "grimoire standard init"
+  purpose: "Chaque artefact produit a une destination — durable, archive, TTL, désindexation ou purge — et chaque nettoyage ou purge laisse une trace."
+
+# Inventaire : ce que le projet produit, et ce qu'il en advient.
+# Les trois premières entrées sont ce que le kit lui-même écrit.
+artifacts:
+  - id: RET-001
+    artifact: "_grimoire/standard/"
+    type: charte
+    status: active
+    owner: ""
+    sensitivity: interne
+    indexable: true
+    retention: durable
+    expires_at: ""
+    superseded_by: ""
+  - id: RET-002
+    artifact: "_grimoire-output/evidence/"
+    type: preuve
+    status: active
+    owner: ""
+    sensitivity: interne
+    indexable: false
+    retention: projet
+    expires_at: ""
+    superseded_by: ""
+  - id: RET-003
+    artifact: "_grimoire-output/events/runtime-journal.jsonl"
+    type: log
+    status: active
+    owner: ""
+    sensitivity: interne
+    indexable: false
+    retention: "court terme"
+    expires_at: "rotation à 10 000 événements"
+    superseded_by: ""
+# - id: RET-004
+#   artifact: ""
+#   type: rapport           # adr | rapport | handoff | log | charte | api | incident | preuve | mémoire
+#   status: active          # active | archived | superseded | obsolete | sensitive
+#   owner: ""
+#   sensitivity: interne    # public | interne | confidentiel | secret | personnel
+#   indexable: false
+#   retention: mission      # durable | projet | mission | court terme | purge
+#   expires_at: ""          # date ou règle, attendu dès que la rétention n'est pas durable
+#   superseded_by: ""       # obligatoire quand status = superseded
+
+# Nettoyages périodiques : TTL, doublons, obsolescence, données sensibles.
+cleanup: []
+# - date: ""
+#   scope: "docs, mémoire vectorielle, rapports, handoffs"
+#   reviewed: 0
+#   actions: ""
+#   next_review: ""
+
+# Purges de mémoire fausse ou contaminée : chacune est suivie comme incident.
+purges: []
+# - date: ""
+#   target: ""
+#   reason: ""
+#   incident_id: ""         # entrée du registre d'incidents
+
+allowed:
+  types: [adr, rapport, handoff, log, charte, api, incident, preuve, mémoire]
+  statuses: [active, archived, superseded, obsolete, sensitive]
+  sensitivities: [public, interne, confidentiel, secret, personnel]
+  retentions: [durable, projet, mission, "court terme", purge]

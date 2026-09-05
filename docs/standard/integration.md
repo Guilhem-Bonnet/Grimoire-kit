@@ -53,36 +53,64 @@ l'objet que l'artefact produit ; une entrée sans lien dit pourquoi.
 
 ```bash
 grimoire standard traceability --profile governed
-grimoire -o json standard traceability
+grimoire standard traceability .            # sur un projet enrôlé : + verdict par artefact
+grimoire -o json standard traceability .
 ```
 
 La commande rend, pour les artefacts requis par le profil, les exigences et
 contrôles satisfaits, puis les exigences obligatoires jusqu'au niveau atteint
 que le kit ne couvre par aucun artefact — les trous, cumulés de N1 au niveau
-demandé. C'est la matrice qu'AG-AUD-001 exige : une conformité déclarée reliée
-à exigence, contrôle et preuve, plutôt qu'affirmée.
+demandé. Sur un projet enrôlé, elle ajoute le verdict que `standard verify`
+rend sur chaque artefact (`ok`, `warning`, `error`, `absent`) et le nombre
+d'exigences effectivement vérifiées. C'est la matrice qu'AG-AUD-001 exige :
+une conformité déclarée reliée à exigence, contrôle, preuve **et verdict**,
+plutôt qu'affirmée. La déclaration de conformité la cite dans sa section
+`Traceability`.
+
+Depuis le 2026-09-04 (#246), aucun niveau N1 à N5 ne laisse d'exigence obligatoire sans
+artefact : les dix-sept trous que la matrice listait le 2026-09-03 sont
+couverts par les artefacts ci-dessous. Ce qui reste partiel est écrit dans
+la `note` de l'artefact concerné dans `traceability.yaml`.
 
 ## Artefacts obligatoires de la norme
 
-Deux artefacts que la norme exige et que les profils livrent désormais :
+Les artefacts que la norme exige et que les profils livrent, par premier
+niveau où la norme les attend :
 
-| Artefact | Exigence | Profils | Fichier |
+| Artefact | Exigences | Profils | Fichier |
 |---|---|---|---|
 | Claim ledger | AG-QUA-002 — une affirmation sans preuve reste une hypothèse | tous | `_grimoire-output/evidence/<task>/claim-ledger.md` |
-| Registre des surfaces runtime | AG-TOL-007, AG-RET-006 — owner, mode, rétention, statut par surface | `governed`, `production` | `_grimoire/standard/runtime-surface-registry.yaml` |
+| Dossier d'acceptation | AG-QUA-003 — le livrable est accepté ou refusé par celui qui le reçoit | tous | `_grimoire-output/evidence/<task>/acceptance-record.md` |
+| Registre de rétention | AG-RET-001, -003, -004, -005 — destination de chaque artefact, remplaçante, nettoyages, purges suivies | tous | `_grimoire/standard/retention-registry.yaml` |
+| Registre d'outils | AG-TOL-001, -003, -005 — risque et permissions, contrats MCP, capture des erreurs | dès `controlled` | `_grimoire/standard/tool-registry.yaml` |
+| Registre d'incidents | AG-INC-001, -002, -003 — containment, correction, purge, prévention, récurrences | dès `controlled` | `_grimoire/standard/incident-registry.yaml` |
+| Matrice risques / contrôles / preuves | AG-AUD-003, AG-QUA-005 — défauts IA plausibles anticipés | dès `controlled` | `_grimoire/standard/risk-control-matrix.yaml` |
+| Registre des surfaces runtime | AG-TOL-007, AG-RET-006 — owner, mode, rétention, statut par surface | dès `governed` | `_grimoire/standard/runtime-surface-registry.yaml` |
+| Registre des capacités | AG-DYN-001 à -005 — gap, durabilité, expiration, promotion justifiée | dès `governed` | `_grimoire/standard/capability-registry.yaml` |
 
-`grimoire standard verify` les lit. Un registre vierge est un avertissement :
-il attend d'être rempli. Une affirmation marquée `prouvé` sans source, une
-affirmation `utiliser` qui n'est pas prouvée en profil gouverné, une surface de
-contrôle sans owner : erreurs. Un projet déjà enrôlé reçoit les deux fichiers
-par `grimoire standard fix --apply`.
+Deux exigences sont portées par un champ d'artefact existant plutôt que par un
+fichier : AG-ORC-004 par le bloc `wip:` d'`orchestration-policy.yaml` (WIP
+borné, `open_delegation: forbidden`), AG-AUD-001 par la section `Traceability`
+de `compliance-declaration.md`.
+
+`grimoire standard verify` les lit tous. Un registre vierge est un
+avertissement : il attend d'être rempli. Ce qui est une erreur, c'est une
+déclaration fausse — un critère `passé` sans preuve, un livrable `accepté`
+sans validateur, une source `superseded` sans remplaçante, un `on_critical`
+qui n'est ni `stop` ni `reduce_autonomy`, une délégation ouverte — et, en
+profil gouverné, une purge non suivie comme incident, un serveur MCP sans
+scopes ni timeout, un incident fermé sans prévention, une capacité éphémère
+sans expiration, un risque sans contrôle. Un projet déjà enrôlé reçoit les
+fichiers manquants par `grimoire standard fix --apply` ; le bloc `wip:` et la
+section `Traceability` arrivent par `grimoire up` si les deux fichiers n'ont
+pas été édités, sinon ils se recopient depuis les gabarits.
 
 ## Profils de conformité opérationnelle
 
 | Profil | Usage | Artefacts minimaux |
 |---|---|---|
-| `starter` | Individu ou petit projet qui veut un flow standard-aware léger | Mission Brief, Task Envelope, Evidence Pack |
-| `controlled` | Équipe qui veut gouvernance répétable et routage LLM explicite | Starter + LLM Provider Registry + Compliance Declaration |
+| `starter` | Individu ou petit projet qui veut un flow standard-aware léger | Mission Brief, Task Envelope, Evidence Pack, Claim Ledger, Acceptance Record, Retention Registry |
+| `controlled` | Équipe qui veut gouvernance répétable et routage LLM explicite | Starter + LLM Provider Registry + Compliance Declaration + Tool, Incident et Risk registries |
 | `orchestrated` | Multi-agents avec contexte avancé et documentation externe indexée | Controlled + board, mémoire, contexte, décisions, rules/hooks, orchestration, evidence gates, patterns |
 | `governed` | Organisation avec politiques par environnement et audit | Orchestrated + score, remediation, risques acceptés et waivers |
 | `production` | Flow critique avec dry-run, rollback, SLO et coûts | Governed + preuves de release gates et métriques critiques |
@@ -149,8 +177,14 @@ _grimoire/standard/hook-registry.yaml
 _grimoire/standard/orchestration-policy.yaml
 _grimoire/standard/evidence-gates.yaml
 _grimoire/standard/pattern-catalog.yaml
+_grimoire/standard/retention-registry.yaml
+_grimoire/standard/tool-registry.yaml
+_grimoire/standard/incident-registry.yaml
+_grimoire/standard/risk-control-matrix.yaml
 _grimoire-output/evidence/{task-id}/task-envelope.md
 _grimoire-output/evidence/{task-id}/evidence-pack.md
+_grimoire-output/evidence/{task-id}/claim-ledger.md
+_grimoire-output/evidence/{task-id}/acceptance-record.md
 ```
 
 ### Activation de session (Claude Code)
@@ -162,9 +196,13 @@ d'activation au démarrage de chaque session — le mécanisme validé
 les artefacts seuls produisaient 0/40 d'engagement :
 
 - la directive vit dans `.claude/activation-context.md` (éditable par
-  projet, jamais écrasée si présente) ;
-- le hook exécute `grimoire standard activation-context`, portable et
-  versionné avec le kit ;
+  projet, jamais écrasée si présente) ; c'est un gabarit : `{task_id}` y
+  est remplacé, à chaque session, par la tâche courante — le claim actif
+  du Mission Ledger, ou `GRIMOIRE_TASK_ID`, ou `bootstrap` (ordre complet
+  dans la [référence CLI](../cli-reference.md#quelle-tâche-la-session-porte)) ;
+- le hook exécute `grimoire-hook --host claude --event SessionStart`, qui
+  rend la même directive que `grimoire standard activation-context`,
+  portable et versionné avec le kit ;
 - fusion non destructive dans un `settings.json` existant ; un fichier
   malformé est laissé intact (le hook est alors sauté avec un
   avertissement) ;
