@@ -7,6 +7,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Évalué
+
+- **Campagne evals 2026-09-04 — bras `enforced` contre `activated-v3` : effet
+  non démontré, indicatif.** Première campagne pré-enregistrée après
+  l'amendement A2 (`evals/reports/2026-09-04/`). Le bras `enforced` ajoute à
+  l'activation les deux hooks bloquants du kit (refus PreToolUse, gate Stop)
+  au profil `governed`. Sur 24 runs par bras (3 répétitions, sous puissance :
+  règle d'arrêt budgétaire puis limite de dépense du compte), le gate obtient
+  l'artefact qu'il exige (`context-bundle` 23/24 contre 0/24) et rien d'autre :
+  complétion 3 contre 5, coût par run +41 %, 0 régression dure contre 1. Le
+  blocage change le volume de preuve, pas ce qui est livré. Verdict hors
+  compteur de la clause 2 d'A2. Le mécanisme `enforced` est committé
+  (`evals/witnesses/web-app-todo/enforced/`), ainsi que le runner de campagne,
+  les paquets de jugement aveugle et l'agrégateur (`evals/runner.py`,
+  `evals/judge.py`, `evals/aggregate.py`).
+
 ### Modifié
 
 - **L'étage TestPyPI, qui n'a jamais tourné, disparaît de `publish.yml`.** Le

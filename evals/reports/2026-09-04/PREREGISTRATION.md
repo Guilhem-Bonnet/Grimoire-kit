@@ -176,3 +176,35 @@ Référence de coût : 0,85 USD/run activé le 2026-08-27 ; le run à blanc
   block (deny effectif sous `--dangerously-skip-permissions`), 2 `stop` block
   (l'agent a repris et rempli enveloppe et inventaire au lieu de conclure), 6
   allow. Le mécanisme bloque réellement dans le témoin.
+
+- **2026-09-04 — point de contrôle budgétaire (10 runs, 16:51 → 17:06)** :
+  5 `enforced` (4,74 USD, 0,95 USD/run, 29-63 tours) + 5 `activated-v3`
+  (3,55 USD, 0,71 USD/run, 24-56 tours) = 8,29 USD ; projection × 80 =
+  **66,3 USD > 60**. Le design 8 × 5 × 2 est abandonné conformément à la
+  règle ; **repli pré-enregistré appliqué** : poursuite par blocs complets,
+  4 répétitions maximum (projection ≈ 53 USD), plafond dur 60 USD tenu par
+  le runner. La campagne sera publiée **sous puissance** (n = 4 < 5) : verdict
+  indicatif, hors compteur de la clause 2. Mécanisme vérifié sur les 5
+  premiers runs `enforced` : 4/5 portent un enregistrement Stop dans le
+  ledger (1 block suivi d'une reprise, 3 allow — l'agent avait déjà créé le
+  `context-bundle` exigé par le gate avant de conclure), 5/5 ont le
+  context-bundle ; aucun deny PreToolUse (aucune commande destructrice
+  tentée). Correction du runner après lecture des `mechanical.json` du bloc :
+  la surcouche des tests baseline devient informative (rouge dès que le
+  contrat `Store` s'étend, fakeStore à compléter — ce n'est pas une casse) ;
+  le candidat « régression dure » mécanique est redéfini sur l'état final du
+  run (suite rouge, fichier ou fonction de test baseline absents). Les
+  `mechanical.json` de tous les runs sont recalculés en fin de campagne avec
+  cette définition ; le jugement reste celui de `JUDGING.md` sur le diff.
+- **2026-09-04 — limite mensuelle de dépense du compte (18:11, répétition 4)** :
+  13 runs retournent « You've hit your limit » sans exécuter un tour (0 USD),
+  1 run interrompu après 46 tours (1,14 USD) — les 14 sont invalidés
+  (`invalid.json`, hors agrégation) et listés au rapport. 2 runs de la
+  répétition 4 achevés avant la coupure sont valides, jugés, hors comparaison
+  décisionnelle. **Aucune relance** (économie stricte demandée par
+  l'opérateur) : la campagne s'arrête à 3 répétitions complètes par cellule,
+  48 runs décisionnels + 2 runs valides hors blocs. Total dépensé 45,58 USD
+  (run à blanc inclus), sous le plafond de 60 USD.
+- **2026-09-04 — jugement** : 50 juges aveugles, un par run valide ; 44 au
+  modèle par défaut de la session, les 6 derniers paquets en `haiku` (même
+  consigne, changement consigné au rapport).

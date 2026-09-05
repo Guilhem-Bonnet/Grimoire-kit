@@ -30,7 +30,7 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +69,8 @@ def log(msg: str) -> None:
 
 
 def load_tasks() -> list[dict[str, Any]]:
-    return yaml.safe_load(TASKS_YAML.read_text(encoding="utf-8"))["tasks"]
+    tasks: list[dict[str, Any]] = yaml.safe_load(TASKS_YAML.read_text(encoding="utf-8"))["tasks"]
+    return tasks
 
 
 def run_env() -> dict[str, str]:
@@ -100,9 +101,10 @@ def prepare(run_dir: Path, arm: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(BASELINE_APP, app, symlinks=True)
     needs, profile, installer = ARM_SETUP[arm]
+    standard_opts = ["--needs", needs] if needs else ["--profile", str(profile)]
     for cmd in (
         ["grimoire", "init", ".", "-a", "web-app", "-b", "local"],
-        ["grimoire", "standard", "init", "."] + (["--needs", needs] if needs else ["--profile", profile]),
+        ["grimoire", "standard", "init", ".", *standard_opts],
     ):
         res = sh(cmd, cwd=app)
         if res.returncode != 0:
@@ -251,10 +253,15 @@ def mechanical(run_dir: Path) -> dict[str, Any]:
         "removed_tests": removed_tests,
         "overlay_green": bool(out["overlay_go"]["ok"] and out["overlay_npm"]["ok"]),
     }
-    # règle secondaire pré-enregistrée : dure = cassé/supprimé ; adaptée = modifié mais suites vertes
-    hard = bool(deleted or removed_tests or not out["baseline_summary"]["overlay_green"])
+    # Règle secondaire pré-enregistrée : dure = test baseline cassé ou supprimé
+    # sur l'état final du run (suite rouge, fichier ou fonction de test absents) ;
+    # adaptée = fichier de test baseline modifié, suites vertes. La surcouche
+    # (tests baseline recopiés tels quels) est informative : elle est rouge dès
+    # que le contrat de `Store` s'étend (fakeStore à compléter), ce qui n'est pas
+    # une régression — le juge tranche sur le diff.
+    hard = bool(deleted or removed_tests or not out["tests_green"])
     out["baseline_summary"]["hard_regression_candidate"] = hard
-    out["baseline_summary"]["adapted_candidate"] = bool(modified and not hard and out["tests_green"])
+    out["baseline_summary"]["adapted_candidate"] = bool(modified and not hard)
     (run_dir / "mechanical.json").write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return out
 
@@ -448,7 +455,7 @@ def campaign(
     launched = 0
     try:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = []
+            futures: list[Future[dict[str, Any]]] = []
             for task_id, arm, rep in order:
                 if (RUNS / date / task_id / arm / f"rep-{rep}" / "record.json").is_file():
                     continue
