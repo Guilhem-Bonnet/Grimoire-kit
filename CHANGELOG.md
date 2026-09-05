@@ -30,6 +30,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Ajouté
 
+- **`grimoire task trace <id>` — la cause d'un arrêt sans ouvrir un fichier
+  (L4, #139).** Timeline unifiée d'une tâche, lue depuis les quatre journaux
+  qui portaient déjà le `task_id` sans que rien ne les lise ensemble : Mission
+  Ledger (transitions, incidents), TraceLedger des hooks (outils refusés par la
+  policy, clôtures refusées), RuntimeKernel (run events, checkpoints, abort et
+  sa raison), EvidenceService (packs, verdicts). Les entrées qui expliquent un
+  arrêt sont marquées et reprises en « Cause(s) d'arrêt » ; `--causes` les
+  isole, `--output json` rend tout. Aucune source absente n'est inventée, aucun
+  dossier n'est créé en lisant, et la stack legacy `observatory.py` n'est pas
+  sollicitée. Deux écritures rendent cela possible : le gateway de hooks —
+  seul écrivain du TraceLedger — porte désormais le `task_id` résolu sur chaque
+  événement (les refus de policy étaient journalisés sous un identifiant vide,
+  donc introuvables par tâche), et un gate de transition rouge laisse une trace
+  `grimoire.task-gate` (au TraceLedger, jamais au Mission Ledger : un refus
+  n'est pas un changement d'état).
+
 - **Aucun niveau de la norme ne laisse plus d'exigence obligatoire sans
   artefact.** `grimoire standard traceability` listait dix-sept exigences
   `AG-*` obligatoires jusqu'à N4 que le kit ne couvrait par rien (#246). Six
@@ -64,6 +80,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
+  filtraient les `pull_request` par chemin : une PR qui ne touchait ni `src/`
+  ni `tests/` ne déclenchait aucun des checks que la protection de `main`
+  exige depuis le 2026-09-04, et restait bloquée sans jamais avoir été
+  vérifiée — le contraire de ce qu'un check requis promet. Les filtres
+  restent sur `push` ; sur une PR, tout tourne. Même retrait pour
+  `agentic-standard.yml`, dont le check `standard` est requis.
 - **Les hooks ne dégradent plus en silence.** Quatre gardes pouvaient passer
   au vert sans l'avoir mérité, et le défaut n'est apparu qu'en écrivant le
   contrôle négatif. (1) Une décision qui plantait rendait `ALLOW` — sur

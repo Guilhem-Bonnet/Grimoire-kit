@@ -25,19 +25,6 @@ on:
       - "framework/agentic-standard/**"
   pull_request:
     branches: [main]
-    paths:
-      - "src/**"
-      - "tests/unit/**"
-      - "tests/test_agentic_standard.py"
-      - "pyproject.toml"
-      - "evals/tasks/**"
-      - "evals/collect.py"
-      # Gouvernent le job dep-audit : sans eux dans le filtre, ajouter un
-      # waiver ou en laisser expirer un ne relance jamais l'audit qu'ils
-      # pilotent — le controle serait modifie sans etre reverifie.
-      - ".github/security/**"
-      - "scripts/depaudit-waivers.py"
-      - "framework/agentic-standard/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
