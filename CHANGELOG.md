@@ -96,6 +96,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un pheromone board corrompu est mis de côté, plus écrasé.** Un board
+  tronqué (disque plein, deux hooks concurrents sans `flock`) était lu comme
+  vide, puis réécrit par le dépôt suivant : tout l'historique stigmergique
+  disparaissait et `deposit_pheromone` rendait un `Pheromone` comme si de
+  rien n'était. Le fichier illisible est désormais renommé
+  `pheromone-board.json.corrupt-<horodatage>` avant qu'un board vide reparte,
+  et une ligne sur stderr le dit. La copie autonome `framework/tools/` a le
+  même défaut, documenté en #265 (zone gelée).
+
 - **Un fichier de gates illisible ne laisse plus passer toutes les
   transitions.** `evidence-gates.yaml` cassé était lu comme `{}` : aucune
   transition déclarée, donc aucune gardée, donc `task move` et `task close`
