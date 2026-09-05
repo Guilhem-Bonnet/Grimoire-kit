@@ -71,6 +71,13 @@ test-cov: ## Run tests with coverage report
 build: ## Build sdist + wheel
 	$(PYTHON) -m build
 
+.PHONY: wheel-check
+wheel-check: build ## Install the freshest built wheel in a new venv and start it — the pre-release check TestPyPI never did (#195)
+	$(PYTHON) -m venv --clear .wheel-check-venv
+	.wheel-check-venv/bin/python -m pip install -q "$$(ls -t dist/*.whl | head -1)"
+	.wheel-check-venv/bin/grimoire --version
+	.wheel-check-venv/bin/python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
+
 .PHONY: clean
 clean: ## Remove build artifacts and caches
 	rm -rf dist/ build/ *.egg-info src/*.egg-info site/
@@ -104,8 +111,8 @@ release: check ## Release — bump version, tag, build
 	@# would make `grimoire migrate` read every file this version introduces as
 	@# a user customisation and freeze it out of future updates.
 	$(PYTHON) scripts/gen-kit-hashes.py
-	$(PYTHON) -m build
-	@echo "\n\033[32m✓ Built $(VERSION). Tag and push when ready:\033[0m"
+	$(MAKE) wheel-check
+	@echo "\n\033[32m✓ Built $(VERSION), wheel installs in a fresh venv. Tag and push when ready:\033[0m"
 	@echo "  git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json"
 	@echo "  git commit -m 'chore: release $(VERSION)'"
 	@echo "  git tag -a v$(VERSION) -m 'Release $(VERSION)'"
@@ -117,11 +124,6 @@ release: check ## Release — bump version, tag, build
 publish: ## Upload dist/ to PyPI (requires TWINE_USERNAME + TWINE_PASSWORD or ~/.pypirc)
 	@test -d dist || (echo "No dist/ found. Run 'make build' or 'make release' first." && exit 1)
 	$(PYTHON) -m twine upload dist/*.whl dist/*.tar.gz
-
-.PHONY: publish-test
-publish-test: ## Upload dist/ to TestPyPI
-	@test -d dist || (echo "No dist/ found. Run 'make build' first." && exit 1)
-	$(PYTHON) -m twine upload --repository testpypi dist/*.whl dist/*.tar.gz
 
 ## ─── Docs ──────────────────────────────────────────────────────
 .PHONY: docs
