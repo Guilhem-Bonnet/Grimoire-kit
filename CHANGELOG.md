@@ -7,6 +7,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Évalué
+
+- **Campagne evals 2026-09-04 — bras `enforced` contre `activated-v3` : effet
+  non démontré, indicatif.** Première campagne pré-enregistrée après
+  l'amendement A2 (`evals/reports/2026-09-04/`). Le bras `enforced` ajoute à
+  l'activation les deux hooks bloquants du kit (refus PreToolUse, gate Stop)
+  au profil `governed`. Sur 24 runs par bras (3 répétitions, sous puissance :
+  règle d'arrêt budgétaire puis limite de dépense du compte), le gate obtient
+  l'artefact qu'il exige (`context-bundle` 23/24 contre 0/24) et rien d'autre :
+  complétion 3 contre 5, coût par run +41 %, 0 régression dure contre 1. Le
+  blocage change le volume de preuve, pas ce qui est livré. Verdict hors
+  compteur de la clause 2 d'A2. Le mécanisme `enforced` est committé
+  (`evals/witnesses/web-app-todo/enforced/`), ainsi que le runner de campagne,
+  les paquets de jugement aveugle et l'agrégateur (`evals/runner.py`,
+  `evals/judge.py`, `evals/aggregate.py`).
+
 ### Modifié
 
 - **La borne `chromadb<0.7` est un choix instruit, plus un héritage.** Mesuré
@@ -89,6 +105,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`grimoire.hosts.sync`), qui rend l'échec en donnée et l'écrit sur stderr ;
   les trois commandes affichent l'avertissement, et `standard init -o json`
   le porte dans `host_surfaces`.
+
+- **Un pheromone board corrompu est mis de côté, plus écrasé.** Un board
+  tronqué (disque plein, deux hooks concurrents sans `flock`) était lu comme
+  vide, puis réécrit par le dépôt suivant : tout l'historique stigmergique
+  disparaissait et `deposit_pheromone` rendait un `Pheromone` comme si de
+  rien n'était. Le fichier illisible est désormais renommé
+  `pheromone-board.json.corrupt-<horodatage>` avant qu'un board vide reparte,
+  et une ligne sur stderr le dit. La copie autonome `framework/tools/` a le
+  même défaut, documenté en #265 (zone gelée).
 
 - **Un fichier de gates illisible ne laisse plus passer toutes les
   transitions.** `evidence-gates.yaml` cassé était lu comme `{}` : aucune
