@@ -276,22 +276,26 @@ class RuntimeKernel:
             instances = [w for w in instances if w.task_id == task_id]
         return instances
 
-    def _latest_checkpoint(self, wfi_id: str) -> Checkpoint | None:
+    def list_checkpoints(self, wfi_id: str | None = None) -> list[Checkpoint]:
+        """Checkpoints dans l'ordre d'écriture, restreints à une instance si demandé."""
+        out: list[Checkpoint] = []
         if not self._checkpoints_path.exists():
-            return None
-        latest: Checkpoint | None = None
+            return out
         for line in self._checkpoints_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
-                raw = json.loads(line)
-                chk = Checkpoint.from_dict(raw)
-                if chk.workflow_instance_id == wfi_id:
-                    latest = chk
+                chk = Checkpoint.from_dict(json.loads(line))
             except (json.JSONDecodeError, KeyError):
-                pass
-        return latest
+                continue
+            if wfi_id is None or chk.workflow_instance_id == wfi_id:
+                out.append(chk)
+        return out
+
+    def _latest_checkpoint(self, wfi_id: str) -> Checkpoint | None:
+        checkpoints = self.list_checkpoints(wfi_id)
+        return checkpoints[-1] if checkpoints else None
 
     def get_run_events(self, wfi_id: str | None = None) -> list[RunEvent]:
         events: list[RunEvent] = []

@@ -161,9 +161,48 @@ class TaskService:
         task = self.require(task_id)
         verdict = self.gate(task, target)
         if verdict.blocked:
+            self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
         moved = self.ledger.transition_task(task_id, target, actor_id=actor, reason=reason, claim=claim)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
+
+    def _record_refusal(self, task: MissionTask, target: TaskState, verdict: GateVerdict, actor: str) -> None:
+        """Journaliser un gate rouge dans le TraceLedger — le journal d'observabilité, pas la source.
+
+        Le Mission Ledger ne reçoit rien : un refus n'est pas un changement
+        d'état. Mais `grimoire task trace` doit pouvoir montrer *pourquoi* une
+        tâche n'a pas avancé, et c'est ici que le gateway de hooks écrit déjà
+        ses refus. Best-effort : un journal inaccessible ne bloque pas le refus.
+        """
+        try:
+            from datetime import UTC, datetime
+
+            from grimoire.core.standard_generation import TRACES_DIR
+            from grimoire.traces.ledger import TraceLedger
+            from grimoire.traces.schemas import TraceOutcome
+
+            TraceLedger(self.project_root / TRACES_DIR).record(
+                run_id=f"task-gate-{task.id}",
+                workflow_instance_id="",
+                mission_id=task.mission_id,
+                task_id=task.id,
+                recipe_id="grimoire.task-gate",
+                outcome=TraceOutcome.FAILURE,
+                started_at=datetime.now(UTC).isoformat(),
+                agent_id=actor,
+                policy_verdicts=[
+                    {
+                        "verdict_id": refusal.evidence,
+                        "action_kind": f"task.transition:{task.status.value}->{target.value}",
+                        "verdict": "block",
+                    }
+                    for refusal in verdict.refusals
+                ],
+                error_count=len(verdict.refusals),
+                tags=["task.gate", verdict.transition_id],
+            )
+        except Exception:  # noqa: S110 — observabilité : jamais au prix du refus lui-même
+            pass
 
     def project_board(self) -> Path | None:
         """Reprojette le board du standard depuis le ledger, si le projet est enrôlé.

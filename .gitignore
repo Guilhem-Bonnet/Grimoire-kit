@@ -33,6 +33,7 @@ Thumbs.db
 venv/
 .venv/
 .venv-release/
+.wheel-check-venv/
 env/
 
 # Secrets (never commit)
