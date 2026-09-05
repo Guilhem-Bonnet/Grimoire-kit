@@ -152,3 +152,16 @@ d'efficacité.
 - **Ce que cette règle ne dit pas** : elle ne préjuge pas du résultat. Si une
   campagne pré-enregistrée passe le critère composite, la thèse est démontrée
   sur cette suite, et la règle d'arrêt n'a simplement jamais à s'appliquer.
+
+### Journal des changements d'intervention (clause 3 d'A2)
+
+- **2026-09-04 — intervention : de la directive à la contrainte.** Avant la
+  campagne `evals/reports/2026-09-04/` (pré-inscription committée avant tout
+  run). L'intervention testée n'est plus l'activation seule (hook
+  SessionStart) mais l'activation **plus les hooks bloquants** du kit 3.37.0 —
+  refus des mutations destructrices (PreToolUse) et refus de clore une tâche
+  aux gates rouges (Stop), au profil `governed`. La mesure (critère A1,
+  grille `JUDGING.md`, règles de comptage 2026-07-03 et secondaire
+  dure/adaptée) et la suite de tâches (`evals/tasks/web-app-todo.yaml`) sont
+  inchangées. Référence : bras `activated-v3` contemporain, même kit, même
+  runner, même jour. Le compteur de la clause 2 démarre à cette campagne.
