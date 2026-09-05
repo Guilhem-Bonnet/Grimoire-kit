@@ -2,6 +2,29 @@
 
 ## Dernière release
 
+### 3.38.0 — Les agents connaissent leur tâche, les gardes parlent, la campagne enforced est mesurée
+
+- **Les agents lisent, réclament et clôturent leurs tâches.** Outils MCP
+  `task_list_ready`, `task_show`, `task_claim`, `task_update`, `task_context`
+  sur le même service que le CLI ; la tâche courante se résout depuis le claim
+  actif du Mission Ledger ; `grimoire task trace <id>` rend la timeline unifiée
+  d'une tâche, refus de policy et gates rouges compris.
+- **Les gardes n'échouent plus en silence.** Une exception dans la politique
+  de hook rend `ask`, un fichier de gates illisible ferme toutes les portes, un
+  board stigmergique corrompu est mis de côté, un manifeste d'équipe cassé est
+  nommé, le rendu des surfaces hôtes dit quand il échoue, et la CI ne porte
+  plus d'étape qui ne peut pas échouer.
+- **Six artefacts de plus pour la norme.** Registres d'acceptation, de
+  rétention, d'outils, d'incidents, de capacités et matrice risques-contrôles :
+  plus aucune exigence obligatoire sans artefact de N1 à N5.
+- **Campagne enforced contre activated, pré-enregistrée.** Vingt-quatre runs
+  par bras : zéro régression dure sous enforcement, l'artefact de preuve
+  garanti, ni complétion ni test supplémentaire, 39 % de tours en plus.
+- **Release plus honnête.** L'étage TestPyPI qui n'a jamais tourné est retiré
+  au profit de `make wheel-check` ; chaque PR exécute la CI complète.
+
+## Releases précédentes
+
 ### 3.37.0 — Le bridge trace la norme, Windows compte, l'identité se déclare
 
 - **Le bridge du standard est tracé.** La révision de la norme est épinglée et

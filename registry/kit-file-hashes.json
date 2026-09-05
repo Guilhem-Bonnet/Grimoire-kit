@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.37.0",
+ "generated_for": "3.38.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1618,6 +1618,10 @@
    "version": "3.32.0",
    "path": "framework/hooks/pre-commit-cc.sh"
   },
+  "7fd1201e6ff2ece8f128f4d09ec00c4cf565d3c0808fee2c443be052ae4d17f9": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/retention-registry.yaml"
+  },
   "7ff594b3c9b36dbc0428ebf089b87859e40e8d71c420462c6f6be717489a44d8": {
    "version": "3.4.2",
    "path": "archetypes/stack/agents/terraform-expert.md"
@@ -1829,6 +1833,10 @@
   "8d9b7b1749bff021d16b9420af882576e9c47e0c4970b296fb632ed065fa401c": {
    "version": "3.21.1",
    "path": "framework/tools/message-bus.py"
+  },
+  "8e016a0a37808840a239e9bd66dd7619bd0d2429d58aa5e83ec5bfd339ba7585": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/capability-registry.yaml"
   },
   "8eba8e62b482cb54aa5d6bfa1e704718b6edd3ab92b0cd3dbe7991783676219a": {
    "version": "3.35.0",
@@ -2213,6 +2221,10 @@
   "aaaeac78a1c6fcb3541481610a93d53e859002d6885d1919021001f25590aee9": {
    "version": "3.35.0",
    "path": "framework/tools/swarm-consensus.py"
+  },
+  "ab42b1cb598b541800db471cdc25df7487b33a808ae9d19663020d1d03b9ac64": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/acceptance-record.md"
   },
   "ab4447578debd3c46587a64722a6945d40326f8bbc6658dde7b62e39d511e6ab": {
    "version": "3.4.2",
@@ -3066,6 +3078,10 @@
    "version": "3.4.2",
    "path": "framework/workflows/boomerang-orchestration.md"
   },
+  "e894c3d0ef5a593d134279d5c3a8e3c358806b99221de70db5705a40af43256d": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/tool-registry.yaml"
+  },
   "e8b1c99ef0641c82eb2043760d24d2fb2315ff756a4dd0bd28ebc1441df41a7b": {
    "version": "3.36.0",
    "path": "framework/tools/observatory.py"
@@ -3106,6 +3122,10 @@
    "version": "3.4.2",
    "path": "framework/copilot/prompts/grimoire-changelog.prompt.md"
   },
+  "ea8983b1bc1eee9e32e48307e729f4fc14fa639627db01b02d11cac6edc8f821": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/risk-control-matrix.yaml"
+  },
   "eaa5f62168af4fb10c43447e7f707b66d891bc0f20749f3f3c58c21e3a934318": {
    "version": "3.32.0",
    "path": "framework/tools/agent-forge.py"
@@ -3137,6 +3157,10 @@
   "ec50e484c19b444518083ecb154024de0e1b00f2fc578841493396ead67fd13b": {
    "version": "3.35.0",
    "path": "framework/workflows/subagent-orchestration.md"
+  },
+  "ec66f01a20f0bc7f16c14903e9e59552e7932bdef1707369cdf88a10ef653e8b": {
+   "version": "3.38.0",
+   "path": "framework/agentic-standard/templates/incident-registry.yaml"
   },
   "ec91850a23a93a6bbb8e7cdb17e35b22666196a78ef53e2d8616464f80ed1807": {
    "version": "3.32.0",

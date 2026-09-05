@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.38.0] - 2026-09-04
+
 ### Évalué
 
 - **Campagne evals 2026-09-04 — bras `enforced` contre `activated-v3` : effet
