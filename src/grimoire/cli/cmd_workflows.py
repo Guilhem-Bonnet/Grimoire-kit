@@ -33,7 +33,7 @@ from grimoire.workflows.registry import (
     load_workflows,
     workflow_slug,
 )
-from grimoire.workflows.teams import load_team, load_teams
+from grimoire.workflows.teams import UnreadableManifest, load_team, load_team_catalog
 
 __all__ = ["workflows_app"]
 
@@ -272,15 +272,22 @@ def workflows_teams(
     that nothing in the SDK ever loaded.
     """
     root = path.resolve()
-    teams = load_teams(root)
+    catalog = load_team_catalog(root)
+    teams = catalog.teams
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(
-            {"count": len(teams), "teams": [team.to_dict() for team in teams]},
+            {
+                "count": len(teams),
+                "teams": [team.to_dict() for team in teams],
+                "unreadable": [item.to_dict() for item in catalog.unreadable],
+            },
             indent=2, ensure_ascii=False,
         ))
+        _print_unreadable(catalog.unreadable)
         return
 
+    _print_unreadable(catalog.unreadable)
     if not teams:
         console.print("[yellow]No team manifest found.[/yellow]")
         return
@@ -299,6 +306,12 @@ def workflows_teams(
         )
     console.print(table)
     console.print(f"\n[dim]{len(teams)} team(s).[/dim]")
+
+
+def _print_unreadable(items: tuple[UnreadableManifest, ...]) -> None:
+    """Un manifeste que le catalogue n'a pas pu lire est nommé, jamais omis."""
+    for item in items:
+        console.print(f"[yellow]![/yellow] manifeste d'équipe illisible : {item.path} — {item.reason}")
 
 
 @workflows_app.command("install")

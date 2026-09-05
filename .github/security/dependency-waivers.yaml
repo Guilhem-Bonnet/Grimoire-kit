@@ -15,8 +15,11 @@ metadata:
 # /api/v2/...). grimoire-kit instancie chromadb.PersistentClient : embarque,
 # local, mono-tenant, sans serveur ni couche d'authentification. Aucune des
 # trois surfaces d'attaque n'existe dans cet usage. Aucune version corrigee
-# n'est publiee en amont (OSV, verifie le 2026-08-26) : monter de version ne
-# resout rien. Waivers bornes au 2026-11-30, a re-evaluer a cette date.
+# n'est publiee en amont (OSV, verifie le 2026-08-26, puis le 2026-09-04 :
+# 0.6.3 et 1.5.9 sont toutes deux affectees) : monter de version ne resout
+# rien et ajouterait CVE-2026-45829 (injection pre-authentification, 1.x
+# seulement). Re-waiver du 2026-09-04 (#174) : bornes au 2027-02-28, a
+# re-evaluer a cette date — ou avant, si OSV publie un correctif.
 waivers:
   - waiver_id: "DEPAUDIT-2026-002"
     check_id: "pip-audit"
@@ -29,10 +32,11 @@ waivers:
       mono-tenant, sans serveur — il n'y a ni tenant, ni utilisateur
       authentifie, donc pas de surface. Aucune version corrigee publiee.
     approved_by: "Guilhem-Bonnet"
-    expires_at: "2026-11-30"
+    expires_at: "2027-02-28"
     evidence_refs:
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
       - "https://api.osv.dev/v1/vulns/CVE-2026-45830"
+      - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/174"
   - waiver_id: "DEPAUDIT-2026-003"
     check_id: "pip-audit"
     vulnerability_id: "CVE-2026-45831"
@@ -43,10 +47,11 @@ waivers:
       d'autorisation : PersistentClient n'en expose pas. Aucune version
       corrigee publiee.
     approved_by: "Guilhem-Bonnet"
-    expires_at: "2026-11-30"
+    expires_at: "2027-02-28"
     evidence_refs:
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
       - "https://api.osv.dev/v1/vulns/CVE-2026-45831"
+      - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/174"
   - waiver_id: "DEPAUDIT-2026-004"
     check_id: "pip-audit"
     vulnerability_id: "CVE-2026-45833"
@@ -58,7 +63,8 @@ waivers:
       serveur ChromaDB et ne positionne jamais trust_remote_code. Aucune
       version corrigee publiee.
     approved_by: "Guilhem-Bonnet"
-    expires_at: "2026-11-30"
+    expires_at: "2027-02-28"
     evidence_refs:
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
       - "https://api.osv.dev/v1/vulns/CVE-2026-45833"
+      - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/174"

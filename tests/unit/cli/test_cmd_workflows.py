@@ -112,6 +112,22 @@ class TestTeams:
         assert chain["team-build"] == "team-ops"
 
 
+    def test_a_broken_team_manifest_is_named_not_dropped(self, project: Path) -> None:
+        path = project / layout.KIT_DIR / "teams" / "cassee.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("team:\n  name: [non fermée\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["-o", "json", "workflows", "teams", str(project)])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert any("cassee.yaml" in item["path"] for item in data["unreadable"])
+        assert "cassee.yaml" in result.output
+
+        result = runner.invoke(app, ["workflows", "teams", str(project)])
+        assert result.exit_code == 0, result.output
+        assert "cassee.yaml" in result.output
+        assert "illisible" in result.output
+
 class TestInstall:
     def test_an_orchestration_lands_in_the_kit_workflows_dir(self, project: Path) -> None:
         result = runner.invoke(app, ["-o", "json", "workflows", "install", "party-mode", str(project)])
