@@ -12,7 +12,7 @@ from grimoire.evidence import (
     EvidenceProfile,
     EvidenceService,
 )
-from grimoire.missions.gates import GATES_FILE, GateVerdict, check_transition
+from grimoire.missions.gates import GATES_FILE, GatesFileError, GateVerdict, check_transition, declared_transitions
 from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
 
 STANDARD = Path("_grimoire/standard")
@@ -150,6 +150,45 @@ def test_une_preuve_sans_resolveur_refuse_au_lieu_de_passer(projet: Path) -> Non
     refus = verdict.refusals[0]
     assert refus.evidence == "signature_du_pape"
     assert "aucun résolveur" in refus.reason
+
+
+def test_un_fichier_de_gates_illisible_refuse_au_lieu_de_laisser_passer(projet: Path) -> None:
+    """Le module promet « une preuve introuvable est un refus, jamais un silence » ;
+    un fichier de gates cassé rendait pourtant chaque transition non déclarée,
+    donc libre. Le gate était d'autant plus vert que son fichier était abîmé."""
+    (projet / GATES_FILE).write_text("transitions: [oups", encoding="utf-8")
+    verdict = check_transition(projet, tache(), "review", "accepted")
+    assert verdict.blocked
+    assert verdict.strictness == "hard_fail"
+    refus = verdict.refusals[0]
+    assert "evidence-gates.yaml" in refus.evidence
+    assert "illisible" in refus.reason
+    assert refus.remedy
+
+
+def test_un_fichier_de_gates_qui_n_est_pas_une_table_refuse_aussi(projet: Path) -> None:
+    (projet / GATES_FILE).write_text("- juste\n- une liste\n", encoding="utf-8")
+    verdict = check_transition(projet, tache(), "review", "accepted")
+    assert verdict.blocked
+    assert "evidence-gates.yaml" in verdict.refusals[0].evidence
+
+
+def test_declared_transitions_ne_cache_pas_un_fichier_illisible(projet: Path) -> None:
+    (projet / GATES_FILE).write_text("transitions: [oups", encoding="utf-8")
+    with pytest.raises(GatesFileError):
+        declared_transitions(projet)
+
+
+def test_un_registre_de_fournisseurs_illisible_dit_illisible(projet: Path) -> None:
+    """« aucun fournisseur activé » était un faux diagnostic : le fichier
+    existait, il était cassé. Le remède n'est pas le même."""
+    (projet / GATES_FILE).write_text(
+        GATES.replace('["review_gate", "evidence_gate"]', '["provider_policy"]'), encoding="utf-8"
+    )
+    (projet / STANDARD / "llm-provider-registry.yaml").write_text("providers: [oups", encoding="utf-8")
+    verdict = check_transition(projet, tache(), "review", "accepted")
+    refus = next(r for r in verdict.refusals if r.evidence == "provider_policy")
+    assert "illisible" in refus.reason
 
 
 def test_un_profil_inconnu_est_traite_comme_strict(projet: Path) -> None:
