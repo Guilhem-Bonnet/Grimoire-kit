@@ -67,8 +67,16 @@ neo4j = ["neo4j>=5.0"]
 # utilisé par framework/tools/message-bus.py, en zone gelée. L'extra reste
 # nécessaire tant que la couche chaude existe.
 redis = ["redis>=5.0"]
-# Borne d'origine, jamais revue : chromadb en est à la 1.5.x. La lever
-# demande de vérifier la rupture d'API 0.6 → 1.0, chantier distinct.
+# Borne tenue, instruite le 2026-09-04 (#174) sur deux venv jetables, 0.6.3 et
+# 1.5.9 : les sept appels que `mempalace` fait au client embarqué
+# (PersistentClient, get_or_create_collection, upsert, get, query, delete,
+# count) rendent les mêmes clés en 1.x, et un palais écrit par 0.6 s'y relit
+# sans migration — mais pas l'inverse (un palais 1.x est illisible en 0.6 :
+# KeyError '_type'). Lever la borne n'apporte donc aucune fonctionnalité et
+# ajoute deux CVE au périmètre audité (CVE-2026-45829 / PYSEC-2026-311,
+# injection de code pré-authentification, 1.x seulement). Les trois CVE
+# waivées n'ont de correctif sur aucune version, 1.5.9 comprise. Condition
+# de réouverture : un correctif amont pour ces trois-là, qui paraîtra sur 1.x.
 mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
 search = ["tantivy>=0.26"]
