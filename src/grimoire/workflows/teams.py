@@ -17,7 +17,32 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import layout
+from grimoire.core.exceptions import GrimoireError
 from grimoire.data import framework_path
+
+
+class TeamManifestError(GrimoireError):
+    """Un manifeste d'équipe existe mais ne se lit pas.
+
+    ``None`` était la réponse pour « pas une équipe » comme pour « fichier
+    illisible » : l'équipe manquait au catalogue sans une ligne.
+    """
+
+    def __init__(self, path: Path, cause: str) -> None:
+        self.path = path
+        self.cause = cause
+        super().__init__(f"{path.name} illisible : {cause}")
+
+
+@dataclass(frozen=True, slots=True)
+class UnreadableManifest:
+    """Un fichier de `teams/` que le catalogue n'a pas pu lire, et pourquoi."""
+
+    path: Path
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"path": str(self.path), "reason": self.reason}
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,14 +102,20 @@ def team_dirs(project_root: Path) -> list[Path]:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    """Le manifeste comme table ; :class:`TeamManifestError` s'il ne se lit pas."""
     from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
 
     yaml = YAML(typ="safe")
     try:
         data = yaml.load(io.StringIO(path.read_text(encoding="utf-8")))
-    except Exception:
+    except (OSError, UnicodeDecodeError, YAMLError) as exc:
+        raise TeamManifestError(path, f"{type(exc).__name__}: {exc}") from exc
+    if data is None:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise TeamManifestError(path, f"attendu une table YAML, trouvé {type(data).__name__}")
+    return data
 
 
 def _members(raw: Any) -> tuple[TeamMember, ...]:
@@ -122,7 +153,10 @@ def _phases(raw: Any) -> tuple[str, ...]:
 
 
 def parse_team(path: Path) -> Team | None:
-    """Charge un manifeste ; ``None`` s'il ne porte pas de section ``team``."""
+    """Charge un manifeste ; ``None`` s'il ne porte pas de section ``team``.
+
+    Lève :class:`TeamManifestError` si le fichier existe et ne se lit pas.
+    """
     data = _load_yaml(path).get("team")
     if not isinstance(data, dict):
         return None
@@ -143,16 +177,35 @@ def parse_team(path: Path) -> Team | None:
     )
 
 
-def load_teams(project_root: Path) -> list[Team]:
-    """Toutes les équipes visibles, dédoublonnées par nom, projet prioritaire."""
+@dataclass(frozen=True, slots=True)
+class TeamCatalog:
+    """Ce que le chargeur a lu, et ce qu'il n'a pas pu lire."""
+
+    teams: tuple[Team, ...] = ()
+    unreadable: tuple[UnreadableManifest, ...] = ()
+
+
+def load_team_catalog(project_root: Path) -> TeamCatalog:
+    """Toutes les équipes visibles, dédoublonnées par nom, projet prioritaire —
+    et chaque manifeste illisible, nommé plutôt que passé sous silence."""
     seen: dict[str, Team] = {}
+    unreadable: list[UnreadableManifest] = []
     for directory in team_dirs(project_root):
         for path in sorted(directory.glob("*.yaml")):
-            team = parse_team(path)
+            try:
+                team = parse_team(path)
+            except TeamManifestError as exc:
+                unreadable.append(UnreadableManifest(path, exc.cause))
+                continue
             if team is None or team.name in seen:
                 continue
             seen[team.name] = team
-    return sorted(seen.values(), key=lambda t: t.name)
+    return TeamCatalog(tuple(sorted(seen.values(), key=lambda t: t.name)), tuple(unreadable))
+
+
+def load_teams(project_root: Path) -> list[Team]:
+    """Les équipes lisibles ; voir :func:`load_team_catalog` pour les autres."""
+    return list(load_team_catalog(project_root).teams)
 
 
 def load_team(project_root: Path, name: str) -> Team | None:
