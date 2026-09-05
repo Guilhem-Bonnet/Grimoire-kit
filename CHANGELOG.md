@@ -80,6 +80,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un manifeste d'équipe illisible est nommé, plus omis.** `parse_team`
+  répondait `None` pour « pas une équipe » comme pour « YAML cassé » : l'équipe
+  manquait à `workflows teams` sans une ligne. Le chargeur distingue les deux
+  (`TeamManifestError`), `load_team_catalog` rend les équipes lues et les
+  fichiers illisibles avec leur cause, et `workflows teams` les affiche — en
+  texte et dans `unreadable` en JSON.
+
 - **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
   filtraient les `pull_request` par chemin : une PR qui ne touchait ni `src/`
   ni `tests/` ne déclenchait aucun des checks que la protection de `main`

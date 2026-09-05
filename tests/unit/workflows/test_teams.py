@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from grimoire.workflows import teams
 
 
@@ -76,11 +78,22 @@ class TestMalformedManifests:
 
         assert teams.parse_team(path) is None
 
-    def test_broken_yaml_does_not_raise(self, tmp_path: Path) -> None:
-        """Un manifeste cassé ne doit pas faire tomber `workflows show`."""
+    def test_broken_yaml_is_reported_not_swallowed(self, tmp_path: Path) -> None:
+        """Un manifeste cassé ne doit pas faire tomber `workflows show` — mais il
+        ne doit pas non plus disparaître : `None` était la réponse pour « pas
+        une équipe » et pour « fichier illisible », et l'équipe manquait au
+        catalogue sans une ligne."""
         path = _manifest(tmp_path, "cassee", "team:\n  name: [non fermée\n")
 
-        assert teams.parse_team(path) is None
+        with pytest.raises(teams.TeamManifestError) as exc:
+            teams.parse_team(path)
+        assert "cassee.yaml" in str(exc.value)
+
+        catalog = teams.load_team_catalog(tmp_path)
+        assert [t.name for t in catalog.teams] == [t.name for t in teams.load_teams(tmp_path)]
+        assert len(catalog.unreadable) == 1
+        assert catalog.unreadable[0].path == path
+        assert "ParserError" in catalog.unreadable[0].reason
 
     def test_a_member_without_a_name_is_dropped(self, tmp_path: Path) -> None:
         path = _manifest(
