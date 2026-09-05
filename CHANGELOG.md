@@ -80,6 +80,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Un fichier de gates illisible ne laisse plus passer toutes les
+  transitions.** `evidence-gates.yaml` cassé était lu comme `{}` : aucune
+  transition déclarée, donc aucune gardée, donc `task move` et `task close`
+  passaient sans preuve — le gate était d'autant plus vert que son fichier
+  était abîmé, à rebours de ce que le module promet. Le lecteur distingue
+  désormais « absent » (aucune transition) de « illisible » (`GatesFileError`)
+  : `check_transition` rend un verdict bloquant `hard_fail` qui nomme le
+  fichier et la cause, `task show` le signale au lieu de se taire, et un
+  registre de fournisseurs cassé dit « illisible » au lieu du faux diagnostic
+  « aucun fournisseur activé ».
+
 - **Un manifeste d'équipe illisible est nommé, plus omis.** `parse_team`
   répondait `None` pour « pas une équipe » comme pour « YAML cassé » : l'équipe
   manquait à `workflows teams` sans une ligne. Le chargeur distingue les deux
