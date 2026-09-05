@@ -45,6 +45,7 @@ from grimoire.core.claude_activation import (
     activation_context_text,
     install_claude_activation,
 )
+from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
 standard_app = typer.Typer(
     help="Apply and verify the agentic standard bridge.",
@@ -781,13 +782,14 @@ def init_profile(
         installed_extras_ok = _run_pip_install(plan.pip_target)
 
     activation: ClaudeActivationResult | None = None
+    surfaces: HostSyncOutcome | None = None
     if claude_hook and not dry_run:
         activation = install_claude_activation(result.project_root, task_id=task_id)
         # Enrolment adds blocking gates; the host surfaces carry them. Running
         # after the activation install is deliberate: the emitters own
         # `.claude/settings.json` and replace the legacy hook entry with the
         # unified one, so a project never ends up injecting the directive twice.
-        _sync_host_surfaces(result.project_root)
+        surfaces = sync_host_surfaces(result.project_root)
 
     if _get_fmt(ctx) == "json":
         payload: dict[str, object] = {
@@ -809,6 +811,8 @@ def init_profile(
                 "written": _paths(activation.written),
                 "message": activation.message,
             }
+        if surfaces is not None:
+            payload["host_surfaces"] = surfaces.to_dict()
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
@@ -832,6 +836,8 @@ def init_profile(
             console.print("  [dim]hook d'activation Claude Code déjà en place[/dim]")
         else:
             console.print(f"  [yellow][!][/yellow] {activation.message}")
+        if surfaces is not None and not surfaces.ok:
+            console.print(f"  [yellow][!][/yellow] {surfaces.warning}")
     elif claude_hook and dry_run:
         console.print(
             "  [dim]dry-run : hook d'activation Claude Code non installé "
@@ -1304,24 +1310,3 @@ def fix(
         console.print(f"  [yellow]![/yellow] {action.action}: {action.check_id}{path_text}")
 
 
-def _sync_host_surfaces(project_root: Path) -> list[str]:
-    """Re-render every host surface after a governance change.
-
-    Never fatal: a project that is correctly enrolled but whose surfaces failed
-    to render is a reportable drift (`grimoire host status`), not a failed
-    install.
-    """
-    try:
-        from grimoire.hosts.collect import build_surface
-        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
-
-        surface = build_surface(project_root)
-        written: list[str] = []
-        for host_id in supported_hosts():
-            emitter = emitter_for(host_id)
-            if emitter is None:  # pragma: no cover - registry is complete
-                continue
-            written.extend(apply_plan(emitter.plan(surface, project_root), project_root).written)
-        return written
-    except Exception:
-        return []

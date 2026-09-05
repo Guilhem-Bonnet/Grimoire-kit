@@ -35,6 +35,7 @@ from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.scaffold import TIER_SEED, write_text_if_changed
+from grimoire.hosts.sync import sync_host_surfaces
 
 console = Console(stderr=True)
 
@@ -489,7 +490,7 @@ def repair_project_artifacts(target: Path) -> list[str]:
     # Intentional reuse of ProjectScaffolder's planning internals so the
     # regenerated artifact stays identical to what `grimoire init` produces.
     # Per-host agent files are not planned here: they belong to the host
-    # emitters, and `_sync_host_surfaces` below regenerates them.
+    # emitters, and `sync_host_surfaces` below regenerates them.
     scaffolder._plan_mcp_config(plan)
 
     written: list[str] = []
@@ -502,7 +503,10 @@ def repair_project_artifacts(target: Path) -> list[str]:
             written.append(template.label or template.dst.relative_to(target).as_posix())
     # Les fichiers par hôte appartiennent aux émetteurs : ils sont régénérés
     # ici et nulle part ailleurs, pour qu'un seul écrivain possède le chemin.
-    written.extend(_sync_host_surfaces(target))
+    surfaces = sync_host_surfaces(target)
+    written.extend(surfaces.written)
+    if not surfaces.ok:
+        console.print(f"[yellow]![/yellow] {surfaces.warning}")
     return written
 
 
@@ -1055,19 +1059,3 @@ def up(
         raise typer.Exit(1)
 
 
-def _sync_host_surfaces(target: Path) -> list[str]:
-    """Regenerate the per-host surfaces (agents, skills, commands, hooks)."""
-    try:
-        from grimoire.hosts.collect import build_surface
-        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
-
-        surface = build_surface(target)
-        written: list[str] = []
-        for host_id in supported_hosts():
-            emitter = emitter_for(host_id)
-            if emitter is None:  # pragma: no cover - registry is complete
-                continue
-            written.extend(apply_plan(emitter.plan(surface, target), target).written)
-        return written
-    except Exception:
-        return []

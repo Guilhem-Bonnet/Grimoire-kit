@@ -96,6 +96,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **Le rendu des surfaces hôtes dit quand il échoue.** `init`, `doctor --fix`
+  et `standard init` régénéraient agents, skills, commandes et hooks derrière
+  trois copies d'un `except Exception: return []`, chacune justifiée par
+  « `host status` rapportera la dérive ». Un projet dont les surfaces ne se
+  rendaient pas sortait donc d'`init` avec un rapport vert et aucun hook, et
+  `doctor --fix` affichait « 22/22 checks passed ». Un seul écrivain désormais
+  (`grimoire.hosts.sync`), qui rend l'échec en donnée et l'écrit sur stderr ;
+  les trois commandes affichent l'avertissement, et `standard init -o json`
+  le porte dans `host_surfaces`.
+
 - **Un pheromone board corrompu est mis de côté, plus écrasé.** Un board
   tronqué (disque plein, deux hooks concurrents sans `flock`) était lu comme
   vide, puis réécrit par le dépôt suivant : tout l'historique stigmergique
