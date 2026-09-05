@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Modifié
 
+- **La borne `chromadb<0.7` est un choix instruit, plus un héritage.** Mesuré
+  sur deux venv jetables (#174) : les sept appels que le backend `mempalace`
+  fait au client embarqué rendent les mêmes clés en 0.6.3 et 1.5.9, un palais
+  0.6 se relit tel quel en 1.x — et pas l'inverse — et la suite mémoire est
+  verte sous 1.5.9. Lever la borne n'apporte rien et ajouterait une CVE
+  d'injection pré-authentification au périmètre audité ; les trois CVE
+  waivées n'ont de correctif sur aucune version. La borne reste, son
+  commentaire dit pourquoi, et les trois waivers sont reconduits au
+  2027-02-28 après revérification OSV du 2026-09-04.
+
 - **L'étage TestPyPI, qui n'a jamais tourné, disparaît de `publish.yml`.** Le
   projet n'a jamais été enregistré sur test.pypi.org : le job échouait à
   chaque tag et son `continue-on-error` le faisait passer pour une
@@ -17,6 +27,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   wheel-check` (wheel installée dans un venv neuf) avant le tag, les jobs
   `build` et `test` de `publish.yml` au tag, dont `publish-pypi` dépend sans
   `continue-on-error`. La cible `make publish-test` disparaît avec l'étage.
+
 ### Ajouté
 
 - **`grimoire task trace <id>` — la cause d'un arrêt sans ouvrir un fichier
@@ -78,6 +89,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`grimoire.hosts.sync`), qui rend l'échec en donnée et l'écrit sur stderr ;
   les trois commandes affichent l'avertissement, et `standard init -o json`
   le porte dans `host_surfaces`.
+
+- **Un manifeste d'équipe illisible est nommé, plus omis.** `parse_team`
+  répondait `None` pour « pas une équipe » comme pour « YAML cassé » : l'équipe
+  manquait à `workflows teams` sans une ligne. Le chargeur distingue les deux
+  (`TeamManifestError`), `load_team_catalog` rend les équipes lues et les
+  fichiers illisibles avec leur cause, et `workflows teams` les affiche — en
+  texte et dans `unreadable` en JSON.
 
 - **Chaque PR exécute la CI complète.** `ci-sdk.yml` et `ci-validate.yml`
   filtraient les `pull_request` par chemin : une PR qui ne touchait ni `src/`
