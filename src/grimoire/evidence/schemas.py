@@ -1,4 +1,10 @@
-"""Evidence pack and verification verdict schemas."""
+"""Evidence pack and verification verdict schemas.
+
+Implements the upstream pattern catalogue's QUA-04 ("Evidence pack et
+verification verdict", `web/data/catalogue-export.json`) — see #246 lot 4,
+which converged the pattern codes cited across `tools/`, the extensions and
+this module onto that one catalogue instead of two disconnected namings.
+"""
 
 from __future__ import annotations
 

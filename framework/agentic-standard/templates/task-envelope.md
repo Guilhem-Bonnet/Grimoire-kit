@@ -9,6 +9,17 @@
 - Current state: `intake | planned | executing | validating | blocked | done`
 - Risk level: `low | medium | high | critical`
 
+## Ambiguïtés résolues
+
+Toute ambiguïté bloquante rencontrée pendant la tâche, et comment elle a été
+résolue — par contexte vérifié (relecture, source faisant autorité) ou par
+question ciblée posée au demandeur. Une hypothèse non vérifiée reste une
+hypothèse, jamais un fait tant que la colonne « Source » ne le dit pas.
+
+| Question posée | Résolution | Source (contexte vérifié / question ciblée / hypothèse) |
+|---|---|---|
+|  |  |  |
+
 ## Context orchestration
 
 | Context item | Source | Reason selected | Freshness | Token budget |

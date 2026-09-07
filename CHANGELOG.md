@@ -26,6 +26,43 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`src/grimoire/tools/workspace_language.py`). La piste d'un petit modèle
   local (Ollama) pour des suggestions de contenu reste hors périmètre — elle
   brancherait derrière cette IntelliSense déterministe, jamais à sa place.
+- **Les codes de patterns convergent vers un seul catalogue, et les cinq DOIT
+  restants de #246 sont couverts (#246).** `tools/blueprint_*.py`,
+  `tools/handoff.py`, `tools/cost_model.py`, huit extensions et le bridge du
+  standard (`framework/agentic-standard/`) citaient chacun des codes
+  `ORG-`/`ORC-`/`COG-`/`KNO-`/`MOD-`/`GOV-`/`QUA-`/`RUN-` sans qu'aucun ne
+  référence l'autre. Les 36 patterns du bridge
+  (`templates/pattern-catalog.yaml`) portent désormais un `catalog_ref` vers
+  le ou les codes du catalogue de 78 patterns
+  (`web/data/catalogue-export.json`, même révision upstream que
+  `profile-map.yaml`) qu'ils implémentent ; `evidence/schemas.py` (QUA-04) et
+  `missions/ledger.py` (QUA-03), qui implémentaient chacun un pattern du
+  catalogue sans le citer, le citent maintenant. Nouveau module partagé
+  `grimoire.core.standard_checks.pattern_codes` ; `standard verify` refuse un
+  `catalog_ref` qui ne nomme pas un code réel
+  (`patterns.catalog_ref_unknown`) ; `tests/unit/
+  test_pattern_code_convergence.py` (27 cas) refuse un code cité n'importe où
+  dans le dépôt sans entrée au catalogue.
+
+  Les cinq exigences DOIT que la matrice ne montrait pas comme trous
+  (AG-MIS-005, AG-ORC-005, AG-LLM-004, AG-OBS-003, AG-OBS-005) sont
+  désormais couvertes par un artefact réel, chacune au niveau où la norme
+  les attend : `grimoire task record-model-call` journalise un appel modèle
+  (modèle, rôle, coût, latence, erreur) dans le TraceLedger — les champs
+  `model`/`token_usage` existaient dans le schéma sans qu'aucun code ne les
+  peuple ; `grimoire task handoff` donne enfin un appelant réel à
+  `tools.handoff.build_handoff` (#275 l'avait laissé orphelin) et trace la
+  communication inter-agents en événement append-only au Mission Ledger ; le
+  gabarit `task-envelope.md` gagne une section « Ambiguïtés résolues » ; le
+  gabarit `retention-registry.yaml` gagne une entrée RET-004 (type incident,
+  rétention durable) ; le gabarit `observability-policy.yaml` gagne une
+  entrée `trace_ledger` déclarant les dimensions réellement capturées
+  (modèle, outil, hook, verdict, preuve) plutôt que le seul
+  `runtime-journal.jsonl`, qu'aucun code n'écrit. `standard traceability
+  --profile governed` : zéro trou non justifié ; `standard verify` sur les
+  cinq profils, projet jetable : mêmes quatre erreurs préexistantes
+  qu'avant sur `governed`/`production` (#269), aucune nouvelle.
+
 - **Le claim rappelle ce que la mémoire sait de la tâche — L6 Task memory
   (#141).** `grimoire task recall <id>`, l'outil MCP `task_recall` et le hook
   `SessionStart` (entre la persona d'entrée et la directive du standard,

@@ -1,3 +1,16 @@
+# `catalog_ref` (#246 lot 4) ties each kit-native pattern below to the code(s)
+# of the upstream pattern catalogue it implements — the same 78 ORG-/ORC-/
+# COG-/KNO-/MOD-/GOV-/QUA-/RUN- codes that `tools/blueprint_*.py`,
+# `tools/handoff.py`, `tools/cost_model.py`, `evidence/schemas.py`,
+# `missions/ledger.py` and the extensions already cite, exported at
+# `web/data/catalogue-export.json` and pinned to the same upstream commit as
+# `profile-map.yaml` (`metadata.upstream_standard.commit`). An empty list is a
+# documented absence, not an oversight: this bridge covers 36 of the 78
+# upstream patterns, and a pattern with no upstream code (e.g.
+# `code-graph-projection`) is kit-native. `tests/unit/
+# test_pattern_code_convergence.py` refuses a code cited anywhere in the kit
+# (here or in tools/extensions) that isn't in the catalogue, and refuses a
+# `catalog_ref` id that doesn't match a real pattern id.
 $schema: "grimoire-agentic-standard-pattern-catalog/v1"
 metadata:
   project: ""
@@ -19,6 +32,7 @@ patterns:
     category: context
     maturity: orchestrated
     source_normative: context-orchestration.advanced
+    catalog_ref: ["ORC-05"]
     intent: "Build deterministic, budgeted, redacted context bundles."
     required_artifacts: ["context-contract.yaml", "context-bundle.yaml"]
     rule_refs: ["memory.freshness-required"]
@@ -28,6 +42,7 @@ patterns:
     category: memory
     maturity: orchestrated
     source_normative: memory-governance.multi-level
+    catalog_ref: ["KNO-02"]
     intent: "Separate session, task, project, organization, semantic, episodic, and external cache memories."
     required_artifacts: ["memory-policy.yaml"]
     rule_refs: ["memory.freshness-required"]
@@ -37,6 +52,7 @@ patterns:
     category: workflow
     maturity: governed
     source_normative: evidence-governance.state-machine
+    catalog_ref: ["QUA-05"]
     intent: "Block lifecycle transitions unless evidence is present."
     required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
     rule_refs: ["gate.requires-evidence"]
@@ -46,6 +62,7 @@ patterns:
     category: provider
     maturity: controlled
     source_normative: provider-governance.routing
+    catalog_ref: ["MOD-01", "MOD-03"]
     intent: "Route provider calls through declared capability and data-policy constraints."
     required_artifacts: ["llm-provider-registry.yaml"]
     rule_refs: ["provider.no-undeclared-route"]
@@ -55,6 +72,7 @@ patterns:
     category: runtime
     maturity: governed
     source_normative: runtime-observability.events
+    catalog_ref: ["RUN-02"]
     intent: "Record context, decision, hook, gate, and score events for auditability."
     required_artifacts: ["runtime-journal.jsonl"]
     rule_refs: []
@@ -64,6 +82,7 @@ patterns:
     category: memory
     maturity: governed
     source_normative: memory-os.hot-memory-non-authoritative
+    catalog_ref: ["KNO-02"]
     intent: "Use Redis for TTL-bound session state, leases and transient events without making it a durable source of truth."
     required_artifacts: ["memory-policy.yaml", "evidence-pack.md"]
     rule_refs: ["memory.hot-degrades-safely"]
@@ -73,6 +92,7 @@ patterns:
     category: governance
     maturity: governed
     source_normative: hook-governance.gateway-required
+    catalog_ref: ["GOV-01", "GOV-03"]
     intent: "Route hooks through a policy gateway so tool mediation, traces and evidence gates stay auditable."
     required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
     rule_refs: ["hooks.must-use-gateway", "hooks.no-destructive-bypass"]
@@ -82,6 +102,7 @@ patterns:
     category: orchestration
     maturity: governed
     source_normative: skill-governance.classification-required
+    catalog_ref: ["RUN-07"]
     intent: "Classify skills as core templates, project packs or incubator assets before promotion."
     required_artifacts: ["hook-registry.yaml", "pattern-catalog.yaml"]
     rule_refs: ["skills.classified-before-use"]
@@ -91,6 +112,7 @@ patterns:
     category: observability
     maturity: governed
     source_normative: observability-governance.cockpit-consumes-evidence
+    catalog_ref: ["QUA-02"]
     intent: "Generate a reproducible cockpit from governed artifacts and runtime events without making the cockpit authoritative."
     required_artifacts: ["observability-policy.yaml", "runtime-journal.jsonl", "cockpit-report.md", "evidence-pack.md"]
     rule_refs: ["observability.cockpit-read-only", "observability.inputs-are-declared", "observability.no-secret-export"]
@@ -100,6 +122,7 @@ patterns:
     category: memory
     maturity: orchestrated
     source_normative: memory-os.code-graph-projection
+    catalog_ref: []
     intent: "Project code, tasks and evidence into a verifiable graph (TOUCHES_CODE/COVERS_CODE/MEMORY_FOR) for traceable recall."
     required_artifacts: ["memory-policy.yaml"]
     rule_refs: ["memory.freshness-required"]
@@ -109,6 +132,7 @@ patterns:
     category: orchestration
     maturity: orchestrated
     source_normative: orchestration-governance.roles-handoff-escalation
+    catalog_ref: ["ORC-01"]
     intent: "Declare agent roles, handoffs, escalation and fallback so multi-agent routing cannot drift undeclared."
     required_artifacts: ["orchestration-policy.yaml"]
     rule_refs: ["orchestration.no-undeclared-handoff"]
@@ -118,6 +142,7 @@ patterns:
     category: knowledge
     maturity: orchestrated
     source_normative: knowledge-governance.index-to-source
+    catalog_ref: ["KNO-06"]
     intent: "Index normative documents and patterns and bind each governed check back to its normative source."
     required_artifacts: ["knowledge-source-registry.yaml"]
     rule_refs: ["knowledge.source-declared"]
@@ -127,6 +152,7 @@ patterns:
     category: workflow
     maturity: governed
     source_normative: evidence-governance.mission-ledger
+    catalog_ref: ["QUA-03", "QUA-04"]
     intent: "Bind missions, tasks and verification verdicts into an append-only evidence ledger that gates release."
     required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
     rule_refs: ["gate.requires-evidence"]
@@ -136,6 +162,7 @@ patterns:
     category: security
     maturity: governed
     source_normative: security-governance.tool-mediation-owasp
+    catalog_ref: ["GOV-09"]
     intent: "Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution."
     required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
     rule_refs: ["tools.mediated-before-use"]
@@ -145,6 +172,7 @@ patterns:
     category: provider
     maturity: production
     source_normative: provider-governance.cost-and-slo
+    catalog_ref: ["QUA-07"]
     intent: "Budget provider cost and declare SLOs so production routing reports overruns and latency breaches."
     required_artifacts: ["llm-provider-registry.yaml"]
     rule_refs: ["provider.cost-budgeted"]
@@ -154,6 +182,7 @@ patterns:
     category: security
     maturity: starter
     source_normative: security-governance.tool-blast-radius
+    catalog_ref: ["GOV-07"]
     intent: "Bound each tool/task blast radius: writable paths, network egress, environment, cost, and production reach; fail closed."
     required_artifacts: ["blast-radius-policy.yaml"]
     rule_refs: []
@@ -163,6 +192,7 @@ patterns:
     category: security
     maturity: governed
     source_normative: security-governance.controller-agent-privilege
+    catalog_ref: ["GOV-05"]
     intent: "Separate controller/agent privileges and scrub infrastructure tokens before agent spawn (fail closed)."
     required_artifacts: ["privilege-boundary.yaml"]
     rule_refs: []
@@ -172,6 +202,7 @@ patterns:
     category: security
     maturity: controlled
     source_normative: security-governance.prompt-injection-firewall
+    catalog_ref: ["GOV-12"]
     intent: "Isolate external/untrusted content so it cannot override control instructions."
     required_artifacts: ["prompt-firewall.yaml"]
     rule_refs: []
@@ -181,6 +212,7 @@ patterns:
     category: governance
     maturity: controlled
     source_normative: audit-governance.remote-source-freshness
+    catalog_ref: ["GOV-13"]
     intent: "Detect stale refs, oversized branch sets, and unreachable remotes before auditing source."
     required_artifacts: ["remote-hygiene.yaml"]
     rule_refs: []
@@ -190,6 +222,7 @@ patterns:
     category: governance
     maturity: governed
     source_normative: governance.decision-council-gate
+    catalog_ref: ["GOV-14"]
     intent: "Escalate critical/high-uncertainty decisions to a quorum with veto, budget cap, and recorded disagreements."
     required_artifacts: ["decision-council.yaml"]
     rule_refs: []
@@ -199,6 +232,7 @@ patterns:
     category: context
     maturity: orchestrated
     source_normative: context-governance.compression-without-loss
+    catalog_ref: ["ORC-08"]
     intent: "Allow context compression only if provenance, constraints, tool atomicity, and evidence remain verifiable."
     required_artifacts: ["compression-gate.yaml"]
     rule_refs: []
@@ -208,6 +242,7 @@ patterns:
     category: memory
     maturity: orchestrated
     source_normative: memory-governance.integrity-validator
+    catalog_ref: ["KNO-07"]
     intent: "Validate provenance, drift, poisoning, and expiry of promoted memories before recall."
     required_artifacts: ["memory-integrity.yaml"]
     rule_refs: []
@@ -217,6 +252,7 @@ patterns:
     category: governance
     maturity: governed
     source_normative: governance.merge-lane-fault-classifier
+    catalog_ref: ["GOV-06"]
     intent: "Classify merge/review failures as transient (retryable) or hard (escalate) before any automatic retry."
     required_artifacts: ["merge-lane.yaml"]
     rule_refs: []
@@ -226,6 +262,7 @@ patterns:
     category: provider
     maturity: production
     source_normative: provider-governance.cost-and-reliability
+    catalog_ref: ["QUA-06"]
     intent: "Track LLM cost per model/provider and report session reliability SLOs (CrashRate / UnhealthyRate)."
     required_artifacts: ["cost-registry.yaml"]
     rule_refs: []
@@ -235,6 +272,7 @@ patterns:
     category: security
     maturity: controlled
     source_normative: security-governance.guardrail-contract
+    catalog_ref: ["GOV-08"]
     intent: "Version input/output/tool/model guardrails with explicit modes and violation actions; fail closed."
     required_artifacts: ["guardrail-contract.yaml"]
     rule_refs: []
@@ -244,6 +282,7 @@ patterns:
     category: quality
     maturity: governed
     source_normative: quality-governance.visual-evidence-gate
+    catalog_ref: ["QUA-12"]
     intent: "Require DOM, screenshot, and journey proof when a delivery touches UI/UX."
     required_artifacts: ["visual-evidence.yaml"]
     rule_refs: []
@@ -253,6 +292,7 @@ patterns:
     category: security
     maturity: governed
     source_normative: security-governance.workspace-isolation
+    catalog_ref: ["RUN-11"]
     intent: "Declare writable roots, network egress and env passthrough; fail closed."
     required_artifacts: ["workspace-isolation.yaml"]
     rule_refs: []
@@ -262,6 +302,7 @@ patterns:
     category: governance
     maturity: governed
     source_normative: governance.policy-by-environment
+    catalog_ref: ["GOV-10"]
     intent: "Declare what changes across local/CI/staging/production; production fails closed."
     required_artifacts: ["environment-policy.yaml"]
     rule_refs: []
@@ -271,6 +312,7 @@ patterns:
     category: quality
     maturity: governed
     source_normative: quality-governance.browser-tool-contract
+    catalog_ref: ["QUA-11"]
     intent: "Require DOM/screenshot/console logs from browser tools and bound reachable domains."
     required_artifacts: ["browser-tool-contract.yaml"]
     rule_refs: []
@@ -280,6 +322,7 @@ patterns:
     category: runtime
     maturity: orchestrated
     source_normative: runtime-governance.provider-contract
+    catalog_ref: ["RUN-08"]
     intent: "Uniform lifecycle/resources/logs/cleanup contract so runtimes are interchangeable."
     required_artifacts: ["runtime-provider-contract.yaml"]
     rule_refs: []
@@ -289,6 +332,7 @@ patterns:
     category: observability
     maturity: controlled
     source_normative: observability-governance.prompt-version
+    catalog_ref: ["QUA-09"]
     intent: "Track prompt/skill/provider/model versions linked to evals for regression attribution."
     required_artifacts: ["prompt-version-log.yaml"]
     rule_refs: []
@@ -298,6 +342,7 @@ patterns:
     category: governance
     maturity: production
     source_normative: governance.cluster-action-dry-run
+    catalog_ref: ["GOV-11"]
     intent: "High-risk cluster actions require dry-run, rollback proof and approval before execution."
     required_artifacts: ["cluster-action-policy.yaml"]
     rule_refs: []
@@ -307,6 +352,7 @@ patterns:
     category: knowledge
     maturity: production
     source_normative: knowledge-governance.doc-to-graph
+    catalog_ref: ["KNO-08"]
     intent: "Extract sourced relations and contradictions into a documentary graph with provenance."
     required_artifacts: ["doc-graph-pipeline.yaml"]
     rule_refs: []
@@ -316,6 +362,7 @@ patterns:
     category: orchestration
     maturity: production
     source_normative: orchestration-governance.flow-dsl-minimal
+    catalog_ref: ["ORC-10"]
     intent: "Tool-neutral flow manifest: ordered steps, exportable diagram, determinism flag."
     required_artifacts: ["flow-dsl-manifest.yaml"]
     rule_refs: []
@@ -325,6 +372,7 @@ patterns:
     category: workflow
     maturity: starter
     source_normative: orchestration-governance.workflow-state
+    catalog_ref: ["ORC-09"]
     intent: "Declare a durable mission state machine (states/guards/interrupts); execution delegated to LangGraph/Conductor."
     required_artifacts: ["workflow-state-manifest.yaml"]
     rule_refs: []
@@ -334,6 +382,7 @@ patterns:
     category: runtime
     maturity: production
     source_normative: runtime-governance.k8s-agent-control-plane
+    catalog_ref: ["RUN-03"]
     intent: "Declarative K8s agent/sandbox contract (CRD/limits/network/SA/OTel); native provider delegated to kagent/client-go."
     required_artifacts: ["k8s-agent-manifest.yaml"]
     rule_refs: []

@@ -60,6 +60,7 @@ from grimoire.core.standard_checks.controls import (
     _verify_workflow_state_manifest,
     _verify_workspace_isolation,
 )
+from grimoire.core.standard_checks.pattern_codes import catalog_pattern_ids
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
@@ -1091,6 +1092,46 @@ def _verify_pattern_catalog(root: Path, result: StandardVerificationResult) -> N
                 f"Pattern {pattern.get('id')!r} required_artifacts must be a list.",
                 path=rel_path,
             )
+        _verify_pattern_catalog_ref(pattern, rel_path, result)
+
+
+def _verify_pattern_catalog_ref(pattern: dict[str, Any], rel_path: Path, result: StandardVerificationResult) -> None:
+    """`catalog_ref` (#246 lot 4), when present, must name real upstream codes.
+
+    A kit-native pattern with no upstream equivalent declares ``catalog_ref: []``
+    — absence is a documented choice, not an error. The field itself stays
+    optional so a hand-authored `pattern-catalog.yaml` predating this bridge
+    convergence keeps validating.
+    """
+    if "catalog_ref" not in pattern:
+        return
+    refs = pattern.get("catalog_ref")
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        _add_check(
+            result,
+            "patterns.catalog_ref_invalid",
+            "error",
+            f"Pattern {pattern.get('id')!r} catalog_ref must be a list of pattern-code strings.",
+            path=rel_path,
+        )
+        return
+    if not refs:
+        return
+    try:
+        catalog_ids = catalog_pattern_ids()
+    except (OSError, ValueError):
+        # Bundled catalogue unreachable in this environment — degrade silently
+        # rather than fail a check the project artifact itself did not cause.
+        return
+    unknown = [ref for ref in refs if ref not in catalog_ids]
+    if unknown:
+        _add_check(
+            result,
+            "patterns.catalog_ref_unknown",
+            "error",
+            f"Pattern {pattern.get('id')!r} cites unknown catalogue code(s): {', '.join(unknown)}.",
+            path=rel_path,
+        )
 
 
 def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult) -> None:

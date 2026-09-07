@@ -313,6 +313,8 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "guardrail.output_missing": "rule_packs",
     "guardrail.tool_missing": "rule_packs",
     "guardrail.unversioned": "rule_packs",
+    "patterns.catalog_ref_invalid": "rule_packs",
+    "patterns.catalog_ref_unknown": "rule_packs",
     "patterns.categories_missing": "rule_packs",
     "patterns.category_missing": "rule_packs",
     "patterns.check_refs_missing": "rule_packs",
