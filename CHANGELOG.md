@@ -25,6 +25,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   L'espace Exécuter (`spaces/executer.js`) affiche le rappel dans
   l'inspecteur, avec parcimonie — pas de section pour un rappel vide.
 
+## [3.39.1] - 2026-09-07
+
 ### Corrigé
 
 - **Le glossaire se charge sur une installation nue de la wheel.** Le serveur
