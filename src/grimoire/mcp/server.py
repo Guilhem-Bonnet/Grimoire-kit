@@ -668,6 +668,36 @@ def task_context(
         return _task_error(exc)
 
 
+@mcp.tool()
+def task_recall(
+    task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
+) -> str:
+    """What the project's memory knows about this task and its neighbours — the recall a claim surfaces.
+
+    Own history of the task (past failed/blocked attempts), neighbouring tasks
+    (explicit links, same mission, or close titles) with what stopped them, and
+    anything the project's memory has consolidated on nearby subjects. Bounded
+    in tokens. Same recall as `grimoire task recall` and the SessionStart hook.
+
+    Args:
+        task_id: Ledger task id. Empty string resolves the session's active task
+            (GRIMOIRE_TASK_ID, then the ledger's active claim, then the board, then bootstrap).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    from grimoire.core.standard_state import resolve_active_task
+
+    root = Path(project_path).resolve()
+    try:
+        service = _task_service(project_path, ledger_root)
+        resolved = task_id or resolve_active_task(root).task_id
+        service.require(resolved)
+        recall = service.recall(resolved)
+        return json.dumps(recall.to_dict(), indent=2, ensure_ascii=False, default=str)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
 # ── Host surfaces ─────────────────────────────────────────────────────────────
 #
 # A host that loads neither skill folders nor slash commands can still reach

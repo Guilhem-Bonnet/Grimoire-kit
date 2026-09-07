@@ -52,6 +52,7 @@ __all__ = [
     "files_view",
     "glossary_view",
     "safe_relpath",
+    "task_recall_view",
     "task_trace_view",
     "task_view",
     "tasks_view",
@@ -275,6 +276,19 @@ def task_trace_view(project_root: Path, task_id: str) -> dict[str, Any]:
     from grimoire.missions.trace import build_task_timeline
 
     return build_task_timeline(project_root, task_id).to_dict()
+
+
+def task_recall_view(project_root: Path, task_id: str) -> dict[str, Any]:
+    """Le rappel de la tâche — même contenu que ``grimoire task recall`` (#141).
+
+    ``has_content`` est ce que l'inspecteur consulte pour décider d'afficher le
+    bloc « Rappel » : un rappel honnêtement vide ne mérite pas une section, il
+    mérite de ne pas en avoir une.
+    """
+    service = _service(project_root)
+    service.require(task_id)
+    payload: dict[str, Any] = service.recall(task_id).to_dict()
+    return payload
 
 
 # ── Fichiers par étage ──────────────────────────────────────────────────────

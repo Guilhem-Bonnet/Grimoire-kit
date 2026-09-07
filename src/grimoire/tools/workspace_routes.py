@@ -163,6 +163,8 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         if path.startswith(f"{PREFIX}tasks/"):
             if path.endswith("/trace"):
                 return workspace_api.task_trace_view(project_root, _task_id(path, "trace"))
+            if path.endswith("/recall"):
+                return workspace_api.task_recall_view(project_root, _task_id(path, "recall"))
             return workspace_api.task_view(project_root, _task_id(path))
     except GrimoireError as exc:
         raise _translate(exc) from exc

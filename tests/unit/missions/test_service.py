@@ -15,6 +15,8 @@ from ruamel.yaml import YAML
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_state import resolve_active_task
 from grimoire.evidence import EvidenceItem, EvidenceKind, EvidenceProfile, EvidenceService
+from grimoire.memory.backends.local import LocalMemoryBackend
+from grimoire.memory.manager import MemoryManager
 from grimoire.missions import service as service_module
 from grimoire.missions.gates import GATES_FILE, GateRefusal, GateVerdict
 from grimoire.missions.schemas import TaskState
@@ -207,3 +209,87 @@ def test_un_profil_permissif_signale_sans_bloquer(projet: Path) -> None:
     move = service.transition(tid, TaskState.READY, "a")
     assert move.advisories and "owner_or_agent_role" in move.advisories[0]
     assert move.task.status is TaskState.READY
+
+
+# ── le rappel de tâche (#141) : la boucle de mémoire au claim ────────────────
+
+
+def ouvre_avec_memoire(projet: Path, titre: str, memoire: MemoryManager) -> tuple[TaskService, str]:
+    service = TaskService(projet, memory_manager=memoire)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, titre, acceptance=(ACCEPTATION,), owner="amelia")
+    return service, task.id
+
+
+def _amene_a_needs_verification(projet: Path, service: TaskService, tid: str) -> None:
+    service.transition(tid, TaskState.READY, "a")
+    service.claim(tid, "a", "h")
+    service.transition(tid, TaskState.RUNNING, "a")
+    prouve(projet, tid)
+    service.transition(tid, TaskState.NEEDS_VERIFICATION, "a")
+
+
+def test_recall_refuse_une_tache_inconnue_avant_tout_calcul(projet: Path) -> None:
+    service, _ = ouvre(projet)
+    with pytest.raises(GrimoireMissionError, match="Tâche inconnue"):
+        service.recall("GAO-nulle-part-001")
+
+
+def test_recall_d_une_tache_neuve_est_honnetement_vide(projet: Path) -> None:
+    service, tid = ouvre(projet)
+    recall = service.recall(tid)
+    assert not recall.has_content
+
+
+def test_la_cloture_consolide_la_memoire_et_le_rappel_suivant_le_voit(projet: Path, tmp_path: Path) -> None:
+    """C'est la boucle complète : clôturer une tâche écrit en mémoire, et une
+    tâche voisine ouverte ensuite — dans une session suivante, donc un service
+    neuf — le voit dans son propre rappel."""
+    memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
+    service, tid = ouvre_avec_memoire(projet, "Migrer le service de facturation", memoire)
+    _amene_a_needs_verification(projet, service, tid)
+
+    service.transition(tid, TaskState.CLOSED, "a")
+
+    assert memoire.count() == 1, "la clôture doit avoir consolidé un souvenir, et un seul"
+
+    suivante, autre_tid = ouvre_avec_memoire(projet, "Réparer le service de facturation en urgence", memoire)
+    rappel = suivante.recall(autre_tid)
+    assert rappel.memory_hits, "la mémoire consolidée à la clôture doit nourrir le rappel d'une tâche voisine"
+
+
+def test_le_blocage_consolide_aussi_la_memoire(projet: Path, tmp_path: Path) -> None:
+    memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
+    service, tid = ouvre_avec_memoire(projet, "Ouvrir le port sortant du proxy", memoire)
+    service.transition(tid, TaskState.READY, "a")
+
+    service.transition(tid, TaskState.BLOCKED, "a", "règle firewall refusée par l'équipe infra")
+
+    assert memoire.count() == 1
+    entry = memoire.get_all()[0]
+    assert entry.metadata.get("type") == "failures"
+    assert "règle firewall refusée" in entry.text
+
+
+def test_un_mouvement_ordinaire_n_ecrit_rien_en_memoire(projet: Path, tmp_path: Path) -> None:
+    """Garde-fou de la roadmap : pas de micro-action stockée comme connaissance durable."""
+    memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
+    service, tid = ouvre_avec_memoire(projet, "Tâche ordinaire", memoire)
+
+    service.transition(tid, TaskState.READY, "a")
+    service.claim(tid, "a", "h")
+    service.transition(tid, TaskState.RUNNING, "a")
+
+    assert memoire.count() == 0
+
+
+def test_sans_backend_memoire_configure_le_service_degrade_sans_planter(projet: Path) -> None:
+    """Aucun `project-context.yaml` dans le projet de test : `.memory` doit
+    rester `None`, et la clôture ne doit pas échouer pour autant."""
+    service, tid = ouvre(projet)
+    assert service.memory is None
+    _amene_a_needs_verification(projet, service, tid)
+
+    move = service.transition(tid, TaskState.CLOSED, "a")
+
+    assert move.task.status is TaskState.CLOSED

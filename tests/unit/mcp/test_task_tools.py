@@ -25,12 +25,20 @@ from grimoire.evidence import EvidenceItem, EvidenceKind, EvidenceProfile, Evide
 from grimoire.hosts.decisions import HookInput, decide_activation, decide_task_context
 from grimoire.hosts.surface import HookEvent
 from grimoire.mcp import server as server_module
-from grimoire.mcp.server import mcp, task_claim, task_context, task_list_ready, task_show, task_update
+from grimoire.mcp.server import (
+    mcp,
+    task_claim,
+    task_context,
+    task_list_ready,
+    task_recall,
+    task_show,
+    task_update,
+)
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
-TASK_TOOLS = {"task_list_ready", "task_show", "task_claim", "task_update", "task_context"}
+TASK_TOOLS = {"task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
 ACCEPTATION = "un client MCP liste, reclame et clot une tache reelle"
 EVIDENCE = Path("_grimoire-runtime-output/evidence")
 BOARD = Path("_grimoire/standard/task-board.yaml")
@@ -118,7 +126,7 @@ def hook_nomme(projet: Path) -> str:
 
 # ── la surface existe pour un client ─────────────────────────────────────────
 
-def test_un_client_voit_les_cinq_outils() -> None:
+def test_un_client_voit_les_six_outils() -> None:
     async def scenario(session: ClientSession) -> set[str]:
         return {tool.name for tool in (await session.list_tools()).tools}
 
@@ -239,6 +247,65 @@ def test_le_refus_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
     par_mcp = json.loads(task_claim(tid, project_path=str(projet)))
     assert cli.exit_code == 1 and par_cli["blocked"] is True
     assert par_cli["refusals"] == par_mcp["refusals"]
+
+
+# ── task_recall (#141) : le même rappel que le hook et le CLI ────────────────
+
+
+def test_task_recall_est_honnetement_vide_pour_une_tache_neuve(projet: Path) -> None:
+    tid = ouvre(projet)
+    rappel = json.loads(task_recall(task_id=tid, project_path=str(projet)))
+    assert rappel["task_id"] == tid
+    assert rappel["has_content"] is False
+
+
+def test_task_recall_fait_remonter_la_cause_d_une_jumelle_qui_a_echoue(projet: Path) -> None:
+    ledger = _ledger(projet)
+    mission = ledger.list_missions()[0] if ledger.list_missions() else None
+    mission_id = mission.id if mission else ledger.create_mission(title="Travaux", origin="test").id
+    premiere = ledger.create_task(
+        mission_id, "Brancher le webhook de paiement", acceptance=(ACCEPTATION,), owner="claude"
+    )
+    ledger.transition_task(premiere.id, TaskState.READY, actor_id="claude")
+    ledger.transition_task(premiere.id, TaskState.CLAIMED, actor_id="claude")
+    ledger.transition_task(premiere.id, TaskState.RUNNING, actor_id="claude")
+    ledger.transition_task(
+        premiere.id, TaskState.FAILED, actor_id="claude", reason="webhook de paiement : signature invalide"
+    )
+    jumelle = ledger.create_task(
+        mission_id, "Brancher le webhook de paiement (bis)", acceptance=(ACCEPTATION,), owner="claude"
+    )
+
+    rappel = json.loads(task_recall(task_id=jumelle.id, project_path=str(projet)))
+
+    assert rappel["has_content"] is True
+    assert any("signature invalide" in s["causes"][0] for s in rappel["siblings"] if s["causes"])
+    assert "signature invalide" in rappel["text"]
+
+
+def test_task_recall_sans_argument_resout_la_tache_active(projet: Path) -> None:
+    tid = ouvre(projet)
+    task_context(task_id=tid, project_path=str(projet))
+    task_claim(tid, actor="claude", project_path=str(projet))
+
+    rappel = json.loads(task_recall(project_path=str(projet)))
+
+    assert rappel["task_id"] == tid
+
+
+def test_le_rappel_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    tid = ouvre(projet)
+    par_mcp = json.loads(task_recall(task_id=tid, project_path=str(projet)))
+    cli = CliRunner().invoke(
+        app, ["--output", "json", "task", "recall", tid, "--project-root", str(projet)]
+    )
+    par_cli = json.loads(cli.output)
+    assert cli.exit_code == 0, cli.output
+    assert par_cli["text"] == par_mcp["text"]
 
 
 # ── erreurs lisibles ─────────────────────────────────────────────────────────

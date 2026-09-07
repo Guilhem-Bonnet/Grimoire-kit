@@ -109,6 +109,28 @@ def test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse(
     assert "refusé" in refusal_text
 
 
+def test_executer_l_inspecteur_ne_montre_pas_de_rappel_vide(
+    workspace: Page, project_with_task: tuple[Path, str]
+) -> None:
+    """#141, avec parcimonie : une tâche qui n'a rien traversé n'a rien à
+    rappeler, et l'inspecteur ne doit pas afficher un bloc « Rappel » vide.
+
+    Si le garde ``has_content`` de ``renderInspector`` disparaissait, ce test
+    échouerait — le bloc apparaîtrait pour la tâche par défaut du fixture, qui
+    n'est jamais réclamée avec succès dans ce lot (le claim y est refusé faute
+    de context bundle et de fournisseur activé)."""
+    _, task_id = project_with_task
+    _goto(workspace, "executer")
+    workspace.wait_for_selector(".ex-card")
+
+    inspector = workspace.locator("#inspector-body")
+    workspace.locator(".ex-card").filter(has_text="Vérifier la vue de travail").first.click()
+    inspector.get_by_text(task_id, exact=True).wait_for()
+
+    assert inspector.locator(".ex-recall").count() == 0
+    assert "Rappel" not in inspector.locator(".ex-insp-block h4").all_inner_texts()
+
+
 # ── Observer — état vide honnête, jamais un mur de zéros ni une erreur ─────
 
 

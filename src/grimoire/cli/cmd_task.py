@@ -397,6 +397,29 @@ def task_context(
     console.print(f"[green]OK[/green] context bundle de {task_id} → {artifact.path}")
 
 
+@task_app.command("recall")
+def task_recall(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Ce que la mémoire du projet sait de cette tâche et de ses voisines.
+
+    Même rappel que celui que le hook SessionStart injecte au claim, et que
+    l'outil MCP `task_recall` — historique propre de la tâche, tâches liées ou
+    au titre proche avec leurs causes d'arrêt, et ce que la mémoire du projet a
+    consolidé sur des sujets voisins. Borné en tokens.
+    """
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    recall = service.recall(task_id)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(recall.to_dict(), indent=2, ensure_ascii=False, default=str))
+        return
+    console.print(recall.text)
+
+
 @task_app.command("trace")
 def task_trace(
     ctx: typer.Context,

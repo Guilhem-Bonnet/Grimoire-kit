@@ -123,6 +123,7 @@ export const api = {
   tasks: (params) => get(WS + 'tasks', params),
   task: (id) => get(WS + 'tasks/' + encodeURIComponent(id)),
   taskTrace: (id) => get(WS + 'tasks/' + encodeURIComponent(id) + '/trace'),
+  taskRecall: (id) => get(WS + 'tasks/' + encodeURIComponent(id) + '/recall'),
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
