@@ -2,6 +2,17 @@
 
 ## Dernière release
 
+### 3.39.1 — Le glossaire sur une installation nue
+
+- **La vue de travail s'ouvre sur `pip install grimoire-kit` sans extra.** Le
+  glossaire importait PyYAML alors que la dépendance déclarée est ruamel ;
+  les six espaces s'ouvraient avec une erreur sur une installation nue (#292,
+  trouvé par le passage consommateur sur un projet réel). Chargeur du kit à la
+  place, avec un test qui bloque `yaml`.
+- Voir `CHANGELOG.md` pour le détail des autres changements de cette version.
+
+## Releases précédentes
+
 ### 3.39.0 — La vue de travail
 
 - **Une coque unique pour l'atelier et le cockpit.** Six espaces de travail,

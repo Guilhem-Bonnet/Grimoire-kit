@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.39.1] - 2026-09-07
+
 ### Corrigé
 
 - **Le glossaire se charge sur une installation nue de la wheel.** Le serveur
