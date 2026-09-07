@@ -136,3 +136,12 @@ def test_le_cockpit_ne_redirige_pas_la_vitrine(cockpit_server: int) -> None:
     code, location = _get_no_follow(cockpit_server, "/index.html")
     assert code == 200
     assert location is None
+
+
+def test_la_racine_ouvre_la_coque_et_index_reste_vitrine() -> None:
+    """`/` ouvre l'espace Piloter ; `index.html` demandé explicitement reste la
+    page vitrine, hors périmètre du basculement (spec §7)."""
+    from grimoire.tools.workspace_legacy import legacy_redirect_target
+
+    assert legacy_redirect_target("") == "piloter"
+    assert legacy_redirect_target("index.html") is None
