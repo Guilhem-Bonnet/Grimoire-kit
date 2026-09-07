@@ -7,6 +7,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Le glossaire se charge sur une installation nue de la wheel.** Le serveur
+  de la vue de travail importait PyYAML alors que la dépendance déclarée est
+  ruamel : sur `pip install grimoire-kit` sans extra, `/api/workspace/glossary`
+  tombait et les six espaces s'ouvraient avec une erreur (#292, trouvé par le
+  passage consommateur sur un projet réel). Le glossaire et le registre des
+  plans passent par le chargeur du kit ; un test bloque le module `yaml` et un
+  autre refuse tout `import yaml` direct dans ces modules.
+
 ### Retiré
 
 - **Onze accesseurs publics sans appelant ni test (#275).** `MemoryManager.

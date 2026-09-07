@@ -110,10 +110,7 @@ class PlansRegistry:
                 if not p.exists():
                     issues.append(f"{entry.id}: path not found: {entry.path}")
 
-        stats = {
-            status: sum(1 for p in self.plans if p.status == status)
-            for status in _VALID_STATUSES
-        }
+        stats = {status: sum(1 for p in self.plans if p.status == status) for status in _VALID_STATUSES}
         stats["total"] = len(self.plans)
 
         active = [p for p in self.plans if p.status == "active"]
@@ -133,13 +130,9 @@ class PlansRegistry:
 
 def load_plans_registry(path: Path) -> PlansRegistry:
     """Load and parse a deprecated-plans-registry.yaml file."""
-    try:
-        import yaml  # type: ignore[import-untyped]
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except ImportError:
-        import json
-        # Fallback: attempt JSON (not standard, but allows testing without pyyaml)
-        raw = json.loads(path.read_text(encoding="utf-8"))
+    from grimoire.tools._common import load_yaml
+
+    raw = load_yaml(path)
 
     if not isinstance(raw, dict):
         msg = "Plans registry must be a YAML mapping"

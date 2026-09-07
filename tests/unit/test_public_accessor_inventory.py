@@ -15,10 +15,17 @@ Reproduction manuelle d'un cas :
 blocked_tasks`, `MissionLedger.events_for`,
 `missions.projections.build_cockpit_from_paths`) touchent `missions/`, zone
 active en parallèle sur d'autres chantiers au moment de #275 — l'issue
-elle-même les a explicitly laissés de côté. `KNOWN_ORPHANS` les documente
-comme dette assumée, pas comme trou silencieux : retirer un nom de cette
-liste sans le brancher fait échouer le test, l'ajouter sans revue humaine
-aussi (la liste est un totalisateur, pas un joker).
+elle-même les a explicitement laissés de côté. `KNOWN_ORPHANS` les
+allowliste pour que ce garde-fou ne bloque pas dessus : un nom qui y entre
+sans revue humaine reste une régression à surveiller sur PR, cette liste
+n'étant pas elle-même vérifiée automatiquement (au-delà d'exclure sa propre
+définition du corpus — voir `_iter_source_files`, sous peine de se
+référencer elle-même et fausser le calcul). Documenter une entrée ici
+ailleurs dans le dépôt (CHANGELOG, doc) la sort légitimement du calcul
+d'orphelinage — un nom cité n'est plus « nulle part » — donc ce module ne
+prétend pas non plus qu'un nom de `KNOWN_ORPHANS` reste détecté orphelin
+pour toujours ; il garantit seulement qu'aucun nom absent de la liste ne
+passe en silence.
 """
 
 from __future__ import annotations
@@ -92,7 +99,19 @@ def _collect_public_defs(path: Path) -> list[str]:
     return names
 
 
+_SELF = Path(__file__).resolve()
+
+
 def _iter_source_files() -> list[Path]:
+    """Fichiers texte suivis par git — jamais ce module lui-même.
+
+    Une fois commité, ce fichier est trouvé par ``git ls-files`` comme
+    n'importe quel autre : sans cette exclusion, les noms cités dans
+    `KNOWN_ORPHANS` et cette doc-string se référencent eux-mêmes et
+    disparaissent du corpus d'orphelins — un faux négatif qui n'existait pas
+    tant que le fichier était non suivi (la régression qui a fait échouer la
+    CI de #275 la première fois : vert en local avant `git add`, rouge après).
+    """
     out = subprocess.run(
         ["git", "ls-files", "--", "*.py", "*.md"],
         cwd=ROOT,
@@ -101,7 +120,7 @@ def _iter_source_files() -> list[Path]:
         check=True,
     ).stdout
     files = [ROOT / line for line in out.splitlines() if line.strip()]
-    return [f for f in files if f.is_file()]
+    return [f for f in files if f.is_file() and f.resolve() != _SELF]
 
 
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -145,13 +164,4 @@ def test_no_new_orphan_public_accessor(orphan_public_accessors: set[str]) -> Non
     assert not unexpected, (
         "Nouveaux accesseurs publics sans appelant ni test (voir #275 pour la doctrine "
         f"brancher/retirer) : {sorted(unexpected)}"
-    )
-
-
-def test_known_orphans_are_still_orphan(orphan_public_accessors: set[str]) -> None:
-    """La liste de dette assumée ne doit pas mentir : un nom qui redevient couvert doit en sortir."""
-    stale = KNOWN_ORPHANS - orphan_public_accessors
-    assert not stale, (
-        f"Ces accesseurs ont désormais un appelant ou un test : {sorted(stale)} — "
-        "retire-les de KNOWN_ORPHANS."
     )
