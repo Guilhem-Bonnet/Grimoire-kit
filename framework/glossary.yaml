@@ -287,7 +287,7 @@ entries:
       L'unité de travail du Mission Ledger, avec ses critères d'acceptation,
       son propriétaire et les portes de preuve qu'elle doit franchir.
     raccourci: ""
-    termes: [mission-ledger, porte-de-preuve, board-gouverne]
+    termes: [mission-ledger, porte-de-preuve, board-gouverne, rappel-de-tache]
     doc: cli-reference.md
 
   - id: mission-ledger
@@ -364,6 +364,18 @@ entries:
     raccourci: ""
     termes: [tache, agent]
     doc: ""
+
+  - id: rappel-de-tache
+    nom: Rappel de tâche
+    définition: >-
+      Ce que le Mission Ledger et la mémoire du projet savent d'une tâche et
+      de ses voisines au moment du claim — historique propre, cause d'arrêt
+      d'une jumelle, mémoire consolidée à une clôture ou un blocage passés.
+      Borné en tokens, injecté par le hook SessionStart pour une tâche
+      réclamée seulement.
+    raccourci: ""
+    termes: [tache, mission-ledger, evidence-pack]
+    doc: cli-reference.md
 
   - id: standard-agentique
     nom: Standard agentique

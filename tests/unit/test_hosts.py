@@ -708,6 +708,67 @@ def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
     assert "concierge" in rendered["hookSpecificOutput"]["additionalContext"]
 
 
+# ── Rappel de tâche au claim (#141) ─────────────────────────────────────────
+
+
+def test_le_rappel_de_tache_n_est_jamais_injecte_sans_claim(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contrôle négatif : une tâche active mais jamais réclamée ne rappelle rien.
+
+    ``GRIMOIRE_TASK_ID`` force la tâche active sans passer par un claim — c'est
+    exactement le cas que la boucle ne doit pas déclencher.
+    """
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(project)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Tâche jamais réclamée", acceptance=("x",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    monkeypatch.setenv("GRIMOIRE_TASK_ID", task.id)
+
+    context = _session_start(project)
+
+    assert "rappel de tâche" not in context.lower()
+    assert decide_activation(
+        HookInput(event=HookEvent.SESSION_START, project_root=project)
+    ).detail["recall_injected"] is False
+
+
+def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(project: Path) -> None:
+    """Le critère de l'issue #141, vu depuis le hook : une jumelle qui a échoué
+    remonte au claim, dans l'ordre prescrit — persona, rappel, directive."""
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(project)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    passee = service.ledger.create_task(mission.id, "Configurer le webhook amont", acceptance=("x",))
+    service.ledger.transition_task(passee.id, TaskState.READY, actor_id="a")
+    service.ledger.transition_task(passee.id, TaskState.CLAIMED, actor_id="a")
+    service.ledger.transition_task(passee.id, TaskState.RUNNING, actor_id="a")
+    service.ledger.transition_task(
+        passee.id, TaskState.BLOCKED, actor_id="a", reason="webhook amont : certificat expiré"
+    )
+    service.ledger.transition_task(passee.id, TaskState.READY, actor_id="a")
+
+    jumelle = service.ledger.create_task(
+        mission.id, "Configurer le webhook amont (reprise)", acceptance=("x",)
+    )
+    service.ledger.transition_task(jumelle.id, TaskState.READY, actor_id="b")
+    service.ledger.claim_task(jumelle.id, "b", "host-b")
+
+    context = _session_start(project)
+
+    assert "certificat expiré" in context
+    assert (
+        context.index("[Grimoire — persona d'entrée]")
+        < context.index("[Grimoire — rappel de tâche]")
+        < context.index("[Grimoire Standard — activation]")
+    )
+
+
 def _configure_entry(root: Path, entry: str | None) -> None:
     """Écrit un project-context.yaml minimal ; ``None`` omet la clé."""
     lines = ['project:', '  name: "hosts-test"', '  type: "library"', 'agents:', '  archetype: "minimal"']

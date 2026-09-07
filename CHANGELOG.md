@@ -6,6 +6,24 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **Le claim rappelle ce que la mémoire sait de la tâche — L6 Task memory
+  (#141).** `grimoire task recall <id>`, l'outil MCP `task_recall` et le hook
+  `SessionStart` (entre la persona d'entrée et la directive du standard,
+  seulement pour une tâche réclamée) rendent le même rappel : l'historique
+  propre de la tâche (tentatives précédentes bloquées ou échouées), ses
+  voisines — liées par `task link`, de la même mission, ou au titre proche —
+  avec la cause de leur arrêt même si elles ont depuis été rouvertes, et ce
+  que la mémoire du projet a consolidé sur des sujets voisins quand un backend
+  mémoire est configuré. Borné en tokens. `TaskService` consolide dans cette
+  mémoire ce qu'une clôture (`decisions`) ou un blocage (`failures`) enseigne
+  — jamais un mouvement ordinaire, conformément aux garde-fous de
+  `planning/memory-os-roadmap.md` (étape 6, Kanban Task Memory). Nouveau
+  module `grimoire.missions.recall` ; `grimoire.missions.service.TaskService`
+  gagne `.recall()` et une résolution paresseuse de la mémoire du projet.
+  L'espace Exécuter (`spaces/executer.js`) affiche le rappel dans
+  l'inspecteur, avec parcimonie — pas de section pour un rappel vide.
 
 ## [3.39.0] - 2026-09-06
 ### Corrigé

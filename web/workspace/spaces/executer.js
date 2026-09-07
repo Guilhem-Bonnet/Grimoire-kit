@@ -11,7 +11,7 @@
 // colonnes vides en pointillé.
 //
 // API consommées : api.tasks(), api.task(id), api.taskTrace(id),
-// api.taskAction(id, 'claim'|'move'|'block'|'close', body).
+// api.taskRecall(id), api.taskAction(id, 'claim'|'move'|'block'|'close', body).
 // Le refus d'un gate revient en 200 avec `blocked: true` et la preuve
 // manquante nommée — c'est une réponse à afficher, pas une erreur à avaler.
 
@@ -70,6 +70,7 @@ function injectStyles() {
     .ex-insp-block { margin-bottom: var(--sp-4); }
     .ex-insp-block h4 { font-size: var(--t-min); color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
     .ex-insp-block ul { margin: 0; padding-left: 18px; font-size: var(--t-s); }
+    .ex-recall { margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
     .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 6px; }
     .ex-gate-req { font-size: var(--t-min); color: var(--ink3); }
     .ex-refusal { color: var(--bad); font-size: var(--t-s); margin-top: 6px; }
@@ -232,9 +233,10 @@ async function renderTimeline(root, ctx, task) {
 
 async function renderInspector(ctx, taskId, onWritten) {
   ctx.inspector.replaceChildren();
-  const [detail, trace] = await Promise.all([
+  const [detail, trace, recall] = await Promise.all([
     ctx.api.task(taskId).catch(() => null),
     ctx.api.taskTrace(taskId).catch(() => null),
+    ctx.api.taskRecall(taskId).catch(() => null),
   ]);
   if (!detail) {
     ctx.inspector.append(text('p', 'lbl', 'Tâche indisponible.'));
@@ -243,6 +245,19 @@ async function renderInspector(ctx, taskId, onWritten) {
 
   ctx.inspector.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(text('div', 'lbl mono', detail.id));
+
+  // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien
+  // à dire, plutôt que d'afficher « rien en mémoire » à chaque tâche neuve.
+  if (recall && recall.has_content) {
+    const recallBlock = document.createElement('div');
+    recallBlock.className = 'ex-insp-block';
+    recallBlock.append(text('h4', null, 'Rappel'));
+    const pre = document.createElement('pre');
+    pre.className = 'ex-recall';
+    pre.textContent = recall.text;
+    recallBlock.append(pre);
+    ctx.inspector.append(recallBlock);
+  }
 
   const acceptance = document.createElement('div');
   acceptance.className = 'ex-insp-block';

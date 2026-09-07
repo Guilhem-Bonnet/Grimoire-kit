@@ -1722,6 +1722,10 @@
    "version": "3.4.2",
    "path": "archetypes/creative-studio/archetype.dna.yaml"
   },
+  "85ecbf012f25705a9dd75209fd21b334d1d972e80121073ffd5ad65707a81849": {
+   "version": "3.39.0",
+   "path": "framework/glossary.yaml"
+  },
   "861082fcece716ef2697f9ae07abb440f202a4ba325ead3db42a9968d80b1466": {
    "version": "3.4.2",
    "path": "archetypes/meta/agents/project-navigator.md"

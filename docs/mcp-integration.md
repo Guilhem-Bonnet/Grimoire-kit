@@ -81,10 +81,11 @@ Dans `claude_desktop_config.json` :
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) |
 | `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche |
 | `task_context` | Sur quelle tâche la session est, et son context bundle |
+| `task_recall` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 
 ### Les tâches : un outil, pas du texte dans un prompt
 
-Les cinq outils `task_*` appellent le même service que `grimoire task`
+Les six outils `task_*` appellent le même service que `grimoire task`
 (`grimoire.missions.service.TaskService`), donc le même gate de preuve
 (`_grimoire/standard/evidence-gates.yaml`). Une transition que le CLI refuse,
 MCP la refuse pour la même raison, et le refus est structuré :
@@ -117,6 +118,16 @@ Le parcours nominal d'un agent : `task_list_ready` → `task_context(task_id)`
 (produit le bundle que le gate exige) → `task_claim` → `task_update(move,
 running)` → travail et preuves → `task_update(move, needs_verification)` →
 `task_update(close)`.
+
+`task_recall` (#141) rend, pour la tâche active ou un identifiant explicite,
+l'historique propre de la tâche, ses voisines et la cause de leur arrêt, et ce
+que la mémoire du projet a consolidé sur des sujets voisins — borné en tokens.
+C'est le même rappel que celui que le hook `SessionStart` injecte
+automatiquement après un `task_claim` réussi, et que `grimoire task recall`
+côté CLI ; voir [référence CLI](cli-reference.md#ce-que-le-claim-rappelle)
+pour le détail. Une clôture ou un blocage (`task_update`, `close`/`block`)
+consolide dans cette même mémoire ce qui a été appris — jamais un mouvement
+ordinaire.
 
 ## Exemples d'utilisation
 

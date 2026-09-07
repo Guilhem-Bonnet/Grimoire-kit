@@ -411,23 +411,49 @@ sous-agent : **{entry.name}** — {entry.description}
     return text, entry.name
 
 
+def _claimed_task_recall(project_root: Path, task_id: str) -> str:
+    """The claim's recall — only for a task someone has actually claimed.
+
+    A task resolved from the board or a bare ``GRIMOIRE_TASK_ID`` override may
+    not carry a claim at all (``proposed``, ``ready``, or an operator naming a
+    task nobody has taken yet); recalling siblings for those would be reading
+    material for a task that has not started, not the reminder a claim earns.
+    ``task.claim`` is set once by :meth:`TaskService.claim` and survives every
+    later transition, so its presence is the one honest signal here.
+    """
+    try:
+        from grimoire.missions.service import TaskService
+
+        service = TaskService(project_root)
+        if not service.has_ledger:
+            return ""
+        task = service.ledger.get_task(task_id)
+        if task is None or task.claim is None:
+            return ""
+        return service.recall(task_id).text
+    except Exception:
+        return ""
+
+
 def decide_activation(hook: HookInput) -> Decision:
-    """Session start: hand the agent its persona, then the standing directive.
+    """Session start: hand the agent its persona, its claim's recall, then the directive.
 
     The directive was validated 40/40 by the 2026-07-09 campaign against 0/40
     without it — an unread standard is an inert standard. It stays last on
     purpose: it is the part measured, and the part closest to the user's first
     message. The persona goes first because identity frames the protocol, not
-    the reverse.
+    the reverse; the recall sits between the two — it is about the work, not
+    the identity, but it belongs before the standing directive all the same.
     """
     task_id = active_task_id(hook.project_root)
     directive = activation_context_text(hook.project_root, task_id=task_id)
     persona, entry_name = entry_persona_context(hook.project_root)
-    context = f"{persona}\n{directive}" if persona else directive
+    recall = _claimed_task_recall(hook.project_root, task_id)
+    context = "\n".join(part for part in (persona, recall, directive) if part)
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,
-        detail={"task_id": task_id, "entry_agent": entry_name},
+        detail={"task_id": task_id, "entry_agent": entry_name, "recall_injected": bool(recall)},
     )
 
 
