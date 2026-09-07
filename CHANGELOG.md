@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Piloter distingue kit aligné et kit installé (#288).** Le badge Kit
+  affichait « à jour » à côté d'un sous-texte `aligné sur 3.36.0, installé
+  3.38.0` — deux versions différentes contredisant un badge d'alignement
+  exact. `kit.upToDate` (aucun fichier livré n'a de révision plus récente au
+  catalogue) et `kit.aligned === kit.installed` (synchronisation exacte) sont
+  deux affirmations distinctes ; le badge dit maintenant « aligné » quand la
+  première est vraie sans la seconde, « à jour » seulement quand les deux
+  versions coïncident. Aucune donnée serveur ne change
+  (`project_health.kit_alignment` reste correct) : la correction est dans le
+  rendu, `web/workspace/spaces/piloter.js`.
+
 ## [3.39.0] - 2026-09-06
 ### Corrigé
 
