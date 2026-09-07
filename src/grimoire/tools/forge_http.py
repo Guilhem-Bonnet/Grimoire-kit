@@ -316,7 +316,7 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             if api.ui_dir is None:
                 self._json({"grimoire": "serve", "hint": "API disponible sous /api/"}, 200)
                 return
-            rel = path.lstrip("/") or "index.html"
+            rel = path.lstrip("/")
             if rel.startswith("data/"):
                 self._data_file(rel[len("data/"):])
                 return
@@ -328,7 +328,7 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             if space is not None and not (query or {}).get("legacy"):
                 self._redirect(f"/workspace/index.html#{space}")
                 return
-            target = (api.ui_dir / rel).resolve()
+            target = (api.ui_dir / (rel or "index.html")).resolve()
             # is_relative_to évite la confusion de préfixe (/a/web vs /a/web2).
             if not target.is_relative_to(api.ui_dir.resolve()):
                 self._error("chemin refusé", 403)

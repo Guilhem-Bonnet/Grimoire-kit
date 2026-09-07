@@ -31,6 +31,9 @@ __all__ = ["LEGACY_PAGES", "legacy_redirect_target"]
 #: `anatomy.html`, `game-ui.html`) sont hors périmètre (spec §7) et n'entrent
 #: jamais dans cette table.
 LEGACY_PAGES: dict[str, str] = {
+    # La racine de l'application servie ouvre la coque ; `index.html` demandé
+    # explicitement reste la page vitrine.
+    "": "piloter",
     "atelier.html": "piloter",
     "portfolio.html": "piloter",
     "kanban.html": "executer",

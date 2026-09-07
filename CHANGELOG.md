@@ -8,6 +8,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 ## [3.39.0] - 2026-09-06
+### Corrigé
+
+- **La racine de `grimoire serve` et du cockpit ouvre la vue de travail.** Le
+  basculement redirigeait les dix pages d'outil mais laissait `/` sur la page
+  vitrine ; la racine mène maintenant à l'espace Piloter, `index.html` demandé
+  explicitement reste la vitrine.
 
 ### Modifié
 
