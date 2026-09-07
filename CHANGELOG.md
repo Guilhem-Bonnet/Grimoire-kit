@@ -19,6 +19,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   versions coïncident. Aucune donnée serveur ne change
   (`project_health.kit_alignment` reste correct) : la correction est dans le
   rendu, `web/workspace/spaces/piloter.js`.
+- **Le glossaire se charge sur une installation nue de la wheel.** Le serveur
+  de la vue de travail importait PyYAML alors que la dépendance déclarée est
+  ruamel : sur `pip install grimoire-kit` sans extra, `/api/workspace/glossary`
+  tombait et les six espaces s'ouvraient avec une erreur (#292, trouvé par le
+  passage consommateur sur un projet réel). Le glossaire et le registre des
+  plans passent par le chargeur du kit ; un test bloque le module `yaml` et un
+  autre refuse tout `import yaml` direct dans ces modules.
 
 ## [3.39.0] - 2026-09-06
 ### Corrigé
