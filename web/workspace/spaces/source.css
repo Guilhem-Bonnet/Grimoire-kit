@@ -91,24 +91,73 @@
 }
 
 .sr-gutter {
+  position: relative;
   flex: none;
   padding: var(--sp-2) var(--sp-2);
-  text-align: right;
-  color: var(--ink3);
   background: var(--e1);
   border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.sr-gutter-nums {
+  text-align: right;
+  color: var(--ink3);
   user-select: none;
   white-space: pre;
 }
 
-.sr-textarea {
+/* Marqueurs de diagnostic : positionnés à `line * 20px` par source-editor.js,
+   au-dessus des numéros. */
+.sr-gutter-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sr-gutter-dot {
+  position: absolute;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  pointer-events: auto;
+  cursor: help;
+}
+
+/* Le corps de l'éditeur : la textarea réelle, et la surcouche colorée
+   dessous — même police, même remplissage, même interligne, alignées au
+   caractère près (ADR-006 D2 : recouvrement, pas de dépendance). */
+.sr-code-main {
+  position: relative;
   flex: 1;
+  min-width: 0;
+}
+
+.sr-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--t-s);
+  line-height: 20px;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sr-textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
   border: 0;
   outline: 0;
   resize: none;
   padding: var(--sp-2) var(--sp-3);
   background: none;
-  color: var(--ink);
+  color: transparent;
+  caret-color: var(--ink);
   font-family: var(--mono);
   font-size: var(--t-s);
   line-height: 20px;
@@ -116,9 +165,101 @@
   tab-size: 2;
 }
 
+.sr-textarea::selection {
+  background: var(--accsoft);
+}
+
 .sr-textarea[readonly] {
-  color: var(--ink2);
+  caret-color: var(--ink2);
   cursor: not-allowed;
+}
+
+/* Tokens de syntaxe (issue 280) — chaque rôle son token de web/workspace/tokens.css,
+   jamais une couleur choisie ici (tests/unit/test_workspace_tokens.py). */
+.tok-key { color: var(--syn-key); }
+.tok-string { color: var(--syn-string); }
+.tok-comment { color: var(--syn-comment); }
+.tok-tag { color: var(--syn-tag); }
+.tok-placeholder { color: var(--syn-placeholder); }
+.tok-path { color: var(--syn-path); }
+.tok-agent,
+.tok-pattern,
+.tok-workflow { color: var(--syn-ident); }
+/* `.tok-linked` : le serveur a résolu ce token vers une entrée du glossaire
+   (source-editor.js le pose, pas `data-term` — voir le commentaire de
+   `renderHighlight`, la surcouche est `pointer-events: none`). */
+.tok-linked { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+/* Infobulle de diagnostic — survol de la gouttière, non épinglable : plus
+   simple que la pile du glossaire (spec §3.2), qui ne s'applique qu'au
+   vocabulaire du kit. */
+.sr-diag-tip {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none; /* purement informative — jamais un obstacle au clic sous elle */
+  max-width: 360px;
+  background: var(--e3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--sp-2) var(--sp-3);
+  box-shadow: var(--shadow-tip);
+  font-size: var(--t-min);
+  color: var(--ink2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sr-diag-tip[hidden] {
+  display: none;
+}
+
+.sr-diag-tip-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Complétion : Ctrl+Espace ou déclenchée par {, @, / — même primitive
+   visuelle que la palette de commandes. */
+.sr-complete {
+  position: fixed;
+  z-index: 90;
+  width: 240px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--sp-1);
+  list-style: none;
+  background: var(--e2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-tip);
+  font-size: var(--t-s);
+}
+
+.sr-complete[hidden] {
+  display: none;
+}
+
+.sr-complete li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2);
+  height: 28px;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.sr-complete li[aria-selected="true"] {
+  background: var(--accsoft);
+}
+
+.sr-complete li .cmd {
+  margin-left: auto;
+  font-size: var(--t-min);
+  color: var(--ink3);
 }
 
 /* Diff : les tokens d'état portent l'ajout et le retrait, pas une couleur choisie ici. */

@@ -37,7 +37,10 @@ from grimoire.tools.workspace_routes import GET_ROUTES, POST_ROUTES, PREFIX
 # lance un sous-processus et a son propre test, plus lent.
 SHARED_READS = sorted(
     set(GET_ROUTES)
-    - {f"{PREFIX}file", f"{PREFIX}file/diff", f"{PREFIX}file/usage", f"{PREFIX}file/history", f"{PREFIX}doctor"}
+    - {
+        f"{PREFIX}file", f"{PREFIX}file/diff", f"{PREFIX}file/usage", f"{PREFIX}file/history",
+        f"{PREFIX}doctor", f"{PREFIX}language",
+    }
 )
 
 
@@ -245,6 +248,45 @@ def test_file_usage_et_file_history_repondent_sur_les_deux_hotes(
     assert code_c == code_d == 200
     assert history_a["path"] == history_b["path"] == path
     assert "commits" in history_a
+
+
+def test_language_repond_sur_les_deux_hotes_avec_tokens_et_diagnostics(
+    atelier: int, cockpit: int
+) -> None:
+    """L'IntelliSense de Source (#280) a aussi besoin d'un ``?path=`` — même
+    promesse de cible que ``file/usage`` et ``file/history``."""
+    path = _kit_markdown_path(atelier)
+
+    code_a, payload_a = _get(atelier, f"{PREFIX}language?path={path}")
+    code_b, payload_b = _get(cockpit, f"{PREFIX}language?path={path}&project=projet-a")
+
+    assert code_a == code_b == 200
+    assert payload_a["path"] == payload_b["path"] == path
+    assert "tokens" in payload_a and "diagnostics" in payload_a
+    assert "completions" not in payload_a, "pas de complétions sans line/col"
+
+
+def test_language_avec_un_brouillon_ignore_le_disque(atelier: int) -> None:
+    """``text=`` porte le brouillon affiché : il prime sur le fichier réel,
+    pour que la colorisation reste juste avant tout enregistrement."""
+    path = _kit_markdown_path(atelier)
+
+    code, payload = _get(
+        atelier, f"{PREFIX}language?path={path}&text=" + "voir%20_grimoire%2Fkit%2Fabsent.md"
+    )
+
+    assert code == 200
+    assert any(d["family"] == "dead-path" for d in payload["diagnostics"])
+
+
+def test_language_avec_position_rend_des_completions(atelier: int) -> None:
+    code, payload = _get(
+        atelier,
+        f"{PREFIX}language?path=_grimoire/kit/agents/x.md&text=voir%20%40&line=0&col=6",
+    )
+
+    assert code == 200
+    assert isinstance(payload["completions"], list)
 
 
 # ── 5. Un chemin hostile est refusé, symlink compris ────────────────────────

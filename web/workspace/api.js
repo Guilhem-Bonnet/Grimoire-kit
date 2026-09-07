@@ -131,6 +131,15 @@ export const api = {
   fileHistory: (path) => get(WS + 'file/history', { path }),
   commands: () => get(WS + 'commands'),
   doctor: (project) => get(WS + 'doctor', project ? { project } : undefined),
+  // IntelliSense de l'éditeur Source (#280) : tokens + diagnostics toujours,
+  // complétions seulement si `pos` est fourni. `text` porte le brouillon en
+  // cours d'édition — omis, la lecture vient du disque comme `file()`.
+  language: (path, { text, pos } = {}) => {
+    const params = { path };
+    if (text !== undefined) params.text = text;
+    if (pos) { params.line = String(pos.line); params.col = String(pos.col); }
+    return get(WS + 'language', params);
+  },
   // Concevoir (lot 3) : les containers enrichis (genre, agents, équipe,
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),

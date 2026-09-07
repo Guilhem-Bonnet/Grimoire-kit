@@ -26,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from grimoire.tools import workspace_api, workspace_exec
+from grimoire.tools import workspace_api, workspace_exec, workspace_language
 
 __all__ = [
     "GET_ROUTES",
@@ -118,6 +118,25 @@ def _doctor(project_root: Path, _query: _Query) -> Any:
     return workspace_exec.doctor_view(project_root)
 
 
+def _language(project_root: Path, query: _Query) -> Any:
+    """Tokens, diagnostics et complétions de l'éditeur Source (#280).
+
+    ``text`` porte le brouillon affiché — s'il est absent, la lecture vient du
+    disque, comme :func:`_file`. ``line``/``col`` sont 0-indexées ; les deux
+    doivent être présentes pour obtenir des complétions, sinon la réponse n'a
+    que ``tokens``/``diagnostics``.
+    """
+    line = _one(query, "line")
+    col = _one(query, "col")
+    return workspace_language.language_view(
+        project_root,
+        _one(query, "path"),
+        text=_one(query, "text"),
+        line=int(line) if line is not None else None,
+        col=int(col) if col is not None else None,
+    )
+
+
 #: Chemins exacts. Les routes paramétrées par un identifiant de tâche sont
 #: traitées à part dans :func:`workspace_get`, parce qu'un identifiant de ledger
 #: n'est pas un segment fixe.
@@ -131,6 +150,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}file/history": _file_history,
     f"{PREFIX}commands": _commands,
     f"{PREFIX}doctor": _doctor,
+    f"{PREFIX}language": _language,
     f"{PREFIX}blueprints": _blueprints,
 }
 

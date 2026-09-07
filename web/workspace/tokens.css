@@ -108,6 +108,19 @@
   --s2: #b07ce8;
   --s3: #d99a2b;
 
+  /* ── Colorisation de l'éditeur Source (#280) ──────────────────────────── *
+   * Tokens de syntaxe ajoutés par l'IntelliSense déterministe — aucun n'est
+   * une couleur d'état ni de série : ce sont des rôles de lecture, posés sur
+   * `--bg` (la toile de l'éditeur), mesurés à 4,5:1 par
+   * tests/unit/test_workspace_tokens.py comme le reste de l'encre. */
+  --syn-key: #7fb8f0;
+  --syn-string: #8fd19e;
+  --syn-tag: #c99ee8;
+  --syn-placeholder: #f0a860;
+  --syn-path: #5fc7c2;
+  --syn-ident: #e0c15c;
+  --syn-comment: #7d838c;
+
   /* ── Ombre de la surface posée ────────────────────────────────────────── */
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   --shadow-tip: 0 16px 40px rgba(0, 0, 0, 0.35);
@@ -190,6 +203,13 @@
     --s1: #1f6fbf;
     --s2: #6b48c4;
     --s3: #9a6a08;
+    --syn-key: #1f5fa8;
+    --syn-string: #0f6b38;
+    --syn-tag: #7a3ea3;
+    --syn-placeholder: #8f4c08;
+    --syn-path: #106b66;
+    --syn-ident: #785c08;
+    --syn-comment: #5b6169;
     --t-min: 12px;
   }
 }
@@ -216,5 +236,12 @@
   --s1: #1f6fbf;
   --s2: #6b48c4;
   --s3: #9a6a08;
+  --syn-key: #1f5fa8;
+  --syn-string: #0f6b38;
+  --syn-tag: #7a3ea3;
+  --syn-placeholder: #8f4c08;
+  --syn-path: #106b66;
+  --syn-ident: #785c08;
+  --syn-comment: #5b6169;
   --t-min: 12px;
 }
