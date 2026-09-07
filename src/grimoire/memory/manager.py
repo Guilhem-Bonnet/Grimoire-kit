@@ -611,34 +611,6 @@ class MemoryManager:
     def consolidate(self) -> int:
         return self._backend.consolidate()
 
-    def _require_hot_memory(self) -> RedisHotMemory:
-        if self._hot_memory is None:
-            reason = self._hot_memory_issue or "memory.short_term_backend is not 'redis'"
-            raise GrimoireMemoryError(f"Redis hot memory is not available: {reason}")
-        return self._hot_memory
-
-    def hot_store(
-        self,
-        key: str,
-        value: str,
-        *,
-        ttl_seconds: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return self._require_hot_memory().store(key, value, ttl_seconds=ttl_seconds, metadata=metadata)
-
-    def hot_recall(self, key: str) -> dict[str, Any] | None:
-        return self._require_hot_memory().recall(key)
-
-    def hot_delete(self, key: str) -> bool:
-        return self._require_hot_memory().delete(key)
-
-    def hot_acquire_lease(self, key: str, *, ttl_seconds: int | None = None) -> str | None:
-        return self._require_hot_memory().acquire_lease(key, ttl_seconds=ttl_seconds)
-
-    def hot_release_lease(self, key: str, token: str) -> bool:
-        return self._require_hot_memory().release_lease(key, token)
-
     def delete(self, entry_id: str) -> bool:
         deleted = self._backend.delete(entry_id)
         if deleted:

@@ -78,9 +78,6 @@ class CodeGraph:
 
     # ── Queries ────────────────────────────────────────────────────────────
 
-    def get_node(self, node_id: str) -> CodeNode | None:
-        return self._nodes.get(node_id)
-
     def nodes_in_file(self, file_path: str) -> list[CodeNode]:
         return [self._nodes[nid] for nid in self._by_file.get(file_path, []) if nid in self._nodes]
 
@@ -92,15 +89,6 @@ class CodeGraph:
             if target:
                 deps.append(target)
         return deps
-
-    def get_dependents(self, node_id: str) -> list[CodeNode]:
-        """Nodes that depend on node_id (incoming edges)."""
-        result = []
-        for edge in self._incoming.get(node_id, []):
-            src = self._nodes.get(edge.from_node)
-            if src:
-                result.append(src)
-        return result
 
     def hotspots(self, top_n: int = 10) -> list[CodeNode]:
         """Most-referenced nodes (highest in-degree)."""

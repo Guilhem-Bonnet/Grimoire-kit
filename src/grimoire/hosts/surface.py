@@ -259,9 +259,6 @@ class ProjectSurface:
                 return agent
         return None
 
-    def hooks_for(self, event: HookEvent) -> tuple[HookSpec, ...]:
-        return tuple(h for h in self.hooks if h.event == event)
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_name": self.project_name,
