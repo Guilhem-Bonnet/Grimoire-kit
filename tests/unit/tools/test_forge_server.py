@@ -286,6 +286,13 @@ class TestExtensionsAndPlan:
         assert len(plan["extensionErrors"]) == 1
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Rend la 302 telle quelle au lieu de la suivre."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]  # noqa: ANN001
+        return None
+
+
 class TestStatic:
     @pytest.fixture
     def static_url(self, project_root: Path, kit_root: Path, tmp_path: Path):
@@ -298,8 +305,15 @@ class TestStatic:
         yield f"http://127.0.0.1:{server.server_address[1]}"
         server.shutdown()
 
-    def test_serves_index(self, static_url: str) -> None:
-        with urllib.request.urlopen(static_url + "/", timeout=5) as resp:  # noqa: S310
+    def test_root_redirects_to_workspace(self, static_url: str) -> None:
+        """La racine ouvre la vue de travail (ADR-006, pas 2) ; la page
+        vitrine reste servie quand on la demande explicitement."""
+        opener = urllib.request.build_opener(_NoRedirect())
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            opener.open(static_url + "/", timeout=5)
+        assert exc.value.code == 302
+        assert exc.value.headers["Location"] == "/workspace/index.html#piloter"
+        with urllib.request.urlopen(static_url + "/index.html", timeout=5) as resp:  # noqa: S310
             assert b"forge" in resp.read()
 
     def test_missing_file_404(self, static_url: str) -> None:
