@@ -201,6 +201,29 @@ def test_chaque_encre_tient_45_sur_les_surfaces_de_texte(
     assert ratio >= 4.5, f"{ink} sur {surface} en thème {theme} : {ratio:.2f}:1"
 
 
+# ── Colorisation de l'éditeur Source (#280) ─────────────────────────────────
+
+SYNTAX_TOKENS = (
+    "--syn-key", "--syn-string", "--syn-tag", "--syn-placeholder",
+    "--syn-path", "--syn-ident", "--syn-comment",
+)
+
+
+@pytest.mark.parametrize("theme,header", THEMES.items())
+@pytest.mark.parametrize("token", SYNTAX_TOKENS)
+def test_chaque_token_de_syntaxe_tient_45_sur_le_fond_de_l_editeur(
+    theme: str, header: str, token: str
+) -> None:
+    """Les tokens de colorisation ajoutés pour l'IntelliSense de Source
+    (#280) posent leur encre sur ``--bg`` — la toile de l'éditeur, pas un
+    panneau — et doivent tenir le même seuil que le reste de l'interface."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens[token], tokens["--bg"])
+
+    assert ratio >= 4.5, f"{token} sur --bg en thème {theme} : {ratio:.2f}:1"
+
+
 @pytest.mark.parametrize("theme,header", THEMES.items())
 def test_le_texte_de_l_action_primaire_tient_sur_son_fond(theme: str, header: str) -> None:
     """Une action primaire par écran : elle ne peut pas être celle qu'on ne lit pas."""

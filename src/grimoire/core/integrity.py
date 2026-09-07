@@ -24,16 +24,17 @@ from __future__ import annotations
 
 import csv
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 #: Only kit-provided *inputs* are in scope. ``_grimoire-output/`` holds what a
 #: run is supposed to produce; naming a file before it exists is the point.
-_INPUT_PREFIX = "_grimoire/"
+INPUT_PREFIX = "_grimoire/"
 
 #: Written by an agent on first use rather than read at activation. Naming one
 #: is a promise to create it, not a claim that it is already there.
-_WRITTEN_ON_FIRST_USE = frozenset({
+WRITTEN_ON_FIRST_USE = frozenset({
     "_grimoire/_memory/agent-changelog.md",
     "_grimoire/_memory/knowledge-digest.md",
     "_grimoire/_memory/mcp-audit.jsonl",
@@ -49,8 +50,8 @@ _WRITTEN_ON_FIRST_USE = frozenset({
 #: The slash of ``{project-root}/_grimoire/...`` must still pass — it is the
 #: form nearly every persona uses — so only a real directory segment before the
 #: slash disqualifies the match.
-_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-]/)(?<![A-Za-z0-9_.-])_grimoire/[A-Za-z0-9_./-]+")
-_AGENT_TAG_RE = re.compile(r'<agent\s+tag="([\w-]+)"')
+PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-]/)(?<![A-Za-z0-9_.-])_grimoire/[A-Za-z0-9_./-]+")
+AGENT_TAG_RE = re.compile(r'<agent\s+tag="([\w-]+)"')
 _READABLE_SUFFIXES = frozenset({".md", ".yaml", ".yml", ".csv", ".json", ".sh", ".py", ".toml"})
 
 #: Directories whose contents are the project's, not the kit's.
@@ -201,6 +202,33 @@ def _readable_files(project_root: Path) -> list[Path]:
     return files
 
 
+def iter_path_targets(line: str) -> Iterator[tuple[str, int, int]]:
+    """Kit-input path targets named in *line*, each with its match span.
+
+    Shared by :func:`dead_path_references`, which scans the kit's own
+    delivery, and by the Source editor's live diagnostics
+    (:mod:`grimoire.tools.workspace_language`), which scans whatever the user
+    has open right now — including a draft that was never written to disk.
+    Extracted so the second reader cannot drift from what the doctor already
+    knows to skip: a bare ``fer-{id}.yaml`` or ``proposal-*.yaml`` prefix is
+    completed at run time, not a reference to chase.
+    """
+    for match in PATH_RE.finditer(line):
+        target = match.group(0).rstrip("./,);:`*").removeprefix("./")
+        if not target.startswith(INPUT_PREFIX) or "{" in target or "*" in target:
+            continue
+        if target.endswith("-") or line[match.end():match.end() + 1] in {"{", "*"}:
+            continue
+        yield target, match.start(), match.end()
+
+
+def target_is_dead(project_root: Path, target: str) -> bool:
+    """Whether kit-input *target* fails to resolve under *project_root*."""
+    if target in WRITTEN_ON_FIRST_USE:
+        return False
+    return not (project_root / target).exists()
+
+
 def dead_path_references(project_root: Path) -> list[DeadReference]:
     """Input paths named by delivered files that do not resolve in the project."""
     dead: list[DeadReference] = []
@@ -210,15 +238,8 @@ def dead_path_references(project_root: Path) -> list[DeadReference]:
         except (OSError, UnicodeDecodeError):
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            for match in _PATH_RE.finditer(line):
-                target = match.group(0).rstrip("./,);:`*").removeprefix("./")
-                if not target.startswith(_INPUT_PREFIX) or "{" in target or "*" in target:
-                    continue
-                # ``fer-{id}.yaml`` and ``proposal-*.yaml`` reach the regex as a
-                # bare prefix: the run completes the name at write time.
-                if target.endswith("-") or line[match.end():match.end() + 1] in {"{", "*"}:
-                    continue
-                if target in _WRITTEN_ON_FIRST_USE or (project_root / target).exists():
+            for target, _start, _end in iter_path_targets(line):
+                if not target_is_dead(project_root, target):
                     continue
                 dead.append(DeadReference(
                     source=path.relative_to(project_root).as_posix(),
@@ -253,7 +274,7 @@ def roster_incoherences(project_root: Path) -> RosterReport:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        tags = set(_AGENT_TAG_RE.findall(text))
+        tags = set(AGENT_TAG_RE.findall(text))
         if tags:
             report.maps_found += 1
             routed |= tags

@@ -18,7 +18,10 @@
 //
 // API consommées : api.files(tier), api.file(path), api.fileDiff(path),
 // api.fileUsage(path), api.fileHistory(path), api.createOverride(path),
-// api.writeFile(path, text), api.commands(), api.doctor(), api.run(argv).
+// api.writeFile(path, text), api.commands(), api.doctor(), api.run(argv),
+// api.language(path, {text, pos}).
+
+import * as sourceEditor from './source-editor.js';
 
 const CSS_HREF = new URL('./source.css', import.meta.url).href;
 
@@ -199,6 +202,8 @@ async function openFile(ctx, root, path) {
   state.currentPath = path;
   state.dirty = false;
   state.inspectorTab = 'fichier';
+  editorProblemLines = []; // le fichier change : les diagnostics de l'ancien ne s'appliquent plus
+  renderProblems(ctx);
   try {
     state.currentEntry = await ctx.api.file(path);
   } catch (error) {
@@ -319,49 +324,23 @@ function renderCanvas(root, ctx) {
 }
 
 function buildSourceView(ctx, root, entry) {
-  const code = document.createElement('div');
-  code.className = 'sr-code';
-  const lines = (state.draft || '').split('\n');
-  const gutter = document.createElement('div');
-  gutter.className = 'sr-gutter';
-  gutter.textContent = lines.map((_, i) => String(i + 1)).join('\n');
-  const textarea = document.createElement('textarea');
-  textarea.className = 'sr-textarea';
-  textarea.spellcheck = false;
-  textarea.value = state.draft;
-  textarea.readOnly = !entry.editable;
-  textarea.rows = Math.max(lines.length, 20);
-  textarea.addEventListener('input', () => {
-    state.draft = textarea.value;
-    state.dirty = state.draft !== (entry.text || '');
-    const newLines = state.draft.split('\n');
-    if (newLines.length !== lines.length) {
-      gutter.textContent = newLines.map((_, i) => String(i + 1)).join('\n');
-    }
-    const saveBtn = root.querySelector('.sr-docrow .btn:not(.pri)');
-    if (saveBtn) {
-      saveBtn.disabled = !state.dirty;
-      saveBtn.textContent = state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer';
-    }
+  // La colorisation, la gouttière de diagnostics et la complétion vivent dans
+  // leur propre module (lot 5, #280) : `sourceEditor.build` rend le même
+  // `.sr-code` qu'avant — gouttière + `.sr-textarea` — augmenté d'une
+  // surcouche colorée. Le contrat que
+  // tests/e2e/test_workspace_source.py connaît (`.sr-textarea`, Ctrl+S, Tab,
+  // le bouton Enregistrer) ne change pas.
+  return sourceEditor.build(ctx, entry, state, {
+    onDirtyChange: () => {
+      const saveBtn = root.querySelector('.sr-docrow .btn:not(.pri)');
+      if (saveBtn) {
+        saveBtn.disabled = !state.dirty;
+        saveBtn.textContent = state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer';
+      }
+    },
+    onSave: () => saveCurrent(ctx, root),
+    onDiagnostics: (diagnostics) => updateEditorProblems(ctx, entry.path, diagnostics),
   });
-  textarea.addEventListener('keydown', (event) => {
-    const meta = event.metaKey || event.ctrlKey;
-    if (meta && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      if (entry.editable) saveCurrent(ctx, root);
-    }
-    if (event.key === 'Tab') {
-      event.preventDefault();
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
-      textarea.selectionStart = textarea.selectionEnd = start + 2;
-      textarea.dispatchEvent(new Event('input'));
-    }
-  });
-  textarea.addEventListener('scroll', () => { gutter.scrollTop = textarea.scrollTop; });
-  code.append(gutter, textarea);
-  return code;
 }
 
 function buildDiffPlaceholder() {
@@ -661,20 +640,45 @@ function renderInspectorHistorique(ctx, body, entry) {
   });
 }
 
-// ── Onglet Problèmes : doctor au montage de Source ──────────────────────────
+// ── Onglet Problèmes : doctor au montage, plus l'éditeur en continu ────────
+//
+// Deux sources dans le même onglet : `grimoire doctor`, une fois par montage
+// de Source, et les diagnostics du fichier ouvert dans l'éditeur (#280),
+// recalculés à l'enregistrement et au repos de saisie. `ctx.dock.clear/log`
+// remplace tout le contenu de l'onglet à chaque appel (README, « Lot 5 ↔
+// lot 1 ») : les deux sources sont donc tenues à part et refusionnées à
+// chaque mise à jour de l'une ou l'autre, plutôt que de s'écraser.
+
+let doctorLines = [];
+let editorProblemLines = [];
+
+function renderProblems(ctx) {
+  ctx.dock.clear('problemes');
+  const lines = [...doctorLines];
+  if (editorProblemLines.length) {
+    if (lines.length) lines.push('');
+    lines.push(...editorProblemLines);
+  }
+  ctx.dock.log('problemes', ...(lines.length ? lines : ['aucune ligne']));
+}
 
 async function populateProblems(ctx) {
-  ctx.dock.clear('problemes');
-  ctx.dock.log('problemes', 'diagnostic en cours — grimoire doctor --check-paths…');
+  doctorLines = ['diagnostic en cours — grimoire doctor --check-paths…'];
+  renderProblems(ctx);
   try {
     const report = await ctx.api.doctor();
-    ctx.dock.clear('problemes');
-    ctx.dock.log('problemes', ...report.lines);
-    if (!report.lines.length) ctx.dock.log('problemes', 'aucune ligne — ' + report.command);
+    doctorLines = report.lines.length ? report.lines : ['aucune ligne — ' + report.command];
   } catch (error) {
-    ctx.dock.clear('problemes');
-    ctx.dock.log('problemes', 'diagnostic indisponible · ' + error.message);
+    doctorLines = ['diagnostic indisponible · ' + error.message];
   }
+  renderProblems(ctx);
+}
+
+function updateEditorProblems(ctx, path, diagnostics) {
+  editorProblemLines = diagnostics.map(
+    (d) => `${path}:${d.line + 1}:${d.start + 1} — [${d.severity}] ${d.family} — ${d.message}`,
+  );
+  renderProblems(ctx);
 }
 
 // ── Console du dock : invite, historique, complétion ────────────────────────

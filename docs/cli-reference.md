@@ -928,6 +928,27 @@ utiliser la forme longue : `python -m grimoire.tools.forge_server`.
 de la coque qui les remplace ; ajouter `?legacy=1` à l'URL sert encore
 l'ancienne page, sans redirection.
 
+#### Source : IntelliSense déterministe (issue 280)
+
+L'éditeur de l'espace Source colorie le frontmatter, les blocs `<agent>`/
+`<activation>`/`<step>`, les placeholders (`{project-root}`, `{{…}}`) et les
+identifiants d'agents, de patterns et de workflows, sans dépendance ni
+bundler (surcouche par recouvrement sur la `<textarea>`, voir
+[ADR-006](adr-006-vue-de-travail.md) D2). Un correcteur signale un chemin du
+kit qui ne se résout pas (même logique que `grimoire doctor`), un agent
+routé mais absent du manifeste, une clé de frontmatter inconnue, un terme du
+glossaire cité mais non défini, ou un pattern/workflow inconnu du catalogue —
+recalculé à l'enregistrement et au repos de saisie, et repris dans l'onglet
+Problèmes du dock. La complétion (`Ctrl+Espace`, ou déclenchée par `{`, `@`,
+`/`) propose agents, workflows, patterns, chemins du kit et clés de schéma ;
+le survol d'un identifiant lié à une entrée du glossaire ouvre la même bulle
+épinglable que le reste de la vue de travail. Tout vient de
+`GET /api/workspace/language` (`src/grimoire/tools/workspace_language.py`),
+servi en lecture seule sur les deux hôtes — voir le tableau des routes dans
+[`web/workspace/README.md`](../web/workspace/README.md). La piste d'un petit
+modèle local (Ollama) pour des suggestions de contenu resterait derrière
+cette IntelliSense déterministe, jamais à sa place.
+
 ### Projets de la machine
 
 Le bouton de projet, en haut de la barre latérale, ouvre le sélecteur. Trois

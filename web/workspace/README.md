@@ -32,7 +32,8 @@ API, il n'y a pas de projet, et la coque affiche l'état vide qui le dit.
 pytest tests/unit/test_workspace_api.py \
        tests/unit/test_workspace_routes.py \
        tests/unit/test_workspace_tokens.py \
-       tests/unit/test_workspace_glossary.py
+       tests/unit/test_workspace_glossary.py \
+       tests/unit/test_workspace_language.py
 
 # Harnais navigateur (facultatif — se skippe proprement sans Playwright)
 pip install playwright && playwright install chromium
@@ -60,6 +61,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
 | `spaces/memoire.js` | Store et graphe d'abord, couches ensuite | lot 4 |
 | `spaces/source.js` | Fichiers par étage, éditeur, diff, override, provenance | lot 5 |
+| `spaces/source-editor.js` | IntelliSense de l'éditeur Source (issue 280) : colorisation par recouvrement, gouttière de diagnostics, complétion, infobulle du glossaire au survol | lot 5 |
 
 ## Le contrat d'un espace
 
@@ -132,6 +134,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/file/history?path=` | `{path, is_repo, commits[]}` — inspecteur, onglet Historique ; `is_repo: false` hors dépôt git |
 | `GET /api/workspace/commands` | Le catalogue des sous-commandes que la Console accepte |
 | `GET /api/workspace/doctor` | `{ok, code, timed_out, command, lines[], stderr}` |
+| `GET /api/workspace/language?path=&text=&line=&col=` | IntelliSense de Source (issue 280) : `{path, tokens[], diagnostics[], completions[]?}` — `tokens[]` : `{line, start, end, kind, glossaryId?}` ; `diagnostics[]` : `{line, start, end, severity, family, message}` ; `completions[]` (seulement si `line`/`col` fournis) : `{label, kind, insertText, detail}`. `text` porte le brouillon en cours d'édition — omis, la lecture vient du disque comme `file` |
 
 ### Écritures — atelier seulement (404 sur le cockpit)
 

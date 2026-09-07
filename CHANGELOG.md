@@ -6,6 +6,26 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **Source : IntelliSense déterministe — colorisation, correcteur, complétion
+  (issue 280).** L'éditeur de l'espace Source colorie le frontmatter, les
+  blocs `<agent>`/`<activation>`/`<step>`, les placeholders et les
+  identifiants d'agents, de patterns et de workflows, par recouvrement sur la
+  `<textarea>` — aucune dépendance ni bundler (ADR-006 D2). Un correcteur
+  signale, recalculé à l'enregistrement et au repos de saisie : un chemin du
+  kit qui ne se résout pas (même logique que `grimoire doctor`,
+  `grimoire.core.integrity`), un agent routé mais absent du manifeste, une
+  clé de frontmatter inconnue de son schéma, un terme du glossaire cité sans
+  entrée, un pattern ou un workflow inconnu du catalogue — repris dans
+  l'onglet Problèmes du dock. La complétion (`Ctrl+Espace`, ou déclenchée par
+  `{`, `@`, `/`) propose agents, workflows, patterns, chemins du kit et clés
+  de schéma ; le survol d'un identifiant lié au glossaire ouvre la même bulle
+  épinglable que le reste de la vue de travail. Nouvelle route en lecture
+  seule, servie par les deux hôtes : `GET /api/workspace/language`
+  (`src/grimoire/tools/workspace_language.py`). La piste d'un petit modèle
+  local (Ollama) pour des suggestions de contenu reste hors périmètre — elle
+  brancherait derrière cette IntelliSense déterministe, jamais à sa place.
 
 ## [3.39.0] - 2026-09-06
 ### Corrigé
