@@ -973,9 +973,9 @@ le survol d'un identifiant lié à une entrée du glossaire ouvre la même bulle
 épinglable que le reste de la vue de travail. Tout vient de
 `GET /api/workspace/language` (`src/grimoire/tools/workspace_language.py`),
 servi en lecture seule sur les deux hôtes — voir le tableau des routes dans
-[`web/workspace/README.md`](../web/workspace/README.md). La piste d'un petit
-modèle local (Ollama) pour des suggestions de contenu resterait derrière
-cette IntelliSense déterministe, jamais à sa place.
+`web/workspace/README.md`. La piste d'un petit modèle local (Ollama) pour des
+suggestions de contenu resterait derrière cette IntelliSense déterministe,
+jamais à sa place.
 
 ### Projets de la machine
 

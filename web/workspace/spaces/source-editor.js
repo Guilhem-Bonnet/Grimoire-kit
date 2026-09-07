@@ -39,6 +39,19 @@ const PAD_TOP = 8; // var(--sp-2)
 
 let charWidthCache = null;
 
+// Geist Mono charge en `font-display: swap` (tokens.css) : le texte s'affiche
+// d'abord dans une police de repli, plus étroite ou plus large. Une mesure
+// prise avant que la police voulue ait fini de charger se fige alors sur la
+// mauvaise largeur pour tout le reste de la session — la complétion et le
+// survol du glossaire visent alors à côté du texte réellement affiché. Sans
+// filet de rattrapage, ce défaut ne se voit qu'une fois la police lente à
+// charger (réseau contraint, cache froid) : `document.fonts.ready` purge le
+// cache une fois que la police a fini de résoudre, pour que la mesure
+// suivante soit la bonne.
+if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { charWidthCache = null; });
+}
+
 function charWidth() {
   if (charWidthCache) return charWidthCache;
   const probe = document.createElement('span');
@@ -46,7 +59,6 @@ function charWidth() {
   probe.style.position = 'absolute';
   probe.style.visibility = 'hidden';
   probe.style.whiteSpace = 'pre';
-  probe.style.font = `var(--t-s) var(--mono)`;
   probe.style.fontFamily = 'var(--mono)';
   probe.style.fontSize = 'var(--t-s)';
   document.body.append(probe);
@@ -361,9 +373,18 @@ export function build(ctx, entry, state, hooks) {
   let completionActive = false;
 
   function closeCompletion() {
+    // Sans ce clearTimeout, une complétion continuée (débounce 120 ms — voir
+    // le handler `input`) encore en vol rouvrirait le popup après cette
+    // fermeture, y compris après Échap : la fermeture doit annuler la
+    // requête qui s'apprêtait à la rouvrir, pas seulement cacher ce qui est
+    // déjà affiché.
+    clearTimeout(completionDebounceTimer);
     completionMenu.hidden = true;
     completionItems = [];
     completionActive = false;
+    // Une réponse déjà en vol (fetch envoyé, pas encore résolu) doit aussi
+    // se taire à son retour plutôt que de rouvrir malgré la fermeture.
+    completionRequestId += 1;
   }
 
   async function openCompletion() {
@@ -428,6 +449,16 @@ export function build(ctx, entry, state, hooks) {
   });
 
   textarea.addEventListener('keydown', (event) => {
+    // Échap annule aussi une complétion pas encore affichée : le
+    // déclencheur (`{`/`@`/`/`) l'a lancée dans les 120 ms qui précèdent, la
+    // réponse peut arriver *après* la touche et rouvrir un popup qu'on
+    // venait de fermer — d'où le contrôle en dehors du `!hidden` ci-dessous,
+    // seul cas qui doit agir même popup encore invisible.
+    if (event.key === 'Escape' && (!completionMenu.hidden || completionActive)) {
+      event.preventDefault();
+      closeCompletion();
+      return;
+    }
     if (!completionMenu.hidden) {
       if (event.key === 'ArrowDown') { event.preventDefault(); moveCompletionSelection(completionMenu, 1); return; }
       if (event.key === 'ArrowUp') { event.preventDefault(); moveCompletionSelection(completionMenu, -1); return; }
@@ -435,7 +466,6 @@ export function build(ctx, entry, state, hooks) {
         const picked = selectedCompletion(completionMenu, completionItems);
         if (picked) { event.preventDefault(); acceptCompletion(picked); return; }
       }
-      if (event.key === 'Escape') { event.preventDefault(); closeCompletion(); return; }
     }
 
     const meta = event.metaKey || event.ctrlKey;
