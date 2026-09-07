@@ -256,3 +256,35 @@ def test_show_signale_un_fichier_de_gates_illisible_au_lieu_de_se_taire(projet: 
     assert res.exit_code == 0, res.output
     assert "evidence-gates.yaml" in res.output
     assert "illisible" in res.output
+
+
+# ── le rappel de tâche (#141) ────────────────────────────────────────────────
+
+
+def test_recall_refuse_une_tache_inconnue(projet: Path) -> None:
+    res = run(projet, "recall", "GAO-fantome-001")
+    assert res.exit_code == 1
+    assert "Tâche inconnue" in res.output
+
+
+def test_recall_d_une_tache_neuve_le_dit_honnetement(projet: Path) -> None:
+    tid = ajoute(projet)
+    res = run(projet, "recall", tid)
+    assert res.exit_code == 0, res.output
+    assert "rien en mémoire" in res.output
+
+
+def test_recall_fait_remonter_la_cause_d_une_jumelle_qui_a_echoue(projet: Path) -> None:
+    """Le même critère d'acceptation que le hook et l'outil MCP, vu du CLI."""
+    premiere = ajoute(projet)
+    run(projet, "move", premiere, "--to", "ready")
+    run(projet, "block", premiere, "--reason", "identifiants du service tiers invalides")
+
+    res = run(
+        projet, "add", "Ajouter /health (reprise)", "-a", ACCEPTATION, "--owner", "amelia"
+    )
+    jumelle = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+
+    res = run(projet, "recall", jumelle)
+    assert res.exit_code == 0, res.output
+    assert "identifiants du service tiers invalides" in res.output

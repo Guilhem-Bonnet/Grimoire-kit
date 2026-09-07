@@ -6,7 +6,7 @@
 > (`web/workspace/glossary.js`, spécification §3.2) : éditer une définition ici
 > n'aurait aucun effet, éditer le YAML met à jour les deux.
 
-**62 concepts.**
+**63 concepts.**
 
 ## Espace de travail {: #espace-de-travail }
 
@@ -212,7 +212,7 @@ Termes liés : [Empreinte](#empreinte), [Kit](#kit)
 
 L'unité de travail du Mission Ledger, avec ses critères d'acceptation, son propriétaire et les portes de preuve qu'elle doit franchir.
 
-Termes liés : [Mission Ledger](#mission-ledger), [Porte de preuve](#porte-de-preuve), [Board gouverné](#board-gouverne)
+Termes liés : [Mission Ledger](#mission-ledger), [Porte de preuve](#porte-de-preuve), [Board gouverné](#board-gouverne), [Rappel de tâche](#rappel-de-tache)
 
 Documentation : [cli-reference.md](/cli-reference.md)
 
@@ -269,6 +269,14 @@ Termes liés : [Tâche](#tache), [Porte de preuve](#porte-de-preuve)
 Le paquet de contexte qu'un agent reçoit pour une tâche donnée, calculé depuis le projet et non recopié à la main.
 
 Termes liés : [Tâche](#tache), [Agent](#agent)
+
+## Rappel de tâche {: #rappel-de-tache }
+
+Ce que le Mission Ledger et la mémoire du projet savent d'une tâche et de ses voisines au moment du claim — historique propre, cause d'arrêt d'une jumelle, mémoire consolidée à une clôture ou un blocage passés. Borné en tokens, injecté par le hook SessionStart pour une tâche réclamée seulement.
+
+Termes liés : [Tâche](#tache), [Mission Ledger](#mission-ledger), [Evidence pack](#evidence-pack)
+
+Documentation : [cli-reference.md](/cli-reference.md)
 
 ## Standard agentique {: #standard-agentique }
 

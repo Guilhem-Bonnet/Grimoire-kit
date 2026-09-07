@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.39.0",
+ "generated_for": "3.39.1",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1721,6 +1721,10 @@
   "85c7bae4b3975392fd3fa059e1a11c0ce60922b4b8447387b043ab007caabae5": {
    "version": "3.4.2",
    "path": "archetypes/creative-studio/archetype.dna.yaml"
+  },
+  "85ecbf012f25705a9dd75209fd21b334d1d972e80121073ffd5ad65707a81849": {
+   "version": "3.39.0",
+   "path": "framework/glossary.yaml"
   },
   "861082fcece716ef2697f9ae07abb440f202a4ba325ead3db42a9968d80b1466": {
    "version": "3.4.2",

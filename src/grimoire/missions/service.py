@@ -18,6 +18,7 @@ Deux règles :
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,10 +28,12 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.board import board_status_of, build_board, write_board
 from grimoire.missions.gates import GateVerdict, check_transition
 from grimoire.missions.ledger import MissionLedger
+from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import MissionTask, TaskClaim, TaskState
 
 if TYPE_CHECKING:
     from grimoire.core.agentic_standard import StandardRuntimeArtifact
+    from grimoire.memory.manager import MemoryManager
 
 __all__ = [
     "DEFAULT_LEDGER_RELPATH",
@@ -97,10 +100,21 @@ class TaskMove:
 class TaskService:
     """Lire, réclamer et déplacer les tâches d'un projet, gates compris."""
 
-    def __init__(self, project_root: Path, ledger_root: Path = DEFAULT_LEDGER_RELPATH) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        ledger_root: Path = DEFAULT_LEDGER_RELPATH,
+        memory_manager: MemoryManager | None = None,
+    ) -> None:
         self.project_root = project_root.resolve()
         self.ledger_root = ledger_root if ledger_root.is_absolute() else self.project_root / ledger_root
         self._ledger: MissionLedger | None = None
+        # ``None`` explicite (mémoire injectée sans backend) et « pas encore
+        # résolue » sont deux états différents : sans ce booléon, un manager
+        # None passé au constructeur serait re-résolu depuis la config à
+        # chaque appel.
+        self._memory: MemoryManager | None = memory_manager
+        self._memory_resolved = memory_manager is not None
 
     @property
     def ledger(self) -> MissionLedger:
@@ -111,6 +125,32 @@ class TaskService:
     @property
     def has_ledger(self) -> bool:
         return (self.ledger_root / "events.jsonl").is_file()
+
+    @property
+    def memory(self) -> MemoryManager | None:
+        """Le manager mémoire du projet, résolu au premier accès — ``None`` sans config.
+
+        Un projet sans ``project-context.yaml`` n'a pas de mémoire à consulter :
+        le rappel et la consolidation se dégradent alors à ce que le ledger
+        seul sait, plutôt que d'échouer.
+        """
+        if not self._memory_resolved:
+            self._memory = self._load_memory()
+            self._memory_resolved = True
+        return self._memory
+
+    def _load_memory(self) -> MemoryManager | None:
+        config_path = self.project_root / "project-context.yaml"
+        if not config_path.is_file():
+            return None
+        try:
+            from grimoire.core.config import GrimoireConfig
+            from grimoire.memory.manager import MemoryManager as _MemoryManager
+
+            config = GrimoireConfig.from_yaml(config_path)
+            return _MemoryManager.from_config(config, project_root=self.project_root)
+        except Exception:  # la mémoire est une couche optionnelle du service
+            return None
 
     # ── Lecture ────────────────────────────────────────────────────────────
 
@@ -164,7 +204,23 @@ class TaskService:
             self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
         moved = self.ledger.transition_task(task_id, target, actor_id=actor, reason=reason, claim=claim)
+        self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
+
+    def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str) -> None:
+        """Clôture ou blocage : ce que la roadmap Memory OS autorise à écrire.
+
+        Rien d'autre n'appelle :func:`consolidate_task_memory` — c'est le seul
+        point d'écriture, comme :meth:`project_board` l'est pour le board.
+        Best-effort : la transition est déjà au ledger, qui est la source ;
+        une mémoire indisponible n'y change rien.
+        """
+        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED):
+            return
+        # best-effort : la transition est déjà au ledger, qui est la source ;
+        # une mémoire indisponible n'y change rien.
+        with contextlib.suppress(Exception):
+            consolidate_task_memory(self.memory, self.ledger, task, target, actor=actor, reason=reason)
 
     def _record_refusal(self, task: MissionTask, target: TaskState, verdict: GateVerdict, actor: str) -> None:
         """Journaliser un gate rouge dans le TraceLedger — le journal d'observabilité, pas la source.
@@ -229,3 +285,14 @@ class TaskService:
 
         self.require(task_id)
         return build_context_bundle(self.project_root, task_id=task_id)
+
+    def recall(self, task_id: str, *, token_budget: int = DEFAULT_TOKEN_BUDGET) -> TaskRecall:
+        """Ce que le projet sait de *task_id* et de ses voisines — le même rappel partout.
+
+        Une tâche inconnue est refusée avant tout calcul, comme :meth:`context`.
+        """
+        self.require(task_id)
+        return build_task_recall(
+            self.project_root, task_id,
+            ledger_root=self.ledger_root, memory_manager=self.memory, token_budget=token_budget,
+        )

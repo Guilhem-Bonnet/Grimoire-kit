@@ -8,10 +8,11 @@ un projet réel avec un vrai ledger — jamais sur une donnée inventée.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Browser, Page
 
 
 def _goto(page: Page, space: str) -> None:
@@ -51,6 +52,88 @@ def test_piloter_zoom_flotte_projet_est_disponible_sur_le_cockpit(cockpit_worksp
     zoom = cockpit_workspace.locator("#zoom-seg button")
     assert zoom.count() == 2
     assert {zoom.nth(i).inner_text() for i in range(2)} == {"Flotte", "Projet"}
+
+
+def test_piloter_kit_reel_aligne_dit_aligne_pas_a_jour(workspace: Page) -> None:
+    """Le projet réel de la fixture est scaffoldé par le kit qui tourne, mais la
+    plupart de ses fichiers n'ont pas changé depuis une révision antérieure du
+    catalogue : `aligned` (3.3x.0, la révision de ce contenu) et `installed`
+    (3.39.0, le CLI qui répond) divergent légitimement — exactement le cas que
+    #288 signalait, obtenu ici sans rien mocker. Le badge ne doit jamais dire
+    « à jour » à côté de deux nombres différents."""
+    _goto(workspace, "piloter")
+    workspace.wait_for_selector(".pl-sheet")
+    kit_block_text = workspace.locator(".pl-insp-block").first.inner_text()
+
+    assert "aligné sur" in kit_block_text and "installé" in kit_block_text
+    assert "à jour" not in kit_block_text, (
+        "« à jour » à côté de deux versions différentes est la contradiction de #288"
+    )
+    assert "aligné" in kit_block_text.lower()
+
+
+def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Browser, served: str) -> None:
+    """Pin exact du couple de versions de #288 (`aligné sur 3.36.0, installé
+    3.38.0`), indépendant des versions que la fixture réelle produira demain.
+    `kit.upToDate` peut légitimement valoir `true` ici (aucun fichier livré
+    n'a de révision plus récente au catalogue, cf.
+    `project_health.kit_alignment`) : seule la réponse `/api/health` est
+    fabriquée, tout le reste (ledger, activité, CI) vient du vrai serveur.
+    """
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+
+    def _divergent_kit(route) -> None:
+        response = route.fetch()
+        payload = response.json()
+        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.36.0", "installed": "3.38.0"}
+        route.fulfill(response=response, body=json.dumps(payload))
+
+    page.route("**/api/health*", _divergent_kit)
+    try:
+        page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _goto(page, "piloter")
+        page.wait_for_selector(".pl-sheet")
+        kit_block = page.locator(".pl-insp-block").first
+        kit_block_text = kit_block.inner_text()
+
+        assert "3.36.0" in kit_block_text
+        assert "3.38.0" in kit_block_text
+        assert "à jour" not in kit_block_text, (
+            "« à jour » à côté de deux versions différentes est la contradiction de #288"
+        )
+        assert "aligné" in kit_block_text.lower()
+        dot = kit_block.locator(".dot").first
+        assert "warn" not in (dot.get_attribute("class") or ""), "upToDate=true doit rester un point vert"
+    finally:
+        context.close()
+
+
+def test_piloter_kit_exactement_synchronise_dit_a_jour(browser: Browser, served: str) -> None:
+    """Miroir du test précédent : quand `aligned == installed`, le mot honnête
+    redevient « à jour » (#288 ne demande pas de bannir le mot, seulement de
+    ne plus l'employer à côté de deux versions différentes)."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+
+    def _synced_kit(route) -> None:
+        response = route.fetch()
+        payload = response.json()
+        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.39.0", "installed": "3.39.0"}
+        route.fulfill(response=response, body=json.dumps(payload))
+
+    page.route("**/api/health*", _synced_kit)
+    try:
+        page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _goto(page, "piloter")
+        page.wait_for_selector(".pl-sheet")
+        kit_block_text = page.locator(".pl-insp-block").first.inner_text()
+
+        assert "à jour" in kit_block_text
+    finally:
+        context.close()
 
 
 # ── Exécuter — les trois vues, un move réussi, un refus de gate ────────────
@@ -107,6 +190,28 @@ def test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse(
     refusal_text = workspace.locator(".ex-refusal").inner_text().lower()
     assert "context bundle" in refusal_text or "fournisseur" in refusal_text
     assert "refusé" in refusal_text
+
+
+def test_executer_l_inspecteur_ne_montre_pas_de_rappel_vide(
+    workspace: Page, project_with_task: tuple[Path, str]
+) -> None:
+    """#141, avec parcimonie : une tâche qui n'a rien traversé n'a rien à
+    rappeler, et l'inspecteur ne doit pas afficher un bloc « Rappel » vide.
+
+    Si le garde ``has_content`` de ``renderInspector`` disparaissait, ce test
+    échouerait — le bloc apparaîtrait pour la tâche par défaut du fixture, qui
+    n'est jamais réclamée avec succès dans ce lot (le claim y est refusé faute
+    de context bundle et de fournisseur activé)."""
+    _, task_id = project_with_task
+    _goto(workspace, "executer")
+    workspace.wait_for_selector(".ex-card")
+
+    inspector = workspace.locator("#inspector-body")
+    workspace.locator(".ex-card").filter(has_text="Vérifier la vue de travail").first.click()
+    inspector.get_by_text(task_id, exact=True).wait_for()
+
+    assert inspector.locator(".ex-recall").count() == 0
+    assert "Rappel" not in inspector.locator(".ex-insp-block h4").all_inner_texts()
 
 
 # ── Observer — état vide honnête, jamais un mur de zéros ni une erreur ─────

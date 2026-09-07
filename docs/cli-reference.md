@@ -273,6 +273,7 @@ prochain export l'écrase.
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
+| `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
@@ -310,6 +311,33 @@ GAO-livrer-la-ti-001 — Livrer la timeline  (running)
 
 Cause(s) d'arrêt : 3
 ```
+
+### Ce que le claim rappelle
+
+`grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont
+déjà traversé : son propre historique (tentatives précédentes bloquées ou
+échouées), ses tâches voisines — liées par `task link`, de la même mission, ou
+au titre proche — avec la cause de leur arrêt même si elles ont depuis été
+rouvertes, et ce que la mémoire du projet a consolidé sur des sujets voisins
+quand un backend mémoire est configuré (`project-context.yaml`). Sans lui, le
+rappel reste utile depuis le seul Mission Ledger. Le texte rendu est borné en
+tokens : c'est un rappel, pas un rapport.
+
+```text
+[Grimoire — rappel de tâche] GAO-migrer-le-se-002 :
+Tâches voisines :
+  - GAO-migrer-le-se-001 (même mission, failed)
+      cause : connexion refusée par la base cible : pool épuisé
+```
+
+Le même rappel est injecté par le hook `SessionStart`, entre la persona
+d'entrée et la directive du standard, **seulement pour une tâche réclamée**
+(`task.claim` posé — une tâche `proposed` ou `ready` ne rappelle rien) ; et par
+l'outil MCP `task_recall`, qui résout la tâche active de la même manière que
+`task_context` quand aucun identifiant n'est donné. À la clôture ou au
+blocage d'une tâche, `TaskService` consolide ce qui a été appris dans la
+mémoire du projet (`decisions` à la clôture, `failures` au blocage) — jamais
+sur un mouvement ordinaire.
 
 ### Quelle tâche la session porte
 

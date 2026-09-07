@@ -122,6 +122,25 @@ def test_la_timeline_nomme_les_journaux_absents(project_with_task: tuple[Path, s
     assert timeline["entries"], "au moins la création de la tâche est datée"
 
 
+def test_le_rappel_d_une_tache_neuve_est_honnetement_vide(
+    project_with_task: tuple[Path, str],
+) -> None:
+    """#141 : c'est ce que l'inspecteur consulte pour décider d'afficher le bloc « Rappel »."""
+    root, task_id = project_with_task
+
+    rappel = wa.task_recall_view(root, task_id)
+
+    assert rappel["task_id"] == task_id
+    assert rappel["has_content"] is False
+
+
+def test_le_rappel_d_une_tache_inconnue_est_un_404_pas_un_500(real_project: Path) -> None:
+    from grimoire.tools.workspace_routes import workspace_get
+
+    with pytest.raises(FileNotFoundError):
+        workspace_get(real_project, "/api/workspace/tasks/GAO-inexistante-999/recall", {})
+
+
 # ── Fichiers par étage ──────────────────────────────────────────────────────
 
 

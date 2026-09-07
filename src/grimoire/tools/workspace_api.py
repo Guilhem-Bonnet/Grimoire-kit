@@ -52,6 +52,7 @@ __all__ = [
     "files_view",
     "glossary_view",
     "safe_relpath",
+    "task_recall_view",
     "task_trace_view",
     "task_view",
     "tasks_view",
@@ -164,16 +165,17 @@ def glossary_view(project_root: Path) -> dict[str, Any]:
     kit installé ensuite. Un glossaire absent rend une liste vide et le dit —
     une infobulle sans définition doit se taire, pas inventer.
     """
-    import yaml  # type: ignore[import-untyped]
-
     from grimoire.core import layout
+    from grimoire.tools._common import load_yaml
 
     source = layout.resolve(project_root, _GLOSSARY_RELPATH) or _kit_glossary_path()
     if source is None or not source.is_file():
         return {"schema": "grimoire-glossary/v1", "source": None, "count": 0, "entries": []}
     try:
-        raw = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError) as exc:
+        # ruamel (dépendance déclarée) avec repli PyYAML : une installation nue
+        # de la wheel n'a pas `yaml`, et le glossaire sert les six espaces.
+        raw = load_yaml(source) or {}
+    except (OSError, ValueError) as exc:
         return {
             "schema": "grimoire-glossary/v1",
             "source": str(source),
@@ -216,9 +218,7 @@ def _task_json(task: Any) -> dict[str, Any]:
     return data
 
 
-def tasks_view(
-    project_root: Path, *, mission: str | None = None, status: str | None = None
-) -> dict[str, Any]:
+def tasks_view(project_root: Path, *, mission: str | None = None, status: str | None = None) -> dict[str, Any]:
     """Les tâches du projet et les colonnes du board gouverné.
 
     ``ledger: false`` n'est pas une erreur : un projet peut n'avoir jamais
@@ -278,6 +278,19 @@ def task_trace_view(project_root: Path, task_id: str) -> dict[str, Any]:
     return build_task_timeline(project_root, task_id).to_dict()
 
 
+def task_recall_view(project_root: Path, task_id: str) -> dict[str, Any]:
+    """Le rappel de la tâche — même contenu que ``grimoire task recall`` (#141).
+
+    ``has_content`` est ce que l'inspecteur consulte pour décider d'afficher le
+    bloc « Rappel » : un rappel honnêtement vide ne mérite pas une section, il
+    mérite de ne pas en avoir une.
+    """
+    service = _service(project_root)
+    service.require(task_id)
+    payload: dict[str, Any] = service.recall(task_id).to_dict()
+    return payload
+
+
 # ── Fichiers par étage ──────────────────────────────────────────────────────
 
 
@@ -304,9 +317,7 @@ def _digest(path: Path) -> str:
     return digest_of(path)
 
 
-def _file_entry(
-    project_root: Path, path: Path, tier: dict[str, Any], catalog: _Catalog
-) -> dict[str, Any]:
+def _file_entry(project_root: Path, path: Path, tier: dict[str, Any], catalog: _Catalog) -> dict[str, Any]:
     rel = path.relative_to(project_root).as_posix()
     try:
         size = path.stat().st_size
@@ -337,7 +348,7 @@ def _file_entry(
         from grimoire.core import layout
 
         prefix = f"{layout.OVERRIDES_DIR}/"
-        kit_rel = f"{layout.KIT_DIR}/{rel[len(prefix):]}" if rel.startswith(prefix) else None
+        kit_rel = f"{layout.KIT_DIR}/{rel[len(prefix) :]}" if rel.startswith(prefix) else None
         kit_path = (project_root / kit_rel) if kit_rel else None
         masks = bool(kit_path and kit_path.is_file())
         entry["kit_counterpart"] = kit_rel
@@ -481,8 +492,8 @@ def file_diff(project_root: Path, raw_path: str | None) -> dict[str, Any]:
         "identical": shipped is not None,
         "kit_version": shipped.get("version") if shipped else None,
         "reason": (
-            "identique à ce que le kit a livré en "
-            f"{shipped['version']}" if shipped
+            f"identique à ce que le kit a livré en {shipped['version']}"
+            if shipped
             else "contenu inconnu du catalogue du kit : ce fichier n'a pas été livré tel quel, "
             "et le catalogue ne garde que des empreintes — créez un override pour comparer"
         ),
@@ -556,9 +567,7 @@ def blueprints_view(project_root: Path) -> dict[str, Any]:
             raw = {}
         if raw:
             nodes = [n for n in (raw.get("nodes") or []) if isinstance(n, dict)]
-            if raw.get("blueprintVersion") == 2 or (
-                nodes and all("pins" not in n for n in nodes)
-            ):
+            if raw.get("blueprintVersion") == 2 or (nodes and all("pins" not in n for n in nodes)):
                 genre = "studio"
             seen: set[str] = set()
             for node in nodes:
@@ -732,8 +741,14 @@ def file_history(project_root: Path, raw_path: str | None) -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [
-                "git", "log", "--follow", "--max-count=50", "--date=iso-strict",
-                "--pretty=format:%H%x1f%ad%x1f%an%x1f%s", "--", rel,
+                "git",
+                "log",
+                "--follow",
+                "--max-count=50",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%ad%x1f%an%x1f%s",
+                "--",
+                rel,
             ],
             cwd=str(root),
             capture_output=True,
