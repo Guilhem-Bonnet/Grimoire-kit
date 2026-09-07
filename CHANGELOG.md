@@ -6,6 +6,8 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+
+## [3.40.0] - 2026-09-07
 ### Ajouté
 
 - **Source : IntelliSense déterministe — colorisation, correcteur, complétion
