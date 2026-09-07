@@ -36,6 +36,15 @@ declared_inputs:
     trust_level: "medium"
     freshness: "per-run"
     dimensions: ["context_builds", "decision_traces", "hook_events", "gate_events"]
+  # AG-OBS-003 : télémétrie des appels modèle, outil, hook et verdict — le
+  # TraceLedger que `grimoire task trace-export` exporte et que
+  # `grimoire task record-model-call` / le gateway de hooks alimentent.
+  - id: trace_ledger
+    path: "_grimoire-output/traces/*.jsonl"
+    owner: "automation"
+    trust_level: "medium"
+    freshness: "per-call"
+    dimensions: ["model_calls", "tool_calls", "hook_events", "policy_verdicts", "evidence_refs"]
   - id: evidence_packs
     path: "_grimoire-output/evidence/**/evidence-pack.md"
     owner: "maintainers"
