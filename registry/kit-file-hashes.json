@@ -746,6 +746,10 @@
    "version": "3.24.0",
    "path": "archetypes/infra-ops/agents/backup-dr-specialist.md"
   },
+  "3a560757a0893f8ea69f7d44fd49e2e544a65a7c2414957cd96b808c5eab6c36": {
+   "version": "3.39.0",
+   "path": "framework/agentic-standard/templates/observability-policy.yaml"
+  },
   "3ac2e340bd0fcac587d894fbe154ac57144407f07e7f3fda5e5b37880fb1a979": {
    "version": "3.4.2",
    "path": "framework/copilot/prompts/grimoire-status.prompt.md"
@@ -801,6 +805,10 @@
   "3fffcd8f0f93d80b17cf073df6f064e1d94ff4a4ebcf332d2184bc0f68765867": {
    "version": "3.4.2",
    "path": "framework/prompt-templates/audit-report.md"
+  },
+  "403f52432bcad9b2b22c79d0b7810b292c897b247e53abbf5634b88495d72d00": {
+   "version": "3.39.0",
+   "path": "framework/agentic-standard/templates/retention-registry.yaml"
   },
   "40657abaa5ada84bee3cb4f9730c3156e4089c4a504ee8acb0ae2bc2f994ced9": {
    "version": "3.4.2",
@@ -937,6 +945,10 @@
   "4a2904e6af34593bef6d22acc8c5b33e5547fa17733a8620cc110293556c246a": {
    "version": "3.24.0",
    "path": "archetypes/stack/agents/typescript-expert.md"
+  },
+  "4a6f4ac42664bbc06a42c1b1bfd7bdcfcfd42016f2345185e5e64a287c58ee08": {
+   "version": "3.39.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "4aab7a556b135ee16c29859aa67853e6fe865ed0cfa7de7d13b2d41541087abc": {
    "version": "3.38.0",
@@ -1817,6 +1829,10 @@
   "8bdbc507ead8a6a36fe22d2fc90028919416e75ede6b29654d4465a593076608": {
    "version": "3.32.0",
    "path": "framework/cc-reference.md"
+  },
+  "8bfcf116c0171e479e29aee3d3b054b56a15a9998bd072fce99da51055c05824": {
+   "version": "3.39.0",
+   "path": "framework/agentic-standard/templates/task-envelope.md"
   },
   "8c217f0ab8e7d751969e05520bce823b6dcbcd1cfe79e7b3f41bfc9297b0eca9": {
    "version": "3.16.0",
@@ -3313,6 +3329,10 @@
   "f5dd59cc2eba171379b42ec6864839b8fd0a46ee6a62286b14f8f4e9d4c31c6e": {
    "version": "3.36.0",
    "path": "framework/agentic-standard/templates/claim-ledger.md"
+  },
+  "f5f76a5ec8af6778997eb0c1aa2e8dea55f0b3e4c4b726d94ac51de63757a2ac": {
+   "version": "3.39.0",
+   "path": "framework/agentic-standard/traceability.yaml"
   },
   "f651378cad3d87d9b681e945e91b61209e998765f714801ded8fe5ed195256e1": {
    "version": "3.12.0",

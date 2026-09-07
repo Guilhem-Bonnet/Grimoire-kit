@@ -5,6 +5,11 @@ Design principles (from CAHIER-DES-CHARGES §5.3):
   - Atomic writes: temp file + rename to avoid partial JSONL corruption
   - State machine: transitions validated before appending
   - Queries: ready / blocked / claimed / stale / needs_verification exposed as properties
+
+Implements the upstream pattern catalogue's QUA-03 ("Mission ledger
+append-only", `web/data/catalogue-export.json`) — see #246 lot 4, which
+converged the pattern codes cited across `tools/`, the extensions and this
+module onto that one catalogue instead of two disconnected namings.
 """
 
 from __future__ import annotations

@@ -470,3 +470,127 @@ def task_trace(
             console.print(f"  - {escape(entry.summary)}  [dim]({entry.source}, {entry.kind})[/dim]")
     else:
         console.print("\n[green]Aucune cause d'arrêt enregistrée.[/green]")
+
+
+_TRACES_ROOT = Annotated[Path, typer.Option("--traces-root", help="Racine du TraceLedger.")]
+_DEFAULT_TRACES = Path("_grimoire-output/traces")
+
+
+def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    """Ordre de grandeur $ à partir de `tools.cost_model.MODEL_RATES` — jamais une facture.
+
+    Reconnaissance par sous-chaîne (``model.lower()`` contient ``"opus"``,
+    ``"sonnet"``, ``"haiku"``...) : un modèle non reconnu vaut 0.0, jamais une
+    estimation inventée.
+    """
+    from grimoire.tools.cost_model import MODEL_RATES
+
+    needle = model.lower()
+    for family, rates in MODEL_RATES.items():
+        if family in needle:
+            return round((tokens_in / 1_000_000) * rates["in"] * 1000 + (tokens_out / 1_000_000) * rates["out"] * 1000, 6)
+    return 0.0
+
+
+@task_app.command("record-model-call")
+def task_record_model_call(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    model: Annotated[str, typer.Option("--model", help="Nom du modèle appelé.")],
+    tokens_in: Annotated[int, typer.Option("--tokens-in", min=0, help="Tokens en entrée.")] = 0,
+    tokens_out: Annotated[int, typer.Option("--tokens-out", min=0, help="Tokens en sortie.")] = 0,
+    mission_id: Annotated[str, typer.Option("--mission-id")] = "",
+    agent_id: Annotated[str, typer.Option("--agent-id", help="Rôle ou id de l'agent appelant.")] = "",
+    latency_ms: Annotated[float, typer.Option("--latency-ms", min=0)] = 0.0,
+    error: Annotated[bool, typer.Option("--error", help="L'appel a échoué.")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+    traces_root: _TRACES_ROOT = _DEFAULT_TRACES,
+) -> None:
+    """Journalise un appel modèle dans le TraceLedger (AG-LLM-004, AG-OBS-003).
+
+    AG-LLM-004 nomme cinq champs : modèle, rôle, coût, latence, erreur — les
+    cinq sont capturés (``model``, ``--agent-id``, coût estimé depuis
+    `tools.cost_model.MODEL_RATES`, ``--latency-ms``, ``--error``).
+
+    Le kit n'appelle jamais un modèle lui-même — c'est l'hôte (Claude Code,
+    Copilot...) qui le fait. Cette commande est le point d'entrée que l'hôte
+    (ou un hook) appelle après coup pour que l'appel devienne une preuve
+    durable : `grimoire task trace-export --format otel|langfuse` l'exporte
+    ensuite comme n'importe quelle autre trace.
+    """
+    from grimoire.traces.ledger import TraceLedger
+    from grimoire.traces.schemas import TokenUsage, TraceOutcome
+
+    root = project_root.resolve()
+    traces_path = traces_root if traces_root.is_absolute() else root / traces_root
+    cost = _estimate_model_cost(model, tokens_in, tokens_out)
+    usage = TokenUsage(
+        prompt_tokens=tokens_in,
+        completion_tokens=tokens_out,
+        total_tokens=tokens_in + tokens_out,
+        estimated_cost_usd=cost,
+    )
+    ledger = TraceLedger(traces_path)
+    trace = ledger.record(
+        run_id=f"model-call-{task_id}",
+        workflow_instance_id="",
+        mission_id=mission_id,
+        task_id=task_id,
+        recipe_id="grimoire.model-call",
+        outcome=TraceOutcome.FAILURE if error else TraceOutcome.SUCCESS,
+        started_at=_now_iso(),
+        agent_id=agent_id,
+        model=model,
+        token_usage=usage.to_dict(),
+        latency_ms=latency_ms,
+        error_count=1 if error else 0,
+    )
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False, default=str))
+        return
+    console.print(f"[green]OK[/green] appel modèle journalisé : {model}, {tokens_in}+{tokens_out} tokens (~${cost:.4f})")
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(tz=UTC).isoformat()
+
+
+@task_app.command("handoff")
+def task_handoff(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    capsule_path: Annotated[Path, typer.Argument(help="Fichier JSON de la capsule SubagentStop.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Dérive un handoff-packet (ORC-03) d'une capsule et le trace au Mission Ledger (AG-ORC-005).
+
+    `tools.handoff.build_handoff` savait déjà produire le packet ; rien ne
+    l'appelait. Cette commande lui donne un appelant réel, et journalise la
+    communication inter-agents dans le ledger append-only puisque c'est elle
+    qui alimente la décision suivante de la tâche.
+    """
+    from grimoire.missions.ledger import MissionLedger
+    from grimoire.tools.handoff import build_handoff, is_subagent_stop
+
+    root = project_root.resolve()
+    try:
+        capsule = json.loads(capsule_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        console.print(f"[red]✗[/red] Capsule illisible : {exc}")
+        raise typer.Exit(1) from None
+    if not is_subagent_stop(capsule):
+        console.print("[red]✗[/red] Pas une capsule SubagentStop exploitable (event != 'SubagentStop').")
+        raise typer.Exit(1)
+
+    packet = build_handoff(capsule)
+    ledger_path = ledger_root if ledger_root.is_absolute() else root / ledger_root
+    ledger = MissionLedger(ledger_path)
+    ledger.append_event("handoff", task_id, "task", actor_id=str(packet["from"].get("agent", "unknown")), payload=packet)
+
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(packet, indent=2, ensure_ascii=False, default=str))
+        return
+    console.print(f"[green]OK[/green] handoff {packet['from']['agent']} → {task_id} tracé au ledger : {packet['summary']}")

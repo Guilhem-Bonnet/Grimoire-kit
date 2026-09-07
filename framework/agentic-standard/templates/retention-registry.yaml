@@ -37,7 +37,20 @@ artifacts:
     retention: "court terme"
     expires_at: "rotation à 10 000 événements"
     superseded_by: ""
-# - id: RET-004
+  # RET-004 : les événements critiques, incidents et exceptions du registre
+  # d'incidents (AG-OBS-005) ne s'auto-purgent jamais — un incident qui
+  # disparaît sans successeur casse la traçabilité que AG-INC-* exige.
+  - id: RET-004
+    artifact: "_grimoire/standard/incident-registry.yaml"
+    type: incident
+    status: active
+    owner: ""
+    sensitivity: interne
+    indexable: false
+    retention: durable
+    expires_at: ""
+    superseded_by: ""
+# - id: RET-005
 #   artifact: ""
 #   type: rapport           # adr | rapport | handoff | log | charte | api | incident | preuve | mémoire
 #   status: active          # active | archived | superseded | obsolete | sensitive
