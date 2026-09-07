@@ -2,6 +2,26 @@
 
 ## Dernière release
 
+### 3.40.0 — La tâche se souvient, l'éditeur comprend
+
+- **Le claim rappelle ce que la mémoire sait de la tâche.** Historique,
+  tâches voisines avec leur cause d'arrêt, mémoire consolidée : en CLI
+  (`grimoire task recall`), en MCP (`task_recall`), au SessionStart et dans
+  l'inspecteur d'Exécuter. La consolidation n'écrit qu'à la clôture ou au
+  blocage.
+- **L'éditeur Source comprend le langage du kit.** Colorisation, diagnostics
+  (chemin mort, agent inconnu, clé de frontmatter inconnue, terme absent du
+  glossaire, pattern ou workflow inconnu) et complétion, sans dépendance,
+  adossés au doctor, au manifeste, au catalogue et au glossaire.
+- **Le bridge du standard converge avec la norme.** Trente-six patterns
+  rattachés au catalogue de la norme, cinq exigences obligatoires couvertes,
+  plus aucun trou de N1 à N5.
+- **Moins de code mort.** Onze accesseurs sans appelant retirés, trois
+  branchés sur une vraie commande, un inventaire qui refuse le retour.
+- Piloter distingue un kit aligné d'un kit installé.
+
+## Releases précédentes
+
 ### 3.39.1 — Le glossaire sur une installation nue
 
 - **La vue de travail s'ouvre sur `pip install grimoire-kit` sans extra.** Le
