@@ -29,8 +29,8 @@ WORKSPACE = ROOT / "web" / "workspace"
 
 #: Les trois façons dont la coque cite un concept.
 _CITATIONS = (
-    re.compile(r'data-term="([a-z0-9-]+)"'),           # HTML
-    re.compile(r"\bterm:\s*'([a-z0-9-]+)'"),           # tables déclaratives de shell.js
+    re.compile(r'data-term="([a-z0-9-]+)"'),  # HTML
+    re.compile(r"\bterm:\s*'([a-z0-9-]+)'"),  # tables déclaratives de shell.js
     re.compile(r"\.dataset\.term\s*=\s*'([a-z0-9-]+)'"),  # pose à l'exécution
 )
 
@@ -71,17 +71,27 @@ def test_le_glossaire_couvre_au_moins_les_quinze_concepts_de_la_spec(
     assert len(entries) >= 15
 
     incontournables = {
-        "espace-de-travail", "toile", "dock", "inspecteur", "explorateur",
-        "palette-de-commandes", "mode-concentration", "densite", "infobulle",
-        "tache", "porte-de-preuve", "evidence-pack", "trace", "etage", "override",
+        "espace-de-travail",
+        "toile",
+        "dock",
+        "inspecteur",
+        "explorateur",
+        "palette-de-commandes",
+        "mode-concentration",
+        "densite",
+        "infobulle",
+        "tache",
+        "porte-de-preuve",
+        "evidence-pack",
+        "trace",
+        "etage",
+        "override",
     }
     assert incontournables <= set(entries), sorted(incontournables - set(entries))
 
 
 @pytest.mark.parametrize("field", REQUIRED)
-def test_chaque_entree_porte_tous_les_champs_declares(
-    entries: dict[str, dict[str, Any]], field: str
-) -> None:
+def test_chaque_entree_porte_tous_les_champs_declares(entries: dict[str, dict[str, Any]], field: str) -> None:
     """Une bulle affiche nom, définition et raccourci : un champ absent est un trou."""
     missing = [key for key, entry in entries.items() if field not in entry]
 
@@ -162,11 +172,7 @@ def test_aucun_terme_cite_par_l_interface_n_est_absent_du_glossaire(
     Il échoue en nommant le fichier et le terme : le remède est d'écrire
     l'entrée, jamais de retirer la citation.
     """
-    offenders = {
-        source: sorted(ids - set(entries))
-        for source, ids in _cited().items()
-        if ids - set(entries)
-    }
+    offenders = {source: sorted(ids - set(entries)) for source, ids in _cited().items() if ids - set(entries)}
 
     assert not offenders, (
         "termes cités sans entrée au glossaire — ajoutez-les à framework/glossary.yaml :\n  "
@@ -219,3 +225,30 @@ def test_le_glossaire_est_au_catalogue_des_digests() -> None:
         "glossaire absent du catalogue — régénérez-le : python scripts/gen-kit-hashes.py"
     )
     assert catalog["digests"][digest]["path"] == "framework/glossary.yaml"
+
+
+def test_le_glossaire_se_charge_sans_pyyaml(monkeypatch, tmp_path) -> None:
+    """Une installation nue de la wheel n'a pas PyYAML : le glossaire doit
+    passer par le chargeur du kit (ruamel, dépendance déclarée). Reproduit
+    #292 : `import yaml` faisait tomber les six espaces."""
+    import sys
+
+    from grimoire.tools.workspace_api import glossary_view
+
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    view = glossary_view(tmp_path)
+    assert "error" not in view
+    assert view["count"] > 0
+
+
+def test_aucun_import_pyyaml_direct_dans_le_serveur_de_la_vue() -> None:
+    """Garde de #292 : les modules servis à une installation nue ne dépendent
+    pas de PyYAML ; ils passent par `grimoire.tools._common.load_yaml`."""
+    from pathlib import Path
+
+    import grimoire.missions.plans_registry as plans
+    import grimoire.tools.workspace_api as api
+
+    for module in (api, plans):
+        text = Path(module.__file__).read_text(encoding="utf-8")
+        assert "import yaml" not in text, module.__name__
