@@ -447,3 +447,74 @@ def task_trace(
             console.print(f"  - {escape(entry.summary)}  [dim]({entry.source}, {entry.kind})[/dim]")
     else:
         console.print("\n[green]Aucune cause d'arrêt enregistrée.[/green]")
+
+
+_EVIDENCE_ROOT = Annotated[Path, typer.Option("--evidence-root", help="Racine de l'EvidenceService.")]
+_DEFAULT_EVIDENCE = Path("_grimoire-runtime-output/evidence")
+
+
+@task_app.command("pack")
+def task_pack(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    pack_id: Annotated[str, typer.Argument(help="Identifiant du pack de preuve (`EVD-...`), vu via `task trace`.")],
+    project_root: _PROJECT_ROOT = Path(),
+    evidence_root: _EVIDENCE_ROOT = _DEFAULT_EVIDENCE,
+) -> None:
+    """Détail d'un pack de preuve : items, couverture des critères d'acceptation.
+
+    `grimoire task trace <task_id>` liste les identifiants de pack dans sa
+    timeline (`detail.pack_id`) sans jamais en montrer le contenu ; cette
+    commande lit le pack complet derrière un id.
+    """
+    from grimoire.evidence import EvidenceService
+
+    root = project_root.resolve()
+    evidence_path = evidence_root if evidence_root.is_absolute() else root / evidence_root
+    service = EvidenceService(evidence_path)
+    pack = service.get_pack(pack_id)
+    if pack is None:
+        console.print(f"[red]✗[/red] Pack introuvable : {pack_id}")
+        raise typer.Exit(1)
+    if pack.task_id != task_id:
+        console.print(f"[yellow]![/yellow] Le pack {pack_id} appartient à la tâche {pack.task_id}, pas {task_id}.")
+
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(pack.to_dict(), indent=2, ensure_ascii=False, default=str))
+        return
+
+    console.print(f"[bold]{pack.id}[/bold] — tâche {pack.task_id}, profil {pack.profile.value}  [dim]({pack.created_at})[/dim]")
+    if pack.coverage is not None:
+        couverts = ", ".join(pack.coverage.acceptance_covered) or "—"
+        console.print(f"  Critères couverts  : {couverts}")
+        if pack.coverage.acceptance_missing:
+            manquants = ", ".join(pack.coverage.acceptance_missing)
+            console.print(f"  [red]Critères manquants[/red] : {manquants}")
+    for item in pack.items:
+        console.print(f"  - [{item.kind.value}] {escape(item.summary or item.uri)}  [dim]{item.uri}[/dim]")
+
+
+@task_app.command("trace-export")
+def task_trace_export(
+    dest: Annotated[Path, typer.Argument(help="Fichier JSONL de sortie.")],
+    fmt: Annotated[str, typer.Option("--format", help="otel ou langfuse.")] = "otel",
+    mission_id: Annotated[str | None, typer.Option("--mission-id", help="Filtre sur une mission.")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Exporte le TraceLedger (traces d'outils, verdicts de policy) en JSONL.
+
+    ``--format otel`` suit les conventions sémantiques OTel GenAI ;
+    ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse.
+    Aucun SDK tiers requis dans les deux cas.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    if fmt not in {"otel", "langfuse"}:
+        console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse)")
+        raise typer.Exit(2)
+
+    root = project_root.resolve()
+    ledger = TraceLedger(root / TRACES_DIR)
+    count = ledger.export_otel_jsonl(dest, mission_id=mission_id) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
+    console.print(f"[green]OK[/green] {count} trace(s) exportée(s) au format {fmt} → {dest}")

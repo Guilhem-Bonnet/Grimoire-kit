@@ -134,6 +134,38 @@ def memory_graph_sync_tasks(
     console.print(f"  Code refs: {stats.get('task_code_links', 0)} task, {stats.get('evidence_code_links', 0)} evidence")
 
 
+@graph_app.command("coverage")
+def memory_graph_coverage(
+    ctx: typer.Context,
+    paths: str = _graph_paths_opt,
+    exclude: str = _graph_exclude_opt,
+) -> None:
+    """Nœuds publics sans TESTED_BY : ce que le code graph voit comme non couvert.
+
+    Construit le graphe en mémoire (sans Neo4j) et liste les fonctions,
+    méthodes et classes publiques, hors tests, qu'aucune arête TESTED_BY
+    n'atteint. Complète ``memory graph sync-code`` / ``verify``, qui portent
+    sur la fidélité de la projection Neo4j, pas sur la couverture elle-même.
+    """
+    from grimoire.memory.projections import build_code_graph
+
+    _, root = _load_config_context()
+    graph = build_code_graph(root, _parse_paths(paths), exclude=_parse_exclude(exclude))
+    uncovered = graph.uncovered_nodes()
+
+    fmt = _get_fmt(ctx)
+    if fmt == "json":
+        typer.echo(json.dumps(
+            {"total_nodes": len(graph.nodes), "uncovered": [n.id for n in uncovered]},
+            indent=2,
+            default=str,
+        ))
+        return
+    console.print(f"[bold]{len(uncovered)}[/bold] nœud(s) public(s) sans TESTED_BY sur {len(graph.nodes)} indexés")
+    for node in uncovered:
+        console.print(f"  - {node.id}  [dim]({node.file_path})[/dim]")
+
+
 @graph_app.command("verify")
 def memory_graph_verify(
     ctx: typer.Context,
