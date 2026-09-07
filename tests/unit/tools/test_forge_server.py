@@ -52,9 +52,7 @@ class TestForgeAPI:
 
     def test_archetypes(self, api: ForgeAPI) -> None:
         archetypes = api.archetypes()
-        assert archetypes == [
-            {"id": "minimal", "name": "Minimal", "description": "Base.", "tags": ["core"]}
-        ]
+        assert archetypes == [{"id": "minimal", "name": "Minimal", "description": "Base.", "tags": ["core"]}]
 
     def test_blueprint_roundtrip_and_validate(self, api: ForgeAPI) -> None:
         blueprint = {
@@ -87,9 +85,7 @@ class TestForgeAPI:
 
     def test_validate_detects_broken_edge_and_missing_artifact(self, api: ForgeAPI) -> None:
         blueprint = {
-            "nodes": [
-                {"id": "a", "kind": "artifact", "ref": "absent.md", "label": "X", "pins": []}
-            ],
+            "nodes": [{"id": "a", "kind": "artifact", "ref": "absent.md", "label": "X", "pins": []}],
             "edges": [{"from": "a.out", "to": "ghost.in", "contract": "c"}],
         }
         errors = api.blueprint_validate(blueprint)
@@ -116,9 +112,7 @@ def make_node(node_id: str, ref: str, out_contract: str = "task-envelope") -> di
 
 
 @pytest.fixture
-def api_with_catalogue(
-    project_root: Path, kit_root: Path, tmp_path: Path
-) -> ForgeAPI:
+def api_with_catalogue(project_root: Path, kit_root: Path, tmp_path: Path) -> ForgeAPI:
     ui = tmp_path / "ui"
     (ui / "data").mkdir(parents=True)
     catalogue = {
@@ -129,14 +123,9 @@ def api_with_catalogue(
         ],
         "contracts": [{"id": "task-envelope"}, {"id": "handoff-packet"}],
         "relations": [{"from": "ORC-01", "to": "GOV-01", "kind": "depends"}],
-        "useCases": [
-            {"id": "revue-gouvernee", "name": "Revue gouvernée",
-             "patterns": ["GOV-01", "QUA-04"]}
-        ],
+        "useCases": [{"id": "revue-gouvernee", "name": "Revue gouvernée", "patterns": ["GOV-01", "QUA-04"]}],
     }
-    (ui / "data" / "catalogue-export.json").write_text(
-        json.dumps(catalogue), encoding="utf-8"
-    )
+    (ui / "data" / "catalogue-export.json").write_text(json.dumps(catalogue), encoding="utf-8")
     return ForgeAPI(project_root, kit_root, ui_dir=ui)
 
 
@@ -163,9 +152,7 @@ class TestLint:
         errors = api.blueprint_validate(blueprint)
         assert any("contrat déclaré" in e for e in errors)
 
-    def test_lint_warns_missing_dependency_and_proof(
-        self, api_with_catalogue: ForgeAPI
-    ) -> None:
+    def test_lint_warns_missing_dependency_and_proof(self, api_with_catalogue: ForgeAPI) -> None:
         blueprint = {
             "nodes": [make_node("a", "ORC-01"), make_node("b", "ORC-01")],
             "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
@@ -191,9 +178,7 @@ class TestLint:
     def test_events_log(self, api: ForgeAPI, project_root: Path) -> None:
         events = project_root / "_grimoire-runtime-output" / "hook-runtime"
         events.mkdir(parents=True)
-        (events / "events.jsonl").write_text(
-            '{"hook": "test", "n": 1}\n{"hook": "test", "n": 2}\n', encoding="utf-8"
-        )
+        (events / "events.jsonl").write_text('{"hook": "test", "n": 1}\n{"hook": "test", "n": 2}\n', encoding="utf-8")
         log = api.events_log()
         assert [e["n"] for e in log["hook-runtime"]] == [1, 2]
 
@@ -221,7 +206,9 @@ class TestHTTP:
     def test_blueprint_put_then_get(self, base_url: str) -> None:
         payload = json.dumps({"id": "http-demo", "nodes": [], "edges": []}).encode()
         req = urllib.request.Request(  # noqa: S310 - serveur de test local
-            base_url + "/api/blueprints/http-demo", data=payload, method="PUT",
+            base_url + "/api/blueprints/http-demo",
+            data=payload,
+            method="PUT",
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
@@ -238,35 +225,35 @@ def kit_with_extension(kit_root: Path) -> Path:
     (ext / "artifacts").mkdir(parents=True)
     (ext / "artifacts" / "demo.agent.md").write_text("# Demo\n", encoding="utf-8")
     manifest = {
-        "manifestVersion": 1, "id": "demo-ext", "name": "Demo", "version": "0.1.0",
-        "description": "Extension de test.", "license": "MIT",
-        "authors": [{"name": "T"}], "compat": {"kit": ">=3.11", "manifest": 1},
+        "manifestVersion": 1,
+        "id": "demo-ext",
+        "name": "Demo",
+        "version": "0.1.0",
+        "description": "Extension de test.",
+        "license": "MIT",
+        "authors": [{"name": "T"}],
+        "compat": {"kit": ">=3.11", "manifest": 1},
         "provides": {"agents": ["artifacts/demo.agent.md"]},
         "patterns": {"implements": ["ORC-01"]},
         "permissions": {"filesystem": "artifacts", "network": False, "hooks": [], "memory": "none"},
-        "install": {"steps": [{"kind": "copy", "from": "artifacts/demo.agent.md",
-                               "to": ".github/agents/demo.agent.md"}]},
+        "install": {
+            "steps": [{"kind": "copy", "from": "artifacts/demo.agent.md", "to": ".github/agents/demo.agent.md"}]
+        },
     }
     (ext / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
     return kit_root
 
 
 class TestExtensionsAndPlan:
-    def test_extensions_view_lists_available(
-        self, project_root: Path, kit_with_extension: Path
-    ) -> None:
+    def test_extensions_view_lists_available(self, project_root: Path, kit_with_extension: Path) -> None:
         api = ForgeAPI(project_root, kit_with_extension, ui_dir=None)
         view = api.extensions_view()
         assert view["available"][0]["id"] == "demo-ext"
         assert view["installed"] == {}
 
-    def test_setup_plan_installs_and_writes_plan(
-        self, project_root: Path, kit_with_extension: Path
-    ) -> None:
+    def test_setup_plan_installs_and_writes_plan(self, project_root: Path, kit_with_extension: Path) -> None:
         api = ForgeAPI(project_root, kit_with_extension, ui_dir=None)
-        plan = api.setup_plan(
-            {"name": "p", "user": "u", "archetype": "minimal", "extensions": ["demo-ext"]}
-        )
+        plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "extensions": ["demo-ext"]})
         assert plan["extensionsInstalled"] == ["demo-ext v0.1.0"]
         assert plan["extensionErrors"] == []
         # B2 : le plan compile vers le parcours moderne, plus jamais le legacy.
@@ -277,9 +264,7 @@ class TestExtensionsAndPlan:
         api.extension_remove("demo-ext")
         assert api.extensions_view()["installed"] == {}
 
-    def test_setup_plan_reports_extension_errors(
-        self, project_root: Path, kit_root: Path
-    ) -> None:
+    def test_setup_plan_reports_extension_errors(self, project_root: Path, kit_root: Path) -> None:
         api = ForgeAPI(project_root, kit_root, ui_dir=None)
         plan = api.setup_plan({"extensions": ["ghost"]})
         assert plan["extensionsInstalled"] == []
@@ -289,7 +274,7 @@ class TestExtensionsAndPlan:
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Rend la 302 telle quelle au lieu de la suivre."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]  # noqa: ANN001
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
         return None
 
 
@@ -325,7 +310,8 @@ class TestStatic:
         req = urllib.request.Request(  # noqa: S310
             static_url + "/api/extensions/add",
             data=json.dumps({"source": "ghost"}).encode(),
-            method="POST", headers={"Content-Type": "application/json"},
+            method="POST",
+            headers={"Content-Type": "application/json"},
         )
         with pytest.raises(urllib.error.HTTPError) as exc:
             urllib.request.urlopen(req, timeout=5)  # noqa: S310
@@ -361,8 +347,10 @@ class TestComposites:
         bp = {
             "nodes": [
                 make_node("a", "ORC-01"),
-                {**self.composite("use-case:revue-gouvernee"),
-                 "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}]},
+                {
+                    **self.composite("use-case:revue-gouvernee"),
+                    "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
+                },
             ],
             "edges": [{"from": "a.out", "to": "uc.in", "contract": "task-envelope"}],
         }
@@ -374,9 +362,7 @@ class TestComposites:
 
 
 class TestSimulate:
-    def test_orders_flow_and_reports_requirements(
-        self, api_with_catalogue: ForgeAPI
-    ) -> None:
+    def test_orders_flow_and_reports_requirements(self, api_with_catalogue: ForgeAPI) -> None:
         bp = {
             "nodes": [
                 make_node("b", "GOV-01"),
@@ -411,7 +397,9 @@ class TestSimulate:
         bp = {
             "nodes": [
                 {
-                    "id": "x", "kind": "extension-node", "ref": "crewai/crewai-crew",
+                    "id": "x",
+                    "kind": "extension-node",
+                    "ref": "crewai/crewai-crew",
                     "label": "Crew",
                     "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
                 }
@@ -427,7 +415,9 @@ class TestSimulate:
         bp = {
             "nodes": [
                 {
-                    "id": "a", "kind": "artifact", "ref": ".github/agents/dev.agent.md",
+                    "id": "a",
+                    "kind": "artifact",
+                    "ref": ".github/agents/dev.agent.md",
                     "label": "dev",
                     "pins": [{"id": "out", "direction": "out", "contract": "task-envelope"}],
                 }
@@ -440,9 +430,7 @@ class TestSimulate:
 
 
 class TestCompile:
-    def test_compiles_ready_blueprint(
-        self, api_with_catalogue: ForgeAPI, project_root: Path
-    ) -> None:
+    def test_compiles_ready_blueprint(self, api_with_catalogue: ForgeAPI, project_root: Path) -> None:
         bp = {
             "blueprintVersion": 1,
             "id": "flow-ok",
@@ -464,6 +452,7 @@ class TestCompile:
         assert compiled["path"] == result["artifact"]
         assert compiled["hash"] == result["hash"]
         import hashlib
+
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         assert compiled["hash"] == f"sha256:{digest}"
 
@@ -472,7 +461,9 @@ class TestCompile:
             "id": "flow-ko",
             "nodes": [
                 {
-                    "id": "x", "kind": "extension-node", "ref": "crewai/crewai-crew",
+                    "id": "x",
+                    "kind": "extension-node",
+                    "ref": "crewai/crewai-crew",
                     "label": "Crew",
                     "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
                 }
@@ -482,9 +473,7 @@ class TestCompile:
         with pytest.raises(ValueError, match="compilation refusée"):
             api.blueprint_compile(bp)
 
-    def test_pattern_requirements_in_mission_pack(
-        self, api_with_catalogue: ForgeAPI, project_root: Path
-    ) -> None:
+    def test_pattern_requirements_in_mission_pack(self, api_with_catalogue: ForgeAPI, project_root: Path) -> None:
         # Enrichir le catalogue de contrôles pour GOV-01
         ui = api_with_catalogue.ui_dir
         assert ui is not None
@@ -577,8 +566,7 @@ class TestStudioBridge:
         artifact = api.project_root / result["artifact"]
         assert artifact.is_file()
         saved = json.loads(
-            (api.project_root / "_grimoire" / "blueprints" / "flow-studio.blueprint.json")
-            .read_text(encoding="utf-8")
+            (api.project_root / "_grimoire" / "blueprints" / "flow-studio.blueprint.json").read_text(encoding="utf-8")
         )
         assert saved["blueprintVersion"] == 2
         assert saved["compiled"]["artifacts"][0]["path"] == result["artifact"]
@@ -596,8 +584,7 @@ class TestContextPolicy:
 
     def test_invalid_enum_is_blocking(self, api: ForgeAPI) -> None:
         bp = {
-            "nodes": [with_context(make_node("a", "ORC-01"),
-                                   {"budget": {"tier": "gigantic"}})],
+            "nodes": [with_context(make_node("a", "ORC-01"), {"budget": {"tier": "gigantic"}})],
             "edges": [],
         }
         errors = api.blueprint_validate(bp)
@@ -606,10 +593,10 @@ class TestContextPolicy:
     def test_invalid_types_are_blocking(self, api: ForgeAPI) -> None:
         bp = {
             "nodes": [
-                with_context(make_node("a", "ORC-01"),
-                             {"budget": {"maxTokens": "beaucoup"},
-                              "compaction": {"strategy": "zip"},
-                              "isolation": "airgap"}),
+                with_context(
+                    make_node("a", "ORC-01"),
+                    {"budget": {"maxTokens": "beaucoup"}, "compaction": {"strategy": "zip"}, "isolation": "airgap"},
+                ),
             ],
             "edges": [],
         }
@@ -628,8 +615,7 @@ class TestContextPolicy:
 
     def test_r_c4_max_tokens_over_window_is_blocking(self, api: ForgeAPI) -> None:
         bp = {
-            "nodes": [with_context(make_node("a", "ORC-01"),
-                                   {"budget": {"maxTokens": 300000}})],
+            "nodes": [with_context(make_node("a", "ORC-01"), {"budget": {"maxTokens": 300000}})],
             "edges": [],
         }
         errors = api.blueprint_validate(bp)
@@ -637,21 +623,23 @@ class TestContextPolicy:
 
     def test_valid_context_passes(self, api: ForgeAPI) -> None:
         bp = {
-            "nodes": [with_context(
-                make_node("a", "ORC-01"),
-                {"budget": {"tier": "small", "maxTokens": 12000},
-                 "compaction": {"strategy": "digest",
-                                "digestContract": "context-pack"},
-                 "isolation": "shared"})],
+            "nodes": [
+                with_context(
+                    make_node("a", "ORC-01"),
+                    {
+                        "budget": {"tier": "small", "maxTokens": 12000},
+                        "compaction": {"strategy": "digest", "digestContract": "context-pack"},
+                        "isolation": "shared",
+                    },
+                )
+            ],
             "edges": [],
         }
         assert api.blueprint_validate(bp) == []
 
     # ── R-C5 (bloquant) : node isolé à sortie non-digest ──
 
-    def test_r_c5_isolated_with_non_digest_output_is_blocking(
-        self, api: ForgeAPI
-    ) -> None:
+    def test_r_c5_isolated_with_non_digest_output_is_blocking(self, api: ForgeAPI) -> None:
         bp = {
             "nodes": [
                 with_context(make_node("a", "ORC-01"), {"isolation": "isolated"}),
@@ -664,12 +652,18 @@ class TestContextPolicy:
 
     def test_r_c5_isolated_with_digest_output_passes(self, api: ForgeAPI) -> None:
         node_a = {
-            "id": "a", "kind": "pattern", "ref": "ORC-01", "label": "ORC-01",
+            "id": "a",
+            "kind": "pattern",
+            "ref": "ORC-01",
+            "label": "ORC-01",
             "config": {"context": {"isolation": "isolated"}},
             "pins": [{"id": "out", "direction": "out", "contract": "handoff-packet"}],
         }
         node_b = {
-            "id": "b", "kind": "pattern", "ref": "GOV-01", "label": "GOV-01",
+            "id": "b",
+            "kind": "pattern",
+            "ref": "GOV-01",
+            "label": "GOV-01",
             "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
         }
         bp = {
@@ -683,12 +677,10 @@ class TestContextPolicy:
             "blueprintVersion": 2,
             "id": "flow-iso",
             "nodes": [
-                {"id": "n1", "ref": "ORC-01", "x": 0, "y": 0,
-                 "config": {"context": {"isolation": "isolated"}}},
+                {"id": "n1", "ref": "ORC-01", "x": 0, "y": 0, "config": {"context": {"isolation": "isolated"}}},
                 {"id": "n2", "ref": "GOV-01", "x": 300, "y": 0},
             ],
-            "edges": [{"id": "e1", "from": "n1", "to": "n2",
-                       "contract": "task-envelope"}],
+            "edges": [{"id": "e1", "from": "n1", "to": "n2", "contract": "task-envelope"}],
         }
         with pytest.raises(ValueError, match="R-C5"):
             api.blueprint_compile(bp)
@@ -697,12 +689,17 @@ class TestContextPolicy:
 
     def test_r_c1_extension_feeding_shared_node_warns(self, api: ForgeAPI) -> None:
         ext = {
-            "id": "x", "kind": "extension-node", "ref": "demo-ext/crew",
+            "id": "x",
+            "kind": "extension-node",
+            "ref": "demo-ext/crew",
             "label": "crew",
             "pins": [{"id": "out", "direction": "out", "contract": "handoff-packet"}],
         }
         dst = {
-            "id": "b", "kind": "pattern", "ref": "GOV-01", "label": "GOV-01",
+            "id": "b",
+            "kind": "pattern",
+            "ref": "GOV-01",
+            "label": "GOV-01",
             "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
         }
         bp = {
@@ -725,8 +722,7 @@ class TestContextPolicy:
                 node = with_context(node, {"compaction": {"strategy": "digest"}})
             nodes.append(node)
             if i:
-                edges.append({"from": f"n{i - 1}.out", "to": f"n{i}.in",
-                              "contract": "task-envelope"})
+                edges.append({"from": f"n{i - 1}.out", "to": f"n{i}.in", "contract": "task-envelope"})
         return {"blueprintVersion": 1, "nodes": nodes, "edges": edges}
 
     def test_r_c2_chain_of_four_without_digest_warns(self, api: ForgeAPI) -> None:
@@ -743,15 +739,12 @@ class TestContextPolicy:
 
     def test_r_c3_deep_without_justification_warns(self, api: ForgeAPI) -> None:
         bp = {
-            "nodes": [with_context(make_node("a", "ORC-01"),
-                                   {"budget": {"tier": "deep"}})],
+            "nodes": [with_context(make_node("a", "ORC-01"), {"budget": {"tier": "deep"}})],
             "edges": [],
         }
         lint = api.blueprint_lint(bp)
         assert any("R-C3" in w for w in lint["warnings"])
-        bp["nodes"][0]["config"]["context"]["budget"]["justification"] = (
-            "audit multi-fichiers"
-        )
+        bp["nodes"][0]["config"]["context"]["budget"]["justification"] = "audit multi-fichiers"
         lint = api.blueprint_lint(bp)
         assert not any("R-C3" in w for w in lint["warnings"])
 
@@ -788,8 +781,7 @@ class TestContextPolicy:
 
     def test_context_pressure_critical_and_r_c6(self, api: ForgeAPI) -> None:
         bp = {
-            "nodes": [with_context(make_node("a", "ORC-01"),
-                                   {"budget": {"maxTokens": 190000}})],
+            "nodes": [with_context(make_node("a", "ORC-01"), {"budget": {"maxTokens": 190000}})],
             "edges": [],
         }
         report = api.blueprint_simulate(bp)
@@ -807,18 +799,20 @@ class TestContextPolicy:
 
     # ── compilation : section « Contexte » ──
 
-    def test_compile_emits_context_section(
-        self, api_with_catalogue: ForgeAPI, project_root: Path
-    ) -> None:
+    def test_compile_emits_context_section(self, api_with_catalogue: ForgeAPI, project_root: Path) -> None:
         node_a = with_context(
             make_node("a", "ORC-01", out_contract="handoff-packet"),
-            {"budget": {"tier": "deep", "maxTokens": 12000,
-                        "justification": "analyse transverse"},
-             "compaction": {"strategy": "digest"},
-             "isolation": "isolated"},
+            {
+                "budget": {"tier": "deep", "maxTokens": 12000, "justification": "analyse transverse"},
+                "compaction": {"strategy": "digest"},
+                "isolation": "isolated",
+            },
         )
         node_b = {
-            "id": "b", "kind": "pattern", "ref": "QUA-04", "label": "QUA-04",
+            "id": "b",
+            "kind": "pattern",
+            "ref": "QUA-04",
+            "label": "QUA-04",
             "config": {"context": {"compaction": {"strategy": "selective"}}},
             "pins": [{"id": "in", "direction": "in", "contract": "handoff-packet"}],
         }
@@ -839,9 +833,7 @@ class TestContextPolicy:
         assert "SELECTIVE_LOAD" in content
         assert "sous-agent à capsule minimale" in content
 
-    def test_compile_without_context_has_no_section(
-        self, api_with_catalogue: ForgeAPI, project_root: Path
-    ) -> None:
+    def test_compile_without_context_has_no_section(self, api_with_catalogue: ForgeAPI, project_root: Path) -> None:
         bp = {
             "id": "flow-noctx",
             "name": "Sans contexte",
@@ -857,8 +849,9 @@ class TestContextPolicy:
         bp = {
             "blueprintVersion": 2,
             "id": "flow-cfg",
-            "nodes": [{"id": "n1", "ref": "ORC-01", "x": 0, "y": 0,
-                       "config": {"context": {"budget": {"tier": "small"}}}}],
+            "nodes": [
+                {"id": "n1", "ref": "ORC-01", "x": 0, "y": 0, "config": {"context": {"budget": {"tier": "small"}}}}
+            ],
             "edges": [],
         }
         v1 = api._studio_to_v1(bp)
@@ -876,10 +869,8 @@ class TestStigmergyView:
         from grimoire.tools import stigmergy as stig
 
         board = stig.load_board(api.project_root)
-        stig.emit_pheromone(board, ptype="NEED", location="src/auth",
-                            text="review", emitter="dev")
-        stig.emit_pheromone(board, ptype="ALERT", location="src/auth",
-                            text="faille", emitter="qa")
+        stig.emit_pheromone(board, ptype="NEED", location="src/auth", text="review", emitter="dev")
+        stig.emit_pheromone(board, ptype="ALERT", location="src/auth", text="faille", emitter="qa")
         stig.save_board(api.project_root, board)
 
         view = api.stigmergy_view()
@@ -895,9 +886,7 @@ class TestEdgeChannel:
     def _bp(self, channel: str | None = None) -> dict:
         # Un plan de défaillance (failure/escalation) transporte error-envelope
         # (R-F2) ; le plan nominal reste task-envelope.
-        contract = (
-            "error-envelope" if channel in ("failure", "escalation") else "task-envelope"
-        )
+        contract = "error-envelope" if channel in ("failure", "escalation") else "task-envelope"
         a = make_node("a", "ORC-01", out_contract=contract)
         b = make_node("b", "GOV-01")
         b["pins"][0]["contract"] = contract  # in de b
@@ -940,7 +929,7 @@ class TestIsolationRegion:
         b = make_node("b", "COG-01", out_contract=out_contract)
         c = make_node("c", "GOV-01")
         b["pins"][0]["contract"] = "handoff-packet"  # in de b
-        c["pins"][0]["contract"] = out_contract       # in de c
+        c["pins"][0]["contract"] = out_contract  # in de c
         return {
             "blueprintVersion": 1,
             "nodes": [a, b, c],
@@ -948,8 +937,7 @@ class TestIsolationRegion:
                 {"from": "a.out", "to": "b.in", "contract": "handoff-packet"},
                 {"from": "b.out", "to": "c.in", "contract": out_contract},
             ],
-            "boundaries": [{"id": "quarantine", "mode": "isolation",
-                            "members": ["a", "b"]}],
+            "boundaries": [{"id": "quarantine", "mode": "isolation", "members": ["a", "b"]}],
         }
 
     def test_unknown_member_rejected(self, api: ForgeAPI) -> None:
@@ -1028,9 +1016,7 @@ class TestMemoryLinkAndModernSetup:
         st = self._get(f"{base_url}/api/memory/status")
         assert st["state"] == "uninitialized"
 
-    def test_api_memory_status_initialized(
-        self, base_url: str, project_root: Path
-    ) -> None:
+    def test_api_memory_status_initialized(self, base_url: str, project_root: Path) -> None:
         (project_root / "project-context.yaml").write_text(
             "project:\n  name: demo\nmemory:\n  backend: local\n",
             encoding="utf-8",
@@ -1039,12 +1025,8 @@ class TestMemoryLinkAndModernSetup:
         assert st["state"] == "ok"
         assert st["resolvedBackend"] == "local"
 
-    def test_setup_plan_includes_backend_and_modern_command(
-        self, api: ForgeAPI
-    ) -> None:
-        plan = api.setup_plan(
-            {"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical"}
-        )
+    def test_setup_plan_includes_backend_and_modern_command(self, api: ForgeAPI) -> None:
+        plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical"})
         assert plan["backend"] == "lexical"
         assert "--backend lexical" in plan["initCommand"]
         assert plan["initCommand"].startswith("grimoire up ")
@@ -1061,13 +1043,9 @@ class TestSetupPlanRobustness:
         plan = api.setup_plan({"name": "p", "backend": "auto", "needs": None})
         assert plan["needs"] == []
 
-    def test_extensions_string_is_not_iterated_char_by_char(
-        self, api: ForgeAPI
-    ) -> None:
+    def test_extensions_string_is_not_iterated_char_by_char(self, api: ForgeAPI) -> None:
         # "demo" ne doit PAS déclencher l'installation de d/e/m/o.
-        plan = api.setup_plan(
-            {"name": "p", "backend": "auto", "extensions": "demo"}
-        )
+        plan = api.setup_plan({"name": "p", "backend": "auto", "extensions": "demo"})
         assert plan["extensionsInstalled"] == []
         assert plan["extensionErrors"] == []
 
@@ -1083,7 +1061,9 @@ class TestFailureInjectionSimulate:
 
     def _bp(self) -> dict:
         crew = {
-            "id": "crew", "kind": "pattern", "ref": "COG-01",
+            "id": "crew",
+            "kind": "pattern",
+            "ref": "COG-01",
             "config": {"resilience": {"retry": {"max": 2}}},
             "pins": [
                 {"id": "in", "direction": "in", "contract": "task-envelope"},
@@ -1093,10 +1073,10 @@ class TestFailureInjectionSimulate:
         human = make_node("human", "GOV-15")
         human["pins"][0]["contract"] = "error-envelope"
         return {
-            "blueprintVersion": 1, "id": "bp",
+            "blueprintVersion": 1,
+            "id": "bp",
             "nodes": [crew, human],
-            "edges": [{"from": "crew.error", "to": "human.in",
-                       "contract": "error-envelope", "channel": "escalation"}],
+            "edges": [{"from": "crew.error", "to": "human.in", "contract": "error-envelope", "channel": "escalation"}],
         }
 
     def test_nominal_simulate_has_null_injection(self, api: ForgeAPI) -> None:
@@ -1104,9 +1084,7 @@ class TestFailureInjectionSimulate:
         assert report["failureInjection"] is None
 
     def test_injected_failure_traced(self, api: ForgeAPI) -> None:
-        report = api.blueprint_simulate(
-            self._bp(), inject_failure={"nodeId": "crew", "class": "timeout"}
-        )
+        report = api.blueprint_simulate(self._bp(), inject_failure={"nodeId": "crew", "class": "timeout"})
         fi = report["failureInjection"]
         assert fi["valid"] is True
         assert fi["path"] == ["crew", "human"]
@@ -1125,9 +1103,7 @@ class TestPontStudioDeclarations:
             "blueprintVersion": 2,
             "id": "b",
             "nodes": [{"id": "a", "ref": "ORC-02"}, {"id": "b", "ref": "QUA-04"}],
-            "edges": [
-                {"from": "a", "to": "b", "contract": "task-envelope", "channel": "failure"}
-            ],
+            "edges": [{"from": "a", "to": "b", "contract": "task-envelope", "channel": "failure"}],
         }
         v1 = api._studio_to_v1(studio)
         assert v1["edges"][0]["channel"] == "failure"
@@ -1138,9 +1114,7 @@ class TestPontStudioDeclarations:
             "blueprintVersion": 2,
             "id": "b",
             "nodes": [{"id": "a", "ref": "ORC-02"}, {"id": "b", "ref": "QUA-04"}],
-            "edges": [
-                {"from": "a", "to": "b", "contract": "task-envelope", "channel": "happy"}
-            ],
+            "edges": [{"from": "a", "to": "b", "contract": "task-envelope", "channel": "happy"}],
         }
         assert "channel" not in api._studio_to_v1(studio)["edges"][0]
 
@@ -1155,9 +1129,7 @@ class TestPontStudioDeclarations:
             "edges": [{"from": "a", "to": "b", "contract": "task-envelope"}],
         }
         boundaries = api._studio_to_v1(studio).get("boundaries")
-        assert boundaries == [
-            {"id": "ck-studio", "mode": "checkpoint", "members": ["a"], "scope": "state"}
-        ]
+        assert boundaries == [{"id": "ck-studio", "mode": "checkpoint", "members": ["a"], "scope": "state"}]
 
     def test_sans_declaration_le_format_est_inchange(self, api: ForgeAPI) -> None:
         studio = {
@@ -1211,27 +1183,30 @@ class TestErrorContractIsKnown:
             "id": "avec-repli",
             "nodes": [
                 {
-                    "id": "work", "kind": "pattern", "ref": "ORC-01",
+                    "id": "work",
+                    "kind": "pattern",
+                    "ref": "ORC-01",
                     "pins": [
                         {"id": "out", "direction": "out", "contract": "task-envelope"},
                         {"id": "err", "direction": "out", "contract": contract},
                     ],
                 },
                 {
-                    "id": "verify", "kind": "pattern", "ref": "QUA-04",
-                    "pins": [
-                        {"id": "in", "direction": "in", "contract": "task-envelope"}
-                    ],
+                    "id": "verify",
+                    "kind": "pattern",
+                    "ref": "QUA-04",
+                    "pins": [{"id": "in", "direction": "in", "contract": "task-envelope"}],
                 },
                 {
-                    "id": "repli", "kind": "pattern", "ref": "GOV-01",
+                    "id": "repli",
+                    "kind": "pattern",
+                    "ref": "GOV-01",
                     "pins": [{"id": "in", "direction": "in", "contract": contract}],
                 },
             ],
             "edges": [
                 {"from": "work.out", "to": "verify.in", "contract": "task-envelope"},
-                {"from": "work.err", "to": "repli.in", "contract": contract,
-                 "channel": "failure"},
+                {"from": "work.err", "to": "repli.in", "contract": contract, "channel": "failure"},
             ],
         }
 
@@ -1240,23 +1215,15 @@ class TestErrorContractIsKnown:
         catalogue = api_with_catalogue._catalogue() or {}
         assert "error-envelope" not in {c["id"] for c in catalogue.get("contracts", [])}
 
-        report = api_with_catalogue.blueprint_lint(
-            self._flow_with_failure_edge("error-envelope")
-        )
+        report = api_with_catalogue.blueprint_lint(self._flow_with_failure_edge("error-envelope"))
         assert not [e for e in report["errors"] if "contrat inconnu" in e], report["errors"]
 
     def test_failure_edge_simulates_clean(self, api_with_catalogue: ForgeAPI) -> None:
-        report = api_with_catalogue.blueprint_simulate(
-            self._flow_with_failure_edge("error-envelope")
-        )
+        report = api_with_catalogue.blueprint_simulate(self._flow_with_failure_edge("error-envelope"))
         assert report["blockers"] == [], report["blockers"]
         assert report["channels"]["failure"] == 1
 
-    def test_another_unknown_contract_is_still_rejected(
-        self, api_with_catalogue: ForgeAPI
-    ) -> None:
+    def test_another_unknown_contract_is_still_rejected(self, api_with_catalogue: ForgeAPI) -> None:
         """La garde reste fermée : seul le contrat du format est ajouté."""
-        report = api_with_catalogue.blueprint_lint(
-            self._flow_with_failure_edge("contrat-invente")
-        )
+        report = api_with_catalogue.blueprint_lint(self._flow_with_failure_edge("contrat-invente"))
         assert [e for e in report["errors"] if "contrat inconnu" in e], report["errors"]
