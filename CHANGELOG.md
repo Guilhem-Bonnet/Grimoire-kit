@@ -62,8 +62,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   L'espace Exécuter (`spaces/executer.js`) affiche le rappel dans
   l'inspecteur, avec parcimonie — pas de section pour un rappel vide.
 
+## [3.39.1] - 2026-09-07
+
 ### Corrigé
 
+- **Piloter distingue kit aligné et kit installé (#288).** Le badge Kit
+  affichait « à jour » à côté d'un sous-texte `aligné sur 3.36.0, installé
+  3.38.0` — deux versions différentes contredisant un badge d'alignement
+  exact. `kit.upToDate` (aucun fichier livré n'a de révision plus récente au
+  catalogue) et `kit.aligned === kit.installed` (synchronisation exacte) sont
+  deux affirmations distinctes ; le badge dit maintenant « aligné » quand la
+  première est vraie sans la seconde, « à jour » seulement quand les deux
+  versions coïncident. Aucune donnée serveur ne change
+  (`project_health.kit_alignment` reste correct) : la correction est dans le
+  rendu, `web/workspace/spaces/piloter.js`.
 - **Le glossaire se charge sur une installation nue de la wheel.** Le serveur
   de la vue de travail importait PyYAML alors que la dépendance déclarée est
   ruamel : sur `pip install grimoire-kit` sans extra, `/api/workspace/glossary`
@@ -71,6 +83,37 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   passage consommateur sur un projet réel). Le glossaire et le registre des
   plans passent par le chargeur du kit ; un test bloque le module `yaml` et un
   autre refuse tout `import yaml` direct dans ces modules.
+
+### Retiré
+
+- **Onze accesseurs publics sans appelant ni test (#275).** `MemoryManager.
+  hot_store/hot_recall/hot_delete/hot_acquire_lease/hot_release_lease`
+  (Redis hot memory — R&D non portée, #94) ; `CodeGraph.get_node` et
+  `get_dependents` ; `MemPalaceBackend.search_preview` (« convenience method
+  used during experiments », jamais adoptée) ; `RecipeRegistry.get_or_raise`
+  et `list_recipes` (la classe entière n'a aucun appelant) ;
+  `ProjectSurface.hooks_for` (même mode de panne qu'`entry_agent()`, #233).
+  Trois autres (`MissionLedger.blocked_tasks`/`events_for`,
+  `missions.projections.build_cockpit_from_paths`) restent orphelins par
+  choix — zone `missions/` active en parallèle au moment de cette passe,
+  documentés dans `KNOWN_ORPHANS` (`tests/unit/test_public_accessor_
+  inventory.py`) plutôt que tranchés en silence.
+
+### Ajouté
+
+- **Trois accesseurs orphelins branchés sur un appelant réel (#275).**
+  `grimoire task pack <task-id> <pack-id>` lit un pack de preuve complet
+  (`EvidenceService.get_pack`), jusqu'ici accessible seulement en liste.
+  `grimoire task trace-export <dest> --format otel|langfuse` exporte le
+  `TraceLedger` (`export_otel_jsonl` et `export_langfuse` n'avaient tous les
+  deux aucun appelant produit). `grimoire memory graph coverage` liste les
+  nœuds publics sans arête `TESTED_BY` (`CodeGraph.uncovered_nodes`), sans
+  dépendance Neo4j.
+- **Garde-fou anti-régression (#275)** :
+  `tests/unit/test_public_accessor_inventory.py` réplique l'inventaire AST
+  qui a produit #275 et échoue si un nouvel accesseur public de
+  `src/grimoire/` se retrouve sans appelant ni test hors de sa propre
+  définition.
 
 ## [3.39.0] - 2026-09-06
 ### Corrigé

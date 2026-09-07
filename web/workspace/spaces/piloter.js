@@ -97,6 +97,30 @@ function text(tag, className, value) {
   return node;
 }
 
+// ── Statut du kit : aligné (contenu à jour) ≠ installé (CLI qui tourne) ─────
+//
+// `kit.upToDate` dit qu'aucun fichier livré n'a de révision plus récente au
+// catalogue — l'invariant qui compte pour l'utilisateur. `kit.aligned` est la
+// version qui a écrit ce contenu, `kit.installed` la version du CLI qui vient
+// de répondre : deux nombres différents pour une même raison saine (un fichier
+// n'a pas changé depuis 3.36.0 alors que le CLI est passé en 3.38.0, cf.
+// project_health.py:kit_alignment). Affirmer « à jour » à côté de deux
+// versions différentes se lit comme une contradiction (#288) ; « aligné »
+// reste vrai dans les deux cas, « à jour » n'est employé que quand les deux
+// versions coïncident réellement.
+function kitStatus(kit) {
+  if (!kit || !kit.scaffolded) {
+    return { word: kit ? 'non initialisé' : 'indisponible', dot: kit ? 'warn' : null };
+  }
+  if (!kit.upToDate) {
+    return { word: `en retard (${kit.behind})`, dot: 'warn' };
+  }
+  if (kit.aligned && kit.installed && kit.aligned !== kit.installed) {
+    return { word: 'aligné', dot: 'ok' };
+  }
+  return { word: 'à jour', dot: 'ok' };
+}
+
 // ── Signaux « à traiter » ────────────────────────────────────────────────────
 
 function watchReasons(entry, health) {
@@ -278,7 +302,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.append(text('h2', null, name || slug || ctx.host.project || 'Projet servi'));
 
   wrap.append(kpiCard([
-    { value: health?.kit?.upToDate ? 'à jour' : (health?.kit?.scaffolded ? 'en retard' : 'absent'), label: 'kit' },
+    { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit' },
     { value: ciWord(health?.ci_status), label: 'CI' },
     { value: fmtInt(health?.commits_total), label: 'commits' },
     { value: fmtInt((health?.flows || []).length), label: 'flows' },
@@ -292,7 +316,8 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   const kitBlock = document.createElement('div');
   kitBlock.className = 'pl-insp-block';
   kitBlock.append(text('h4', null, 'Kit'));
-  kitBlock.append(row(dot(health?.kit?.upToDate ? 'ok' : 'warn'), text('span', null, health?.kit?.scaffolded ? (health.kit.upToDate ? 'à jour' : `en retard (${health.kit.behind})`) : 'non initialisé')));
+  const kit = kitStatus(health?.kit);
+  kitBlock.append(row(dot(kit.dot), text('span', null, kit.word)));
   if (health?.kit?.aligned) kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
   ctx.inspector.append(kitBlock);
 

@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.evidence.schemas import EvidenceProfile
 
 __all__ = [
@@ -226,15 +225,3 @@ class RecipeRegistry:
             return versions.get(version)
         return sorted(versions.values(), key=lambda r: r.version)[-1]
 
-    def get_or_raise(self, recipe_id: str, version: str | None = None) -> Recipe:
-        recipe = self.get(recipe_id, version)
-        if recipe is None:
-            raise GrimoireRuntimeError(f"Recipe not found: {recipe_id}" + (f"@{version}" if version else ""))
-        return recipe
-
-    def list_recipes(self) -> list[Recipe]:
-        """Return all latest-version recipes, sorted by id."""
-        result = []
-        for versions in self._recipes.values():
-            result.append(sorted(versions.values(), key=lambda r: r.version)[-1])
-        return sorted(result, key=lambda r: r.id)

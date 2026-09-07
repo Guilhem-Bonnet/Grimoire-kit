@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
-from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
+from grimoire.memory.taxonomy import build_taxonomy
 
 _DEFAULT_COLLECTION = "mempalace_drawers"
 
@@ -308,21 +308,3 @@ class MemPalaceBackend(MemoryBackend):
         filters: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return build_taxonomy(self.get_all_filtered(user_id=user_id, filters=filters))
-
-    def search_preview(
-        self,
-        query: str,
-        *,
-        wing: str = "",
-        hall: str = "",
-        room: str = "",
-        user_id: str = "",
-        limit: int = 5,
-    ) -> list[MemoryEntry]:
-        """Convenience method used by higher layers during experiments."""
-        filters = {"wing": wing, "hall": hall, "room": room}
-        return [
-            entry
-            for entry in self.search_filtered(query, user_id=user_id, limit=limit, filters=filters)
-            if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
-        ]
