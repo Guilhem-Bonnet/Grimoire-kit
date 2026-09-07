@@ -2,6 +2,28 @@
 
 ## Dernière release
 
+### 3.39.0 — La vue de travail
+
+- **Une coque unique pour l'atelier et le cockpit.** Six espaces de travail,
+  Piloter, Concevoir, Exécuter, Observer, Mémoire et Source, remplacent les
+  pages d'outil ; les anciennes redirigent vers l'espace correspondant
+  (`?legacy=1` pour y revenir). Panneaux repliés, entrouverts ou épinglés,
+  raccourcis 1 à 5, mode concentration, palette ⌘K qui atteint projets,
+  workflows, tâches, fichiers et commandes du kit.
+- **Des infobulles qui expliquent le système.** Survol, Alt pour épingler,
+  termes liés en bulles enfants, Échap ferme la pile ; une seule source, le
+  glossaire du kit, dont la documentation est générée.
+- **Source.** Les fichiers du projet par étage, kit généré, overrides et
+  projections des hôtes ; éditer un fichier du kit crée l'override ; diff
+  contre le catalogue de digests, provenance, historique. Une console qui
+  n'exécute que les sous-commandes autorisées du kit, sans shell.
+- **Des données réelles ou rien.** Le portefeuille lit les vrais champs, un
+  état vide dit d'où viendra la donnée, la démo reste opt-in.
+- **Palette Encre, cinq surfaces, sombre et clair**, contrastes mesurés par un
+  test ; fontes Geist embarquées. Tests de navigateur Chromium en CI.
+
+## Releases précédentes
+
 ### 3.38.0 — Les agents connaissent leur tâche, les gardes parlent, la campagne enforced est mesurée
 
 - **Les agents lisent, réclament et clôturent leurs tâches.** Outils MCP

@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.39.0] - 2026-09-06
 ### Corrigé
 
 - **La racine de `grimoire serve` et du cockpit ouvre la vue de travail.** Le
