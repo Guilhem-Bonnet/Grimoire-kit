@@ -371,7 +371,7 @@ dépôt courant.
 
 Un dispatch qui finit au vert classe aussi le diff qu'il a produit
 (`git diff --name-only` dans le projet) : `review_required` s'il touche une
-surface sensible, `review_optional` sinon. Surfaces par défaut, génériques : exports publics (`*/__init__.py`), surfaces d'entrée (`*/cli/*`, `*/mcp/*`, `*/api/*`), schémas (`*schema*`), standard du projet (`_grimoire/standard/*`, `framework/agentic-standard/*`), vocabulaire de décision (`*/verifiability.py`), politiques, sécurité et hooks (`*/policies/*`, `*/security/*`, `*/hooks/*`).github/hooks/`). Un diff confiné à `tests/` ou
+surface sensible, `review_optional` sinon. Surfaces par défaut, génériques : exports publics (`*/__init__.py`), surfaces d'entrée (`*/cli/*`, `*/mcp/*`, `*/api/*`), schémas (`*schema*`), standard du projet (`_grimoire/standard/*`, `framework/agentic-standard/*`), vocabulaire de décision (`*/verifiability.py`), politiques, sécurité et hooks (`*/policies/*`, `*/security/*`, `*/hooks/*`). Un diff confiné à `tests/` ou
 `docs/` reste toujours `review_optional`. La liste se surcharge projet par
 projet dans `_grimoire/standard/orchestration-policy.yaml` (clé
 `review_surfaces`, une liste de globs). Un projet qui n'est pas un dépôt git
