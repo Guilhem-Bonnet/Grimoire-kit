@@ -29,12 +29,20 @@ MCP, exports publics...). La classe de vérifiabilité dit qui a le droit de
 produire ; la **classe de relisibilité** (#327) dit quoi relire une fois le
 vert obtenu : un diff qui touche une surface sensible est ``review_required``,
 le reste ``review_optional``.
+
+Même constat, autre angle : les trois corrections apportées ce jour-là ont
+été trouvées exactement là où l'ouvrier délégué déclarait douter en prose.
+Les **incertitudes déclarées** (#328) rendent ce canal d'escalade lisible par
+un programme : le prompt demande à l'ouvrier de terminer par un bloc JSON
+délimité, que le dispatch extrait et stocke plutôt que de laisser un
+relecteur humain espérer tomber dessus au bon endroit dans une sortie longue.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -64,6 +72,7 @@ __all__ = [
     "CheckResult",
     "DispatchAttempt",
     "DispatchReport",
+    "Uncertainty",
     "build_prompt",
     "render_invocation",
     "run_dispatch",
@@ -112,6 +121,22 @@ DEFAULT_REVIEW_SURFACES: tuple[str, ...] = (
 #: clé optionnelle.
 _ORCHESTRATION_POLICY_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 
+#: Bloc de fin de prompt (issue #328) : le canal d'escalade le moins cher qui
+#: existe est l'incertitude que l'ouvrier déclare lui-même — encore faut-il
+#: qu'il la mette dans un format qu'un programme, pas seulement un relecteur
+#: humain, sait retrouver et compter.
+_UNCERTAINTIES_INSTRUCTION = (
+    "\nAvant de conclure, termine ta réponse par un bloc délimité :\n"
+    "```grimoire-uncertainties\n"
+    '[{"where": "fichier ou zone concernée", "what": "ce dont tu doutes", '
+    '"why": "pourquoi tu doutes"}]\n'
+    "```\n"
+    "Liste JSON, vide (`[]`) si tu n'as aucune incertitude à déclarer — jamais "
+    "de prose à la place du JSON, jamais le bloc omis par excès de confiance."
+)
+
+_UNCERTAINTIES_BLOCK_RE = re.compile(r"```grimoire-uncertainties\s*\n(.*?)```", re.DOTALL)
+
 
 def start_tier_for(verifiability: Verifiability) -> str | None:
     """Le premier palier autorisé pour cette classe — ``None`` si aucun (V2)."""
@@ -159,7 +184,8 @@ def build_prompt(task: MissionTask) -> str:
         "les commandes de vérification (`--check`) qui jugeront le résultat — "
         "leur code de sortie est le seul verdict qui compte ici."
     )
-    return "\n".join(lignes)
+    prompt = "\n".join(lignes)
+    return prompt + _UNCERTAINTIES_INSTRUCTION
 
 
 def render_invocation(template: str, *, prompt: str, model: str) -> list[str]:
@@ -257,6 +283,76 @@ def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | No
 
 
 @dataclass(frozen=True, slots=True)
+class Uncertainty:
+    """Une incertitude déclarée par l'ouvrier délégué (issue #328).
+
+    Trois champs, tous exigés à l'extraction : un objet qui n'en porte pas un
+    des trois n'est pas assez précis pour qu'un relecteur sache où regarder —
+    autant l'ignorer avec un avertissement que le stocker à moitié vide.
+    """
+
+    where: str
+    what: str
+    why: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"where": self.where, "what": self.what, "why": self.why}
+
+
+def _uncertainties_search_text(stdout: str) -> str:
+    """Où chercher le bloc : le champ ``result`` si *stdout* est un JSON qui le porte, sinon *stdout* brut.
+
+    Un fournisseur headless qui rend un JSON enveloppe souvent la réponse
+    texte de l'ouvrier sous ``result`` (même convention que ``total_cost_usd``
+    plus haut) — le bloc délimité vit alors dedans, pas dans le JSON lui-même.
+    """
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return stdout
+    if isinstance(data, dict):
+        result = data.get("result")
+        if isinstance(result, str):
+            return result
+    return stdout
+
+
+def _extract_uncertainties(stdout: str) -> tuple[tuple[Uncertainty, ...], tuple[str, ...]]:
+    """Le bloc ``grimoire-uncertainties`` de *stdout*, jamais un échec (issue #328).
+
+    Trois issues : bloc absent → vide, sans avertissement (l'ouvrier n'a rien
+    à déclarer, ou ne connaît pas encore la convention — pas une anomalie à
+    signaler à chaque dispatch) ; bloc présent mais illisible (JSON invalide,
+    pas une liste) → vide, un avertissement ; bloc présent et lisible →
+    chaque objet sans ``where``/``what``/``why`` est ignoré avec son propre
+    avertissement, les autres sont gardés.
+    """
+    match = _UNCERTAINTIES_BLOCK_RE.search(_uncertainties_search_text(stdout))
+    if match is None:
+        return (), ()
+    body = match.group(1).strip()
+    try:
+        payload = json.loads(body) if body else []
+    except (json.JSONDecodeError, ValueError):
+        return (), (f"bloc grimoire-uncertainties illisible (JSON invalide) : {body[:200]!r}",)
+    if not isinstance(payload, list):
+        return (), (f"bloc grimoire-uncertainties illisible (attendu une liste JSON) : {body[:200]!r}",)
+    uncertainties: list[Uncertainty] = []
+    warnings: list[str] = []
+    for item in payload:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("where"), str)
+            and isinstance(item.get("what"), str)
+            and isinstance(item.get("why"), str)
+        ):
+            uncertainties.append(Uncertainty(where=item["where"], what=item["what"], why=item["why"]))
+        else:
+            warnings.append(f"incertitude ignorée (clés where/what/why manquantes ou non textuelles) : {item!r}")
+    return tuple(uncertainties), tuple(warnings)
+
+
+@dataclass(frozen=True, slots=True)
 class CheckResult:
     """Le verdict d'une commande ``--check`` : verte ou non, rien d'autre à savoir."""
 
@@ -280,7 +376,10 @@ class DispatchAttempt:
 
     ``review``/``review_files``/``review_note`` (#327) ne sont posés que pour
     la tentative verte — au plus une par cascade — car relire n'a de sens
-    qu'une fois un résultat accepté.
+    qu'une fois un résultat accepté. ``uncertainties``/``uncertainty_warnings``
+    (#328) sont extraits pour toute tentative où l'appel a réussi, vert ou
+    rouge : l'ouvrier peut avoir douté d'un travail que le check juge encore
+    insuffisant.
     """
 
     attempt: int
@@ -295,6 +394,8 @@ class DispatchAttempt:
     review: str | None = None
     review_files: tuple[str, ...] = ()
     review_note: str | None = None
+    uncertainties: tuple[Uncertainty, ...] = ()
+    uncertainty_warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -310,6 +411,8 @@ class DispatchAttempt:
             "review": self.review,
             "review_files": list(self.review_files),
             "review_note": self.review_note,
+            "uncertainties": [u.to_dict() for u in self.uncertainties],
+            "uncertainty_warnings": list(self.uncertainty_warnings),
         }
 
 
@@ -371,6 +474,15 @@ class DispatchReport:
     def review_note(self) -> str | None:
         return self.attempts[-1].review_note if self.attempts else None
 
+    @property
+    def uncertainties(self) -> tuple[Uncertainty, ...]:
+        """Les incertitudes déclarées par la dernière tentative appelée (#328)."""
+        return self.attempts[-1].uncertainties if self.attempts else ()
+
+    @property
+    def uncertainty_warnings(self) -> tuple[str, ...]:
+        return self.attempts[-1].uncertainty_warnings if self.attempts else ()
+
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "task_id": self.task_id,
@@ -383,6 +495,8 @@ class DispatchReport:
             "review": self.review,
             "review_files": list(self.review_files),
             "review_note": self.review_note,
+            "uncertainties": [u.to_dict() for u in self.uncertainties],
+            "uncertainty_warnings": list(self.uncertainty_warnings),
         }
         if self.refusal is not None:
             data["refusal"] = self.refusal
@@ -567,6 +681,10 @@ def run_dispatch(
             # La relecture ne se pose qu'une fois le résultat accepté (#327) —
             # un check rouge n'a rien produit qu'on ait besoin de relire.
             review, review_files, review_note = _classify_review(root) if green else (None, (), None)
+            # L'incertitude déclarée, elle, vaut pour tout appel qui a répondu,
+            # vert ou rouge (#328) : l'ouvrier peut avoir douté d'un travail
+            # que le check juge encore insuffisant.
+            uncertainties, uncertainty_warnings = _extract_uncertainties(stdout)
             attempt = DispatchAttempt(
                 attempt=attempt_no,
                 tier=tier,
@@ -580,6 +698,8 @@ def run_dispatch(
                 review=review,
                 review_files=review_files,
                 review_note=review_note,
+                uncertainties=uncertainties,
+                uncertainty_warnings=uncertainty_warnings,
             )
             attempts.append(attempt)
             service.ledger.append_event(

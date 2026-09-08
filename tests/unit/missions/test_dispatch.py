@@ -478,3 +478,134 @@ def test_chaine_epuisee_ne_porte_aucune_relecture(tmp_path: Path) -> None:
     assert not report.succeeded
     assert report.review is None
     assert report.review_files == ()
+
+
+# ── Incertitudes déclarées (issue #328) ──────────────────────────────────────
+
+
+def test_bloc_uncertainties_present_est_extrait_et_stocke(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : bloc présent → liste stockée et affichée."""
+    ouvrier = _script(
+        tmp_path,
+        "declare.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("Travail terminé.")
+        print("```grimoire-uncertainties")
+        print('[{"where": "src/x.py:42", "what": "gestion du cas vide", "why": "aucun test ne le couvre"}]')
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(ouvrier)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 0  # bloc présent, dispatch vert inchangé
+    assert len(report.uncertainties) == 1
+    incertitude = report.uncertainties[0]
+    assert incertitude.where == "src/x.py:42"
+    assert incertitude.what == "gestion du cas vide"
+    assert incertitude.why == "aucun test ne le couvre"
+    assert report.uncertainty_warnings == ()
+
+    events = [e for e in service.ledger.list_events(tid) if e.event_type == "task.dispatched"]
+    assert events[-1].payload["uncertainties"] == [incertitude.to_dict()]
+
+
+def test_bloc_uncertainties_absent_est_une_liste_vide_sans_avertissement(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : bloc absent → vide, dispatch vert inchangé."""
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 0
+    assert report.uncertainties == ()
+    assert report.uncertainty_warnings == ()
+
+
+def test_bloc_uncertainties_mal_forme_est_vide_avec_avertissement(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : bloc mal formé → vide, avertissement dans le rapport."""
+    ouvrier = _script(
+        tmp_path,
+        "declare_invalide.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("```grimoire-uncertainties")
+        print("ceci n'est pas du JSON")
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(ouvrier)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 0  # jamais un échec
+    assert report.uncertainties == ()
+    assert len(report.uncertainty_warnings) == 1
+
+
+def test_objet_uncertainty_sans_les_trois_cles_est_ignore_les_autres_gardes(tmp_path: Path) -> None:
+    """Tout objet sans where/what/why est ignoré avec avertissement ; les autres restent."""
+    ouvrier = _script(
+        tmp_path,
+        "declare_partiel.py",
+        """\
+        from pathlib import Path
+        import json
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        bloc = json.dumps(
+            [
+                {"where": "a", "what": "b"},
+                {"where": "x", "what": "y", "why": "z"},
+            ]
+        )
+        print("```grimoire-uncertainties")
+        print(bloc)
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(ouvrier)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert len(report.uncertainties) == 1
+    assert report.uncertainties[0].where == "x"
+    assert len(report.uncertainty_warnings) == 1
+
+
+def test_bloc_uncertainties_lu_dans_le_champ_result_d_un_json(tmp_path: Path) -> None:
+    """Un fournisseur qui enveloppe la réponse dans `{"result": "..."}` reste lisible."""
+    ouvrier = _script(
+        tmp_path,
+        "declare_json.py",
+        """\
+        from pathlib import Path
+        import json
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        texte = (
+            "```grimoire-uncertainties\\n"
+            '[{"where": "a", "what": "b", "why": "c"}]\\n'
+            "```"
+        )
+        print(json.dumps({"result": texte, "total_cost_usd": 0.01}))
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(ouvrier)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert len(report.uncertainties) == 1
+    assert report.uncertainties[0].to_dict() == {"where": "a", "what": "b", "why": "c"}

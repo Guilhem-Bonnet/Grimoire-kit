@@ -385,6 +385,23 @@ une note qui le dit plutôt qu'un silence trompeur. Le rapport (`review`,
 `review_files`) et l'événement `task.dispatched` portent tous deux le
 résultat ; `task show` affiche celui du dernier dispatch.
 
+#### Incertitudes déclarées
+
+Le prompt envoyé à l'ouvrier délégué se termine par une consigne : rendre un
+bloc délimité ```` ```grimoire-uncertainties ```` contenant une liste JSON
+d'objets `{"where": ..., "what": ..., "why": ...}` — le canal d'escalade le
+moins cher qui existe, lu ici mécaniquement plutôt qu'en prose. Le dispatch
+l'extrait de la sortie de l'ouvrier (le texte brut, ou le champ `result` si la
+sortie est un JSON qui l'enveloppe) et stocke le résultat sous `uncertainties`
+dans le rapport et dans l'événement `task.dispatched`. Un bloc absent est une
+liste vide, silencieusement — la plupart des ouvriers n'y répondront pas
+encore ; un bloc présent mais illisible (JSON invalide, pas une liste) est
+aussi une liste vide, mais avec un avertissement dans `uncertainty_warnings` ;
+un objet du bloc sans les trois clés est ignoré avec son propre avertissement,
+les autres objets du même bloc restent gardés. Rien de tout cela ne change le
+verdict ni le code de sortie du dispatch. `task show` affiche les incertitudes
+du dernier dispatch.
+
 ### Ce que le claim rappelle
 
 `grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont

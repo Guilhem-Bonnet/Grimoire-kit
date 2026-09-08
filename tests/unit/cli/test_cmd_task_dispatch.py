@@ -207,3 +207,78 @@ def test_task_show_sans_dispatch_ne_montre_aucune_relecture(tmp_path: Path) -> N
 
     assert res.exit_code == 0
     assert "relecture" not in res.output
+
+
+# ── Incertitudes déclarées (#328) : câblage CLI ──────────────────────────────
+
+
+def test_dispatch_json_porte_uncertainties(tmp_path: Path) -> None:
+    green = _script(
+        tmp_path,
+        "green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        ["--output", "json", "task", "dispatch", tid, "--check", "test -f marker.txt", "--project-root", str(tmp_path)],
+    )
+
+    payload = json.loads(res.output)
+    assert payload["uncertainties"] == []
+    assert payload["uncertainty_warnings"] == []
+
+
+def test_dispatch_texte_affiche_les_incertitudes_declarees(tmp_path: Path) -> None:
+    ouvrier = _script(
+        tmp_path,
+        "declare.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("```grimoire-uncertainties")
+        print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
+
+    assert res.exit_code == 0
+    assert "incertitudes déclarées" in res.output
+    assert "src/x.py" in res.output
+
+
+def test_task_show_affiche_les_uncertainties_du_dernier_dispatch(tmp_path: Path) -> None:
+    ouvrier = _script(
+        tmp_path,
+        "declare.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("```grimoire-uncertainties")
+        print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+    dispatch_res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
+    assert dispatch_res.exit_code == 0, dispatch_res.output
+
+    res_texte = run(tmp_path, "show", tid)
+    assert "incertitudes déclarées" in res_texte.output
+    assert "src/x.py" in res_texte.output
+
+    res_json = runner.invoke(app, ["--output", "json", "task", "show", tid, "--project-root", str(tmp_path)])
+    payload = json.loads(res_json.output)
+    assert payload["last_dispatch"]["uncertainties"] == [
+        {"where": "src/x.py", "what": "cas limite", "why": "non testé"}
+    ]

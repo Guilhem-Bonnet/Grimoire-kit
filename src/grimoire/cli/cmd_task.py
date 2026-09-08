@@ -247,9 +247,9 @@ def task_show(
 ) -> None:
     """Détaille une tâche, et ce que son prochain pas exigera.
 
-    Le dernier ``task.dispatched`` du ledger porte la relecture (#327) : le
-    montrer ici évite de rouvrir le rapport de ``dispatch`` pour savoir si le
-    vert précédent mérite un regard.
+    Le dernier ``task.dispatched`` du ledger porte la relecture (#327) et les
+    incertitudes déclarées (#328) : les montrer ici évite de rouvrir le
+    rapport de ``dispatch`` pour savoir si le vert précédent mérite un regard.
     """
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import GatesFileError, declared_transitions
@@ -273,12 +273,16 @@ def task_show(
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
-    if last_dispatch is not None and last_dispatch.get("review") is not None:
-        _print_review(
-            last_dispatch["review"],
-            [str(p) for p in last_dispatch.get("review_files") or ()],
-            last_dispatch.get("review_note"),
-        )
+    if last_dispatch is not None:
+        if last_dispatch.get("review") is not None:
+            _print_review(
+                last_dispatch["review"],
+                [str(p) for p in last_dispatch.get("review_files") or ()],
+                last_dispatch.get("review_note"),
+            )
+        _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
+        for warning in last_dispatch.get("uncertainty_warnings") or ():
+            console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     here = board_status_of(task.status)
@@ -730,6 +734,8 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
         for check in attempt.checks:
             marque = "[green]OK[/green]" if check.ok else "[red]✗[/red]"
             console.print(f"        {marque} {escape(check.cmd)}")
+        for warning in attempt.uncertainty_warnings:
+            console.print(f"        [yellow]![/yellow] {escape(warning)}")
 
     if report.succeeded:
         console.print(f"[green]OK[/green] {report.task_id} — vert au bout de {len(report.attempts)} tentative(s)")
@@ -743,6 +749,7 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
         console.print(
             f"[red]✗[/red] {report.task_id} — chaîne épuisée, {len(report.attempts)} tentative(s), aucun vert"
         )
+    _print_uncertainties([u.to_dict() for u in report.uncertainties])
     raise typer.Exit(report.exit_code)
 
 
@@ -754,6 +761,16 @@ def _print_review(review: str, review_files: list[str], review_note: str | None)
         console.print(f"  [dim]- {escape(path)}[/dim]")
     if review_note:
         console.print(f"  [dim]{escape(review_note)}[/dim]")
+
+
+def _print_uncertainties(uncertainties: list[dict[str, Any]]) -> None:
+    """Rendu texte des incertitudes déclarées (#328) — silencieux si la liste est vide."""
+    if not uncertainties:
+        return
+    console.print(f"[bold]incertitudes déclarées[/bold] ({len(uncertainties)}) :")
+    for item in uncertainties:
+        console.print(f"  - {escape(str(item.get('where', '')))} : {escape(str(item.get('what', '')))}")
+        console.print(f"    [dim]{escape(str(item.get('why', '')))}[/dim]")
 
 
 @task_app.command("dispatch")
