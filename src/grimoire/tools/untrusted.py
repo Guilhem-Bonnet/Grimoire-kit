@@ -29,6 +29,7 @@ ni relayer une approbation, ni porter une instruction. Seul ``user`` le peut.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 import subprocess
@@ -100,8 +101,16 @@ class UntrustedContent:
     exit_code: int = 0
 
     def render(self) -> str:
-        """Le texte à insérer dans un contexte : bannière, corps, marqueurs."""
-        head = f'{SENTINEL} {self.nonce} BEGIN source="{self.source}">>>'
+        """Le texte à insérer dans un contexte : bannière, corps, marqueurs.
+
+        ``source`` est **encodé en JSON** : une URL contenant un guillemet ou un
+        saut de ligne — une source hostile la choisit — rendrait sinon le
+        marqueur d'ouverture ambigu, et pourrait faire croire à un lecteur que
+        l'enveloppe se referme là. Encodé, il tient sur une ligne et ses
+        guillemets sont échappés.
+        """
+        source = json.dumps(self.source, ensure_ascii=False)
+        head = f"{SENTINEL} {self.nonce} BEGIN source={source}>>>"
         tail = f"{SENTINEL} {self.nonce} END>>>"
         return f"{head}\n{_BANNER}\n---\n{self.body}\n{tail}"
 
