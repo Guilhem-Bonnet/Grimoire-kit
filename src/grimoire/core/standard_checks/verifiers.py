@@ -54,6 +54,7 @@ from grimoire.core.standard_checks.controls import (
     _verify_retention_registry,
     _verify_risk_control_matrix,
     _verify_runtime_provider_contract,
+    _verify_tool_mediation,
     _verify_tool_registry,
     _verify_visual_evidence,
     _verify_wip_limits,
@@ -869,7 +870,68 @@ def _verify_memory_policy(root: Path, profile: StandardProfile, result: Standard
                 "Memory allowed context uses must be a list.",
                 path=rel_path,
             )
+    _verify_memory_write_validation(data, memory_types, profile=profile, result=result, path=rel_path)
     _verify_memory_os_contract(data, profile=profile, result=result, path=rel_path)
+
+
+def _verify_memory_write_validation(
+    data: Mapping[str, Any],
+    memory_types: list[Any],
+    *,
+    profile: StandardProfile,
+    result: StandardVerificationResult,
+    path: Path,
+) -> None:
+    """``redaction_policy: required`` doit désigner un exécutant, pas une intention.
+
+    Le vérificateur ne contrôlait que la *présence* de la clé : un projet
+    pouvait déclarer la redaction requise sur ses dix types de mémoire sans
+    qu'une seule ligne de code ne caviarde jamais rien. Le bloc
+    ``write_validation`` est ce que ``grimoire.memory.validation`` lit
+    réellement ; le lier ici ferme l'écart entre la déclaration et l'exécution.
+    """
+    strict = profile.id in {"governed", "production"}
+    block = data.get("write_validation")
+    if not isinstance(block, dict):
+        _add_check(
+            result,
+            "memory.write_validation_missing",
+            "warning",
+            "Memory policy declares no write_validation block: nothing binds redaction_policy to code.",
+            path=path,
+        )
+        return
+    if block.get("enabled") is not True:
+        _add_check(
+            result,
+            "memory.write_validation_disabled",
+            "error" if strict else "warning",
+            "write_validation.enabled is not true: memory writes cross no trust boundary.",
+            path=path,
+        )
+    redaction = str(block.get("redaction") or "")
+    requires_redaction = any(
+        isinstance(entry, dict) and str(entry.get("redaction_policy") or "") == "required"
+        for entry in memory_types
+    )
+    if requires_redaction and redaction != "required":
+        _add_check(
+            result,
+            "memory.redaction_not_executed",
+            "error" if strict else "warning",
+            "A memory type declares redaction_policy: required but write_validation.redaction "
+            f"is {redaction or 'unset'!r}: the policy would never run.",
+            path=path,
+        )
+    enforcement = str(block.get("emitter_enforcement") or "")
+    if enforcement not in {"observe", "refuse"}:
+        _add_check(
+            result,
+            "memory.emitter_enforcement_unknown",
+            "warning",
+            f"write_validation.emitter_enforcement {enforcement or 'unset'!r} is neither observe nor refuse.",
+            path=path,
+        )
 
 
 def _verify_context_contract(root: Path, result: StandardVerificationResult) -> None:
@@ -1220,6 +1282,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_runtime_surface_registry(root, profile, result)
     _verify_retention_registry(root, profile, result)
     _verify_tool_registry(root, profile, result)
+    _verify_tool_mediation(root, profile, result)
     _verify_incident_registry(root, profile, result)
     _verify_risk_control_matrix(root, profile, result)
     _verify_capability_registry(root, profile, result)

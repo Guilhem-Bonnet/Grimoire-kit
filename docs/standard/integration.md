@@ -222,6 +222,129 @@ les artefacts seuls produisaient 0/40 d'engagement :
   avertissement) ;
 - opt-out : `grimoire standard init . --no-claude-hook`.
 
+## Contenu externe : donnée, pas instruction
+
+Une page web récupérée, un message inter-agents, une réponse d'API : rien ne
+les distinguait d'une consigne une fois dans le contexte d'un agent. C'est
+OWASP LLM01 et ASI01, et le principe commun aux six patterns de défense de
+Beurer-Kellner — une donnée non fiable ingérée ne doit plus pouvoir déclencher
+d'action conséquente.
+
+**Récupérer une page.** Une seule entrée, côté agent comme côté code :
+
+```bash
+grimoire web fetch https://example.com/doc            # sortie enveloppée
+grimoire web fetch https://example.com/doc --json     # + provenance externe
+```
+
+```python
+from pathlib import Path
+from grimoire.tools.untrusted import fetch_untrusted
+
+page = fetch_untrusted("https://example.com/doc", project_root=Path("."))
+contexte = page.render()      # bannière + marqueurs encadrant le corps
+journal = page.to_dict()      # source, nonce, tampering, code de sortie, taille
+```
+
+`fetch_untrusted` exécute `framework/tools/web-browser.py` en **sous-processus**
+— le script est en zone gelée et n'est jamais importé — puis enveloppe sa sortie.
+
+**Le câblage est vérifié à deux endroits, pas déclaré.** Le manifeste dit
+*quels outils existent* ; le catalogue de résolution dit *lequel appeler pour
+une intention*. C'est le second que consulte un agent qui doit lire une page —
+câbler le premier seul laissait le trou entier.
+
+| Artefact livré | Ce qui doit y figurer | Check |
+|---|---|---|
+| `_grimoire/kit/tool-manifest.csv` | colonne `entrypoint` = `grimoire web fetch` sur la ligne du navigateur | `firewall.untrusted_output_unwrapped` |
+| `_grimoire/kit/tools/tool-resolver.py` | la capacité `web-browsing` résout vers `grimoire web fetch` | `firewall.capability_resolves_unwrapped` |
+
+Les deux sont des erreurs en `production` et des avertissements en `governed`.
+Un projet qui ne livre ni l'un ni l'autre ne déclenche rien : il n'a pas de
+navigateur à câbler. Sans ces contrôles, le pare-feu ne serait qu'un YAML
+cochant des cases, et l'enveloppe du code que personne n'appelle.
+
+`web-browser.py` reste exécutable à la main — il est en zone gelée, on ne peut
+pas l'en empêcher. Ce qui change, c'est que plus rien dans ce que le kit livre
+n'y envoie : le catalogue, le manifeste et la documentation nomment tous
+`grimoire web fetch`, et un projet qui reviendrait en arrière échoue à la
+vérification.
+
+**Pourquoi le marqueur est aléatoire.** Une balise fixe (`BEGIN UNTRUSTED`) se
+recopie dans la page : il suffirait à un attaquant d'écrire la balise de fin
+pour sortir de l'enveloppe. Chaque enveloppe porte donc un identifiant tiré au
+hasard à l'emballage, que la source ne peut pas connaître. Une page qui tente
+malgré tout de recopier le sentinelle le voit neutralisé, et le fait est
+signalé (`tampering: true`) — c'est un événement à journaliser, pas seulement
+une chaîne à nettoyer.
+
+**Messages inter-agents.** Le log partagé (`framework/event-log-shared-state.md`)
+exige désormais un champ `origin` valant `user`, `agent` ou `external`. Un
+message qui n'est pas d'origine `user` ne peut ni relayer une approbation ni
+porter une instruction : `tag_event_payload()` refuse à l'écriture un `payload`
+qui porte une clé d'autorité (`approved`, `authorized`, `instruction`,
+`command`, `override`…). Un événement sans `origin` est traité comme `external`.
+
+**Profil.** L'artefact `prompt-firewall.yaml` est requis à partir du profil
+`production`. En `governed`, son absence produit l'avertissement
+`firewall.artifact_missing` : le rendre obligatoire à ce palier aurait rendu
+tout projet consommateur non conforme du jour au lendemain.
+
+## Médiation des outils : le registre est comparé au réel
+
+`tool-mediation-gate` est exigé par le profil `governed` depuis le premier
+jour, avec `checks: []` : rien ne le vérifiait. `grimoire standard verify`
+oppose désormais la règle `tools.mediated-before-use` en comparant le registre
+aux serveurs MCP **réellement résolus à l'exécution** :
+
+| Source lue | Portée |
+|---|---|
+| `.mcp.json` du projet | projet |
+| `~/.claude.json` (y compris son entrée `projects.<racine du projet>`) | utilisateur |
+| `~/.claude/settings.json` | utilisateur |
+
+Un serveur de portée utilisateur est tout aussi appelable par l'agent que celui
+du projet : l'ignorer ferait naître le vérificateur fail-open (décision 5 du
+plan d'exécution du 2026-09-08).
+
+Quatre façons d'échouer, erreur dès `governed`, avertissement en dessous :
+
+| Check | Cause |
+|---|---|
+| `mediation.server_undeclared` | un serveur résolu n'est pas au registre |
+| `mediation.server_risk_missing` | il y est, sans risque |
+| `mediation.out_of_scope_without_reason` | il est mis hors périmètre sans motif |
+| `mediation.registry_stale` | le registre inscrit un serveur que plus aucune source ne résout |
+| `mediation.source_unreadable` | une source existe mais n'est pas du JSON valide — avertissement dès `governed`, erreur en `production` |
+
+Le dernier cas est ce qui empêche le registre d'être rempli une fois pour
+toutes : un registre périmé affirme une médiation qui n'a plus d'objet.
+
+Déclarer un serveur volontairement hors périmètre, plutôt que l'omettre :
+
+```yaml
+mcp_servers:
+  - id: MCP-001
+    server: playwright
+    owner: guilhem
+    scopes: [read]
+    timeout_s: 30
+    logging: {requests: true, errors: true, secrets_masked: true}
+    out_of_scope: true
+    out_of_scope_reason: "navigateur de test local, jamais appelé par un agent en production"
+```
+
+La lecture des sources est sans secret : seules les **clés** de `mcpServers`
+sont extraites. Les commandes, arguments et `env`, où vivent les jetons, ne sont
+ni lus ni journalisés.
+
+Une source **absente** est muette : un projet sans `.mcp.json` n'a rien à
+déclarer. Une source **présente et illisible** ne l'est pas : le vérificateur ne
+peut alors rien affirmer, et se taire confondrait « rien à déclarer » avec « je
+n'ai pas pu regarder ». Elle produit donc `mediation.source_unreadable` —
+avertissement dès `governed`, erreur en `production`, jamais un plantage : la
+configuration cassée d'un autre outil ne doit pas emporter la vérification.
+
 ## Commandes runtime normatives
 
 Les profils `orchestrated`, `governed` et `production` ne se limitent plus aux templates de gouvernance : ils exposent une première tranche exécutable du runtime standard.

@@ -200,10 +200,136 @@ def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: Sta
             )
 
 
+#: Capacité du catalogue de résolution dont la sortie est du contenu externe, et
+#: chaîne que son bloc doit contenir pour qu'un agent soit envoyé vers l'entrée
+#: qui enveloppe. Le manifeste dit *quels outils existent* ; le catalogue dit
+#: *lequel appeler pour une intention* — c'est celui-là que l'agent consulte.
+_WRAPPED_CAPABILITY = "web-browsing"
+
+
+def capability_resolves_wrapped(source: str) -> bool:
+    """Le bloc ``web-browsing`` du catalogue envoie-t-il vers l'entrée enveloppée ?
+
+    Lecture textuelle bornée au bloc de la capacité : `tool-resolver.py` est en
+    zone gelée, on ne l'importe pas pour l'interroger, et une lecture de tout le
+    fichier confondrait la mention du script dans un commentaire ou un texte
+    d'aide avec sa résolution effective.
+
+    Vrai aussi quand la capacité est absente : il n'y a alors rien à envoyer.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    marker = f'"{_WRAPPED_CAPABILITY}": {{'
+    start = source.find(marker)
+    if start < 0:
+        return True
+    lines = source[start:].splitlines()
+    block = [lines[0]]
+    for line in lines[1:]:
+        # Fin du bloc : la clé de capacité suivante, au même niveau d'indentation.
+        if line.startswith('    "') and line.rstrip().endswith("{"):
+            break
+        block.append(line)
+    body = "\n".join(block)
+    expected = set(UNTRUSTED_OUTPUT_ENTRYPOINTS.values())
+    return any(entry in body for entry in expected)
+
+
+def _verify_capability_resolution_wiring(
+    root: Path, profile: StandardProfile, result: StandardVerificationResult
+) -> None:
+    """Le catalogue de résolution **livré** envoie-t-il vers l'entrée enveloppée ?
+
+    Le contrôle du manifeste ne suffisait pas : un projet pouvait déclarer
+    `grimoire web fetch` dans `tool-manifest.csv` pendant que
+    `tool-resolver.py` — le catalogue qu'un agent interroge pour « je dois lire
+    une page » — le renvoyait toujours sur `web-browser.py`. Le manifeste dit
+    quels outils existent ; le catalogue dit lequel appeler. C'est le second qui
+    décide.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    rel_path = Path("_grimoire") / "kit" / "tools" / "tool-resolver.py"
+    source = _text_file(root, rel_path)
+    if not source or capability_resolves_wrapped(source):
+        return
+    expected = ", ".join(sorted(UNTRUSTED_OUTPUT_ENTRYPOINTS.values()))
+    _add_check(
+        result,
+        "firewall.capability_resolves_unwrapped",
+        "error" if profile.id == "production" else "warning",
+        f"Capability {_WRAPPED_CAPABILITY!r} resolves to a raw tool: an agent asking to read a page "
+        f"is sent to the script, whose output reaches the context unwrapped. Route it through {expected}.",
+        path=rel_path,
+    )
+
+
+def _verify_untrusted_output_wiring(
+    root: Path, profile: StandardProfile, result: StandardVerificationResult
+) -> None:
+    """Le manifeste livré aux agents pointe-t-il vers l'entrée qui enveloppe ?
+
+    ``_verify_prompt_firewall`` ne contrôlait qu'un YAML déclaratif : un projet
+    pouvait cocher ``isolate_external_content: true`` et laisser ses agents
+    appeler le navigateur nu, dont le flux entre dans le contexte sans rien qui
+    le distingue d'une consigne (OWASP LLM01). Une case cochée n'est pas un
+    câblage — c'est le verrou décoratif que ce dépôt a déjà mesuré six fois.
+
+    Le contrôle porte sur ce que le projet a réellement reçu : la colonne
+    ``entrypoint`` du ``tool-manifest.csv`` généré au scaffold. Un projet sans
+    manifeste, ou dont le manifeste ne livre pas d'outil à sortie externe, n'a
+    rien à câbler et ne déclenche rien.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    rel_path = Path("_grimoire") / "kit" / "tool-manifest.csv"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    severity = "error" if profile.id == "production" else "warning"
+    for line in text.splitlines()[1:]:
+        columns = [cell.strip() for cell in line.split(",")]
+        if len(columns) < 2:
+            continue
+        expected = UNTRUSTED_OUTPUT_ENTRYPOINTS.get(columns[1])
+        if expected is None:
+            continue
+        declared = columns[3] if len(columns) > 3 else ""
+        if declared != expected:
+            _add_check(
+                result,
+                "firewall.untrusted_output_unwrapped",
+                severity,
+                f"Tool manifest points agents at {columns[1]} directly "
+                f"(entrypoint={declared or 'empty'!r}): its output reaches a context unwrapped. "
+                f"Declare {expected!r}, which marks the output as external data.",
+                path=rel_path,
+            )
+
+
 def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """Isolation du contenu externe : requis en `production`, attendu en `governed`.
+
+    L'artefact n'était requis par aucun profil, pas même `production` : la
+    capacité `prompt-injection-firewall` était donc catalogue seul. Le rendre
+    obligatoire dès `governed` aurait rendu tout projet consommateur non
+    conforme du jour au lendemain — d'où l'avertissement à ce palier et
+    l'exigence dure au suivant (décision 2 du plan d'exécution).
+    """
     rel_path = STANDARD_DIR / "prompt-firewall.yaml"
+    _verify_untrusted_output_wiring(root, profile, result)
+    _verify_capability_resolution_wiring(root, profile, result)
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
+        if profile.id == "governed":
+            _add_check(
+                result,
+                "firewall.artifact_missing",
+                "warning",
+                "No prompt-firewall.yaml: external content is not declared as isolated from "
+                "control instructions. Required from the production profile on.",
+                path=rel_path,
+            )
         return
     strict_profile = profile.id in {"governed", "production"}
     if data.get("isolate_external_content") is not True:
@@ -1064,3 +1190,160 @@ def _verify_compliance_traceability(root: Path, profile: StandardProfile, result
         _add_check(result, "compliance.traceability_missing", "warning", "Compliance declaration has no Traceability section.", path=rel_path)
     elif _strict(profile) and "- Last verdict:\n" in text:
         _add_check(result, "compliance.verdict_missing", "warning", "Compliance declaration records no verification verdict.", path=rel_path)
+
+
+# ── tools.mediated-before-use ─────────────────────────────────────────────────
+#
+# Le pattern `tool-mediation-gate` était exigé par le profil `governed` avec
+# `checks: []` : aucun code ne le vérifiait. Un projet gouverné pouvait faire
+# tourner quatre serveurs MCP sans qu'aucun figure au registre d'outils.
+#
+# Périmètre : les serveurs **résolus à l'exécution**, pas seulement ceux du
+# `.mcp.json` du projet (décision 5 du plan d'exécution du 2026-09-08). Un
+# serveur de portée utilisateur est tout aussi appelable par l'agent ; l'ignorer
+# ferait naître le vérificateur fail-open.
+#
+# Lecture tolérante et sans secret : seules les **clés** de `mcpServers` sont
+# extraites. Les valeurs — commande, arguments, `env` — ne sont ni lues ni
+# journalisées, parce que c'est là que vivent les jetons.
+
+#: Sources de portée utilisateur, relatives à ``Path.home()``.
+_MCP_USER_SOURCES: tuple[str, ...] = (".claude.json", ".claude/settings.json")
+
+#: Source de portée projet.
+_MCP_PROJECT_SOURCE = ".mcp.json"
+
+
+def resolved_mcp_servers(root: Path) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Serveurs MCP qu'un agent peut réellement appeler ici, et sources cassées.
+
+    Renvoie ``(nom → source, sources illisibles)``. Une source absente est
+    normale et muette ; une source **présente et illisible** ne l'est pas : c'est
+    précisément le cas où le vérificateur ne peut rien affirmer, et le taire
+    reviendrait à confondre « rien à déclarer » avec « je n'ai pas pu regarder »
+    (revue adversariale de la PR #324).
+    """
+    found: dict[str, str] = {}
+    unreadable: list[str] = []
+    candidates: list[tuple[Path, str]] = [(root / _MCP_PROJECT_SOURCE, _MCP_PROJECT_SOURCE)]
+    try:
+        home = Path.home()
+    except (OSError, RuntimeError):  # pragma: no cover - HOME absent
+        home = None
+    if home is not None:
+        candidates += [(home / name, f"~/{name}") for name in _MCP_USER_SOURCES]
+
+    for path, label in candidates:
+        names, readable = _mcp_server_names(path, root)
+        if not readable:
+            unreadable.append(label)
+            continue
+        for name in names:
+            found.setdefault(name, label)
+    return found, tuple(unreadable)
+
+
+def _mcp_server_names(path: Path, root: Path) -> tuple[list[str], bool]:
+    """Les noms déclarés par une source, jamais ses valeurs.
+
+    Le second membre dit si la source a pu être lue : une source absente compte
+    comme lisible (il n'y a rien à lire), une source présente et invalide non.
+    """
+    import json
+
+    if not path.is_file():
+        return [], True
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return [], False
+    if not isinstance(raw, dict):
+        return [], False
+    names: list[str] = []
+    servers = raw.get("mcpServers")
+    if isinstance(servers, dict):
+        names.extend(str(key) for key in servers)
+    # `~/.claude.json` range aussi les serveurs par projet : seuls ceux du
+    # projet vérifié sont résolus ici.
+    projects = raw.get("projects")
+    if isinstance(projects, dict):
+        entry = projects.get(str(root)) or projects.get(str(root.resolve()))
+        if isinstance(entry, dict) and isinstance(entry.get("mcpServers"), dict):
+            names.extend(str(key) for key in entry["mcpServers"])
+    return names, True
+
+
+def _verify_tool_mediation(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """`tools.mediated-before-use` : rien ne s'appelle qui ne soit inscrit.
+
+    Trois façons d'échouer, toutes fail-closed : un serveur résolu absent du
+    registre, un serveur inscrit sans risque ou mis hors périmètre sans raison,
+    et un registre périmé — inscrit un serveur que plus aucune source ne
+    résout. Sans ce dernier cas, un registre suffirait à être rempli une fois.
+    """
+    rel_path = STANDARD_DIR / "tool-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if profile.id in {"governed", "production"} else "warning"
+    resolved, unreadable = resolved_mcp_servers(root)
+    for label in unreadable:
+        _add_check(
+            result,
+            "mediation.source_unreadable",
+            # Erreur seulement en production : ailleurs, un fichier de
+            # configuration cassé appartenant à un autre outil ne doit pas
+            # bloquer une vérification, mais il ne doit pas non plus se taire —
+            # le vérificateur ne peut rien affirmer sur ce qu'il n'a pas pu lire.
+            "error" if profile.id == "production" else "warning",
+            f"MCP source unreadable: {label} exists but is not valid JSON — "
+            "the tool registry cannot be compared against it.",
+            path=rel_path,
+        )
+
+    declared: dict[str, dict[str, Any]] = {}
+    for server in _entries(data, "mcp_servers"):
+        name = str(server.get("server") or server.get("name") or server.get("id") or "").strip()
+        if name:
+            declared[name] = server
+
+    for name, source in sorted(resolved.items()):
+        entry = declared.get(name)
+        if entry is None:
+            _add_check(
+                result,
+                "mediation.server_undeclared",
+                severity,
+                f"MCP server {name!r} is resolved at runtime (from {source}) but absent from the tool registry: "
+                "an unmediated tool call.",
+                path=rel_path,
+            )
+            continue
+        if entry.get("out_of_scope") is True:
+            if not str(entry.get("out_of_scope_reason") or "").strip():
+                _add_check(
+                    result,
+                    "mediation.out_of_scope_without_reason",
+                    severity,
+                    f"MCP server {name!r} is declared out_of_scope without a reason: an exemption nobody argued for.",
+                    path=rel_path,
+                )
+            continue
+        if not str(entry.get("risk") or "").strip():
+            _add_check(
+                result,
+                "mediation.server_risk_missing",
+                severity,
+                f"MCP server {name!r} is declared without a risk: mediation cannot rank what it cannot weigh.",
+                path=rel_path,
+            )
+
+    stale = sorted(name for name in declared if name not in resolved)
+    if stale:
+        _add_check(
+            result,
+            "mediation.registry_stale",
+            severity,
+            f"Tool registry declares MCP server(s) no source resolves any more: {', '.join(stale)}.",
+            path=rel_path,
+        )

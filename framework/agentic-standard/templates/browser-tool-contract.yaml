@@ -10,3 +10,11 @@ require_dom: true
 require_screenshot: true
 require_console_logs: true
 allowed_domains: []
+# Ce que le navigateur rend est une donnee externe, jamais une consigne.
+# `grimoire.tools.untrusted.fetch_untrusted()` execute `web-browser.py` en
+# sous-processus et enveloppe sa sortie entre deux marqueurs portant un
+# identifiant aleatoire que la page ne peut pas connaitre. Appeler le script
+# directement et coller sa sortie dans un contexte est le chemin qui expose a
+# OWASP LLM01.
+untrusted_output_envelope: required
+untrusted_output_entrypoint: "grimoire.tools.untrusted.fetch_untrusted"

@@ -49,6 +49,19 @@ memory_os:
     - "grimoire memory gate"
     - "grimoire memory migrate verify"
     - "grimoire memory graph verify"
+# Frontiere de confiance des ecritures (executee par grimoire.memory.validation).
+# Sans ce bloc, `redaction_policy: required` ci-dessous reste une intention :
+# rien ne caviarde, rien ne refuse. Le retirer degrade la verification.
+write_validation:
+  enabled: true
+  max_text_bytes: 32768          # au-dela, ce n'est plus une memoire mais un document
+  max_metadata_bytes: 16384
+  redaction: required            # required | none — doit valoir `required` si un
+                                 # memory_type declare redaction_policy: required
+  refuse_instruction_like_content: true
+  emitter_enforcement: observe   # observe | refuse — observe tant que l'acteur MCP est generique
+  allowed_emitters: ["unspecified", "user", "cli", "agent", "hook", "mcp", "migration", "sidecar"]
+
 memory_types:
   - memory_id: "session"
     type: "session"

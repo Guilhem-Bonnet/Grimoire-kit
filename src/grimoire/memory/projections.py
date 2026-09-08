@@ -461,6 +461,12 @@ def sync_code_vector_projection(
             user_id=str(entry["user_id"]),
             tags=tuple(entry["tags"]),
             metadata=dict(entry["metadata"]),
+            # Texte dérivé de fichiers déjà présents dans le dépôt : le schéma
+            # et la redaction s'appliquent, mais un motif de consigne y est
+            # journalisé et non refusé — refuser reviendrait à refuser
+            # d'indexer le dépôt, et le vecteur est alors le fichier, relu en
+            # diff, pas cette écriture.
+            content_origin="derived",
         )
         upserted += 1
     return {
@@ -762,6 +768,12 @@ def sync_task_vector_projection(
             user_id=str(entry["user_id"]),
             tags=tuple(entry["tags"]),
             metadata=dict(entry["metadata"]),
+            # Texte dérivé de fichiers déjà présents dans le dépôt : le schéma
+            # et la redaction s'appliquent, mais un motif de consigne y est
+            # journalisé et non refusé — refuser reviendrait à refuser
+            # d'indexer le dépôt, et le vecteur est alors le fichier, relu en
+            # diff, pas cette écriture.
+            content_origin="derived",
         )
         upserted += 1
     return {"vector_entries": len(entries), "upserted": upserted, "skipped": len(entries) - upserted}
@@ -897,6 +909,12 @@ def sync_docs_projection(
             user_id=str(entry["user_id"]),
             tags=tuple(entry["tags"]),
             metadata=dict(entry["metadata"]),
+            # Texte dérivé de fichiers déjà présents dans le dépôt : le schéma
+            # et la redaction s'appliquent, mais un motif de consigne y est
+            # journalisé et non refusé — refuser reviendrait à refuser
+            # d'indexer le dépôt, et le vecteur est alors le fichier, relu en
+            # diff, pas cette écriture.
+            content_origin="derived",
         )
         upserted += 1
     return {

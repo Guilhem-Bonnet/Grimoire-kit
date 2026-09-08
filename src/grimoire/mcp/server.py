@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from grimoire.__version__ import __version__
 from grimoire.core.config import GrimoireConfig
@@ -39,6 +39,8 @@ _INSTRUCTIONS = (
 )
 
 if TYPE_CHECKING:
+    from mcp.types import CallToolResult, ToolAnnotations
+
     # L'analyse statique ne s'attache à aucune des deux versions : elle décrit
     # la surface qu'on utilise, et rien d'autre. Un premier jet visait les
     # stubs de `FastMCP` ; la CI installe l'extra complet, donc désormais mcp
@@ -75,6 +77,12 @@ else:
             msg = "MCP SDK not installed. Run: pip install grimoire-kit[mcp]"
             raise ImportError(msg) from _exc
 
+    # `mcp.types` n'a pas bougé entre les deux façades : c'est la couche
+    # protocole, pas la couche serveur. Les annotations d'outil datent de la
+    # révision 2025-03-26, `structuredContent` de 2025-06-18 — d'où la borne
+    # basse du SDK dans pyproject.toml.
+    from mcp.types import CallToolResult, ToolAnnotations
+
     mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS)
 
 
@@ -83,9 +91,93 @@ def _find_config() -> GrimoireConfig:
     return GrimoireConfig.find_and_load()
 
 
+# ── Annotations d'outil ───────────────────────────────────────────────────────
+#
+# MCP 2025-03-26 a introduit `readOnlyHint`, `destructiveHint`, `idempotentHint`
+# et `openWorldHint`. Ce sont des *indices* : la spécification dit qu'un client
+# ne doit pas s'y fier pour un serveur inconnu. Ils servent malgré tout à deux
+# choses ici — un hôte qui distingue lecture et écriture peut auto-approuver la
+# première, et un outil sans annotation ne peut plus se cacher : le test
+# `test_chaque_outil_est_annote` échoue.
+#
+# `openWorldHint` vaut vrai quand l'outil peut sortir du projet : la mémoire
+# adressée à un serveur distant (Weaviate, Qdrant, Ollama) et l'état des
+# fournisseurs LLM sont les seuls cas.
+
+
+# Les deux façades du SDK ne nomment pas ces champs pareil : `mcp` 1.x les
+# déclare en camelCase, `mcp` 2.x en snake_case avec l'alias camelCase — le nom
+# du fil reste celui de la spécification des deux côtés. Construire par
+# mot-clé marchait sur l'un et échouait sous `mypy --strict` sur l'autre.
+# `model_validate` prend les noms du fil dans les deux versions, et
+# `annotation_hints` les relit dans les deux : c'est le seul point du module qui
+# a besoin de le savoir. Vérifié contre 1.28.1 et 2.2.0, pas supposé.
+
+
+def _annotations(**hints: bool) -> ToolAnnotations:
+    """Construire une annotation par les noms du protocole, pas ceux du SDK."""
+    return ToolAnnotations.model_validate(hints)
+
+
+def annotation_hints(annotations: ToolAnnotations | None) -> dict[str, Any]:
+    """Les indices d'une annotation, sous les noms du protocole.
+
+    Sortie vide quand l'outil n'est pas annoté. Publique parce que la suite de
+    tests s'en sert pour vérifier le contrat : la lire autrement reviendrait à
+    tester la casse du SDK installé plutôt que ce que le client reçoit.
+    """
+    if annotations is None:
+        return {}
+    dumped: dict[str, Any] = annotations.model_dump(by_alias=True)
+    return dumped
+
+
+def _reads(*, open_world: bool = False) -> ToolAnnotations:
+    """Un outil qui lit : sans effet de bord, rejouable."""
+    return _annotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=open_world
+    )
+
+
+def _writes(*, destructive: bool, idempotent: bool, open_world: bool = False) -> ToolAnnotations:
+    """Un outil qui écrit. `destructive` = l'effet n'est pas trivialement défait."""
+    return _annotations(
+        readOnlyHint=False,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=open_world,
+    )
+
+
+def _tool_error(payload: dict[str, Any]) -> str:
+    """Render a frank tool failure: ``isError`` **plus** the JSON body.
+
+    Le corps `{"error": ...}` que les appelants parsent déjà reste intact et
+    devient le contenu du résultat ; le drapeau protocolaire s'ajoute par-dessus,
+    jamais à la place (décision 3 du plan d'exécution). Sans lui, un client MCP
+    lisait un `CallToolResult` réussi contenant le mot « error » : à la charge du
+    modèle de s'en apercevoir.
+
+    Le type de retour reste `str` parce que c'est le contrat des outils — leur
+    `outputSchema` est `{"result": string}` ; `CallToolResult` est la forme
+    protocolaire que FastMCP laisse traverser telle quelle (`convert_result`),
+    à condition que `structuredContent` respecte ce schéma. Le `cast` dit
+    exactement cela.
+    """
+    body = json.dumps(payload, indent=2, ensure_ascii=False)
+    return cast(
+        str,
+        CallToolResult.model_validate({
+            "content": [{"type": "text", "text": body}],
+            "structuredContent": {"result": body},
+            "isError": True,
+        }),
+    )
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_project_context(project_path: str = ".") -> str:
     """Return the full project context (parsed project-context.yaml) as JSON.
 
@@ -117,10 +209,10 @@ def grimoire_project_context(project_path: str = ".") -> str:
             "grimoire_kit_version": __version__,
         }, indent=2, ensure_ascii=False)
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_status(project_path: str = ".") -> str:
     """Return project health status as JSON — config validity, structure, agents.
 
@@ -158,7 +250,7 @@ def grimoire_status(project_path: str = ".") -> str:
     }, indent=2)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_agent_list(project_path: str = ".") -> str:
     """List all agents available in the project's archetype.
 
@@ -171,12 +263,12 @@ def grimoire_agent_list(project_path: str = ".") -> str:
     try:
         cfg = GrimoireConfig.find_and_load(target)
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
     # Find kit root (where archetypes/ lives)
     kit_root = _find_kit_root(target)
     if not kit_root:
-        return json.dumps({"error": "Cannot find archetypes/ directory", "agents": []})
+        return _tool_error({"error": "Cannot find archetypes/ directory", "agents": []})
 
     registry = AgentRegistry(kit_root)
     archetype = cfg.agents.archetype
@@ -199,10 +291,10 @@ def grimoire_agent_list(project_path: str = ".") -> str:
             "total": len(agents),
         }, indent=2)
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc), "agents": []})
+        return _tool_error({"error": str(exc), "agents": []})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_harmony_check(project_path: str = ".") -> str:
     """Run architecture harmony check and return score + dissonances.
 
@@ -217,7 +309,7 @@ def grimoire_harmony_check(project_path: str = ".") -> str:
     return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_config(project_path: str = ".") -> str:
     """Return the raw parsed project-context.yaml as JSON.
 
@@ -229,17 +321,21 @@ def grimoire_config(project_path: str = ".") -> str:
     target = Path(project_path).resolve()
     config_file = target / "project-context.yaml"
     if not config_file.is_file():
-        return json.dumps({"error": f"No project-context.yaml found at {target}"})
+        return _tool_error({"error": f"No project-context.yaml found at {target}"})
     try:
         raw = load_yaml(config_file)
         return json.dumps(raw, indent=2, ensure_ascii=False, default=str)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=True, idempotent=False, open_world=True))
 def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".") -> str:
     """Store a memory entry in the project's configured memory backend.
+
+    The write crosses the memory trust boundary first: content schema, size
+    ceiling, refusal of instruction-shaped text, and redaction when the project
+    policy requires it. A refusal comes back named, never as a silent success.
 
     Args:
         text: The text to remember.
@@ -247,18 +343,21 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
         project_path: Path to project root (default: current directory).
     """
     from grimoire.memory.manager import MemoryManager
+    from grimoire.memory.validation import MemoryWriteRefusedError
 
     target = Path(project_path).resolve()
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
-        entry = mgr.store(text, user_id=user_id)
+        entry = mgr.store(text, user_id=user_id, emitter="mcp")
         return json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
+    except MemoryWriteRefusedError as exc:
+        return _tool_error(exc.to_dict())
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads(open_world=True))
 def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, project_path: str = ".") -> str:
     """Search project memories by keyword or semantic similarity.
 
@@ -285,10 +384,10 @@ def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, projec
             "retrieval": "hybrid" if mgr.prefers_hybrid else "single",
         }, indent=2, ensure_ascii=False)
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=True, idempotent=True))
 def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
     """Add a custom agent to the project configuration.
 
@@ -299,7 +398,7 @@ def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
     target = Path(project_path).resolve()
     config_path = target / "project-context.yaml"
     if not config_path.is_file():
-        return json.dumps({"error": "No project-context.yaml found"})
+        return _tool_error({"error": "No project-context.yaml found"})
 
     try:
         from ruamel.yaml import YAML
@@ -324,7 +423,7 @@ def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
 
         return json.dumps({"status": "added", "agent_id": agent_id})
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
 # ── Agentic standard ──────────────────────────────────────────────────────────
@@ -342,7 +441,7 @@ def _standard_checks_json(checks: tuple[Any, ...] | list[Any]) -> list[dict[str,
     ]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_standard_verify(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Verify the project's governed agentic-standard artifacts (fail-closed).
 
@@ -370,10 +469,10 @@ def grimoire_standard_verify(project_path: str = ".", profile: str = "", task_id
             "warning_count": result.warning_count,
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_standard_audit(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Audit governed standard artifacts and propose remediation actions.
 
@@ -412,10 +511,10 @@ def grimoire_standard_audit(project_path: str = ".", profile: str = "", task_id:
             ],
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
 def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Calculate and persist the standard compliance score (0-100 vs threshold).
 
@@ -440,10 +539,14 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
             "output_path": str(result.output_path),
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+# Le passage d'une porte est journalisé : `check_evidence_gates` ajoute une
+# ligne au journal d'événements du runtime. C'est voulu — une porte franchie
+# sans trace ne prouve rien — donc ce n'est pas une lecture. Non idempotent :
+# chaque appel ajoute une ligne.
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
 def grimoire_standard_gate(
     project_path: str = ".",
     task_id: str = "bootstrap",
@@ -477,7 +580,7 @@ def grimoire_standard_gate(
             "checks": _standard_checks_json(result.checks),
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
 # ── Tâches (issue #138) ───────────────────────────────────────────────────────
@@ -512,11 +615,14 @@ def _task_error(exc: Exception) -> str:
     from grimoire.missions.service import TaskRefusedError
 
     if isinstance(exc, TaskRefusedError):
+        # Un refus de gate n'est pas une panne d'outil : la porte a fonctionné,
+        # et le corps nomme la preuve manquante. Le marquer `isError` dirait au
+        # client que l'appel a échoué, alors qu'il a répondu.
         return json.dumps(exc.to_dict(), indent=2, ensure_ascii=False)
-    return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    return _tool_error({"error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def task_list_ready(
     project_path: str = ".", mission: str = "", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -537,7 +643,7 @@ def task_list_ready(
         return _task_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
     """Show one task: state, acceptance, claim, and what each next move will require.
 
@@ -565,7 +671,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
         return _task_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
 def task_claim(
     task_id: str,
     actor: str = "mcp-agent",
@@ -590,7 +696,7 @@ def task_claim(
         return _task_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
 def task_update(
     task_id: str,
     action: str,
@@ -614,15 +720,15 @@ def task_update(
     from grimoire.missions.schemas import TaskState
 
     if action not in _TASK_ACTIONS:
-        return json.dumps({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+        return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
     if action == "move":
         try:
             target = TaskState(to)
         except ValueError:
-            return json.dumps({"error": f"unknown state {to!r}", "states": [s.value for s in TaskState]})
+            return _tool_error({"error": f"unknown state {to!r}", "states": [s.value for s in TaskState]})
     elif action == "block":
         if not reason.strip():
-            return json.dumps({"error": "block requires a reason"})
+            return _tool_error({"error": "block requires a reason"})
         target = TaskState.BLOCKED
     else:
         target = TaskState.CLOSED
@@ -633,7 +739,12 @@ def task_update(
         return _task_error(exc)
 
 
-@mcp.tool()
+# `task_context` n'est pas une lecture : `build_context_bundle` écrit
+# `context-bundle.yaml` et ajoute une ligne au journal d'événements à chaque
+# appel (agentic_standard.py). Il était annoté `_reads()` — une annotation qui
+# ment est pire qu'une annotation absente, parce qu'un hôte auto-approuve sur sa
+# foi. Idempotent : le bundle est recalculé au même contenu pour la même tâche.
+@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
 def task_context(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -670,7 +781,7 @@ def task_context(
         return _task_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def task_recall(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -707,7 +818,7 @@ def task_recall(
 # client the kit has no emitter for.
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_host_status(project_path: str = ".") -> str:
     """Report, per host, what this project declares and what the host executes.
 
@@ -722,7 +833,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
     try:
         surface = build_surface(target)
     except (GrimoireError, OSError, ValueError) as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
     hosts = []
     for host_id in supported_hosts():
@@ -744,7 +855,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
     return json.dumps({"surface": surface.to_dict(), "hosts": hosts}, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads(open_world=True))
 def grimoire_providers_status(project_path: str = ".") -> str:
     """Report LLM provider availability per cost tier (issue #310, lot 2).
 
@@ -770,7 +881,7 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     try:
         providers = read_registry(target)
     except ProviderRegistryError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
     now = datetime.now(UTC)
     state = load_state(target)
@@ -804,7 +915,7 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_skill(slug: str, project_path: str = ".") -> str:
     """Return a Grimoire skill body on demand, for hosts without native skills.
 
@@ -823,10 +934,10 @@ def grimoire_skill(slug: str, project_path: str = ".") -> str:
                 indent=2,
                 ensure_ascii=False,
             )
-    return json.dumps({"error": f"Unknown skill: {slug}", "available": [s.slug for s in skills]})
+    return _tool_error({"error": f"Unknown skill: {slug}", "available": [s.slug for s in skills]})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads())
 def grimoire_command(slug: str, project_path: str = ".") -> str:
     """Return a Grimoire command body, for hosts without native slash commands.
 
@@ -850,7 +961,7 @@ def grimoire_command(slug: str, project_path: str = ".") -> str:
                 indent=2,
                 ensure_ascii=False,
             )
-    return json.dumps({"error": f"Unknown command: {slug}", "available": [c.slug for c in commands]})
+    return _tool_error({"error": f"Unknown command: {slug}", "available": [c.slug for c in commands]})
 
 
 # ── Prompts and resources ─────────────────────────────────────────────────────

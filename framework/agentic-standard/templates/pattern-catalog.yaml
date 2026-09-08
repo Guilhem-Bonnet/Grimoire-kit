@@ -164,10 +164,10 @@ patterns:
     source_normative: security-governance.tool-mediation-owasp
     catalog_ref: ["GOV-09"]
     intent: "Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution."
-    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
+    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml", "tool-registry.yaml"]
     rule_refs: ["tools.mediated-before-use"]
     hook_refs: ["tools.terminal-guard"]
-    check_refs: []
+    check_refs: ["mediation.server_undeclared", "mediation.registry_stale", "mediation.server_risk_missing", "mediation.out_of_scope_without_reason", "mediation.source_unreadable"]
   - id: provider-cost-slo
     category: provider
     maturity: production
@@ -204,10 +204,10 @@ patterns:
     source_normative: security-governance.prompt-injection-firewall
     catalog_ref: ["GOV-12"]
     intent: "Isolate external/untrusted content so it cannot override control instructions."
-    required_artifacts: ["prompt-firewall.yaml"]
+    required_artifacts: ["prompt-firewall.yaml", "tool-manifest.csv", "tool-resolver.py"]
     rule_refs: []
     hook_refs: []
-    check_refs: ["firewall.isolation_disabled", "firewall.override_allowed"]
+    check_refs: ["firewall.isolation_disabled", "firewall.override_allowed", "firewall.untrusted_output_unwrapped", "firewall.capability_resolves_unwrapped", "firewall.artifact_missing"]
   - id: remote-hygiene-guard
     category: governance
     maturity: controlled

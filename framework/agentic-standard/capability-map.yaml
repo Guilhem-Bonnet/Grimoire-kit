@@ -137,9 +137,9 @@ patterns:
     profile_min: governed
   tool-mediation-gate:
     category: security
-    artifacts: [hook_registry, rule_packs]
+    artifacts: [hook_registry, rule_packs, tool_registry]
     rules: [tools.mediated-before-use]
-    checks: []
+    checks: [mediation.server_undeclared, mediation.registry_stale, mediation.server_risk_missing, mediation.out_of_scope_without_reason, mediation.source_unreadable]
     tech_extras: [mcp]
     profile_min: governed
   provider-cost-slo:
@@ -167,7 +167,7 @@ patterns:
     category: security
     artifacts: [prompt_firewall]
     rules: []
-    checks: [firewall.isolation_disabled, firewall.override_allowed]
+    checks: [firewall.isolation_disabled, firewall.override_allowed, firewall.untrusted_output_unwrapped, firewall.capability_resolves_unwrapped, firewall.artifact_missing]
     tech_extras: []
     profile_min: controlled
   remote-hygiene-guard:

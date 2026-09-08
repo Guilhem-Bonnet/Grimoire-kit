@@ -66,10 +66,37 @@ def via_client(scenario: Any) -> Any:
     return anyio.run(_with_client, scenario)
 
 
+def _json(result):
+    """Le corps JSON d'un résultat d'outil, réussi ou marqué ``isError``.
+
+    Depuis que les échecs francs portent ``isError``, un outil rend soit une
+    chaîne JSON, soit un ``CallToolResult`` dont le contenu *est* cette même
+    chaîne : le drapeau s'ajoute au corps, il ne le remplace pas. Ce helper lit
+    les deux formes, ce qui est exactement le contrat qu'on veut vérifier.
+    """
+    if isinstance(result, str):
+        return json.loads(result)
+    return json.loads("".join(getattr(block, "text", "") for block in result.content))
+
+
+def _is_error(result) -> bool:
+    """``isError`` tel que le client MCP le verra, quelle que soit la casse du SDK.
+
+    `mcp` 1.x expose `isError`, la 2.x `is_error` avec l'alias : lire l'attribut
+    directement testait la casse du SDK installé, pas le fil.
+    """
+    if isinstance(result, str):
+        return False
+    dump = getattr(result, "model_dump", None)
+    if dump is None:
+        return bool(getattr(result, "isError", False))
+    return bool(dump(by_alias=True).get("isError", False))
+
+
 async def call(session: ClientSession, tool: str, **args: Any) -> dict[str, Any]:
     result = await session.call_tool(tool, args)
     text = "".join(getattr(block, "text", "") for block in result.content)
-    return dict(json.loads(text))
+    return dict(_json(text))
 
 
 # ── le projet : gouverné pour de vrai ────────────────────────────────────────
@@ -200,8 +227,8 @@ def test_bloquer_exige_un_motif_et_le_board_le_montre(projet: Path) -> None:
     task_context(task_id=tid, project_path=str(projet))
     task_claim(tid, actor="claude", project_path=str(projet))
     task_update(tid, "move", to="running", project_path=str(projet))
-    assert "reason" in json.loads(task_update(tid, "block", project_path=str(projet)))["error"]
-    bloque = json.loads(task_update(tid, "block", reason="service tiers en panne", project_path=str(projet)))
+    assert "reason" in _json(task_update(tid, "block", project_path=str(projet)))["error"]
+    bloque = _json(task_update(tid, "block", reason="service tiers en panne", project_path=str(projet)))
     assert bloque["status"] == "blocked"
     assert board_status(projet, tid) == "blocked"
 
@@ -228,7 +255,7 @@ def test_l_outil_mcp_passe_par_le_gate_et_un_gate_rouge_ne_change_rien(
     monkeypatch.setattr(service_module, "check_transition", gate_rouge)
     avant = len(ledger.list_events())
 
-    refus = json.loads(task_update(tid, "move", to="cancelled", project_path=str(projet)))
+    refus = _json(task_update(tid, "move", to="cancelled", project_path=str(projet)))
     assert refus["blocked"] is True and refus["transition"] == "espion"
     assert consulte == [("ready", "archived")]
     assert len(MissionLedger(projet / DEFAULT_LEDGER_RELPATH).list_events()) == avant
@@ -243,8 +270,8 @@ def test_le_refus_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
 
     tid = ouvre(projet)
     cli = CliRunner().invoke(app, ["--output", "json", "task", "claim", tid, "--project-root", str(projet)])
-    par_cli = json.loads(cli.output)
-    par_mcp = json.loads(task_claim(tid, project_path=str(projet)))
+    par_cli = _json(cli.output)
+    par_mcp = _json(task_claim(tid, project_path=str(projet)))
     assert cli.exit_code == 1 and par_cli["blocked"] is True
     assert par_cli["refusals"] == par_mcp["refusals"]
 
@@ -254,7 +281,7 @@ def test_le_refus_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
 
 def test_task_recall_est_honnetement_vide_pour_une_tache_neuve(projet: Path) -> None:
     tid = ouvre(projet)
-    rappel = json.loads(task_recall(task_id=tid, project_path=str(projet)))
+    rappel = _json(task_recall(task_id=tid, project_path=str(projet)))
     assert rappel["task_id"] == tid
     assert rappel["has_content"] is False
 
@@ -276,7 +303,7 @@ def test_task_recall_fait_remonter_la_cause_d_une_jumelle_qui_a_echoue(projet: P
         mission_id, "Brancher le webhook de paiement (bis)", acceptance=(ACCEPTATION,), owner="claude"
     )
 
-    rappel = json.loads(task_recall(task_id=jumelle.id, project_path=str(projet)))
+    rappel = _json(task_recall(task_id=jumelle.id, project_path=str(projet)))
 
     assert rappel["has_content"] is True
     assert any("signature invalide" in s["causes"][0] for s in rappel["siblings"] if s["causes"])
@@ -288,7 +315,7 @@ def test_task_recall_sans_argument_resout_la_tache_active(projet: Path) -> None:
     task_context(task_id=tid, project_path=str(projet))
     task_claim(tid, actor="claude", project_path=str(projet))
 
-    rappel = json.loads(task_recall(project_path=str(projet)))
+    rappel = _json(task_recall(project_path=str(projet)))
 
     assert rappel["task_id"] == tid
 
@@ -299,11 +326,11 @@ def test_le_rappel_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
     from grimoire.cli.app import app
 
     tid = ouvre(projet)
-    par_mcp = json.loads(task_recall(task_id=tid, project_path=str(projet)))
+    par_mcp = _json(task_recall(task_id=tid, project_path=str(projet)))
     cli = CliRunner().invoke(
         app, ["--output", "json", "task", "recall", tid, "--project-root", str(projet)]
     )
-    par_cli = json.loads(cli.output)
+    par_cli = _json(cli.output)
     assert cli.exit_code == 0, cli.output
     assert par_cli["text"] == par_mcp["text"]
 
@@ -311,18 +338,47 @@ def test_le_rappel_du_cli_et_celui_de_mcp_sont_le_meme(projet: Path) -> None:
 # ── erreurs lisibles ─────────────────────────────────────────────────────────
 
 def test_sans_ledger_la_liste_est_vide_et_le_dit(tmp_path: Path) -> None:
-    out = json.loads(task_list_ready(project_path=str(tmp_path)))
+    out = _json(task_list_ready(project_path=str(tmp_path)))
     assert out["count"] == 0 and "task add" in out["note"]
     assert not (tmp_path / DEFAULT_LEDGER_RELPATH).exists()
 
 
 def test_une_tache_inconnue_et_un_etat_inconnu_sont_nommes(projet: Path) -> None:
     ouvre(projet)
-    assert "inconnue" in json.loads(task_show("GAO-nulle-001", project_path=str(projet)))["error"]
-    inconnu = json.loads(task_update("x", "move", to="fini", project_path=str(projet)))
+    assert "inconnue" in _json(task_show("GAO-nulle-001", project_path=str(projet)))["error"]
+    inconnu = _json(task_update("x", "move", to="fini", project_path=str(projet)))
     assert "fini" in inconnu["error"] and "running" in inconnu["states"]
-    assert "actions" in json.loads(task_update("x", "teleport", project_path=str(projet)))
+    assert "actions" in _json(task_update("x", "teleport", project_path=str(projet)))
 
 
 def test_le_serveur_expose_les_outils_de_tache_sous_leur_nom() -> None:
     assert {name for name in dir(server_module) if name.startswith("task_")} >= TASK_TOOLS
+
+
+# ── Un refus de gate n'est pas une panne d'outil ──────────────────────────────
+
+
+class TestGateRefusalIsNotAToolFailure:
+    """Choix figé : un refus de gate de preuve n'est **pas** marqué `isError`.
+
+    La porte a fonctionné, l'appel a répondu, et le corps nomme la preuve
+    manquante et son remède — ce n'est pas une panne d'outil. La revue
+    adversariale de la PR #324 l'a relevé comme un risque pour un hôte qui
+    filtre sur ce drapeau ; le choix est assumé, donc il est figé par un test
+    plutôt que laissé tacite. L'inverser, c'est faire échouer ce test, pas
+    changer un détail en silence.
+    """
+
+    def test_un_claim_refuse_repond_sans_is_error(self, projet: Path) -> None:
+        tid = ouvre(projet)
+        result = task_claim(tid, project_path=str(projet))
+        assert _json(result)["blocked"] is True
+        assert not _is_error(result), (
+            "un refus de gate est une réponse structurée, pas une panne : le marquer "
+            "isError ferait croire à l'hôte que l'outil a échoué"
+        )
+
+    def test_une_panne_franche_reste_marquee(self, projet: Path) -> None:
+        result = task_show("GAO-nulle-001", project_path=str(projet))
+        assert "error" in _json(result)
+        assert _is_error(result), "une tâche inconnue est une panne d'appel, elle doit porter isError"

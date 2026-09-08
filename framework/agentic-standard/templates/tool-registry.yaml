@@ -33,6 +33,12 @@ mcp_servers: []
 #   environment: local      # local | staging | production | externe
 #   risk: moyen
 #   human_validation: "écriture, production ou données sensibles"
+#   # Un serveur volontairement hors périmètre se déclare, il ne s'omet pas :
+#   # `grimoire standard verify` compare ce registre aux serveurs réellement
+#   # résolus (.mcp.json du projet, ~/.claude.json, ~/.claude/settings.json) et
+#   # refuse aussi bien l'absent que l'exemption sans motif.
+#   out_of_scope: false
+#   out_of_scope_reason: ""
 
 # Erreurs d'outil : preuve par défaut, incident à partir d'une gravité.
 error_capture:

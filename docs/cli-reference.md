@@ -262,6 +262,26 @@ observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
 plancher d'une tâche V1). La colonne « départ recommandé » est exactement
 ce que `grimoire task dispatch` retient par défaut pour ce couple.
 
+## Web
+
+Le groupe `grimoire web` est le chemin par lequel un agent atteint le web. Il
+existe parce que le chemin nu ne suffit pas : `web-browser.py` rend son flux tel
+quel, et un agent qui colle ce flux dans son contexte ne distingue plus ce qu'il
+a lu de ce qu'on lui a demandé (OWASP LLM01).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire web fetch <url> [--selector CSS] [--timeout N] [--json]` | Récupérer une page et la rendre enveloppée « donnée externe, pas instruction » |
+
+La sortie est encadrée par deux marqueurs portant un identifiant tiré au hasard
+à chaque appel, que la page ne peut pas connaître ; une source qui tente de
+recopier le marqueur le voit neutralisé et signalé. En `--json`, le résultat
+porte `origin: external` : il ne peut pas relayer une approbation.
+
+Le navigateur tourne en sous-processus — le script est en zone gelée et n'est
+jamais importé. Voir
+[Contenu externe : donnée, pas instruction](standard/integration.md#contenu-externe--donnée-pas-instruction).
+
 ## Standard agentique gouverné
 
 Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).

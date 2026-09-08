@@ -90,7 +90,12 @@ class MemorySidecar:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._connection: sqlite3.Connection | None = None
-        self._init_db()
+        # Le schéma est créé à la première utilisation, pas à la construction.
+        # `MemoryManager.from_config` instancie le sidecar pour tout le monde, y
+        # compris pour une simple recherche : ouvrir la base ici faisait qu'un
+        # outil MCP annoté `readOnlyHint` créait trois fichiers sur disque
+        # (`palace_sidecar.sqlite3`, `-shm`, `-wal`) au premier appel. Une
+        # annotation de lecture doit être vraie.
 
     @property
     def db_path(self) -> Path:
@@ -98,9 +103,12 @@ class MemorySidecar:
 
     def _conn(self) -> sqlite3.Connection:
         if self._connection is None:
-            self._connection = sqlite3.connect(self._db_path, timeout=10, check_same_thread=False)
-            self._connection.row_factory = sqlite3.Row
-            self._connection.execute("PRAGMA journal_mode=WAL")
+            connection = sqlite3.connect(self._db_path, timeout=10, check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            # Posé avant `_init_db`, qui rappelle `_conn` : sans cela, récursion.
+            self._connection = connection
+            self._init_db()
         return self._connection
 
     def _init_db(self) -> None:
