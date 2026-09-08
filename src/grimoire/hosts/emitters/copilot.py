@@ -60,6 +60,13 @@ _WIRE_NAMES: dict[HookEvent, str] = {
 
 
 def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
+    # Pas de `model` ici : le contrat documenté pour .github/agents/*.agent.md
+    # (https://code.visualstudio.com/docs/copilot/customization/custom-agents)
+    # accepte un nom de modèle explicite ou une liste de repli, mais ne
+    # documente aucune valeur de sélection automatique équivalente à
+    # `inherit` côté Claude Code. Inventer un nom de modèle serait mentir sur
+    # ce que l'hôte sait faire ; la lacune est déclarée en toutes lettres dans
+    # la dégradation « model affinity » du plan plutôt que d'être tue.
     header = Emitter.frontmatter(
         {
             "description": agent.description,
@@ -191,6 +198,18 @@ class CopilotEmitter(Emitter):
                 surface="hook matchers",
                 reason="Les hooks VS Code ne filtrent pas par outil dans leur configuration.",
                 fallback="le filtrage se fait dans la décision : un appel en lecture seule sort en `allow` sans effet.",
+            )
+        )
+        degradations.append(
+            Degradation(
+                surface="model affinity",
+                reason=(
+                    "L'agent personnalisé VS Code (.github/agents/*.agent.md) accepte un nom de "
+                    "modèle explicite ou une liste de repli via `model`, mais aucune valeur de "
+                    "sélection automatique équivalente à `inherit` n'y est documentée (source : "
+                    "https://code.visualstudio.com/docs/copilot/customization/custom-agents)."
+                ),
+                fallback="`model` n'est pas émis ; le modèle actuel du sélecteur VS Code s'applique à chaque agent.",
             )
         )
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]

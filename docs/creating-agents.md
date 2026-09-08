@@ -90,11 +90,11 @@ model_affinity:
   reasoning: high       # low | medium | high | extreme
   context_window: medium  # small (≤32K) | medium (≤128K) | large (≤200K) | massive (>1M)
   speed: fast           # fast | medium | slow-ok
-  cost: medium          # cheap | medium | any
+  cost: medium          # low | medium | any
 ---
 ```
 
-| Axe | Quand utiliser `extreme`/`massive` | Quand utiliser `low`/`small`/`cheap` |
+| Axe | Quand utiliser `extreme`/`massive` | Quand utiliser `low`/`small` |
 |---|---|---|
 | **reasoning** | Debug deep, audit sécurité, architecture | CRUD, mémoire, monitoring |
 | **context_window** | Scan codebase entier, refactoring large | Tâches ciblées, corrections ponctuelles |
@@ -102,6 +102,17 @@ model_affinity:
 | **cost** | Tâches critiques, sécurité | Tâches répétitives, consolidation |
 
 Vérifiez la recommandation : `bash grimoire-init.sh guard --recommend-models`
+
+**Ce que `grimoire host sync` en fait par hôte :** Claude Code croise `reasoning`
+et `cost` pour choisir un modèle (`reasoning: high` → `opus` quoi qu'il arrive ;
+sinon `cost: low` → `haiku` ; sinon `reasoning: low` → `haiku` ; sinon `inherit`,
+le modèle de la session). Le concierge illustre le premier cas : raisonnement
+élevé pour trier juste, mais invoqué à chaque tour — `cost: low` ne le
+rétrograde pas. Copilot, lui, ne reçoit pas cette affinité : son contrat
+`.github/agents/*.agent.md` n'accepte qu'un nom de modèle explicite ou une
+liste de repli, sans équivalent documenté de `inherit` ; `grimoire host sync
+--host copilot` ne devine donc aucun nom de modèle et signale l'écart comme
+dégradation plutôt que de le taire.
 
 ### 3. Écrire l'identité
 
