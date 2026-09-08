@@ -55,6 +55,7 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
@@ -447,6 +448,8 @@ class DispatchReport:
     refusal: str | None = None
     transitioned_to: str | None = None
     transition_refused: str | None = None
+    start_tier: str | None = None
+    start_tier_reason: str | None = None
 
     @property
     def refusal_message(self) -> str | None:
@@ -504,6 +507,8 @@ class DispatchReport:
             "review_note": self.review_note,
             "uncertainties": [u.to_dict() for u in self.uncertainties],
             "uncertainty_warnings": list(self.uncertainty_warnings),
+            "start_tier": self.start_tier,
+            "start_tier_reason": self.start_tier_reason,
         }
         if self.refusal is not None:
             data["refusal"] = self.refusal
@@ -573,9 +578,29 @@ def _run_checks(checks: tuple[str, ...], *, project_root: Path) -> tuple[CheckRe
     return tuple(results)
 
 
-def _dispatch_event_payload(attempt: DispatchAttempt, task_id: str) -> dict[str, Any]:
+def _dispatch_event_payload(
+    attempt: DispatchAttempt,
+    task: MissionTask,
+    verifiability: Verifiability,
+    start_tier: str,
+    start_tier_reason: str,
+) -> dict[str, Any]:
+    """Le payload d'un événement ``task.dispatched`` — le type et la classe embarqués (lot 4, #312).
+
+    ``task_type``/``verifiability`` sont écrits ici plutôt que re-dérivés au
+    moment de la lecture : ``dispatch_history`` n'a alors ni besoin de
+    recharger la tâche (qui peut avoir été close, voire disparue), ni de
+    supposer que ses critères d'acceptation n'ont pas changé depuis. Un
+    événement plus ancien, écrit avant ce lot, n'a pas ces clés —
+    ``dispatch_history`` l'ignore sans échouer plutôt que d'inventer une
+    classe qui n'a jamais été observée.
+    """
     payload = attempt.to_dict()
-    payload["task_id"] = task_id
+    payload["task_id"] = task.id
+    payload["task_type"] = task.type.value
+    payload["verifiability"] = verifiability.value
+    payload["start_tier"] = start_tier
+    payload["start_tier_reason"] = start_tier_reason
     return payload
 
 
@@ -585,6 +610,7 @@ def run_dispatch(
     *,
     checks: tuple[str, ...] = (),
     max_tier: str | None = None,
+    start_tier: str | None = None,
     provider_id: str | None = None,
     dry_run: bool = False,
     call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
@@ -593,20 +619,28 @@ def run_dispatch(
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
     Refuse avant tout appel si la classe est V2 ou si ``checks`` est vide.
-    Sinon, essaie chaque palier de la chaîne, du moins cher au plus cher (ou
-    depuis ``mid`` pour une tâche V1) : à chaque palier, chaque fournisseur
-    disponible est tenté jusqu'à un appel qui réussit ; un check rouge fait
-    passer au palier suivant (le fournisseur n'est pas en cause, le résultat
-    l'est), un échec d'appel (429, timeout) fait passer au fournisseur
-    suivant du même palier. Chaque tentative — y compris un échec d'appel —
-    laisse un événement ``task.dispatched`` au ledger.
+    Sinon, essaie chaque palier de la chaîne, du palier de départ au plus
+    cher : à chaque palier, chaque fournisseur disponible est tenté jusqu'à
+    un appel qui réussit ; un check rouge fait passer au palier suivant (le
+    fournisseur n'est pas en cause, le résultat l'est), un échec d'appel
+    (429, timeout) fait passer au fournisseur suivant du même palier. Chaque
+    tentative — y compris un échec d'appel — laisse un événement
+    ``task.dispatched`` au ledger.
+
+    Le palier de départ vient, par défaut, de l'historique des dispatchs
+    passés pour ce couple (type de tâche, classe) — :mod:`dispatch_history`,
+    issue #312 : ``cheap``/``mid`` pour V0/V1 tant que rien ne le contredit,
+    ajusté quand un couple escalade trop souvent depuis son palier habituel,
+    ou redescendu quand il ne le fait plus. *start_tier* (``--start-tier``)
+    court-circuite entièrement cette recommandation — l'opérateur qui la
+    fournit sait mieux que l'historique pour ce dispatch précis.
     """
     task = service.require(task_id)
     verifiability = classify(task)
     prompt = build_prompt(task)
 
-    start_tier = start_tier_for(verifiability)
-    if start_tier is None:
+    floor = start_tier_for(verifiability)
+    if floor is None:
         return DispatchReport(
             task_id=task_id,
             verifiability=verifiability.value,
@@ -615,6 +649,15 @@ def run_dispatch(
             prompt=prompt,
             refusal="v2",
         )
+
+    if start_tier is not None:
+        chosen_tier = start_tier
+        start_tier_reason = "palier de départ explicite (--start-tier)"
+    else:
+        chosen_tier, start_tier_reason = recommend_start_tier(
+            service.ledger, task_type=task.type.value, verifiability=verifiability.value, floor=floor
+        )
+
     if not checks:
         return DispatchReport(
             task_id=task_id,
@@ -623,9 +666,11 @@ def run_dispatch(
             planned_chain=(),
             prompt=prompt,
             refusal="no_check",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
-    chain = _tier_chain(start_tier, max_tier)
+    chain = _tier_chain(chosen_tier, max_tier)
     if not chain:
         return DispatchReport(
             task_id=task_id,
@@ -634,6 +679,8 @@ def run_dispatch(
             planned_chain=(),
             prompt=prompt,
             refusal="no_tier",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     if dry_run:
@@ -643,6 +690,8 @@ def run_dispatch(
             dry_run=True,
             planned_chain=chain,
             prompt=prompt,
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     root = service.project_root
@@ -678,7 +727,11 @@ def run_dispatch(
                 )
                 attempts.append(attempt)
                 service.ledger.append_event(
-                    "task.dispatched", task_id, "task", actor, _dispatch_event_payload(attempt, task_id)
+                    "task.dispatched",
+                    task_id,
+                    "task",
+                    actor,
+                    _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
                 )
                 continue  # fournisseur suivant, même palier
 
@@ -710,7 +763,11 @@ def run_dispatch(
             )
             attempts.append(attempt)
             service.ledger.append_event(
-                "task.dispatched", task_id, "task", actor, _dispatch_event_payload(attempt, task_id)
+                "task.dispatched",
+                task_id,
+                "task",
+                actor,
+                _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
             )
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
@@ -731,6 +788,8 @@ def run_dispatch(
             planned_chain=chain,
             prompt=prompt,
             refusal="no_provider",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     report = DispatchReport(
@@ -740,6 +799,8 @@ def run_dispatch(
         planned_chain=chain,
         prompt=prompt,
         attempts=tuple(attempts),
+        start_tier=chosen_tier,
+        start_tier_reason=start_tier_reason,
     )
     if not report.succeeded:
         return report
@@ -761,6 +822,8 @@ def run_dispatch(
             prompt=report.prompt,
             attempts=report.attempts,
             transition_refused=str(exc),
+            start_tier=report.start_tier,
+            start_tier_reason=report.start_tier_reason,
         )
     return DispatchReport(
         task_id=report.task_id,
@@ -770,4 +833,6 @@ def run_dispatch(
         prompt=report.prompt,
         attempts=report.attempts,
         transitioned_to=TaskState.NEEDS_VERIFICATION.value,
+        start_tier=report.start_tier,
+        start_tier_reason=report.start_tier_reason,
     )

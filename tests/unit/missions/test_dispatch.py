@@ -609,3 +609,80 @@ def test_bloc_uncertainties_lu_dans_le_champ_result_d_un_json(tmp_path: Path) ->
 
     assert len(report.uncertainties) == 1
     assert report.uncertainties[0].to_dict() == {"where": "a", "what": "b", "why": "c"}
+
+
+# ── Palier de départ ajusté par l'historique (issue #312, lot 4) ────────────
+
+
+def test_evenement_task_dispatched_porte_le_type_la_classe_et_le_depart(tmp_path: Path) -> None:
+    """Le lot 4 lit ces clés depuis l'événement — elles doivent y être."""
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    event = next(e for e in service.ledger.list_events(tid) if e.event_type == "task.dispatched")
+    assert event.payload["task_type"] == "implementation"
+    assert event.payload["verifiability"] == "V0"
+    assert event.payload["start_tier"] == "cheap"
+    assert report.start_tier == "cheap"
+    assert report.start_tier_reason is not None
+
+
+def test_start_tier_explicite_prime_sur_la_recommandation(tmp_path: Path) -> None:
+    """``--start-tier mid`` saute `cheap` même sans le moindre historique."""
+    mid_green = _script(tmp_path, "mid_green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("mid-only", "mid", _invocation(mid_green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), start_tier="mid")
+
+    assert report.exit_code == 0
+    assert report.start_tier == "mid"
+    assert "explicite" in (report.start_tier_reason or "")
+    assert [a.tier for a in report.attempts] == ["mid"]
+
+
+def test_moins_de_n_observations_le_depart_reste_celui_de_la_classe(tmp_path: Path) -> None:
+    """Sans historique, la classe décide seule — `cheap` pour V0."""
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.start_tier == "cheap"
+    assert "moins de" in (report.start_tier_reason or "")
+
+
+def test_l_historique_pousse_le_depart_a_mid_quand_cheap_echoue_trop_souvent(tmp_path: Path) -> None:
+    """5 dispatchs du même couple, tous escaladés depuis cheap : le 6e part directement de mid."""
+    from grimoire.missions.dispatch_history import MIN_OBSERVATIONS
+
+    cheap_red = _script(tmp_path, "cheap_red.py", _SILENT_OK)
+    mid_green = _script(tmp_path, "mid_green.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-red", "cheap", _invocation(cheap_red)),
+        _provider_yaml("mid-green", "mid", _invocation(mid_green)),
+    )
+    service = _service(tmp_path)
+
+    for _ in range(MIN_OBSERVATIONS):
+        tid = _task(service, acceptance=(V0_CRITERION,))
+        (tmp_path / "marker.txt").unlink(missing_ok=True)
+        report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+        assert report.exit_code == 0
+        assert [a.tier for a in report.attempts] == ["cheap", "mid"]  # escalade à chaque fois
+
+    (tmp_path / "marker.txt").unlink(missing_ok=True)
+    dernier = _task(service, acceptance=(V0_CRITERION,))
+    report = run_dispatch(service, dernier, checks=("test -f marker.txt",))
+
+    assert report.start_tier == "mid"
+    assert "cheap" in (report.start_tier_reason or "")
+    assert [a.tier for a in report.attempts] == ["mid"]  # cheap n'est même plus tenté
