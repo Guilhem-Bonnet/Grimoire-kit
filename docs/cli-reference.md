@@ -289,6 +289,20 @@ Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_list_ready`
 `task_show`, `task_claim`, `task_update`, `task_context`) : même service, même
 gate, même refus. Voir [Intégration MCP](mcp-integration.md).
 
+### Vérifiabilité d'une tâche
+
+`grimoire task show <id>` et la projection du board (`verifiability`) portent
+une classe dérivée — jamais déclarée — depuis le texte des critères
+d'acceptation et des preuves attendues : **V0** si tous nomment un verdict
+qu'un programme rend seul (test, lint, schéma, gate, code de sortie, build/CI,
+fichier attendu), **V1** si au moins un critère nomme une revue ou une
+validation par une personne ou un agent sans qu'aucun autre ne reste ambigu,
+**V2** sinon — y compris une tâche sans aucun critère. Un critère formulé de
+façon vague (« le code est propre ») ne peut jamais produire un V0 : un seul
+critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
+`task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
+lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
+
 ### Pourquoi une tâche s'est arrêtée
 
 `grimoire task trace <id>` lit quatre journaux qui portent chacun le `task_id`

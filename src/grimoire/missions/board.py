@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.schemas import DependencyKind, RiskProfile, TaskState
+from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
@@ -129,6 +130,7 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         "owner": owner,
         "agent_roles": [task.type.value],
         "acceptance_criteria": list(task.acceptance),
+        "verifiability": verifiability_as_dict(task),
         "blockers": _blockers(task),
         # Chemins conventionnels du standard, indexés par task_id.
         "context_bundle_ref": f"_grimoire-output/context/{task.id}/context-bundle.yaml",

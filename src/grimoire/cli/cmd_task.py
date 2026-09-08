@@ -248,14 +248,22 @@ def task_show(
     """Détaille une tâche, et ce que son prochain pas exigera."""
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import GatesFileError, declared_transitions
+    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     task = _require_task(_service(project_root, ledger_root), task_id)
+    verifiabilite = verifiability_as_dict(task)
     if _fmt(ctx) == "json":
-        typer.echo(json.dumps(task.to_dict(), indent=2, ensure_ascii=False))
+        payload = task.to_dict()
+        payload["verifiability"] = verifiabilite
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
     console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
+    console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
+    for entree in verifiabilite["criteria"]:
+        motif = entree["pattern"] or "non reconnu"
+        console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     here = board_status_of(task.status)
