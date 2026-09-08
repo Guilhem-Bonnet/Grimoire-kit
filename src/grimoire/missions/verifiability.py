@@ -119,8 +119,12 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
         ),
         (
             "schema_validation",
-            r"\b(sch[ée]mas?|schema|validation|valide selon le sch[ée]ma|"
-            r"json schema|pydantic)\b",
+            # « validation » nu n'y figure pas : « validation fonctionnelle par
+            # le PO » est un jugement humain, et le mot seul ne dit pas qui
+            # rend le verdict. Seule la validation contre un schéma est
+            # mécanique ; le reste tombe en ambigu, donc monte.
+            r"\b(sch[ée]mas?|schema|valide selon le sch[ée]ma|validation du sch[ée]ma|"
+            r"schema validation|json schema|pydantic)\b",
         ),
         (
             "gate",
@@ -152,6 +156,14 @@ JUDGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
     (
         ("revue", r"\b(revue|review|relecture|peer review|code review)\b"),
         ("juge", r"\b(juge|jugement|judge)\b"),
+        # Un test « manuel » ou une vérification « à la main » est un verdict
+        # humain quel que soit le mot « test » à côté : sans ce motif, le
+        # vocabulaire mécanique l'aurait avalé et produit un faux V0.
+        (
+            "verification_manuelle",
+            r"\b(manuel(?:le)?s?|manual(?:ly)?|[àa] la main|by hand|"
+            r"d[ée]mo(?:nstration)?|product owner|PO)\b",
+        ),
         (
             "validation_humaine",
             r"\b(valid[ée]e? par|validation par|approuv[ée]e? par|approval by|"

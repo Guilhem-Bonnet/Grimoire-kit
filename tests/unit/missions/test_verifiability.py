@@ -113,3 +113,21 @@ def test_as_dict_porte_classe_explication_et_criteres() -> None:
 def test_toutes_les_classes_ont_une_explication_non_vide() -> None:
     for classe in Verifiability:
         assert classe.explanation
+
+
+def test_faux_v0_validation_nue_par_une_personne_monte() -> None:
+    # « validation » sans schéma ne dit pas qui juge : ambigu, donc V2, jamais V0.
+    t = tache(acceptance=("pytest vert", "validation fonctionnelle par le PO en démo"))
+    assert classify(t) is not Verifiability.V0
+
+
+def test_faux_v0_tests_manuels_sont_un_jugement_humain() -> None:
+    t = tache(acceptance=("les tests manuels sont concluants",))
+    assert classify(t) is Verifiability.V1
+    t_en = tache(acceptance=("manual testing passes",))
+    assert classify(t_en) is Verifiability.V1
+
+
+def test_validation_contre_un_schema_reste_mecanique() -> None:
+    t = tache(acceptance=("validation du schéma JSON",), expected_evidence=("schema validation passes",))
+    assert classify(t) is Verifiability.V0
