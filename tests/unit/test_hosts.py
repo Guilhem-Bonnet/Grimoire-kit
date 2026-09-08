@@ -288,6 +288,101 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     assert "model: 'inherit'" in concierge  # medium/medium : pas de signal fort
 
 
+# ── Politique de dispatch (#329) ─────────────────────────────────────────────
+
+
+def test_claude_entry_agent_carries_the_dispatch_policy(project: Path) -> None:
+    """Le plan d'émission Claude Code porte la politique V0/V1/V2 + incertitudes.
+
+    Seule la persona d'entrée route vers d'autres personas ; c'est donc son
+    fichier — pas celui de chaque sous-agent — qui doit dire quel modèle
+    correspond à quelle classe de vérifiabilité.
+    """
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    entry = (project / ".claude/agents/concierge.md").read_text(encoding="utf-8")
+    sub = (project / ".claude/agents/scribe.md").read_text(encoding="utf-8")
+
+    assert "Politique de dispatch" in entry
+    assert "V0" in entry and "haiku" in entry
+    assert "V1" in entry and "sonnet" in entry
+    assert "V2" in entry and "le modèle de la session" in entry
+    assert "grimoire-uncertainties" in entry
+    # Seule la persona d'entrée dispatche ; les autres n'en ont pas besoin.
+    assert "Politique de dispatch" not in sub
+
+
+def test_copilot_readme_documents_the_policy_without_inventing_a_model(governed: Path) -> None:
+    """Le README Copilot porte la même règle V0/V1/V2, jamais un nom de modèle.
+
+    Cet hôte n'offre aucune sélection automatique équivalente à `inherit`
+    (dégradation « model affinity » déjà déclarée) ; documenter la politique
+    sans y coller `haiku`/`sonnet`/`opus` est la même discipline que
+    l'émetteur applique déjà aux fichiers d'agent.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    readme = (governed / ".github/hooks/README.md").read_text(encoding="utf-8")
+
+    assert "Politique de dispatch" in readme
+    assert "V0" in readme and "V1" in readme and "V2" in readme
+    assert "grimoire-uncertainties" in readme
+    for invented_model in ("haiku", "sonnet", "opus", "gpt-", "gemini"):
+        assert invented_model not in readme.lower()
+
+
+def _write_providers_registry(root: Path, *, project: str = "demo") -> None:
+    registry = f"""\
+$schema: "grimoire-llm-provider-registry/v1"
+metadata:
+  project: "{project}"
+  owner: ""
+  policy: "No provider/model call outside this registry."
+providers:
+  - id: "anthropic"
+    enabled: true
+    provider_type: "hosted"
+    allowed_capabilities: ["chat", "code"]
+    default_models: ["claude-sonnet-4.6"]
+    currency: "quota"
+    invocation: "claude -p {{prompt}} --model {{model}}"
+    models:
+      - id: "claude-haiku-4.5"
+        tier: "cheap"
+      - id: "claude-sonnet-4.6"
+        tier: "mid"
+    data_policy:
+      allowed_data_classes: ["public-docs"]
+      forbidden_data_classes: ["secrets"]
+      retention_notes: ""
+    fallback_order: []
+    audit:
+      log_prompts: false
+      log_metadata: true
+routing:
+  default_provider: "anthropic"
+  default_fallback_chain: []
+  require_capability_match: true
+  require_data_policy_match: true
+"""
+    registry_path = root / "_grimoire/standard/llm-provider-registry.yaml"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(registry, encoding="utf-8")
+
+
+def test_session_start_reports_providers_when_the_registry_exists(project: Path) -> None:
+    _write_providers_registry(project)
+    context = _session_start(project)
+    assert "Fournisseurs : 1 disponibles, 0 refroidis, prochain cheap=anthropic" in context
+
+
+def test_session_start_says_nothing_about_providers_without_a_registry(project: Path) -> None:
+    context = _session_start(project)
+    assert "Fournisseurs :" not in context
+
+
 def test_copilot_surface_declares_its_permission_gap(governed: Path) -> None:
     emitter = emitter_for(HostId.GITHUB_COPILOT)
     assert emitter is not None

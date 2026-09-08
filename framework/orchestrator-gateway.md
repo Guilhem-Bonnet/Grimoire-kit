@@ -279,79 +279,15 @@ session_knowledge_graph:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> AORA — Orchestration Autonome de Tâches Complexes
+## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> AORA — Retiré (2026-07-12)
 
-> **Principe** : Pour les tâches multi-step, le SOG ne rend PAS la main entre chaque étape.
-> Il décompose, itère, et ne livre qu'un résultat complet.
-
-### Protocole d'itération longue
-
-Quand l'orchestrateur reçoit une tâche complexe (complexity ≥ moderate) :
-
-```yaml
-aora_protocol:
-  # Phase 1 — Décomposition
-  decompose:
-    action: "Transformer la tâche en checklist de micro-tâches ordonnées"
-    output: "Living Checklist affichée à l'utilisateur"
-    max_tasks: 15  # Au-delà, regrouper en phases
-    
-  # Phase 2 — Boucle AORA
-  loop:
-    for_each_task:
-      act: "Dispatcher au sub-agent optimal (ou exécuter directement)"
-      observe: "Capturer le résultat : succès, échec, output, stderr"
-      reflect: |
-        - Succès → cocher ✅, passer à la tâche suivante
-        - Échec mineur → tenter correction (max 3 retries par micro-tâche)  
-        - Échec bloquant → escalader à l'utilisateur avec contexte complet
-        - Découverte inattendue → ajouter/modifier la checklist dynamiquement
-      act_again: "Continuer sans rendre la main"
-    
-    # Interruption utilisateur
-    user_interrupt:
-      always_possible: true
-      behavior: "Intégrer le feedback, adapter le plan, continuer la boucle"
-    
-    # Limites de sécurité
-    guardrails:
-      max_iterations_per_task: 3
-      max_total_iterations: 30
-      on_limit_reached: "Escalade utilisateur avec rapport de progression"
-  
-  # Phase 3 — Livraison
-  deliver:
-    format: |
-      ## Résultat — {task_description}
-      
-      {résumé exécutif en 2-3 lignes}
-      
-      ### Actions effectuées
-      {checklist complétée avec statuts}
-      
-      ### Décisions prises en autonomie
-      {liste des choix faits sans demander, si applicable}
-      
-      ### CC Status
-      {résultats de vérification}
-    
-    trust_score: "Score composite de tous les sub-agents impliqués"
-```
-
-### Quand activer AORA
-
-| Complexité | Micro-tâches estimées | Activation |
-|---|---|---|
-| Simple | 1-2 | Non — exécution directe |
-| Moderate | 3-7 | Oui — checklist courte |
-| Complex | 8-15 | Oui — checklist + phases |
-| Multi-step | 15+ | Oui — phases + checkpoints |
-
-### Interaction ALS × AORA
-
-- **L1/L2** : AORA itère silencieusement, livre le résultat final
-- **L3** : AORA présente le plan (checklist), attend validation UNE fois, puis itère
-- **L4** : pas d'AORA — chaque étape supervisée individuellement
+> Retiré du socle le 2026-07-12 (voir `CHANGELOG.md`), zéro usage constaté. Pour les tâches
+> multi-step, le SOG continue de décomposer en checklist et d'itérer sans rendre la main entre
+> étapes, sous les deux règles conservées sans le nom AORA (`agent-base.md` § Plan
+> d'exécution) : circuit breaker (même erreur 2× → pivoter ; 2 pivots → escalade utilisateur)
+> et cascading initiative (L1 corriger, L2 corriger et mentionner, L3+ signaler). Valeurs de
+> plafond historiques, non appliquées par du code à ce jour : `max_iterations_per_task: 3`,
+> `max_total_iterations: 30`.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -421,10 +357,10 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 | **HPE (BM-58)** | SOG utilise le moteur HPE pour orchestrer les DAG hybrides (parallel + séquentiel + opportuniste) |
 | **ELSS (BM-59)** | SOG observe l'état partagé, reconstruit le shared state, détecte les conflits |
 | **ALS** | SOG utilise l'Autonomy Level System pour déterminer quand foncer vs demander |
-| **AORA** | SOG active la boucle d'itération autonome pour les tâches complex+ |
+| **AORA** | Retiré (2026-07-12) ; circuit breaker et cascading initiative conservés sans son nom dans `agent-base.md` § Plan d'exécution |
 | **PCS** | SOG compresse le contexte progressivement pour les sessions longues |
-| **PIP** | SOG exploite les triggers proactifs pour signaler/corriger les patterns détectés |
-| **DCF** | SOG utilise la matrice Confiance × Risque pour calibrer chaque décision |
+| **PIP** | Observer-only : décrit, non instrumenté, aucune obligation |
+| **DCF** | Retiré (2026-07-12) ; calibration exécuter/proposer/escalader portée par ALS seul |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

@@ -11,6 +11,8 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.runtime.schemas import (
+    DEFAULT_MAX_BUDGET,
+    DEFAULT_MAX_TOOL_CALLS,
     Checkpoint,
     CheckpointState,
     ExecutionContext,
@@ -21,23 +23,33 @@ from grimoire.runtime.schemas import (
     WorkflowStatus,
 )
 
-# Valid workflow status transitions
+# Valid workflow status transitions.
+# REFUSED mirrors ABORTED as a terminal, non-resumable stop: it is reachable
+# from every in-flight status and leads nowhere (B11 — plafonds MAST par
+# instance : au plafond, l'instance ne poursuit jamais silencieusement).
 _WF_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
-    WorkflowStatus.CREATED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED}),
+    WorkflowStatus.CREATED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.RUNNING: frozenset({
         WorkflowStatus.CHECKPOINTED,
         WorkflowStatus.PAUSED,
         WorkflowStatus.BLOCKED,
         WorkflowStatus.COMPLETED,
         WorkflowStatus.ABORTED,
+        WorkflowStatus.REFUSED,
     }),
-    WorkflowStatus.CHECKPOINTED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED}),
-    WorkflowStatus.PAUSED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED}),
-    WorkflowStatus.BLOCKED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED}),
+    WorkflowStatus.CHECKPOINTED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
+    WorkflowStatus.PAUSED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
+    WorkflowStatus.BLOCKED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.COMPLETED: frozenset({WorkflowStatus.VERIFIED}),
     WorkflowStatus.VERIFIED: frozenset(),
     WorkflowStatus.ABORTED: frozenset(),
+    WorkflowStatus.REFUSED: frozenset(),
 }
+
+# Statuses that stopped the instance short of completion: mediate_tool must
+# refuse further tool calls without raising and without re-attempting an
+# invalid transition once one of these is reached.
+_STOPPED_STATUSES = frozenset({WorkflowStatus.ABORTED, WorkflowStatus.REFUSED})
 
 
 def _now_iso() -> str:
@@ -144,7 +156,19 @@ class RuntimeKernel:
         *,
         recipe_version: str = "",
         wfi_id: str | None = None,
+        max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+        max_budget: int = DEFAULT_MAX_BUDGET,
     ) -> WorkflowInstance:
+        """Create a workflow instance with per-instance MAST caps (B11).
+
+        ``max_tool_calls`` bounds the number of tool calls ``mediate_tool``
+        will mediate for this instance — the kernel's only observable unit
+        of "turn" (FM-1.3, circuit breaker). ``max_budget`` bounds the sum
+        of ``cost`` seen across those calls — a call-count proxy by default
+        (see ``DEFAULT_MAX_BUDGET`` in ``schemas.py``) unless a caller passes
+        a real cost per call (FM-1.5, budget). Overridable per instance;
+        the module-level defaults are the "reasonable default" caps.
+        """
         run_id = ctx.run_id or f"RUN-{uuid.uuid4().hex[:12]}"
         instances = self._load_instances()
         if wfi_id is None:
@@ -162,6 +186,8 @@ class RuntimeKernel:
             host_id=ctx.host_id,
             actor_id=ctx.actor_id,
             created_at=_now_iso(),
+            max_tool_calls=max_tool_calls,
+            max_budget=max_budget,
         )
         self._save_instance(wfi)
         return wfi
@@ -173,6 +199,53 @@ class RuntimeKernel:
             raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
         wfi = self._transition(wfi, WorkflowStatus.RUNNING)
         self._emit(RunEventType.WORKFLOW_STARTED, wfi, ctx)
+        return wfi
+
+    def advance_step(self, wfi_id: str, ctx: ExecutionContext, *, step_id: str) -> WorkflowInstance:
+        """Ouvre l'exécution d'un node : reprend RUNNING, journalise STEP_STARTED.
+
+        Pourquoi une méthode dédiée plutôt que rappeler ``start()`` entre deux
+        nodes : ``start()`` est l'API de démarrage de *workflow*, elle réémet
+        ``WORKFLOW_STARTED`` — un événement de début de vie, pas de début de
+        node. Le prototype de la première étape de #204 a débusqué ce
+        contournement (rappeler ``start()`` fait légalement transitionner
+        CHECKPOINTED -> RUNNING, mais produit un ``workflow.started`` par
+        node, un mensonge dans le journal). ``advance_step`` fait la seule
+        transition dont un node a besoin et journalise l'événement qui lui
+        correspond réellement.
+
+        Accepte trois états de départ : CHECKPOINTED (le node précédent vient
+        d'être checkpointé, on entre dans le suivant), BLOCKED (le node
+        précédent a été rejeté par ``fail_step`` et on retente son
+        exécution), et RUNNING (le tout premier node d'un run, juste après
+        ``start()`` — aucune transition à faire, seul l'événement compte).
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        if wfi.status in (WorkflowStatus.CHECKPOINTED, WorkflowStatus.BLOCKED):
+            wfi = self._transition(wfi, WorkflowStatus.RUNNING)
+        elif wfi.status is not WorkflowStatus.RUNNING:
+            raise GrimoireRuntimeError(
+                f"advance_step requires RUNNING, CHECKPOINTED or BLOCKED, got {wfi.status.value} for {wfi_id}"
+            )
+        self._emit(RunEventType.STEP_STARTED, wfi, ctx, payload={"step_id": step_id})
+        return wfi
+
+    def fail_step(self, wfi_id: str, ctx: ExecutionContext, *, step_id: str, reason: str) -> WorkflowInstance:
+        """Un node dont la sortie ne respecte pas son contrat de pin bloque le flow.
+
+        BLOCKED, pas ABORTED : le flow est suspendu, pas abandonné.
+        ``resume_from_checkpoint`` ou un nouveau ``advance_step`` (après
+        correction de l'hôte) le reprend légalement depuis BLOCKED.
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.BLOCKED, abort_reason=reason)
+        self._emit(RunEventType.STEP_FAILED, wfi, ctx, payload={"step_id": step_id, "reason": reason})
         return wfi
 
     def checkpoint(
@@ -214,6 +287,11 @@ class RuntimeKernel:
         wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": list(updated_refs)})
         self._save_instance(wfi)
         self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
+        # Un checkpoint clôt toujours le step qu'il nomme : STEP_COMPLETED est
+        # l'événement de step, CHECKPOINT_SAVED celui de persistance. Les deux
+        # sont vrais en même temps, `missions/trace.py` ne lisait jusqu'ici
+        # que le second faute d'un producteur pour le premier.
+        self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
         return wfi, chk
 
     def resume_from_checkpoint(self, wfi_id: str, ctx: ExecutionContext) -> tuple[WorkflowInstance, Checkpoint | None]:
@@ -228,19 +306,116 @@ class RuntimeKernel:
         self._emit(RunEventType.CHECKPOINT_RESUMED, wfi, ctx, payload={"checkpoint_id": chk.id if chk else None})
         return wfi, chk
 
-    def mediate_tool(self, tool_name: str, tool_args: dict[str, Any], ctx: ExecutionContext, wfi_id: str) -> bool:
-        """Call the tool mediator if registered.  Returns True if tool execution is allowed."""
+    def mediate_tool(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        ctx: ExecutionContext,
+        wfi_id: str,
+        *,
+        cost: int = 1,
+    ) -> bool:
+        """Call the tool mediator if registered.  Returns True if tool execution is allowed.
+
+        Enforces the instance's MAST caps (B11) before consulting the
+        mediator: once ``max_tool_calls`` mediated calls or ``max_budget``
+        cost units are exhausted, the instance is refused (terminal state,
+        checkpoint written, ``workflow.refused`` event emitted) and this
+        call — and every subsequent one — returns ``False`` without raising
+        and without letting the instance keep running.  ``cost`` defaults to
+        1 (a call-count proxy); pass a real cost when the caller has one.
+
+        The caps are checked *before* ``tool.requested`` is emitted: a call
+        that will be refused for being over cap never appears in the event
+        log as requested, only as blocked — the log stays an accurate record
+        of what was actually mediated. ``cost`` must be non-negative; a
+        negative value would let a caller shrink ``budget_used`` and defeat
+        the cap, so it raises ``ValueError`` instead.
+        """
+        if cost < 0:
+            raise ValueError(f"cost must be non-negative, got {cost}")
+
         instances = self._load_instances()
         wfi = instances.get(wfi_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+
+        if wfi.status in _STOPPED_STATUSES:
+            self._emit(RunEventType.TOOL_BLOCKED, wfi, ctx, payload={"tool_name": tool_name, "reason": f"instance already {wfi.status.value}"})
+            return False
+
+        next_calls = wfi.tool_calls_used + 1
+        next_budget = wfi.budget_used + cost
+        if next_calls > wfi.max_tool_calls or next_budget > wfi.max_budget:
+            over_calls = next_calls > wfi.max_tool_calls
+            reason = (
+                f"plafond MAST atteint pour {wfi.id} — "
+                f"appels d'outils médiés {next_calls}/{wfi.max_tool_calls}"
+                f"{' (dépassé)' if over_calls else ''}, "
+                f"budget {next_budget}/{wfi.max_budget}"
+                f"{' (dépassé)' if not over_calls else ''}"
+            )
+            self._refuse(wfi, ctx, reason=reason)
+            self._emit(RunEventType.TOOL_BLOCKED, wfi, ctx, payload={"tool_name": tool_name, "reason": "mast_cap_exceeded"})
+            return False
+
         self._emit(RunEventType.TOOL_REQUESTED, wfi, ctx, payload={"tool_name": tool_name, "args": tool_args})
+
+        wfi = WorkflowInstance.from_dict({
+            **wfi.to_dict(),
+            "caps": {
+                "max_tool_calls": wfi.max_tool_calls,
+                "max_budget": wfi.max_budget,
+                "tool_calls_used": next_calls,
+                "budget_used": next_budget,
+            },
+        })
+        self._save_instance(wfi)
+
         allowed = self._tool_mediator(tool_name, tool_args, ctx) if self._tool_mediator is not None else True
         if allowed:
             self._emit(RunEventType.TOOL_COMPLETED, wfi, ctx, payload={"tool_name": tool_name})
         else:
             self._emit(RunEventType.TOOL_BLOCKED, wfi, ctx, payload={"tool_name": tool_name})
         return allowed
+
+    def _refuse(self, wfi: WorkflowInstance, ctx: ExecutionContext, *, reason: str) -> WorkflowInstance:
+        """Transition an instance to the terminal REFUSED status (B11).
+
+        Writes a checkpoint (so replay/audit can see exactly where the
+        instance stopped) before flipping the status, then emits
+        ``WORKFLOW_REFUSED``. Never raises — a refusal is an ordinary,
+        observable outcome, not an error.
+        """
+        chk = Checkpoint(
+            id=f"chk-{wfi.id}-refused-{uuid.uuid4().hex[:6]}",
+            workflow_instance_id=wfi.id,
+            run_id=wfi.run_id,
+            step_id="refused",
+            state=CheckpointState(completed_steps=(), pending_steps=(), side_effects=()),
+            created_at=_now_iso(),
+            idempotency_key=f"idem-{wfi.id}-refused",
+            safe_to_resume=False,
+        )
+        self._append_checkpoint(chk)
+        updated_refs = (*wfi.checkpoint_refs, chk.id)
+        wfi = self._transition(wfi, WorkflowStatus.REFUSED, abort_reason=reason)
+        wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": list(updated_refs)})
+        self._save_instance(wfi)
+        self._emit(
+            RunEventType.WORKFLOW_REFUSED,
+            wfi,
+            ctx,
+            payload={
+                "reason": reason,
+                "checkpoint_id": chk.id,
+                "tool_calls_used": wfi.tool_calls_used,
+                "max_tool_calls": wfi.max_tool_calls,
+                "budget_used": wfi.budget_used,
+                "max_budget": wfi.max_budget,
+            },
+        )
+        return wfi
 
     def complete(self, wfi_id: str, ctx: ExecutionContext, *, evidence_pack_id: str = "") -> WorkflowInstance:
         instances = self._load_instances()

@@ -227,7 +227,7 @@ def _runtime_entries(kernel_path: Path, task_id: str) -> list[TimelineEntry]:
     from grimoire.runtime.kernel import RuntimeKernel
     from grimoire.runtime.schemas import RunEventType
 
-    failing = {RunEventType.TOOL_BLOCKED, RunEventType.STEP_FAILED, RunEventType.WORKFLOW_ABORTED}
+    failing = {RunEventType.TOOL_BLOCKED, RunEventType.STEP_FAILED, RunEventType.WORKFLOW_ABORTED, RunEventType.WORKFLOW_REFUSED}
     kernel = RuntimeKernel(kernel_path)
     out: list[TimelineEntry] = []
     for wfi in kernel.list_instances(task_id):
@@ -236,6 +236,8 @@ def _runtime_entries(kernel_path: Path, task_id: str) -> list[TimelineEntry]:
             summary = f"{event.event_type.value} ({wfi.recipe_id})"
             if event.event_type is RunEventType.WORKFLOW_ABORTED:
                 summary = f"workflow {wfi.id} abandonné — raison : {payload.get('reason') or wfi.abort_reason or 'non renseignée'}"
+            elif event.event_type is RunEventType.WORKFLOW_REFUSED:
+                summary = f"workflow {wfi.id} refusé (plafond MAST) — raison : {payload.get('reason') or wfi.abort_reason or 'non renseignée'}"
             elif event.event_type in (RunEventType.TOOL_BLOCKED, RunEventType.TOOL_COMPLETED, RunEventType.TOOL_REQUESTED):
                 summary = f"outil {payload.get('tool_name', '?')} — {event.event_type.value.split('.')[1]}"
             elif event.event_type in (RunEventType.STEP_STARTED, RunEventType.STEP_COMPLETED, RunEventType.STEP_FAILED):
