@@ -179,8 +179,11 @@ def flow_status(
 def flow_resume(
     ctx: typer.Context,
     run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
+    # `--result`, pas `--output` : ce dernier est déjà le format de sortie
+    # global de la CLI (`--output json`), et un même mot pour deux choses
+    # sur la même commande aurait fini par tromper quelqu'un.
     output: Annotated[
-        Path, typer.Option("--output", help="Fichier JSON : la sortie produite par l'hôte pour le node courant.")
+        Path, typer.Option("--result", help="Fichier JSON : la sortie produite par l'hôte pour le node courant.")
     ],
     project_root: _PROJECT_ROOT = Path(),
 ) -> None:

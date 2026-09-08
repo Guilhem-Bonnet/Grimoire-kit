@@ -51,7 +51,7 @@ def test_flow_run_then_resume_then_status_json(tmp_path: Path) -> None:
     output_file.write_text(json.dumps({"pins": {"out": {"contract": "c1"}}}), encoding="utf-8")
     result = runner.invoke(
         app,
-        ["--output", "json", "flow", "resume", run_id, "--output", str(output_file), "--project-root", str(tmp_path)],
+        ["--output", "json", "flow", "resume", run_id, "--result", str(output_file), "--project-root", str(tmp_path)],
     )
     assert result.exit_code == 0, result.output
     resumed = json.loads(result.output)
@@ -64,7 +64,7 @@ def test_flow_run_then_resume_then_status_json(tmp_path: Path) -> None:
     b_output_file.write_text(json.dumps({"pins": {}}), encoding="utf-8")
     result = runner.invoke(
         app,
-        ["--output", "json", "flow", "resume", run_id, "--output", str(b_output_file), "--project-root", str(tmp_path)],
+        ["--output", "json", "flow", "resume", run_id, "--result", str(b_output_file), "--project-root", str(tmp_path)],
     )
     assert result.exit_code == 0, result.output
     resumed = json.loads(result.output)
@@ -86,7 +86,7 @@ def test_flow_resume_refuses_non_conforming_output_with_nonzero_exit(tmp_path: P
     bad_output.write_text(json.dumps({"pins": {"out": {"contract": "faux"}}}), encoding="utf-8")
     result = runner.invoke(
         app,
-        ["--output", "json", "flow", "resume", run_id, "--output", str(bad_output), "--project-root", str(tmp_path)],
+        ["--output", "json", "flow", "resume", run_id, "--result", str(bad_output), "--project-root", str(tmp_path)],
     )
     assert result.exit_code == 1
     body = json.loads(result.output)

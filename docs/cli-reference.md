@@ -459,7 +459,7 @@ seconde sortie, il ne retire rien.
 | --- | --- |
 | `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
 | `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
-| `grimoire flow resume <run-id> --output <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
+| `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
 
 Un checkpoint par node : un run interrompu reprend exactement au node
