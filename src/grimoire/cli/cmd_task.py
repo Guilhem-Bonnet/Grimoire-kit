@@ -673,3 +673,111 @@ def task_trace_export(
     ledger = TraceLedger(root / TRACES_DIR)
     count = ledger.export_otel_jsonl(dest, mission_id=mission_id) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
     console.print(f"[green]OK[/green] {count} trace(s) exportée(s) au format {fmt} → {dest}")
+
+
+# ── Dispatch par cascade (issue #323) ─────────────────────────────────────────
+# Le lot 3 attend le moteur de flow (#204). En attendant, la topologie hybride
+# de l'épic — l'hôte tient la session, le kit remet une tranche de travail à un
+# exécuteur puis applique le gate — se livre ici au niveau d'une tâche unique,
+# en croisant la classe de vérifiabilité (#309) et le registre par palier de
+# coût (#310). Pas de juge LLM, pas de worktree automatique : l'utilisateur
+# travaille sur une branche propre, et c'est un `--check` mécanique qui décide.
+
+_VERDICT_ICON: dict[str, str] = {
+    "green": "[green]vert[/green]",
+    "red": "[red]rouge[/red]",
+    "rate_limit": "[yellow]limite/429[/yellow]",
+    "timeout": "[yellow]timeout[/yellow]",
+}
+
+
+def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        raise typer.Exit(report.exit_code)
+
+    if report.refusal is not None:
+        console.print(f"[red]✗[/red] {report.task_id} — {report.refusal_message}")
+        raise typer.Exit(report.exit_code)
+
+    if report.dry_run:
+        console.print(f"[bold]{report.task_id}[/bold] — vérifiabilité {report.verifiability}")
+        console.print(f"  chaîne prévue : {' → '.join(report.planned_chain)}")
+        console.print("  [dim]" + escape(report.prompt).replace("\n", "\n  ") + "[/dim]")
+        raise typer.Exit(0)
+
+    for attempt in report.attempts:
+        icon = _VERDICT_ICON.get(attempt.verdict, attempt.verdict)
+        console.print(
+            f"  [{attempt.attempt}] {attempt.tier:6} {attempt.provider}/{attempt.model} "
+            f"— {icon} [dim]({attempt.duration_s:.1f}s)[/dim]"
+        )
+        for check in attempt.checks:
+            marque = "[green]OK[/green]" if check.ok else "[red]✗[/red]"
+            console.print(f"        {marque} {escape(check.cmd)}")
+
+    if report.succeeded:
+        console.print(f"[green]OK[/green] {report.task_id} — vert au bout de {len(report.attempts)} tentative(s)")
+        if report.transitioned_to:
+            console.print(f"[dim]transition : → {report.transitioned_to} (vérification requise, V1)[/dim]")
+        elif report.transition_refused:
+            console.print(f"[yellow]![/yellow] transition non appliquée : {report.transition_refused}")
+    else:
+        console.print(
+            f"[red]✗[/red] {report.task_id} — chaîne épuisée, {len(report.attempts)} tentative(s), aucun vert"
+        )
+    raise typer.Exit(report.exit_code)
+
+
+@task_app.command("dispatch")
+def task_dispatch(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    check: Annotated[
+        list[str] | None,
+        typer.Option("--check", help="Commande dont le code de sortie 0 vaut vert (répétable, toutes doivent l'être)."),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Montrer la classe, la chaîne et le prompt sans appeler.")
+    ] = False,
+    max_tier: Annotated[
+        str | None, typer.Option("--max-tier", help="Ne pas dépasser ce palier (cheap, mid, strong).")
+    ] = None,
+    provider: Annotated[str | None, typer.Option("--provider", help="Restreindre la cascade à ce fournisseur.")] = None,
+    timeout: Annotated[float, typer.Option("--timeout", help="Timeout d'un appel fournisseur, en secondes.")] = 600.0,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Délègue une tâche en cascade, du palier le moins cher au plus cher.
+
+    La classe de vérifiabilité décide qui a le droit d'appeler : une tâche V2
+    (aucun verdict mécanique ni revue reconnue) est refusée avant tout appel.
+    V0 cascade depuis `cheap` ; V1 cascade depuis `mid` et, au vert, passe la
+    tâche en `needs_verification` au lieu de la considérer close — le check
+    mécanique n'est ici qu'un indice, la classe exige encore un regard humain.
+
+    Sans `--check`, le dispatch est refusé : la classe dit que le verdict est
+    mécanique, encore faut-il dire lequel. Un fournisseur sans `invocation`
+    déclarée n'est jamais candidat.
+    """
+    from grimoire.missions.dispatch import run_dispatch
+    from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
+
+    if max_tier is not None and max_tier not in SUPPORTED_MODEL_TIERS:
+        console.print(f"[red]✗[/red] Palier inconnu : {max_tier} (attendu : {', '.join(SUPPORTED_MODEL_TIERS)})")
+        raise typer.Exit(2)
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    report = run_dispatch(
+        service,
+        task_id,
+        checks=tuple(check or ()),
+        max_tier=max_tier,
+        provider_id=provider,
+        dry_run=dry_run,
+        call_timeout=timeout,
+        actor=actor,
+    )
+    _emit_dispatch(ctx, report)

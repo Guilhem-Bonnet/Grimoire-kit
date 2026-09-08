@@ -286,6 +286,7 @@ prochain export l'écrase.
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
+| `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
@@ -337,6 +338,34 @@ GAO-livrer-la-ti-001 — Livrer la timeline  (running)
 
 Cause(s) d'arrêt : 3
 ```
+
+### Dispatch par cascade
+
+`grimoire task dispatch <id>` délègue une tâche à un fournisseur LLM du
+registre (`llm-provider-registry.yaml`), en cascadant par palier de coût
+(`cheap → mid → strong`) selon la classe de vérifiabilité de la tâche : une
+tâche **V2** est refusée avant tout appel (aucun verdict mécanique ne peut la
+juger), une **V0** cascade depuis `cheap`, une **V1** cascade depuis `mid` et,
+au vert, passe en `needs_verification` au lieu d'être considérée close — le
+check mécanique n'y est qu'un indice, la classe exige encore un regard
+humain. Au moins un `--check <commande>` est obligatoire (code de sortie 0 =
+vert, toutes doivent l'être) ; sans lui, la classe dit que le verdict est
+mécanique, encore faut-il dire lequel.
+
+Un échec d'appel (429, timeout, code de sortie non nul) passe au fournisseur
+suivant du même palier et pose un refroidissement (`grimoire providers
+status`) ; un `--check` rouge passe au palier suivant. Chaque tentative laisse
+un événement `task.dispatched` au Mission Ledger (palier, fournisseur,
+modèle, durée, verdict, coût si la sortie est un JSON portant
+`total_cost_usd`). `--dry-run` montre la classe, la chaîne de paliers prévue
+et le prompt sans rien appeler ; `--max-tier` borne la cascade ; `--provider`
+la restreint à un seul fournisseur.
+
+Code de sortie : `0` si la chaîne finit au vert, `1` si elle s'épuise sans
+verdict vert, `2` sur un refus (V2, aucun `--check`, aucun fournisseur
+invocable). Ce lot ne worktree pas automatiquement : **travaillez sur une
+branche propre** avant de dispatcher — le fournisseur délégué écrit dans le
+dépôt courant.
 
 ### Ce que le claim rappelle
 
