@@ -52,7 +52,7 @@ class TestFromBackend:
     def test_store_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         result = mgr.store("hello")
-        mock_backend.store.assert_called_once_with("hello", user_id="", tags=(), metadata=None)
+        mock_backend.store.assert_called_once_with("hello", user_id="", tags=(), metadata={"project_name": "grimoire", "source_kind": "memory"})
         assert result.text == "stored"
 
     def test_recall_delegates(self, mock_backend: MagicMock) -> None:
@@ -102,16 +102,30 @@ class TestFromBackend:
         assert result.text == "updated"
 
     def test_store_many_delegates(self, mock_backend: MagicMock) -> None:
+        """Le lot traverse la frontière de confiance, même sans enrichissement.
+
+        La provenance minimale (``project_name``, ``source_kind``) est posée par
+        le manager, pas exigée de l'appelant : c'est ce qui rend l'invariant vrai
+        sur tous les chemins sans casser les projections.
+
+        Ce test attendait une délégation brute : ``store_many`` court-circuitait
+        la normalisation quand ``auto_enrich`` était faux, ce qui en faisait un
+        chemin d'écriture non validé de plus (revue adversariale de la PR #324).
+        Le court-circuit a été retiré ; la forme normalisée est ce qui atteint le
+        backend.
+        """
         mgr = MemoryManager.from_backend(mock_backend)
         items = [{"text": "a"}, {"text": "b"}]
         results = mgr.store_many(items)
-        mock_backend.store_many.assert_called_once_with(items)
+        mock_backend.store_many.assert_called_once_with(
+            [{"text": "a", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory"}}, {"text": "b", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory"}}]
+        )
         assert len(results) == 2
 
     def test_store_with_tags_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         mgr.store("tagged", tags=("t1", "t2"))
-        mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata=None)
+        mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata={"project_name": "grimoire", "source_kind": "memory"})
 
 
 # ── auto-resolution ──────────────────────────────────────────────────────────

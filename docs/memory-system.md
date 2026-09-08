@@ -438,10 +438,75 @@ Sans ce lien, la politique de redaction restait une intention que rien
 n'exécutait.
 
 Un secret caviardé laisse sa trace dans les métadonnées de l'entrée
-(`redactions: ["aws-access-key-id"]`) : l'audit sait *qu'un* secret a été retiré
-sans jamais réécrire sa valeur. Les motifs, leurs cas positifs et leurs cas
-négatifs sont dans `tests/unit/memory/test_write_validation.py` ; le taux de
-faux positifs mesuré sur le corpus négatif est nul.
+(`redactions: ["aws-access-key-id", "metadata:note"]`) : l'audit sait *qu'un*
+secret a été retiré, et *où*, sans jamais réécrire sa valeur. La redaction porte
+sur le texte **et** sur les valeurs de chaîne des métadonnées, récursivement.
+Les motifs, leurs cas positifs et leurs cas négatifs sont dans
+`tests/unit/memory/test_write_validation.py` ; le taux de faux positifs mesuré
+sur le corpus négatif est nul.
+
+### Tous les chemins d'écriture, pas seulement `store()`
+
+`store()`, `remember()`, `upsert()`, `store_many()` et `update()` passent par la
+même porte (`MemoryManager._validated`). C'est ce qui manquait au premier jet :
+`remember()` — le chemin de `grimoire memory remember` et de
+`missions/recall.py` — écrivait directement dans le backend, et une clé AWS
+comme un « ignore all previous instructions » s'y stockaient sans refus. Un
+garde qu'un seul chemin sur cinq traverse n'est pas un garde.
+
+`store_many()` est tout-ou-rien : un refus arrête le lot entier plutôt que
+d'écrire les survivantes et de signaler un succès partiel.
+
+La provenance minimale (`project_name`, `source_kind`) est **posée par le
+manager**, pas exigée de l'appelant : un manager construit par `from_backend`
+n'enrichit pas, et la lui demander reviendrait à refuser les projections
+légitimes.
+
+### Contenu écrit contre contenu dérivé
+
+| `content_origin` | Ce que c'est | Motif de consigne détecté |
+|---|---|---|
+| `authored` (défaut) | prose écrite par un humain, un agent ou un outil | **refus** |
+| `derived` | texte dérivé de fichiers déjà présents dans le dépôt (projections de code, de docs, de tâches) | **journalisé**, écriture acceptée |
+
+Refuser un chunk de code parce qu'un fichier du dépôt contient `## Instructions :`
+reviendrait à refuser d'indexer le dépôt ; et le vecteur d'empoisonnement est
+alors le fichier — relu en diff — pas l'écriture mémoire. Mesuré sur ce dépôt :
+3 fichiers sur 342 déclenchent un motif de consigne, tous en prose de
+documentation. Le schéma et la redaction, eux, s'appliquent identiquement.
+
+### Normalisation, et ce qu'elle ne couvre pas
+
+Les motifs lisent des caractères : un espace de largeur nulle au milieu de
+« instructions », ou un « ｉ » pleine chasse, les traversent tous. Six évasions
+sur six passaient avant. Le texte est donc normalisé **avant** le passage des
+motifs, et c'est le texte normalisé qui est stocké — une mémoire qui contient un
+caractère de formatage invisible est déjà une mémoire piégée :
+
+- NFKC (homoglyphes de compatibilité, pleine chasse, ligatures) ;
+- suppression de la catégorie Unicode `Cf` (largeur nulle, marques
+  bidirectionnelles, trait d'union conditionnel) ;
+- espaces exotiques (insécable, insécable étroite, cadratin…) ramenés à l'espace.
+
+`redact_secrets()` et `instruction_like()` normalisent eux aussi : un appelant
+direct de ces primitives ne doit pas hériter d'une passoire.
+
+Un secret que seul le dépliage des sauts de ligne fait apparaître est **refusé**
+(`memory.obfuscated_secret`) plutôt que caviardé à moitié : le réécrire
+supposerait des positions qui n'existent que dans une vue normalisée.
+
+**Limites connues**, documentées plutôt que tues — une détection par motifs ne
+les couvre pas et ne prétend pas les couvrir :
+
+- translittération (`1gnore`, `ign0re`), synonymie, traduction ;
+- homoglyphes hors décomposition NFKC (cyrillique `а` U+0430 pour `a`) ;
+- secret réparti sur plusieurs écritures successives, qu'aucune inspection d'une
+  écriture isolée ne peut voir ;
+- contenu encodé (base64, rot13) reconstitué à la lecture.
+
+Cette couche est de la défense en profondeur, pas une frontière étanche : elle
+tient parce que le schéma, la redaction et le refus se superposent, pas parce
+qu'un motif serait exhaustif.
 
 ## Couche chaude Redis
 

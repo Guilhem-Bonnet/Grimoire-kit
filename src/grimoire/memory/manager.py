@@ -28,7 +28,7 @@ from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
-from grimoire.memory.validation import MemoryWritePolicy, validate_memory_write
+from grimoire.memory.validation import MemoryWritePolicy, ValidatedWrite, validate_memory_write
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +379,42 @@ class MemoryManager:
             tags=tags,
         )
 
+    def _validated(
+        self,
+        text: str,
+        *,
+        user_id: str,
+        tags: tuple[str, ...],
+        metadata: dict[str, Any] | None,
+        emitter: str = "",
+        content_origin: str = "authored",
+    ) -> ValidatedWrite:
+        """Enrichir puis valider — l'unique porte de tous les chemins d'écriture.
+
+        ``store``, ``remember``, ``upsert``, ``store_many`` et ``update``
+        passent tous par ici. La revue adversariale de la PR #324 a montré
+        pourquoi : ``store`` validait, ``remember`` non, et ``remember`` est le
+        chemin de ``grimoire memory remember`` et de ``missions/recall.py`` — une
+        clé AWS et un « ignore all previous instructions » s'y stockaient sans
+        refus. Un garde qu'un seul chemin sur cinq traverse n'est pas un garde.
+        """
+        normalized = self._prepare_metadata(metadata, user_id=user_id, tags=tags)
+        # La provenance est une garantie du manager, pas une exigence faite aux
+        # appelants : un manager construit par `from_backend` n'enrichit pas, et
+        # exiger de lui les champs que l'enrichissement pose reviendrait à
+        # refuser les projections légitimes. On les pose donc ici, de sorte que
+        # toute écriture passée par le manager porte sa provenance.
+        stamped = dict(normalized or {})
+        stamped.setdefault("project_name", self._project_name or "grimoire")
+        stamped.setdefault("source_kind", "memory")
+        return validate_memory_write(
+            text,
+            metadata=stamped,
+            emitter=emitter,
+            policy=self._write_policy,
+            content_origin=content_origin,
+        )
+
     def store(
         self,
         text: str,
@@ -387,6 +423,7 @@ class MemoryManager:
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
         emitter: str = "",
+        content_origin: str = "authored",
     ) -> MemoryEntry:
         """Écrire une mémoire, après la frontière de confiance.
 
@@ -397,12 +434,9 @@ class MemoryManager:
         redaction, quand la politique du projet la déclare ``required``,
         s'exécute ici et laisse sa trace dans les métadonnées.
         """
-        normalized = self._prepare_metadata(metadata, user_id=user_id, tags=tags)
-        validated = validate_memory_write(
-            text,
-            metadata=normalized,
-            emitter=emitter,
-            policy=self._write_policy,
+        validated = self._validated(
+            text, user_id=user_id, tags=tags, metadata=metadata,
+            emitter=emitter, content_origin=content_origin,
         )
         entry = self._backend.store(
             validated.text, user_id=user_id, tags=tags, metadata=validated.metadata
@@ -496,7 +530,8 @@ class MemoryManager:
             raise GrimoireMemoryError(msg)
         entry_id = self.typed_entry_id(agent, text)
         metadata = {"type": type_, "agent": agent, "dedup_key": entry_id}
-        normalized = self._prepare_metadata(metadata, user_id=agent, tags=tags)
+        validated = self._validated(text, user_id=agent, tags=tags, metadata=metadata, emitter="agent")
+        text, normalized = validated.text, validated.metadata
         try:
             entry = self._backend.upsert(entry_id, text, user_id=agent, tags=tags, metadata=normalized)
         except NotImplementedError:
@@ -650,9 +685,15 @@ class MemoryManager:
         return deleted
 
     def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
+        """Modifier une entrée — même frontière que la créer.
+
+        Une écriture qui remplace le texte d'une mémoire existante est une
+        écriture : la valider seulement à la création laisserait la porte de
+        derrière ouverte.
+        """
+        existing = self._backend.recall(entry_id) if (metadata is not None or text is not None) else None
         normalized = metadata
         if self._auto_enrich and metadata is not None:
-            existing = self._backend.recall(entry_id)
             merged = dict(existing.metadata) if existing is not None else {}
             merged.update(metadata)
             normalized = self._prepare_metadata(
@@ -660,6 +701,19 @@ class MemoryManager:
                 user_id=existing.user_id if existing is not None else "",
                 tags=tags or (existing.tags if existing is not None else ()),
             )
+        if text is not None:
+            validated = validate_memory_write(
+                text, metadata=normalized, policy=self._write_policy,
+            )
+            text, normalized = validated.text, validated.metadata
+        elif normalized is not None:
+            validated_meta = validate_memory_write(
+                existing.text if existing is not None else "état inchangé",
+                metadata=normalized,
+                policy=self._write_policy,
+                content_origin="derived",
+            )
+            normalized = validated_meta.metadata
         updated = self._backend.update(entry_id, text=text, tags=tags, metadata=normalized)
         if updated is not None:
             self._sync_memory(updated)
@@ -673,8 +727,12 @@ class MemoryManager:
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        content_origin: str = "authored",
     ) -> MemoryEntry:
-        normalized = self._prepare_metadata(metadata, user_id=user_id, tags=tags)
+        validated = self._validated(
+            text, user_id=user_id, tags=tags, metadata=metadata, content_origin=content_origin,
+        )
+        text, normalized = validated.text, validated.metadata
         try:
             entry = self._backend.upsert(entry_id, text, user_id=user_id, tags=tags, metadata=normalized)
         except NotImplementedError as exc:
@@ -682,20 +740,31 @@ class MemoryManager:
         self._sync_memory(entry)
         return entry
 
-    def store_many(self, entries: list[dict[str, Any]]) -> list[MemoryEntry]:
-        if not self._auto_enrich:
-            results = self._backend.store_many(entries)
-            self._sync_memories(results)
-            return results
+    def store_many(
+        self, entries: list[dict[str, Any]], *, content_origin: str = "authored"
+    ) -> list[MemoryEntry]:
+        """Écriture en lot. Un seul refus arrête le lot entier.
 
+        Valider entrée par entrée puis écrire les survivantes laisserait passer
+        un lot à moitié empoisonné en signalant un succès partiel : sur une
+        frontière de confiance, tout ou rien.
+        """
         normalized_entries: list[dict[str, Any]] = []
         for entry in entries:
             tags = tuple(entry.get("tags", ()))
             user_id = str(entry.get("user_id", ""))
+            validated = self._validated(
+                str(entry.get("text", "")),
+                user_id=user_id,
+                tags=tags,
+                metadata=entry.get("metadata"),
+                content_origin=content_origin,
+            )
             normalized_entries.append({
                 **entry,
+                "text": validated.text,
                 "tags": list(tags),
-                "metadata": self._prepare_metadata(entry.get("metadata"), user_id=user_id, tags=tags),
+                "metadata": validated.metadata,
             })
         results = self._backend.store_many(normalized_entries)
         self._sync_memories(results)

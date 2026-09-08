@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,14 +43,32 @@ from grimoire.core.exceptions import GrimoireMemoryError
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CONTENT_ORIGINS",
     "MAX_METADATA_BYTES",
     "MAX_TEXT_BYTES",
     "MemoryWritePolicy",
     "MemoryWriteRefusedError",
     "ValidatedWrite",
+    "normalize_for_storage",
+    "redact_metadata",
     "redact_secrets",
     "validate_memory_write",
 ]
+
+#: D'où vient le texte écrit.
+#:
+#: ``authored`` — prose écrite par un humain, un agent ou un outil : c'est la
+#: surface d'empoisonnement, un contenu qui se donne pour une consigne y est
+#: **refusé**.
+#:
+#: ``derived`` — texte dérivé de fichiers déjà présents dans le dépôt
+#: (projections de code, de docs, de tâches). Refuser reviendrait à refuser
+#: d'indexer le dépôt lui-même, et le vecteur d'empoisonnement est alors le
+#: fichier — relu en diff — pas l'écriture mémoire. Le constat est **journalisé**
+#: au lieu d'être opposé ; le schéma et la redaction, eux, s'appliquent
+#: identiquement. Mesuré sur ce dépôt : 3 fichiers sur 342 déclenchent un motif
+#: de consigne, tous en prose de documentation.
+CONTENT_ORIGINS: tuple[str, ...] = ("authored", "derived")
 
 #: Taille maximale d'un texte mémorisé, en octets UTF-8. Trente-deux kilo-octets
 #: est déjà dix fois la plus grosse mémoire écrite par le kit ; au-delà, ce n'est
@@ -75,6 +94,13 @@ ALLOWED_MEMORY_TYPES: frozenset[str] = frozenset({
     # standard agentique
     "session", "task", "project", "workspace", "organization", "procedural",
     "semantic", "episodic", "long_term", "external_knowledge_cache",
+    # projections déterministes (grimoire.memory.projections) — un vocabulaire
+    # distinct, celui du contenu dérivé du dépôt. Sa dérive est surveillée par
+    # `test_le_vocabulaire_des_projections_ne_derive_pas`, qui relit les
+    # littéraux de projections.py : un type inventé là-bas ferait échouer chaque
+    # projection sans que rien ne dise pourquoi.
+    "code_chunk", "code_contract", "code_method", "code_symbol", "code_test",
+    "docs_page", "evidence_pack", "incident", "ledger_event", "mission", "verdict",
 })
 
 #: Émetteurs connus du kit. ``unspecified`` y figure sciemment : le retirer
@@ -118,7 +144,11 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 #: Refusés, jamais caviardés : caviarder laisserait la forme et retirerait la
 #: preuve.
 _INSTRUCTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("chat-template-marker", re.compile(r"<\|\s*(?:im_start|im_end|system|endoftext)\s*\|>", re.IGNORECASE)),
+    # Les chevrons sont optionnels : NFKC replie « ｜ » sur « | », et une variante
+    # sans chevrons traversait la première version. Pas d'espace toléré entre les
+    # barres et le mot, sinon une ligne de tableau Markdown « | system | »
+    # deviendrait un motif de consigne.
+    ("chat-template-marker", re.compile(r"<?\|(?:im_start|im_end|system|endoftext)\|>?", re.IGNORECASE)),
     ("inst-marker", re.compile(r"\[/?INST\]|<<SYS>>")),
     ("role-header", re.compile(r"(?im)^\s*(?:#{1,6}\s*)?(?:system|assistant|instruction)s?\s*:", re.UNICODE)),
     ("override-en", re.compile(
@@ -218,14 +248,122 @@ class ValidatedWrite:
     warnings: tuple[str, ...] = field(default=())
 
 
+# ── Normalisation ─────────────────────────────────────────────────────────────
+#
+# Les motifs ci-dessus lisent des caractères. Un attaquant qui insère un espace
+# de largeur nulle au milieu de « instructions », ou qui écrit « ｉ » plein-chasse
+# à la place de « i », les traverse tous — six évasions sur six lors de la revue
+# adversariale de la PR #324. La normalisation court donc **avant** le passage
+# des motifs, et sur le texte qui sera réellement stocké : une mémoire qui
+# contient un caractère de formatage invisible est déjà une mémoire piégée.
+#
+# Limites connues, documentées plutôt que tues — une détection par motifs ne
+# les couvre pas et ne prétend pas les couvrir :
+#
+# - translittération (« 1gnore », « ign0re »), synonymie, traduction ;
+# - homoglyphes hors décomposition NFKC (cyrillique « а » U+0430 pour « a ») ;
+# - secret réparti sur plusieurs écritures successives, qu'aucune inspection
+#   d'une écriture isolée ne peut voir ;
+# - encodage du contenu (base64, rot13) reconstitué à la lecture.
+#
+# Ce module est une couche de défense en profondeur, pas une frontière
+# étanche : la frontière tient parce que la redaction, le schéma et le refus se
+# superposent, pas parce qu'un motif serait exhaustif.
+
+#: Espaces exotiques ramenés à l'espace ordinaire. NFKC en normalise une partie,
+#: pas l'insécable ni l'insécable étroite.
+_SPACE_LOOKALIKES = dict.fromkeys(
+    map(ord, "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+             "\u2008\u2009\u200a\u202f\u205f\u3000"),
+    " ",
+)
+
+#: Séparateur de jeton replié : un saut de ligne entre deux fragments longs de
+#: caractères de jeton. Sert uniquement à la *détection*, jamais au stockage.
+_WRAPPED_TOKEN = re.compile(r"([A-Za-z0-9_\-+/=.~]{6,})\s*\n\s*([A-Za-z0-9_\-+/=.~]{6,})")
+
+
+def normalize_for_storage(text: str) -> tuple[str, tuple[str, ...]]:
+    """Nettoyer le texte avant tout examen, et renvoyer ce qui a été nettoyé.
+
+    NFKC replie les homoglyphes de compatibilité (pleine chasse, ligatures), la
+    catégorie Unicode ``Cf`` retire les caractères de formatage invisibles
+    (largeur nulle, marques bidirectionnelles, trait d'union conditionnel), et
+    les espaces exotiques redeviennent des espaces. Le texte renvoyé est celui
+    qui sera stocké : normaliser pour détecter puis stocker l'original
+    reviendrait à stocker exactement ce qu'on vient de juger piégé.
+    """
+    applied: list[str] = []
+    folded = unicodedata.normalize("NFKC", text)
+    if folded != text:
+        applied.append("nfkc")
+    stripped = "".join(ch for ch in folded if unicodedata.category(ch) != "Cf")
+    if stripped != folded:
+        applied.append("format-characters")
+    spaced = stripped.translate(_SPACE_LOOKALIKES)
+    if spaced != stripped:
+        applied.append("space-lookalikes")
+    return spaced, tuple(applied)
+
+
+def _unfolded(text: str) -> str:
+    """Vue de détection où un jeton coupé par un saut de ligne est recollé."""
+    previous = None
+    current = text
+    # Un jeton peut être coupé plusieurs fois ; deux passes suffisent en
+    # pratique, la boucle borne le cas pathologique.
+    for _ in range(4):
+        if current == previous:
+            break
+        previous = current
+        current = _WRAPPED_TOKEN.sub(r"\1\2", current)
+    return current
+
+
+def redact_metadata(metadata: Any, *, _path: str = "metadata") -> tuple[Any, tuple[str, ...]]:
+    """Caviarder récursivement les valeurs de chaîne d'un mapping de métadonnées.
+
+    La redaction ne portait que sur ``text`` : un secret déposé dans
+    ``metadata["note"]`` traversait intact (revue adversariale de la PR #324).
+    Les étiquettes renvoyées nomment le chemin, pas la valeur.
+    """
+    hits: list[str] = []
+    if isinstance(metadata, str):
+        redacted, labels = redact_secrets(metadata)
+        return redacted, ((f"{_path}",) if labels else ())
+    if isinstance(metadata, dict):
+        out: dict[Any, Any] = {}
+        for key, value in metadata.items():
+            # Notre propre trace de redaction n'est pas à re-caviarder.
+            if key == "redactions":
+                out[key] = value
+                continue
+            out[key], found = redact_metadata(value, _path=f"{_path}:{key}")
+            hits.extend(found)
+        return out, tuple(hits)
+    if isinstance(metadata, list):
+        out_list = []
+        for index, value in enumerate(metadata):
+            item, found = redact_metadata(value, _path=f"{_path}[{index}]")
+            out_list.append(item)
+            hits.extend(found)
+        return out_list, tuple(hits)
+    return metadata, ()
+
+
 def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     """Caviarder les secrets reconnus ; renvoyer le texte et les étiquettes vues.
 
     Le remplacement est ``[redacted:<étiquette>]`` : la trace dit *quel type*
     de secret a été retiré, jamais sa valeur.
+
+    La normalisation court **ici**, pas seulement dans
+    :func:`validate_memory_write` : un appelant direct de cette fonction ne doit
+    pas hériter d'une passoire. Elle est idempotente, donc l'appel depuis le
+    chemin d'écriture ne la refait pas payer deux fois.
     """
     hits: list[str] = []
-    redacted = text
+    redacted, _ = normalize_for_storage(text)
     for label, pattern in _SECRET_PATTERNS:
         redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
         if count:
@@ -234,9 +372,15 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
 
 
 def instruction_like(text: str) -> str:
-    """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide."""
+    """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
+
+    Normalise avant de chercher, pour la même raison que :func:`redact_secrets` :
+    un espace de largeur nulle au milieu de « instructions » traversait les sept
+    motifs, et un appelant direct doit être couvert comme le chemin d'écriture.
+    """
+    normalized, _ = normalize_for_storage(text)
     for label, pattern in _INSTRUCTION_PATTERNS:
-        if pattern.search(text):
+        if pattern.search(normalized):
             return label
     return ""
 
@@ -247,29 +391,50 @@ def validate_memory_write(
     metadata: dict[str, Any] | None = None,
     emitter: str = "",
     policy: MemoryWritePolicy | None = None,
+    content_origin: str = "authored",
 ) -> ValidatedWrite:
     """Valider une écriture mémoire, et renvoyer ce qu'il faut écrire.
 
-    Lève :class:`MemoryWriteRefusedError` — jamais une exception anonyme — dès qu'une
-    règle du schéma est violée. Retourne le texte éventuellement caviardé et les
-    métadonnées augmentées de la trace de redaction.
+    Lève :class:`MemoryWriteRefusedError` — jamais une exception anonyme — dès
+    qu'une règle du schéma est violée. Retourne le texte normalisé et
+    éventuellement caviardé, et les métadonnées caviardées puis augmentées de la
+    trace de redaction.
+
+    ``content_origin`` distingue la prose écrite (``authored``, refus du contenu
+    qui se donne pour une consigne) du texte dérivé de fichiers du dépôt
+    (``derived``, constat journalisé) — voir :data:`CONTENT_ORIGINS`.
     """
     active = policy or MemoryWritePolicy()
     resolved_emitter = (emitter or "").strip() or "unspecified"
+    if content_origin not in CONTENT_ORIGINS:
+        raise MemoryWriteRefusedError(
+            "memory.content_origin_unknown",
+            f"Refusé : content_origin {content_origin!r} inconnue, attendu l'une de {', '.join(CONTENT_ORIGINS)}.",
+            remedy="Écrire par MemoryManager, qui déclare l'origine du contenu.",
+        )
     if not active.enabled:
         return ValidatedWrite(text=text, metadata=metadata, emitter=resolved_emitter)
 
     _check_text_schema(text, active)
+    # Normaliser d'abord : les motifs lisent des caractères, et un espace de
+    # largeur nulle au milieu d'un mot leur échappe tous.
+    normalized_text, applied = normalize_for_storage(text)
     normalized = _check_metadata_schema(metadata, active)
 
     if active.refuse_instruction_like_content:
-        label = instruction_like(text)
-        if label:
+        label = instruction_like(normalized_text) or instruction_like(_unfolded(normalized_text))
+        if label and content_origin == "authored":
             raise MemoryWriteRefusedError(
                 "memory.instruction_like_content",
                 f"Refusé : le texte porte un motif de consigne ({label}). "
                 "Une mémoire est une donnée, pas un tour système.",
                 remedy="Reformuler en énoncé factuel, ou citer le texte comme extrait attribué à sa source.",
+            )
+        if label:
+            logger.warning(
+                "memory.instruction_like_in_derived_content: motif %r dans un contenu dérivé du dépôt "
+                "(écriture acceptée, le fichier source est le vecteur, pas cette écriture)",
+                label,
             )
 
     recognized = resolved_emitter in active.allowed_emitters
@@ -288,10 +453,14 @@ def validate_memory_write(
             resolved_emitter,
         )
 
-    final_text = text
+    final_text = normalized_text
     redactions: tuple[str, ...] = ()
     if active.redaction == "required":
-        final_text, redactions = redact_secrets(text)
+        final_text, redactions = redact_secrets(normalized_text)
+        _refuse_obfuscated_secret(final_text)
+        if normalized is not None:
+            normalized, meta_hits = redact_metadata(normalized)
+            redactions = (*redactions, *meta_hits)
         if redactions:
             logger.warning("memory.redaction_applied: %s", ", ".join(redactions))
             if normalized is None:
@@ -304,7 +473,25 @@ def validate_memory_write(
         redactions=redactions,
         emitter=resolved_emitter,
         emitter_recognized=recognized,
+        warnings=applied,
     )
+
+
+def _refuse_obfuscated_secret(redacted_text: str) -> None:
+    """Refuser un secret que seul le dépliage des sauts de ligne fait apparaître.
+
+    Le caviarder proprement supposerait de réécrire le texte à des positions qui
+    n'existent que dans une vue normalisée : on refuserait à moitié. Un refus
+    nommé vaut mieux qu'un demi-secret stocké.
+    """
+    remaining, hidden = redact_secrets(_unfolded(redacted_text))
+    if hidden and remaining != _unfolded(redacted_text):
+        raise MemoryWriteRefusedError(
+            "memory.obfuscated_secret",
+            f"Refusé : un secret ({', '.join(hidden)}) n'apparaît qu'une fois les sauts de ligne repliés. "
+            "Le caviarder proprement supposerait de réécrire le texte à des positions qui n'existent pas.",
+            remedy="Retirer le secret du texte, et mémoriser sa référence (nom de variable, coffre) plutôt que sa valeur.",
+        )
 
 
 # ── Détail ────────────────────────────────────────────────────────────────────
