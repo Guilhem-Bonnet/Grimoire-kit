@@ -229,13 +229,23 @@ faire : la persona d'entrée est alors remise à la boucle principale par le hoo
 
 Le groupe `grimoire providers` croise le registre déclaratif
 (`llm-provider-registry.yaml`, voir [Compatibilité multi-provider](standard/integration.md#compatibilité-multi-provider-llm))
-et l'état de refroidissement runtime pour répondre à : quel fournisseur
+et l'état de refroidissement/audit runtime pour répondre à : quel fournisseur
 appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 
 | Commande | Description |
 | --- | --- |
-| `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité, prochain choix |
+| `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
+| `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
 | `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+
+`providers audit` ne fait jamais l'appel réel : présence du premier mot de
+`invocation` sur le `PATH`, `--version` pour un exécutable reconnu (claude,
+gemini, copilot, codex, ollama), et pour un fournisseur local (invocation
+`ollama ...` ou `provider_type: local`) la liste des modèles via
+`GET /api/tags` (hôte surchargeable par `OLLAMA_HOST`, timeout 3 s). Un
+fournisseur jugé `available: false` est écarté par `choose`/`candidates`
+jusqu'au prochain audit qui le retrouve — l'audit n'active ni ne désactive
+jamais un fournisseur, `enabled` reste une décision de gouvernance.
 
 ## Standard agentique gouverné
 

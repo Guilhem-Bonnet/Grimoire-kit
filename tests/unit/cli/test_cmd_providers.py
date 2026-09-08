@@ -120,3 +120,41 @@ def test_status_on_project_without_registry_does_not_crash(tmp_path: Path) -> No
     result = runner.invoke(app, ["providers", "status", "--project-root", str(tmp_path)])
 
     assert result.exit_code == 0, result.stdout
+
+
+# ── `grimoire providers audit` (issue #330) ───────────────────────────────
+
+
+def test_audit_json_marks_missing_executable_unavailable(tmp_path: Path, monkeypatch) -> None:
+    root = _project(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # `anthropic` (claude) reste absent du PATH ; `ollama` (local) y est —
+    # seul anthropic doit basculer `available: false`.
+    fake_ollama = bin_dir / "ollama"
+    fake_ollama.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_ollama.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+    result = runner.invoke(app, ["providers", "audit", "--project-root", str(root), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    anthropic = next(p for p in payload["providers"] if p["id"] == "anthropic")
+    local = next(p for p in payload["providers"] if p["id"] == "local")
+    assert anthropic["available"] is False
+    assert local["available"] is True
+
+    status_result = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    status_payload = json.loads(status_result.stdout)
+    anthropic_status = next(p for p in status_payload["providers"] if p["id"] == "anthropic")
+    assert anthropic_status["available"] is False
+    assert anthropic_status["probed_at"] is not None
+    # anthropic est désormais indisponible : `local` prend sa place.
+    assert status_payload["next_choice"]["cheap"] == "local"
+
+
+def test_audit_on_project_without_registry_does_not_crash(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["providers", "audit", "--project-root", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
