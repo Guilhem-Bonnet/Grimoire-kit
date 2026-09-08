@@ -130,6 +130,94 @@ def test_tool_mediation_blocked_by_mediator(kernel, tmp_path):
     assert k.mediate_tool("shell", {}, ctx, wfi.id) is False
 
 
+# --- B11 : plafonds MAST par instance (tours/appels d'outils médiés + budget) ---
+
+
+def test_create_instance_has_default_caps(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    assert wfi.max_tool_calls > 0
+    assert wfi.max_budget > 0
+    assert wfi.tool_calls_used == 0
+    assert wfi.budget_used == 0
+
+
+def test_create_instance_accepts_custom_caps(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=3, max_budget=30)
+    assert wfi.max_tool_calls == 3
+    assert wfi.max_budget == 30
+
+
+def test_mediate_tool_counts_calls_and_stays_running_under_cap(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=2, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    assert kernel.mediate_tool("filesystem.read", {}, ctx, wfi.id) is True
+    updated = kernel.get_instance(wfi.id)
+    assert updated.tool_calls_used == 1
+    assert updated.status == WorkflowStatus.RUNNING
+
+
+def test_mediate_tool_refuses_when_tool_call_cap_exceeded(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=2, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    assert kernel.mediate_tool("filesystem.read", {}, ctx, wfi.id) is True
+    assert kernel.mediate_tool("filesystem.read", {}, ctx, wfi.id) is True
+    # Third call exceeds the cap of 2 mediated tool calls.
+    assert kernel.mediate_tool("filesystem.read", {}, ctx, wfi.id) is False
+    refused = kernel.get_instance(wfi.id)
+    assert refused.status == WorkflowStatus.REFUSED
+    assert refused.abort_reason
+
+
+def test_mediate_tool_refuses_when_budget_cap_exceeded(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=1000, max_budget=5)
+    kernel.start(wfi.id, ctx)
+    assert kernel.mediate_tool("shell", {}, ctx, wfi.id, cost=5) is True
+    # Budget is exhausted; one more unit of cost tips it over.
+    assert kernel.mediate_tool("shell", {}, ctx, wfi.id, cost=1) is False
+    refused = kernel.get_instance(wfi.id)
+    assert refused.status == WorkflowStatus.REFUSED
+
+
+def test_cap_refusal_writes_checkpoint_and_event(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=1, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    kernel.mediate_tool("t", {}, ctx, wfi.id)
+    kernel.mediate_tool("t", {}, ctx, wfi.id)  # exceeds the cap of 1
+    checkpoints = kernel.list_checkpoints(wfi.id)
+    assert checkpoints, "a checkpoint must be written when a cap refuses the instance"
+    events = kernel.get_run_events(wfi.id)
+    assert RunEventType.WORKFLOW_REFUSED in [e.event_type for e in events]
+
+
+def test_refused_is_a_terminal_status(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=0, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    kernel.mediate_tool("t", {}, ctx, wfi.id)  # immediately exceeds the cap of 0
+    refused = kernel.get_instance(wfi.id)
+    assert refused.status == WorkflowStatus.REFUSED
+    with pytest.raises(GrimoireRuntimeError, match="Invalid workflow transition"):
+        kernel.start(wfi.id, ctx)
+
+
+def test_mediate_tool_never_raises_after_refusal_and_stays_blocked(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=1, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    assert kernel.mediate_tool("t", {}, ctx, wfi.id) is True
+    assert kernel.mediate_tool("t", {}, ctx, wfi.id) is False  # cap hit -> refused
+    # Calling again on an already-refused instance must not raise nor silently allow.
+    assert kernel.mediate_tool("t", {}, ctx, wfi.id) is False
+    refused = kernel.get_instance(wfi.id)
+    assert refused.status == WorkflowStatus.REFUSED
+
+
 def test_list_instances_filter_by_task(kernel):
     ctx = _ctx()
     wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
