@@ -188,3 +188,31 @@ def test_export_import_roundtrip(ledger, tmp_path):
     imported = ledger2.import_jsonl(export_path)
     assert imported == count
     assert ledger2.get_mission(m.id) is not None
+
+
+def test_un_type_d_evenement_inconnu_du_replay_est_ignore_sans_casser(ledger, tmp_path):
+    """``task.dispatched`` (issue #323) n'a pas de branche dans ``_replay_events`` :
+    la projection ignore silencieusement ce qu'elle ne sait pas construire, elle
+    ne doit ni lever ni corrompre l'état des entités qu'elle connaît déjà."""
+    m = ledger.create_mission("M", origin="user")
+    t = ledger.create_task(m.id, "T", acceptance=("done",))
+    before = ledger.get_task(t.id)
+
+    ledger.append_event(
+        "task.dispatched",
+        t.id,
+        "task",
+        "cli",
+        {"task_id": t.id, "tier": "cheap", "provider": "p", "model": "m", "verdict": "green"},
+    )
+
+    # Reprojection à froid depuis une nouvelle instance : le rejeu doit passer
+    # sur l'événement inconnu sans lever, et la tâche doit rester ce qu'elle
+    # était — un type non reconnu ne doit ni la faire disparaître ni la muter.
+    reloaded = MissionLedger(tmp_path / "ledger")
+    after = reloaded.get_task(t.id)
+    assert after is not None
+    assert after.to_dict() == before.to_dict()
+    dispatched = [e for e in reloaded.list_events(t.id) if e.event_type == "task.dispatched"]
+    assert len(dispatched) == 1
+    assert dispatched[0].payload["verdict"] == "green"

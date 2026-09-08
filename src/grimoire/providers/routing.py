@@ -43,12 +43,15 @@ def _candidate_order(providers: tuple[ProviderSpec, ...], default_fallback_chain
     return order
 
 
-def choose(root: Path, tier: str, *, now: datetime | None = None) -> ProviderSpec | None:
-    """Premier fournisseur activé, disponible, et outillé pour *tier*.
+def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[ProviderSpec, ...]:
+    """Tous les fournisseurs activés, disponibles et outillés pour *tier*, dans l'ordre.
 
-    ``None`` si aucun ne convient — appelant fermé, pas d'exception : un
-    routeur de coût qui ne trouve personne doit pouvoir le dire tranquillement
-    (par exemple pour retomber sur un mode dégradé), pas planter le budget.
+    ``choose()`` ne rend que le premier ; une cascade de dispatch (issue #323)
+    a besoin de la liste entière pour retomber sur le suivant du même palier
+    après un échec d'appel, sans reconsulter le registre à chaque tentative.
+    Un fournisseur en refroidissement est absent de la liste — c'est la même
+    notion de « disponible maintenant » que ``choose()``, pas une politique
+    séparée qui pourrait diverger.
     """
     effective_now = now if now is not None else datetime.now(UTC)
     providers = read_registry(root)
@@ -56,6 +59,7 @@ def choose(root: Path, tier: str, *, now: datetime | None = None) -> ProviderSpe
     order = _candidate_order(providers, read_default_fallback_chain(root))
     state = load_state(root)
 
+    out: list[ProviderSpec] = []
     for provider_id in order:
         provider = by_id.get(provider_id)
         if provider is None or not provider.enabled:
@@ -65,5 +69,16 @@ def choose(root: Path, tier: str, *, now: datetime | None = None) -> ProviderSpe
         runtime = state.get(provider_id)
         if runtime is not None and runtime.is_cooling_down(now=effective_now):
             continue
-        return provider
-    return None
+        out.append(provider)
+    return tuple(out)
+
+
+def choose(root: Path, tier: str, *, now: datetime | None = None) -> ProviderSpec | None:
+    """Premier fournisseur activé, disponible, et outillé pour *tier*.
+
+    ``None`` si aucun ne convient — appelant fermé, pas d'exception : un
+    routeur de coût qui ne trouve personne doit pouvoir le dire tranquillement
+    (par exemple pour retomber sur un mode dégradé), pas planter le budget.
+    """
+    found = candidates(root, tier, now=now)
+    return found[0] if found else None

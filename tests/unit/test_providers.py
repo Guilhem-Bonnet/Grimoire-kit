@@ -18,7 +18,7 @@ import pytest
 from grimoire.core.agentic_standard import verify_standard_profile
 from grimoire.missions.gates import _resolve_provider_policy
 from grimoire.providers.registry import ProviderRegistryError, read_registry
-from grimoire.providers.routing import choose
+from grimoire.providers.routing import candidates, choose
 from grimoire.providers.state import load_state, record_failure, record_success, save_state
 
 STANDARD = Path("_grimoire/standard")
@@ -217,6 +217,37 @@ def test_choose_skips_disabled_provider(tmp_path: Path) -> None:
 
     assert chosen is not None
     assert chosen.id == "local"
+
+
+# ── candidates() : la liste complète, pour une cascade (issue #323) ──────
+
+
+def test_candidates_rend_tous_les_eligibles_dans_l_ordre_du_registre(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    found = candidates(tmp_path, "cheap")
+
+    assert [p.id for p in found] == ["anthropic", "local"]
+
+
+def test_candidates_est_le_sur_ensemble_dont_choose_rend_le_premier(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    found = candidates(tmp_path, "cheap")
+    picked = choose(tmp_path, "cheap")
+
+    assert picked is not None
+    assert found[0].id == picked.id
+
+
+def test_candidates_exclut_un_fournisseur_en_refroidissement(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    record_failure(tmp_path, "anthropic", "rate_limit", now=t0)
+
+    found = candidates(tmp_path, "cheap", now=t0 + timedelta(seconds=1))
+
+    assert [p.id for p in found] == ["local"]
 
 
 # ── Le critère d'arrêt : refroidissement puis reprise automatique ────────
