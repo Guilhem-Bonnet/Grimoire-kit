@@ -152,8 +152,30 @@ def test_aucun_secret_n_est_lu_ni_journalise(governed: Path) -> None:
     assert "SECRET_TOKEN" not in rendered
 
 
-def test_une_source_illisible_ne_fait_pas_tomber_la_verification(governed: Path) -> None:
+def test_une_source_illisible_est_signalee_pas_avalee(governed: Path) -> None:
+    """Fail-open relevé par la revue : le silence confondait « rien à déclarer »
+    avec « je n'ai pas pu regarder ». Avertissement dès `governed`."""
     (governed / ".mcp.json").write_text("{ ceci n'est pas du JSON", encoding="utf-8")
+    result = verify_standard_profile(governed)
+    found = [c for c in result.checks if c.id == "mediation.source_unreadable"]
+    assert found and found[0].severity == "warning"
+    assert ".mcp.json" in found[0].message
+    # Un avertissement ne bloque pas : la vérification reste exploitable.
+    assert not [c for c in result.checks if c.id == "mediation.source_unreadable" and c.severity == "error"]
+
+
+def test_une_source_illisible_est_une_erreur_en_production(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    (tmp_path / ".mcp.json").write_text("{ pas du JSON", encoding="utf-8")
+    result = verify_standard_profile(tmp_path)
+    found = [c for c in result.checks if c.id == "mediation.source_unreadable"]
+    assert found and found[0].severity == "error"
+    assert not result.ok
+
+
+def test_une_source_absente_reste_muette(governed: Path) -> None:
+    """Absente n'est pas cassée : un projet sans `.mcp.json` n'a rien à signaler."""
+    assert not (governed / ".mcp.json").exists()
     result = verify_standard_profile(governed)
     assert _ids(result) == []
 

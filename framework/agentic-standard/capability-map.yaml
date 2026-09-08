@@ -139,7 +139,7 @@ patterns:
     category: security
     artifacts: [hook_registry, rule_packs, tool_registry]
     rules: [tools.mediated-before-use]
-    checks: [mediation.server_undeclared, mediation.registry_stale, mediation.server_risk_missing, mediation.out_of_scope_without_reason]
+    checks: [mediation.server_undeclared, mediation.registry_stale, mediation.server_risk_missing, mediation.out_of_scope_without_reason, mediation.source_unreadable]
     tech_extras: [mcp]
     profile_min: governed
   provider-cost-slo:

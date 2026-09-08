@@ -128,6 +128,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "capabilities.promotion_unjustified": "hook_registry",
     "capabilities.status_unknown": "hook_registry",
     "mediation.out_of_scope_without_reason": "hook_registry",
+    "mediation.source_unreadable": "hook_registry",
     "mediation.registry_stale": "hook_registry",
     "mediation.server_risk_missing": "hook_registry",
     "mediation.server_undeclared": "hook_registry",

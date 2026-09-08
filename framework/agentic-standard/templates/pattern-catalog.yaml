@@ -167,7 +167,7 @@ patterns:
     required_artifacts: ["hook-registry.yaml", "rule-packs.yaml", "tool-registry.yaml"]
     rule_refs: ["tools.mediated-before-use"]
     hook_refs: ["tools.terminal-guard"]
-    check_refs: ["mediation.server_undeclared", "mediation.registry_stale", "mediation.server_risk_missing", "mediation.out_of_scope_without_reason"]
+    check_refs: ["mediation.server_undeclared", "mediation.registry_stale", "mediation.server_risk_missing", "mediation.out_of_scope_without_reason", "mediation.source_unreadable"]
   - id: provider-cost-slo
     category: provider
     maturity: production

@@ -290,6 +290,7 @@ Quatre façons d'échouer, erreur dès `governed`, avertissement en dessous :
 | `mediation.server_risk_missing` | il y est, sans risque |
 | `mediation.out_of_scope_without_reason` | il est mis hors périmètre sans motif |
 | `mediation.registry_stale` | le registre inscrit un serveur que plus aucune source ne résout |
+| `mediation.source_unreadable` | une source existe mais n'est pas du JSON valide — avertissement dès `governed`, erreur en `production` |
 
 Le dernier cas est ce qui empêche le registre d'être rempli une fois pour
 toutes : un registre périmé affirme une médiation qui n'a plus d'objet.
@@ -308,11 +309,16 @@ mcp_servers:
     out_of_scope_reason: "navigateur de test local, jamais appelé par un agent en production"
 ```
 
-La lecture des sources est tolérante et sans secret : un fichier absent,
-illisible ou malformé est ignoré — une vérification de conformité ne tombe pas
-parce que la configuration d'un autre outil est cassée — et seules les **clés**
-de `mcpServers` sont extraites. Les commandes, arguments et `env`, où vivent
-les jetons, ne sont ni lus ni journalisés.
+La lecture des sources est sans secret : seules les **clés** de `mcpServers`
+sont extraites. Les commandes, arguments et `env`, où vivent les jetons, ne sont
+ni lus ni journalisés.
+
+Une source **absente** est muette : un projet sans `.mcp.json` n'a rien à
+déclarer. Une source **présente et illisible** ne l'est pas : le vérificateur ne
+peut alors rien affirmer, et se taire confondrait « rien à déclarer » avec « je
+n'ai pas pu regarder ». Elle produit donc `mediation.source_unreadable` —
+avertissement dès `governed`, erreur en `production`, jamais un plantage : la
+configuration cassée d'un autre outil ne doit pas emporter la vérification.
 
 ## Commandes runtime normatives
 

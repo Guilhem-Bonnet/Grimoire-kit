@@ -1105,14 +1105,17 @@ _MCP_USER_SOURCES: tuple[str, ...] = (".claude.json", ".claude/settings.json")
 _MCP_PROJECT_SOURCE = ".mcp.json"
 
 
-def resolved_mcp_servers(root: Path) -> dict[str, str]:
-    """Serveurs MCP qu'un agent peut réellement appeler ici : nom → source.
+def resolved_mcp_servers(root: Path) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Serveurs MCP qu'un agent peut réellement appeler ici, et sources cassées.
 
-    Une source absente, illisible ou malformée est ignorée en silence : une
-    vérification de conformité ne doit pas tomber parce qu'un fichier de
-    configuration d'un autre outil est cassé.
+    Renvoie ``(nom → source, sources illisibles)``. Une source absente est
+    normale et muette ; une source **présente et illisible** ne l'est pas : c'est
+    précisément le cas où le vérificateur ne peut rien affirmer, et le taire
+    reviendrait à confondre « rien à déclarer » avec « je n'ai pas pu regarder »
+    (revue adversariale de la PR #324).
     """
     found: dict[str, str] = {}
+    unreadable: list[str] = []
     candidates: list[tuple[Path, str]] = [(root / _MCP_PROJECT_SOURCE, _MCP_PROJECT_SOURCE)]
     try:
         home = Path.home()
@@ -1122,21 +1125,31 @@ def resolved_mcp_servers(root: Path) -> dict[str, str]:
         candidates += [(home / name, f"~/{name}") for name in _MCP_USER_SOURCES]
 
     for path, label in candidates:
-        for name in _mcp_server_names(path, root):
+        names, readable = _mcp_server_names(path, root)
+        if not readable:
+            unreadable.append(label)
+            continue
+        for name in names:
             found.setdefault(name, label)
-    return found
+    return found, tuple(unreadable)
 
 
-def _mcp_server_names(path: Path, root: Path) -> list[str]:
-    """Les noms déclarés par une source, jamais ses valeurs."""
+def _mcp_server_names(path: Path, root: Path) -> tuple[list[str], bool]:
+    """Les noms déclarés par une source, jamais ses valeurs.
+
+    Le second membre dit si la source a pu être lue : une source absente compte
+    comme lisible (il n'y a rien à lire), une source présente et invalide non.
+    """
     import json
 
+    if not path.is_file():
+        return [], True
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
-        return []
+        return [], False
     if not isinstance(raw, dict):
-        return []
+        return [], False
     names: list[str] = []
     servers = raw.get("mcpServers")
     if isinstance(servers, dict):
@@ -1148,7 +1161,7 @@ def _mcp_server_names(path: Path, root: Path) -> list[str]:
         entry = projects.get(str(root)) or projects.get(str(root.resolve()))
         if isinstance(entry, dict) and isinstance(entry.get("mcpServers"), dict):
             names.extend(str(key) for key in entry["mcpServers"])
-    return names
+    return names, True
 
 
 def _verify_tool_mediation(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
@@ -1164,7 +1177,20 @@ def _verify_tool_mediation(root: Path, profile: StandardProfile, result: Standar
     if not isinstance(data, dict):
         return
     severity = "error" if profile.id in {"governed", "production"} else "warning"
-    resolved = resolved_mcp_servers(root)
+    resolved, unreadable = resolved_mcp_servers(root)
+    for label in unreadable:
+        _add_check(
+            result,
+            "mediation.source_unreadable",
+            # Erreur seulement en production : ailleurs, un fichier de
+            # configuration cassé appartenant à un autre outil ne doit pas
+            # bloquer une vérification, mais il ne doit pas non plus se taire —
+            # le vérificateur ne peut rien affirmer sur ce qu'il n'a pas pu lire.
+            "error" if profile.id == "production" else "warning",
+            f"MCP source unreadable: {label} exists but is not valid JSON — "
+            "the tool registry cannot be compared against it.",
+            path=rel_path,
+        )
 
     declared: dict[str, dict[str, Any]] = {}
     for server in _entries(data, "mcp_servers"):
