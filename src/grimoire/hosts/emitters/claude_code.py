@@ -52,8 +52,10 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "network": ("WebFetch", "WebSearch"),
 }
 
-#: Reasoning demand -> model tier. ``inherit`` is the honest default for the
-#: middle: the session's own model is a better guess than ours.
+#: Reasoning demand -> model tier, avant croisement avec ``cost`` dans
+#: :func:`_model_for`. ``inherit`` reste le défaut honnête du milieu : sans
+#: signal fort dans un sens ou dans l'autre, le modèle de la session est une
+#: meilleure estimation que la nôtre.
 _MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
 
 #: Tool families the declarative permission table covers *in full*, so a host
@@ -76,7 +78,24 @@ _OWNED_COMMAND_MARKERS = OWNED_COMMAND_MARKERS
 
 
 def _model_for(agent: AgentSpec) -> str:
-    return _MODEL_BY_REASONING.get(agent.affinity.reasoning.lower(), "inherit")
+    """Croise ``reasoning`` et ``cost`` : le premier signal fort gagne.
+
+    ``reasoning: high`` l'emporte toujours — un agent qui a besoin de
+    raisonnement profond ne doit pas être rétrogradé parce qu'il est aussi
+    déclaré peu coûteux (ex. le concierge : gros raisonnement de triage, mais
+    invoqué à chaque tour, donc `cost: low`). En dessous de ce plancher,
+    `cost: low` prime sur `reasoning` : un agent qu'on veut bon marché doit
+    rester bon marché même à raisonnement moyen. Ce n'est qu'en l'absence de
+    tout signal fort — ni gros raisonnement, ni petit coût, ni petit
+    raisonnement — que le modèle de la session (`inherit`) reste le défaut
+    honnête du milieu.
+    """
+    reasoning = agent.affinity.reasoning.lower()
+    if reasoning == "high":
+        return "opus"
+    if agent.affinity.cost.lower() == "low":
+        return "haiku"
+    return _MODEL_BY_REASONING.get(reasoning, "inherit")
 
 
 def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:

@@ -40,7 +40,9 @@ from grimoire.hosts.surface import Enforcement, HookEvent, HookSpec, ToolVerb
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
 
 
-def _write_agent(root: Path, name: str, body: str, *, tools: str = "", reasoning: str = "medium") -> None:
+def _write_agent(
+    root: Path, name: str, body: str, *, tools: str = "", reasoning: str = "medium", cost: str = "medium"
+) -> None:
     (root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
     header = [
         "---",
@@ -49,7 +51,14 @@ def _write_agent(root: Path, name: str, body: str, *, tools: str = "", reasoning
     ]
     if tools:
         header.append(f"tools: [{tools}]")
-    header += ["model_affinity:", f"  reasoning: {reasoning}", "  context_window: medium", "---", ""]
+    header += [
+        "model_affinity:",
+        f"  reasoning: {reasoning}",
+        "  context_window: medium",
+        f"  cost: {cost}",
+        "---",
+        "",
+    ]
     (root / AGENT_DIR / f"{name}.md").write_text("\n".join(header) + body + "\n", encoding="utf-8")
 
 
@@ -165,6 +174,31 @@ def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
     assert "model: 'haiku'" in scribe  # low reasoning demand
 
 
+def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None:
+    """`reasoning` et `cost` se croisent : le premier signal fort gagne.
+
+    - `cost: low` + `reasoning: medium` doit dégrader vers haiku : un agent
+      qu'on veut bon marché ne doit pas hériter du modèle de session par
+      défaut.
+    - `reasoning: high` gagne toujours, même avec `cost: low` (cas réel du
+      concierge : gros raisonnement de triage, invoqué à chaque tour) — le
+      raisonnement fort ne doit jamais être rétrogradé pour l'économie.
+    - Sans signal fort dans un sens ou l'autre (medium/medium), `inherit`
+      reste le défaut honnête.
+    """
+    _write_agent(project, "petit-malin", "Tu triages à bas coût.", reasoning="medium", cost="low")
+    _write_agent(project, "gros-cerveau", "Tu raisonnes beaucoup, pour pas cher.", reasoning="high", cost="low")
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    petit_malin = (project / ".claude/agents/petit-malin.md").read_text(encoding="utf-8")
+    gros_cerveau = (project / ".claude/agents/gros-cerveau.md").read_text(encoding="utf-8")
+    concierge = (project / ".claude/agents/concierge.md").read_text(encoding="utf-8")
+    assert "model: 'haiku'" in petit_malin  # cost low prime sur reasoning medium
+    assert "model: 'opus'" in gros_cerveau  # reasoning high prime sur cost low
+    assert "model: 'inherit'" in concierge  # medium/medium : pas de signal fort
+
+
 def test_copilot_surface_declares_its_permission_gap(governed: Path) -> None:
     emitter = emitter_for(HostId.GITHUB_COPILOT)
     assert emitter is not None
@@ -199,6 +233,25 @@ def test_copilot_agent_files_carry_the_wrapper_contract(governed: Path) -> None:
     assert "_grimoire/_config/custom/agents/concierge.md" in entry
     # ...and carry the boundary the surface resolved, not a fixed guess.
     assert "tools: ['read', 'search', 'edit']" in sub
+
+
+def test_copilot_declares_the_model_affinity_gap_instead_of_guessing(governed: Path) -> None:
+    """Copilot ne documente aucune valeur `model` de sélection automatique.
+
+    Contrairement à Claude Code (`inherit`), le contrat VS Code pour
+    `.github/agents/*.agent.md` n'offre qu'un nom de modèle explicite ou une
+    liste de repli — rien qui corresponde à l'affinité `reasoning`/`cost` du
+    projet. Inventer un nom de modèle serait une hallucination silencieuse ;
+    la bonne réponse est de ne rien émettre, quelle que soit l'affinité de
+    l'agent, et de le dire dans une dégradation explicite du plan.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    plan = emitter.plan(build_surface(governed), governed)
+    apply_plan(plan, governed)
+    assert "model affinity" in {d.surface for d in plan.degradations}
+    concierge = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    assert "model:" not in concierge
 
 
 def test_a_hand_written_copilot_wrapper_is_preserved(governed: Path) -> None:
