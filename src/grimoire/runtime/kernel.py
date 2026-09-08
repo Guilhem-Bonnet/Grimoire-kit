@@ -175,6 +175,53 @@ class RuntimeKernel:
         self._emit(RunEventType.WORKFLOW_STARTED, wfi, ctx)
         return wfi
 
+    def advance_step(self, wfi_id: str, ctx: ExecutionContext, *, step_id: str) -> WorkflowInstance:
+        """Ouvre l'exécution d'un node : reprend RUNNING, journalise STEP_STARTED.
+
+        Pourquoi une méthode dédiée plutôt que rappeler ``start()`` entre deux
+        nodes : ``start()`` est l'API de démarrage de *workflow*, elle réémet
+        ``WORKFLOW_STARTED`` — un événement de début de vie, pas de début de
+        node. Le prototype de la première étape de #204 a débusqué ce
+        contournement (rappeler ``start()`` fait légalement transitionner
+        CHECKPOINTED -> RUNNING, mais produit un ``workflow.started`` par
+        node, un mensonge dans le journal). ``advance_step`` fait la seule
+        transition dont un node a besoin et journalise l'événement qui lui
+        correspond réellement.
+
+        Accepte trois états de départ : CHECKPOINTED (le node précédent vient
+        d'être checkpointé, on entre dans le suivant), BLOCKED (le node
+        précédent a été rejeté par ``fail_step`` et on retente son
+        exécution), et RUNNING (le tout premier node d'un run, juste après
+        ``start()`` — aucune transition à faire, seul l'événement compte).
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        if wfi.status in (WorkflowStatus.CHECKPOINTED, WorkflowStatus.BLOCKED):
+            wfi = self._transition(wfi, WorkflowStatus.RUNNING)
+        elif wfi.status is not WorkflowStatus.RUNNING:
+            raise GrimoireRuntimeError(
+                f"advance_step requires RUNNING, CHECKPOINTED or BLOCKED, got {wfi.status.value} for {wfi_id}"
+            )
+        self._emit(RunEventType.STEP_STARTED, wfi, ctx, payload={"step_id": step_id})
+        return wfi
+
+    def fail_step(self, wfi_id: str, ctx: ExecutionContext, *, step_id: str, reason: str) -> WorkflowInstance:
+        """Un node dont la sortie ne respecte pas son contrat de pin bloque le flow.
+
+        BLOCKED, pas ABORTED : le flow est suspendu, pas abandonné.
+        ``resume_from_checkpoint`` ou un nouveau ``advance_step`` (après
+        correction de l'hôte) le reprend légalement depuis BLOCKED.
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.BLOCKED, abort_reason=reason)
+        self._emit(RunEventType.STEP_FAILED, wfi, ctx, payload={"step_id": step_id, "reason": reason})
+        return wfi
+
     def checkpoint(
         self,
         wfi_id: str,
@@ -214,6 +261,11 @@ class RuntimeKernel:
         wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": list(updated_refs)})
         self._save_instance(wfi)
         self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
+        # Un checkpoint clôt toujours le step qu'il nomme : STEP_COMPLETED est
+        # l'événement de step, CHECKPOINT_SAVED celui de persistance. Les deux
+        # sont vrais en même temps, `missions/trace.py` ne lisait jusqu'ici
+        # que le second faute d'un producteur pour le premier.
+        self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
         return wfi, chk
 
     def resume_from_checkpoint(self, wfi_id: str, ctx: ExecutionContext) -> tuple[WorkflowInstance, Checkpoint | None]:
