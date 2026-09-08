@@ -500,9 +500,11 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
 
 def _task_json(task: Any) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of
+    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
+    data["verifiability"] = verifiability_as_dict(task)
     return data
 
 
