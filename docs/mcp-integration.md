@@ -74,14 +74,14 @@ Dans `claude_desktop_config.json` :
 | `grimoire_memory_store` | Stocker un texte en mémoire sémantique | écriture, destructif, monde ouvert |
 | `grimoire_memory_search` | Recherche sémantique dans la mémoire | lecture, monde ouvert |
 | `grimoire_add_agent` | Ajouter un agent au projet | écriture, destructif, idempotent |
-| `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture, sauf `_score` qui persiste le score |
+| `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
 | `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
 | `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant | lecture |
 | `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera | lecture |
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) | écriture, destructif |
 | `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche | écriture, destructif |
-| `task_context` | Sur quelle tâche la session est, et son context bundle | lecture |
+| `task_context` | Sur quelle tâche la session est, et son context bundle | écriture : produit `context-bundle.yaml` et journalise |
 | `task_recall` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens | lecture |
 
 ### Les tâches : un outil, pas du texte dans un prompt
@@ -183,6 +183,17 @@ place :
 
 Un refus de *gate* de preuve fait exception et n'est pas marqué `isError` : la
 porte a fonctionné, l'appel a répondu, et le corps nomme la preuve manquante.
+Un hôte qui filtre sur `isError` doit donc lire `blocked` pour distinguer un
+refus d'un succès. Le choix est figé par
+`tests/unit/mcp/test_task_tools.py::TestGateRefusalIsNotAToolFailure` : l'inverser
+fait échouer un test, il ne se fait pas en silence.
+
+Réciproquement, `readOnlyHint` est vérifié plutôt que déclaré :
+`TestReadOnlyToolsWriteNothing` appelle chaque outil annoté en lecture sur un
+projet gouverné et compare l'arborescence avant et après. C'est ce contrôle qui
+a montré que `task_context` écrivait son bundle et que `grimoire_standard_gate`
+journalisait son passage — deux annotations qui mentaient, alors qu'un hôte
+auto-approuve sur leur foi.
 
 ## Exemples d'utilisation
 

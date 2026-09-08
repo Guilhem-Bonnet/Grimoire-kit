@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -627,3 +627,84 @@ class TestToolContract:
         import inspect
 
         assert "annotations" in inspect.signature(type(mcp).tool).parameters
+
+
+# ── `readOnlyHint` doit être vrai, pas déclaratif ─────────────────────────────
+
+
+class TestReadOnlyToolsWriteNothing:
+    """Un outil annoté lecture seule ne doit rien écrire sur disque.
+
+    La revue adversariale de la PR #324 a trouvé `task_context` déclaré
+    `_reads()` alors qu'il appelle `build_context_bundle` → écriture de
+    `context-bundle.yaml` **et** ajout au journal d'événements
+    (`agentic_standard.py`). Une annotation qui ment est pire qu'une annotation
+    absente : un hôte auto-approuve sur sa foi.
+    """
+
+    @staticmethod
+    def _snapshot(root: Path) -> dict[str, tuple[int, bytes]]:
+        import hashlib
+
+        out: dict[str, tuple[int, bytes]] = {}
+        for path in sorted(root.rglob("*")):
+            if path.is_file():
+                data = path.read_bytes()
+                out[str(path.relative_to(root))] = (len(data), hashlib.sha256(data).digest())
+        return out
+
+    @pytest.fixture()
+    def gouverne(self, tmp_path: Path) -> Path:
+        from grimoire.core.agentic_standard import setup_standard_profile
+
+        root = tmp_path / "projet"
+        root.mkdir()
+        (root / "project-context.yaml").write_text(
+            "project:\n  name: demo\n  type: library\n  stack: [python]\n"
+            "memory:\n  backend: local\n",
+            encoding="utf-8",
+        )
+        (root / "_grimoire" / "_memory").mkdir(parents=True)
+        setup_standard_profile(root, profile_id="governed", project_name="demo")
+        return root
+
+    #: Arguments minimaux par outil de lecture. Un outil absent de cette table
+    #: fait échouer le test : c'est ce qui empêche un nouvel outil d'échapper au
+    #: contrôle en silence.
+    _ARGS: ClassVar[dict[str, dict[str, Any]]] = {
+        "grimoire_project_context": {},
+        "grimoire_status": {},
+        "grimoire_agent_list": {},
+        "grimoire_harmony_check": {},
+        "grimoire_config": {},
+        "grimoire_memory_search": {"query": "quoi que ce soit"},
+        "grimoire_standard_verify": {},
+        "grimoire_standard_audit": {},
+        "task_list_ready": {},
+        "task_show": {"task_id": "bootstrap"},
+        "task_recall": {"task_id": "bootstrap"},
+        "grimoire_host_status": {},
+        "grimoire_providers_status": {},
+        "grimoire_skill": {"slug": "inexistant"},
+        "grimoire_command": {"slug": "inexistant"},
+    }
+
+    def test_la_table_couvre_tous_les_outils_en_lecture(self) -> None:
+        declared = {t.name for t in _declared_tools() if t.annotations.readOnlyHint}
+        assert declared == set(self._ARGS), (
+            "outils en lecture seule non couverts par le contrôle d'écriture : "
+            f"{sorted(declared ^ set(self._ARGS))}"
+        )
+
+    @pytest.mark.parametrize("name", sorted(_ARGS))
+    def test_un_outil_de_lecture_n_ecrit_rien(self, name: str, gouverne: Path) -> None:
+        from grimoire.mcp import server as module
+
+        before = self._snapshot(gouverne)
+        getattr(module, name)(project_path=str(gouverne), **self._ARGS[name])
+        after = self._snapshot(gouverne)
+        created = sorted(set(after) - set(before))
+        modified = sorted(k for k in set(after) & set(before) if after[k] != before[k])
+        assert not created, f"{name} a créé {created} malgré readOnlyHint"
+        assert not modified, f"{name} a modifié {modified} malgré readOnlyHint"
+

@@ -344,3 +344,32 @@ def test_une_tache_inconnue_et_un_etat_inconnu_sont_nommes(projet: Path) -> None
 
 def test_le_serveur_expose_les_outils_de_tache_sous_leur_nom() -> None:
     assert {name for name in dir(server_module) if name.startswith("task_")} >= TASK_TOOLS
+
+
+# ── Un refus de gate n'est pas une panne d'outil ──────────────────────────────
+
+
+class TestGateRefusalIsNotAToolFailure:
+    """Choix figé : un refus de gate de preuve n'est **pas** marqué `isError`.
+
+    La porte a fonctionné, l'appel a répondu, et le corps nomme la preuve
+    manquante et son remède — ce n'est pas une panne d'outil. La revue
+    adversariale de la PR #324 l'a relevé comme un risque pour un hôte qui
+    filtre sur ce drapeau ; le choix est assumé, donc il est figé par un test
+    plutôt que laissé tacite. L'inverser, c'est faire échouer ce test, pas
+    changer un détail en silence.
+    """
+
+    def test_un_claim_refuse_repond_sans_is_error(self, projet: Path) -> None:
+        tid = ouvre(projet)
+        result = task_claim(tid, project_path=str(projet))
+        assert _json(result)["blocked"] is True
+        assert not _is_error(result), (
+            "un refus de gate est une réponse structurée, pas une panne : le marquer "
+            "isError ferait croire à l'hôte que l'outil a échoué"
+        )
+
+    def test_une_panne_franche_reste_marquee(self, projet: Path) -> None:
+        result = task_show("GAO-nulle-001", project_path=str(projet))
+        assert "error" in _json(result)
+        assert _is_error(result), "une tâche inconnue est une panne d'appel, elle doit porter isError"

@@ -515,7 +515,11 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_reads())
+# Le passage d'une porte est journalisé : `check_evidence_gates` ajoute une
+# ligne au journal d'événements du runtime. C'est voulu — une porte franchie
+# sans trace ne prouve rien — donc ce n'est pas une lecture. Non idempotent :
+# chaque appel ajoute une ligne.
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
 def grimoire_standard_gate(
     project_path: str = ".",
     task_id: str = "bootstrap",
@@ -708,7 +712,12 @@ def task_update(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_reads())
+# `task_context` n'est pas une lecture : `build_context_bundle` écrit
+# `context-bundle.yaml` et ajoute une ligne au journal d'événements à chaque
+# appel (agentic_standard.py). Il était annoté `_reads()` — une annotation qui
+# ment est pire qu'une annotation absente, parce qu'un hôte auto-approuve sur sa
+# foi. Idempotent : le bundle est recalculé au même contenu pour la même tâche.
+@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
 def task_context(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
