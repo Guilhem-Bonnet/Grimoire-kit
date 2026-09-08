@@ -218,6 +218,32 @@ def test_mediate_tool_never_raises_after_refusal_and_stays_blocked(kernel):
     assert refused.status == WorkflowStatus.REFUSED
 
 
+def test_mediate_tool_rejects_negative_cost(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=10, max_budget=10)
+    kernel.start(wfi.id, ctx)
+    # A negative cost would let a caller shrink budget_used and defeat the
+    # cap (B11) instead of tripping it — must be refused outright.
+    with pytest.raises(ValueError, match="non-negative"):
+        kernel.mediate_tool("t", {}, ctx, wfi.id, cost=-5)
+    unchanged = kernel.get_instance(wfi.id)
+    assert unchanged.budget_used == 0
+    assert unchanged.status == WorkflowStatus.RUNNING
+
+
+def test_mediate_tool_does_not_emit_requested_when_cap_already_exceeded(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test", max_tool_calls=1, max_budget=1000)
+    kernel.start(wfi.id, ctx)
+    assert kernel.mediate_tool("t", {}, ctx, wfi.id) is True
+    assert kernel.mediate_tool("t", {}, ctx, wfi.id) is False  # over cap -> refused, never requested
+    events = [e.event_type for e in kernel.get_run_events(wfi.id)]
+    # Exactly one requested (the call that was actually mediated); the
+    # refused call is only ever blocked, never logged as requested too.
+    assert events.count(RunEventType.TOOL_REQUESTED) == 1
+    assert events.count(RunEventType.TOOL_BLOCKED) == 1
+
+
 def test_list_instances_filter_by_task(kernel):
     ctx = _ctx()
     wfi = kernel.create_instance(ctx, recipe_id="recipe.test")

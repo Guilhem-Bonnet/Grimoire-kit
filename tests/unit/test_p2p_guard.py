@@ -17,6 +17,7 @@ import pytest
 from grimoire.runtime.p2p_guard import (
     DEFAULT_MAX_P2P_WITHOUT_SOG,
     P2PGuard,
+    load_p2p_guard_config,
     observe_p2p_message,
 )
 
@@ -126,3 +127,29 @@ def test_journal_events_are_valid_jsonl(guard):
     lines = journal.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     json.loads(lines[0])  # must not raise
+
+
+def test_load_config_reads_governance_override(tmp_path):
+    (tmp_path / "project-context.yaml").write_text(
+        "messaging:\n  governance:\n    max_p2p_without_sog: 3\n",
+        encoding="utf-8",
+    )
+    assert load_p2p_guard_config(tmp_path) == {"max_p2p_without_sog": 3}
+
+
+def test_load_config_returns_empty_when_no_config_file(tmp_path):
+    assert load_p2p_guard_config(tmp_path) == {}
+
+
+def test_load_config_falls_back_silently_on_malformed_yaml(tmp_path, caplog):
+    # A YAMLError (not OSError/ValueError) must not propagate: the docstring
+    # promises a silent fallback to {} for "PyYAML, the files, or the section
+    # absent" — malformed YAML belongs in that same bucket, logged instead
+    # of raised.
+    (tmp_path / "project-context.yaml").write_text(
+        "messaging:\n  governance: [unterminated\n",
+        encoding="utf-8",
+    )
+    with caplog.at_level("WARNING"):
+        assert load_p2p_guard_config(tmp_path) == {}
+    assert "p2p_guard" in caplog.text
