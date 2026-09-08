@@ -53,6 +53,11 @@ _WIRE_NAMES: dict[HookEvent, str] = {
     HookEvent.USER_PROMPT_SUBMIT: "UserPromptSubmit",
     HookEvent.PRE_TOOL_USE: "PreToolUse",
     HookEvent.POST_TOOL_USE: "PostToolUse",
+    # Same spelling as Claude Code (see `runtime._WIRE_EVENT_NAMES`); the
+    # capability manifest, not this table, is what says whether Copilot wires
+    # a hook that targets one of them.
+    HookEvent.POST_TOOL_USE_FAILURE: "PostToolUseFailure",
+    HookEvent.SUBAGENT_START: "SubagentStart",
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",

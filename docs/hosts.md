@@ -117,6 +117,15 @@ Les hooks générés dépendent de l'enrôlement du projet dans le standard agen
 Un projet non enrôlé ne reçoit aucun hook de gate : un gate inexistant ne peut
 pas être rouge, et bloquer sur son absence ferait du hook un piège.
 
+Le vocabulaire host-neutre reconnaît aussi `subagent_start` et
+`post_tool_use_failure` (`SubagentStart`, `PostToolUseFailure` côté Claude
+Code) : un hook qui les cible est câblé par `grimoire host sync` comme les
+sept ci-dessus, mais aucun hook du kit ne les utilise par défaut aujourd'hui.
+`HostHooks.subagent_start` / `.post_tool_use_failure` disent, par hôte, si
+l'événement est documenté ; l'absence d'entrée dans `.claude/settings.json`
+n'était pas un choix mais un oubli — la table du wire format ne les
+connaissait pas encore.
+
 ### Le hook `stop`
 
 C'est le seul endroit où la règle du kit — « une clôture sans gates verts est une

@@ -31,6 +31,8 @@ _HOOK_FIELDS: dict[HookEvent, str] = {
     HookEvent.USER_PROMPT_SUBMIT: "user_prompt_submit",
     HookEvent.PRE_TOOL_USE: "pre_tool_use",
     HookEvent.POST_TOOL_USE: "post_tool_use",
+    HookEvent.POST_TOOL_USE_FAILURE: "post_tool_use_failure",
+    HookEvent.SUBAGENT_START: "subagent_start",
     HookEvent.SUBAGENT_STOP: "subagent_stop",
     HookEvent.PRE_COMPACT: "pre_compact",
     HookEvent.STOP: "stop",
