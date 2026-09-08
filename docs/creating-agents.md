@@ -112,7 +112,13 @@ rétrograde pas. Copilot, lui, ne reçoit pas cette affinité : son contrat
 `.github/agents/*.agent.md` n'accepte qu'un nom de modèle explicite ou une
 liste de repli, sans équivalent documenté de `inherit` ; `grimoire host sync
 --host copilot` ne devine donc aucun nom de modèle et signale l'écart comme
-dégradation plutôt que de le taire.
+dégradation plutôt que de le taire. Le fichier de l'agent d'entrée émis pour
+Claude Code porte en plus une « Politique de dispatch » (issue #329) : le
+modèle d'un sous-agent suit la classe de vérifiabilité de sa tâche
+(V0 → `haiku`, V1 → `sonnet`, V2 → le modèle de la session) et chaque
+sous-agent doit clore sa réponse par un bloc ```grimoire-uncertainties``` ;
+Copilot documente la même règle sans nom de modèle dans son README de
+surface, pour la raison ci-dessus.
 
 ### 3. Écrire l'identité
 

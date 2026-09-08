@@ -6,6 +6,28 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Retiré
+
+- **Le socle contredisait la doctrine qu'il citait lui-même.** AORA et DCF étaient
+  présentés comme actifs dans `framework/agent-base.md`,
+  `framework/agent-base-compact.md` et `framework/orchestrator-gateway.md`, alors que
+  le retrait des deux (2026-07-12, zéro usage constaté) n'était consigné que dans ce
+  changelog et dans la doctrine des projets consommateurs. Les trois fichiers
+  distribuaient donc un protocole que le produit ne tenait plus. Les deux sections sont
+  remplacées par un bandeau de retrait ; les deux règles opposables qu'AORA portait
+  (circuit breaker, cascading initiative) survivent sans son nom sous « Plan
+  d'exécution ». PIP passe en statut observer-only, explicite dans les trois fichiers :
+  décrit, non instrumenté, aucune obligation. La calibration exécuter/proposer/escalader
+  que portait DCF reste assurée par ALS seul.
+- **Deux fiches obsolètes qui documentaient un produit imaginaire.**
+  `framework/mcp/grimoire-mcp-server.md` décrivait neuf outils MCP fictifs et une
+  roadmap « MCP v2 Sampling » alors que Sampling est déprécié et que le serveur réel
+  (`src/grimoire/mcp/server.py`) expose vingt-deux outils sans sampling.
+  `framework/workflows/state-checkpoint.md` (BM-06) documentait en prose un mécanisme
+  de checkpoint doublon du kernel d'exécution réel (`src/grimoire/runtime/kernel.py`,
+  machine à états, checkpoints JSONL, reprise). Les deux fiches sont conservées —
+  chacune référencée ailleurs dans le dépôt — mais leur contenu est remplacé par un
+  bandeau d'obsolescence de moins de dix lignes pointant vers l'implémentation réelle.
 
 ## [3.40.0] - 2026-09-07
 ### Ajouté

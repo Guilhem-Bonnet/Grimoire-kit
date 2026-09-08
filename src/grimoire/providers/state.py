@@ -43,11 +43,23 @@ _SCHEMA = "grimoire-providers-runtime-state/v1"
 
 @dataclass(slots=True)
 class ProviderRuntimeState:
-    """Ce qu'on sait d'un fournisseur depuis le dernier succès franc."""
+    """Ce qu'on sait d'un fournisseur depuis le dernier succès franc.
+
+    ``available``/``probed_at``/``models_seen``/``probe_note`` viennent de
+    ``providers.audit`` (issue #330) — un sondage PATH/``--version``/Ollama,
+    jamais d'un appel réel. ``available`` par défaut à ``True`` : un
+    fournisseur jamais sondé (pas d'entrée, ou entrée écrite avant ce champ)
+    reste éligible — compatibilité, pas optimisme, l'audit est ce qui referme
+    la porte.
+    """
 
     cooldown_until: datetime | None = None
     last_failure: str | None = None
     failure_count: int = 0
+    available: bool = True
+    probed_at: str | None = None
+    models_seen: tuple[str, ...] = ()
+    probe_note: str | None = None
 
     def is_cooling_down(self, *, now: datetime) -> bool:
         return self.cooldown_until is not None and self.cooldown_until > now
@@ -89,10 +101,18 @@ def load_state(root: Path) -> dict[str, ProviderRuntimeState]:
             continue
         last_failure = entry.get("last_failure")
         failure_count = entry.get("failure_count", 0)
+        available = entry.get("available", True)
+        probed_at = entry.get("probed_at")
+        models_seen = entry.get("models_seen")
+        probe_note = entry.get("probe_note")
         state[str(provider_id)] = ProviderRuntimeState(
             cooldown_until=_parse_datetime(entry.get("cooldown_until")),
             last_failure=str(last_failure) if isinstance(last_failure, str) and last_failure else None,
             failure_count=int(failure_count) if isinstance(failure_count, int) else 0,
+            available=available if isinstance(available, bool) else True,
+            probed_at=str(probed_at) if isinstance(probed_at, str) and probed_at else None,
+            models_seen=tuple(str(m) for m in models_seen) if isinstance(models_seen, list) else (),
+            probe_note=str(probe_note) if isinstance(probe_note, str) and probe_note else None,
         )
     return state
 
@@ -108,6 +128,10 @@ def save_state(root: Path, state: dict[str, ProviderRuntimeState]) -> None:
                 "cooldown_until": entry.cooldown_until.isoformat() if entry.cooldown_until else None,
                 "last_failure": entry.last_failure,
                 "failure_count": entry.failure_count,
+                "available": entry.available,
+                "probed_at": entry.probed_at,
+                "models_seen": list(entry.models_seen),
+                "probe_note": entry.probe_note,
             }
             for provider_id, entry in state.items()
         },
@@ -141,6 +165,12 @@ def record_failure(
         cooldown_until=effective_now + duration,
         last_failure=kind,
         failure_count=failure_count,
+        # Un échec d'appel ne dit rien sur l'audit (PATH, version, modèles) :
+        # on le préserve plutôt que de le remettre à l'état par défaut.
+        available=previous.available,
+        probed_at=previous.probed_at,
+        models_seen=previous.models_seen,
+        probe_note=previous.probe_note,
     )
     state[provider_id] = entry
     save_state(root, state)
@@ -158,5 +188,11 @@ def record_success(root: Path, provider_id: str) -> None:
     state = load_state(root)
     if provider_id not in state:
         return
-    state[provider_id] = ProviderRuntimeState()
+    previous = state[provider_id]
+    state[provider_id] = ProviderRuntimeState(
+        available=previous.available,
+        probed_at=previous.probed_at,
+        models_seen=previous.models_seen,
+        probe_note=previous.probe_note,
+    )
     save_state(root, state)

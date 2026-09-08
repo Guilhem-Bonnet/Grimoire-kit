@@ -25,11 +25,12 @@ EVALS = ROOT / "evals"
 RUNS = EVALS / "runs"
 TASKS_DIR = EVALS / "tasks"
 
-# `grimoire` est installé en editable dans le venv du dépôt (voir
-# CONTRIBUTING/README) ; ce garde-fou permet malgré tout un run autonome
-# (`python evals/aggregate.py ...`) sans dépendre de l'activation du venv.
-sys.path.insert(0, str(ROOT / "src"))
-from grimoire.evals.schemas import pass_hat_k  # noqa: E402
+# pass_hat_k.py est un module local à evals/ (pas un paquet) ; l'exécution
+# directe (`python evals/aggregate.py ...`) ajoute déjà son propre dossier à
+# sys.path, mais un chargement dynamique (`importlib`, cf. les tests) ne le
+# fait pas — insertion explicite pour marcher dans les deux cas.
+sys.path.insert(0, str(EVALS))
+from pass_hat_k import pass_hat_k  # noqa: E402
 
 _yaml = YAML(typ="safe")
 
@@ -83,7 +84,7 @@ def _pass_hat_k(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any] | None]:
     k = ``repetitions_min`` de la suite. Calculé sur le total et séparément
     par catégorie (``capability``/``regression``) — un run non exécuté ou
     non jugé n'est ni succès ni échec, il exclut la tâche du dénominateur
-    tant qu'elle n'a pas atteint k (voir `grimoire.evals.schemas.pass_hat_k`).
+    tant qu'elle n'a pas atteint k (voir `evals.pass_hat_k.pass_hat_k`).
     """
     by_witness: dict[str, dict[str, list[bool | None]]] = defaultdict(lambda: defaultdict(list))
     k_by_witness: dict[str, int] = {}

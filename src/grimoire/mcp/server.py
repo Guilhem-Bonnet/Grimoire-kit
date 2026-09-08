@@ -749,11 +749,13 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     """Report LLM provider availability per cost tier (issue #310, lot 2).
 
     Croisement du registre déclaratif (`llm-provider-registry.yaml`) et de
-    l'état de refroidissement runtime (`_grimoire-output/providers-state.json`) :
-    quels fournisseurs sont activés, avec quels modèles par palier
-    (cheap/mid/strong), et lequel `choose()` retiendrait maintenant pour
-    chaque palier — la même question que `grimoire providers status`, pour
-    un client MCP qui n'a pas de terminal.
+    l'état runtime (`_grimoire-output/providers-state.json`, refroidissement
+    et dernier `grimoire providers audit`, issue #330) : quels fournisseurs
+    sont activés, avec quels modèles par palier (cheap/mid/strong), lequel
+    `choose()` retiendrait maintenant pour chaque palier, et ce que l'audit a
+    vu (`available`, `probed_at`, `models_seen`, `probe_note`) — la même
+    question que `grimoire providers status`, pour un client MCP qui n'a pas
+    de terminal.
 
     Args:
         project_path: Path to project root (default: current directory).
@@ -784,6 +786,11 @@ def grimoire_providers_status(project_path: str = ".") -> str:
             "models": [{"id": model.id, "tier": model.tier} for model in provider.models],
             "cooling_down": cooling_down,
             "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
+            # Issue #330 : dernier résultat de `grimoire providers audit`.
+            "available": entry.available if entry is not None else True,
+            "probed_at": entry.probed_at if entry is not None else None,
+            "models_seen": list(entry.models_seen) if entry is not None else [],
+            "probe_note": entry.probe_note if entry is not None else None,
         }
 
     next_choice = {tier: choose(target, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}

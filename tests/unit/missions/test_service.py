@@ -7,6 +7,7 @@ projeté et le hook SessionStart nomment la tâche, sans qu'un humain relance
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
 from grimoire.missions import service as service_module
 from grimoire.missions.gates import GATES_FILE, GateRefusal, GateVerdict
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import TaskClaim, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 
 STANDARD = Path("_grimoire/standard")
@@ -86,6 +87,17 @@ def nb_evenements(service: TaskService) -> int:
     return len(service.ledger.list_events())
 
 
+def deux_taches_pretes(projet: Path) -> tuple[TaskService, str, str]:
+    """Deux tâches READY dans la même mission — de quoi faire s'affronter deux claims."""
+    service = TaskService(projet)
+    mission = service.ledger.create_mission(title="Deux agents", origin="test")
+    a = service.ledger.create_task(mission.id, "Tache A", acceptance=(ACCEPTATION,), owner="amelia")
+    b = service.ledger.create_task(mission.id, "Tache B", acceptance=(ACCEPTATION,), owner="marcus")
+    service.ledger.transition_task(a.id, TaskState.READY)
+    service.ledger.transition_task(b.id, TaskState.READY)
+    return service, a.id, b.id
+
+
 # ── le mouvement se voit sans export manuel ──────────────────────────────────
 
 def test_chaque_ecriture_reprojette_le_board_et_le_hook_suit(projet: Path) -> None:
@@ -141,6 +153,52 @@ def test_list_ready_claim_move_close_de_bout_en_bout(projet: Path) -> None:
     ferme = service.transition(tid, TaskState.CLOSED, "agent-mcp")
     assert ferme.to_dict()["transition"] == "needs_verification → closed"
     assert board_status(projet, tid) == "accepted"
+
+
+# ── verrou de fichiers exclusifs (B3) ─────────────────────────────────────────
+#
+# Ces tests exercent le vrai chemin de `TaskService.transition` — désactiver
+# `_check_exclusive_files` (ou son appel) fait retomber
+# `test_un_fichier_deja_reserve_refuse_le_second_claim` : le second `claim`
+# réussirait alors qu'il doit être refusé.
+
+def test_un_fichier_deja_reserve_refuse_le_second_claim(projet: Path) -> None:
+    """Deux agents ne réclament jamais le même fichier : le refus nomme le
+    fichier, la tâche détentrice et son acteur."""
+    service, a, b = deux_taches_pretes(projet)
+    service.claim(a, "amelia", "host-a", files=("src/grimoire/missions/service.py",))
+
+    with pytest.raises(TaskRefusedError) as refus:
+        service.claim(b, "marcus", "host-b", files=("src/grimoire/missions/service.py",))
+
+    message = str(refus.value)
+    assert "src/grimoire/missions/service.py" in message
+    assert a in message
+    assert "amelia" in message
+    assert service.require(b).status is TaskState.READY, "un refus ne laisse rien au ledger"
+
+
+def test_des_fichiers_disjoints_ne_se_bloquent_pas(projet: Path) -> None:
+    service, a, b = deux_taches_pretes(projet)
+    service.claim(a, "amelia", "host-a", files=("fichier_a.py",))
+    claimed = service.claim(b, "marcus", "host-b", files=("fichier_b.py",))
+    assert claimed.task.status is TaskState.CLAIMED
+
+
+def test_un_claim_expire_ne_bloque_plus(projet: Path) -> None:
+    """Un claim expiré ne protège plus son fichier — le temps a suffi, sans
+    geste humain pour le libérer."""
+    service, a, b = deux_taches_pretes(projet)
+    perime = TaskClaim.new(
+        actor_id="amelia",
+        host_id="host-a",
+        exclusive_files=("src/grimoire/missions/service.py",),
+        now=datetime.now(UTC) - timedelta(hours=8),
+    )
+    service.ledger.transition_task(a, TaskState.CLAIMED, actor_id="amelia", claim=perime)
+
+    claimed = service.claim(b, "marcus", "host-b", files=("src/grimoire/missions/service.py",))
+    assert claimed.task.status is TaskState.CLAIMED
 
 
 def test_sans_verdict_accepte_la_fermeture_est_refusee(projet: Path) -> None:

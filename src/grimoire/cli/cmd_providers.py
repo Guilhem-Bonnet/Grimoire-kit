@@ -5,7 +5,12 @@ Enveloppe ``grimoire.providers`` (issue #310, lot 2) : ``status`` répond à
 registre déclaratif et l'état de refroidissement runtime ; ``cooldown``
 enregistre un échec à la main, pour les hooks et scripts qui viennent de voir
 un 429 ou un timeout et n'ont pas de raison d'attendre le prochain appel
-raté pour que ``choose()`` en tienne compte.
+raté pour que ``choose()`` en tienne compte. ``audit`` (issue #330) sonde les
+fournisseurs activés sans dépenser (PATH, ``--version``, modèles Ollama) et
+journalise le résultat dans l'état — ``status`` l'affiche ensuite. ``history``
+(issue #312) compte les dispatchs passés par couple (type de tâche, classe de
+vérifiabilité) depuis le Mission Ledger, et la recommandation de palier de
+départ que ``grimoire task dispatch`` en tire.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from grimoire.providers.audit import audit_providers
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, ProviderSpec, read_registry
 from grimoire.providers.routing import choose
 from grimoire.providers.state import ProviderRuntimeState, load_state, record_failure
@@ -32,6 +38,11 @@ console = Console()
 _PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
 _JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
 _REASON_OPTION = typer.Option("--reason", help="Motif de l'échec : rate_limit | timeout.")
+
+#: Même défaut que ``grimoire task`` (``cmd_task._DEFAULT_LEDGER``) — l'historique
+#: des dispatchs (issue #312) lit le même Mission Ledger que `task dispatch` écrit.
+_DEFAULT_LEDGER = Path("_grimoire-runtime-output/ledger")
+_LEDGER_ROOT_OPTION = typer.Option("--ledger-root", help="Racine du Mission Ledger.")
 
 #: Motifs reconnus par la table de refroidissement (grimoire.providers.state).
 #: Un autre libellé est accepté (repli 5 min) mais on préfère le signaler ici
@@ -50,6 +61,14 @@ def _state_label(provider_id: str, state: dict[str, ProviderRuntimeState], *, no
         until = entry.cooldown_until.isoformat(timespec="seconds") if entry.cooldown_until else "?"
         return f"[yellow]refroidi jusqu'à {until}[/yellow]"
     return "[green]disponible[/green]"
+
+
+def _availability_label(provider_id: str, state: dict[str, ProviderRuntimeState]) -> str:
+    """Ce que le dernier ``providers audit`` sait de *provider_id* — pas le refroidissement."""
+    entry = state.get(provider_id)
+    if entry is None or entry.probed_at is None:
+        return "[dim]non sondé[/dim]"
+    return "[green]oui[/green]" if entry.available else "[red]non[/red]"
 
 
 def _models_by_tier(provider: ProviderSpec) -> str:
@@ -73,6 +92,11 @@ def _provider_json(provider: ProviderSpec, state: dict[str, ProviderRuntimeState
         "cooling_down": cooling_down,
         "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
         "failure_count": entry.failure_count if entry else 0,
+        # Issue #330 : dernier résultat de `providers audit`, jamais du registre.
+        "available": entry.available if entry is not None else True,
+        "probed_at": entry.probed_at if entry is not None else None,
+        "models_seen": list(entry.models_seen) if entry is not None else [],
+        "probe_note": entry.probe_note if entry is not None else None,
     }
 
 
@@ -107,7 +131,7 @@ def providers_status(
         return
 
     table = Table(title="Fournisseurs LLM")
-    for column in ("Fournisseur", "Activé", "Monnaie", "Modèles par palier", "État"):
+    for column in ("Fournisseur", "Activé", "Monnaie", "Modèles par palier", "Disponible (audit)", "Refroidissement"):
         table.add_column(column)
     for provider in providers:
         table.add_row(
@@ -115,6 +139,7 @@ def providers_status(
             "[green]oui[/green]" if provider.enabled else "[dim]non[/dim]",
             provider.currency or "—",
             _models_by_tier(provider),
+            _availability_label(provider.id, state),
             _state_label(provider.id, state, now=now),
         )
     console.print(table)
@@ -149,3 +174,121 @@ def providers_cooldown(
     console.print(
         f"[yellow]●[/yellow] {provider_id} refroidi jusqu'à {until} (échec n°{entry.failure_count}, motif {reason})"
     )
+
+
+@providers_app.command("audit")
+def providers_audit(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Sonder les fournisseurs activés sans dépenser (issue #330).
+
+    Pour chaque fournisseur activé : présence du premier mot de
+    ``invocation`` sur le ``PATH``, ``--version`` pour un exécutable connu,
+    modèles Ollama via ``GET /api/tags`` pour un fournisseur local — jamais
+    l'invocation complète, jamais de prompt. Le résultat (``available``,
+    ``models_seen``, ``probe_note``) est écrit dans l'état runtime ;
+    ``enabled`` reste une décision de gouvernance que l'audit ne touche pas.
+    """
+    root = project_root.resolve()
+    try:
+        results = audit_providers(root)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if json_output or _get_fmt(ctx) == "json":
+        payload = {
+            "providers": [
+                {
+                    "id": result.provider_id,
+                    "available": result.available,
+                    "models_seen": list(result.models_seen),
+                    "probe_note": result.probe_note,
+                }
+                for result in results
+            ],
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    if not results:
+        console.print("[dim]Aucun fournisseur activé à sonder (`grimoire providers status`).[/dim]")
+        return
+
+    table = Table(title="Audit fournisseurs")
+    for column in ("Fournisseur", "Disponible", "Modèles vus", "Note"):
+        table.add_column(column)
+    for result in results:
+        table.add_row(
+            result.provider_id,
+            "[green]oui[/green]" if result.available else "[red]non[/red]",
+            ", ".join(result.models_seen) if result.models_seen else "—",
+            result.probe_note,
+        )
+    console.print(table)
+
+
+def _escalation_label(stats: Any | None) -> str:
+    """Colonne « escalade depuis X » — ``—`` sans observation à ce palier."""
+    if stats is None or stats.rate is None:
+        return "—"
+    return f"{stats.rate:.0%} ({stats.escalations}/{stats.observations})"
+
+
+@providers_app.command("history")
+def providers_history(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Historique des dispatchs par couple (type de tâche, classe) — issue #312.
+
+    Compte, pour chaque couple observé dans le Mission Ledger, le nombre de
+    dispatchs et le taux d'escalade (part des dispatchs où le palier de
+    départ n'a pas suffi) depuis `cheap` et depuis `mid`. Pas de classifieur,
+    pas d'entraînement — des compteurs. La colonne « départ recommandé » est
+    exactement ce que le prochain `grimoire task dispatch` de ce couple
+    retiendra, sauf `--start-tier` explicite.
+    """
+    from grimoire.missions.dispatch_history import compute_dispatch_history
+    from grimoire.missions.ledger import MissionLedger
+
+    root = project_root.resolve()
+    ledger_path = ledger_root if ledger_root.is_absolute() else root / ledger_root
+    as_json = json_output or _get_fmt(ctx) == "json"
+
+    if not (ledger_path / "events.jsonl").is_file():
+        if as_json:
+            typer.echo(json.dumps({"couples": []}, indent=2, ensure_ascii=False))
+            return
+        console.print(f"[dim]Aucun Mission Ledger sous {ledger_path}.[/dim]")
+        return
+
+    histories = compute_dispatch_history(MissionLedger(ledger_path))
+
+    if as_json:
+        typer.echo(json.dumps({"couples": [h.to_dict() for h in histories]}, indent=2, ensure_ascii=False))
+        return
+
+    if not histories:
+        console.print("[dim]Aucun dispatch enregistré dans le Mission Ledger (`grimoire task dispatch`).[/dim]")
+        return
+
+    table = Table(title="Historique des dispatchs")
+    for column in ("Type de tâche", "Classe", "Observations", "Escalade cheap", "Escalade mid", "Départ recommandé"):
+        table.add_column(column)
+    for history in histories:
+        table.add_row(
+            history.task_type,
+            history.verifiability,
+            str(history.observations),
+            _escalation_label(history.by_start_tier.get("cheap")),
+            _escalation_label(history.by_start_tier.get("mid")),
+            history.recommended_start_tier,
+        )
+    console.print(table)
+    for history in histories:
+        console.print(f"[dim]{history.task_type}/{history.verifiability} : {history.reason}[/dim]")

@@ -44,6 +44,8 @@ _WIRE_EVENT_NAMES: dict[HookEvent, str] = {
     HookEvent.USER_PROMPT_SUBMIT: "UserPromptSubmit",
     HookEvent.PRE_TOOL_USE: "PreToolUse",
     HookEvent.POST_TOOL_USE: "PostToolUse",
+    HookEvent.POST_TOOL_USE_FAILURE: "PostToolUseFailure",
+    HookEvent.SUBAGENT_START: "SubagentStart",
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",

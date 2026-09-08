@@ -36,6 +36,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
+from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "copilot"
 GH_DIR = Path(".github")
@@ -53,6 +54,11 @@ _WIRE_NAMES: dict[HookEvent, str] = {
     HookEvent.USER_PROMPT_SUBMIT: "UserPromptSubmit",
     HookEvent.PRE_TOOL_USE: "PreToolUse",
     HookEvent.POST_TOOL_USE: "PostToolUse",
+    # Same spelling as Claude Code (see `runtime._WIRE_EVENT_NAMES`); the
+    # capability manifest, not this table, is what says whether Copilot wires
+    # a hook that targets one of them.
+    HookEvent.POST_TOOL_USE_FAILURE: "PostToolUseFailure",
+    HookEvent.SUBAGENT_START: "SubagentStart",
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",
@@ -156,6 +162,26 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         "JSON purs. C'est la commande invoquée qui dit à qui le fichier",
         "appartient — `grimoire host sync` réécrit ceux qui appellent",
         "`grimoire-hook`, et préserve les autres en les signalant `[!]`.",
+        "",
+        "## Politique de dispatch",
+        "",
+        "Quand l'agent d'entrée route une tranche de travail vers une autre",
+        "persona, la classe de vérifiabilité de la tâche (celle que",
+        "`grimoire task dispatch` calcule) dit le niveau de confiance à lui",
+        "accorder avant de croire son résultat sans relecture :",
+        "",
+        f"- **V0** — {Verifiability.V0.explanation}",
+        f"- **V1** — {Verifiability.V1.explanation}",
+        f"- **V2** — {Verifiability.V2.explanation}",
+        "",
+        "Cet hôte ne documente aucun nom de modèle par palier : voir la",
+        "dégradation « model affinity » ci-dessous, le contrat",
+        "`.github/agents/*.agent.md` n'offre rien d'équivalent à `inherit`.",
+        "Ce qui reste vrai partout : toute persona routée doit clore sa",
+        "réponse par un bloc ```grimoire-uncertainties``` — une liste JSON",
+        'd\'objets `{"where": ..., "what": ..., "why": ...}` pour ce qu\'elle',
+        "n'a pas pu vérifier. Sans ce bloc, la réponse n'est pas un résultat",
+        "vérifiable, c'est une opinion.",
         "",
     ]
     if blocking:
