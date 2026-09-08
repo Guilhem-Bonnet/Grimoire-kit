@@ -26,11 +26,14 @@ counter would never see more than one message.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 # framework/agent-mesh-network.md:244 — "messages avant notification SOG obligatoire"
 DEFAULT_MAX_P2P_WITHOUT_SOG = 5
@@ -65,7 +68,7 @@ def load_p2p_guard_config(project_root: Path) -> dict[str, Any]:
     :data:`DEFAULT_MAX_P2P_WITHOUT_SOG`.
     """
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
     except ImportError:
         return {}
     for candidate in ("project-context.yaml", "grimoire.yaml"):
@@ -74,7 +77,8 @@ def load_p2p_guard_config(project_root: Path) -> dict[str, Any]:
             continue
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except (OSError, ValueError):
+        except (OSError, ValueError, yaml.YAMLError):
+            _log.warning("p2p_guard: %s illisible ou mal formé, repli sur les valeurs par défaut", path, exc_info=True)
             return {}
         governance = (data.get("messaging", {}) or {}).get("governance", {}) or {}
         if isinstance(governance, dict):
