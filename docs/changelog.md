@@ -2,6 +2,30 @@
 
 ## Dernière release
 
+### 3.41.0 — Le dispatch choisit sa preuve, le flow conduit un node à la fois
+
+- **Le dispatch choisit sa cascade selon ce qu'il faut prouver — épic
+  routage par vérifiabilité (#307).** Chaque tâche dérive une classe de
+  vérifiabilité (V0/V1/V2) de son contrat, qui pilote la cascade de
+  `grimoire task dispatch` ; le palier de départ s'ajuste à l'historique des
+  verdicts, la relisibilité et les incertitudes déclarées affinent la
+  décision, et la politique qui en résulte est émise aux hôtes avec l'état
+  des fournisseurs dès le `SessionStart`.
+- **Les fournisseurs se pilotent au coût.** Registre étendu par palier de
+  coût, `grimoire providers status` et `grimoire providers audit` pour
+  sonder sans dépenser, choix de modèle qui croise reasoning et coût.
+- **Le moteur de flow conduit un node à la fois (#204).** `grimoire flow
+  run|status|resume|abort`, avec l'exécuteur par dispatch en cascade du
+  routage par vérifiabilité branché dedans.
+- **Garde-fous runtime et hôtes.** Plafonds de tours et de budget par
+  instance, garde des échanges pair-à-pair, claims à fichiers exclusifs,
+  sous-agents bornés.
+- **Les écritures mémoire sont validées et la médiation d'outils vérifiée.**
+  Contrat MCP annoté, contenu externe marqué comme tel.
+- Export de traces OTel GenAI conforme, évals avec pass^k.
+
+## Releases précédentes
+
 ### 3.40.0 — La tâche se souvient, l'éditeur comprend
 
 - **Le claim rappelle ce que la mémoire sait de la tâche.** Historique,

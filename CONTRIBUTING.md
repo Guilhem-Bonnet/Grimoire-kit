@@ -147,7 +147,15 @@ où un numéro consommé l'est définitivement :
 2. **Au tag, dans `release.yml`** — trois gardes bloquants : le tag et
    `version.txt` disent la même chose, `scripts/gen-kit-hashes.py --check`
    couvre les fichiers livrés, `scripts/check-changelog-release.py` décrit la
-   version publiée.
+   version publiée. Ce dernier exige que chaque commit `feat`/`fix`/`perf`
+   fusionné depuis le tag précédent touche `CHANGELOG.md` — sauf repli : un
+   commit qui ne le touche pas est accepté si son sujet se termine par
+   `(#NNN)` et que ce numéro apparaît dans la section de la version publiée
+   (pas dans `[Unreleased]` ni dans une version déjà taguée). Le repli existe
+   depuis le 2026-09-08 (seize PR fusionnées le même jour sans entrée
+   propre, rattrapées par la section rédigée à la release) ; il couvre un
+   rattrapage ponctuel, pas une dispense — ajouter l'entrée à son propre
+   commit reste la règle.
 3. **Au tag, dans `publish.yml`** — le job `build` installe la wheel qu'il
    vient de construire ; le job `test` la réinstalle dans un runner neuf sur
    chaque Python supporté et importe le SDK. `publish-pypi` dépend des deux :
