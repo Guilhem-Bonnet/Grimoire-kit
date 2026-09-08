@@ -244,7 +244,7 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
 
-- MCP v2 Sampling : [framework/mcp/grimoire-mcp-server.md](mcp/grimoire-mcp-server.md)
+- Serveur MCP (fiche obsolète, voir `docs/mcp-integration.md`) : [framework/mcp/grimoire-mcp-server.md](mcp/grimoire-mcp-server.md)
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md)
 - Boomerang : [framework/workflows/boomerang-orchestration.md](workflows/boomerang-orchestration.md)
 - Grimoire Trace : [framework/grimoire-trace.md](grimoire-trace.md)

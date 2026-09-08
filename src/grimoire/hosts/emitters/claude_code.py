@@ -31,6 +31,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
+from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "claude"
 CLAUDE_DIR = Path(".claude")
@@ -98,6 +99,33 @@ def _model_for(agent: AgentSpec) -> str:
     return _MODEL_BY_REASONING.get(reasoning, "inherit")
 
 
+def _dispatch_policy_section() -> str:
+    """Section "Politique de dispatch" (issue #329) — quel modèle pour quelle tâche.
+
+    Only the entry persona dispatches other personas as sub-agents (every
+    other role "ne clos pas la tâche globale" — see the ``role`` branch
+    below), so only its file needs the rule. The three labels are quoted
+    from :class:`~grimoire.missions.verifiability.Verifiability`, not
+    paraphrased: the tier a sub-agent gets must never drift from what
+    ``grimoire task dispatch`` already computes for the same task from the
+    same source of truth.
+    """
+    return f"""## Politique de dispatch
+
+Avant de dispatcher un sous-agent, choisis son modèle selon la classe de
+vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
+
+- **V0** — {Verifiability.V0.explanation} → `haiku`.
+- **V1** — {Verifiability.V1.explanation} → `sonnet`.
+- **V2** — {Verifiability.V2.explanation} → le modèle de la session (le tien).
+
+Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
+portant une liste JSON d'objets `{{"where": ..., "what": ..., "why": ...}}` —
+un par point qu'il n'a pas pu vérifier. Un sous-agent qui clôt sans ce bloc
+n'a pas rendu un résultat vérifiable, il a rendu une opinion.
+"""
+
+
 def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
     tools = map_verbs(agent.tools, _TOOL_TABLE)
     header = Emitter.frontmatter(
@@ -127,6 +155,8 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 5. Rends un résultat vérifiable — chemins exacts, commandes réellement
    exécutées. Ce que tu n'as pas vérifié, dis-le comme non vérifié.
 """
+    if agent.entry_point:
+        body = f"{body}\n{_dispatch_policy_section()}"
     return EmittedFile(relpath=CLAUDE_DIR / "agents" / f"{agent.name}.md", content=body)
 
 

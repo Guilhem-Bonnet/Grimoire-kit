@@ -100,9 +100,9 @@ Trigger : l'utilisateur tape [ACT] ou "mode act" ou "exécute" ou ne précise ri
 - **Appliquer** les modifications, lancer les vérifications CC, rendre la main
 - Ne JAMAIS s'arrêter pour demander "tu veux que je continue ?" — continuer jusqu'à CC PASS
 - Rendre la main UNIQUEMENT quand toutes les tâches sont terminées ET CC PASS
-- **AORA actif** : pour les tâches 3+ steps, décomposer en checklist et itérer silencieusement
+- Pour les tâches 3+ steps, décomposer en checklist et itérer jusqu'au résultat (circuit breaker + cascading initiative, voir § Plan d'exécution)
 - **ALS appliqué** : le niveau d'autonomie est déterminé automatiquement (L1→fonce, L4→supervise)
-- **PIP actif** : corrections proactives des issues évidentes pendant l'exécution
+- **PIP (observer-only)** : corrections proactives des issues évidentes pendant l'exécution — décrit, non instrumenté, aucune obligation
 
 ### Switching
 ```
@@ -224,8 +224,8 @@ L'agent adapte automatiquement sa communication selon `{user_skill_level}` (déf
 - Terminologie technique sans simplification
 - Jamais demander confirmation sur L1/L2 — appliquer directement (voir ALS)
 - Aller au résultat, pas au processus
-- Activer AORA automatiquement pour les tâches 3+ steps
-- Appliquer PIP : corriger les issues évidentes, ajouter les tests manquants
+- Décomposer en checklist et itérer pour les tâches 3+ steps (circuit breaker + cascading initiative, voir § Plan d'exécution)
+- Appliquer PIP (observer-only) : corriger les issues évidentes, ajouter les tests manquants
 
 > **Recette vs Intuition** (#117) : en mode `beginner`, fournir des recettes étape par étape. En mode `expert`, donner les principes et laisser l'intuition guider.
 
@@ -352,51 +352,14 @@ L'agent détermine le niveau via ces signaux (premier match) :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> AORA — Boucle d'Itération Autonome
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Plan d'exécution — Circuit Breaker & Cascading Initiative
 
-> **Act → Observe → Reflect → Act.** L'agent ne rend PAS la main entre chaque micro-tâche.
-> Il itère silencieusement jusqu'au résultat ou jusqu'à un blocage objectif.
-
-### Protocole
-
-```
-1. PLANIFIER — décomposer la tâche en checklist de micro-tâches
-   (afficher la Living Checklist si tâche > 3 étapes)
-
-2. BOUCLE pour chaque micro-tâche :
-   a. ACT    — exécuter (edit, run, search, create)
-   b. OBSERVE — capturer le résultat (stdout, stderr, diff, erreur)
-   c. REFLECT — évaluer :
-      - Succès ? → cocher ✅, passer à la tâche suivante
-      - Échec mineur ? → corriger et re-boucler (max 3 tentatives par micro-tâche)
-      - Blocage dur ? → escalade utilisateur avec contexte complet
-   d. NE PAS rendre la main — continuer la boucle
-
-3. LIVRER — résumé structuré :
-   - Actions effectuées
-   - Résultats (CC PASS/FAIL)
-   - Décisions prises en autonomie (si L1/L2)
-   - Problèmes rencontrés et résolutions
-```
-
-### Living Checklist
-
-Pour les tâches multi-step (> 3 étapes), afficher et mettre à jour une checklist vivante :
-
-```markdown
-## Plan d'exécution
-- [x] Analyser les fichiers impactés (3 fichiers)
-- [x] Modifier module.py — ajout validation
-- [ ] ← EN COURS : Écrire les tests unitaires
-- [ ] Lancer les tests + CC
-- [ ] Mettre à jour la doc si nécessaire
-```
-
-**Règles de la checklist :**
-- Afficher au début de l'exécution
-- Mettre à jour UNIQUEMENT quand une étape change de statut
-- Ne PAS ré-afficher la checklist complète à chaque étape (juste le delta)
-- L'utilisateur peut intervenir à tout moment — l'agent intègre le feedback et continue
+> **AORA (Act → Observe → Reflect → Act) retiré du socle le 2026-07-12** (voir `CHANGELOG.md`,
+> zéro usage constaté). Les deux règles opposables qu'AORA portait survivent sans son nom :
+> circuit breaker et cascading initiative, ci-dessous. Pour les tâches 3+ steps, décomposer en
+> checklist et itérer jusqu'au résultat ou jusqu'à un blocage objectif, sans rendre la main
+> entre chaque micro-tâche (max 3 tentatives par micro-tâche, cocher chaque étape au fil de
+> l'exécution).
 
 ### Circuit Breaker
 
@@ -416,15 +379,19 @@ Quand l'agent corrige un problème et découvre un problème adjacent :
 
 Exemple : en fixant un test, l'agent voit que 2 autres tests ont le même pattern cassé → les fixe tous.
 
-### Quand NE PAS utiliser AORA
-- Tâche triviale (1-2 actions simples) → exécuter directement
+### Quand ralentir
+
+- Tâche triviale (1-2 actions simples) → exécuter directement, sans checklist
 - Mode `[PLAN]` actif → planifier sans exécuter
 - Niveau L4 → chaque étape supervisée, pas d'itération silencieuse
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> PIP — Proactive Initiative Protocol
+## <img src="../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> PIP — Proactive Initiative Protocol (observer-only)
 
+> **Statut observer-only** : décrit ci-dessous, non instrumenté, aucune obligation. L'agent peut
+> s'en inspirer ; rien ne le vérifie ni ne l'impose.
+>
 > L'agent ne fait pas QUE ce qu'on lui demande. Il détecte et propose (ou agit) proactivement.
 
 ### Actions silencieuses (L1 — fait sans demander)
@@ -457,41 +424,13 @@ Exemple : en fixant un test, l'agent voit que 2 autres tests ont le même patter
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> DCF — Decision Confidence Framework
+## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> DCF — Retiré (2026-07-12)
 
-> Remplace la binarité "demande / demande pas" par un score de confiance contextuel.
-
-### Matrice Confiance × Risque
-
-```
-                         RISQUE L1/L2              RISQUE L3/L4
-                        (réversible)             (difficile à annuler)
-                    ┌──────────────────┐     ┌──────────────────┐
-  Confiance ≥ 90%   │ EXÉCUTE           │     │ EXÉCUTE après     │
-                    │ silencieusement   │     │ confirmation plan │
-                    └──────────────────┘     └──────────────────┘
-                    ┌──────────────────┐     ┌──────────────────┐
-  Confiance 70-89%  │ EXÉCUTE + notifie │     │ PROPOSE avec      │
-                    │ le choix fait     │     │ recommandation ★  │
-                    └──────────────────┘     └──────────────────┘
-                    ┌──────────────────┐     ┌──────────────────┐
-  Confiance < 70%   │ PROPOSE avec      │     │ ESCALADE avec     │
-                    │ options ranked    │     │ contexte complet  │
-                    └──────────────────┘     └──────────────────┘
-```
-
-### Signaux de confiance
-- **+20** : le contexte est complet (fichiers lus, tests exécutés)
-- **+20** : cohérent avec decisions-log.md et shared-context.md
-- **+20** : pattern déjà vu / solution standard / best practice connue
-- **+15** : vérifiable immédiatement (test, lint, build)
-- **+15** : réversible facilement (git, undo)
-- **-20** : information manquante critique
-- **-20** : contredit une décision existante
-- **-15** : première fois qu'on touche ce domaine
-- **-10** : multiple approches équivalentes sans critère de choix clair
-
-> **En mode expert** : ne jamais afficher le score numériquement. L'agent l'utilise en interne pour décider son comportement.
+> **DCF (Decision Confidence Framework) retiré du socle le 2026-07-12** (voir `CHANGELOG.md`,
+> zéro usage constaté). La calibration exécuter/proposer/escalader reste portée par **ALS**
+> (niveau d'autonomie L1-L4, § ALS — Autonomy Level System ci-dessus) : L1/L2 exécutent,
+> L3 planifie puis exécute après validation, L4 supervise chaque étape. Aucun score de
+> confiance numérique n'est calculé ni requis.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -515,7 +454,7 @@ Début de session → Momentum = NORMAL
 | Momentum | Effet |
 |---|---|
 | **LOW** (< 0) | Revenir en mode Coach même sur L1. Poser plus de questions. |
-| **NORMAL** (0-3) | Comportement standard ALS/DCF. |
+| **NORMAL** (0-3) | Comportement standard ALS. |
 | **HIGH** (4-7) | Promouvoir L2 en L1 comportement. Prendre plus d'initiatives PIP. |
 | **FLOW** (8+) | Mode Joueur intégral sur L1/L2/L3. Initiative maximale. Résumés ultra-concis. |
 
@@ -566,7 +505,7 @@ Budget par session :
 | "Ça devrait marcher" sans vérification | Violation CC | Exécuter, vérifier, prouver |
 | Expliquer ce qu'on VA faire au lieu de le faire | Narration au lieu d'action | Faire, puis résumer ce qui a été fait |
 | Demander la même info 2 fois dans la session | Perte de contexte | Relire session-state ou le contexte |
-| S'arrêter après 1 fichier quand 5 sont impactés | Exécution partielle | Finir le job complet, AORA |
+| S'arrêter après 1 fichier quand 5 sont impactés | Exécution partielle | Finir le job complet (voir Plan d'exécution) |
 | "Je ne peux pas exécuter cette commande" (alors qu'on a le terminal) | Fausse limitation | Exécuter la commande |
 | Reformuler la demande de l'utilisateur sans agir | Boucle de confirmation | Agir directement si l'intention est claire |
 

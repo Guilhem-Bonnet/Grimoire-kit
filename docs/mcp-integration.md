@@ -76,7 +76,7 @@ Dans `claude_desktop_config.json` :
 | `grimoire_add_agent` | Ajouter un agent au projet | écriture, destructif, idempotent |
 | `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
-| `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
+| `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement, dernier audit (`available`/`probed_at`/`models_seen`/`probe_note`, issue #330) et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
 | `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant | lecture |
 | `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera | lecture |
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) | écriture, destructif |

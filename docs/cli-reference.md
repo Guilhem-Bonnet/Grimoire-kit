@@ -229,13 +229,23 @@ faire : la persona d'entrée est alors remise à la boucle principale par le hoo
 
 Le groupe `grimoire providers` croise le registre déclaratif
 (`llm-provider-registry.yaml`, voir [Compatibilité multi-provider](standard/integration.md#compatibilité-multi-provider-llm))
-et l'état de refroidissement runtime pour répondre à : quel fournisseur
+et l'état de refroidissement/audit runtime pour répondre à : quel fournisseur
 appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 
 | Commande | Description |
 | --- | --- |
-| `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité, prochain choix |
+| `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
+| `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
 | `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+
+`providers audit` ne fait jamais l'appel réel : présence du premier mot de
+`invocation` sur le `PATH`, `--version` pour un exécutable reconnu (claude,
+gemini, copilot, codex, ollama), et pour un fournisseur local (invocation
+`ollama ...` ou `provider_type: local`) la liste des modèles via
+`GET /api/tags` (hôte surchargeable par `OLLAMA_HOST`, timeout 3 s). Un
+fournisseur jugé `available: false` est écarté par `choose`/`candidates`
+jusqu'au prochain audit qui le retrouve — l'audit n'active ni ne désactive
+jamais un fournisseur, `enabled` reste une décision de gouvernance.
 
 ## Web
 
@@ -306,6 +316,7 @@ prochain export l'écrase.
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
+| `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
@@ -357,6 +368,34 @@ GAO-livrer-la-ti-001 — Livrer la timeline  (running)
 
 Cause(s) d'arrêt : 3
 ```
+
+### Dispatch par cascade
+
+`grimoire task dispatch <id>` délègue une tâche à un fournisseur LLM du
+registre (`llm-provider-registry.yaml`), en cascadant par palier de coût
+(`cheap → mid → strong`) selon la classe de vérifiabilité de la tâche : une
+tâche **V2** est refusée avant tout appel (aucun verdict mécanique ne peut la
+juger), une **V0** cascade depuis `cheap`, une **V1** cascade depuis `mid` et,
+au vert, passe en `needs_verification` au lieu d'être considérée close — le
+check mécanique n'y est qu'un indice, la classe exige encore un regard
+humain. Au moins un `--check <commande>` est obligatoire (code de sortie 0 =
+vert, toutes doivent l'être) ; sans lui, la classe dit que le verdict est
+mécanique, encore faut-il dire lequel.
+
+Un échec d'appel (429, timeout, code de sortie non nul) passe au fournisseur
+suivant du même palier et pose un refroidissement (`grimoire providers
+status`) ; un `--check` rouge passe au palier suivant. Chaque tentative laisse
+un événement `task.dispatched` au Mission Ledger (palier, fournisseur,
+modèle, durée, verdict, coût si la sortie est un JSON portant
+`total_cost_usd`). `--dry-run` montre la classe, la chaîne de paliers prévue
+et le prompt sans rien appeler ; `--max-tier` borne la cascade ; `--provider`
+la restreint à un seul fournisseur.
+
+Code de sortie : `0` si la chaîne finit au vert, `1` si elle s'épuise sans
+verdict vert, `2` sur un refus (V2, aucun `--check`, aucun fournisseur
+invocable). Ce lot ne worktree pas automatiquement : **travaillez sur une
+branche propre** avant de dispatcher — le fournisseur délégué écrit dans le
+dépôt courant.
 
 ### Ce que le claim rappelle
 
@@ -464,6 +503,28 @@ Le rejeu ne fabrique aucun verdict : un cas absent du relevé est rapporté comm
 le paquet `jsonschema`. Quand il manque, la couche ne s'exécute pas et les deux
 commandes **refusent** : un contrôle qui n'a pas eu lieu ne peut pas conclure à
 un succès. `--allow-skipped-schema` accepte explicitement le contrôle partiel.
+
+### `grimoire flow` — le moteur conduit, l'hôte exécute un node
+
+`blueprint compile` aplatit un blueprint en un unique prompt markdown : le
+modèle improvise l'ordre. `grimoire flow` inverse cela (#204) : le
+`RuntimeKernel` conduit un blueprint node par node, chaque node reçoit un
+contrat borné (entrées, frontière d'outils, critères d'acceptation, contrat
+de sortie), et **l'hôte** — jamais le kit — exécute le node. `compile` reste
+un repli valide pour les hôtes sans exécuteur de node ; `flow` ajoute une
+seconde sortie, il ne retire rien.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
+| `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
+| `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
+| `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
+
+Un checkpoint par node : un run interrompu reprend exactement au node
+courant, jamais du début. Une sortie non conforme au contrat de sortie du
+node **suspend** le run en nommant le node et la pin fautifs, avec un code de
+sortie non nul — jamais un échec muet.
 
 ---
 
