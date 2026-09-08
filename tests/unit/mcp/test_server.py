@@ -27,6 +27,7 @@ from grimoire.mcp.server import (
     grimoire_memory_search,
     grimoire_memory_store,
     grimoire_project_context,
+    grimoire_providers_status,
     grimoire_standard_audit,
     grimoire_standard_gate,
     grimoire_standard_score,
@@ -405,6 +406,38 @@ class TestStandardGate:
         data = json.loads(result)
         assert data["state"] is None
         assert data["missing"] == []
+
+
+class TestGrimoireProvidersStatus:
+    """Issue #310, lot 2 — même donnée que `grimoire providers status`, en MCP."""
+
+    def test_project_without_registry_returns_empty(self, tmp_path: Path) -> None:
+        result = grimoire_providers_status(str(tmp_path))
+        data = json.loads(result)
+        assert data["providers"] == []
+        assert data["next_choice"] == {"cheap": None, "mid": None, "strong": None}
+
+    def test_tiered_provider_appears_as_next_choice(self, standard_project: Path) -> None:
+        registry_path = standard_project / "_grimoire/standard/llm-provider-registry.yaml"
+        registry = registry_path.read_text(encoding="utf-8")
+        # Le scaffold "starter" ne déclare aucun fournisseur activé ; on
+        # ajoute la forme minimale d'un fournisseur avec un modèle tarifé,
+        # exactement ce que le lot 2 rend possible.
+        registry = registry.replace(
+            '  - id: "anthropic"\n    enabled: false',
+            '  - id: "anthropic"\n    enabled: true\n    currency: "quota"\n'
+            '    models:\n      - id: "claude-haiku-4.5"\n        tier: "cheap"',
+        )
+        registry_path.write_text(registry, encoding="utf-8")
+
+        result = grimoire_providers_status(str(standard_project))
+        data = json.loads(result)
+
+        anthropic = next(p for p in data["providers"] if p["id"] == "anthropic")
+        assert anthropic["enabled"] is True
+        assert anthropic["currency"] == "quota"
+        assert data["next_choice"]["cheap"] == "anthropic"
+        assert data["next_choice"]["strong"] is None
 
 
 # ── _find_kit_root ────────────────────────────────────────────────────────────

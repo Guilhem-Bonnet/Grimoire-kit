@@ -1,0 +1,151 @@
+"""CLI ``grimoire providers`` — disponibilité et routage par palier de coût.
+
+Enveloppe ``grimoire.providers`` (issue #310, lot 2) : ``status`` répond à
+« qui puis-je appeler maintenant, pour quel palier ? » en croisant le
+registre déclaratif et l'état de refroidissement runtime ; ``cooldown``
+enregistre un échec à la main, pour les hooks et scripts qui viennent de voir
+un 429 ou un timeout et n'ont pas de raison d'attendre le prochain appel
+raté pour que ``choose()`` en tienne compte.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated, Any
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, ProviderSpec, read_registry
+from grimoire.providers.routing import choose
+from grimoire.providers.state import ProviderRuntimeState, load_state, record_failure
+
+providers_app = typer.Typer(
+    help="Fournisseurs LLM : disponibilité par palier de coût, refroidissement après échec.",
+    no_args_is_help=True,
+)
+console = Console()
+
+_PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
+_JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
+_REASON_OPTION = typer.Option("--reason", help="Motif de l'échec : rate_limit | timeout.")
+
+#: Motifs reconnus par la table de refroidissement (grimoire.providers.state).
+#: Un autre libellé est accepté (repli 5 min) mais on préfère le signaler ici
+#: plutôt que laisser un fournisseur silencieusement mal calibré.
+_KNOWN_REASONS = ("rate_limit", "timeout")
+
+
+def _get_fmt(ctx: typer.Context) -> str:
+    """Format hérité du ``-o/--output`` global, si l'appelant ne force pas ``--json``."""
+    return str((ctx.obj or {}).get("output", "text") or "text")
+
+
+def _state_label(provider_id: str, state: dict[str, ProviderRuntimeState], *, now: datetime) -> str:
+    entry = state.get(provider_id)
+    if entry is not None and entry.is_cooling_down(now=now):
+        until = entry.cooldown_until.isoformat(timespec="seconds") if entry.cooldown_until else "?"
+        return f"[yellow]refroidi jusqu'à {until}[/yellow]"
+    return "[green]disponible[/green]"
+
+
+def _models_by_tier(provider: ProviderSpec) -> str:
+    parts = [
+        f"{tier}: " + ", ".join(model.id for model in provider.models_for_tier(tier))
+        for tier in SUPPORTED_MODEL_TIERS
+        if provider.models_for_tier(tier)
+    ]
+    return " · ".join(parts) if parts else "—"
+
+
+def _provider_json(provider: ProviderSpec, state: dict[str, ProviderRuntimeState], *, now: datetime) -> dict[str, Any]:
+    entry = state.get(provider.id)
+    cooling_down = entry is not None and entry.is_cooling_down(now=now)
+    return {
+        "id": provider.id,
+        "enabled": provider.enabled,
+        "currency": provider.currency,
+        "invocation": provider.invocation,
+        "models": [{"id": model.id, "tier": model.tier} for model in provider.models],
+        "cooling_down": cooling_down,
+        "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
+        "failure_count": entry.failure_count if entry else 0,
+    }
+
+
+@providers_app.command("status")
+def providers_status(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Fournisseurs déclarés : activation, monnaie, modèles par palier, disponibilité."""
+    root = project_root.resolve()
+    try:
+        providers = read_registry(root)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    now = datetime.now(UTC)
+    state = load_state(root)
+    next_choice = {tier: choose(root, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}
+
+    if json_output or _get_fmt(ctx) == "json":
+        payload = {
+            "providers": [_provider_json(provider, state, now=now) for provider in providers],
+            "next_choice": {tier: (spec.id if spec else None) for tier, spec in next_choice.items()},
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    if not providers:
+        console.print("[dim]Aucun registre de fournisseurs (`grimoire standard init`).[/dim]")
+        return
+
+    table = Table(title="Fournisseurs LLM")
+    for column in ("Fournisseur", "Activé", "Monnaie", "Modèles par palier", "État"):
+        table.add_column(column)
+    for provider in providers:
+        table.add_row(
+            provider.id,
+            "[green]oui[/green]" if provider.enabled else "[dim]non[/dim]",
+            provider.currency or "—",
+            _models_by_tier(provider),
+            _state_label(provider.id, state, now=now),
+        )
+    console.print(table)
+
+    console.print("\n[bold]Prochain choix par palier[/bold]")
+    for tier in SUPPORTED_MODEL_TIERS:
+        spec = next_choice[tier]
+        label = spec.id if spec is not None else "[yellow]aucun fournisseur disponible[/yellow]"
+        console.print(f"  {tier}: {label}")
+
+
+@providers_app.command("cooldown")
+def providers_cooldown(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur (voir `grimoire providers status`).")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    reason: Annotated[str, _REASON_OPTION] = "rate_limit",
+) -> None:
+    """Enregistrer manuellement un échec (429, timeout...) pour ce fournisseur.
+
+    Utile depuis un hook ou un script qui vient de voir l'appel échouer :
+    ``choose()`` écarte ce fournisseur jusqu'à l'expiration du
+    refroidissement sans attendre qu'il retente lui-même.
+    """
+    if reason not in _KNOWN_REASONS:
+        console.print(
+            f"[yellow]![/yellow] motif {reason!r} non reconnu ({', '.join(_KNOWN_REASONS)}) — "
+            "refroidissement par défaut appliqué quand même."
+        )
+    root = project_root.resolve()
+    entry = record_failure(root, provider_id, reason)
+    until = entry.cooldown_until.isoformat(timespec="seconds") if entry.cooldown_until else "?"
+    console.print(
+        f"[yellow]●[/yellow] {provider_id} refroidi jusqu'à {until} (échec n°{entry.failure_count}, motif {reason})"
+    )

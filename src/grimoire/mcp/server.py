@@ -743,6 +743,59 @@ def grimoire_host_status(project_path: str = ".") -> str:
 
 
 @mcp.tool()
+def grimoire_providers_status(project_path: str = ".") -> str:
+    """Report LLM provider availability per cost tier (issue #310, lot 2).
+
+    Croisement du registre déclaratif (`llm-provider-registry.yaml`) et de
+    l'état de refroidissement runtime (`_grimoire-output/providers-state.json`) :
+    quels fournisseurs sont activés, avec quels modèles par palier
+    (cheap/mid/strong), et lequel `choose()` retiendrait maintenant pour
+    chaque palier — la même question que `grimoire providers status`, pour
+    un client MCP qui n'a pas de terminal.
+
+    Args:
+        project_path: Path to project root (default: current directory).
+    """
+    from datetime import UTC, datetime
+
+    from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, read_registry
+    from grimoire.providers.routing import choose
+    from grimoire.providers.state import load_state
+
+    target = Path(project_path).resolve()
+    try:
+        providers = read_registry(target)
+    except ProviderRegistryError as exc:
+        return json.dumps({"error": str(exc)})
+
+    now = datetime.now(UTC)
+    state = load_state(target)
+
+    def _provider_payload(provider: Any) -> dict[str, Any]:
+        entry = state.get(provider.id)
+        cooling_down = entry is not None and entry.is_cooling_down(now=now)
+        return {
+            "id": provider.id,
+            "enabled": provider.enabled,
+            "currency": provider.currency,
+            "invocation": provider.invocation,
+            "models": [{"id": model.id, "tier": model.tier} for model in provider.models],
+            "cooling_down": cooling_down,
+            "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
+        }
+
+    next_choice = {tier: choose(target, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}
+    return json.dumps(
+        {
+            "providers": [_provider_payload(provider) for provider in providers],
+            "next_choice": {tier: (spec.id if spec is not None else None) for tier, spec in next_choice.items()},
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
 def grimoire_skill(slug: str, project_path: str = ".") -> str:
     """Return a Grimoire skill body on demand, for hosts without native skills.
 
