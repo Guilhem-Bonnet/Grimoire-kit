@@ -21,7 +21,7 @@
 10. **Plan d'exécution** — Tâches 3+ steps : décomposer en checklist, itérer jusqu'au résultat, ne PAS rendre la main entre micro-tâches. Max 3 retries/step. Circuit breaker : si même erreur 2×, pivoter la stratégie ; si 2 pivots échouent, escalade utilisateur. Cascading initiative : problème adjacent L1 = corriger dans la foulée, L2 = corriger + mentionner, L3+ = signaler sans corriger. (AORA retiré du socle le 2026-07-12, voir CHANGELOG — ces deux règles survivent sans son nom.)
 11. **PIP (Proactive Initiative Protocol, observer-only)** — Décrit, non instrumenté, aucune obligation : L1 = corriger lint/imports/typos silencieusement. L2 = ajouter tests, mettre à jour docs, signaler TODOs. Jamais d'initiative sur architecture.
 12. **Session Momentum** — La confiance augmente avec les succès consécutifs dans la session : `boost = min(session_success_count / 5, 2)`. Chaque succès réduit les confirmations nécessaires. Reset à 0 si erreur critique.
-13. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 question si niveau ALS L1. Au-delà du budget = décider soi-même + documenter.
+13. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 questions si niveau ALS L1. Au-delà du budget = décider soi-même + documenter.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
