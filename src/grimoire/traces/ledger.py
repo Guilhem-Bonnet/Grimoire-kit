@@ -13,6 +13,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.traces.otel_conventions import (
+    ATTR_AGENT_NAME,
+    ATTR_CONVERSATION_ID,
+    ATTR_INPUT_TOKENS,
+    ATTR_OPERATION_NAME,
+    ATTR_OUTPUT_TOKENS,
+    ATTR_PROVIDER_NAME,
+    ATTR_REQUEST_MODEL,
+    ATTR_TOOL_CALL_ID,
+    ATTR_TOOL_NAME,
+    OP_EXECUTE_TOOL,
+    OP_INVOKE_AGENT,
+    OTEL_EXPORT_SCHEMA_VERSION,
+    PROVIDER_NAME,
+    agent_span_name,
+    model_span_name,
+    tool_span_name,
+)
 from grimoire.traces.schemas import (
     PolicyVerdictRef,
     TokenUsage,
@@ -179,16 +197,20 @@ class TraceLedger:
     # ── OTel GenAI JSONL export ────────────────────────────────────────────
 
     def export_otel_jsonl(self, dest: Path, *, mission_id: str | None = None) -> int:
-        """Export traces as OTel GenAI JSONL spans. Returns count written.
+        """Export traces as OTel GenAI JSONL spans. Returns span count written.
 
-        Format follows OpenTelemetry GenAI semantic conventions.
+        Format follows OpenTelemetry GenAI semantic conventions
+        (``OTEL_EXPORT_SCHEMA_VERSION``, see ``otel_conventions``). One
+        ``invoke_agent`` parent span per trace, plus one ``execute_tool``
+        child span per recorded tool call — so the count returned is spans,
+        not traces, whenever a trace carries tool calls.
         No opentelemetry-sdk dependency required — pure JSONL output.
         """
         traces = self.list_traces(mission_id=mission_id)
         lines: list[str] = []
         for trace in traces:
-            span = self._to_otel_span(trace)
-            lines.append(json.dumps(span, ensure_ascii=False))
+            for span in self._to_otel_spans(trace):
+                lines.append(json.dumps(span, ensure_ascii=False))
         dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return len(lines)
 
@@ -244,10 +266,33 @@ class TraceLedger:
             "endTime": trace.completed_at or None,
         }
 
-    def _to_otel_span(self, trace: TraceRecord) -> dict[str, Any]:
+    def _to_otel_spans(self, trace: TraceRecord) -> list[dict[str, Any]]:
+        """Project one trace into an ``invoke_agent`` parent span plus one
+        ``execute_tool`` child span per recorded tool call.
+
+        Follows OTel GenAI conventions: ``gen_ai.provider.name`` (not the
+        deprecated ``gen_ai.system``), ``gen_ai.operation.name``,
+        ``gen_ai.conversation.id`` from ``mission_id`` (falling back to
+        ``run_id``), ``gen_ai.agent.name`` from ``agent_id``. Each tool-call
+        child carries real start/end timestamps derived from the call's own
+        ``timestamp`` when the caller recorded one, or from the parent
+        trace's ``started_at`` otherwise — never from a bug that hands the
+        nanosecond converter a Python type name instead of an ISO string
+        (the previous behaviour, which made every timestamp zero).
+        """
         trace_id_hex = uuid.uuid5(uuid.NAMESPACE_URL, trace.run_id).hex
         span_id_hex = uuid.uuid5(uuid.NAMESPACE_URL, trace.id).hex[:16]
         status_code = _OTEL_STATUS_OK if trace.outcome == TraceOutcome.SUCCESS else _OTEL_STATUS_ERROR
+        conversation_id = trace.mission_id or trace.run_id
+
+        resource = {
+            "attributes": {
+                "service.name": "grimoire-kit",
+                "grimoire.host_id": trace.host_id,
+                "grimoire.agent_id": trace.agent_id,
+                "grimoire.schema_version": OTEL_EXPORT_SCHEMA_VERSION,
+            }
+        }
 
         attrs: dict[str, Any] = {
             "grimoire.run_id": trace.run_id,
@@ -256,44 +301,61 @@ class TraceLedger:
             "grimoire.recipe_id": trace.recipe_id,
             "grimoire.workflow_instance_id": trace.workflow_instance_id,
             "grimoire.outcome": trace.outcome.value,
-            "gen_ai.system": "grimoire",
-            "gen_ai.request.model": trace.model,
-            "gen_ai.usage.input_tokens": trace.token_usage.prompt_tokens,
-            "gen_ai.usage.output_tokens": trace.token_usage.completion_tokens,
+            ATTR_PROVIDER_NAME: PROVIDER_NAME,
+            ATTR_OPERATION_NAME: OP_INVOKE_AGENT,
+            ATTR_CONVERSATION_ID: conversation_id,
+            ATTR_REQUEST_MODEL: trace.model,
+            ATTR_INPUT_TOKENS: trace.token_usage.prompt_tokens,
+            ATTR_OUTPUT_TOKENS: trace.token_usage.completion_tokens,
             "grimoire.error_count": trace.error_count,
             "grimoire.retry_count": trace.retry_count,
             "grimoire.quality_score": trace.quality_score,
             "grimoire.policy_blocks": sum(1 for tc in trace.tool_calls if tc.verdict == "block"),
         }
+        if trace.agent_id:
+            attrs[ATTR_AGENT_NAME] = trace.agent_id
 
-        events = [
+        parent_name = agent_span_name(trace.agent_id) if trace.agent_id else model_span_name(OP_INVOKE_AGENT, trace.recipe_id)
+
+        spans: list[dict[str, Any]] = [
             {
-                "timeUnixNano": _ns(tc.latency_ms.__class__.__name__),
-                "name": "grimoire.tool_call",
-                "attributes": {
-                    "tool": tc.tool,
-                    "verdict": tc.verdict,
-                    "policy_verdict_id": tc.policy_verdict_id,
-                },
+                "traceId": trace_id_hex,
+                "spanId": span_id_hex,
+                "name": parent_name,
+                "kind": _OTEL_SPAN_KIND_INTERNAL,
+                "startTimeUnixNano": _ns(trace.started_at),
+                "endTimeUnixNano": _ns(trace.completed_at),
+                "status": {"code": status_code},
+                "attributes": attrs,
+                "resource": resource,
             }
-            for tc in trace.tool_calls
         ]
 
-        return {
-            "traceId": trace_id_hex,
-            "spanId": span_id_hex,
-            "name": f"grimoire.workflow.{trace.recipe_id}",
-            "kind": _OTEL_SPAN_KIND_INTERNAL,
-            "startTimeUnixNano": _ns(trace.started_at),
-            "endTimeUnixNano": _ns(trace.completed_at),
-            "status": {"code": status_code},
-            "attributes": attrs,
-            "events": events,
-            "resource": {
-                "attributes": {
-                    "service.name": "grimoire-kit",
-                    "grimoire.host_id": trace.host_id,
-                    "grimoire.agent_id": trace.agent_id,
+        for index, tc in enumerate(trace.tool_calls):
+            start_ns = _ns(tc.timestamp or trace.started_at)
+            end_ns = start_ns + int(tc.latency_ms * 1_000_000) if start_ns else 0
+            child_attrs: dict[str, Any] = {
+                ATTR_PROVIDER_NAME: PROVIDER_NAME,
+                ATTR_OPERATION_NAME: OP_EXECUTE_TOOL,
+                ATTR_TOOL_NAME: tc.tool,
+                "grimoire.verdict": tc.verdict,
+                "grimoire.policy_verdict_id": tc.policy_verdict_id,
+            }
+            if tc.call_id:
+                child_attrs[ATTR_TOOL_CALL_ID] = tc.call_id
+            spans.append(
+                {
+                    "traceId": trace_id_hex,
+                    "spanId": uuid.uuid5(uuid.NAMESPACE_URL, f"{trace.id}:tool:{index}").hex[:16],
+                    "parentSpanId": span_id_hex,
+                    "name": tool_span_name(tc.tool),
+                    "kind": _OTEL_SPAN_KIND_INTERNAL,
+                    "startTimeUnixNano": start_ns,
+                    "endTimeUnixNano": end_ns,
+                    "status": {"code": _OTEL_STATUS_ERROR if tc.verdict in ("block", "deny") else _OTEL_STATUS_OK},
+                    "attributes": child_attrs,
+                    "resource": resource,
                 }
-            },
-        }
+            )
+
+        return spans

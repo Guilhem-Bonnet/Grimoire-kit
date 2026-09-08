@@ -12,11 +12,39 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-RUNS = Path(__file__).resolve().parent / "runs"
+from ruamel.yaml import YAML
+
+ROOT = Path(__file__).resolve().parent.parent
+EVALS = ROOT / "evals"
+RUNS = EVALS / "runs"
+TASKS_DIR = EVALS / "tasks"
+
+# pass_hat_k.py est un module local à evals/ (pas un paquet) ; l'exécution
+# directe (`python evals/aggregate.py ...`) ajoute déjà son propre dossier à
+# sys.path, mais un chargement dynamique (`importlib`, cf. les tests) ne le
+# fait pas — insertion explicite pour marcher dans les deux cas.
+sys.path.insert(0, str(EVALS))
+from pass_hat_k import pass_hat_k  # noqa: E402
+
+_yaml = YAML(typ="safe")
+
+
+@lru_cache(maxsize=8)
+def task_suite(witness: str) -> dict[str, Any]:
+    """La suite de tâches (`evals/tasks/<witness>.yaml`) : `repetitions_min`
+    (k du pass^k) et la `category` déclarée par tâche."""
+    return _yaml.load((TASKS_DIR / f"{witness}.yaml").read_text(encoding="utf-8"))
+
+
+def task_categories(witness: str) -> dict[str, str]:
+    suite = task_suite(witness)
+    return {t["id"]: t.get("category", "capability") for t in suite["tasks"]}
 
 
 def load(date: str) -> list[dict[str, Any]]:
@@ -50,6 +78,71 @@ def _sum(values: list[Any]) -> int | None:
     return int(sum(known)) if known else None
 
 
+def _pass_hat_k(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any] | None]:
+    """pass^k (audit B13, docs/evals-protocol.md amendement A3) : proportion de
+    tâches réussies à TOUTES leurs k répétitions exécutées et jugées,
+    k = ``repetitions_min`` de la suite. Calculé sur le total et séparément
+    par catégorie (``capability``/``regression``) — un run non exécuté ou
+    non jugé n'est ni succès ni échec, il exclut la tâche du dénominateur
+    tant qu'elle n'a pas atteint k (voir `evals.pass_hat_k.pass_hat_k`).
+    """
+    by_witness: dict[str, dict[str, list[bool | None]]] = defaultdict(lambda: defaultdict(list))
+    k_by_witness: dict[str, int] = {}
+    for r in rows:
+        witness = r.get("witness")
+        if not witness:
+            continue
+        k_by_witness.setdefault(witness, task_suite(witness)["repetitions_min"])
+        by_witness[witness][r["task_id"]].append((r["judgment"] or {}).get("completed"))
+
+    def combined(keep_category: Any) -> dict[str, Any] | None:
+        merged: dict[str, list[bool | None]] = {}
+        ks: set[int] = set()
+        for witness, by_task in by_witness.items():
+            cats = task_categories(witness)
+            for task_id, outcomes in by_task.items():
+                if keep_category(cats.get(task_id, "capability")):
+                    merged[f"{witness}:{task_id}"] = outcomes
+                    ks.add(k_by_witness[witness])
+        if not merged:
+            return None
+        # Des suites différentes peuvent déclarer des k différents ; prendre
+        # le plus petit garde le calcul défini pour toutes plutôt que de
+        # faire échouer par construction une suite qui vise un k plus bas.
+        return pass_hat_k(merged, min(ks)).to_dict()
+
+    return {
+        "overall": combined(lambda _c: True),
+        "capability": combined(lambda c: c == "capability"),
+        "regression": combined(lambda c: c == "regression"),
+    }
+
+
+def _cost_by_model(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Coût agrégé par modèle quand le résultat de la CLI expose une
+    ventilation (``modelUsage`` ou équivalent, B13). La CLI ne ventile pas
+    par *sous-agent nommé* à ce jour — voir docs/evals-protocol.md amendement A3 ;
+    reste vide plutôt que d'inventer une clé absente.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    for r in rows:
+        usage = r["external"].get("model_usage")
+        if not usage:
+            continue
+        for model, entry in usage.items():
+            # Branch on the type before calling .get(): entry is only ever a
+            # dict when the CLI nests the cost under a key, and some shapes
+            # this function explicitly supports (see the docstring's "else
+            # entry") give the number directly instead.
+            if isinstance(entry, dict):
+                cost = entry.get("costUSD") or entry.get("cost_usd") or entry.get("cost")
+            else:
+                cost = entry
+            if isinstance(cost, int | float):
+                totals[model] += cost
+    return {model: round(total, 4) for model, total in totals.items()}
+
+
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     j = [r["judgment"] or {} for r in rows]
     costs = [r["external"].get("tokens_cost") for r in rows]
@@ -58,6 +151,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     turns = [r["run"].get("num_turns") for r in rows if r["run"].get("num_turns") is not None]
     gov = [r.get("governance") or {} for r in rows]
     std = [r.get("standard") or {} for r in rows]
+    pass_k = _pass_hat_k(rows)
+    cost_by_model = _cost_by_model(rows)
     return {
         "runs": len(rows),
         "judged": sum(1 for x in j if x),
@@ -67,9 +162,13 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "regressions_hard": _sum([x.get("regressions_hard") for x in j]),
         "regressions_adapted": _sum([x.get("regressions_adapted") for x in j]),
         "hard_candidates_mechanical": _n([(r.get("mechanical") or {}).get("hard_regression_candidate") for r in rows]),
+        "pass_hat_k": (pass_k["overall"] or {}).get("pass_hat_k") if pass_k["overall"] else None,
+        "pass_hat_k_capability": (pass_k["capability"] or {}).get("pass_hat_k") if pass_k["capability"] else None,
+        "pass_hat_k_regression": (pass_k["regression"] or {}).get("pass_hat_k") if pass_k["regression"] else None,
         "cost_total": cost_total,
         "cost_per_run": round(cost_total / len(rows), 3) if rows else None,
         "cost_per_completed": round(cost_total / completed, 2) if completed else None,
+        "cost_by_model": cost_by_model or None,
         "turns_mean": round(sum(turns) / len(turns), 1) if turns else None,
         "max_turns_hit": sum(1 for r in rows if r["run"].get("subtype") == "error_max_turns"),
         "timed_out": sum(1 for r in rows if r["run"].get("timed_out")),

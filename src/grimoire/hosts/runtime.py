@@ -218,7 +218,9 @@ _LEDGER_VERDICT = {
 _RECORDED_EVENTS = {HookEvent.PRE_TOOL_USE, HookEvent.STOP, HookEvent.SUBAGENT_STOP}
 
 
-def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, latency_ms: float) -> None:
+def _record_decision(
+    hook: HookInput, decision: Decision, host_id: HostId, latency_ms: float, started_at: str | None = None
+) -> None:
     """Append what the decision did to the project's trace ledger.
 
     The ledger and this layer were built for each other and never connected:
@@ -246,6 +248,7 @@ def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, laten
         # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
         task_id = str(detail.get("task_id") or active_task_id(hook.project_root))
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
+        record_started_at = started_at or _now_iso()
         tool_calls = []
         if hook.event is HookEvent.PRE_TOOL_USE:
             tool_calls.append(
@@ -254,6 +257,11 @@ def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, laten
                     "verdict": verdict,
                     "args_hash": _args_hash(hook.tool_input),
                     "latency_ms": latency_ms,
+                    # Real wall-clock instant the tool call was decided, not
+                    # the record-time timestamp: the OTel export needs the
+                    # call's own timing, and falling back to the trace's
+                    # ``started_at`` would silently reuse a later moment.
+                    "timestamp": record_started_at,
                 }
             )
         TraceLedger(hook.project_root / TRACES_DIR).record(
@@ -263,7 +271,7 @@ def _record_decision(hook: HookInput, decision: Decision, host_id: HostId, laten
             task_id=task_id,
             recipe_id=DEFAULT_DECISION_BY_EVENT.get(hook.event, hook.event.value),
             outcome=TraceOutcome.FAILURE if decision.is_refusal else TraceOutcome.SUCCESS,
-            started_at=_now_iso(),
+            started_at=record_started_at,
             host_id=host_id.value,
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
@@ -302,10 +310,11 @@ def run_hook(
     """Full path: normalise, decide, persist side effects, render."""
     hook = normalize_input(payload, event=event, project_root=project_root)
     resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
+    started_at = _now_iso()
     started = time.perf_counter()
     decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
     latency_ms = (time.perf_counter() - started) * 1000
-    _record_decision(hook, decision, host_id, latency_ms)
+    _record_decision(hook, decision, host_id, latency_ms, started_at)
     capsule, capsule_error = _persist_capsule(hook, decision)
     if capsule is not None or capsule_error:
         stamp = {"capsule": str(capsule)} if capsule is not None else {"capsule_error": capsule_error}

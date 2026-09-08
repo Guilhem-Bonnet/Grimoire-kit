@@ -46,6 +46,13 @@ class ToolCallTrace:
     args_hash: str = ""
     policy_verdict_id: str = ""
     latency_ms: float = 0.0
+    #: ISO-8601 instant the call happened, when known. Empty on records
+    #: written before this field existed — exporters must fall back to the
+    #: parent trace's ``started_at`` rather than invent a timestamp.
+    timestamp: str = ""
+    #: Provider-issued tool-call id, when the caller has one. Feeds
+    #: ``gen_ai.tool.call.id`` on export; empty means "not available".
+    call_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +61,8 @@ class ToolCallTrace:
             "args_hash": self.args_hash,
             "policy_verdict_id": self.policy_verdict_id,
             "latency_ms": self.latency_ms,
+            "timestamp": self.timestamp,
+            "call_id": self.call_id,
         }
 
     @classmethod
@@ -64,6 +73,8 @@ class ToolCallTrace:
             args_hash=d.get("args_hash", ""),
             policy_verdict_id=d.get("policy_verdict_id", ""),
             latency_ms=float(d.get("latency_ms", 0.0)),
+            timestamp=d.get("timestamp", ""),
+            call_id=d.get("call_id", ""),
         )
 
 
