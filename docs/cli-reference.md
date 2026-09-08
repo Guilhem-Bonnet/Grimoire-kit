@@ -285,6 +285,7 @@ prochain export l'écrase.
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
+| `grimoire task trace-export <dest> [--format otel\|langfuse] [--mission-id <id>]` | Exporte le TraceLedger en JSONL, conventions sémantiques OTel GenAI ou contrat REST Langfuse |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un

@@ -43,7 +43,8 @@ def test_un_appel_de_modele_devient_un_span_otel(tmp_path: Path) -> None:
     span = otel_spans(tmp_path)[0]
     attrs = span["attributes"]
     assert attrs["gen_ai.request.model"] == "sonnet"
-    assert attrs["gen_ai.system"] == "anthropic"
+    assert attrs["gen_ai.provider.name"] == "anthropic"
+    assert "gen_ai.system" not in attrs
     assert attrs["gen_ai.usage.input_tokens"] == 1200
     assert attrs["gen_ai.usage.output_tokens"] == 300
     assert attrs["gen_ai.operation.name"] == "chat"
@@ -111,3 +112,34 @@ def test_les_deux_sources_sont_lues(tmp_path: Path) -> None:
     write_events(tmp_path, "task-flow", [{"type": "llm-call", "model": "b"}])
     models = {s["attributes"]["gen_ai.request.model"] for s in otel_spans(tmp_path)}
     assert models == {"a", "b"}
+
+
+def test_un_sous_dossier_de_hook_runtime_est_decouvert(tmp_path: Path) -> None:
+    """EVENT_SOURCES ne nommait que le fichier plat : une session écrite un
+    niveau plus bas (`hook-runtime/<session>/events.jsonl`) restait invisible.
+    """
+    nested = tmp_path / "_grimoire-runtime-output" / "hook-runtime" / "session-42" / "events.jsonl"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text(json.dumps({"type": "llm-call", "model": "nested"}) + "\n", encoding="utf-8")
+
+    names = {name for name, _ in event_files(tmp_path)}
+    assert "hook-runtime/session-42" in names
+    models = {s["attributes"]["gen_ai.request.model"] for s in otel_spans(tmp_path)}
+    assert "nested" in models
+
+
+def test_le_fichier_plat_de_hook_runtime_nest_pas_double(tmp_path: Path) -> None:
+    write_events(tmp_path, "hook-runtime", [{"type": "llm-call", "model": "flat"}])
+    nested = tmp_path / "_grimoire-runtime-output" / "hook-runtime" / "s" / "events.jsonl"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text(json.dumps({"type": "llm-call", "model": "nested"}) + "\n", encoding="utf-8")
+
+    paths = [path for _, path in event_files(tmp_path)]
+    assert len(paths) == len(set(paths))
+
+
+def test_un_pas_d_agent_devient_invoke_agent(tmp_path: Path) -> None:
+    write_events(tmp_path, "task-flow", [{"type": "agent-step", "agent": "dev"}])
+    span = otel_spans(tmp_path)[0]
+    assert span["attributes"]["gen_ai.operation.name"] == "invoke_agent"
+    assert span["attributes"]["gen_ai.agent.name"] == "dev"

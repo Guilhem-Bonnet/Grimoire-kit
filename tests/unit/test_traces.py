@@ -127,16 +127,82 @@ class TestTraceLedger:
         assert rate == 0.5
 
     def test_export_otel_jsonl(self, tmp_path) -> None:
+        """One `invoke_agent` parent span, plus one `execute_tool` child per call."""
         ledger = TraceLedger(tmp_path)
         _make_trace(ledger)
         out = tmp_path / "otel.jsonl"
         count = ledger.export_otel_jsonl(out)
-        assert count == 1
+        assert count == 3  # 1 parent (invoke_agent) + 2 children (execute_tool)
         assert out.exists()
         import json
-        line = json.loads(out.read_text())
-        assert "traceId" in line
-        assert line["name"].startswith("grimoire.workflow.")
+
+        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        parent = lines[0]
+        assert "traceId" in parent
+        assert parent["name"] == "invoke_agent grimoire-master"
+        assert parent["attributes"]["gen_ai.provider.name"] == "grimoire"
+        assert parent["attributes"]["gen_ai.operation.name"] == "invoke_agent"
+        assert parent["attributes"]["gen_ai.conversation.id"] == "MIS-test-001"
+        assert parent["attributes"]["gen_ai.agent.name"] == "grimoire-master"
+        assert "gen_ai.system" not in parent["attributes"]
+
+    def test_export_otel_tool_call_spans_have_real_timestamps(self, tmp_path) -> None:
+        """Regression: `_ns` used to receive `tc.latency_ms.__class__.__name__`
+        (the string ``"float"``) instead of an ISO timestamp, so every
+        tool-call span's `timeUnixNano` read zero — a silently empty OTel
+        export for every tool call ever traced.
+        """
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger)
+        out = tmp_path / "otel.jsonl"
+        ledger.export_otel_jsonl(out)
+        import json
+
+        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        tool_spans = [line for line in lines if line.get("parentSpanId")]
+        assert len(tool_spans) == 2
+        for span in tool_spans:
+            assert span["name"].startswith("execute_tool ")
+            assert span["startTimeUnixNano"] > 0
+            assert span["endTimeUnixNano"] >= span["startTimeUnixNano"]
+            assert span["attributes"]["gen_ai.operation.name"] == "execute_tool"
+            assert span["attributes"]["gen_ai.tool.name"] in {"read_file", "write_file"}
+            assert span["attributes"]["gen_ai.provider.name"] == "grimoire"
+
+    def test_export_otel_tool_call_uses_its_own_timestamp_when_recorded(self, tmp_path) -> None:
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="RUN-ts",
+            workflow_instance_id="WFI-ts",
+            mission_id="MIS-ts",
+            task_id="GAO-ts",
+            recipe_id="recipe.ts",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            completed_at="2026-01-01T00:01:00+00:00",
+            agent_id="dev",
+            tool_calls=[
+                {
+                    "tool": "grep",
+                    "verdict": "allow",
+                    "latency_ms": 40.0,
+                    "timestamp": "2026-01-01T00:00:30+00:00",
+                    "call_id": "call-001",
+                }
+            ],
+        )
+        out = tmp_path / "otel.jsonl"
+        ledger.export_otel_jsonl(out)
+        import json
+
+        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        child = next(line for line in lines if line.get("parentSpanId"))
+        expected_start_ns = int(
+            __import__("datetime").datetime.fromisoformat("2026-01-01T00:00:30+00:00").timestamp() * 1_000_000_000
+        )
+        assert child["startTimeUnixNano"] == expected_start_ns
+        assert child["endTimeUnixNano"] == expected_start_ns + int(40.0 * 1_000_000)
+        assert child["attributes"]["gen_ai.tool.call.id"] == "call-001"
 
     def test_persistence_across_instances(self, tmp_path) -> None:
         ledger1 = TraceLedger(tmp_path)
