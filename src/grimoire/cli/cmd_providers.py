@@ -7,7 +7,10 @@ enregistre un échec à la main, pour les hooks et scripts qui viennent de voir
 un 429 ou un timeout et n'ont pas de raison d'attendre le prochain appel
 raté pour que ``choose()`` en tienne compte. ``audit`` (issue #330) sonde les
 fournisseurs activés sans dépenser (PATH, ``--version``, modèles Ollama) et
-journalise le résultat dans l'état — ``status`` l'affiche ensuite.
+journalise le résultat dans l'état — ``status`` l'affiche ensuite. ``history``
+(issue #312) compte les dispatchs passés par couple (type de tâche, classe de
+vérifiabilité) depuis le Mission Ledger, et la recommandation de palier de
+départ que ``grimoire task dispatch`` en tire.
 """
 
 from __future__ import annotations
@@ -35,6 +38,11 @@ console = Console()
 _PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
 _JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
 _REASON_OPTION = typer.Option("--reason", help="Motif de l'échec : rate_limit | timeout.")
+
+#: Même défaut que ``grimoire task`` (``cmd_task._DEFAULT_LEDGER``) — l'historique
+#: des dispatchs (issue #312) lit le même Mission Ledger que `task dispatch` écrit.
+_DEFAULT_LEDGER = Path("_grimoire-runtime-output/ledger")
+_LEDGER_ROOT_OPTION = typer.Option("--ledger-root", help="Racine du Mission Ledger.")
 
 #: Motifs reconnus par la table de refroidissement (grimoire.providers.state).
 #: Un autre libellé est accepté (repli 5 min) mais on préfère le signaler ici
@@ -220,3 +228,67 @@ def providers_audit(
             result.probe_note,
         )
     console.print(table)
+
+
+def _escalation_label(stats: Any | None) -> str:
+    """Colonne « escalade depuis X » — ``—`` sans observation à ce palier."""
+    if stats is None or stats.rate is None:
+        return "—"
+    return f"{stats.rate:.0%} ({stats.escalations}/{stats.observations})"
+
+
+@providers_app.command("history")
+def providers_history(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Historique des dispatchs par couple (type de tâche, classe) — issue #312.
+
+    Compte, pour chaque couple observé dans le Mission Ledger, le nombre de
+    dispatchs et le taux d'escalade (part des dispatchs où le palier de
+    départ n'a pas suffi) depuis `cheap` et depuis `mid`. Pas de classifieur,
+    pas d'entraînement — des compteurs. La colonne « départ recommandé » est
+    exactement ce que le prochain `grimoire task dispatch` de ce couple
+    retiendra, sauf `--start-tier` explicite.
+    """
+    from grimoire.missions.dispatch_history import compute_dispatch_history
+    from grimoire.missions.ledger import MissionLedger
+
+    root = project_root.resolve()
+    ledger_path = ledger_root if ledger_root.is_absolute() else root / ledger_root
+    as_json = json_output or _get_fmt(ctx) == "json"
+
+    if not (ledger_path / "events.jsonl").is_file():
+        if as_json:
+            typer.echo(json.dumps({"couples": []}, indent=2, ensure_ascii=False))
+            return
+        console.print(f"[dim]Aucun Mission Ledger sous {ledger_path}.[/dim]")
+        return
+
+    histories = compute_dispatch_history(MissionLedger(ledger_path))
+
+    if as_json:
+        typer.echo(json.dumps({"couples": [h.to_dict() for h in histories]}, indent=2, ensure_ascii=False))
+        return
+
+    if not histories:
+        console.print("[dim]Aucun dispatch enregistré dans le Mission Ledger (`grimoire task dispatch`).[/dim]")
+        return
+
+    table = Table(title="Historique des dispatchs")
+    for column in ("Type de tâche", "Classe", "Observations", "Escalade cheap", "Escalade mid", "Départ recommandé"):
+        table.add_column(column)
+    for history in histories:
+        table.add_row(
+            history.task_type,
+            history.verifiability,
+            str(history.observations),
+            _escalation_label(history.by_start_tier.get("cheap")),
+            _escalation_label(history.by_start_tier.get("mid")),
+            history.recommended_start_tier,
+        )
+    console.print(table)
+    for history in histories:
+        console.print(f"[dim]{history.task_type}/{history.verifiability} : {history.reason}[/dim]")
