@@ -129,7 +129,14 @@ def _cost_by_model(rows: list[dict[str, Any]]) -> dict[str, float]:
         if not usage:
             continue
         for model, entry in usage.items():
-            cost = entry.get("costUSD") or entry.get("cost_usd") or entry.get("cost") if isinstance(entry, dict) else entry
+            # Branch on the type before calling .get(): entry is only ever a
+            # dict when the CLI nests the cost under a key, and some shapes
+            # this function explicitly supports (see the docstring's "else
+            # entry") give the number directly instead.
+            if isinstance(entry, dict):
+                cost = entry.get("costUSD") or entry.get("cost_usd") or entry.get("cost")
+            else:
+                cost = entry
             if isinstance(cost, int | float):
                 totals[model] += cost
     return {model: round(total, 4) for model, total in totals.items()}
