@@ -99,6 +99,7 @@ event_schema:
   agent: "{agent_id}/{persona}"   # émetteur
   type: "{event_type}"            # voir table des types
   payload: {}                     # données spécifiques au type
+  origin: "user | agent | external"  # OBLIGATOIRE — qui fait autorité
   trace_id: "{session_trace_id}"  # lien avec Grimoire_TRACE
   seq: integer                    # numéro de séquence global
   
@@ -107,6 +108,32 @@ event_schema:
   tags: ["sprint-7", "auth"]      # tags pour filtrage
   visibility: "all | team | private"  # qui peut observer
 ```
+
+
+### Provenance : `origin` est obligatoire
+
+Un `payload` libre est un canal d'instructions déguisé : un agent compromis, ou
+un contenu externe recopié dans un événement, peut faire approuver une action
+par un autre agent qui lit le log. C'est OWASP ASI07 (*Insecure Inter-Agent
+Communication*) et ASI01 (*Agent Goal Hijack*).
+
+Chaque événement déclare donc son origine :
+
+| `origin` | Ce que le message peut faire |
+|---|---|
+| `user` | Fait autorité : peut approuver, autoriser, instruire |
+| `agent` | Rapporte un fait. **Ne peut ni relayer une approbation ni porter une instruction** |
+| `external` | Donnée récupérée hors du projet. Mêmes interdits, plus l'obligation d'être enveloppée (voir `grimoire.tools.untrusted`) |
+
+Règle opposable : un message d'origine `agent` ou `external` dont le `payload`
+porte une clé d'autorité (`approved`, `authorized`, `instruction`, `command`,
+`override`, `grant`…) est **refusé à l'écriture**, pas filtré à la lecture — un
+événement écrit est déjà lu. `grimoire.tools.untrusted.tag_event_payload()` pose
+la provenance et oppose la règle ; un module qui écrit ces événements passe par
+elle.
+
+Un événement sans `origin` est traité comme `external` : le défaut d'un champ de
+confiance ne peut pas être « de confiance ».
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

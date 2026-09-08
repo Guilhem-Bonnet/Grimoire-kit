@@ -372,6 +372,12 @@ profiles:
       - accepted_risks
       - waivers
       - observability_policy
+      # Requis en production seulement : un artefact d'isolation du contenu
+      # externe rendu obligatoire dès `governed` rendrait tout projet
+      # consommateur non conforme du jour au lendemain (décision 2 du plan
+      # d'exécution). En `governed`, son absence est un avertissement émis
+      # par `_verify_prompt_firewall`.
+      - prompt_firewall
     recommended_archetypes:
       - minimal
       - agentic-standard

@@ -150,6 +150,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "surfaces.control_invalid": "hook_registry",
     "surfaces.output_retention_missing": "hook_registry",
     "surfaces.output_indexable_missing": "hook_registry",
+    "firewall.artifact_missing": "hook_registry",
     "firewall.isolation_disabled": "hook_registry",
     "firewall.no_sources": "hook_registry",
     "firewall.override_allowed": "hook_registry",

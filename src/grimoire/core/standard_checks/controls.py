@@ -201,9 +201,26 @@ def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: Sta
 
 
 def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """Isolation du contenu externe : requis en `production`, attendu en `governed`.
+
+    L'artefact n'était requis par aucun profil, pas même `production` : la
+    capacité `prompt-injection-firewall` était donc catalogue seul. Le rendre
+    obligatoire dès `governed` aurait rendu tout projet consommateur non
+    conforme du jour au lendemain — d'où l'avertissement à ce palier et
+    l'exigence dure au suivant (décision 2 du plan d'exécution).
+    """
     rel_path = STANDARD_DIR / "prompt-firewall.yaml"
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
+        if profile.id == "governed":
+            _add_check(
+                result,
+                "firewall.artifact_missing",
+                "warning",
+                "No prompt-firewall.yaml: external content is not declared as isolated from "
+                "control instructions. Required from the production profile on.",
+                path=rel_path,
+            )
         return
     strict_profile = profile.id in {"governed", "production"}
     if data.get("isolate_external_content") is not True:

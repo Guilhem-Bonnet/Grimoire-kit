@@ -222,6 +222,49 @@ les artefacts seuls produisaient 0/40 d'engagement :
   avertissement) ;
 - opt-out : `grimoire standard init . --no-claude-hook`.
 
+## Contenu externe : donnée, pas instruction
+
+Une page web récupérée, un message inter-agents, une réponse d'API : rien ne
+les distinguait d'une consigne une fois dans le contexte d'un agent. C'est
+OWASP LLM01 et ASI01, et le principe commun aux six patterns de défense de
+Beurer-Kellner — une donnée non fiable ingérée ne doit plus pouvoir déclencher
+d'action conséquente.
+
+**Récupérer une page.** Passer par `grimoire.tools.untrusted`, jamais par un
+appel direct au navigateur dont on collerait la sortie :
+
+```python
+from pathlib import Path
+from grimoire.tools.untrusted import fetch_untrusted
+
+page = fetch_untrusted("https://example.com/doc", project_root=Path("."))
+contexte = page.render()      # bannière + marqueurs encadrant le corps
+journal = page.to_dict()      # source, nonce, tampering, code de sortie, taille
+```
+
+`fetch_untrusted` exécute `framework/tools/web-browser.py` en **sous-processus**
+— le script est en zone gelée et n'est jamais importé — puis enveloppe sa sortie.
+
+**Pourquoi le marqueur est aléatoire.** Une balise fixe (`BEGIN UNTRUSTED`) se
+recopie dans la page : il suffirait à un attaquant d'écrire la balise de fin
+pour sortir de l'enveloppe. Chaque enveloppe porte donc un identifiant tiré au
+hasard à l'emballage, que la source ne peut pas connaître. Une page qui tente
+malgré tout de recopier le sentinelle le voit neutralisé, et le fait est
+signalé (`tampering: true`) — c'est un événement à journaliser, pas seulement
+une chaîne à nettoyer.
+
+**Messages inter-agents.** Le log partagé (`framework/event-log-shared-state.md`)
+exige désormais un champ `origin` valant `user`, `agent` ou `external`. Un
+message qui n'est pas d'origine `user` ne peut ni relayer une approbation ni
+porter une instruction : `tag_event_payload()` refuse à l'écriture un `payload`
+qui porte une clé d'autorité (`approved`, `authorized`, `instruction`,
+`command`, `override`…). Un événement sans `origin` est traité comme `external`.
+
+**Profil.** L'artefact `prompt-firewall.yaml` est requis à partir du profil
+`production`. En `governed`, son absence produit l'avertissement
+`firewall.artifact_missing` : le rendre obligatoire à ce palier aurait rendu
+tout projet consommateur non conforme du jour au lendemain.
+
 ## Commandes runtime normatives
 
 Les profils `orchestrated`, `governed` et `production` ne se limitent plus aux templates de gouvernance : ils exposent une première tranche exécutable du runtime standard.
