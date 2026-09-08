@@ -367,6 +367,24 @@ invocable). Ce lot ne worktree pas automatiquement : **travaillez sur une
 branche propre** avant de dispatcher — le fournisseur délégué écrit dans le
 dépôt courant.
 
+#### Classe de relisibilité
+
+Un dispatch qui finit au vert classe aussi le diff qu'il a produit
+(`git diff --name-only` dans le projet) : `review_required` s'il touche une
+surface sensible, `review_optional` sinon. Surfaces par défaut : exports
+publics (`src/**/__init__.py`), CLI (`src/grimoire/cli/`), MCP
+(`src/grimoire/mcp/`), schémas et templates du standard
+(`framework/agentic-standard/`), vocabulaires de décision
+(`src/grimoire/missions/verifiability.py`), politiques et hooks
+(`src/grimoire/policies/`, `.github/hooks/`). Un diff confiné à `tests/` ou
+`docs/` reste toujours `review_optional`. La liste se surcharge projet par
+projet dans `_grimoire/standard/orchestration-policy.yaml` (clé
+`review_surfaces`, une liste de globs). Un projet qui n'est pas un dépôt git
+ne permet pas de calculer le diff : la classe reste `review_optional`, avec
+une note qui le dit plutôt qu'un silence trompeur. Le rapport (`review`,
+`review_files`) et l'événement `task.dispatched` portent tous deux le
+résultat ; `task show` affiche celui du dernier dispatch.
+
 ### Ce que le claim rappelle
 
 `grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont

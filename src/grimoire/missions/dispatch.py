@@ -21,10 +21,19 @@ Chaque tentative — qu'elle échoue à l'appel (429, timeout) ou échoue au che
 — laisse un événement ``task.dispatched`` dans le Mission Ledger : c'est
 l'historique brut dont le lot 4 (#312, budget et coûts) a besoin, et il doit
 survivre même quand la cascade entière finit rouge.
+
+Constat de la session du 2026-09-08 (sous-issue de #307) : des dispatchs
+verts aux tests ont quand même dû être corrigés par relecture forte, sur des
+diffs qui touchaient des surfaces où une erreur de jugement coûte cher (CLI,
+MCP, exports publics...). La classe de vérifiabilité dit qui a le droit de
+produire ; la **classe de relisibilité** (#327) dit quoi relire une fois le
+vert obtenu : un diff qui touche une surface sensible est ``review_required``,
+le reste ``review_optional``.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import shlex
 import subprocess
@@ -33,7 +42,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
@@ -47,6 +60,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CHECK_TIMEOUT_S",
     "DEFAULT_CALL_TIMEOUT_S",
+    "DEFAULT_REVIEW_SURFACES",
     "CheckResult",
     "DispatchAttempt",
     "DispatchReport",
@@ -76,6 +90,27 @@ CHECK_TIMEOUT_S = 600.0
 #: sortie — un fournisseur peut répondre 0 et pourtant décrire un 429 dans son
 #: propre format de sortie (CLI headless qui avale l'erreur HTTP).
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "overloaded", "quota")
+
+#: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une
+#: exige une relecture forte même si les checks mécaniques sont au vert.
+#: Chaque motif est un glob ``fnmatch`` appliqué au chemin relatif rendu par
+#: ``git diff --name-only``. Surchargeable projet par projet via
+#: ``_grimoire/standard/orchestration-policy.yaml`` (clé ``review_surfaces``).
+DEFAULT_REVIEW_SURFACES: tuple[str, ...] = (
+    "src/**/__init__.py",  # exports publics
+    "src/grimoire/cli/**",  # CLI
+    "src/grimoire/mcp/**",  # MCP
+    "framework/agentic-standard/**",  # schémas et templates du standard
+    "src/grimoire/missions/verifiability.py",  # vocabulaire de décision (motifs V0/V1/V2)
+    "src/grimoire/policies/**",  # politiques
+    ".github/hooks/**",  # hooks
+)
+
+#: Chemin relatif de la politique d'orchestration — même fichier que celui lu
+#: par ``core.agentic_standard`` et ``standard_checks``, redéclaré ici pour ne
+#: pas tirer tout ``agentic_standard`` dans un module qui ne fait que lire une
+#: clé optionnelle.
+_ORCHESTRATION_POLICY_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 
 
 def start_tier_for(verifiability: Verifiability) -> str | None:
@@ -162,6 +197,65 @@ def _extract_cost_usd(stdout: str) -> float | None:
     return float(cost) if isinstance(cost, (int, float)) else None
 
 
+def _yaml() -> YAML:
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    return yaml
+
+
+def _review_surfaces(project_root: Path) -> tuple[str, ...]:
+    """Les globs de surfaces sensibles — la surcharge du projet, sinon la liste par défaut.
+
+    Best-effort et permissif : ``orchestration-policy.yaml`` sert d'abord au
+    standard agentique, une clé absente ou un fichier illisible n'est pas une
+    raison de faire échouer un dispatch — juste de retomber sur la liste que
+    l'issue #327 fixe elle-même.
+    """
+    path = project_root / _ORCHESTRATION_POLICY_FILE
+    if not path.is_file():
+        return DEFAULT_REVIEW_SURFACES
+    try:
+        data = _yaml().load(path.read_text(encoding="utf-8"))
+    except (YAMLError, OSError, UnicodeDecodeError):
+        return DEFAULT_REVIEW_SURFACES
+    if not isinstance(data, dict):
+        return DEFAULT_REVIEW_SURFACES
+    surfaces = data.get("review_surfaces")
+    if not isinstance(surfaces, list):
+        return DEFAULT_REVIEW_SURFACES
+    cleaned = tuple(str(item) for item in surfaces if str(item).strip())
+    return cleaned or DEFAULT_REVIEW_SURFACES
+
+
+def _matches_review_surface(path: str, surfaces: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in surfaces)
+
+
+def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | None]:
+    """Classe le diff courant — ``(review, review_files, review_note)`` (issue #327).
+
+    ``git diff --name-only`` plutôt qu'une lecture du working tree : c'est
+    exactement ce que le prochain relecteur verra. Un projet non versionné ne
+    permet pas de calculer quoi que ce soit ; le déclarer ``review_required``
+    par défaut inventerait une garantie qu'on ne peut pas tenir, donc
+    ``review_optional`` avec une note plutôt qu'un silence trompeur.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, timeout=CHECK_TIMEOUT_S
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
+    if completed.returncode != 0:
+        return "review_optional", (), "projet non versionné (pas un dépôt git) : relisibilité non calculée"
+    files = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    surfaces = _review_surfaces(project_root)
+    matched = tuple(f for f in files if _matches_review_surface(f, surfaces))
+    if matched:
+        return "review_required", matched, None
+    return "review_optional", (), None
+
+
 @dataclass(frozen=True, slots=True)
 class CheckResult:
     """Le verdict d'une commande ``--check`` : verte ou non, rien d'autre à savoir."""
@@ -183,6 +277,10 @@ class DispatchAttempt:
     échoué — saturation, délai dépassé, ou panne locale du fournisseur ; le
     fournisseur suivant du même palier prend le relais, les checks ne
     tournent pas).
+
+    ``review``/``review_files``/``review_note`` (#327) ne sont posés que pour
+    la tentative verte — au plus une par cascade — car relire n'a de sens
+    qu'une fois un résultat accepté.
     """
 
     attempt: int
@@ -194,6 +292,9 @@ class DispatchAttempt:
     checks: tuple[CheckResult, ...]
     verdict: str
     cost_usd: float | None
+    review: str | None = None
+    review_files: tuple[str, ...] = ()
+    review_note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +307,9 @@ class DispatchAttempt:
             "checks": [c.to_dict() for c in self.checks],
             "verdict": self.verdict,
             "cost_usd": self.cost_usd,
+            "review": self.review,
+            "review_files": list(self.review_files),
+            "review_note": self.review_note,
         }
 
 
@@ -254,6 +358,19 @@ class DispatchReport:
             return 2
         return 0 if self.succeeded else 1
 
+    @property
+    def review(self) -> str | None:
+        """``review_required``/``review_optional`` de la dernière tentative — ``None`` s'il n'y en a aucune (#327)."""
+        return self.attempts[-1].review if self.attempts else None
+
+    @property
+    def review_files(self) -> tuple[str, ...]:
+        return self.attempts[-1].review_files if self.attempts else ()
+
+    @property
+    def review_note(self) -> str | None:
+        return self.attempts[-1].review_note if self.attempts else None
+
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "task_id": self.task_id,
@@ -263,6 +380,9 @@ class DispatchReport:
             "prompt": self.prompt,
             "attempts": [a.to_dict() for a in self.attempts],
             "exit_code": self.exit_code,
+            "review": self.review,
+            "review_files": list(self.review_files),
+            "review_note": self.review_note,
         }
         if self.refusal is not None:
             data["refusal"] = self.refusal
@@ -444,6 +564,9 @@ def run_dispatch(
             record_success(root, provider.id)
             check_results = _run_checks(checks, project_root=root)
             green = all(c.ok for c in check_results)
+            # La relecture ne se pose qu'une fois le résultat accepté (#327) —
+            # un check rouge n'a rien produit qu'on ait besoin de relire.
+            review, review_files, review_note = _classify_review(root) if green else (None, (), None)
             attempt = DispatchAttempt(
                 attempt=attempt_no,
                 tier=tier,
@@ -454,6 +577,9 @@ def run_dispatch(
                 checks=check_results,
                 verdict="green" if green else "red",
                 cost_usd=_extract_cost_usd(stdout),
+                review=review,
+                review_files=review_files,
+                review_note=review_note,
             )
             attempts.append(attempt)
             service.ledger.append_event(

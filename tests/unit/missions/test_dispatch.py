@@ -9,6 +9,7 @@ fournisseurs factices »).
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -94,6 +95,24 @@ routing:
 """,
         encoding="utf-8",
     )
+
+
+def _git_repo(root: Path, *tracked: Path) -> None:
+    """Un dépôt git minimal, un commit initial portant les fichiers déjà suivis.
+
+    Nécessaire pour tout test de la classe de relisibilité (#327) : elle lit
+    ``git diff --name-only``, qui ne voit un fichier que s'il était déjà suivi
+    avant que le fournisseur factice ne le modifie.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    for path in tracked:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
 
 
 def _service(tmp_path: Path) -> TaskService:
@@ -346,3 +365,116 @@ def test_dry_run_montre_la_classe_la_chaine_et_le_prompt_sans_rien_appeler(tmp_p
     assert report.attempts == ()
     assert [e for e in service.ledger.list_events(tid) if e.event_type == "task.dispatched"] == []
     assert load_state(tmp_path) == {}
+
+
+# ── Classe de relisibilité (issue #327) ──────────────────────────────────────
+
+
+def test_diff_touchant_le_cli_est_review_required_avec_le_fichier_nomme(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : un diff touchant `src/grimoire/cli/x.py` est `required`."""
+    cible = tmp_path / "src" / "grimoire" / "cli" / "x.py"
+    _git_repo(tmp_path, cible)
+    modifie = _script(
+        tmp_path,
+        "modifie_cli.py",
+        """\
+        from pathlib import Path
+        Path("src/grimoire/cli/x.py").write_text("changed\\n", encoding="utf-8")
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(modifie)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 0
+    assert report.review == "review_required"
+    assert "src/grimoire/cli/x.py" in report.review_files
+    assert report.review_note is None
+
+
+def test_diff_limite_a_tests_est_review_optional(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : un diff limité à `tests/` est `optional`."""
+    cible = tmp_path / "tests" / "test_x.py"
+    _git_repo(tmp_path, cible)
+    modifie = _script(
+        tmp_path,
+        "modifie_tests.py",
+        """\
+        from pathlib import Path
+        Path("tests/test_x.py").write_text("changed\\n", encoding="utf-8")
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(modifie)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 0
+    assert report.review == "review_optional"
+    assert report.review_files == ()
+
+
+def test_review_surfaces_surcharge_yaml_est_respectee(tmp_path: Path) -> None:
+    """Critère d'arrêt de l'issue : la surcharge YAML est respectée.
+
+    `review_surfaces` remplace la liste par défaut : un diff qui ne touche que
+    `docs/` (jamais sensible par défaut) devient `required` sous la
+    surcharge, et un diff CLI (sensible par défaut) redevient `optional` —
+    remplacer, pas fusionner.
+    """
+    cible = tmp_path / "docs" / "guide.md"
+    _git_repo(tmp_path, cible)
+    (tmp_path / "_grimoire" / "standard").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "_grimoire" / "standard" / "orchestration-policy.yaml").write_text(
+        'review_surfaces:\n  - "docs/**"\n', encoding="utf-8"
+    )
+    modifie = _script(
+        tmp_path,
+        "modifie_docs.py",
+        """\
+        from pathlib import Path
+        Path("docs/guide.md").write_text("changed\\n", encoding="utf-8")
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(modifie)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_required"
+    assert "docs/guide.md" in report.review_files
+
+
+def test_projet_sans_depot_git_reste_review_optional_avec_une_note(tmp_path: Path) -> None:
+    """Sans dépôt git, le diff n'est pas calculable : `optional`, jamais un `required` inventé."""
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_optional"
+    assert report.review_files == ()
+    assert report.review_note is not None
+
+
+def test_chaine_epuisee_ne_porte_aucune_relecture(tmp_path: Path) -> None:
+    """La relecture ne se pose qu'après un dispatch vert — un rouge n'a rien à faire relire."""
+    always_red = _script(tmp_path, "always_red.py", _SILENT_OK)
+    _write_registry(tmp_path, _provider_yaml("seul", "cheap", _invocation(always_red)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), max_tier="cheap")
+
+    assert not report.succeeded
+    assert report.review is None
+    assert report.review_files == ()

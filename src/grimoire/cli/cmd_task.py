@@ -245,16 +245,25 @@ def task_show(
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
 ) -> None:
-    """Détaille une tâche, et ce que son prochain pas exigera."""
+    """Détaille une tâche, et ce que son prochain pas exigera.
+
+    Le dernier ``task.dispatched`` du ledger porte la relecture (#327) : le
+    montrer ici évite de rouvrir le rapport de ``dispatch`` pour savoir si le
+    vert précédent mérite un regard.
+    """
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import GatesFileError, declared_transitions
     from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
-    task = _require_task(_service(project_root, ledger_root), task_id)
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
     verifiabilite = verifiability_as_dict(task)
+    dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
+    last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
+        payload["last_dispatch"] = last_dispatch
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
@@ -264,6 +273,12 @@ def task_show(
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
+    if last_dispatch is not None and last_dispatch.get("review") is not None:
+        _print_review(
+            last_dispatch["review"],
+            [str(p) for p in last_dispatch.get("review_files") or ()],
+            last_dispatch.get("review_note"),
+        )
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     here = board_status_of(task.status)
@@ -722,11 +737,23 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
             console.print(f"[dim]transition : → {report.transitioned_to} (vérification requise, V1)[/dim]")
         elif report.transition_refused:
             console.print(f"[yellow]![/yellow] transition non appliquée : {report.transition_refused}")
+        if report.review is not None:
+            _print_review(report.review, [str(p) for p in report.review_files], report.review_note)
     else:
         console.print(
             f"[red]✗[/red] {report.task_id} — chaîne épuisée, {len(report.attempts)} tentative(s), aucun vert"
         )
     raise typer.Exit(report.exit_code)
+
+
+def _print_review(review: str, review_files: list[str], review_note: str | None) -> None:
+    """Rendu texte de la classe de relisibilité (#327) — les mêmes données que ``to_dict()``."""
+    label = "[red]requise[/red]" if review == "review_required" else "[dim]optionnelle[/dim]"
+    console.print(f"[bold]relecture[/bold] : {label}")
+    for path in review_files:
+        console.print(f"  [dim]- {escape(path)}[/dim]")
+    if review_note:
+        console.print(f"  [dim]{escape(review_note)}[/dim]")
 
 
 @task_app.command("dispatch")
