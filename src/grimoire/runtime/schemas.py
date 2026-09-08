@@ -14,6 +14,7 @@ class WorkflowStatus(StrEnum):
     PAUSED = "paused"
     BLOCKED = "blocked"
     ABORTED = "aborted"
+    REFUSED = "refused"
     COMPLETED = "completed"
     VERIFIED = "verified"
 
@@ -22,6 +23,7 @@ class RunEventType(StrEnum):
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_COMPLETED = "workflow.completed"
     WORKFLOW_ABORTED = "workflow.aborted"
+    WORKFLOW_REFUSED = "workflow.refused"
     STEP_STARTED = "step.started"
     STEP_COMPLETED = "step.completed"
     STEP_FAILED = "step.failed"
@@ -30,6 +32,16 @@ class RunEventType(StrEnum):
     TOOL_BLOCKED = "tool.blocked"
     CHECKPOINT_SAVED = "checkpoint.saved"
     CHECKPOINT_RESUMED = "checkpoint.resumed"
+
+
+# Plafonds MAST par instance (FM-1.3 : circuit breaker sur les tours/appels
+# d'outils médiés ; FM-1.5 : budget). Le kernel ne voit passer ni tokens ni
+# coût — aucun champ de ce type ne traverse ``ExecutionContext`` ou
+# ``mediate_tool`` aujourd'hui — donc le budget est un compteur d'unités,
+# 1 par appel d'outil médié par défaut. Un appelant qui connaît un coût réel
+# (tokens, $ ...) peut passer ``cost=`` à ``RuntimeKernel.mediate_tool``.
+DEFAULT_MAX_TOOL_CALLS = 50
+DEFAULT_MAX_BUDGET = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +62,14 @@ class WorkflowInstance:
     checkpoint_refs: tuple[str, ...] = ()
     evidence_pack_id: str = ""
     abort_reason: str = ""
+    # Plafonds MAST par instance (B11) — voir la note au-dessus de
+    # ``DEFAULT_MAX_TOOL_CALLS``. ``max_tool_calls`` couvre à la fois "tours"
+    # et "appels d'outils médiés" : c'est la seule unité d'exécution que le
+    # kernel observe (``mediate_tool``).
+    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
+    max_budget: int = DEFAULT_MAX_BUDGET
+    tool_calls_used: int = 0
+    budget_used: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,11 +88,18 @@ class WorkflowInstance:
             "checkpoint_refs": list(self.checkpoint_refs),
             "evidence_pack_id": self.evidence_pack_id,
             "abort_reason": self.abort_reason,
+            "caps": {
+                "max_tool_calls": self.max_tool_calls,
+                "max_budget": self.max_budget,
+                "tool_calls_used": self.tool_calls_used,
+                "budget_used": self.budget_used,
+            },
             "created_at": self.created_at,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WorkflowInstance:
+        caps = d.get("caps", {})
         return cls(
             id=d["id"],
             recipe_id=d["recipe_id"],
@@ -90,6 +117,10 @@ class WorkflowInstance:
             checkpoint_refs=tuple(d.get("checkpoint_refs", [])),
             evidence_pack_id=d.get("evidence_pack_id", ""),
             abort_reason=d.get("abort_reason", ""),
+            max_tool_calls=caps.get("max_tool_calls", DEFAULT_MAX_TOOL_CALLS),
+            max_budget=caps.get("max_budget", DEFAULT_MAX_BUDGET),
+            tool_calls_used=caps.get("tool_calls_used", 0),
+            budget_used=caps.get("budget_used", 0),
         )
 
 
