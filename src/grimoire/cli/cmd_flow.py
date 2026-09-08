@@ -27,7 +27,6 @@ from rich.console import Console
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.flows.dispatch_executor import (
-    DEFAULT_CALL_TIMEOUT_S,
     FlowDispatchOutcome,
     node_dispatch_history,
     resume_with_dispatch,
@@ -36,6 +35,7 @@ from grimoire.flows.dispatch_executor import (
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.schemas import FlowStatusView, ResumeOutcome
+from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
 from grimoire.runtime.schemas import WorkflowInstance
 
