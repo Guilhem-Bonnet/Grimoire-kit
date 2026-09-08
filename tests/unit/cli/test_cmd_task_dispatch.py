@@ -178,6 +178,67 @@ def test_dispatch_json_porte_review(tmp_path: Path) -> None:
     assert payload["review_note"] is not None
 
 
+# ── Palier de départ ajusté par l'historique (issue #312, lot 4) ────────────
+
+
+def test_start_tier_inconnu_refuse_avec_le_code_de_sortie_2(tmp_path: Path) -> None:
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = run(tmp_path, "dispatch", tid, "--check", "true", "--start-tier", "ultra")
+
+    assert res.exit_code == 2
+    assert "ultra" in res.output
+
+
+def test_start_tier_explicite_saute_cheap(tmp_path: Path) -> None:
+    mid_green = _script(
+        tmp_path,
+        "mid_green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "mid-only", "mid", f"{sys.executable} {mid_green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        [
+            "--output",
+            "json",
+            "task",
+            "dispatch",
+            tid,
+            "--check",
+            "test -f marker.txt",
+            "--start-tier",
+            "mid",
+            "--project-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["start_tier"] == "mid"
+    assert "explicite" in payload["start_tier_reason"]
+    assert [a["tier"] for a in payload["attempts"]] == ["mid"]
+
+
+def test_json_porte_toujours_start_tier_et_sa_raison(tmp_path: Path) -> None:
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        ["--output", "json", "task", "dispatch", tid, "--check", "true", "--project-root", str(tmp_path)],
+    )
+
+    payload = json.loads(res.output)
+    assert payload["start_tier"] == "cheap"
+    assert "moins de" in payload["start_tier_reason"]
+
+
 def test_task_show_affiche_la_relecture_du_dernier_dispatch(tmp_path: Path) -> None:
     green = _script(
         tmp_path,

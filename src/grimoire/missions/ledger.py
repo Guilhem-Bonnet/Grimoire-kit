@@ -346,7 +346,7 @@ class MissionLedger:
 
     def claim_task(self, task_id: str, actor_id: str, host_id: str, exclusive_files: tuple[str, ...] = ()) -> MissionTask:
         """Convenience: READY → CLAIMED."""
-        claim = TaskClaim(actor_id=actor_id, host_id=host_id, exclusive_files=exclusive_files)
+        claim = TaskClaim.new(actor_id=actor_id, host_id=host_id, exclusive_files=exclusive_files)
         return self.transition_task(task_id, TaskState.CLAIMED, actor_id=actor_id, claim=claim)
 
     def open_incident(

@@ -36,6 +36,10 @@ def test_claude_code_cli_manifest():
     # which excluded the one hook that can enrich a prompt before the model
     # reads it; the assertion encoded the mistake and is corrected with it.
     assert CLAUDE_CODE_CLI_MANIFEST.hooks.user_prompt_submit is True
+    # A3: SubagentStart and PostToolUseFailure exist in the host-neutral
+    # vocabulary now; Claude Code documents both.
+    assert CLAUDE_CODE_CLI_MANIFEST.hooks.subagent_start is True
+    assert CLAUDE_CODE_CLI_MANIFEST.hooks.post_tool_use_failure is True
 
 
 def test_detect_via_env_var(monkeypatch):

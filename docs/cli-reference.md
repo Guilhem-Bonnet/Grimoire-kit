@@ -237,6 +237,7 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
 | `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
 | `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+| `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
 
 `providers audit` ne fait jamais l'appel réel : présence du premier mot de
 `invocation` sur le `PATH`, `--version` pour un exécutable reconnu (claude,
@@ -246,6 +247,20 @@ gemini, copilot, codex, ollama), et pour un fournisseur local (invocation
 fournisseur jugé `available: false` est écarté par `choose`/`candidates`
 jusqu'au prochain audit qui le retrouve — l'audit n'active ni ne désactive
 jamais un fournisseur, `enabled` reste une décision de gouvernance.
+
+`providers history` (issue #312) lit les événements `task.dispatched` du
+Mission Ledger et compte, par couple (type de tâche, classe de
+vérifiabilité) : le nombre de dispatchs et le taux d'escalade depuis
+`cheap` et depuis `mid` (part des dispatchs où le palier de départ n'a pas
+suffi). Pas de classifieur, pas d'entraînement — des compteurs. Avec au
+moins 5 observations pour un couple, un taux d'escalade dépassant 40 %
+depuis `cheap` fait recommander `mid`, dépassant 40 % depuis `mid` fait
+recommander `strong` ; un couple monté à `mid` dont les 5 dernières
+observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
+`cheap` depuis autant d'observations, voit `cheap` recommandé à nouveau
+(re-sondage) — jamais sous le plancher qu'impose la classe (`mid` reste le
+plancher d'une tâche V1). La colonne « départ recommandé » est exactement
+ce que `grimoire task dispatch` retient par défaut pour ce couple.
 
 ## Standard agentique gouverné
 
@@ -296,7 +311,7 @@ prochain export l'écrase.
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
-| `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
+| `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
@@ -326,13 +341,30 @@ critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
 
+### Plafonds MAST par instance de workflow
+
+Chaque instance créée par le RuntimeKernel (`create_instance`) porte deux
+plafonds indépendants, surchargeables à la création (`max_tool_calls=50`,
+`max_budget=100` par défaut) : le nombre d'appels d'outils que
+`mediate_tool` médiera — la seule unité de « tour » que le kernel observe —
+et un budget d'unités de coût consommées par ces mêmes appels (1 unité par
+appel par défaut ; un appelant qui connaît un coût réel, en tokens ou en
+devise, peut passer `cost=` à chaque appel). Le kernel ne voit aujourd'hui
+passer ni tokens ni coût ailleurs, d'où ce choix par défaut. Au premier appel
+qui dépasserait l'un des deux plafonds, l'instance passe dans l'état terminal
+`refused` : un checkpoint est écrit, un événement `workflow.refused` est
+journalisé, et l'appel — comme tout appel suivant sur cette instance — rend
+`False` sans jamais lever d'exception ni laisser l'instance continuer en
+silence. Voir `src/grimoire/runtime/kernel.py` et `schemas.py`
+(`WorkflowStatus.REFUSED`, `RunEventType.WORKFLOW_REFUSED`).
+
 ### Pourquoi une tâche s'est arrêtée
 
 `grimoire task trace <id>` lit quatre journaux qui portent chacun le `task_id`
 — le Mission Ledger (transitions, incidents), le TraceLedger des hooks (outils
 autorisés ou **refusés par la policy**, clôtures refusées, **gates de
-transition rouges**), le RuntimeKernel (run events, checkpoints, **abort et sa
-raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
+transition rouges**), le RuntimeKernel (run events, checkpoints, **abort/refus
+et leur raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
 Les entrées qui expliquent un arrêt sont marquées et reprises dans une section
 « Cause(s) d'arrêt » ; `--causes` n'affiche qu'elles ; `--output json` rend la
 timeline complète avec ses sources. Une source absente est nommée comme telle ;
@@ -367,15 +399,30 @@ suivant du même palier et pose un refroidissement (`grimoire providers
 status`) ; un `--check` rouge passe au palier suivant. Chaque tentative laisse
 un événement `task.dispatched` au Mission Ledger (palier, fournisseur,
 modèle, durée, verdict, coût si la sortie est un JSON portant
-`total_cost_usd`). `--dry-run` montre la classe, la chaîne de paliers prévue
-et le prompt sans rien appeler ; `--max-tier` borne la cascade ; `--provider`
-la restreint à un seul fournisseur.
+`total_cost_usd`, type de tâche, classe de vérifiabilité, palier de départ et
+sa raison). `--dry-run` montre la classe, la chaîne de paliers prévue et le
+prompt sans rien appeler ; `--max-tier` borne la cascade ; `--provider` la
+restreint à un seul fournisseur.
 
 Code de sortie : `0` si la chaîne finit au vert, `1` si elle s'épuise sans
 verdict vert, `2` sur un refus (V2, aucun `--check`, aucun fournisseur
 invocable). Ce lot ne worktree pas automatiquement : **travaillez sur une
 branche propre** avant de dispatcher — le fournisseur délégué écrit dans le
 dépôt courant.
+
+#### Palier de départ ajusté par l'historique
+
+Le palier de départ de la cascade n'est plus fixe : sauf `--start-tier`
+explicite, il vient de l'historique des dispatchs passés pour le couple
+(type de tâche, classe de vérifiabilité) — voir [`grimoire providers
+history`](#fournisseurs-llm) (issue #312). Par défaut, `cheap` pour V0 et
+`mid` pour V1 (le plancher que la classe impose, jamais franchi vers le
+bas) ; ajusté vers `mid`, puis `strong`, quand un couple escalade trop
+souvent depuis son palier habituel, et re-sondé vers le bas quand il cesse
+d'escalader et que le palier inférieur n'a pas été retenté depuis un
+moment. Le rapport (`start_tier`, `start_tier_reason`) et l'événement
+`task.dispatched` disent tous deux quel palier a été retenu et pourquoi ;
+`--start-tier cheap|mid|strong` l'impose sans consulter l'historique.
 
 #### Classe de relisibilité
 

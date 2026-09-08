@@ -309,7 +309,7 @@ def task_claim(
     """Réclame une tâche prête : ready → claimed."""
     from grimoire.missions.schemas import TaskClaim, TaskState
 
-    claim = TaskClaim(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
+    claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
     _transition(ctx, task_id, TaskState.CLAIMED, project_root, ledger_root, actor, claim=claim)
 
 
@@ -717,14 +717,20 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
 
     if report.refusal is not None:
         console.print(f"[red]✗[/red] {report.task_id} — {report.refusal_message}")
+        if report.start_tier is not None:
+            console.print(
+                f"[dim]  départ retenu : {report.start_tier} — {escape(report.start_tier_reason or '')}[/dim]"
+            )
         raise typer.Exit(report.exit_code)
 
     if report.dry_run:
         console.print(f"[bold]{report.task_id}[/bold] — vérifiabilité {report.verifiability}")
+        console.print(f"  départ : {report.start_tier} [dim]({escape(report.start_tier_reason or '')})[/dim]")
         console.print(f"  chaîne prévue : {' → '.join(report.planned_chain)}")
         console.print("  [dim]" + escape(report.prompt).replace("\n", "\n  ") + "[/dim]")
         raise typer.Exit(0)
 
+    console.print(f"[dim]départ : {report.start_tier} — {escape(report.start_tier_reason or '')}[/dim]")
     for attempt in report.attempts:
         icon = _VERDICT_ICON.get(attempt.verdict, attempt.verdict)
         console.print(
@@ -787,19 +793,33 @@ def task_dispatch(
     max_tier: Annotated[
         str | None, typer.Option("--max-tier", help="Ne pas dépasser ce palier (cheap, mid, strong).")
     ] = None,
+    start_tier: Annotated[
+        str | None,
+        typer.Option(
+            "--start-tier",
+            help=(
+                "Forcer le palier de départ (cheap, mid, strong), en ignorant la recommandation tirée de "
+                "l'historique des dispatchs (`grimoire providers history`)."
+            ),
+        ),
+    ] = None,
     provider: Annotated[str | None, typer.Option("--provider", help="Restreindre la cascade à ce fournisseur.")] = None,
     timeout: Annotated[float, typer.Option("--timeout", help="Timeout d'un appel fournisseur, en secondes.")] = 600.0,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
 ) -> None:
-    """Délègue une tâche en cascade, du palier le moins cher au plus cher.
+    """Délègue une tâche en cascade, du palier de départ au plus cher.
 
     La classe de vérifiabilité décide qui a le droit d'appeler : une tâche V2
     (aucun verdict mécanique ni revue reconnue) est refusée avant tout appel.
-    V0 cascade depuis `cheap` ; V1 cascade depuis `mid` et, au vert, passe la
-    tâche en `needs_verification` au lieu de la considérer close — le check
-    mécanique n'est ici qu'un indice, la classe exige encore un regard humain.
+    Le palier de départ vient, sauf `--start-tier` explicite, de
+    l'historique des dispatchs passés pour ce couple (type de tâche, classe)
+    — voir `grimoire providers history` (issue #312) : `cheap`/`mid` pour
+    V0/V1 tant que rien ne le contredit. Au vert, une tâche V1 passe en
+    `needs_verification` au lieu d'être considérée close — le check
+    mécanique n'est ici qu'un indice, la classe exige encore un regard
+    humain.
 
     Sans `--check`, le dispatch est refusé : la classe dit que le verdict est
     mécanique, encore faut-il dire lequel. Un fournisseur sans `invocation`
@@ -811,6 +831,9 @@ def task_dispatch(
     if max_tier is not None and max_tier not in SUPPORTED_MODEL_TIERS:
         console.print(f"[red]✗[/red] Palier inconnu : {max_tier} (attendu : {', '.join(SUPPORTED_MODEL_TIERS)})")
         raise typer.Exit(2)
+    if start_tier is not None and start_tier not in SUPPORTED_MODEL_TIERS:
+        console.print(f"[red]✗[/red] Palier inconnu : {start_tier} (attendu : {', '.join(SUPPORTED_MODEL_TIERS)})")
+        raise typer.Exit(2)
 
     service = _service(project_root, ledger_root)
     _require_task(service, task_id)
@@ -819,6 +842,7 @@ def task_dispatch(
         task_id,
         checks=tuple(check or ()),
         max_tier=max_tier,
+        start_tier=start_tier,
         provider_id=provider,
         dry_run=dry_run,
         call_timeout=timeout,
