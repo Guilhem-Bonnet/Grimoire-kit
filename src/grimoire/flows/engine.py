@@ -105,6 +105,14 @@ class FlowEngine:
     def list_run_ids(self) -> list[str]:
         return sorted(p.stem for p in self._flows_root.glob("*.json"))
 
+    def run_meta(self, run_id: str) -> FlowRunMeta:
+        """Accès public aux métadonnées d'un run — utile à un exécuteur qui doit
+
+        recharger le blueprint hors du cycle ``run``/``resume`` (l'exécuteur par
+        dispatch, #311, en a besoin pour reprendre un run sans que l'hôte lui
+        redonne le chemin du fichier)."""
+        return self._load_meta(run_id)
+
     # ── Dérivation d'état depuis le kernel ──────────────────────────────────
 
     def _ctx_for(self, wfi: WorkflowInstance) -> ExecutionContext:
@@ -117,6 +125,16 @@ class FlowEngine:
             host_id=self._host_id,
             risk_profile="standard",
         )
+
+    def _context_pack(self, wfi: WorkflowInstance, blueprint_id: str) -> dict[str, Any]:
+        """Le peu qu'un exécuteur non interactif doit savoir pour lier son travail au run.
+
+        ``InteractiveNodeExecutor`` l'ignore entièrement (il n'imprime que le
+        contrat) : ces clés n'existent que pour un exécuteur qui doit, comme
+        celui par dispatch (#311), nommer une tâche de mission stable d'un
+        appel à l'autre du même run sans que l'hôte le lui répète.
+        """
+        return {"run_id": wfi.id, "blueprint_id": blueprint_id, "mission_id": wfi.mission_id}
 
     def _current_node(self, wfi: WorkflowInstance, order: list[str]) -> str | None:
         """Le node courant, recalculé depuis le kernel — jamais un compteur à côté."""
@@ -192,7 +210,7 @@ class FlowEngine:
         )
 
         contract = contracts[order[0]]
-        (executor or InteractiveNodeExecutor()).execute(contract, context_pack={})
+        (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
     def resume(self, run_id: str, *, output: dict[str, Any], executor: NodeExecutor | None = None) -> ResumeOutcome:
@@ -243,7 +261,9 @@ class FlowEngine:
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
         # le prochain resume() rouvrira ce même node suivant en premier —
         # jamais de node sauté, jamais de node rejoué deux fois.
-        (executor or InteractiveNodeExecutor()).execute(next_contract, context_pack={})
+        (executor or InteractiveNodeExecutor()).execute(
+            next_contract, context_pack=self._context_pack(wfi, meta.blueprint_id)
+        )
         return ResumeOutcome(ok=True, finished=False, node_id=next_id, contract=next_contract)
 
     def status(self, run_id: str, *, include_contract: bool = True) -> FlowStatusView:

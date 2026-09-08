@@ -583,6 +583,38 @@ courant, jamais du début. Une sortie non conforme au contrat de sortie du
 node **suspend** le run en nommant le node et la pin fautifs, avec un code de
 sortie non nul — jamais un échec muet.
 
+#### `--executor dispatch` — la cascade par classe de vérifiabilité (#311)
+
+`run` et `resume` acceptent `--executor dispatch` (défaut : `interactive`,
+inchangé). Au lieu d'attendre un `--result` de l'hôte, chaque node est confié
+à `grimoire.flows.dispatch_executor` : une tâche de mission est créée (ou
+retrouvée) au ledger, liée au run et au node, avec pour critères
+d'acceptation ceux du node et pour preuve attendue son contrat de sortie ;
+elle est dispatchée en cascade (`run_dispatch`, #323) — l'ouvrier écrit sa
+sortie dans un fichier JSON que le kit vérifie contre les pins du node, avec
+la même fonction que `flow resume`.
+
+La chaîne suit la classe de vérifiabilité du node (#309) :
+
+- **V0** : `cheap` → `mid` → `strong`.
+- **V1** : démarre à `mid` ; un vert marque le node **à relire**
+  (`needs_verification` côté ledger), jamais une fermeture.
+- **V2** : refusé avant tout appel — le node **revient à l'hôte**, exactement
+  comme `flow run`/`flow resume` interactifs : le contrat est présenté,
+  `flow resume --result` reprend la main.
+
+`run --executor dispatch` enchaîne les nodes tant que la cascade reste
+verte, checkpointe après chacun, et s'arrête au premier node rouge (chaîne
+épuisée) ou V2, avec un rapport par node (fournisseur, tentatives, verdict,
+coût, escalades) plutôt qu'un contrat. `resume --executor dispatch` (sans
+`--result`) reprend de la même façon le node que le run avait laissé ouvert —
+utile après un crash comme après une suspension V2 corrigée autrement.
+`flow status` affiche, pour tout node dispatché, fournisseur, tentatives,
+verdict, relecture requise et incertitudes déclarées — lus depuis
+l'événement `task.dispatched` du Mission Ledger, valables même dans un
+process qui n'a pas fait le dispatch. `--max-tier` et `--timeout` bornent la
+cascade comme sur `grimoire task dispatch`.
+
 ---
 
 ## Cadrage produit
