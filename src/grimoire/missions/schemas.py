@@ -10,8 +10,14 @@ All identifiers follow the canonical formats defined in SCHEMAS-CONTRATS-cibles.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
+
+#: Durée par défaut avant qu'un claim n'expire de lui-même — assez pour une
+#: session de travail (implémentation + tests + PR), pas assez pour qu'un
+#: agent mort bloque un fichier indéfiniment.
+DEFAULT_CLAIM_TTL_SECONDS = 4 * 60 * 60
 
 
 class MissionState(StrEnum):
@@ -94,12 +100,50 @@ class TaskClaim:
     actor_id: str
     host_id: str
     exclusive_files: tuple[str, ...] = ()
+    #: ISO 8601 UTC. Chaîne vide = jamais expiré (claims historiques, tests).
+    expires_at: str = ""
+
+    @classmethod
+    def new(
+        cls,
+        actor_id: str,
+        host_id: str,
+        exclusive_files: tuple[str, ...] = (),
+        *,
+        ttl_seconds: int = DEFAULT_CLAIM_TTL_SECONDS,
+        now: datetime | None = None,
+    ) -> TaskClaim:
+        """Le constructeur normal : un claim avec son expiration déjà calculée.
+
+        Les trois points d'entrée qui créent un claim (`MissionLedger.claim_task`,
+        `TaskService.claim`, `grimoire task claim`) passent par ici plutôt que par
+        le constructeur brut, pour qu'aucun ne puisse oublier l'expiration.
+        """
+        moment = now or datetime.now(UTC)
+        expires = moment + timedelta(seconds=ttl_seconds)
+        return cls(
+            actor_id=actor_id,
+            host_id=host_id,
+            exclusive_files=exclusive_files,
+            expires_at=expires.isoformat(),
+        )
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """Un claim sans `expires_at` n'expire jamais — compat. des claims sans TTL."""
+        if not self.expires_at:
+            return False
+        try:
+            expires = datetime.fromisoformat(self.expires_at)
+        except ValueError:
+            return False
+        return (now or datetime.now(UTC)) >= expires
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "actor_id": self.actor_id,
             "host_id": self.host_id,
             "exclusive_files": list(self.exclusive_files),
+            "expires_at": self.expires_at,
         }
 
     @classmethod
@@ -108,6 +152,7 @@ class TaskClaim:
             actor_id=d["actor_id"],
             host_id=d["host_id"],
             exclusive_files=tuple(d.get("exclusive_files", [])),
+            expires_at=d.get("expires_at", ""),
         )
 
 

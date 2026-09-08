@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import (
     MissionState,
+    TaskClaim,
     TaskState,
 )
 
@@ -95,10 +98,35 @@ def test_task_state_machine_happy_path(ledger):
     assert t.status == TaskState.CLAIMED
     assert t.claim is not None
     assert t.claim.actor_id == "agent"
+    assert t.claim.expires_at, "claim_task stamps a default expiry (B3)"
+    assert not t.claim.is_expired(), "a freshly claimed task is not expired"
     t = ledger.transition_task(t.id, TaskState.RUNNING)
     t = ledger.transition_task(t.id, TaskState.NEEDS_VERIFICATION)
     t = ledger.transition_task(t.id, TaskState.CLOSED)
     assert t.status == TaskState.CLOSED
+
+
+# ── TaskClaim expiry (B3) ───────────────────────────────────────────────────
+
+def test_task_claim_new_stamps_a_default_expiry():
+    claim = TaskClaim.new(actor_id="a", host_id="h")
+    assert claim.expires_at
+    assert not claim.is_expired()
+
+
+def test_task_claim_new_respects_custom_ttl_and_now():
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    claim = TaskClaim.new(actor_id="a", host_id="h", ttl_seconds=60, now=now)
+    assert not claim.is_expired(now=now + timedelta(seconds=30))
+    assert claim.is_expired(now=now + timedelta(seconds=61))
+
+
+def test_task_claim_without_expires_at_never_expires():
+    """Compat: raw TaskClaim() (tests, old ledgers) never blocks on expiry."""
+    claim = TaskClaim(actor_id="a", host_id="h")
+    assert claim.expires_at == ""
+    assert not claim.is_expired()
+    assert not claim.is_expired(now=datetime(2099, 1, 1, tzinfo=UTC))
 
 
 def test_task_invalid_transition_raises(ledger):
