@@ -177,9 +177,10 @@ class CheckResult:
 class DispatchAttempt:
     """Une tentative de la cascade : un fournisseur, un palier, un verdict.
 
-    ``verdict`` prend l'une de quatre valeurs : ``"green"`` (appel et checks
+    ``verdict`` prend l'une de cinq valeurs : ``"green"`` (appel et checks
     au vert), ``"red"`` (appel réussi, un check au moins a échoué),
-    ``"rate_limit"`` ou ``"timeout"`` (l'appel lui-même a échoué — le
+    ``"rate_limit"``, ``"timeout"`` ou ``"error"`` (l'appel lui-même a
+    échoué — saturation, délai dépassé, ou panne locale du fournisseur ; le
     fournisseur suivant du même palier prend le relais, les checks ne
     tournent pas).
     """
@@ -278,8 +279,9 @@ def _run_provider_call(
 ) -> tuple[int | None, str, str, float, str | None]:
     """Exécute l'invocation rendue ; rend (code, stdout, stderr, durée, kind d'échec).
 
-    *kind* vaut ``"timeout"``, ``"rate_limit"`` (code non nul ou sortie
-    évoquant un 429/une limite) ou ``None`` (appel réussi). ``invocation`` est
+    *kind* vaut ``"timeout"``, ``"rate_limit"`` (sortie évoquant un 429 ou
+    une limite), ``"error"`` (code non nul sans trace de limite) ou ``None``
+    (appel réussi). ``invocation`` est
     garanti non vide par ``candidates()`` en amont ; ``shlex.split`` d'une
     chaîne vide rendrait de toute façon une commande vide, refusée par
     ``subprocess`` — pas de garde supplémentaire nécessaire ici.
@@ -293,8 +295,18 @@ def _run_provider_call(
     except subprocess.TimeoutExpired:
         return None, "", "", time.monotonic() - started, "timeout"
     duration = time.monotonic() - started
-    failed = completed.returncode != 0 or _looks_rate_limited(completed.stdout) or _looks_rate_limited(completed.stderr)
-    return completed.returncode, completed.stdout, completed.stderr, duration, ("rate_limit" if failed else None)
+    # Une saturation (429, quota) et une panne locale (CLI absent, script qui
+    # plante) n'ont pas le même sens pour l'état runtime : la première dit que
+    # le fournisseur est bon mais occupé, la seconde qu'il est cassé ici. Les
+    # deux refroidissent, mais sous un nom distinct, pour que `providers
+    # status` et l'historique du lot 4 ne confondent pas les deux.
+    if _looks_rate_limited(completed.stdout) or _looks_rate_limited(completed.stderr):
+        kind = "rate_limit"
+    elif completed.returncode != 0:
+        kind = "error"
+    else:
+        kind = None
+    return completed.returncode, completed.stdout, completed.stderr, duration, kind
 
 
 def _run_checks(checks: tuple[str, ...], *, project_root: Path) -> tuple[CheckResult, ...]:

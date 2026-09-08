@@ -192,7 +192,8 @@ def test_check_rouge_passe_au_palier_suivant_et_echec_d_appel_au_fournisseur_sui
 
     assert report.exit_code == 0
     assert [a.provider for a in report.attempts] == ["cheap-red", "mid-fail", "mid-green"]
-    assert [a.verdict for a in report.attempts] == ["red", "rate_limit", "green"]
+    # mid-fail plante sans parler de limite : c'est une panne locale, pas une saturation.
+    assert [a.verdict for a in report.attempts] == ["red", "error", "green"]
     assert report.attempts[0].tier == "cheap"
     assert report.attempts[-1].tier == "mid"
     assert report.attempts[0].checks[0].ok is False
