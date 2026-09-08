@@ -315,13 +315,30 @@ critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
 
+### Plafonds MAST par instance de workflow
+
+Chaque instance créée par le RuntimeKernel (`create_instance`) porte deux
+plafonds indépendants, surchargeables à la création (`max_tool_calls=50`,
+`max_budget=100` par défaut) : le nombre d'appels d'outils que
+`mediate_tool` médiera — la seule unité de « tour » que le kernel observe —
+et un budget d'unités de coût consommées par ces mêmes appels (1 unité par
+appel par défaut ; un appelant qui connaît un coût réel, en tokens ou en
+devise, peut passer `cost=` à chaque appel). Le kernel ne voit aujourd'hui
+passer ni tokens ni coût ailleurs, d'où ce choix par défaut. Au premier appel
+qui dépasserait l'un des deux plafonds, l'instance passe dans l'état terminal
+`refused` : un checkpoint est écrit, un événement `workflow.refused` est
+journalisé, et l'appel — comme tout appel suivant sur cette instance — rend
+`False` sans jamais lever d'exception ni laisser l'instance continuer en
+silence. Voir `src/grimoire/runtime/kernel.py` et `schemas.py`
+(`WorkflowStatus.REFUSED`, `RunEventType.WORKFLOW_REFUSED`).
+
 ### Pourquoi une tâche s'est arrêtée
 
 `grimoire task trace <id>` lit quatre journaux qui portent chacun le `task_id`
 — le Mission Ledger (transitions, incidents), le TraceLedger des hooks (outils
 autorisés ou **refusés par la policy**, clôtures refusées, **gates de
-transition rouges**), le RuntimeKernel (run events, checkpoints, **abort et sa
-raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
+transition rouges**), le RuntimeKernel (run events, checkpoints, **abort/refus
+et leur raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
 Les entrées qui expliquent un arrêt sont marquées et reprises dans une section
 « Cause(s) d'arrêt » ; `--causes` n'affiche qu'elles ; `--output json` rend la
 timeline complète avec ses sources. Une source absente est nommée comme telle ;
