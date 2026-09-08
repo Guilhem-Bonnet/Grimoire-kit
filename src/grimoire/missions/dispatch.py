@@ -651,8 +651,17 @@ def run_dispatch(
         )
 
     if start_tier is not None:
-        chosen_tier = start_tier
-        start_tier_reason = "palier de départ explicite (--start-tier)"
+        # L'option explicite ne peut que monter : le plancher de la classe est
+        # la seule garantie qu'une V1 ne part pas sur un ouvrier sans juge.
+        # Un `--start-tier cheap` sur une V1 est donc relevé, et dit pourquoi.
+        if SUPPORTED_MODEL_TIERS.index(start_tier) < SUPPORTED_MODEL_TIERS.index(floor):
+            chosen_tier = floor
+            start_tier_reason = (
+                f"palier explicite `{start_tier}` relevé au plancher `{floor}` de la classe {verifiability.value}"
+            )
+        else:
+            chosen_tier = start_tier
+            start_tier_reason = "palier de départ explicite (--start-tier)"
     else:
         chosen_tier, start_tier_reason = recommend_start_tier(
             service.ledger, task_type=task.type.value, verifiability=verifiability.value, floor=floor

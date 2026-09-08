@@ -686,3 +686,22 @@ def test_l_historique_pousse_le_depart_a_mid_quand_cheap_echoue_trop_souvent(tmp
     assert report.start_tier == "mid"
     assert "cheap" in (report.start_tier_reason or "")
     assert [a.tier for a in report.attempts] == ["mid"]  # cheap n'est même plus tenté
+
+
+def test_start_tier_explicite_ne_descend_jamais_sous_le_plancher_de_la_classe(tmp_path: Path) -> None:
+    # Une V1 part de mid : `--start-tier cheap` est relevé, pas honoré.
+    cheap_green = _script(tmp_path, "cheap_green.py", _WRITE_MARKER)
+    mid_green = _script(tmp_path, "mid_green.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-green", "cheap", _invocation(cheap_green)),
+        _provider_yaml("mid-green", "mid", _invocation(mid_green)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=("pytest vert", "revue par un pair"))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), start_tier="cheap")
+
+    assert report.start_tier == "mid"
+    assert "relevé" in (report.start_tier_reason or "")
+    assert [a.provider for a in report.attempts] == ["mid-green"]
