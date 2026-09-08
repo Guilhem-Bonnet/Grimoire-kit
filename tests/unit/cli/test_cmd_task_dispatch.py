@@ -149,3 +149,197 @@ def test_chaine_epuisee_sort_en_1(tmp_path: Path) -> None:
     res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt", "--max-tier", "cheap")
 
     assert res.exit_code == 1
+
+
+# ── Relecture (#327) : câblage CLI ────────────────────────────────────────────
+
+
+def test_dispatch_json_porte_review(tmp_path: Path) -> None:
+    """Sans dépôt git, `review` reste `review_optional` avec une note — jamais absent du JSON."""
+    green = _script(
+        tmp_path,
+        "green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        ["--output", "json", "task", "dispatch", tid, "--check", "test -f marker.txt", "--project-root", str(tmp_path)],
+    )
+
+    payload = json.loads(res.output)
+    assert payload["review"] == "review_optional"
+    assert payload["review_files"] == []
+    assert payload["review_note"] is not None
+
+
+# ── Palier de départ ajusté par l'historique (issue #312, lot 4) ────────────
+
+
+def test_start_tier_inconnu_refuse_avec_le_code_de_sortie_2(tmp_path: Path) -> None:
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = run(tmp_path, "dispatch", tid, "--check", "true", "--start-tier", "ultra")
+
+    assert res.exit_code == 2
+    assert "ultra" in res.output
+
+
+def test_start_tier_explicite_saute_cheap(tmp_path: Path) -> None:
+    mid_green = _script(
+        tmp_path,
+        "mid_green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "mid-only", "mid", f"{sys.executable} {mid_green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        [
+            "--output",
+            "json",
+            "task",
+            "dispatch",
+            tid,
+            "--check",
+            "test -f marker.txt",
+            "--start-tier",
+            "mid",
+            "--project-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["start_tier"] == "mid"
+    assert "explicite" in payload["start_tier_reason"]
+    assert [a["tier"] for a in payload["attempts"]] == ["mid"]
+
+
+def test_json_porte_toujours_start_tier_et_sa_raison(tmp_path: Path) -> None:
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        ["--output", "json", "task", "dispatch", tid, "--check", "true", "--project-root", str(tmp_path)],
+    )
+
+    payload = json.loads(res.output)
+    assert payload["start_tier"] == "cheap"
+    assert "moins de" in payload["start_tier_reason"]
+
+
+def test_task_show_affiche_la_relecture_du_dernier_dispatch(tmp_path: Path) -> None:
+    green = _script(
+        tmp_path,
+        "green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+    dispatch_res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
+    assert dispatch_res.exit_code == 0, dispatch_res.output
+
+    res_texte = run(tmp_path, "show", tid)
+    assert "relecture" in res_texte.output
+
+    res_json = runner.invoke(app, ["--output", "json", "task", "show", tid, "--project-root", str(tmp_path)])
+    payload = json.loads(res_json.output)
+    assert payload["last_dispatch"]["review"] == "review_optional"  # tmp_path n'est pas un dépôt git
+
+
+def test_task_show_sans_dispatch_ne_montre_aucune_relecture(tmp_path: Path) -> None:
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = run(tmp_path, "show", tid)
+
+    assert res.exit_code == 0
+    assert "relecture" not in res.output
+
+
+# ── Incertitudes déclarées (#328) : câblage CLI ──────────────────────────────
+
+
+def test_dispatch_json_porte_uncertainties(tmp_path: Path) -> None:
+    green = _script(
+        tmp_path,
+        "green.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        """,
+    )
+    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = runner.invoke(
+        app,
+        ["--output", "json", "task", "dispatch", tid, "--check", "test -f marker.txt", "--project-root", str(tmp_path)],
+    )
+
+    payload = json.loads(res.output)
+    assert payload["uncertainties"] == []
+    assert payload["uncertainty_warnings"] == []
+
+
+def test_dispatch_texte_affiche_les_incertitudes_declarees(tmp_path: Path) -> None:
+    ouvrier = _script(
+        tmp_path,
+        "declare.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("```grimoire-uncertainties")
+        print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+
+    res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
+
+    assert res.exit_code == 0
+    assert "incertitudes déclarées" in res.output
+    assert "src/x.py" in res.output
+
+
+def test_task_show_affiche_les_uncertainties_du_dernier_dispatch(tmp_path: Path) -> None:
+    ouvrier = _script(
+        tmp_path,
+        "declare.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print("```grimoire-uncertainties")
+        print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
+        print("```")
+        """,
+    )
+    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    tid = ajoute(tmp_path, "la suite de tests passe")
+    dispatch_res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
+    assert dispatch_res.exit_code == 0, dispatch_res.output
+
+    res_texte = run(tmp_path, "show", tid)
+    assert "incertitudes déclarées" in res_texte.output
+    assert "src/x.py" in res_texte.output
+
+    res_json = runner.invoke(app, ["--output", "json", "task", "show", tid, "--project-root", str(tmp_path)])
+    payload = json.loads(res_json.output)
+    assert payload["last_dispatch"]["uncertainties"] == [
+        {"where": "src/x.py", "what": "cas limite", "why": "non testé"}
+    ]

@@ -100,14 +100,26 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _acceptance(node: dict[str, Any], outputs: tuple[PinRef, ...]) -> tuple[str, ...]:
-    """Critères d'acceptation : les evals déclarées du node si présentes.
+    """Critères d'acceptation : ``node.acceptance``, sinon les evals, sinon les pins.
 
-    ``config.evals`` porte des cas ``assert`` — c'est la seule preuve
-    comportementale que le blueprint attache déjà à un node (P1.2, rejouée
-    par ``grimoire blueprint evals``). Un node sans evals reçoit un critère
-    par défaut dérivé de ses pins de sortie : la conformité au contrat est le
-    plancher, jamais rien.
+    Trois sources, dans cet ordre de préférence :
+
+    - ``node.acceptance`` — texte libre écrit par l'auteur du blueprint.
+      C'est le seul des trois qu'une classe de vérifiabilité (#309) peut
+      vraiment lire : ``sortie conforme au contrat « c1 »`` ou
+      ``verdict attendu : ...`` ne nomment ni verdict mécanique reconnu ni
+      revue, et tombent donc toujours ambigus. Un node qui veut être
+      dispatchable par cascade (#311) doit décrire son critère avec ce
+      vocabulaire-là : ``la suite de tests passe`` (V0), ``revue humaine
+      avant fusion`` (V1).
+    - ``config.evals`` — les cas ``assert`` (P1.2, rejoués par ``grimoire
+      blueprint evals``), s'il n'y a pas d'``acceptance`` explicite.
+    - À défaut des deux, un critère dérivé des pins de sortie : la
+      conformité au contrat est le plancher, jamais rien.
     """
+    explicit = node.get("acceptance")
+    if isinstance(explicit, list) and explicit:
+        return tuple(str(c) for c in explicit if str(c).strip())
     evals = (node.get("config") or {}).get("evals")
     criteria: list[str] = []
     if isinstance(evals, dict):

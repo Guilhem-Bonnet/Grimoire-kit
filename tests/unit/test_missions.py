@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import (
     MissionState,
+    TaskClaim,
     TaskState,
 )
 
@@ -95,10 +98,54 @@ def test_task_state_machine_happy_path(ledger):
     assert t.status == TaskState.CLAIMED
     assert t.claim is not None
     assert t.claim.actor_id == "agent"
+    assert t.claim.expires_at, "claim_task stamps a default expiry (B3)"
+    assert not t.claim.is_expired(), "a freshly claimed task is not expired"
     t = ledger.transition_task(t.id, TaskState.RUNNING)
     t = ledger.transition_task(t.id, TaskState.NEEDS_VERIFICATION)
     t = ledger.transition_task(t.id, TaskState.CLOSED)
     assert t.status == TaskState.CLOSED
+
+
+# ── TaskClaim expiry (B3) ───────────────────────────────────────────────────
+
+def test_task_claim_new_stamps_a_default_expiry():
+    claim = TaskClaim.new(actor_id="a", host_id="h")
+    assert claim.expires_at
+    assert not claim.is_expired()
+
+
+def test_task_claim_new_respects_custom_ttl_and_now():
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    claim = TaskClaim.new(actor_id="a", host_id="h", ttl_seconds=60, now=now)
+    assert not claim.is_expired(now=now + timedelta(seconds=30))
+    assert claim.is_expired(now=now + timedelta(seconds=61))
+
+
+def test_task_claim_without_expires_at_never_expires():
+    """Compat: raw TaskClaim() (tests, old ledgers) never blocks on expiry."""
+    claim = TaskClaim(actor_id="a", host_id="h")
+    assert claim.expires_at == ""
+    assert not claim.is_expired()
+    assert not claim.is_expired(now=datetime(2099, 1, 1, tzinfo=UTC))
+
+
+def test_task_claim_naive_iso8601_expires_at_is_treated_as_utc():
+    """A naive ISO8601 string (no tzinfo) must not raise TypeError against
+    the aware `datetime.now(UTC)` default — it is assumed UTC, like every
+    `expires_at` `TaskClaim.new` actually stamps."""
+    claim = TaskClaim(actor_id="a", host_id="h", expires_at="2026-01-01T00:00:00")
+    assert claim.is_expired(now=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC))
+    assert not claim.is_expired(now=datetime(2025, 12, 31, 23, 59, 59, tzinfo=UTC))
+
+
+def test_task_claim_invalid_expires_at_is_treated_as_expired_and_logged(caplog):
+    """An unparsable timestamp must not silently block a file forever: the
+    claim is treated as expired (closed-fail, not closed-silent), and the
+    anomaly is logged rather than swallowed."""
+    claim = TaskClaim(actor_id="a", host_id="h", expires_at="not-a-timestamp")
+    with caplog.at_level("WARNING"):
+        assert claim.is_expired()
+    assert "expires_at invalide" in caplog.text
 
 
 def test_task_invalid_transition_raises(ledger):

@@ -8,6 +8,7 @@ where the host can refuse.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,14 @@ AGENT_DIR = Path("_grimoire/_config/custom/agents")
 
 
 def _write_agent(
-    root: Path, name: str, body: str, *, tools: str = "", reasoning: str = "medium", cost: str = "medium"
+    root: Path,
+    name: str,
+    body: str,
+    *,
+    tools: str = "",
+    reasoning: str = "medium",
+    cost: str = "medium",
+    max_turns: int | None = None,
 ) -> None:
     (root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
     header = [
@@ -56,6 +64,10 @@ def _write_agent(
         f"  reasoning: {reasoning}",
         "  context_window: medium",
         f"  cost: {cost}",
+    ]
+    if max_turns is not None:
+        header.append(f"max_turns: {max_turns}")
+    header += [
         "---",
         "",
     ]
@@ -165,6 +177,47 @@ def test_claude_surface_is_native_everywhere(governed: Path) -> None:
     assert settings["permissions"]["deny"]
 
 
+def test_a_hook_declared_on_subagent_start_is_wired_by_host_sync(governed: Path) -> None:
+    """A3/B8 — l'événement existe désormais dans le vocabulaire host-neutre :
+    un hook qui le cible atterrit dans ``.claude/settings.json`` sous
+    ``SubagentStart``, au lieu de disparaître en silence (c'était le bug :
+    `HookEvent` et l'émetteur ne connaissaient pas cet événement, donc rien ne
+    pouvait le câbler, quoi que déclare un registre côté hôte)."""
+    surface = build_surface(governed)
+    extra = HookSpec(
+        event=HookEvent.SUBAGENT_START,
+        decision="grimoire.subagent-context",
+        enforcement=Enforcement.ADVISORY,
+        rationale="test",
+    )
+    surface = replace(surface, hooks=(*surface.hooks, extra))
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(surface, governed), governed)
+    settings = json.loads((governed / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert "SubagentStart" in settings["hooks"]
+    # Événement sans appel d'outil : pas de matcher à porter.
+    assert "matcher" not in settings["hooks"]["SubagentStart"][0]
+
+
+def test_a_hook_declared_on_post_tool_use_failure_is_wired_by_host_sync(governed: Path) -> None:
+    surface = build_surface(governed)
+    extra = HookSpec(
+        event=HookEvent.POST_TOOL_USE_FAILURE,
+        decision="grimoire.tool-failure",
+        enforcement=Enforcement.ADVISORY,
+        matcher=("execute",),
+        rationale="test",
+    )
+    surface = replace(surface, hooks=(*surface.hooks, extra))
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(surface, governed), governed)
+    settings = json.loads((governed / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert "PostToolUseFailure" in settings["hooks"]
+    assert settings["hooks"]["PostToolUseFailure"][0]["matcher"] == "Bash"
+
+
 def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
     emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
     assert emitter is not None
@@ -172,6 +225,42 @@ def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
     scribe = (governed / ".claude/agents/scribe.md").read_text(encoding="utf-8")
     assert "tools: 'Read, Glob, Grep, Edit, Write'" in scribe
     assert "model: 'haiku'" in scribe  # low reasoning demand
+
+
+def test_sub_agents_carry_effort_max_turns_and_background(governed: Path) -> None:
+    """B10 — un sous-agent généré porte des bornes explicites : ``effort``,
+    ``maxTurns``, et ``background`` pour tout ce qui n'est pas le point
+    d'entrée. Sans elles, un sous-agent invisible tourne sans plafond."""
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    scribe = (governed / ".claude/agents/scribe.md").read_text(encoding="utf-8")
+    concierge = (governed / ".claude/agents/concierge.md").read_text(encoding="utf-8")
+
+    assert "effort: 'low'" in scribe  # reasoning: low -> effort low
+    assert "maxTurns: 30" in scribe  # défaut faute d'override
+    assert "background: true" in scribe  # dispatché en invisible, pas le point d'entrée
+
+    assert "effort: 'low'" in concierge  # reasoning: medium (défaut du fixture) -> effort low
+    assert "background:" not in concierge, "le point d'entrée tourne en avant-plan, attendu par l'humain"
+
+
+def test_high_reasoning_gets_high_effort(project: Path) -> None:
+    _write_agent(project, "gros-cerveau", "Tu raisonnes beaucoup.", reasoning="high")
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    gros_cerveau = (project / ".claude/agents/gros-cerveau.md").read_text(encoding="utf-8")
+    assert "effort: 'high'" in gros_cerveau
+
+
+def test_max_turns_override_from_the_agent_file_wins(project: Path) -> None:
+    _write_agent(project, "verbeux", "Tu écris beaucoup, il te faut plus de tours.", max_turns=80)
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    verbeux = (project / ".claude/agents/verbeux.md").read_text(encoding="utf-8")
+    assert "maxTurns: 80" in verbeux
 
 
 def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None:

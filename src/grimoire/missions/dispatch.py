@@ -21,11 +21,28 @@ Chaque tentative — qu'elle échoue à l'appel (429, timeout) ou échoue au che
 — laisse un événement ``task.dispatched`` dans le Mission Ledger : c'est
 l'historique brut dont le lot 4 (#312, budget et coûts) a besoin, et il doit
 survivre même quand la cascade entière finit rouge.
+
+Constat de la session du 2026-09-08 (sous-issue de #307) : des dispatchs
+verts aux tests ont quand même dû être corrigés par relecture forte, sur des
+diffs qui touchaient des surfaces où une erreur de jugement coûte cher (CLI,
+MCP, exports publics...). La classe de vérifiabilité dit qui a le droit de
+produire ; la **classe de relisibilité** (#327) dit quoi relire une fois le
+vert obtenu : un diff qui touche une surface sensible est ``review_required``,
+le reste ``review_optional``.
+
+Même constat, autre angle : les trois corrections apportées ce jour-là ont
+été trouvées exactement là où l'ouvrier délégué déclarait douter en prose.
+Les **incertitudes déclarées** (#328) rendent ce canal d'escalade lisible par
+un programme : le prompt demande à l'ouvrier de terminer par un bloc JSON
+délimité, que le dispatch extrait et stocke plutôt que de laisser un
+relecteur humain espérer tomber dessus au bon endroit dans une sortie longue.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -33,7 +50,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
@@ -47,9 +69,11 @@ if TYPE_CHECKING:
 __all__ = [
     "CHECK_TIMEOUT_S",
     "DEFAULT_CALL_TIMEOUT_S",
+    "DEFAULT_REVIEW_SURFACES",
     "CheckResult",
     "DispatchAttempt",
     "DispatchReport",
+    "Uncertainty",
     "build_prompt",
     "render_invocation",
     "run_dispatch",
@@ -76,6 +100,50 @@ CHECK_TIMEOUT_S = 600.0
 #: sortie — un fournisseur peut répondre 0 et pourtant décrire un 429 dans son
 #: propre format de sortie (CLI headless qui avale l'erreur HTTP).
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "overloaded", "quota")
+
+#: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une
+#: exige une relecture forte même si les checks mécaniques sont au vert.
+#: Chaque motif est un glob ``fnmatch`` appliqué au chemin relatif rendu par
+#: ``git diff --name-only``. Surchargeable projet par projet via
+#: ``_grimoire/standard/orchestration-policy.yaml`` (clé ``review_surfaces``).
+DEFAULT_REVIEW_SURFACES: tuple[str, ...] = (
+    # Motifs génériques, pas l'arborescence du kit : le dispatch tourne dans
+    # le projet de l'utilisateur, dont on ne connaît pas les chemins. Un
+    # projet surcharge `review_surfaces` s'il nomme ses surfaces autrement.
+    "*/__init__.py",  # exports publics d'un paquet
+    "*/cli/*",  # surfaces d'entrée : ligne de commande
+    "*/mcp/*",  # surfaces d'entrée : outils MCP
+    "*/api/*",  # surfaces d'entrée : API
+    "*schema*",  # schémas, quel que soit le langage
+    "framework/agentic-standard/*",  # templates du standard (kit)
+    "_grimoire/standard/*",  # instances du standard (projet enrôlé)
+    "*/verifiability.py",  # vocabulaire de décision du routage
+    "*/policies/*",  # politiques
+    "*/security/*",  # sécurité
+    "*/hooks/*",  # hooks d'hôte
+)
+
+#: Chemin relatif de la politique d'orchestration — même fichier que celui lu
+#: par ``core.agentic_standard`` et ``standard_checks``, redéclaré ici pour ne
+#: pas tirer tout ``agentic_standard`` dans un module qui ne fait que lire une
+#: clé optionnelle.
+_ORCHESTRATION_POLICY_FILE = STANDARD_DIR / "orchestration-policy.yaml"
+
+#: Bloc de fin de prompt (issue #328) : le canal d'escalade le moins cher qui
+#: existe est l'incertitude que l'ouvrier déclare lui-même — encore faut-il
+#: qu'il la mette dans un format qu'un programme, pas seulement un relecteur
+#: humain, sait retrouver et compter.
+_UNCERTAINTIES_INSTRUCTION = (
+    "\nAvant de conclure, termine ta réponse par un bloc délimité :\n"
+    "```grimoire-uncertainties\n"
+    '[{"where": "fichier ou zone concernée", "what": "ce dont tu doutes", '
+    '"why": "pourquoi tu doutes"}]\n'
+    "```\n"
+    "Liste JSON, vide (`[]`) si tu n'as aucune incertitude à déclarer — jamais "
+    "de prose à la place du JSON, jamais le bloc omis par excès de confiance."
+)
+
+_UNCERTAINTIES_BLOCK_RE = re.compile(r"```grimoire-uncertainties\s*\n(.*?)```", re.DOTALL)
 
 
 def start_tier_for(verifiability: Verifiability) -> str | None:
@@ -124,7 +192,8 @@ def build_prompt(task: MissionTask) -> str:
         "les commandes de vérification (`--check`) qui jugeront le résultat — "
         "leur code de sortie est le seul verdict qui compte ici."
     )
-    return "\n".join(lignes)
+    prompt = "\n".join(lignes)
+    return prompt + _UNCERTAINTIES_INSTRUCTION
 
 
 def render_invocation(template: str, *, prompt: str, model: str) -> list[str]:
@@ -162,6 +231,135 @@ def _extract_cost_usd(stdout: str) -> float | None:
     return float(cost) if isinstance(cost, (int, float)) else None
 
 
+def _yaml() -> YAML:
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    return yaml
+
+
+def _review_surfaces(project_root: Path) -> tuple[str, ...]:
+    """Les globs de surfaces sensibles — la surcharge du projet, sinon la liste par défaut.
+
+    Best-effort et permissif : ``orchestration-policy.yaml`` sert d'abord au
+    standard agentique, une clé absente ou un fichier illisible n'est pas une
+    raison de faire échouer un dispatch — juste de retomber sur la liste que
+    l'issue #327 fixe elle-même.
+    """
+    path = project_root / _ORCHESTRATION_POLICY_FILE
+    if not path.is_file():
+        return DEFAULT_REVIEW_SURFACES
+    try:
+        data = _yaml().load(path.read_text(encoding="utf-8"))
+    except (YAMLError, OSError, UnicodeDecodeError):
+        return DEFAULT_REVIEW_SURFACES
+    if not isinstance(data, dict):
+        return DEFAULT_REVIEW_SURFACES
+    surfaces = data.get("review_surfaces")
+    if not isinstance(surfaces, list):
+        return DEFAULT_REVIEW_SURFACES
+    cleaned = tuple(str(item) for item in surfaces if str(item).strip())
+    return cleaned or DEFAULT_REVIEW_SURFACES
+
+
+def _matches_review_surface(path: str, surfaces: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in surfaces)
+
+
+def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | None]:
+    """Classe le diff courant — ``(review, review_files, review_note)`` (issue #327).
+
+    ``git diff --name-only`` plutôt qu'une lecture du working tree : c'est
+    exactement ce que le prochain relecteur verra. Un projet non versionné ne
+    permet pas de calculer quoi que ce soit ; le déclarer ``review_required``
+    par défaut inventerait une garantie qu'on ne peut pas tenir, donc
+    ``review_optional`` avec une note plutôt qu'un silence trompeur.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, timeout=CHECK_TIMEOUT_S
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
+    if completed.returncode != 0:
+        return "review_optional", (), "projet non versionné (pas un dépôt git) : relisibilité non calculée"
+    files = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    surfaces = _review_surfaces(project_root)
+    matched = tuple(f for f in files if _matches_review_surface(f, surfaces))
+    if matched:
+        return "review_required", matched, None
+    return "review_optional", (), None
+
+
+@dataclass(frozen=True, slots=True)
+class Uncertainty:
+    """Une incertitude déclarée par l'ouvrier délégué (issue #328).
+
+    Trois champs, tous exigés à l'extraction : un objet qui n'en porte pas un
+    des trois n'est pas assez précis pour qu'un relecteur sache où regarder —
+    autant l'ignorer avec un avertissement que le stocker à moitié vide.
+    """
+
+    where: str
+    what: str
+    why: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"where": self.where, "what": self.what, "why": self.why}
+
+
+def _uncertainties_search_text(stdout: str) -> str:
+    """Où chercher le bloc : le champ ``result`` si *stdout* est un JSON qui le porte, sinon *stdout* brut.
+
+    Un fournisseur headless qui rend un JSON enveloppe souvent la réponse
+    texte de l'ouvrier sous ``result`` (même convention que ``total_cost_usd``
+    plus haut) — le bloc délimité vit alors dedans, pas dans le JSON lui-même.
+    """
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return stdout
+    if isinstance(data, dict):
+        result = data.get("result")
+        if isinstance(result, str):
+            return result
+    return stdout
+
+
+def _extract_uncertainties(stdout: str) -> tuple[tuple[Uncertainty, ...], tuple[str, ...]]:
+    """Le bloc ``grimoire-uncertainties`` de *stdout*, jamais un échec (issue #328).
+
+    Trois issues : bloc absent → vide, sans avertissement (l'ouvrier n'a rien
+    à déclarer, ou ne connaît pas encore la convention — pas une anomalie à
+    signaler à chaque dispatch) ; bloc présent mais illisible (JSON invalide,
+    pas une liste) → vide, un avertissement ; bloc présent et lisible →
+    chaque objet sans ``where``/``what``/``why`` est ignoré avec son propre
+    avertissement, les autres sont gardés.
+    """
+    match = _UNCERTAINTIES_BLOCK_RE.search(_uncertainties_search_text(stdout))
+    if match is None:
+        return (), ()
+    body = match.group(1).strip()
+    try:
+        payload = json.loads(body) if body else []
+    except (json.JSONDecodeError, ValueError):
+        return (), (f"bloc grimoire-uncertainties illisible (JSON invalide) : {body[:200]!r}",)
+    if not isinstance(payload, list):
+        return (), (f"bloc grimoire-uncertainties illisible (attendu une liste JSON) : {body[:200]!r}",)
+    uncertainties: list[Uncertainty] = []
+    warnings: list[str] = []
+    for item in payload:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("where"), str)
+            and isinstance(item.get("what"), str)
+            and isinstance(item.get("why"), str)
+        ):
+            uncertainties.append(Uncertainty(where=item["where"], what=item["what"], why=item["why"]))
+        else:
+            warnings.append(f"incertitude ignorée (clés where/what/why manquantes ou non textuelles) : {item!r}")
+    return tuple(uncertainties), tuple(warnings)
+
+
 @dataclass(frozen=True, slots=True)
 class CheckResult:
     """Le verdict d'une commande ``--check`` : verte ou non, rien d'autre à savoir."""
@@ -183,6 +381,13 @@ class DispatchAttempt:
     échoué — saturation, délai dépassé, ou panne locale du fournisseur ; le
     fournisseur suivant du même palier prend le relais, les checks ne
     tournent pas).
+
+    ``review``/``review_files``/``review_note`` (#327) ne sont posés que pour
+    la tentative verte — au plus une par cascade — car relire n'a de sens
+    qu'une fois un résultat accepté. ``uncertainties``/``uncertainty_warnings``
+    (#328) sont extraits pour toute tentative où l'appel a réussi, vert ou
+    rouge : l'ouvrier peut avoir douté d'un travail que le check juge encore
+    insuffisant.
     """
 
     attempt: int
@@ -194,6 +399,11 @@ class DispatchAttempt:
     checks: tuple[CheckResult, ...]
     verdict: str
     cost_usd: float | None
+    review: str | None = None
+    review_files: tuple[str, ...] = ()
+    review_note: str | None = None
+    uncertainties: tuple[Uncertainty, ...] = ()
+    uncertainty_warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +416,11 @@ class DispatchAttempt:
             "checks": [c.to_dict() for c in self.checks],
             "verdict": self.verdict,
             "cost_usd": self.cost_usd,
+            "review": self.review,
+            "review_files": list(self.review_files),
+            "review_note": self.review_note,
+            "uncertainties": [u.to_dict() for u in self.uncertainties],
+            "uncertainty_warnings": list(self.uncertainty_warnings),
         }
 
 
@@ -233,6 +448,8 @@ class DispatchReport:
     refusal: str | None = None
     transitioned_to: str | None = None
     transition_refused: str | None = None
+    start_tier: str | None = None
+    start_tier_reason: str | None = None
 
     @property
     def refusal_message(self) -> str | None:
@@ -254,6 +471,28 @@ class DispatchReport:
             return 2
         return 0 if self.succeeded else 1
 
+    @property
+    def review(self) -> str | None:
+        """``review_required``/``review_optional`` de la dernière tentative — ``None`` s'il n'y en a aucune (#327)."""
+        return self.attempts[-1].review if self.attempts else None
+
+    @property
+    def review_files(self) -> tuple[str, ...]:
+        return self.attempts[-1].review_files if self.attempts else ()
+
+    @property
+    def review_note(self) -> str | None:
+        return self.attempts[-1].review_note if self.attempts else None
+
+    @property
+    def uncertainties(self) -> tuple[Uncertainty, ...]:
+        """Les incertitudes déclarées par la dernière tentative appelée (#328)."""
+        return self.attempts[-1].uncertainties if self.attempts else ()
+
+    @property
+    def uncertainty_warnings(self) -> tuple[str, ...]:
+        return self.attempts[-1].uncertainty_warnings if self.attempts else ()
+
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "task_id": self.task_id,
@@ -263,6 +502,13 @@ class DispatchReport:
             "prompt": self.prompt,
             "attempts": [a.to_dict() for a in self.attempts],
             "exit_code": self.exit_code,
+            "review": self.review,
+            "review_files": list(self.review_files),
+            "review_note": self.review_note,
+            "uncertainties": [u.to_dict() for u in self.uncertainties],
+            "uncertainty_warnings": list(self.uncertainty_warnings),
+            "start_tier": self.start_tier,
+            "start_tier_reason": self.start_tier_reason,
         }
         if self.refusal is not None:
             data["refusal"] = self.refusal
@@ -332,9 +578,29 @@ def _run_checks(checks: tuple[str, ...], *, project_root: Path) -> tuple[CheckRe
     return tuple(results)
 
 
-def _dispatch_event_payload(attempt: DispatchAttempt, task_id: str) -> dict[str, Any]:
+def _dispatch_event_payload(
+    attempt: DispatchAttempt,
+    task: MissionTask,
+    verifiability: Verifiability,
+    start_tier: str,
+    start_tier_reason: str,
+) -> dict[str, Any]:
+    """Le payload d'un événement ``task.dispatched`` — le type et la classe embarqués (lot 4, #312).
+
+    ``task_type``/``verifiability`` sont écrits ici plutôt que re-dérivés au
+    moment de la lecture : ``dispatch_history`` n'a alors ni besoin de
+    recharger la tâche (qui peut avoir été close, voire disparue), ni de
+    supposer que ses critères d'acceptation n'ont pas changé depuis. Un
+    événement plus ancien, écrit avant ce lot, n'a pas ces clés —
+    ``dispatch_history`` l'ignore sans échouer plutôt que d'inventer une
+    classe qui n'a jamais été observée.
+    """
     payload = attempt.to_dict()
-    payload["task_id"] = task_id
+    payload["task_id"] = task.id
+    payload["task_type"] = task.type.value
+    payload["verifiability"] = verifiability.value
+    payload["start_tier"] = start_tier
+    payload["start_tier_reason"] = start_tier_reason
     return payload
 
 
@@ -344,6 +610,7 @@ def run_dispatch(
     *,
     checks: tuple[str, ...] = (),
     max_tier: str | None = None,
+    start_tier: str | None = None,
     provider_id: str | None = None,
     dry_run: bool = False,
     call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
@@ -352,20 +619,28 @@ def run_dispatch(
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
     Refuse avant tout appel si la classe est V2 ou si ``checks`` est vide.
-    Sinon, essaie chaque palier de la chaîne, du moins cher au plus cher (ou
-    depuis ``mid`` pour une tâche V1) : à chaque palier, chaque fournisseur
-    disponible est tenté jusqu'à un appel qui réussit ; un check rouge fait
-    passer au palier suivant (le fournisseur n'est pas en cause, le résultat
-    l'est), un échec d'appel (429, timeout) fait passer au fournisseur
-    suivant du même palier. Chaque tentative — y compris un échec d'appel —
-    laisse un événement ``task.dispatched`` au ledger.
+    Sinon, essaie chaque palier de la chaîne, du palier de départ au plus
+    cher : à chaque palier, chaque fournisseur disponible est tenté jusqu'à
+    un appel qui réussit ; un check rouge fait passer au palier suivant (le
+    fournisseur n'est pas en cause, le résultat l'est), un échec d'appel
+    (429, timeout) fait passer au fournisseur suivant du même palier. Chaque
+    tentative — y compris un échec d'appel — laisse un événement
+    ``task.dispatched`` au ledger.
+
+    Le palier de départ vient, par défaut, de l'historique des dispatchs
+    passés pour ce couple (type de tâche, classe) — :mod:`dispatch_history`,
+    issue #312 : ``cheap``/``mid`` pour V0/V1 tant que rien ne le contredit,
+    ajusté quand un couple escalade trop souvent depuis son palier habituel,
+    ou redescendu quand il ne le fait plus. *start_tier* (``--start-tier``)
+    court-circuite entièrement cette recommandation — l'opérateur qui la
+    fournit sait mieux que l'historique pour ce dispatch précis.
     """
     task = service.require(task_id)
     verifiability = classify(task)
     prompt = build_prompt(task)
 
-    start_tier = start_tier_for(verifiability)
-    if start_tier is None:
+    floor = start_tier_for(verifiability)
+    if floor is None:
         return DispatchReport(
             task_id=task_id,
             verifiability=verifiability.value,
@@ -374,6 +649,24 @@ def run_dispatch(
             prompt=prompt,
             refusal="v2",
         )
+
+    if start_tier is not None:
+        # L'option explicite ne peut que monter : le plancher de la classe est
+        # la seule garantie qu'une V1 ne part pas sur un ouvrier sans juge.
+        # Un `--start-tier cheap` sur une V1 est donc relevé, et dit pourquoi.
+        if SUPPORTED_MODEL_TIERS.index(start_tier) < SUPPORTED_MODEL_TIERS.index(floor):
+            chosen_tier = floor
+            start_tier_reason = (
+                f"palier explicite `{start_tier}` relevé au plancher `{floor}` de la classe {verifiability.value}"
+            )
+        else:
+            chosen_tier = start_tier
+            start_tier_reason = "palier de départ explicite (--start-tier)"
+    else:
+        chosen_tier, start_tier_reason = recommend_start_tier(
+            service.ledger, task_type=task.type.value, verifiability=verifiability.value, floor=floor
+        )
+
     if not checks:
         return DispatchReport(
             task_id=task_id,
@@ -382,9 +675,11 @@ def run_dispatch(
             planned_chain=(),
             prompt=prompt,
             refusal="no_check",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
-    chain = _tier_chain(start_tier, max_tier)
+    chain = _tier_chain(chosen_tier, max_tier)
     if not chain:
         return DispatchReport(
             task_id=task_id,
@@ -393,6 +688,8 @@ def run_dispatch(
             planned_chain=(),
             prompt=prompt,
             refusal="no_tier",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     if dry_run:
@@ -402,6 +699,8 @@ def run_dispatch(
             dry_run=True,
             planned_chain=chain,
             prompt=prompt,
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     root = service.project_root
@@ -437,13 +736,24 @@ def run_dispatch(
                 )
                 attempts.append(attempt)
                 service.ledger.append_event(
-                    "task.dispatched", task_id, "task", actor, _dispatch_event_payload(attempt, task_id)
+                    "task.dispatched",
+                    task_id,
+                    "task",
+                    actor,
+                    _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
                 )
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id)
             check_results = _run_checks(checks, project_root=root)
             green = all(c.ok for c in check_results)
+            # La relecture ne se pose qu'une fois le résultat accepté (#327) —
+            # un check rouge n'a rien produit qu'on ait besoin de relire.
+            review, review_files, review_note = _classify_review(root) if green else (None, (), None)
+            # L'incertitude déclarée, elle, vaut pour tout appel qui a répondu,
+            # vert ou rouge (#328) : l'ouvrier peut avoir douté d'un travail
+            # que le check juge encore insuffisant.
+            uncertainties, uncertainty_warnings = _extract_uncertainties(stdout)
             attempt = DispatchAttempt(
                 attempt=attempt_no,
                 tier=tier,
@@ -454,10 +764,19 @@ def run_dispatch(
                 checks=check_results,
                 verdict="green" if green else "red",
                 cost_usd=_extract_cost_usd(stdout),
+                review=review,
+                review_files=review_files,
+                review_note=review_note,
+                uncertainties=uncertainties,
+                uncertainty_warnings=uncertainty_warnings,
             )
             attempts.append(attempt)
             service.ledger.append_event(
-                "task.dispatched", task_id, "task", actor, _dispatch_event_payload(attempt, task_id)
+                "task.dispatched",
+                task_id,
+                "task",
+                actor,
+                _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
             )
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
@@ -478,6 +797,8 @@ def run_dispatch(
             planned_chain=chain,
             prompt=prompt,
             refusal="no_provider",
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
         )
 
     report = DispatchReport(
@@ -487,6 +808,8 @@ def run_dispatch(
         planned_chain=chain,
         prompt=prompt,
         attempts=tuple(attempts),
+        start_tier=chosen_tier,
+        start_tier_reason=start_tier_reason,
     )
     if not report.succeeded:
         return report
@@ -508,6 +831,8 @@ def run_dispatch(
             prompt=report.prompt,
             attempts=report.attempts,
             transition_refused=str(exc),
+            start_tier=report.start_tier,
+            start_tier_reason=report.start_tier_reason,
         )
     return DispatchReport(
         task_id=report.task_id,
@@ -517,4 +842,6 @@ def run_dispatch(
         prompt=report.prompt,
         attempts=report.attempts,
         transitioned_to=TaskState.NEEDS_VERIFICATION.value,
+        start_tier=report.start_tier,
+        start_tier_reason=report.start_tier_reason,
     )

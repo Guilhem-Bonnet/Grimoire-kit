@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.board import board_status_of, build_board, write_board
-from grimoire.missions.gates import GateVerdict, check_transition
+from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import MissionTask, TaskClaim, TaskState
@@ -179,8 +179,9 @@ class TaskService:
     def claim(
         self, task_id: str, actor: str, host: str = "local", files: tuple[str, ...] = ()
     ) -> TaskMove:
-        """ready → claimed, si le gate `ready_to_in_progress` l'accorde."""
-        claim = TaskClaim(actor_id=actor, host_id=host, exclusive_files=files)
+        """ready → claimed, si le gate `ready_to_in_progress` l'accorde et si aucun
+        autre claim actif ne réserve déjà l'un de *files*."""
+        claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
 
     def transition(
@@ -192,13 +193,15 @@ class TaskService:
         *,
         claim: TaskClaim | None = None,
     ) -> TaskMove:
-        """Déplace une tâche : machine à états, puis gate, puis ledger, puis board.
+        """Déplace une tâche : machine à états, verrou de fichiers, gate, puis ledger, puis board.
 
-        Lève :class:`TaskRefusedError` sur un gate bloquant, :class:`GrimoireMissionError`
-        sur une tâche inconnue ou une transition que la machine à états refuse.
-        Dans les deux cas, rien n'a été écrit.
+        Lève :class:`TaskRefusedError` sur un verrou de fichiers ou un gate bloquant,
+        :class:`GrimoireMissionError` sur une tâche inconnue ou une transition que la
+        machine à états refuse. Dans tous les cas, rien n'a été écrit.
         """
         task = self.require(task_id)
+        if claim is not None:
+            self._check_exclusive_files(task, target, claim)
         verdict = self.gate(task, target)
         if verdict.blocked:
             self._record_refusal(task, target, verdict, actor)
@@ -206,6 +209,36 @@ class TaskService:
         moved = self.ledger.transition_task(task_id, target, actor_id=actor, reason=reason, claim=claim)
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
+
+    def _check_exclusive_files(self, task: MissionTask, target: TaskState, claim: TaskClaim) -> None:
+        """Refuse un claim dont un fichier exclusif est déjà réservé ailleurs.
+
+        Une autre tâche CLAIMED ou RUNNING (« in_progress » au board) dont le
+        claim n'a pas expiré et réserve l'un des mêmes fichiers bloque celui-ci —
+        deux agents n'écrivent jamais le même fichier en même temps. Un claim
+        expiré ne bloque plus personne : le temps a suffi, sans geste humain.
+        """
+        if not claim.exclusive_files:
+            return
+        requested = set(claim.exclusive_files)
+        for other in self.ledger.list_tasks():
+            if other.id == task.id or other.status not in (TaskState.CLAIMED, TaskState.RUNNING):
+                continue
+            held = other.claim
+            if held is None or not held.exclusive_files or held.is_expired():
+                continue
+            overlap = requested & set(held.exclusive_files)
+            if not overlap:
+                continue
+            fichier = sorted(overlap)[0]
+            refusal = GateRefusal(
+                evidence=fichier,
+                reason=f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}",
+                remedy="attendre l'expiration du claim ou réclamer une autre tâche",
+            )
+            verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
+            self._record_refusal(task, target, verdict, claim.actor_id)
+            raise TaskRefusedError(task.id, verdict)
 
     def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str) -> None:
         """Clôture ou blocage : ce que la roadmap Memory OS autorise à écrire.

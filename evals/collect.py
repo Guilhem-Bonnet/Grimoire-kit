@@ -143,6 +143,10 @@ def collect_record(
             "regressions_adapted": None,
             "tokens_cost": None,
             "human_interventions": None,
+            # Ventilation du coût par sous-agent/modèle, quand le JSON de
+            # résultat de la CLI en expose une (`modelUsage` ou équivalent).
+            # Reste `None` sinon — jamais inventée (docs/evals-protocol.md).
+            "model_usage": None,
         },
     }
 

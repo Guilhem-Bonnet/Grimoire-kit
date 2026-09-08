@@ -380,7 +380,7 @@ class CockpitProjectionBuilder:
                 wfi_id = ""
                 wfis = self._kernel.list_instances(task_id=task.id)
                 active = sorted(
-                    [w for w in wfis if w.status not in (WorkflowStatus.ABORTED, WorkflowStatus.VERIFIED)],
+                    [w for w in wfis if w.status not in (WorkflowStatus.ABORTED, WorkflowStatus.REFUSED, WorkflowStatus.VERIFIED)],
                     key=lambda w: w.created_at,
                 )
                 if active:

@@ -234,6 +234,11 @@ class Emitter:
                 continue
             if isinstance(value, bool):
                 lines.append(f"{key}: {'true' if value else 'false'}")
+            elif isinstance(value, int):
+                # Order matters: bool is an int subclass in Python, so the
+                # bool branch above must run first or True/False would land
+                # here as 1/0.
+                lines.append(f"{key}: {value}")
             elif isinstance(value, (list, tuple)):
                 rendered = ", ".join(f"'{v!s}'" for v in value)
                 lines.append(f"{key}: [{rendered}]")

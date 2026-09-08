@@ -59,6 +59,11 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
 #: meilleure estimation que la nôtre.
 _MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
 
+#: Budget de tours par défaut d'un sous-agent, faute d'un ``max_turns:``
+#: déclaré dans sa fiche — assez pour une tranche de travail bornée (lire,
+#: modifier, vérifier), pas assez pour une dérive silencieuse.
+_DEFAULT_MAX_TURNS = 30
+
 #: Tool families the declarative permission table covers *in full*, so a host
 #: that has one gains nothing from also spawning a hook process for them. Only
 #: ``secret`` qualifies: every credential family is expressed as a deny glob
@@ -71,7 +76,13 @@ _MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
 _DECLARATIVELY_COVERED = frozenset({"secret"})
 
 #: Events whose configuration entries take no matcher.
-_MATCHERLESS = {HookEvent.SESSION_START, HookEvent.USER_PROMPT_SUBMIT, HookEvent.PRE_COMPACT}
+_MATCHERLESS = {
+    HookEvent.SESSION_START,
+    HookEvent.USER_PROMPT_SUBMIT,
+    HookEvent.PRE_COMPACT,
+    # A subagent starting is not a tool call — nothing to match on.
+    HookEvent.SUBAGENT_START,
+}
 
 #: Alias local vers la liste partagée : la reconnaissance d'un hook écrit par
 #: le kit est la même question ici et chez Copilot, elle ne doit pas diverger.
@@ -97,6 +108,20 @@ def _model_for(agent: AgentSpec) -> str:
     if agent.affinity.cost.lower() == "low":
         return "haiku"
     return _MODEL_BY_REASONING.get(reasoning, "inherit")
+
+
+def _effort_for(agent: AgentSpec) -> str:
+    """``reasoning: high`` -> ``effort: high`` ; tout le reste (medium, low) ->
+    ``effort: low``. Binaire à dessein : Claude Code n'a pas de palier
+    intermédiaire pour ce champ, et un agent qui n'a pas explicitement demandé
+    un gros raisonnement n'a pas besoin du budget d'effort le plus large."""
+    return "high" if agent.affinity.reasoning.lower() == "high" else "low"
+
+
+def _max_turns_for(agent: AgentSpec) -> int:
+    """La fiche d'agent l'emporte quand elle déclare ``max_turns:`` ; sinon le
+    défaut borné (:data:`_DEFAULT_MAX_TURNS`)."""
+    return agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS
 
 
 def _dispatch_policy_section() -> str:
@@ -128,14 +153,20 @@ n'a pas rendu un résultat vérifiable, il a rendu une opinion.
 
 def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
     tools = map_verbs(agent.tools, _TOOL_TABLE)
-    header = Emitter.frontmatter(
-        {
-            "name": agent.name,
-            "description": agent.description,
-            "tools": ", ".join(tools),
-            "model": _model_for(agent),
-        }
-    )
+    fields: dict[str, Any] = {
+        "name": agent.name,
+        "description": agent.description,
+        "tools": ", ".join(tools),
+        "model": _model_for(agent),
+        "effort": _effort_for(agent),
+        "maxTurns": _max_turns_for(agent),
+    }
+    if not agent.entry_point:
+        # Seul le point d'entrée tourne en avant-plan, attendu par l'humain ;
+        # tout autre sous-agent est dispatché en invisible et peut tourner en
+        # tâche de fond sans qu'on l'attende.
+        fields["background"] = True
+    header = Emitter.frontmatter(fields)
     role = (
         "Tu es le point d'entrée : quand la demande ne désigne pas clairement un rôle, c'est toi qui tranches."
         if agent.entry_point
@@ -301,6 +332,8 @@ _WIRE_NAMES: dict[HookEvent, str] = {
     HookEvent.USER_PROMPT_SUBMIT: "UserPromptSubmit",
     HookEvent.PRE_TOOL_USE: "PreToolUse",
     HookEvent.POST_TOOL_USE: "PostToolUse",
+    HookEvent.POST_TOOL_USE_FAILURE: "PostToolUseFailure",
+    HookEvent.SUBAGENT_START: "SubagentStart",
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",
