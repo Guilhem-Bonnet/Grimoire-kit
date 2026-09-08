@@ -395,6 +395,54 @@ Les halls normalisés actuellement sont les suivants :
 
 Le manager enrichit automatiquement les écritures via `normalize_palace_metadata()`. Les commandes `search`, `list` et `taxonomy` acceptent ensuite les filtres `--wing`, `--hall` et `--room`.
 
+## Frontière de confiance des écritures
+
+Une mémoire survit à la session qui l'a écrite et se relit ensuite comme du
+contexte de confiance : c'est la surface d'empoisonnement décrite par OWASP
+ASI06 (*Memory and Context Poisoning*) et LLM09. `MemoryManager.store()` passe
+donc par `grimoire.memory.validation` **avant** d'appeler le backend, et un
+refus est une erreur nommée (`MemoryWriteRefusedError`), pas une exception anonyme.
+
+| Règle | Effet | Code de refus |
+|---|---|---|
+| Type et taille du texte (32 768 octets par défaut) | refus | `memory.text_type`, `memory.text_empty`, `memory.text_oversize` |
+| Métadonnées sérialisables, bornées (16 384 octets) | refus | `memory.metadata_type`, `memory.metadata_unserializable`, `memory.metadata_oversize` |
+| Provenance obligatoire (`project_name`, `source_kind`) | refus | `memory.metadata_fields_missing` |
+| `memory_type` parmi les types déclarés | refus | `memory.type_unknown` |
+| Texte qui se donne pour une consigne système | refus | `memory.instruction_like_content` |
+| Secrets reconnus, quand la politique déclare `redaction: required` | caviardage `[redacted:<motif>]` | — |
+| Émetteur hors liste d'autorisation | **observation** : événement journalisé, écriture acceptée | `memory.emitter_unrecognized` (mode `refuse` seulement) |
+
+Le mode observation sur les émetteurs est délibéré : l'acteur MCP est encore
+générique, et refuser fermerait la surface qui écrit le plus. Basculer en refus
+se fait par configuration, sans changer de code.
+
+La politique se déclare dans `_grimoire/standard/memory-policy.yaml` :
+
+```yaml
+write_validation:
+  enabled: true
+  max_text_bytes: 32768
+  redaction: required            # required | none
+  refuse_instruction_like_content: true
+  emitter_enforcement: observe   # observe | refuse
+  allowed_emitters: ["unspecified", "user", "cli", "agent", "hook", "mcp", "migration", "sidecar"]
+```
+
+`grimoire standard verify` lie désormais la déclaration à son exécutant : un
+type de mémoire qui annonce `redaction_policy: required` alors que
+`write_validation.redaction` ne vaut pas `required` produit
+`memory.redaction_not_executed` — une erreur dès le profil `governed`. Un
+projet sans bloc `write_validation` reçoit `memory.write_validation_missing`.
+Sans ce lien, la politique de redaction restait une intention que rien
+n'exécutait.
+
+Un secret caviardé laisse sa trace dans les métadonnées de l'entrée
+(`redactions: ["aws-access-key-id"]`) : l'audit sait *qu'un* secret a été retiré
+sans jamais réécrire sa valeur. Les motifs, leurs cas positifs et leurs cas
+négatifs sont dans `tests/unit/memory/test_write_validation.py` ; le taux de
+faux positifs mesuré sur le corpus négatif est nul.
+
 ## Couche chaude Redis
 
 Quand `memory.short_term_backend` vaut `redis`, `MemoryManager` initialise une couche chaude `RedisHotMemory` si `redis_url` est défini et que l'extra Python `grimoire-kit[redis]` est installé.

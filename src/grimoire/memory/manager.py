@@ -28,6 +28,7 @@ from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
+from grimoire.memory.validation import MemoryWritePolicy, validate_memory_write
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,7 @@ class MemoryManager:
         hot_memory: RedisHotMemory | None = None,
         hot_memory_issue: str = "",
         lexical_companion: MemoryBackend | None = None,
+        write_policy: MemoryWritePolicy | None = None,
     ) -> None:
         self._backend = backend
         self._project_name = project_name
@@ -290,6 +292,10 @@ class MemoryManager:
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
         self._lexical_companion = lexical_companion
+        # Défaut sûr : redaction requise, refus du contenu qui se donne pour
+        # une consigne. Un manager construit sans politique n'est pas un
+        # manager sans frontière.
+        self._write_policy = write_policy or MemoryWritePolicy()
 
     @classmethod
     def from_config(cls, config: GrimoireConfig, *, project_root: Path | None = None) -> MemoryManager:
@@ -327,6 +333,7 @@ class MemoryManager:
             hot_memory=hot_memory,
             hot_memory_issue=hot_memory_issue,
             lexical_companion=_create_lexical_companion(config, backend_id, root),
+            write_policy=MemoryWritePolicy.from_project(root),
         )
 
     @classmethod
@@ -372,9 +379,34 @@ class MemoryManager:
             tags=tags,
         )
 
-    def store(self, text: str, *, user_id: str = "", tags: tuple[str, ...] = (), metadata: dict[str, Any] | None = None) -> MemoryEntry:
+    def store(
+        self,
+        text: str,
+        *,
+        user_id: str = "",
+        tags: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+        emitter: str = "",
+    ) -> MemoryEntry:
+        """Écrire une mémoire, après la frontière de confiance.
+
+        La validation court **avant** ``backend.store`` : un contenu hors
+        schéma, surdimensionné ou qui se donne pour une consigne système ne
+        touche jamais le stockage, et le refus est une
+        :class:`~grimoire.memory.validation.MemoryWriteRefusedError` nommée. La
+        redaction, quand la politique du projet la déclare ``required``,
+        s'exécute ici et laisse sa trace dans les métadonnées.
+        """
         normalized = self._prepare_metadata(metadata, user_id=user_id, tags=tags)
-        entry = self._backend.store(text, user_id=user_id, tags=tags, metadata=normalized)
+        validated = validate_memory_write(
+            text,
+            metadata=normalized,
+            emitter=emitter,
+            policy=self._write_policy,
+        )
+        entry = self._backend.store(
+            validated.text, user_id=user_id, tags=tags, metadata=validated.metadata
+        )
         self._sync_memory(entry)
         return entry
 

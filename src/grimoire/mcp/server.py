@@ -83,6 +83,16 @@ def _find_config() -> GrimoireConfig:
     return GrimoireConfig.find_and_load()
 
 
+def _tool_error(payload: dict[str, Any]) -> str:
+    """Render a frank tool failure: the JSON body callers already parse.
+
+    Single funnel so that marking these results ``isError`` at the protocol
+    level is one edit rather than twenty — and so that the body is never
+    replaced by the flag.
+    """
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -241,21 +251,28 @@ def grimoire_config(project_path: str = ".") -> str:
 def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".") -> str:
     """Store a memory entry in the project's configured memory backend.
 
+    The write crosses the memory trust boundary first: content schema, size
+    ceiling, refusal of instruction-shaped text, and redaction when the project
+    policy requires it. A refusal comes back named, never as a silent success.
+
     Args:
         text: The text to remember.
         user_id: Optional user ID to scope the memory.
         project_path: Path to project root (default: current directory).
     """
     from grimoire.memory.manager import MemoryManager
+    from grimoire.memory.validation import MemoryWriteRefusedError
 
     target = Path(project_path).resolve()
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
-        entry = mgr.store(text, user_id=user_id)
+        entry = mgr.store(text, user_id=user_id, emitter="mcp")
         return json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
+    except MemoryWriteRefusedError as exc:
+        return _tool_error(exc.to_dict())
     except GrimoireError as exc:
-        return json.dumps({"error": str(exc)})
+        return _tool_error({"error": str(exc)})
 
 
 @mcp.tool()
