@@ -417,20 +417,25 @@ class TestGrimoireProvidersStatus:
         assert data["providers"] == []
         assert data["next_choice"] == {"cheap": None, "mid": None, "strong": None}
 
-    def test_tiered_provider_appears_as_next_choice(self, standard_project: Path) -> None:
-        registry_path = standard_project / "_grimoire/standard/llm-provider-registry.yaml"
-        registry = registry_path.read_text(encoding="utf-8")
-        # Le scaffold "starter" ne déclare aucun fournisseur activé ; on
-        # ajoute la forme minimale d'un fournisseur avec un modèle tarifé,
-        # exactement ce que le lot 2 rend possible.
-        registry = registry.replace(
-            '  - id: "anthropic"\n    enabled: false',
-            '  - id: "anthropic"\n    enabled: true\n    currency: "quota"\n'
-            '    models:\n      - id: "claude-haiku-4.5"\n        tier: "cheap"',
+    def test_tiered_provider_appears_as_next_choice(self, tmp_path: Path) -> None:
+        # Le profil « starter » ne génère pas de registre de fournisseurs :
+        # on écrit la forme minimale d'un registre v1 avec un fournisseur
+        # activé et un modèle tarifé, exactement ce que le lot 2 rend possible.
+        registry_path = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
+        registry_path.parent.mkdir(parents=True)
+        registry_path.write_text(
+            '$schema: "grimoire-llm-provider-registry/v1"\n'
+            "providers:\n"
+            '  - id: "anthropic"\n'
+            "    enabled: true\n"
+            '    currency: "quota"\n'
+            "    models:\n"
+            '      - id: "claude-haiku-4.5"\n'
+            '        tier: "cheap"\n',
+            encoding="utf-8",
         )
-        registry_path.write_text(registry, encoding="utf-8")
 
-        result = grimoire_providers_status(str(standard_project))
+        result = grimoire_providers_status(str(tmp_path))
         data = json.loads(result)
 
         anthropic = next(p for p in data["providers"] if p["id"] == "anthropic")
