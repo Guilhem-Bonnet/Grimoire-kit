@@ -594,36 +594,40 @@ Grimoire n'a pas encore, ou pas au même niveau).
 
 | Protocole ou mécanisme Grimoire | Équivalent industriel | Écart | Statut |
 |---|---|---|---|
-| SOG, point d'entrée unique et dispatch invisible (`orchestrator-gateway.md`) | Manager pattern OpenAI, Coordinator ADK, Harness Agent MAF | Même architecture ; Grimoire ajoute la détection de zones d'ombre et le batching de questions | aligné |
+| SOG, point d'entrée unique et dispatch invisible (`orchestrator-gateway.md`) | Manager pattern OpenAI, Coordinator ADK, Harness Agent MAF | Même architecture ; Grimoire ajoute la détection de zones d'ombre et le batching de questions ; le critère « mono-agent d'abord » manque au Route Engine | aligné en prose |
 | HUP, seuils de confiance vert/jaune/rouge (`honest-uncertainty-protocol.md`) | « Why language models hallucinate » (récompenser l'abstention) ; MAST FM-2.2 | Aucun éditeur n'expose un protocole équivalent côté agent ; l'industrie le traite à l'entraînement | en avance |
 | QEC, remontée groupée des questions (`question-escalation-chain.md`) | Elicitation MCP, `interrupt()` LangGraph, `request_confirmation` ADK, HITL OpenAI | Grimoire groupe les questions ; l'industrie les pose une à une | en avance |
-| CVTL, vérification croisée (`cross-validation-trust.md`) | Evaluator-optimizer, Writer/Reviewer séparés, Agent-as-a-Judge | Aligné sur la séparation générateur-évaluateur ; à outiller avec pass^k et coût par tâche | aligné |
+| CVTL, vérification croisée (`cross-validation-trust.md`) | Evaluator-optimizer, Writer/Reviewer séparés, Agent-as-a-Judge | Séparation décrite ; aucun garde en code n'impose évaluateur différent du producteur ; à outiller avec pass^k et coût par tâche | aligné en prose, à câbler |
 | PCE, débats productifs (`productive-conflict-engine.md`) | Multi-agent debate | La recherche montre un gain rarement supérieur à Self-Consistency à coût bien supérieur ; réserver PCE aux décisions, pas à la production | à cadrer |
-| AMN et SHP, maillage et huddles (`agent-mesh-network.md`, `selective-huddle-protocol.md`) | Agent teams Claude Code, Swarm Strands, handoffs | Aligné sur le plafond d'échanges P2P ; la limite de cinq échanges avant notification SOG répond à MAST FM-1.3 et FM-1.5 | aligné |
+| AMN et SHP, maillage et huddles (`agent-mesh-network.md`, `selective-huddle-protocol.md`) | Agent teams Claude Code, Swarm Strands, handoffs | Le plafond de cinq échanges P2P répond à MAST FM-1.3 et FM-1.5 sur le papier ; aucun code ne compte les échanges | aligné en prose, à câbler |
 | ARG, graphe de relations (`agent-relationship-graph.md`) | Graphe d'orchestration OpenAI, Graph ADK/Strands | Aligné ; Grimoire l'utilise pour le routage, l'industrie pour l'exécution | aligné |
-| ELSS, journal d'événements partagé (`event-log-shared-state.md`) | Checkpointers LangGraph, task ledger Magentic, mailbox agent teams | Aligné ; à projeter en spans OTel GenAI (`invoke_agent`, `execute_tool`) | à combler |
+| ELSS, journal d'événements partagé (`event-log-shared-state.md`) | Checkpointers LangGraph, task ledger Magentic, mailbox agent teams | Journal réel, mais l'export OTel existant est cassé (horodatage nul, `gen_ai.system` déprécié, sources d'événements fausses) et aucun marquage « donnée, pas instruction » sur les messages inter-agents | à combler |
 | CC, Completion Contract (`cc-reference.md`, `cc-verify.sh`) | « Give Claude a check it can run », Stop hooks, Ralph loop | Aligné ; c'est la réponse directe à MAST FM-3.x | aligné |
 | Standard agentique : `evidence-gated-fsm`, `mission-evidence-ledger`, gates de preuve | Trace grading OpenAI, evals ADK, HAL | Grimoire exige la preuve avant clôture ; l'industrie évalue après coup | en avance |
-| `tool-mediation-gate`, `governed-hook-gateway`, registre de sûreté des hooks en mode shadow/canary/enforced | Cotation de risque par outil (OpenAI), Policy Cedar/Dogwood (AgentCore), OWASP Agent Control Standard | Même idée ; Dogwood ajoute des politiques temporelles par session (compteurs, budgets) que Grimoire n'a pas | à combler |
+| `tool-mediation-gate`, `governed-hook-gateway`, registre de sûreté des hooks en mode shadow/canary/enforced | Cotation de risque par outil (OpenAI), Policy Cedar/Dogwood (AgentCore), OWASP Agent Control Standard | Même idée, mais `tool-mediation-gate` n'a aucun vérificateur (`checks: []`) alors que le profil governed l'exige ; Dogwood ajoute en plus des politiques temporelles par session | à combler |
 | `provider-routing-contract`, `provider-cost-slo`, `model-routing.yaml` | Routing et cascades (FrugalGPT, RouteLLM), `effort` par sous-agent | Aligné sur le principe ; mesurer le coût par tâche résolue et le pass^k, pas seulement le SLO par fournisseur | à combler |
-| `governed-memory-policy`, composition mémoire, Mémoire OS | Memory Bank, AgentCore Memory, Letta, memory tool | Aligné ; ajouter la validation externe des écritures contre le memory poisoning (OWASP T1, ASI06) | à combler |
+| `governed-memory-policy`, composition mémoire, Mémoire OS | Memory Bank, AgentCore Memory, Letta, memory tool | Aucune validation de contenu ni d'émetteur à l'écriture ; la redaction déclarée n'est pas exécutée (OWASP T1, ASI06) | à combler |
 | `advanced-context-orchestrator`, `context-contract.yaml`, capsule de contexte PreCompact | Context engineering Anthropic, write/select/compress/isolate | Aligné ; la capsule PreCompact est une pratique que peu d'hôtes formalisent | en avance |
 | Agent Skills du kit (`.github/skills`, `skill-forge` avec gate qualité) | agentskills.io, `skills-ref validate`, SkillsBench | Aligné sur le format ; ajouter la validation `skills-ref` et un eval par skill (evals.json) | à combler |
-| Hooks Forge via gateway (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, Subagent*, Stop) | Familles d'événements Claude Code, Codex, Gemini, Copilot, Kiro | Aligné ; les hôtes exposent désormais `TaskCreated`, `TaskCompleted`, `InstructionsLoaded`, `PostToolUseFailure` que la Forge n'exploite pas | à combler |
+| Hooks Forge via gateway (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, Subagent*, Stop) | Familles d'événements Claude Code, Codex, Gemini, Copilot, Kiro | Le modèle interne ne connaît que sept événements ; les hôtes exposent `SubagentStart`, `TaskCreated`, `TaskCompleted`, `InstructionsLoaded`, `PostToolUseFailure` ; les gardes du hôte Copilot échouent ouvert | à combler |
 | Persona d'entrée injectée par SessionStart | Aucun hôte ne sait démarrer dans un agent (constat 2026-08-29) | Pratique propre à Grimoire | en avance |
-| Pont MCP du kit (`grimoire` serveur MCP) | MCP 2026-07-28 stateless, MRTR, `server/discover`, headers `Mcp-Method` | Le kit cible une révision antérieure ; planifier la migration avant le retrait de Roots et Sampling (2027-07-28) | à combler |
-| Observabilité cockpit, `observability-policy.yaml` | OTel GenAI spans et métriques, Langfuse, Phoenix | Émettre les spans `invoke_agent` et `execute_tool` au format semconv pour brancher n'importe quel backend | à combler |
+| Pont MCP du kit (`grimoire` serveur MCP) | MCP 2026-07-28 stateless, MRTR, `server/discover`, headers `Mcp-Method` | SDK à la révision 2025-11-25, aucune annotation d'outil ni schéma de sortie ; planifier la migration avant le retrait de Roots et Sampling (2027-07-28) | à combler |
+| Observabilité cockpit, `observability-policy.yaml` | OTel GenAI spans et métriques, Langfuse, Phoenix | Deux exportateurs divergents ; corriger puis émettre `invoke_agent` et `execute_tool` au format semconv pour brancher n'importe quel backend | à combler |
 | Sécurité : garde des surfaces de contrôle, patterns destructifs | Six patterns Beurer-Kellner, CaMeL, sandbox à deux phases | Ajouter un pattern Plan-Then-Execute explicite pour les tâches qui lisent du contenu externe ; documenter l'isolation d'exécution | à combler |
 | Identité des agents | Entra Agent ID, SPIFFE, ID-JAG | Grimoire n'a pas d'identité par agent ; hors périmètre tant que les agents restent locaux | à suivre |
 
-Priorités issues de cette carte, à instruire comme issues produit dans le dépôt
-Grimoire-kit (jamais comme chantiers d'atelier) :
+Priorités issues de cette carte, confirmées par l'audit d'écart du 2026-09-08 (cinq
+audits par axe, constats bloquants revérifiés dans le code), à instruire comme issues
+produit dans le dépôt Grimoire-kit (jamais comme chantiers d'atelier) :
 
 1. Projection OTel GenAI des événements ELSS et du cockpit.
 2. Coût par tâche résolue et pass^k dans les gates de preuve.
 3. Validation externe des écritures mémoire.
 4. Migration du pont MCP vers la révision 2026-07-28.
-5. Politiques temporelles par session sur le tool-mediation-gate.
+5. Vérificateur réel pour le tool-mediation-gate, puis politiques temporelles par session.
+6. Verrou de fichiers `exclusive_files` comparé entre claims actifs (mono-fil en écriture).
+7. Plafonds MAST comptés en code : retries des recettes, échanges P2P, tours et budget des sous-agents.
+8. Statut d'AORA, PIP et DCF tranché dans le socle, aligné avec la doctrine des projets consommateurs.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
