@@ -167,7 +167,7 @@ patterns:
     category: security
     artifacts: [prompt_firewall]
     rules: []
-    checks: [firewall.isolation_disabled, firewall.override_allowed, firewall.untrusted_output_unwrapped, firewall.artifact_missing]
+    checks: [firewall.isolation_disabled, firewall.override_allowed, firewall.untrusted_output_unwrapped, firewall.capability_resolves_unwrapped, firewall.artifact_missing]
     tech_extras: []
     profile_min: controlled
   remote-hygiene-guard:

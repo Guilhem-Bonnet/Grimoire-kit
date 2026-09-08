@@ -249,13 +249,26 @@ journal = page.to_dict()      # source, nonce, tampering, code de sortie, taille
 `fetch_untrusted` exécute `framework/tools/web-browser.py` en **sous-processus**
 — le script est en zone gelée et n'est jamais importé — puis enveloppe sa sortie.
 
-**Le câblage est vérifié, pas déclaré.** Le manifeste d'outils livré aux agents
-(`_grimoire/kit/tool-manifest.csv`) porte une colonne `entrypoint` : la ligne du
-navigateur y nomme `grimoire web fetch`. `grimoire standard verify` compare ce
-manifeste au réel et produit `firewall.untrusted_output_unwrapped` — erreur en
-`production`, avertissement en `governed` — quand il pointe encore vers le
-script nu. Sans ce contrôle, le pare-feu ne serait qu'un YAML cochant des cases,
-et l'enveloppe du code que personne n'appelle.
+**Le câblage est vérifié à deux endroits, pas déclaré.** Le manifeste dit
+*quels outils existent* ; le catalogue de résolution dit *lequel appeler pour
+une intention*. C'est le second que consulte un agent qui doit lire une page —
+câbler le premier seul laissait le trou entier.
+
+| Artefact livré | Ce qui doit y figurer | Check |
+|---|---|---|
+| `_grimoire/kit/tool-manifest.csv` | colonne `entrypoint` = `grimoire web fetch` sur la ligne du navigateur | `firewall.untrusted_output_unwrapped` |
+| `_grimoire/kit/tools/tool-resolver.py` | la capacité `web-browsing` résout vers `grimoire web fetch` | `firewall.capability_resolves_unwrapped` |
+
+Les deux sont des erreurs en `production` et des avertissements en `governed`.
+Un projet qui ne livre ni l'un ni l'autre ne déclenche rien : il n'a pas de
+navigateur à câbler. Sans ces contrôles, le pare-feu ne serait qu'un YAML
+cochant des cases, et l'enveloppe du code que personne n'appelle.
+
+`web-browser.py` reste exécutable à la main — il est en zone gelée, on ne peut
+pas l'en empêcher. Ce qui change, c'est que plus rien dans ce que le kit livre
+n'y envoie : le catalogue, le manifeste et la documentation nomment tous
+`grimoire web fetch`, et un projet qui reviendrait en arrière échoue à la
+vérification.
 
 **Pourquoi le marqueur est aléatoire.** Une balise fixe (`BEGIN UNTRUSTED`) se
 recopie dans la page : il suffirait à un attaquant d'écrire la balise de fin

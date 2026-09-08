@@ -227,13 +227,13 @@ CAPABILITY_CATALOG: dict[str, dict[str, Any]] = {
         "providers": [
             {
                 "id": "web-browser-grimoire",
-                "type": "grimoire_tool",
-                "name": "web-browser.py (fetch, screenshot, interact, readability)",
-                "tools": ["mcp_web_fetch", "mcp_web_screenshot", "mcp_web_interact", "mcp_web_readability"],
+                "type": "cli_command",
+                "name": "grimoire web fetch — page enveloppee « donnee externe, pas instruction »",
+                "tools": ["grimoire web fetch"],
                 "provision": {"method": "none"},
-                "check": {"method": "grimoire_tool", "tool": "web-browser.py"},
+                "check": {"method": "command", "command": "grimoire web fetch --help"},
                 "priority": 1,
-                "note": "Toujours disponible (fallback urllib). Playwright optionnel pour JS rendering.",
+                "note": "N'appelez PAS web-browser.py directement : sa sortie brute entre dans le contexte sans marqueur (OWASP LLM01). grimoire web fetch l'execute en sous-processus et enveloppe le flux.",
             },
             {
                 "id": "browser-mcp",

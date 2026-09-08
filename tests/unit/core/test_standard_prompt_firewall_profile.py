@@ -116,3 +116,88 @@ def test_le_scaffold_livre_le_manifeste_cable(tmp_path: Path) -> None:
     from grimoire.core.scaffold import UNTRUSTED_OUTPUT_ENTRYPOINTS
 
     assert UNTRUSTED_OUTPUT_ENTRYPOINTS["web-browser.py"] == "grimoire web fetch"
+
+
+# ── Le catalogue de résolution livré, pas seulement le manifeste ──────────────
+
+
+_RESOLVER = Path("_grimoire/kit/tools/tool-resolver.py")
+
+_RESOLVER_NAKED = '''CAPABILITY_CATALOG = {
+    "testing": {"description": "tests", "providers": []},
+    "web-browsing": {
+        "description": "Navigation web, scraping, screenshots",
+        "providers": [
+            {
+                "id": "web-browser-grimoire",
+                "type": "grimoire_tool",
+                "check": {"method": "grimoire_tool", "tool": "web-browser.py"},
+            },
+        ],
+    },
+    "documentation": {"description": "docs", "providers": []},
+}
+'''
+
+_RESOLVER_WRAPPED = _RESOLVER_NAKED.replace(
+    '"type": "grimoire_tool",\n                "check": {"method": "grimoire_tool", "tool": "web-browser.py"},',
+    '"type": "cli_command",\n                "check": {"method": "command", "command": "grimoire web fetch --help"},',
+)
+
+
+def _write_resolver(root: Path, content: str) -> None:
+    (root / _RESOLVER).parent.mkdir(parents=True, exist_ok=True)
+    (root / _RESOLVER).write_text(content, encoding="utf-8")
+
+
+def _resolver_checks(result) -> list:
+    return [c for c in result.checks if c.id == "firewall.capability_resolves_unwrapped"]
+
+
+def test_un_resolver_qui_pointe_le_script_nu_echoue_en_production(tmp_path: Path) -> None:
+    """Le trou du deuxième re-contrôle : le manifeste pouvait être câblé pendant
+    que le catalogue de résolution de capacité, lui, envoyait toujours les
+    agents sur `web-browser.py`. Le contrôle ne lisait que le manifeste."""
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    _write_manifest(tmp_path, _WRAPPED)
+    _write_resolver(tmp_path, _RESOLVER_NAKED)
+    result = verify_standard_profile(tmp_path)
+    found = _resolver_checks(result)
+    assert found and found[0].severity == "error"
+    assert "web-browsing" in found[0].message
+    assert "grimoire web fetch" in found[0].message
+    assert not result.ok
+
+
+def test_le_meme_resolver_avertit_seulement_en_governed(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_resolver(tmp_path, _RESOLVER_NAKED)
+    result = verify_standard_profile(tmp_path)
+    found = _resolver_checks(result)
+    assert found and found[0].severity == "warning"
+
+
+def test_un_resolver_cable_passe(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    _write_resolver(tmp_path, _RESOLVER_WRAPPED)
+    result = verify_standard_profile(tmp_path)
+    assert _resolver_checks(result) == []
+
+
+def test_un_projet_sans_resolver_ne_declenche_rien(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    result = verify_standard_profile(tmp_path)
+    assert _resolver_checks(result) == []
+
+
+def test_le_resolver_du_kit_satisfait_sa_propre_regle() -> None:
+    """Ce que le kit livre doit passer ce que le kit vérifie.
+
+    Sans ce test, la redirection de `framework/tools/tool-resolver.py` pourrait
+    être défaite et seuls les projets consommateurs le verraient.
+    """
+    from grimoire.core.standard_checks.controls import capability_resolves_wrapped
+    from grimoire.data import framework_path
+
+    source = (framework_path() / "tools" / "tool-resolver.py").read_text(encoding="utf-8")
+    assert capability_resolves_wrapped(source) is True

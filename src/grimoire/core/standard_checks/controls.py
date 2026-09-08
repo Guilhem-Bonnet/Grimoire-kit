@@ -200,6 +200,70 @@ def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: Sta
             )
 
 
+#: Capacité du catalogue de résolution dont la sortie est du contenu externe, et
+#: chaîne que son bloc doit contenir pour qu'un agent soit envoyé vers l'entrée
+#: qui enveloppe. Le manifeste dit *quels outils existent* ; le catalogue dit
+#: *lequel appeler pour une intention* — c'est celui-là que l'agent consulte.
+_WRAPPED_CAPABILITY = "web-browsing"
+
+
+def capability_resolves_wrapped(source: str) -> bool:
+    """Le bloc ``web-browsing`` du catalogue envoie-t-il vers l'entrée enveloppée ?
+
+    Lecture textuelle bornée au bloc de la capacité : `tool-resolver.py` est en
+    zone gelée, on ne l'importe pas pour l'interroger, et une lecture de tout le
+    fichier confondrait la mention du script dans un commentaire ou un texte
+    d'aide avec sa résolution effective.
+
+    Vrai aussi quand la capacité est absente : il n'y a alors rien à envoyer.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    marker = f'"{_WRAPPED_CAPABILITY}": {{'
+    start = source.find(marker)
+    if start < 0:
+        return True
+    lines = source[start:].splitlines()
+    block = [lines[0]]
+    for line in lines[1:]:
+        # Fin du bloc : la clé de capacité suivante, au même niveau d'indentation.
+        if line.startswith('    "') and line.rstrip().endswith("{"):
+            break
+        block.append(line)
+    body = "\n".join(block)
+    expected = set(UNTRUSTED_OUTPUT_ENTRYPOINTS.values())
+    return any(entry in body for entry in expected)
+
+
+def _verify_capability_resolution_wiring(
+    root: Path, profile: StandardProfile, result: StandardVerificationResult
+) -> None:
+    """Le catalogue de résolution **livré** envoie-t-il vers l'entrée enveloppée ?
+
+    Le contrôle du manifeste ne suffisait pas : un projet pouvait déclarer
+    `grimoire web fetch` dans `tool-manifest.csv` pendant que
+    `tool-resolver.py` — le catalogue qu'un agent interroge pour « je dois lire
+    une page » — le renvoyait toujours sur `web-browser.py`. Le manifeste dit
+    quels outils existent ; le catalogue dit lequel appeler. C'est le second qui
+    décide.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    rel_path = Path("_grimoire") / "kit" / "tools" / "tool-resolver.py"
+    source = _text_file(root, rel_path)
+    if not source or capability_resolves_wrapped(source):
+        return
+    expected = ", ".join(sorted(UNTRUSTED_OUTPUT_ENTRYPOINTS.values()))
+    _add_check(
+        result,
+        "firewall.capability_resolves_unwrapped",
+        "error" if profile.id == "production" else "warning",
+        f"Capability {_WRAPPED_CAPABILITY!r} resolves to a raw tool: an agent asking to read a page "
+        f"is sent to the script, whose output reaches the context unwrapped. Route it through {expected}.",
+        path=rel_path,
+    )
+
+
 def _verify_untrusted_output_wiring(
     root: Path, profile: StandardProfile, result: StandardVerificationResult
 ) -> None:
@@ -254,6 +318,7 @@ def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: Standa
     """
     rel_path = STANDARD_DIR / "prompt-firewall.yaml"
     _verify_untrusted_output_wiring(root, profile, result)
+    _verify_capability_resolution_wiring(root, profile, result)
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
         if profile.id == "governed":

@@ -226,6 +226,27 @@ class TestProjectScaffolder:
         assert ordinaires, "aucun outil livré : la fixture ne prouve rien"
         assert all(rows[f] == "" for f in ordinaires)
 
+    def test_le_resolver_livre_envoie_vers_lentree_enveloppee(self, tmp_path: Path) -> None:
+        """Le catalogue livré, pas seulement le manifeste.
+
+        Un agent qui doit lire une page interroge `tool-resolver.py`, pas le
+        manifeste : le manifeste dit quels outils existent, le catalogue dit
+        lequel appeler. Si le second envoie encore sur `web-browser.py`, le
+        premier a beau être câblé, le flux brut entre quand même dans le
+        contexte.
+        """
+        from grimoire.core.standard_checks.controls import capability_resolves_wrapped
+
+        s = _scaffolder(tmp_path)
+        s.execute(s.plan())
+        resolver = tmp_path / "_grimoire" / "kit" / "tools" / "tool-resolver.py"
+        assert resolver.is_file(), "tool-resolver.py fait partie du socle livré"
+        source = resolver.read_text(encoding="utf-8")
+        assert "grimoire web fetch" in source
+        assert capability_resolves_wrapped(source), (
+            "le catalogue livré résout web-browsing vers le script nu"
+        )
+
     def test_execute_result_counts_match(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
         plan = s.plan()
