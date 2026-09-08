@@ -681,9 +681,9 @@ class TestRedactionAuditNeverLeaks:
         *déclenchement* dépend du texte, et la donnée journalisée, elle, ne vient
         jamais du secret.
         """
-        from grimoire.memory.validation import _SECRET_PATTERNS
+        from grimoire.memory.validation import _REDACTION_RULES
 
-        known = {label for label, _ in _SECRET_PATTERNS}
+        known = {label for label, _ in _REDACTION_RULES}
         assert set(redaction_audit(f"a {self._VALUE}")) <= known
         assert redaction_audit(f"a {self._VALUE}") == redaction_audit(f"b {self._VALUE} c")
 

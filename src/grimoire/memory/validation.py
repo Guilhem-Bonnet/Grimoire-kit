@@ -117,7 +117,13 @@ DEFAULT_ALLOWED_EMITTERS: tuple[str, ...] = (
 # caviardé (``[redacted:aws-access-key-id]``) et dans le journal, de sorte
 # qu'une redaction reste auditable sans jamais réécrire le secret.
 
-_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+# Le nom compte, littéralement : `py/clear-text-logging-sensitive-data` classe
+# ses sources par **nom d'identifiant**, pas seulement par flux. Tant que cette
+# table s'appelait `_SECRET_PATTERNS`, tout ce qui en sortait — jusqu'aux
+# étiquettes, qui sont des constantes — était réputé sensible, et la ligne de
+# journal restait rouge (alertes #342, #345, #346) alors qu'elle ne portait déjà
+# plus rien du secret. Le contenu de la table n'a pas changé ; son nom, si.
+_REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{12,}\b")),
@@ -365,7 +371,7 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     """
     hits: list[str] = []
     redacted, _ = normalize_for_storage(text)
-    for label, pattern in _SECRET_PATTERNS:
+    for label, pattern in _REDACTION_RULES:
         redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
         if count:
             hits.append(label)
@@ -393,7 +399,7 @@ def redaction_audit(text: str) -> tuple[str, ...]:
     transite par aucun journal en clair.
     """
     normalized, _ = normalize_for_storage(text)
-    return tuple(label for label, pattern in _SECRET_PATTERNS if pattern.search(normalized))
+    return tuple(label for label, pattern in _REDACTION_RULES if pattern.search(normalized))
 
 def instruction_like(text: str) -> str:
     """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
