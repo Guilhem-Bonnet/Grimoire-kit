@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.40.0",
+ "generated_for": "3.41.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -325,6 +325,10 @@
   "194b82f4efbdb624c8b8ae2bb0a6abaa2013e0c61c81cb0894928f910a2f1599": {
    "version": "3.16.0",
    "path": "framework/tools/distill.py"
+  },
+  "19811761ea3c07b723ce4c92e30f21e95d2640ff4f945d3925a15e56ab556e23": {
+   "version": "3.41.0",
+   "path": "framework/agentic-industry-reference.md"
   },
   "198e700161a7ab2c847bea1f57edb92351d0b0bb5f35c47127cd5cab8fbb4196": {
    "version": "3.35.0",
@@ -974,6 +978,10 @@
    "version": "3.32.0",
    "path": "archetypes/minimal/agents/custom-agent.tpl.md"
   },
+  "4c4ff6dc09f30028cf7607e2491156e63019bc2db089b7cde82acb79414bf9ae": {
+   "version": "3.41.0",
+   "path": "framework/mcp/grimoire-mcp-server.md"
+  },
   "4c823505d349d2393da64366f3b3eda77210ed3572b6692120816ee24efb0b52": {
    "version": "3.16.0",
    "path": "framework/tools/synapse-trace.py"
@@ -1078,6 +1086,10 @@
    "version": "3.23.0",
    "path": "framework/tools/README.md"
   },
+  "5417380efe1b0f1c96850b068255b59c2d18cc35d22c3b5f7505a6b1239d03a5": {
+   "version": "3.41.0",
+   "path": "framework/event-log-shared-state.md"
+  },
   "54509987d643d318e524bd6bcc3162d9b2d194ae9f9eedd04380032c9b576b40": {
    "version": "3.4.2",
    "path": "framework/tools/crescendo.py"
@@ -1142,6 +1154,10 @@
    "version": "3.4.4",
    "path": "framework/agentic-standard/templates/remediation-plan.yaml"
   },
+  "5a16834c40c2a0016e4cc1119ae2052de771ba93121090e1517d546044bb8fdf": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
+  },
   "5a9bccdc17afa8701e8cc0a5b3d51b032d0372de0233ecb625176e3ad9692f0e": {
    "version": "3.36.0",
    "path": "framework/tools/agent-bench.py"
@@ -1189,6 +1205,10 @@
   "5e79e3f64ee3368a51af3a2c8801e1ef76af7f3041421c68f4a5589648af853f": {
    "version": "3.4.2",
    "path": "framework/tools/workflow-adapt.py"
+  },
+  "5ec80090fc053e723675544aa4bf65a92b162639d860b329fa17ac5fdd0583c2": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "5f517d2b304fb1288e6cdde203b90374fbe78e48bc7e0059c22afae3e698571b": {
    "version": "3.4.2",
@@ -1786,6 +1806,10 @@
    "version": "3.16.0",
    "path": "framework/tools/desire-paths.py"
   },
+  "89a4523039818662ede660610bcc3719ffb45e5b5627676e561afd8dd7f4868a": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
+  },
   "89b0210b93c844d6b9217da99cacb93f49dffeaac9e561581c6d615f2880a578": {
    "version": "3.20.0",
    "path": "framework/tools/fitness-tracker.py"
@@ -1998,6 +2022,10 @@
    "version": "3.16.0",
    "path": "framework/tools/bug-finder.py"
   },
+  "9a8926c747f28b5d692cf1f7f4ed014230699a86cba188e18d272deb430afbe8": {
+   "version": "3.41.0",
+   "path": "framework/agent-base-compact.md"
+  },
   "9aabd0e0d1ae3c914ae701c28ac3cefdbb597ed1d59eaec2c5c9f366071477ec": {
    "version": "3.4.2",
    "path": "archetypes/stack/agents/python-expert.dna.yaml"
@@ -2041,6 +2069,10 @@
   "9cd72a3b0fa6640394aa818a3b1f639699a91e220c4daf4793f96a84fb6b3850": {
    "version": "3.4.2",
    "path": "framework/delivery-contract.tpl.md"
+  },
+  "9ce88eada679ded07834815f1591454619e3b8df11428fc1dab814fcf3843e09": {
+   "version": "3.41.0",
+   "path": "framework/orchestrator-gateway.md"
   },
   "9d2ec0e60595edc1b3e2e235dcb87509060e9a78a88fcdbc395f242bf9c58f46": {
    "version": "3.4.2",
@@ -2386,6 +2418,10 @@
    "version": "3.21.1",
    "path": "framework/tools/conversation-history.py"
   },
+  "b3a2825f6fea0799e64c7816d89682340bf4d1da1b8aaecfcaa6899b3e8132b4": {
+   "version": "3.41.0",
+   "path": "framework/workflows/state-checkpoint.md"
+  },
   "b3a5a7816cb08092f8eb3ca7abf054d594b4ede31ad358456b12c284a9c66944": {
    "version": "3.35.0",
    "path": "archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md"
@@ -2570,6 +2606,10 @@
    "version": "3.27.0",
    "path": "framework/tools/README.md"
   },
+  "bde8f336d55fdca4a53859498b6b00b407291114ee731d91b054f191e4adad44": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/tool-registry.yaml"
+  },
   "be2435568d554c063a928b9226fa1ebfe4b0c456f2c4a08b4fea63694c3ddec8": {
    "version": "3.24.0",
    "path": "framework/tools/rag-indexer.py"
@@ -2662,6 +2702,10 @@
    "version": "3.4.2",
    "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
   },
+  "c6dec04c50fbadb55dcb0e72ba4fe6f0fd10afc386ea1e0bb305fba9b6e612df": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/browser-tool-contract.yaml"
+  },
   "c7214f9fb661f2c5cc07fd2c911981953994c896143170196271e2e2e3ca0e32": {
    "version": "3.35.0",
    "path": "framework/workflows/workflow-graph.tpl.yaml"
@@ -2733,6 +2777,10 @@
   "ca64b5ce3842d16a0647234597b5470351dec426e4b9865ede5bccfc1328c939": {
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
+  },
+  "cb4d35186cc6059cd4a8fe071ae13753c8cdb1b09e33c50016b8c65c5da016a7": {
+   "version": "3.41.0",
+   "path": "framework/agent-base.md"
   },
   "cb699bc9d71451b3b39dcd539283059b3551a9f3daff4c1bc7b5e9d1f50f2d67": {
    "version": "3.32.0",
@@ -2902,6 +2950,10 @@
    "version": "3.16.0",
    "path": "framework/tools/rag-retriever.py"
   },
+  "d668c8ab04a81b968770b96dba279592d5b8fcda534f5180701c7560908ac861": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/memory-policy.yaml"
+  },
   "d77392e9cb7bf75173be3b4bb3f9c570ce7e64eca2676567b15b884f271520b8": {
    "version": "3.21.1",
    "path": "framework/tools/adversarial-consensus.py"
@@ -2973,6 +3025,10 @@
   "db04b218ee927a72f6ebb3364f747400d39c0d244e00000e738c00f9ed2c06b8": {
    "version": "3.4.2",
    "path": "framework/tools/code-review.py"
+  },
+  "db69d33b82be571c437a94f00032c9f7ae2912cb02d53788f3e1ec60b6667662": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
   },
   "dc14181f58ad76575e7d68c2717089adf055c4067cb087bebca6989f7f7c88cc": {
    "version": "3.4.2",
@@ -3198,6 +3254,10 @@
    "version": "3.38.0",
    "path": "framework/agentic-standard/templates/incident-registry.yaml"
   },
+  "ec8e64efefa863ef77e984b4c74cbb364b6ac0dafc053138fd68abf41ff15c8d": {
+   "version": "3.41.0",
+   "path": "framework/tools/tool-resolver.py"
+  },
   "ec91850a23a93a6bbb8e7cdb17e35b22666196a78ef53e2d8616464f80ed1807": {
    "version": "3.32.0",
    "path": "archetypes/stack/agents/typescript-expert.md"
@@ -3221,6 +3281,10 @@
   "ee1a0faef401f8e696544dec46753c0356b16faacf33dbd0f17203238ee33681": {
    "version": "3.21.1",
    "path": "framework/tools/agent-worker.py"
+  },
+  "eebbd513d4c9113272b8bca23ebd8dfce043ce20ebe2ebe34b48ea1c607b3734": {
+   "version": "3.41.0",
+   "path": "framework/agent2agent.md"
   },
   "eebe574d30cfc673d8631b1e6c4ab5b0ab6f065decb0aae44e3a5097b3411930": {
    "version": "3.32.0",
@@ -3321,6 +3385,10 @@
   "f57ce059bc46b405c4a46bf111e8211f988f9036b33f34c106b3e5be9c28de45": {
    "version": "3.21.1",
    "path": "framework/tools/tool-registry.py"
+  },
+  "f588927ee3d34cdebb46834d5b7ea996abb0040cf1c9ffa3b67a1f11a841e54d": {
+   "version": "3.41.0",
+   "path": "framework/agentic-standard/templates/rule-packs.yaml"
   },
   "f5b8f8b529c5a81665bf1ac798ec4a32de02931fb966c1d8be2a965ca126e1de": {
    "version": "3.32.0",

@@ -286,6 +286,50 @@ class TestChangelogCoverage:
         self._close(released_repo, "3.37.0")
         assert released_repo.main() == 0
 
+    def test_a_feature_without_an_entry_is_accepted_when_the_release_note_cites_its_pr(
+        self, released_repo: ModuleType
+    ) -> None:
+        """Repli du 2026-09-08 : seize PR fusionnées le même jour sans toucher
+        CHANGELOG.md à leur propre commit — la section rédigée à la release
+        les cite chacune par numéro, ce que ce test rejoue en miniature."""
+        _commit(released_repo.REPO, "feat(hosts): quelque chose de visible (#233)")
+        self._close(released_repo, "3.37.0")
+        text = released_repo.CHANGELOG.read_text(encoding="utf-8")
+        text = text.replace(
+            "## [3.37.0] - 2026-09-04\n",
+            "## [3.37.0] - 2026-09-04\n\n- **Quelque chose de visible (#233).** Détail.\n",
+            1,
+        )
+        released_repo.CHANGELOG.write_text(text, encoding="utf-8")
+        assert released_repo.main() == 0
+
+    def test_a_pr_number_cited_only_in_an_older_published_version_does_not_count(
+        self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Le repli ne vaut que pour la section qui part dans CE tag : une
+        citation dans une version déjà publiée ne prouve rien sur celle-ci."""
+        _commit(released_repo.REPO, "feat(hosts): quelque chose de visible (#233)")
+        text = released_repo.CHANGELOG.read_text(encoding="utf-8")
+        text = text.replace(
+            "## [3.36.0] - 2026-09-03\n",
+            "## [3.36.0] - 2026-09-03\n\n- **Quelque chose de visible (#233).** Détail.\n",
+            1,
+        )
+        released_repo.CHANGELOG.write_text(text, encoding="utf-8")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 1
+        assert "sans toucher CHANGELOG.md" in capsys.readouterr().err
+
+    def test_a_feature_without_a_pr_number_and_without_an_entry_stays_refused(
+        self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Le repli couvre un format de sujet connu (#NNN final), pas
+        n'importe quelle absence d'entrée."""
+        _commit(released_repo.REPO, "feat(hosts): quelque chose de visible")
+        self._close(released_repo, "3.37.0")
+        assert released_repo.main() == 1
+        assert "sans toucher CHANGELOG.md" in capsys.readouterr().err
+
     def test_without_a_reachable_tag_coverage_is_unverified_not_fine(
         self, changelog: ModuleType, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -296,6 +340,19 @@ class TestChangelogCoverage:
         _commit(root, "chore: release 3.36.0")
         assert changelog.main() == 1
         assert "non vérifiée" in capsys.readouterr().err
+
+
+class TestPrCitedFallback:
+    """`_pr_cited` en isolation, sans dépôt git ni fixture CHANGELOG."""
+
+    def test_a_pr_number_present_in_the_given_section_counts(self, changelog: ModuleType) -> None:
+        assert changelog._pr_cited("feat(hosts): x (#233)", "## [3.37.0]\n\n- **X (#233).** Détail.\n")
+
+    def test_a_pr_number_absent_from_the_given_section_does_not_count(self, changelog: ModuleType) -> None:
+        assert not changelog._pr_cited("feat(hosts): x (#233)", "## [3.37.0]\n\n- rien ici\n")
+
+    def test_a_subject_without_a_pr_number_never_counts(self, changelog: ModuleType) -> None:
+        assert not changelog._pr_cited("feat(hosts): x", "## [3.37.0]\n\n- **X (#233).** Détail.\n")
 
 
 class TestChangelogAccepts:

@@ -29,6 +29,23 @@ chaque changement fusionné depuis le dernier tag a son entrée, au bon endroit
     touche ``CHANGELOG.md``, et chaque titre d'entrée qu'il a ajouté se trouve
     aujourd'hui dans la section de la version publiée ou dans ``[Unreleased]``.
 
+    Repli du 2026-09-08 — le numéro de PR cité dans la section publiée
+        Seize PR ont fusionné le même jour sans toucher ``CHANGELOG.md`` à
+        leur propre commit. Réécrire l'historique de ``main`` (protégée,
+        déjà publique) pour y recoudre l'omission n'était pas une option
+        raisonnable pour clore un défaut de convention, pas un incident. La
+        garantie de fond n'est pas « chaque commit touche le fichier », mais
+        « chaque changement a une entrée au bon endroit » : un commit qui n'a
+        pas touché ``CHANGELOG.md`` est donc accepté si son sujet se termine
+        par ``(#NNN)`` — la forme que git donne à un squash-merge GitHub — et
+        que ``#NNN`` apparaît dans la section de la version publiée par
+        ``version.txt``, rédigée à la release pour couvrir justement ce
+        rattrapage. La citation ne compte que là : dans ``[Unreleased]`` ou
+        une version déjà taguée, elle ne prouve rien sur ce qui part dans ce
+        tag-ci. Un commit sans numéro de PR reconnaissable et sans entrée
+        reste refusé — le repli couvre un format de sujet connu, pas
+        n'importe quelle absence.
+
 Usage::
 
     scripts/check-changelog-release.py
@@ -51,6 +68,22 @@ SECTION = re.compile(r"(?m)^## \[(?P<version>[^\]]+)\]")
 NOTEWORTHY = re.compile(r"^(feat|fix|perf)(\([^)]*\))?!?:")
 #: Le titre d'une entrée : ``- **Ce que ça change.** Le reste…``
 ENTRY_TITLE = re.compile(r"^\+?- \*\*\*?(?P<title>.+?)\*\*", re.MULTILINE)
+#: Le numéro de PR en fin de sujet d'un commit squash-mergé : ``... (#233)``.
+PR_NUMBER = re.compile(r"\(#(?P<num>\d+)\)\s*$")
+
+
+def _pr_cited(subject: str, version_body: str) -> bool:
+    """Le sujet cite-t-il un numéro de PR présent dans CETTE section-là ?
+
+    ``version_body`` doit être le corps de la seule section publiée par
+    ``version.txt`` — jamais ``[Unreleased]`` ni une version déjà taguée,
+    sous peine de revalider n'importe quel commit sur la foi d'une mention
+    qui ne dit rien de ce qui part dans ce tag.
+    """
+    match = PR_NUMBER.search(subject)
+    if not match:
+        return False
+    return f"#{match.group('num')}" in version_body
 
 
 def _git(repo: Path, *args: str) -> str | None:
@@ -98,7 +131,13 @@ def coverage_problems(repo: Path, text: str, version: str) -> list[str]:
             continue
         touched = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha) or ""
         if "CHANGELOG.md" not in touched.split():
-            problems.append(f"{sha[:8]} {subject[:70]} — fusionné depuis {tag} sans toucher CHANGELOG.md")
+            if _pr_cited(subject, bodies.get(version, "")):
+                continue
+            match = PR_NUMBER.search(subject)
+            detail = f", et #{match.group('num')} n'apparaît pas dans [{version}]" if match else ""
+            problems.append(
+                f"{sha[:8]} {subject[:70]} — fusionné depuis {tag} sans toucher CHANGELOG.md{detail}"
+            )
             continue
         diff = _git(repo, "show", sha, "--format=", "--", "CHANGELOG.md") or ""
         added = [m.group("title").strip() for m in ENTRY_TITLE.finditer(diff) if m.group(0).startswith("+")]

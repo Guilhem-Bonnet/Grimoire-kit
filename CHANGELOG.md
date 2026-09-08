@@ -6,6 +6,48 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+
+## [3.41.0] - 2026-09-08
+### Ajouté
+
+- **Classe de vérifiabilité et dispatch en cascade — épic routage par
+  vérifiabilité (#307).** Le contrat d'une tâche dérive une classe V0/V1/V2
+  (#316) ; `grimoire task dispatch` cascade dessus (#325) ; le palier de
+  départ du dispatch s'ajuste à l'historique des verdicts (#335) ; une classe
+  de relisibilité et les incertitudes déclarées viennent affiner la décision
+  (#334) ; la politique de dispatch résultante est émise aux hôtes, avec
+  l'état des fournisseurs au `SessionStart` (#332).
+- **Fournisseurs et coût.** Registre de fournisseurs étendu par palier de
+  coût, état runtime et `grimoire providers status` (#317) ; `grimoire
+  providers audit` sonde les fournisseurs sans dépenser (#331) ; le choix de
+  modèle croise reasoning et coût, Copilot déclare l'écart (#314).
+- **Moteur de flow (#204).** `grimoire flow run|status|resume|abort`
+  conduit un node à la fois (#326) ; l'exécuteur par dispatch en cascade du
+  routage par vérifiabilité est branché dans `flow run` (#336).
+- **Garde-fous runtime et hôtes.** Plafonds de tours et de budget par
+  instance, garde des échanges pair-à-pair (#320) ; claims à fichiers
+  exclusifs, sous-agents bornés, événements `SubagentStart` et
+  `PostToolUseFailure` (#321).
+- **Sécurité des écritures mémoire et médiation d'outils (#324).** Écritures
+  mémoire validées, contrat MCP annoté, contenu externe marqué, médiation
+  d'outils vérifiée.
+- **Référence agentique industrielle (#315).** Chargée à la demande par les
+  agents, plutôt que systématiquement.
+
+### Corrigé
+
+- **Export OTel GenAI et évals avec pass^k (#322).** L'export de traces est
+  conforme au schéma GenAI d'OpenTelemetry ; les évals calculent pass^k.
+- **Accord pluriel et catalogue de digests après #319 (#333).** Correction
+  d'accord introduite par le retrait d'AORA/DCF, et catalogue de digests
+  rafraîchi en conséquence.
+- **Le garde de CHANGELOG accepte un repli par numéro de PR.** Seize PR de
+  cette version ont fusionné sans toucher `CHANGELOG.md` à leur propre
+  commit ; `scripts/check-changelog-release.py` accepte désormais un commit
+  qui ne le touche pas si son sujet cite `(#NNN)` et que ce numéro apparaît
+  dans la section de la version publiée — jamais dans `[Unreleased]` ni une
+  version antérieure. La règle par commit reste la référence.
+
 ### Retiré
 
 - **Le socle contredisait la doctrine qu'il citait lui-même.** AORA et DCF étaient
