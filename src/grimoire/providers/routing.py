@@ -49,9 +49,12 @@ def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[P
     ``choose()`` ne rend que le premier ; une cascade de dispatch (issue #323)
     a besoin de la liste entière pour retomber sur le suivant du même palier
     après un échec d'appel, sans reconsulter le registre à chaque tentative.
-    Un fournisseur en refroidissement est absent de la liste — c'est la même
-    notion de « disponible maintenant » que ``choose()``, pas une politique
-    séparée qui pourrait diverger.
+    Un fournisseur en refroidissement, ou que ``providers audit`` (issue #330)
+    a jugé indisponible (exécutable absent du PATH), est absent de la
+    liste — c'est la même notion de « disponible maintenant » que
+    ``choose()``, pas une politique séparée qui pourrait diverger. Un
+    fournisseur jamais audité reste candidat : ``available`` par défaut à
+    ``True`` (voir ``ProviderRuntimeState``).
     """
     effective_now = now if now is not None else datetime.now(UTC)
     providers = read_registry(root)
@@ -68,6 +71,8 @@ def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[P
             continue
         runtime = state.get(provider_id)
         if runtime is not None and runtime.is_cooling_down(now=effective_now):
+            continue
+        if runtime is not None and not runtime.available:
             continue
         out.append(provider)
     return tuple(out)
