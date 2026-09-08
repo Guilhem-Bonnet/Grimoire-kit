@@ -309,7 +309,7 @@ def task_claim(
     """Réclame une tâche prête : ready → claimed."""
     from grimoire.missions.schemas import TaskClaim, TaskState
 
-    claim = TaskClaim(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
+    claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
     _transition(ctx, task_id, TaskState.CLAIMED, project_root, ledger_root, actor, claim=claim)
 
 

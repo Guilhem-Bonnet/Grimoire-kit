@@ -55,6 +55,8 @@ class HookEvent(StrEnum):
     USER_PROMPT_SUBMIT = "user_prompt_submit"
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
+    POST_TOOL_USE_FAILURE = "post_tool_use_failure"
+    SUBAGENT_START = "subagent_start"
     SUBAGENT_STOP = "subagent_stop"
     PRE_COMPACT = "pre_compact"
     STOP = "stop"
@@ -116,6 +118,10 @@ class AgentSpec:
     """``declared`` when the agent file carries ``tools:``, ``inferred`` when
     derived from its body. Surfaced by ``grimoire host status`` so a wrong
     inference is visible instead of silently shaping a tool boundary."""
+    max_turns: int | None = None
+    """Override for the host's per-turn budget, read from the agent file's
+    ``max_turns:`` frontmatter key. ``None`` lets the emitter fall back to its
+    own default — most agent files never set this."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +132,7 @@ class AgentSpec:
             "tools_origin": self.tools_origin,
             "affinity": self.affinity.to_dict(),
             "entry_point": self.entry_point,
+            "max_turns": self.max_turns,
         }
 
 

@@ -235,9 +235,25 @@ def collect_agents(project_root: Path, *, entry_point: str | None = None) -> tup
                 affinity=ModelAffinity.from_frontmatter(meta.get("model_affinity")),
                 entry_point=bool(entry_point) and name == entry_point,
                 tools_origin="declared" if declared else "inferred",
+                max_turns=_max_turns(meta.get("max_turns")),
             )
         )
     return tuple(specs)
+
+
+def _max_turns(value: Any) -> int | None:
+    """Parse an agent file's ``max_turns:`` override — a positive int, or ``None``.
+
+    Excludes ``bool`` explicitly: it is an ``int`` subclass, and ``max_turns: true``
+    is a malformed override, not a turn budget of 1.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _bundled(kind: str) -> list[Path]:

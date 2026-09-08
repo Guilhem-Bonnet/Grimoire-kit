@@ -29,6 +29,7 @@ class HostHooks:
     user_prompt_submit: bool = False
     pre_tool_use: bool = False
     post_tool_use: bool = False
+    post_tool_use_failure: bool = False
     subagent_start: bool = False
     subagent_stop: bool = False
     pre_compact: bool = False
@@ -40,6 +41,7 @@ class HostHooks:
             "user_prompt_submit": self.user_prompt_submit,
             "pre_tool_use": self.pre_tool_use,
             "post_tool_use": self.post_tool_use,
+            "post_tool_use_failure": self.post_tool_use_failure,
             "subagent_start": self.subagent_start,
             "subagent_stop": self.subagent_stop,
             "pre_compact": self.pre_compact,
@@ -53,6 +55,7 @@ class HostHooks:
             user_prompt_submit=d.get("user_prompt_submit", False),
             pre_tool_use=d.get("pre_tool_use", False),
             post_tool_use=d.get("post_tool_use", False),
+            post_tool_use_failure=d.get("post_tool_use_failure", False),
             subagent_start=d.get("subagent_start", False),
             subagent_stop=d.get("subagent_stop", False),
             pre_compact=d.get("pre_compact", False),
@@ -128,6 +131,7 @@ CLAUDE_CODE_CLI_MANIFEST = HostCapabilityManifest(
         user_prompt_submit=True,
         pre_tool_use=True,
         post_tool_use=True,
+        post_tool_use_failure=True,
         subagent_start=True,
         subagent_stop=True,
         pre_compact=True,
