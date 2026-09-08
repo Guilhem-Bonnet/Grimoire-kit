@@ -80,8 +80,17 @@ def _json(result):
 
 
 def _is_error(result) -> bool:
-    """``isError`` tel que le client MCP le verra."""
-    return bool(getattr(result, "isError", False))
+    """``isError`` tel que le client MCP le verra, quelle que soit la casse du SDK.
+
+    `mcp` 1.x expose `isError`, la 2.x `is_error` avec l'alias : lire l'attribut
+    directement testait la casse du SDK installé, pas le fil.
+    """
+    if isinstance(result, str):
+        return False
+    dump = getattr(result, "model_dump", None)
+    if dump is None:
+        return bool(getattr(result, "isError", False))
+    return bool(dump(by_alias=True).get("isError", False))
 
 
 async def call(session: ClientSession, tool: str, **args: Any) -> dict[str, Any]:

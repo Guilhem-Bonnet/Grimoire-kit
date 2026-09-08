@@ -39,7 +39,7 @@ _INSTRUCTIONS = (
 )
 
 if TYPE_CHECKING:
-    from mcp.types import CallToolResult, TextContent, ToolAnnotations
+    from mcp.types import CallToolResult, ToolAnnotations
 
     # L'analyse statique ne s'attache à aucune des deux versions : elle décrit
     # la surface qu'on utilise, et rien d'autre. Un premier jet visait les
@@ -81,7 +81,7 @@ else:
     # protocole, pas la couche serveur. Les annotations d'outil datent de la
     # révision 2025-03-26, `structuredContent` de 2025-06-18 — d'où la borne
     # basse du SDK dans pyproject.toml.
-    from mcp.types import CallToolResult, TextContent, ToolAnnotations
+    from mcp.types import CallToolResult, ToolAnnotations
 
     mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS)
 
@@ -105,16 +105,43 @@ def _find_config() -> GrimoireConfig:
 # fournisseurs LLM sont les seuls cas.
 
 
+# Les deux façades du SDK ne nomment pas ces champs pareil : `mcp` 1.x les
+# déclare en camelCase, `mcp` 2.x en snake_case avec l'alias camelCase — le nom
+# du fil reste celui de la spécification des deux côtés. Construire par
+# mot-clé marchait sur l'un et échouait sous `mypy --strict` sur l'autre.
+# `model_validate` prend les noms du fil dans les deux versions, et
+# `annotation_hints` les relit dans les deux : c'est le seul point du module qui
+# a besoin de le savoir. Vérifié contre 1.28.1 et 2.2.0, pas supposé.
+
+
+def _annotations(**hints: bool) -> ToolAnnotations:
+    """Construire une annotation par les noms du protocole, pas ceux du SDK."""
+    return ToolAnnotations.model_validate(hints)
+
+
+def annotation_hints(annotations: ToolAnnotations | None) -> dict[str, Any]:
+    """Les indices d'une annotation, sous les noms du protocole.
+
+    Sortie vide quand l'outil n'est pas annoté. Publique parce que la suite de
+    tests s'en sert pour vérifier le contrat : la lire autrement reviendrait à
+    tester la casse du SDK installé plutôt que ce que le client reçoit.
+    """
+    if annotations is None:
+        return {}
+    dumped: dict[str, Any] = annotations.model_dump(by_alias=True)
+    return dumped
+
+
 def _reads(*, open_world: bool = False) -> ToolAnnotations:
     """Un outil qui lit : sans effet de bord, rejouable."""
-    return ToolAnnotations(
+    return _annotations(
         readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=open_world
     )
 
 
 def _writes(*, destructive: bool, idempotent: bool, open_world: bool = False) -> ToolAnnotations:
     """Un outil qui écrit. `destructive` = l'effet n'est pas trivialement défait."""
-    return ToolAnnotations(
+    return _annotations(
         readOnlyHint=False,
         destructiveHint=destructive,
         idempotentHint=idempotent,
@@ -139,12 +166,12 @@ def _tool_error(payload: dict[str, Any]) -> str:
     """
     body = json.dumps(payload, indent=2, ensure_ascii=False)
     return cast(
-        "str",
-        CallToolResult(
-            content=[TextContent(type="text", text=body)],
-            structuredContent={"result": body},
-            isError=True,
-        ),
+        str,
+        CallToolResult.model_validate({
+            "content": [{"type": "text", "text": body}],
+            "structuredContent": {"result": body},
+            "isError": True,
+        }),
     )
 
 

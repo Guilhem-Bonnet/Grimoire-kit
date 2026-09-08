@@ -21,6 +21,7 @@ pytest.importorskip("mcp", reason="extra optionnel grimoire-kit[mcp] non install
 from grimoire.mcp import server as server_module
 from grimoire.mcp.server import (
     _find_kit_root,
+    annotation_hints,
     grimoire_add_agent,
     grimoire_agent_list,
     grimoire_config,
@@ -52,8 +53,18 @@ def _json(result: Any) -> Any:
 
 
 def _is_error(result: Any) -> bool:
-    """``isError`` tel que le client MCP le verra."""
-    return bool(getattr(result, "isError", False))
+    """``isError`` tel que le client MCP le verra, quelle que soit la casse du SDK.
+
+    `mcp` 1.x expose `isError`, la 2.x `is_error` avec l'alias camelCase : lire
+    l'attribut directement testait la casse du SDK installé, pas ce qui part sur
+    le fil — vert en local, rouge en CI.
+    """
+    if isinstance(result, str):
+        return False
+    dump = getattr(result, "model_dump", None)
+    if dump is None:
+        return bool(getattr(result, "isError", False))
+    return bool(dump(by_alias=True).get("isError", False))
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -554,6 +565,11 @@ def _declared_tools() -> list[Any]:
     return list(mcp._tool_manager.list_tools())
 
 
+def _hints(tool: Any) -> dict[str, Any]:
+    """Indices d'un outil, sous les noms du protocole — pas ceux du SDK."""
+    return annotation_hints(tool.annotations)
+
+
 class TestToolContract:
     """Vingt-deux outils sans annotation ni `isError` : un client MCP ne pouvait
     ni distinguer une lecture d'une écriture, ni voir qu'un appel avait échoué —
@@ -568,7 +584,7 @@ class TestToolContract:
             tool.name
             for tool in _declared_tools()
             if any(
-                getattr(tool.annotations, hint, None) is None
+                annotation_hints(tool.annotations).get(hint) is None
                 for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
             )
         ]
@@ -581,7 +597,7 @@ class TestToolContract:
         contradictoires = [
             tool.name
             for tool in _declared_tools()
-            if tool.annotations.readOnlyHint and tool.annotations.destructiveHint
+            if _hints(tool)["readOnlyHint"] and _hints(tool)["destructiveHint"]
         ]
         assert contradictoires == []
 
@@ -590,14 +606,22 @@ class TestToolContract:
         ["task_claim", "task_update", "grimoire_add_agent", "grimoire_memory_store"],
     )
     def test_les_ecritures_sont_declarees_destructives(self, name: str) -> None:
-        tool = next(t for t in _declared_tools() if t.name == name)
-        assert tool.annotations.readOnlyHint is False
-        assert tool.annotations.destructiveHint is True
+        hints = _hints(next(t for t in _declared_tools() if t.name == name))
+        assert hints["readOnlyHint"] is False
+        assert hints["destructiveHint"] is True
 
     def test_une_lecture_reste_une_lecture(self) -> None:
-        tool = next(t for t in _declared_tools() if t.name == "grimoire_standard_verify")
-        assert tool.annotations.readOnlyHint is True
-        assert tool.annotations.idempotentHint is True
+        hints = _hints(next(t for t in _declared_tools() if t.name == "grimoire_standard_verify"))
+        assert hints["readOnlyHint"] is True
+        assert hints["idempotentHint"] is True
+
+    def test_les_indices_sont_lus_sous_les_noms_du_protocole(self) -> None:
+        """Le SDK 1.x nomme ces champs en camelCase, le 2.x en snake_case avec
+        alias. Lire l'attribut directement testait la casse du SDK installé, pas
+        ce que le client reçoit — et la CI, qui résout la 2.x, voyait vingt-deux
+        annotations « partielles » là où le local n'en voyait aucune."""
+        hints = _hints(next(t for t in _declared_tools() if t.name == "grimoire_config"))
+        assert set(hints) >= {"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"}
 
     def test_l_echec_franc_porte_is_error_sans_perdre_le_corps(self, tmp_path: Path) -> None:
         """Décision 3 du plan : `isError` **en plus** du corps JSON, jamais à la place."""
@@ -690,7 +714,7 @@ class TestReadOnlyToolsWriteNothing:
     }
 
     def test_la_table_couvre_tous_les_outils_en_lecture(self) -> None:
-        declared = {t.name for t in _declared_tools() if t.annotations.readOnlyHint}
+        declared = {t.name for t in _declared_tools() if _hints(t).get("readOnlyHint")}
         assert declared == set(self._ARGS), (
             "outils en lecture seule non couverts par le contrôle d'écriture : "
             f"{sorted(declared ^ set(self._ARGS))}"
