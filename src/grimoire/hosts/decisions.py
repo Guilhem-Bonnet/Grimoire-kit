@@ -435,6 +435,48 @@ def _claimed_task_recall(project_root: Path, task_id: str) -> str:
         return ""
 
 
+def _providers_status_line(project_root: Path) -> str:
+    """One-line summary of LLM provider availability, for session start (issue #329).
+
+    Dispatching a sub-agent at the right cost tier (see the Claude Code
+    "Politique de dispatch") only works if the orchestrator knows which
+    provider is actually reachable *right now* — the registry says what a
+    project is entitled to call, but a cooldown from a recent 429 can take
+    the cheapest one out of rotation for the next few minutes. Nothing is
+    added when the project has never run ``grimoire standard init``: a
+    routing surface that does not exist cannot be summarised, and a blank
+    line here would look like a probe that ran and found nothing rather than
+    a surface that was never adopted.
+
+    Best-effort like every other piece of this context: a registry that fails
+    to parse degrades to no line at all, never to a crashed hook.
+    """
+    try:
+        from grimoire.providers.registry import REGISTRY_FILE, read_registry
+        from grimoire.providers.routing import choose
+        from grimoire.providers.state import load_state
+
+        if not (project_root / REGISTRY_FILE).is_file():
+            return ""
+        providers = read_registry(project_root)
+        now = datetime.now(UTC)
+        state = load_state(project_root)
+        cooling = 0
+        available = 0
+        for provider in providers:
+            entry = state.get(provider.id)
+            is_cooling = entry is not None and entry.is_cooling_down(now=now)
+            if is_cooling:
+                cooling += 1
+            elif provider.enabled:
+                available += 1
+        cheapest = choose(project_root, "cheap", now=now)
+        cheap_id = cheapest.id if cheapest is not None else "aucun"
+        return f"Fournisseurs : {available} disponibles, {cooling} refroidis, prochain cheap={cheap_id}"
+    except Exception:
+        return ""
+
+
 def decide_activation(hook: HookInput) -> Decision:
     """Session start: hand the agent its persona, its claim's recall, then the directive.
 
@@ -444,12 +486,17 @@ def decide_activation(hook: HookInput) -> Decision:
     message. The persona goes first because identity frames the protocol, not
     the reverse; the recall sits between the two — it is about the work, not
     the identity, but it belongs before the standing directive all the same.
+
+    The providers line (issue #329) comes last of all: it is operational
+    status, not identity or protocol, and it is the one part of this context
+    that can legitimately be empty (no registry) without that being a defect.
     """
     task_id = active_task_id(hook.project_root)
     directive = activation_context_text(hook.project_root, task_id=task_id)
     persona, entry_name = entry_persona_context(hook.project_root)
     recall = _claimed_task_recall(hook.project_root, task_id)
-    context = "\n".join(part for part in (persona, recall, directive) if part)
+    providers_line = _providers_status_line(hook.project_root)
+    context = "\n".join(part for part in (persona, recall, directive, providers_line) if part)
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,
