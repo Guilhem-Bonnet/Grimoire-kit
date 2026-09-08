@@ -106,13 +106,20 @@ _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "overloaded", "quota")
 #: ``git diff --name-only``. Surchargeable projet par projet via
 #: ``_grimoire/standard/orchestration-policy.yaml`` (clé ``review_surfaces``).
 DEFAULT_REVIEW_SURFACES: tuple[str, ...] = (
-    "src/**/__init__.py",  # exports publics
-    "src/grimoire/cli/**",  # CLI
-    "src/grimoire/mcp/**",  # MCP
-    "framework/agentic-standard/**",  # schémas et templates du standard
-    "src/grimoire/missions/verifiability.py",  # vocabulaire de décision (motifs V0/V1/V2)
-    "src/grimoire/policies/**",  # politiques
-    ".github/hooks/**",  # hooks
+    # Motifs génériques, pas l'arborescence du kit : le dispatch tourne dans
+    # le projet de l'utilisateur, dont on ne connaît pas les chemins. Un
+    # projet surcharge `review_surfaces` s'il nomme ses surfaces autrement.
+    "*/__init__.py",  # exports publics d'un paquet
+    "*/cli/*",  # surfaces d'entrée : ligne de commande
+    "*/mcp/*",  # surfaces d'entrée : outils MCP
+    "*/api/*",  # surfaces d'entrée : API
+    "*schema*",  # schémas, quel que soit le langage
+    "framework/agentic-standard/*",  # templates du standard (kit)
+    "_grimoire/standard/*",  # instances du standard (projet enrôlé)
+    "*/verifiability.py",  # vocabulaire de décision du routage
+    "*/policies/*",  # politiques
+    "*/security/*",  # sécurité
+    "*/hooks/*",  # hooks d'hôte
 )
 
 #: Chemin relatif de la politique d'orchestration — même fichier que celui lu
