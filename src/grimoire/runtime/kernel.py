@@ -272,7 +272,17 @@ class RuntimeKernel:
         call — and every subsequent one — returns ``False`` without raising
         and without letting the instance keep running.  ``cost`` defaults to
         1 (a call-count proxy); pass a real cost when the caller has one.
+
+        The caps are checked *before* ``tool.requested`` is emitted: a call
+        that will be refused for being over cap never appears in the event
+        log as requested, only as blocked — the log stays an accurate record
+        of what was actually mediated. ``cost`` must be non-negative; a
+        negative value would let a caller shrink ``budget_used`` and defeat
+        the cap, so it raises ``ValueError`` instead.
         """
+        if cost < 0:
+            raise ValueError(f"cost must be non-negative, got {cost}")
+
         instances = self._load_instances()
         wfi = instances.get(wfi_id)
         if wfi is None:
@@ -281,8 +291,6 @@ class RuntimeKernel:
         if wfi.status in _STOPPED_STATUSES:
             self._emit(RunEventType.TOOL_BLOCKED, wfi, ctx, payload={"tool_name": tool_name, "reason": f"instance already {wfi.status.value}"})
             return False
-
-        self._emit(RunEventType.TOOL_REQUESTED, wfi, ctx, payload={"tool_name": tool_name, "args": tool_args})
 
         next_calls = wfi.tool_calls_used + 1
         next_budget = wfi.budget_used + cost
@@ -298,6 +306,8 @@ class RuntimeKernel:
             self._refuse(wfi, ctx, reason=reason)
             self._emit(RunEventType.TOOL_BLOCKED, wfi, ctx, payload={"tool_name": tool_name, "reason": "mast_cap_exceeded"})
             return False
+
+        self._emit(RunEventType.TOOL_REQUESTED, wfi, ctx, payload={"tool_name": tool_name, "args": tool_args})
 
         wfi = WorkflowInstance.from_dict({
             **wfi.to_dict(),
