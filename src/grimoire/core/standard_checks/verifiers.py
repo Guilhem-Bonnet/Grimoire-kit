@@ -67,6 +67,7 @@ from grimoire.core.standard_generation import (
     STANDARD_PROFILE_FILE,
     normalize_task_id,
 )
+from grimoire.providers.registry import SUPPORTED_CURRENCIES, SUPPORTED_MODEL_TIERS
 
 
 def _verify_manifest(
@@ -136,6 +137,63 @@ def _verify_mission_brief(root: Path, profile: StandardProfile, result: Standard
         )
 
 
+def _verify_provider_currency_and_tiers(
+    provider: dict[str, Any],
+    provider_id: Any,
+    rel_path: Path,
+    result: StandardVerificationResult,
+) -> None:
+    """``currency`` et ``models[].tier`` (issue #310, lot 2) : vocabulaire fermé.
+
+    Les deux champs sont optionnels — absents, ils ne déclenchent rien, un
+    registre v1 antérieur au lot 2 reste vert. Présents avec une valeur hors
+    vocabulaire, ils sont une erreur bloquante : un tier ou une monnaie
+    inconnue romprait silencieusement ``grimoire providers status`` et
+    ``choose()``, qui les comparent par égalité de chaîne.
+    """
+    currency = provider.get("currency")
+    if currency is not None and currency not in SUPPORTED_CURRENCIES:
+        _add_check(
+            result,
+            "providers.currency_invalid",
+            "error",
+            f"Provider {provider_id!r} currency {currency!r} must be one of {SUPPORTED_CURRENCIES}.",
+            path=rel_path,
+        )
+    models = provider.get("models")
+    if models is None:
+        return
+    if not isinstance(models, list):
+        _add_check(
+            result,
+            "providers.models_tiered_invalid",
+            "error",
+            f"Provider {provider_id!r} models must be a list.",
+            path=rel_path,
+        )
+        return
+    for model in models:
+        if not isinstance(model, dict) or not model.get("id"):
+            _add_check(
+                result,
+                "providers.model_id_missing",
+                "error",
+                f"Provider {provider_id!r} has a model entry with no id.",
+                path=rel_path,
+            )
+            continue
+        tier = model.get("tier")
+        if tier not in SUPPORTED_MODEL_TIERS:
+            _add_check(
+                result,
+                "providers.model_tier_invalid",
+                "error",
+                f"Provider {provider_id!r} model {model.get('id')!r} tier {tier!r} must be one of "
+                f"{SUPPORTED_MODEL_TIERS}.",
+                path=rel_path,
+            )
+
+
 def _verify_provider_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
@@ -178,6 +236,7 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
                 f"Provider {provider_id!r} enabled flag must be boolean.",
                 path=rel_path,
             )
+        _verify_provider_currency_and_tiers(provider, provider_id, rel_path, result)
         if provider.get("enabled") is True:
             capabilities = provider.get("allowed_capabilities")
             if not isinstance(capabilities, list) or not capabilities:

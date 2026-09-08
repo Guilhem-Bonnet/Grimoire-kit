@@ -31,6 +31,7 @@ from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_host import host_app
 from grimoire.cli.cmd_memory_lexical import memory_app
 from grimoire.cli.cmd_migrate import migrate_command
+from grimoire.cli.cmd_providers import providers_app
 from grimoire.cli.cmd_serve import serve as serve_cmd
 from grimoire.cli.cmd_standard import standard_app
 from grimoire.cli.cmd_stigmergy import stigmergy_app
@@ -915,6 +916,7 @@ app.add_typer(task_app, name="task", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")
 app.add_typer(host_app, name="host", rich_help_panel="Project")
+app.add_typer(providers_app, name="providers", rich_help_panel="Project")
 app.command("serve", rich_help_panel="Project")(serve_cmd)
 
 

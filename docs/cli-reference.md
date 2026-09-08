@@ -225,6 +225,18 @@ retenu — dont l'ouverture d'une session dans un agent, qu'aucun hôte ne sait
 faire : la persona d'entrée est alors remise à la boucle principale par le hook
 `session_start`. Voir [Persona d'entrée](hosts.md#persona-dentree).
 
+## Fournisseurs LLM
+
+Le groupe `grimoire providers` croise le registre déclaratif
+(`llm-provider-registry.yaml`, voir [Compatibilité multi-provider](standard/integration.md#compatibilité-multi-provider-llm))
+et l'état de refroidissement runtime pour répondre à : quel fournisseur
+appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
+
+| Commande | Description |
+| --- | --- |
+| `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité, prochain choix |
+| `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+
 ## Standard agentique gouverné
 
 Le groupe `grimoire standard` pilote le standard agentique (profils, patterns gouvernés, preuves). Référence des patterns : [Contrôles gouvernés](standard/controles-gouvernes.md).

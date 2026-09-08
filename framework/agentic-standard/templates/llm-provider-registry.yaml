@@ -5,12 +5,28 @@ metadata:
   owner: ""
   policy: "No provider/model call outside this registry."
 
+# Champs optionnels par fournisseur (issue #310, lot 2) — absents par défaut,
+# donc un registre v1 sans eux continue de passer verify/gates tel quel :
+#   currency    : "quota" (consommé sur un abonnement/CLI) | "api" (facturé à
+#                 l'appel) | "local" (calcul local, pas de facturation).
+#   invocation  : commande headless pour appeler ce fournisseur hors chat,
+#                 avec {prompt} et {model} comme gabarits littéraux.
+#   models      : liste de {id, tier}, tier ∈ "cheap" | "mid" | "strong" — la
+#                 base sur laquelle `grimoire providers status`/`choose()`
+#                 route par palier de coût plutôt que par nom de modèle.
+# Un tier ou une currency hors de ce vocabulaire est une erreur de vérification
+# (providers.model_tier_invalid / providers.currency_invalid).
+
 providers:
   - id: "github-copilot"
     enabled: false
     provider_type: "hosted"
     allowed_capabilities: ["chat", "code", "review"]
     default_models: []
+    # currency: "quota"
+    # models:
+    #   - id: "copilot-integrated-models"
+    #     tier: "mid"
     data_policy:
       allowed_data_classes: []
       forbidden_data_classes: []
@@ -39,6 +55,15 @@ providers:
     provider_type: "hosted"
     allowed_capabilities: ["chat", "code", "reasoning"]
     default_models: []
+    # currency: "quota"  # abonnement Claude, appelé en CLI headless
+    # invocation: "claude -p {prompt} --model {model}"
+    # models:
+    #   - id: "claude-haiku-4.5"
+    #     tier: "cheap"
+    #   - id: "claude-sonnet-4.6"
+    #     tier: "mid"
+    #   - id: "claude-opus-4.7"
+    #     tier: "strong"
     data_policy:
       allowed_data_classes: []
       forbidden_data_classes: []
@@ -53,6 +78,13 @@ providers:
     provider_type: "hosted"
     allowed_capabilities: ["chat", "code", "multimodal", "reasoning"]
     default_models: []
+    # currency: "quota"
+    # invocation: "gemini -p {prompt} --model {model}"
+    # models:
+    #   - id: "gemini-2.5-flash"
+    #     tier: "cheap"
+    #   - id: "gemini-2.5-pro"
+    #     tier: "strong"
     data_policy:
       allowed_data_classes: []
       forbidden_data_classes: []
@@ -67,6 +99,11 @@ providers:
     provider_type: "local"
     allowed_capabilities: ["chat", "code", "embeddings"]
     default_models: []
+    # currency: "local"  # calcul local (Ollama), pas de facturation externe
+    # invocation: "ollama run {model}"
+    # models:
+    #   - id: "qwen3-coder"
+    #     tier: "mid"
     data_policy:
       allowed_data_classes: []
       forbidden_data_classes: []

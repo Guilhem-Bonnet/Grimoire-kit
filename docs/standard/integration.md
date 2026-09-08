@@ -137,6 +137,20 @@ Le flow ne doit pas dépendre implicitement d'un fournisseur unique. Le registre
 
 La règle est simple : pas d'appel récurrent à un provider ou modèle non déclaré.
 
+Chaque fournisseur peut en plus déclarer, en option (issue #310, lot 2) :
+
+- `currency` : `quota` (consommé sur un abonnement/CLI), `api` (facturé à l'appel) ou `local` (calcul local) ;
+- `invocation` : commande headless (`claude -p {prompt} --model {model}`, `ollama run {model}`...) ;
+- `models` : liste de `{id, tier}`, `tier` ∈ `cheap` | `mid` | `strong`.
+
+Ces trois champs sont absents par défaut — un registre qui ne les déclare pas
+continue de passer `verify`/`gates` sans rien changer. Déclarés, ils
+alimentent `grimoire providers status` (tableau de disponibilité par palier
+de coût, refroidissement après échec) et `grimoire providers cooldown <id>
+--reason rate_limit|timeout` (enregistrer un échec depuis un hook ou un
+script). Un `tier` ou une `currency` hors de ce vocabulaire est une erreur de
+vérification, pas un avertissement.
+
 Le choix provider est maintenant explicite au moment de l'initialisation :
 
 ```bash
