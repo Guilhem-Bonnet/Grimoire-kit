@@ -54,6 +54,7 @@ from grimoire.core.standard_checks.controls import (
     _verify_retention_registry,
     _verify_risk_control_matrix,
     _verify_runtime_provider_contract,
+    _verify_tool_mediation,
     _verify_tool_registry,
     _verify_visual_evidence,
     _verify_wip_limits,
@@ -1281,6 +1282,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_runtime_surface_registry(root, profile, result)
     _verify_retention_registry(root, profile, result)
     _verify_tool_registry(root, profile, result)
+    _verify_tool_mediation(root, profile, result)
     _verify_incident_registry(root, profile, result)
     _verify_risk_control_matrix(root, profile, result)
     _verify_capability_registry(root, profile, result)

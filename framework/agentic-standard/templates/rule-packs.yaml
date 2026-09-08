@@ -147,7 +147,12 @@ rules:
       tool_call_unmediated: true
     action: block
     event: tool.blocked
-    remediation: route_tool_call_through_mediation_gate
+    # Verifie par `grimoire standard verify` : tout serveur MCP resolu a
+    # l'execution (.mcp.json du projet, ~/.claude.json, ~/.claude/settings.json)
+    # doit figurer au registre avec un risque, ou etre mis hors perimetre avec
+    # une raison. Un registre perime echoue aussi.
+    check_id: mediation.server_undeclared
+    remediation: declare_the_resolved_mcp_server_in_tool_registry_with_a_risk
   - id: provider.cost-budgeted
     family: provider
     source_normative: provider-governance.cost-and-slo

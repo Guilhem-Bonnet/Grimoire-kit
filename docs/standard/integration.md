@@ -265,6 +265,55 @@ qui porte une clé d'autorité (`approved`, `authorized`, `instruction`,
 `firewall.artifact_missing` : le rendre obligatoire à ce palier aurait rendu
 tout projet consommateur non conforme du jour au lendemain.
 
+## Médiation des outils : le registre est comparé au réel
+
+`tool-mediation-gate` est exigé par le profil `governed` depuis le premier
+jour, avec `checks: []` : rien ne le vérifiait. `grimoire standard verify`
+oppose désormais la règle `tools.mediated-before-use` en comparant le registre
+aux serveurs MCP **réellement résolus à l'exécution** :
+
+| Source lue | Portée |
+|---|---|
+| `.mcp.json` du projet | projet |
+| `~/.claude.json` (y compris son entrée `projects.<racine du projet>`) | utilisateur |
+| `~/.claude/settings.json` | utilisateur |
+
+Un serveur de portée utilisateur est tout aussi appelable par l'agent que celui
+du projet : l'ignorer ferait naître le vérificateur fail-open (décision 5 du
+plan d'exécution du 2026-09-08).
+
+Quatre façons d'échouer, erreur dès `governed`, avertissement en dessous :
+
+| Check | Cause |
+|---|---|
+| `mediation.server_undeclared` | un serveur résolu n'est pas au registre |
+| `mediation.server_risk_missing` | il y est, sans risque |
+| `mediation.out_of_scope_without_reason` | il est mis hors périmètre sans motif |
+| `mediation.registry_stale` | le registre inscrit un serveur que plus aucune source ne résout |
+
+Le dernier cas est ce qui empêche le registre d'être rempli une fois pour
+toutes : un registre périmé affirme une médiation qui n'a plus d'objet.
+
+Déclarer un serveur volontairement hors périmètre, plutôt que l'omettre :
+
+```yaml
+mcp_servers:
+  - id: MCP-001
+    server: playwright
+    owner: guilhem
+    scopes: [read]
+    timeout_s: 30
+    logging: {requests: true, errors: true, secrets_masked: true}
+    out_of_scope: true
+    out_of_scope_reason: "navigateur de test local, jamais appelé par un agent en production"
+```
+
+La lecture des sources est tolérante et sans secret : un fichier absent,
+illisible ou malformé est ignoré — une vérification de conformité ne tombe pas
+parce que la configuration d'un autre outil est cassée — et seules les **clés**
+de `mcpServers` sont extraites. Les commandes, arguments et `env`, où vivent
+les jetons, ne sont ni lus ni journalisés.
+
 ## Commandes runtime normatives
 
 Les profils `orchestrated`, `governed` et `production` ne se limitent plus aux templates de gouvernance : ils exposent une première tranche exécutable du runtime standard.

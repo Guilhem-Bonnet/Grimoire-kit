@@ -164,10 +164,10 @@ patterns:
     source_normative: security-governance.tool-mediation-owasp
     catalog_ref: ["GOV-09"]
     intent: "Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution."
-    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
+    required_artifacts: ["hook-registry.yaml", "rule-packs.yaml", "tool-registry.yaml"]
     rule_refs: ["tools.mediated-before-use"]
     hook_refs: ["tools.terminal-guard"]
-    check_refs: []
+    check_refs: ["mediation.server_undeclared", "mediation.registry_stale", "mediation.server_risk_missing", "mediation.out_of_scope_without_reason"]
   - id: provider-cost-slo
     category: provider
     maturity: production

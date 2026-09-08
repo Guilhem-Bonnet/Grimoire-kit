@@ -64,7 +64,7 @@ devient pertinent.
 | `guardrail-contract` | controlled | Version input/output/tool/model guardrails with explicit modes and violation actions; fail closed. | `guardrail-contract.yaml` | `guardrail.unversioned`, `guardrail.no_violation_action` |
 | `prompt-injection-firewall` | controlled | Isolate external/untrusted content so it cannot override control instructions. | `prompt-firewall.yaml` | `firewall.isolation_disabled`, `firewall.override_allowed` |
 | `tool-blast-radius-limiter` | starter | Bound each tool/task blast radius: writable paths, network egress, environment, cost, and production reach; fail closed. | `blast-radius-policy.yaml` | `tools.blast_radius_undeclared`, `tools.blast_radius_production_allow` |
-| `tool-mediation-gate` | governed | Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution. | `hook-registry.yaml`, `rule-packs.yaml` | — |
+| `tool-mediation-gate` | governed | Mediate tool/MCP calls through a trust gate aligned with OWASP agentic threats before execution. | `hook-registry.yaml`, `rule-packs.yaml`, `tool-registry.yaml` | `mediation.server_undeclared`, `mediation.registry_stale`, `mediation.server_risk_missing`, `mediation.out_of_scope_without_reason` |
 | `workspace-isolation` | governed | Declare writable roots, network egress and env passthrough; fail closed. | `workspace-isolation.yaml` | `workspace.network_open`, `workspace.writable_unbounded` |
 
 ## Governance

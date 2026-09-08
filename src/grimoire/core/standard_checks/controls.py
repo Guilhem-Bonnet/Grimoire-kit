@@ -1081,3 +1081,134 @@ def _verify_compliance_traceability(root: Path, profile: StandardProfile, result
         _add_check(result, "compliance.traceability_missing", "warning", "Compliance declaration has no Traceability section.", path=rel_path)
     elif _strict(profile) and "- Last verdict:\n" in text:
         _add_check(result, "compliance.verdict_missing", "warning", "Compliance declaration records no verification verdict.", path=rel_path)
+
+
+# ── tools.mediated-before-use ─────────────────────────────────────────────────
+#
+# Le pattern `tool-mediation-gate` était exigé par le profil `governed` avec
+# `checks: []` : aucun code ne le vérifiait. Un projet gouverné pouvait faire
+# tourner quatre serveurs MCP sans qu'aucun figure au registre d'outils.
+#
+# Périmètre : les serveurs **résolus à l'exécution**, pas seulement ceux du
+# `.mcp.json` du projet (décision 5 du plan d'exécution du 2026-09-08). Un
+# serveur de portée utilisateur est tout aussi appelable par l'agent ; l'ignorer
+# ferait naître le vérificateur fail-open.
+#
+# Lecture tolérante et sans secret : seules les **clés** de `mcpServers` sont
+# extraites. Les valeurs — commande, arguments, `env` — ne sont ni lues ni
+# journalisées, parce que c'est là que vivent les jetons.
+
+#: Sources de portée utilisateur, relatives à ``Path.home()``.
+_MCP_USER_SOURCES: tuple[str, ...] = (".claude.json", ".claude/settings.json")
+
+#: Source de portée projet.
+_MCP_PROJECT_SOURCE = ".mcp.json"
+
+
+def resolved_mcp_servers(root: Path) -> dict[str, str]:
+    """Serveurs MCP qu'un agent peut réellement appeler ici : nom → source.
+
+    Une source absente, illisible ou malformée est ignorée en silence : une
+    vérification de conformité ne doit pas tomber parce qu'un fichier de
+    configuration d'un autre outil est cassé.
+    """
+    found: dict[str, str] = {}
+    candidates: list[tuple[Path, str]] = [(root / _MCP_PROJECT_SOURCE, _MCP_PROJECT_SOURCE)]
+    try:
+        home = Path.home()
+    except (OSError, RuntimeError):  # pragma: no cover - HOME absent
+        home = None
+    if home is not None:
+        candidates += [(home / name, f"~/{name}") for name in _MCP_USER_SOURCES]
+
+    for path, label in candidates:
+        for name in _mcp_server_names(path, root):
+            found.setdefault(name, label)
+    return found
+
+
+def _mcp_server_names(path: Path, root: Path) -> list[str]:
+    """Les noms déclarés par une source, jamais ses valeurs."""
+    import json
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    if not isinstance(raw, dict):
+        return []
+    names: list[str] = []
+    servers = raw.get("mcpServers")
+    if isinstance(servers, dict):
+        names.extend(str(key) for key in servers)
+    # `~/.claude.json` range aussi les serveurs par projet : seuls ceux du
+    # projet vérifié sont résolus ici.
+    projects = raw.get("projects")
+    if isinstance(projects, dict):
+        entry = projects.get(str(root)) or projects.get(str(root.resolve()))
+        if isinstance(entry, dict) and isinstance(entry.get("mcpServers"), dict):
+            names.extend(str(key) for key in entry["mcpServers"])
+    return names
+
+
+def _verify_tool_mediation(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
+    """`tools.mediated-before-use` : rien ne s'appelle qui ne soit inscrit.
+
+    Trois façons d'échouer, toutes fail-closed : un serveur résolu absent du
+    registre, un serveur inscrit sans risque ou mis hors périmètre sans raison,
+    et un registre périmé — inscrit un serveur que plus aucune source ne
+    résout. Sans ce dernier cas, un registre suffirait à être rempli une fois.
+    """
+    rel_path = STANDARD_DIR / "tool-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+    severity = "error" if profile.id in {"governed", "production"} else "warning"
+    resolved = resolved_mcp_servers(root)
+
+    declared: dict[str, dict[str, Any]] = {}
+    for server in _entries(data, "mcp_servers"):
+        name = str(server.get("server") or server.get("name") or server.get("id") or "").strip()
+        if name:
+            declared[name] = server
+
+    for name, source in sorted(resolved.items()):
+        entry = declared.get(name)
+        if entry is None:
+            _add_check(
+                result,
+                "mediation.server_undeclared",
+                severity,
+                f"MCP server {name!r} is resolved at runtime (from {source}) but absent from the tool registry: "
+                "an unmediated tool call.",
+                path=rel_path,
+            )
+            continue
+        if entry.get("out_of_scope") is True:
+            if not str(entry.get("out_of_scope_reason") or "").strip():
+                _add_check(
+                    result,
+                    "mediation.out_of_scope_without_reason",
+                    severity,
+                    f"MCP server {name!r} is declared out_of_scope without a reason: an exemption nobody argued for.",
+                    path=rel_path,
+                )
+            continue
+        if not str(entry.get("risk") or "").strip():
+            _add_check(
+                result,
+                "mediation.server_risk_missing",
+                severity,
+                f"MCP server {name!r} is declared without a risk: mediation cannot rank what it cannot weigh.",
+                path=rel_path,
+            )
+
+    stale = sorted(name for name in declared if name not in resolved)
+    if stale:
+        _add_check(
+            result,
+            "mediation.registry_stale",
+            severity,
+            f"Tool registry declares MCP server(s) no source resolves any more: {', '.join(stale)}.",
+            path=rel_path,
+        )
