@@ -852,6 +852,7 @@ class ProjectScaffolder:
     })
 
     _PROTOCOL_DOCS: ClassVar[tuple[str, ...]] = (
+        "agentic-industry-reference.md",
         "agent-mesh-network.md",
         "agent-relationship-graph.md",
         "cc-reference.md",

@@ -117,6 +117,7 @@ class TestProjectScaffolder:
         labels = [fc.label for fc in plan.copies]
         assert "framework/agent-base.md" in labels
         assert "framework/cc-verify.sh" in labels
+        assert "framework/agentic-industry-reference.md" in labels
 
     def test_plan_includes_project_context(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
