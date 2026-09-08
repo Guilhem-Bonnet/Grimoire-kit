@@ -129,6 +129,25 @@ def test_task_claim_without_expires_at_never_expires():
     assert not claim.is_expired(now=datetime(2099, 1, 1, tzinfo=UTC))
 
 
+def test_task_claim_naive_iso8601_expires_at_is_treated_as_utc():
+    """A naive ISO8601 string (no tzinfo) must not raise TypeError against
+    the aware `datetime.now(UTC)` default — it is assumed UTC, like every
+    `expires_at` `TaskClaim.new` actually stamps."""
+    claim = TaskClaim(actor_id="a", host_id="h", expires_at="2026-01-01T00:00:00")
+    assert claim.is_expired(now=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC))
+    assert not claim.is_expired(now=datetime(2025, 12, 31, 23, 59, 59, tzinfo=UTC))
+
+
+def test_task_claim_invalid_expires_at_is_treated_as_expired_and_logged(caplog):
+    """An unparsable timestamp must not silently block a file forever: the
+    claim is treated as expired (closed-fail, not closed-silent), and the
+    anomaly is logged rather than swallowed."""
+    claim = TaskClaim(actor_id="a", host_id="h", expires_at="not-a-timestamp")
+    with caplog.at_level("WARNING"):
+        assert claim.is_expired()
+    assert "expires_at invalide" in caplog.text
+
+
 def test_task_invalid_transition_raises(ledger):
     m = ledger.create_mission("M", origin="user")
     t = ledger.create_task(m.id, "Task", acceptance=("done",))
