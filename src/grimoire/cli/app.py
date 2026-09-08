@@ -38,6 +38,7 @@ from grimoire.cli.cmd_stigmergy import stigmergy_app
 from grimoire.cli.cmd_task import task_app
 from grimoire.cli.cmd_up import up as up_command
 from grimoire.cli.cmd_upgrade import upgrade_command
+from grimoire.cli.cmd_web import web_app
 from grimoire.cli.cmd_workflows import workflows_app
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
@@ -917,6 +918,7 @@ app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
 app.add_typer(features_app, name="features", rich_help_panel="Project")
 app.add_typer(host_app, name="host", rich_help_panel="Project")
 app.add_typer(providers_app, name="providers", rich_help_panel="Project")
+app.add_typer(web_app, name="web", rich_help_panel="Data")
 app.command("serve", rich_help_panel="Project")(serve_cmd)
 
 

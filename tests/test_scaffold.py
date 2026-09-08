@@ -200,6 +200,32 @@ class TestProjectScaffolder:
         content = manifest.read_text()
         assert "name,file,category,description,icon" in content
 
+    def test_le_manifeste_doutils_envoie_les_agents_vers_lentree_enveloppee(self, tmp_path: Path) -> None:
+        """Le navigateur ne doit pas être proposé nu à un agent.
+
+        Sa sortie est une page : collée telle quelle dans un contexte, rien ne
+        la distingue d'une consigne (OWASP LLM01). La colonne `entrypoint` du
+        manifeste envoie donc vers `grimoire web fetch`, qui enveloppe — et
+        `grimoire standard verify` refuse un manifeste qui pointe encore vers le
+        script nu.
+        """
+        from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+        s = _scaffolder(tmp_path)
+        s.execute(s.plan())
+        manifest = tmp_path / "_grimoire" / "kit" / "tool-manifest.csv"
+        assert manifest.is_file()
+        lines = manifest.read_text(encoding="utf-8").splitlines()
+        assert lines[0] == "name,file,description,entrypoint"
+        rows = {line.split(",")[1]: line.split(",")[-1] for line in lines[1:] if "," in line}
+        for tool, expected in UNTRUSTED_OUTPUT_ENTRYPOINTS.items():
+            if tool in rows:
+                assert rows[tool] == expected, f"{tool} livré sans entrée enveloppée"
+        # Un outil ordinaire garde une colonne vide : rien à envelopper.
+        ordinaires = [f for f, e in rows.items() if f not in UNTRUSTED_OUTPUT_ENTRYPOINTS]
+        assert ordinaires, "aucun outil livré : la fixture ne prouve rien"
+        assert all(rows[f] == "" for f in ordinaires)
+
     def test_execute_result_counts_match(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path)
         plan = s.plan()

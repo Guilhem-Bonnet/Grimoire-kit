@@ -200,6 +200,49 @@ def _verify_privilege_boundary(root: Path, profile: StandardProfile, result: Sta
             )
 
 
+def _verify_untrusted_output_wiring(
+    root: Path, profile: StandardProfile, result: StandardVerificationResult
+) -> None:
+    """Le manifeste livré aux agents pointe-t-il vers l'entrée qui enveloppe ?
+
+    ``_verify_prompt_firewall`` ne contrôlait qu'un YAML déclaratif : un projet
+    pouvait cocher ``isolate_external_content: true`` et laisser ses agents
+    appeler le navigateur nu, dont le flux entre dans le contexte sans rien qui
+    le distingue d'une consigne (OWASP LLM01). Une case cochée n'est pas un
+    câblage — c'est le verrou décoratif que ce dépôt a déjà mesuré six fois.
+
+    Le contrôle porte sur ce que le projet a réellement reçu : la colonne
+    ``entrypoint`` du ``tool-manifest.csv`` généré au scaffold. Un projet sans
+    manifeste, ou dont le manifeste ne livre pas d'outil à sortie externe, n'a
+    rien à câbler et ne déclenche rien.
+    """
+    from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    rel_path = Path("_grimoire") / "kit" / "tool-manifest.csv"
+    text = _text_file(root, rel_path)
+    if not text:
+        return
+    severity = "error" if profile.id == "production" else "warning"
+    for line in text.splitlines()[1:]:
+        columns = [cell.strip() for cell in line.split(",")]
+        if len(columns) < 2:
+            continue
+        expected = UNTRUSTED_OUTPUT_ENTRYPOINTS.get(columns[1])
+        if expected is None:
+            continue
+        declared = columns[3] if len(columns) > 3 else ""
+        if declared != expected:
+            _add_check(
+                result,
+                "firewall.untrusted_output_unwrapped",
+                severity,
+                f"Tool manifest points agents at {columns[1]} directly "
+                f"(entrypoint={declared or 'empty'!r}): its output reaches a context unwrapped. "
+                f"Declare {expected!r}, which marks the output as external data.",
+                path=rel_path,
+            )
+
+
 def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     """Isolation du contenu externe : requis en `production`, attendu en `governed`.
 
@@ -210,6 +253,7 @@ def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: Standa
     l'exigence dure au suivant (décision 2 du plan d'exécution).
     """
     rel_path = STANDARD_DIR / "prompt-firewall.yaml"
+    _verify_untrusted_output_wiring(root, profile, result)
     data = _load_yaml_file(root, rel_path, result)
     if not isinstance(data, dict):
         if profile.id == "governed":

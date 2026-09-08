@@ -43,11 +43,21 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ORIGINS",
     "SENTINEL",
+    "UNTRUSTED_OUTPUT_ENTRYPOINTS",
     "UntrustedContent",
     "fetch_untrusted",
     "tag_event_payload",
     "wrap_untrusted",
 ]
+
+#: Outils dont la sortie brute est du contenu externe, et la commande à appeler
+#: à leur place. Le manifeste livré aux agents (`_grimoire/kit/tool-manifest.csv`)
+#: porte cette valeur dans sa colonne `entrypoint`, et
+#: `_verify_prompt_firewall` refuse un manifeste qui pointe encore vers le
+#: script nu : sans ce câblage, l'enveloppe reste du code que personne n'appelle.
+UNTRUSTED_OUTPUT_ENTRYPOINTS: dict[str, str] = {
+    "web-browser.py": "grimoire web fetch",
+}
 
 #: Préfixe des deux marqueurs. Seul, il ne protège de rien — c'est le nonce qui
 #: le rend non forgeable. Il sert à repérer et neutraliser une tentative de

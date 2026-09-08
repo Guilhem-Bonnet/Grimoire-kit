@@ -204,10 +204,10 @@ patterns:
     source_normative: security-governance.prompt-injection-firewall
     catalog_ref: ["GOV-12"]
     intent: "Isolate external/untrusted content so it cannot override control instructions."
-    required_artifacts: ["prompt-firewall.yaml"]
+    required_artifacts: ["prompt-firewall.yaml", "tool-manifest.csv"]
     rule_refs: []
     hook_refs: []
-    check_refs: ["firewall.isolation_disabled", "firewall.override_allowed"]
+    check_refs: ["firewall.isolation_disabled", "firewall.override_allowed", "firewall.untrusted_output_unwrapped", "firewall.artifact_missing"]
   - id: remote-hygiene-guard
     category: governance
     maturity: controlled

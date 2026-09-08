@@ -27,6 +27,7 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
 from grimoire.memory import profiles as memory_profiles
+from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
 from grimoire.workflows import registry as workflow_registry
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1059,12 +1060,21 @@ class ProjectScaffolder:
 
         # Tool manifest — same contract as the agent manifest: the inventory a
         # persona is told to load must describe what this project actually got.
-        tool_lines = ["name,file,description\n"]
+        #
+        # La colonne `entrypoint` dit *par quoi passer* quand la sortie brute
+        # d'un outil ne doit pas être lue comme une consigne. Le navigateur rend
+        # une page : un agent qui colle ce flux dans son contexte ne distingue
+        # plus ce qu'il a lu de ce qu'on lui a demandé (OWASP LLM01). Le
+        # manifeste pointe donc vers `grimoire web fetch`, qui enveloppe.
+        # `_verify_prompt_firewall` contrôle ce câblage : sans lui, le pare-feu
+        # ne serait qu'un YAML qui coche des cases.
+        tool_lines = ["name,file,description,entrypoint\n"]
         for fc in sorted(p.copies, key=lambda c: c.dst.name):
             if fc.dst.parent != self._tools_dir():
                 continue
             desc = self._extract_tool_description(fc.src).replace(",", ";")
-            tool_lines.append(f"{fc.dst.stem},{fc.dst.name},{desc}\n")
+            entrypoint = UNTRUSTED_OUTPUT_ENTRYPOINTS.get(fc.dst.name, "")
+            tool_lines.append(f"{fc.dst.stem},{fc.dst.name},{desc},{entrypoint}\n")
         p.templates.append(TemplateRender(
             dst=self._kit_dir() / "tool-manifest.csv",
             content="".join(tool_lines),

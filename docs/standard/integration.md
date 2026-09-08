@@ -230,8 +230,12 @@ OWASP LLM01 et ASI01, et le principe commun aux six patterns de défense de
 Beurer-Kellner — une donnée non fiable ingérée ne doit plus pouvoir déclencher
 d'action conséquente.
 
-**Récupérer une page.** Passer par `grimoire.tools.untrusted`, jamais par un
-appel direct au navigateur dont on collerait la sortie :
+**Récupérer une page.** Une seule entrée, côté agent comme côté code :
+
+```bash
+grimoire web fetch https://example.com/doc            # sortie enveloppée
+grimoire web fetch https://example.com/doc --json     # + provenance externe
+```
 
 ```python
 from pathlib import Path
@@ -244,6 +248,14 @@ journal = page.to_dict()      # source, nonce, tampering, code de sortie, taille
 
 `fetch_untrusted` exécute `framework/tools/web-browser.py` en **sous-processus**
 — le script est en zone gelée et n'est jamais importé — puis enveloppe sa sortie.
+
+**Le câblage est vérifié, pas déclaré.** Le manifeste d'outils livré aux agents
+(`_grimoire/kit/tool-manifest.csv`) porte une colonne `entrypoint` : la ligne du
+navigateur y nomme `grimoire web fetch`. `grimoire standard verify` compare ce
+manifeste au réel et produit `firewall.untrusted_output_unwrapped` — erreur en
+`production`, avertissement en `governed` — quand il pointe encore vers le
+script nu. Sans ce contrôle, le pare-feu ne serait qu'un YAML cochant des cases,
+et l'enveloppe du code que personne n'appelle.
 
 **Pourquoi le marqueur est aléatoire.** Une balise fixe (`BEGIN UNTRUSTED`) se
 recopie dans la page : il suffirait à un attaquant d'écrire la balise de fin

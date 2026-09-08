@@ -55,3 +55,64 @@ def test_un_projet_governed_sans_artefact_est_averti_pas_bloque(tmp_path: Path) 
     found = [c for c in result.checks if c.id == "firewall.artifact_missing"]
     assert found and found[0].severity == "warning"
     assert _ARTIFACT not in result.missing
+
+
+# ── Le pare-feu vérifie un câblage, pas un YAML ───────────────────────────────
+
+
+_MANIFEST = Path("_grimoire/kit/tool-manifest.csv")
+
+_HEADER = "name,file,description,entrypoint\n"
+_WRAPPED = f"{_HEADER}web-browser,web-browser.py,Navigateur sandboxé,grimoire web fetch\n"
+_NAKED = f"{_HEADER}web-browser,web-browser.py,Navigateur sandboxé,\n"
+
+
+def _write_manifest(root: Path, content: str) -> None:
+    (root / _MANIFEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / _MANIFEST).write_text(content, encoding="utf-8")
+
+
+def _firewall_checks(result) -> list:
+    return [c for c in result.checks if c.id == "firewall.untrusted_output_unwrapped"]
+
+
+def test_un_manifeste_qui_pointe_le_script_nu_echoue_en_production(tmp_path: Path) -> None:
+    """Le trou relevé par la revue : `_verify_prompt_firewall` ne contrôlait
+    qu'un YAML déclaratif. Un projet pouvait cocher `isolate_external_content:
+    true` et laisser ses agents appeler le navigateur nu."""
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    _write_manifest(tmp_path, _NAKED)
+    result = verify_standard_profile(tmp_path)
+    found = _firewall_checks(result)
+    assert found and found[0].severity == "error"
+    assert "grimoire web fetch" in found[0].message
+    assert not result.ok
+
+
+def test_le_meme_manifeste_avertit_seulement_en_governed(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_manifest(tmp_path, _NAKED)
+    result = verify_standard_profile(tmp_path)
+    found = _firewall_checks(result)
+    assert found and found[0].severity == "warning"
+
+
+def test_un_manifeste_cable_passe(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    _write_manifest(tmp_path, _WRAPPED)
+    result = verify_standard_profile(tmp_path)
+    assert _firewall_checks(result) == []
+
+
+def test_un_projet_sans_manifeste_ne_declenche_rien(tmp_path: Path) -> None:
+    """Pas de navigateur livré, pas de câblage à exiger."""
+    setup_standard_profile(tmp_path, profile_id="production", project_name="Demo")
+    result = verify_standard_profile(tmp_path)
+    assert _firewall_checks(result) == []
+
+
+def test_le_scaffold_livre_le_manifeste_cable(tmp_path: Path) -> None:
+    """Ce que le kit installe doit satisfaire ce que le kit vérifie."""
+    from grimoire.core.scaffold import UNTRUSTED_OUTPUT_ENTRYPOINTS
+
+    assert UNTRUSTED_OUTPUT_ENTRYPOINTS["web-browser.py"] == "grimoire web fetch"
