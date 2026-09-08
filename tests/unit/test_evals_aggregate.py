@@ -109,6 +109,21 @@ def test_cost_by_model_empty_when_cli_exposes_nothing() -> None:
     assert mod._cost_by_model(rows) == {}
 
 
+def test_cost_by_model_accepts_a_bare_number_entry() -> None:
+    """Some CLI shapes give the cost directly (no nested costUSD/cost_usd/cost
+    key) — entry is a float/int, not a dict. Must not raise AttributeError
+    from calling .get() on it (Copilot review, PR #322)."""
+    mod = _load_module()
+    rows = [_row("t1", model_usage={"claude-sonnet-4-6": 0.75})]
+    assert mod._cost_by_model(rows) == {"claude-sonnet-4-6": 0.75}
+
+
+def test_cost_by_model_ignores_a_non_numeric_non_dict_entry() -> None:
+    mod = _load_module()
+    rows = [_row("t1", model_usage={"claude-sonnet-4-6": "n/a"})]
+    assert mod._cost_by_model(rows) == {}
+
+
 def test_summarize_exposes_pass_hat_k_and_cost_by_model(monkeypatch) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "task_categories", lambda w: {"feat-due-dates": "capability"})
