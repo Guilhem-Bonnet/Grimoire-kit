@@ -30,6 +30,7 @@ from grimoire.memory.validation import (
     instruction_like,
     redact_metadata,
     redact_secrets,
+    redaction_audit,
     validate_memory_write,
 )
 
@@ -639,3 +640,76 @@ class TestCliRememberIsValidated:
         )
         assert b"AKIAIOSFODNN7EXAMPLE" not in written
         assert b"redacted:aws-access-key-id" in written
+
+
+# ── Le journal ne recopie pas le secret qu'il vient de retirer ────────────────
+
+
+class TestRedactionAuditNeverLeaks:
+    """CodeQL #342 (`py/clear-text-logging-sensitive-data`) sur la première
+    version : la ligne de journal était construite depuis le retour de
+    `redact_secrets`, nourri du texte en clair. Un journal qui recopie le secret
+    qu'il vient de retirer ne retire rien."""
+
+    _VALUE = "AKIAIOSFODNN7EXAMPLE"
+
+    def test_le_journal_ne_contient_pas_la_valeur(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="grimoire.memory.validation"):
+            validate_memory_write(f"clé {self._VALUE} à révoquer")
+        journal = " ".join(record.getMessage() for record in caplog.records)
+        assert "memory.redaction_applied" in journal
+        assert self._VALUE not in journal
+
+    def test_le_journal_nomme_le_motif_la_longueur_et_un_condense(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="grimoire.memory.validation"):
+            validate_memory_write(f"clé {self._VALUE}")
+        journal = " ".join(record.getMessage() for record in caplog.records)
+        assert "aws-access-key-id" in journal
+        assert f"len={len(self._VALUE)}" in journal
+        assert "sha256=" in journal
+
+    def test_le_condense_est_stable_et_tronque(self) -> None:
+        """De quoi recouper deux occurrences, pas de quoi reconstituer."""
+        first = redaction_audit(f"a {self._VALUE}")
+        second = redaction_audit(f"b {self._VALUE} c")
+        assert first == second
+        digest = first[0].split("sha256=")[1]
+        assert len(digest) == 12
+        assert self._VALUE not in first[0]
+
+    def test_un_texte_sain_ne_produit_aucun_descripteur(self) -> None:
+        assert redaction_audit("la rotation des mots de passe est trimestrielle") == ()
+
+    def test_la_metadonnee_ne_garde_que_les_etiquettes(self) -> None:
+        outcome = validate_memory_write(f"clé {self._VALUE}")
+        assert outcome.metadata is None or self._VALUE not in str(outcome.metadata)
+
+
+class TestUnserializableMetadataIsANamedRefusal:
+    """`json.dumps(..., default=None)` n'est pas un encodeur : au mieux il ne
+    faisait rien, au pire il aurait rendu « NoneType is not callable » à la
+    place du refus. Le refus doit être nommé, quelle que soit la valeur."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [object(), {1, 2, 3}, lambda: None, complex(1, 2), b"octets"],
+        ids=["object", "set", "callable", "complex", "bytes"],
+    )
+    def test_toute_valeur_non_serialisable_est_refusee(self, value: Any) -> None:
+        with pytest.raises(MemoryWriteRefusedError) as exc:
+            validate_memory_write(
+                "fait",
+                metadata={"project_name": "p", "source_kind": "memory", "x": value},
+            )
+        assert exc.value.code == "memory.metadata_unserializable"
+        assert "NoneType" not in str(exc.value)
+
+    def test_une_valeur_imbriquee_non_serialisable_est_refusee(self) -> None:
+        with pytest.raises(MemoryWriteRefusedError) as exc:
+            validate_memory_write(
+                "fait",
+                metadata={"project_name": "p", "source_kind": "memory", "x": {"y": [object()]}},
+            )
+        assert exc.value.code == "memory.metadata_unserializable"

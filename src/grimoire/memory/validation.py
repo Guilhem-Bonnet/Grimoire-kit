@@ -30,6 +30,7 @@ code stable, ce que l'appelant (CLI, outil MCP) peut rendre tel quel.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -52,6 +53,7 @@ __all__ = [
     "normalize_for_storage",
     "redact_metadata",
     "redact_secrets",
+    "redaction_audit",
     "validate_memory_write",
 ]
 
@@ -371,6 +373,25 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     return redacted, tuple(hits)
 
 
+def redaction_audit(text: str) -> tuple[str, ...]:
+    """Descripteurs journalisables d'une redaction : jamais la valeur.
+
+    Un journal qui recopie le secret qu'il vient de retirer ne retire rien —
+    CodeQL l'a signalé (`py/clear-text-logging-sensitive-data`, alerte #342) sur
+    la première version, qui journalisait le retour de :func:`redact_secrets`.
+    Chaque descripteur ne porte que le **nom du motif** (une constante du
+    module), la **longueur** de ce qui a été retiré et un **hachage tronqué** :
+    de quoi recouper deux occurrences ou reconnaître une fuite déjà vue, jamais
+    de quoi reconstituer le secret.
+    """
+    records: list[str] = []
+    normalized, _ = normalize_for_storage(text)
+    for label, pattern in _SECRET_PATTERNS:
+        for match in pattern.finditer(normalized):
+            digest = hashlib.sha256(match.group(0).encode("utf-8")).hexdigest()[:12]
+            records.append(f"{label} len={len(match.group(0))} sha256={digest}")
+    return tuple(records)
+
 def instruction_like(text: str) -> str:
     """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
 
@@ -462,7 +483,10 @@ def validate_memory_write(
             normalized, meta_hits = redact_metadata(normalized)
             redactions = (*redactions, *meta_hits)
         if redactions:
-            logger.warning("memory.redaction_applied: %s", ", ".join(redactions))
+            # Les descripteurs, pas les étiquettes issues du texte : le nom du
+            # motif est une constante, la longueur un entier, le condensé un
+            # hachage. Rien dans cette ligne ne remonte au secret.
+            logger.warning("memory.redaction_applied: %s", "; ".join(redaction_audit(normalized_text)))
             if normalized is None:
                 normalized = {}
             normalized = {**normalized, "redactions": list(redactions)}
@@ -528,23 +552,19 @@ def _check_metadata_schema(metadata: Any, policy: MemoryWritePolicy) -> dict[str
             f"Refusé : les métadonnées doivent être un mapping, reçu {type(metadata).__name__}.",
             remedy="Passer un dictionnaire, ou rien.",
         )
+    # Pas de `default=` : on veut que `json.dumps` **lève** sur une valeur qu'il
+    # ne sait pas écrire, pour la transformer en refus nommé. La première
+    # version passait `default=None`, qui n'est pas un encodeur : au mieux elle
+    # ne faisait rien, au pire elle aurait rendu « NoneType is not callable » à
+    # la place du refus.
     try:
-        encoded = json.dumps(metadata, ensure_ascii=False, default=None)
+        encoded = json.dumps(metadata, ensure_ascii=False)
     except (TypeError, ValueError) as exc:
         raise MemoryWriteRefusedError(
             "memory.metadata_unserializable",
             f"Refusé : métadonnées non sérialisables en JSON ({exc}).",
             remedy="N'y mettre que des scalaires, listes et mappings.",
         ) from exc
-    if "null" in encoded and any(
-        not isinstance(value, (str, int, float, bool, list, dict, type(None)))
-        for value in metadata.values()
-    ):
-        raise MemoryWriteRefusedError(
-            "memory.metadata_unserializable",
-            "Refusé : une valeur de métadonnée n'est pas sérialisable en JSON.",
-            remedy="N'y mettre que des scalaires, listes et mappings.",
-        )
     size = len(encoded.encode("utf-8"))
     if size > policy.max_metadata_bytes:
         raise MemoryWriteRefusedError(
