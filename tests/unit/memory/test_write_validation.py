@@ -660,24 +660,32 @@ class TestRedactionAuditNeverLeaks:
         assert "memory.redaction_applied" in journal
         assert self._VALUE not in journal
 
-    def test_le_journal_nomme_le_motif_la_longueur_et_un_condense(
+    def test_le_journal_nomme_le_motif_et_rien_d_autre(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """Deuxième tour : la version qui ajoutait la longueur et un sha256
+        tronqué a été refusée elle aussi (CodeQL #345). Le hachage n'est pas une
+        barrière reconnue, et la longueur est une information sur le secret. Le
+        journal ne porte plus que le nom des règles qui ont mordu."""
         with caplog.at_level(logging.WARNING, logger="grimoire.memory.validation"):
             validate_memory_write(f"clé {self._VALUE}")
         journal = " ".join(record.getMessage() for record in caplog.records)
         assert "aws-access-key-id" in journal
-        assert f"len={len(self._VALUE)}" in journal
-        assert "sha256=" in journal
+        assert str(len(self._VALUE)) not in journal
+        assert "sha256" not in journal
 
-    def test_le_condense_est_stable_et_tronque(self) -> None:
-        """De quoi recouper deux occurrences, pas de quoi reconstituer."""
-        first = redaction_audit(f"a {self._VALUE}")
-        second = redaction_audit(f"b {self._VALUE} c")
-        assert first == second
-        digest = first[0].split("sha256=")[1]
-        assert len(digest) == 12
-        assert self._VALUE not in first[0]
+    def test_les_etiquettes_viennent_de_la_table_de_motifs(self) -> None:
+        """Ce que la ligne de journal contient est une constante du module.
+
+        C'est la propriété qui rend le flux non traçable : seul le
+        *déclenchement* dépend du texte, et la donnée journalisée, elle, ne vient
+        jamais du secret.
+        """
+        from grimoire.memory.validation import _SECRET_PATTERNS
+
+        known = {label for label, _ in _SECRET_PATTERNS}
+        assert set(redaction_audit(f"a {self._VALUE}")) <= known
+        assert redaction_audit(f"a {self._VALUE}") == redaction_audit(f"b {self._VALUE} c")
 
     def test_un_texte_sain_ne_produit_aucun_descripteur(self) -> None:
         assert redaction_audit("la rotation des mots de passe est trimestrielle") == ()

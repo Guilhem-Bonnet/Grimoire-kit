@@ -30,7 +30,6 @@ code stable, ce que l'appelant (CLI, outil MCP) peut rendre tel quel.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
@@ -374,23 +373,27 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
 
 
 def redaction_audit(text: str) -> tuple[str, ...]:
-    """Descripteurs journalisables d'une redaction : jamais la valeur.
+    """Les motifs qui se sont déclenchés — rien qui vienne du secret.
 
-    Un journal qui recopie le secret qu'il vient de retirer ne retire rien —
-    CodeQL l'a signalé (`py/clear-text-logging-sensitive-data`, alerte #342) sur
-    la première version, qui journalisait le retour de :func:`redact_secrets`.
-    Chaque descripteur ne porte que le **nom du motif** (une constante du
-    module), la **longueur** de ce qui a été retiré et un **hachage tronqué** :
-    de quoi recouper deux occurrences ou reconnaître une fuite déjà vue, jamais
-    de quoi reconstituer le secret.
+    Un journal qui recopie le secret qu'il vient de retirer ne retire rien.
+    CodeQL l'a signalé deux fois : d'abord sur la ligne qui journalisait le
+    retour de :func:`redact_secrets` (alerte #342), puis sur une version qui
+    ajoutait la longueur et un sha256 tronqué (alerte #345). Le hachage n'est
+    pas une barrière reconnue par ``py/clear-text-logging-sensitive-data``, et
+    la longueur est bel et bien une information sur le secret.
+
+    Les étiquettes renvoyées ici sont prises **dans la table de motifs**, une
+    constante de module : seul le *déclenchement* dépend du texte, et CodeQL
+    suit les données, pas le flot de contrôle. La ligne de journal ne contient
+    donc ni la valeur, ni sa longueur, ni son empreinte — seulement le nom des
+    règles qui ont mordu, ce qui suffit à savoir quoi corriger à la source.
+
+    Le détail par occurrence, lui, reste dans la trace stockée avec l'entrée
+    (``metadata["redactions"]``), là où il est utile à un audit et où il ne
+    transite par aucun journal en clair.
     """
-    records: list[str] = []
     normalized, _ = normalize_for_storage(text)
-    for label, pattern in _SECRET_PATTERNS:
-        for match in pattern.finditer(normalized):
-            digest = hashlib.sha256(match.group(0).encode("utf-8")).hexdigest()[:12]
-            records.append(f"{label} len={len(match.group(0))} sha256={digest}")
-    return tuple(records)
+    return tuple(label for label, pattern in _SECRET_PATTERNS if pattern.search(normalized))
 
 def instruction_like(text: str) -> str:
     """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
@@ -483,10 +486,10 @@ def validate_memory_write(
             normalized, meta_hits = redact_metadata(normalized)
             redactions = (*redactions, *meta_hits)
         if redactions:
-            # Les descripteurs, pas les étiquettes issues du texte : le nom du
-            # motif est une constante, la longueur un entier, le condensé un
-            # hachage. Rien dans cette ligne ne remonte au secret.
-            logger.warning("memory.redaction_applied: %s", "; ".join(redaction_audit(normalized_text)))
+            # Les noms des motifs qui ont mordu, pris dans la table de motifs :
+            # aucune donnée issue du texte n'entre dans cette ligne. Le détail
+            # par occurrence vit dans la trace stockée, pas dans le journal.
+            logger.warning("memory.redaction_applied: %s", ", ".join(redaction_audit(normalized_text)))
             if normalized is None:
                 normalized = {}
             normalized = {**normalized, "redactions": list(redactions)}
