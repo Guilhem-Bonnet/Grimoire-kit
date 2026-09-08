@@ -776,6 +776,18 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
+## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Référence industrielle
+
+> Avant de dessiner un workflow, d'arbitrer mono-agent contre multi-agent, d'ajouter un
+> outil, un serveur MCP, un hook ou un sous-agent, ou quand une revue demande « est-ce
+> l'état de l'art ? », charger `{project-root}/_grimoire/kit/framework/agentic-industry-reference.md`
+> (chargé à la demande). Il condense les docs officielles des laboratoires, les
+> spécifications MCP, A2A, AGENTS.md, Agent Skills et OpenTelemetry GenAI, les cadres
+> OWASP et NIST, et la recherche chiffrée, avec pour chaque affirmation son niveau de
+> preuve. Sa section 10 dit où Grimoire est aligné, en avance ou en retard.
+
+<img src="../docs/assets/divider.svg" width="100%" alt="">
+
 ## <img src="../docs/assets/icons/branch.svg" width="28" height="28" alt=""> Version Compacte
 
 > Pour les contextes à budget token limité, charger `agent-base-compact.md` au lieu de ce fichier.

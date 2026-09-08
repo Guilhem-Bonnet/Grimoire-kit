@@ -56,3 +56,4 @@ Avant de livrer un output significatif, vérifier mentalement :
 4. Attendre input → traiter
 
 > Pour les détails complets (memory protocol, handoff, peak-end rule, affordance, activation steps) → charger `agent-base.md`
+> Pour l'état de l'art industriel (patterns, protocoles, sécurité, evals, économie, écarts Grimoire) → charger `agentic-industry-reference.md`
