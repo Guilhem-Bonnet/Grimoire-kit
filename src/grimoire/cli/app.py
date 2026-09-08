@@ -27,6 +27,7 @@ from grimoire.cli.cmd_context_pack import context_pack_command
 from grimoire.cli.cmd_debugger import debugger_app
 from grimoire.cli.cmd_ext import ext_app
 from grimoire.cli.cmd_features import features_app
+from grimoire.cli.cmd_flow import flow_app
 from grimoire.cli.cmd_hooks import hooks_app
 from grimoire.cli.cmd_host import host_app
 from grimoire.cli.cmd_memory_lexical import memory_app
@@ -911,6 +912,7 @@ app.add_typer(workflows_app, name="wf", hidden=True)
 app.add_typer(standard_app, name="standard", rich_help_panel="Project")
 app.add_typer(ext_app, name="ext", rich_help_panel="Project")
 app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
+app.add_typer(flow_app, name="flow", rich_help_panel="Project")
 app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
 app.add_typer(task_app, name="task", rich_help_panel="Project")
 app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")

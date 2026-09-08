@@ -139,6 +139,70 @@ def test_list_instances_filter_by_task(kernel):
     assert not results_other
 
 
+# --- #204 : la frontière d'étape (advance_step / fail_step / STEP_*) --------
+
+
+def test_advance_step_from_checkpointed_returns_to_running_and_emits_step_started(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    kernel.start(wfi.id, ctx)
+    kernel.checkpoint(wfi.id, ctx, step_id="s1", completed_steps=["s1"], pending_steps=["s2"])
+    wfi = kernel.advance_step(wfi.id, ctx, step_id="s2")
+    assert wfi.status == WorkflowStatus.RUNNING
+    events = kernel.get_run_events(wfi.id)
+    step_started = [e for e in events if e.event_type is RunEventType.STEP_STARTED]
+    assert len(step_started) == 1
+    assert step_started[0].payload["step_id"] == "s2"
+    # Un seul WORKFLOW_STARTED pour tout le run : advance_step n'en réémet pas
+    # un second, contrairement au contournement (rappeler start()) débusqué
+    # par le prototype de la première étape de #204.
+    assert len([e for e in events if e.event_type is RunEventType.WORKFLOW_STARTED]) == 1
+
+
+def test_advance_step_from_running_is_a_no_op_transition(kernel):
+    """Le tout premier node d'un run : déjà RUNNING après start(), pas de transition à faire."""
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    kernel.start(wfi.id, ctx)
+    wfi = kernel.advance_step(wfi.id, ctx, step_id="s1")
+    assert wfi.status == WorkflowStatus.RUNNING
+
+
+def test_checkpoint_emits_step_completed_with_step_id(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    kernel.start(wfi.id, ctx)
+    kernel.checkpoint(wfi.id, ctx, step_id="parse", completed_steps=["parse"], pending_steps=[])
+    events = kernel.get_run_events(wfi.id)
+    completed = [e for e in events if e.event_type is RunEventType.STEP_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["step_id"] == "parse"
+
+
+def test_fail_step_blocks_the_workflow_and_names_the_step(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    kernel.start(wfi.id, ctx)
+    wfi = kernel.fail_step(wfi.id, ctx, step_id="parse", reason="pin=out contract mismatch")
+    assert wfi.status == WorkflowStatus.BLOCKED
+    assert wfi.abort_reason == "pin=out contract mismatch"
+    events = kernel.get_run_events(wfi.id)
+    failed = [e for e in events if e.event_type is RunEventType.STEP_FAILED]
+    assert len(failed) == 1
+    assert failed[0].payload["step_id"] == "parse"
+    assert failed[0].payload["reason"] == "pin=out contract mismatch"
+
+
+def test_advance_step_from_blocked_recovers_to_running(kernel):
+    """Une retentative après correction de l'hôte repart légalement de BLOCKED."""
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
+    kernel.start(wfi.id, ctx)
+    kernel.fail_step(wfi.id, ctx, step_id="parse", reason="bad output")
+    wfi = kernel.advance_step(wfi.id, ctx, step_id="parse")
+    assert wfi.status == WorkflowStatus.RUNNING
+
+
 # --- P0.4 : un contrat d'adapter unique --------------------------------------
 
 

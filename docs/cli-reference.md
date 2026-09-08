@@ -445,6 +445,28 @@ le paquet `jsonschema`. Quand il manque, la couche ne s'exécute pas et les deux
 commandes **refusent** : un contrôle qui n'a pas eu lieu ne peut pas conclure à
 un succès. `--allow-skipped-schema` accepte explicitement le contrôle partiel.
 
+### `grimoire flow` — le moteur conduit, l'hôte exécute un node
+
+`blueprint compile` aplatit un blueprint en un unique prompt markdown : le
+modèle improvise l'ordre. `grimoire flow` inverse cela (#204) : le
+`RuntimeKernel` conduit un blueprint node par node, chaque node reçoit un
+contrat borné (entrées, frontière d'outils, critères d'acceptation, contrat
+de sortie), et **l'hôte** — jamais le kit — exécute le node. `compile` reste
+un repli valide pour les hôtes sans exécuteur de node ; `flow` ajoute une
+seconde sortie, il ne retire rien.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
+| `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
+| `grimoire flow resume <run-id> --output <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
+| `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
+
+Un checkpoint par node : un run interrompu reprend exactement au node
+courant, jamais du début. Une sortie non conforme au contrat de sortie du
+node **suspend** le run en nommant le node et la pin fautifs, avec un code de
+sortie non nul — jamais un échec muet.
+
 ---
 
 ## Cadrage produit
