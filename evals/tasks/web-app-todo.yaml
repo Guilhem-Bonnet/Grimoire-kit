@@ -59,9 +59,15 @@ disclosed_prompt_template: >-
   vide puis de la section « Critères d'acceptation : » listant verbatim, à
   raison d'une puce « - » par item et dans l'ordre du YAML, les entrées du
   champ `acceptance` de la tâche. Aucun autre ajout, aucune reformulation.
+# `category` par tâche : `capability` (mesure une compétence, taux bas
+# attendu) ou `regression` (sourcée d'un échec réel passé, taux proche
+# de 100 % attendu — protocole docs/evals-protocol.md, amendement A3).
+# Aucune tâche de ce fichier n'est sourcée d'un échec réel à ce jour :
+# toutes restent `capability` jusqu'à qualification d'un vrai incident.
 tasks:
   - id: feat-due-dates
     kind: feature
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Ajouter une date d'échéance optionnelle aux tâches : colonne SQL,
       endpoint API (création + mise à jour), affichage et tri côté SPA.
@@ -71,6 +77,7 @@ tasks:
       - tri par échéance couvert par un test frontend
   - id: feat-bulk-complete
     kind: feature
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Permettre de marquer plusieurs tâches comme terminées en une seule
       requête (endpoint batch + sélection multiple dans la SPA).
@@ -79,6 +86,7 @@ tasks:
       - état UI cohérent après échec partiel
   - id: fix-timezone-display
     kind: bugfix
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Les horodatages s'affichent en UTC au lieu du fuseau du navigateur.
       Corriger l'affichage sans changer le stockage (UTC en base).
@@ -87,6 +95,7 @@ tasks:
       - test d'affichage couvrant au moins deux fuseaux
   - id: fix-n-plus-one
     kind: bugfix
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       La liste des tâches déclenche une requête SQL par tag (N+1).
       Corriger via jointure ou chargement groupé.
@@ -95,6 +104,7 @@ tasks:
       - résultat identique à l'existant (snapshot)
   - id: refactor-handlers
     kind: refactor
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Extraire la validation des payloads des handlers HTTP Go vers un
       package dédié, sans changement de comportement.
@@ -103,6 +113,7 @@ tasks:
       - couverture de la validation conservée ou accrue
   - id: refactor-api-client
     kind: refactor
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Centraliser les appels fetch de la SPA dans un client API unique avec
       gestion d'erreurs uniforme.
@@ -111,6 +122,7 @@ tasks:
       - comportement d'erreur testé (401, 500, réseau)
   - id: migrate-go-version
     kind: migration
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Monter la version de Go d'une mineure (ex. 1.22 → 1.23) : toolchain,
       CI, lint, et correction des dépréciations rencontrées.
@@ -119,6 +131,7 @@ tasks:
       - changelog des dépréciations traitées
   - id: sec-rate-limit
     kind: security
+    category: capability  # capability|regression — voir docs/evals-protocol.md
     prompt: >-
       Ajouter un rate-limit par IP sur les endpoints d'écriture de l'API
       (configurable, désactivable en test).

@@ -4,7 +4,18 @@ from __future__ import annotations
 
 import json
 
-from grimoire.evals import EvalCase, EvalHarness, EvalOutcome, EvalReport, EvalResult, EvalScore
+import pytest
+
+from grimoire.evals import (
+    EvalCase,
+    EvalCategory,
+    EvalHarness,
+    EvalOutcome,
+    EvalReport,
+    EvalResult,
+    EvalScore,
+    pass_hat_k,
+)
 from grimoire.evals.fixtures import make_intake_suite, make_mission_lifecycle_suite, make_policy_suite
 
 # ── Schema roundtrip ──────────────────────────────────────────────────────────
@@ -94,6 +105,73 @@ class TestEvalSchemas:
         lines = [json.loads(line) for line in out.read_text().splitlines()]
         assert lines[0]["case_id"] == "a"
         assert lines[1]["outcome"] == "fail"
+
+
+# ── pass^k (B13) ────────────────────────────────────────────────────────────
+
+
+class TestPassHatK:
+    def test_task_passing_all_k_reps_counts_as_passed(self) -> None:
+        result = pass_hat_k({"t1": [True, True, True]}, k=3)
+        assert result.tasks_evaluated == 1
+        assert result.tasks_passed == 1
+        assert result.value == 1.0
+        assert result.per_task == {"t1": True}
+
+    def test_a_single_failure_fails_the_whole_task(self) -> None:
+        result = pass_hat_k({"t1": [True, True, False]}, k=3)
+        assert result.tasks_passed == 0
+        assert result.tasks_evaluated == 1
+        assert result.per_task == {"t1": False}
+
+    def test_unexecuted_rep_is_neither_success_nor_failure(self) -> None:
+        """A rep that never ran (None) must not be silently coerced into a
+        pass or a fail — the task falls short of k and is excluded instead.
+        """
+        result = pass_hat_k({"t1": [True, True, None]}, k=3)
+        assert result.tasks_evaluated == 0
+        assert result.tasks_passed == 0
+        assert result.tasks_insufficient == ("t1",)
+        assert result.per_task == {"t1": None}
+
+    def test_more_than_k_executed_reps_still_counts(self) -> None:
+        result = pass_hat_k({"t1": [True, True, True, True]}, k=3)
+        assert result.tasks_evaluated == 1
+        assert result.tasks_passed == 1
+
+    def test_mixed_suite_rate(self) -> None:
+        result = pass_hat_k(
+            {
+                "t1": [True, True, True],
+                "t2": [True, False, True],
+                "t3": [True, None, True],  # insufficient — excluded
+            },
+            k=3,
+        )
+        assert result.tasks_evaluated == 2
+        assert result.tasks_passed == 1
+        assert result.value == 0.5
+        assert result.tasks_insufficient == ("t3",)
+
+    def test_empty_suite_has_no_rate(self) -> None:
+        result = pass_hat_k({}, k=5)
+        assert result.tasks_evaluated == 0
+        assert result.value is None
+
+    def test_rejects_k_below_one(self) -> None:
+        with pytest.raises(ValueError, match="k doit"):
+            pass_hat_k({"t1": [True]}, k=0)
+
+    def test_to_dict_is_json_ready(self) -> None:
+        result = pass_hat_k({"t1": [True]}, k=1)
+        d = result.to_dict()
+        assert d["pass_hat_k"] == 1.0
+        assert d["tasks_evaluated"] == 1
+        json.dumps(d)  # doit être sérialisable tel quel
+
+    def test_eval_case_category_defaults_to_capability(self) -> None:
+        case = EvalCase(case_id="x", name="X", fn=lambda: EvalResult(case_id="x", outcome=EvalOutcome.PASS))
+        assert case.category == EvalCategory.CAPABILITY
 
 
 # ── EvalHarness ───────────────────────────────────────────────────────────────

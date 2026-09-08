@@ -153,6 +153,47 @@ d'efficacité.
   campagne pré-enregistrée passe le critère composite, la thèse est démontrée
   sur cette suite, et la règle d'arrêt n'a simplement jamais à s'appliquer.
 
+### A3 — 2026-09-08 — pass^k, catégorie capability/regression, coût par sous-agent
+
+- **Moment** : suite à l'audit d'écart contre la référence agentique
+  industrielle (2026-09-08, `framework/agentic-industry-reference.md` §6.1
+  et 6.2) — aucune campagne n'a encore consommé cet amendement.
+- **Contexte** : chaque suite de tâches déclare `repetitions_min` (k = 5
+  sur les deux suites pinnées) et exécute déjà k répétitions par tâche,
+  mais aucun rapport n'en tirait de mesure de *consistance* — seul le taux
+  de complétion par run était agrégé, un run à la fois. La référence
+  distingue aussi `pass@k` (au moins une réussite sur k, optimiste) de
+  `pass^k` (τ-bench/τ²-bench : réussite sur les k répétitions, la mesure
+  pertinente pour juger si un comportement est fiable plutôt que chanceux)
+  et sépare *capability evals* (mesurent une compétence, taux bas attendu)
+  des *regression evals* (sourcées d'un échec réel, taux proche de 100 %
+  attendu) — deux familles que le protocole ne distinguait pas.
+- **Décision** :
+  1. `evals/aggregate.py` calcule **pass^k**, jamais pass@k : une tâche
+     compte comme réussie seulement si elle réussit la **totalité** de ses
+     k répétitions **exécutées et jugées** (`grimoire.evals.schemas.pass_hat_k`).
+     Une répétition non exécutée (arrêt budgétaire, incident) ou non encore
+     jugée n'est ni un succès ni un échec ; la tâche reste hors dénominateur
+     tant qu'elle n'a pas atteint k, et apparaît nommément dans
+     `tasks_insufficient` plutôt que d'être absorbée en silence dans un taux.
+  2. Chaque tâche des suites `evals/tasks/*.yaml` porte un champ
+     `category: capability | regression`, par défaut `capability`. Une
+     tâche ne passe en `regression` que si elle est effectivement sourcée
+     d'un échec réel documenté — aucune tâche des suites pinnées ne l'est à
+     ce jour, elles restent donc toutes `capability`. `evals/aggregate.py`
+     rapporte pass^k séparément pour les deux catégories
+     (`pass_hat_k_capability`, `pass_hat_k_regression`), en plus du total.
+  3. Coût par sous-agent : le run-record (`evals/collect.py`) porte un
+     champ `external.model_usage`, rempli depuis `modelUsage` (ou
+     équivalent) quand la CLI l'expose dans son JSON de résultat. La CLI
+     n'expose à ce jour aucune ventilation par *sous-agent nommé* — seule
+     une ventilation par **modèle** existe quand elle existe. Le champ
+     reste `None` en son absence, jamais inventé ; `evals/aggregate.py`
+     agrège ce qui est présent sous `cost_by_model`.
+- **Portée** : non rétroactif — les rapports déjà committés sous
+  `evals/reports/` ne sont pas recalculés ; l'amendement s'applique à
+  compter de la prochaine campagne exécutée.
+
 ### Journal des changements d'intervention (clause 3 d'A2)
 
 - **2026-09-04 — intervention : de la directive à la contrainte.** Avant la

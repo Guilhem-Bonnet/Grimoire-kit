@@ -370,6 +370,11 @@ def collect(run_dir: Path, task_id: str, arm: str) -> dict[str, Any]:
             "tests_green": mech.get("tests_green"),
             "tokens_cost": result.get("total_cost_usd"),
             "human_interventions": 0,
+            # `modelUsage` (SDK Claude Code) ventile le coût par modèle quand
+            # la CLI l'expose ; aucune ventilation par *sous-agent nommé*
+            # n'existe côté CLI à ce jour (B13, docs/evals-protocol.md) —
+            # reste `None` plutôt que d'inventer une clé absente.
+            "model_usage": result.get("modelUsage") or result.get("model_usage"),
         }
     )
     record["run"] = {
