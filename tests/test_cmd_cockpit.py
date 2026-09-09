@@ -208,13 +208,14 @@ def test_refresh_generates_when_project_registered(
     assert "régénérées" in res.output
 
 
-def test_refresh_purges_dead_paths_before_generating(
+def test_refresh_signale_les_chemins_morts_sans_toucher_au_registre(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#340 : un chemin disparu est retiré du registre, pas seulement ignoré à l'affichage.
+    """#340 : un chemin disparu est signalé, jamais retiré d'office.
 
-    La purge doit être écrite, pas juste filtrée en mémoire — sinon le prochain
-    appel paie de nouveau le coût des dossiers morts.
+    Un chemin absent n'est pas toujours mort — disque débranché, montage réseau
+    tombé. Retirer l'entrée à la place de l'utilisateur perdrait sa
+    configuration sans qu'il l'ait demandé ; `prune` reste son geste.
     """
     proj = _project(tmp_path, "vivant")
     runner.invoke(app, ["cockpit", "add", str(proj)])
@@ -228,8 +229,9 @@ def test_refresh_purges_dead_paths_before_generating(
 
     assert res.exit_code == 0
     assert "1 entrée(s) ignorée(s), chemin disparu" in res.output
+    assert "prune" in res.output
     remaining = project_registry.load_registry()
-    assert [p["slug"] for p in remaining] == ["vivant"]
+    assert sorted(p["slug"] for p in remaining) == ["fantome", "vivant"]
 
 
 def test_generate_data_warns_on_subprocess_failure(
