@@ -1,8 +1,12 @@
 """Les manifestes d'équipe avaient un schéma, trois fichiers, et aucun lecteur.
 
-`framework/teams/` décrit la chaîne vision → build → ops : membres, rôles,
-contrats, phases, handoff. `grep -r teams src/` ne renvoyait rien. Ces tests
-fixent ce que le chargeur en tire et ce qu'il refuse.
+`framework/teams/` décrivait la chaîne vision → build → ops : membres, rôles,
+contrats, phases, handoff. `grep -r teams src/` ne renvoyait rien. Les trois
+manifestes livrés référençaient des agents (`architect`, `dev`, `qa`, `sm`,
+`pm`, `analyst`, `ux-designer`, `tech-writer`, `innovation-strategist`)
+qu'aucun archétype du kit ne fournit — un reliquat de la pile BMAD retiré en
+#346. Ces tests fixent ce que le chargeur tire d'un manifeste, avec des
+fixtures synthétiques plutôt qu'avec les fichiers livrés.
 """
 
 from __future__ import annotations
@@ -21,32 +25,48 @@ def _manifest(tmp_path: Path, name: str, body: str) -> Path:
     return path
 
 
-class TestShippedManifests:
-    def test_the_three_teams_load(self, tmp_path: Path) -> None:
-        names = {team.name for team in teams.load_teams(tmp_path)}
+class TestSyntheticManifests:
+    def test_a_chain_of_manifests_loads(self, tmp_path: Path) -> None:
+        _manifest(
+            tmp_path, "vision",
+            'team:\n  name: "vision"\n  handoff:\n    to_team: "build"\n',
+        )
+        _manifest(
+            tmp_path, "build",
+            'team:\n  name: "build"\n  handoff:\n    to_team: "ops"\n',
+        )
 
-        assert {"team-vision", "team-build", "team-ops"} <= names
-
-    def test_the_handoff_chain_is_readable(self, tmp_path: Path) -> None:
         chain = {team.name: team.handoff_to for team in teams.load_teams(tmp_path)}
 
-        assert chain["team-vision"] == "team-build"
-        assert chain["team-build"] == "team-ops"
+        assert chain["vision"] == "build"
+        assert chain["build"] == "ops"
 
     def test_a_roster_carries_roles_and_optionality(self, tmp_path: Path) -> None:
-        build = teams.load_team(tmp_path, "team-build")
+        path = _manifest(
+            tmp_path, "build",
+            'team:\n  name: "build"\n  agents:\n'
+            '    - name: "concierge"\n      role: "lead"\n      required: true\n'
+            '    - name: "memory-keeper"\n      role: "support"\n      required: false\n',
+        )
+        build = teams.parse_team(path)
 
         assert build is not None
-        assert "dev" in build.required_agents
+        assert "concierge" in build.required_agents
         optional = [m.name for m in build.agents if not m.required]
-        assert "tech-writer" in optional
+        assert "memory-keeper" in optional
         assert all(member.role for member in build.agents)
 
     def test_delivery_phases_are_exposed(self, tmp_path: Path) -> None:
-        build = teams.load_team(tmp_path, "team-build")
+        path = _manifest(
+            tmp_path, "build",
+            'team:\n  name: "build"\n  delivery_workflow:\n    phases:\n'
+            '      - phase: 1\n        name: "un"\n'
+            '      - phase: 2\n        name: "deux"\n',
+        )
+        build = teams.parse_team(path)
 
         assert build is not None
-        assert len(build.phases) >= 4
+        assert len(build.phases) == 2
 
 
 class TestResolution:

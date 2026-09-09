@@ -69,15 +69,31 @@ class TestList:
         assert "orchestration" in result.output
 
 
+def _team(project: Path, name: str, body: str) -> Path:
+    path = project / layout.KIT_DIR / "teams" / f"{name}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 class TestShow:
     def test_show_renders_the_declared_team(self, project: Path) -> None:
-        result = runner.invoke(app, ["-o", "json", "workflows", "show", "boomerang-orchestration", str(project)])
+        _team(
+            project, "equipe-atelier",
+            'team:\n  name: "equipe-atelier"\n  handoff:\n    to_team: "equipe-suivante"\n'
+            '  agents:\n    - name: "creative-toolsmith"\n      role: "lead"\n      required: true\n',
+        )
+        _installed(
+            project, "orchestree.md",
+            "---\nkind: orchestration\ndescription: 'x'\nteam: equipe-atelier\n---\n\nCorps.\n",
+        )
+        result = runner.invoke(app, ["-o", "json", "workflows", "show", "orchestree", str(project)])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["team"] == "team-build"
-        assert data["team_manifest"]["handoff_to"] == "team-ops"
-        assert "dev" in data["team_manifest"]["required_agents"]
+        assert data["team"] == "equipe-atelier"
+        assert data["team_manifest"]["handoff_to"] == "equipe-suivante"
+        assert "creative-toolsmith" in data["team_manifest"]["required_agents"]
 
     def test_show_reports_a_team_that_is_not_installed(self, project: Path) -> None:
         _installed(
@@ -103,13 +119,21 @@ class TestShow:
 
 class TestTeams:
     def test_teams_lists_the_chain(self, project: Path) -> None:
+        _team(
+            project, "equipe-vision",
+            'team:\n  name: "equipe-vision"\n  handoff:\n    to_team: "equipe-atelier"\n',
+        )
+        _team(
+            project, "equipe-atelier",
+            'team:\n  name: "equipe-atelier"\n  handoff:\n    to_team: "equipe-suivante"\n',
+        )
         result = runner.invoke(app, ["-o", "json", "workflows", "teams", str(project)])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
         chain = {t["name"]: t["handoff_to"] for t in data["teams"]}
-        assert chain["team-vision"] == "team-build"
-        assert chain["team-build"] == "team-ops"
+        assert chain["equipe-vision"] == "equipe-atelier"
+        assert chain["equipe-atelier"] == "equipe-suivante"
 
 
     def test_a_broken_team_manifest_is_named_not_dropped(self, project: Path) -> None:
