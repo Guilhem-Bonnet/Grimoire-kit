@@ -6,9 +6,14 @@ route honore la cible**. Deux projets réels sont initialisés, servis par les
 deux hôtes en même temps, et chaque lecture doit répondre pour le projet qu'on
 lui a désigné — jamais pour l'autre, jamais pour « le dernier sélectionné ».
 
-Le second volet est le contraire : le cockpit se déclare ``readOnly``. Les
-écritures de la vue de travail (réclamer une tâche, prendre un override, lancer
-une commande) ne doivent exister QUE sur l'hôte mono-projet.
+Le second volet est le contraire : le cockpit se déclare ``readOnly`` — sauf
+pour le projet qu'il sert en direct (``_HOME_SLUG``, résolu au lancement
+depuis le dossier courant, #351/#356 : fusionner ``serve`` dans ``cockpit
+serve`` ne devait pas retirer la capacité d'écrire depuis ce projet-là). Les
+écritures de la vue de travail (réclamer une tâche, prendre un override,
+lancer une commande) restent donc refusées sur tout AUTRE projet du registre —
+celui qu'on ne fait que regarder — mais honorées sur le projet de lancement,
+exactement comme sur l'hôte mono-projet historique.
 """
 
 from __future__ import annotations
@@ -110,6 +115,36 @@ def cockpit(real_project: Path, second_project: Path, tmp_path: Path, monkeypatc
         cmd_cockpit._API_CACHE.clear()
 
 
+@pytest.fixture
+def cockpit_home(
+    real_project: Path, second_project: Path, tmp_path: Path, monkeypatch
+) -> Iterator[int]:
+    """Le même cockpit, mais lancé depuis ``projet-a`` (#351/#356).
+
+    ``monkeypatch.setattr`` sur ``_HOME_SLUG`` mime ce que ``serve()`` ferait
+    via ``_select_cwd_project`` sans passer par un vrai ``cwd`` ni écrire
+    l'état persistant du registre — et s'annule tout seul en fin de test, pour
+    qu'aucun autre test de ce fichier n'hérite d'un projet de lancement.
+    """
+    monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "cockpit-home"))
+    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "projet-a")
+    cmd_cockpit._API_CACHE.clear()
+    reg.register_project(real_project, "projet-a")
+    reg.register_project(second_project, "projet-b")
+    serve_dir = tmp_path / "serve-home"
+    serve_dir.mkdir(parents=True)
+    handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_address[1]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        cmd_cockpit._API_CACHE.clear()
+
+
 # ── 1. Chaque route honore la cible ─────────────────────────────────────────
 
 
@@ -157,22 +192,54 @@ def test_un_projet_inconnu_est_refuse_par_le_cockpit(cockpit: int) -> None:
     assert code == 404
 
 
-# ── 2. Les écritures n'existent que sur l'hôte mono-projet ──────────────────
+# ── 2. Les écritures n'existent que sur le projet de lancement ──────────────
 
 
 @pytest.mark.parametrize("route", sorted(POST_ROUTES))
-def test_le_cockpit_n_expose_aucune_ecriture_de_la_vue_de_travail(
+def test_le_cockpit_refuse_les_ecritures_sur_un_projet_qu_il_ne_lance_pas(
     route: str, cockpit: int
 ) -> None:
-    """Le cockpit se déclare `readOnly` depuis sa création.
+    """Le cockpit se déclare `readOnly` — sauf sur son projet de lancement.
 
-    Lui donner de quoi réclamer une tâche ou prendre un override dans un dépôt
-    qu'il ne sert pas serait une régression de gouvernance. Le refus est un 404 :
-    la route n'existe pas de ce côté.
+    Cette fixture n'en a pas (`_select_cwd_project` n'a jamais tourné) : les
+    deux projets du registre sont donc de simples entrées qu'on regarde, pas
+    celui qu'on sert en direct. Réclamer une tâche ou créer un override dans
+    l'un ou l'autre resterait une régression de gouvernance — la route
+    EXISTE désormais des deux côtés (#356), le refus est donc un 403, plus
+    précis que le 404 d'avant sa fusion dans `cockpit serve` (#351).
     """
     code, _ = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
 
-    assert code == 404
+    assert code == 403
+
+
+@pytest.mark.parametrize("route", sorted(POST_ROUTES))
+def test_le_cockpit_refuse_toujours_l_autre_projet_meme_avec_un_lancement_direct(
+    route: str, cockpit_home: int
+) -> None:
+    """`cockpit_home` sert `projet-a` en direct — mais pas `projet-b`.
+
+    Le pilier de la garantie #356 : avoir UN projet ouvert en écriture ne rend
+    pas le cockpit généralement inscriptible. Un clic malheureux sur une autre
+    carte du registre ne doit jamais écrire là où l'utilisateur ne fait que
+    regarder.
+    """
+    code, _ = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
+
+    assert code == 403
+
+
+def test_le_cockpit_execute_une_commande_de_la_liste_blanche_sur_son_projet_de_lancement(
+    cockpit_home: int,
+) -> None:
+    """Miroir cockpit de `test_l_atelier_execute_une_commande_de_la_liste_blanche`
+    (#356) : le projet de lancement retrouve la capacité que `serve` avait
+    avant sa fusion dans `cockpit serve` (#351)."""
+    code, payload = _post(cockpit_home, f"{PREFIX}command?project=projet-a", {"argv": ["version"]})
+
+    assert code == 200
+    assert payload["ok"] is True
+    assert "grimoire-kit" in payload["output"]
 
 
 def test_l_atelier_execute_une_commande_de_la_liste_blanche(atelier: int) -> None:

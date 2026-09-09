@@ -695,11 +695,21 @@ async function main() {
   }
 
   if (status) {
+    // `applyPreferences()` a déjà tourné une fois plus haut, avant que
+    // `host.project` ne soit connu (pour éviter un flash de mauvais thème
+    // pendant l'aller-retour réseau) — avec la clé de repli `atelier`. Tant
+    // que `grimoire serve` servait toujours `project: null`, cette clé était
+    // la même avant et après l'amorçage et le rejeu ci-dessous ne changeait
+    // rien d'observable. Depuis #351/#356, `cockpit serve` résout un vrai
+    // slug : sans ce second appel, thème et densité se lisaient sous la
+    // bonne clé après un clic (`toggleTheme`, appelé après amorçage) mais
+    // sous `atelier` après un rechargement — la préférence semblait perdue.
+    applyPreferences();
     $('project-name').textContent = host.project || status.slug || '(projet servi)';
     $('project-dot').classList.add('ok');
     $('st-kit').textContent = 'grimoire-kit ' + (status.kitVersion || '—');
     $('st-api').textContent = 'API locale ' + location.host;
-    $('st-host').textContent = host.kind === 'cockpit' ? 'cockpit · lecture seule' : 'atelier';
+    $('st-host').textContent = host.readOnly ? 'cockpit · lecture seule' : (host.kind === 'cockpit' ? 'cockpit' : 'atelier');
     try {
       await glossary.load(api);
       glossary.attach(document);

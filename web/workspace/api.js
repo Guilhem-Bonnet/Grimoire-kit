@@ -19,6 +19,15 @@ export const host = {
   project: null,
   /** Vrai quand l'hôte refuse les écritures (cockpit). */
   readOnly: false,
+  // Vrai si `project` vient d'un `?project=` explicite dans l'URL (une
+  // navigation cockpit délibérée — carte Flotte cliquée, lien copié) ; faux
+  // s'il vient de la sélection courante que le serveur a résolue tout seul
+  // (`?project=` absent — lancement direct depuis un projet, #351/#356). Les
+  // espaces qui distinguent « je regarde ce projet en passant » de « j'ai
+  // lancé le cockpit depuis ce projet » lisent ce champ, pas seulement
+  // `project` (voir piloter.js : Flotte reste le point d'entrée par défaut du
+  // pilotage de flotte, sauf lancement direct).
+  projectFromUrl: false,
   status: null,
 };
 
@@ -95,6 +104,7 @@ export async function boot() {
   host.status = status;
   host.kind = status.host === 'cockpit' ? 'cockpit' : 'atelier';
   host.readOnly = status.readOnly === true;
+  host.projectFromUrl = host.kind === 'cockpit' && Boolean(wanted);
   if (host.kind === 'cockpit') host.project = host.project || status.project || status.slug;
   else host.project = null;
   return status;
@@ -144,14 +154,20 @@ export const api = {
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),
 
-  // ── Blueprints : éditeur de graphe (atelier seulement — voir forge_routes.py) ─
+  // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
+  // Lecture, validation et simulation sont disponibles sur les deux hôtes
+  // (le cockpit les sert pour le projet déjà sélectionné, #356) : aucune des
+  // trois n'écrit sur disque. `postOpen` contourne donc le même verrou
+  // `readOnly` que `updateProject` plus haut, et pour la même raison — ce
+  // n'est pas une mutation de la vue de travail. Seules `blueprintPut` et
+  // `blueprintCompile` écrivent réellement, et restent derrière `put`/`post`.
   blueprintGet: (id) => get('/api/blueprints/' + encodeURIComponent(id)),
   blueprintDiff: (id, ref) =>
     get('/api/blueprints/' + encodeURIComponent(id) + '/diff', ref ? { ref } : undefined),
   blueprintValidate: (id, blueprint) =>
-    post('/api/blueprints/' + encodeURIComponent(id) + '/validate', blueprint),
+    postOpen('/api/blueprints/' + encodeURIComponent(id) + '/validate', blueprint),
   blueprintSimulate: (id, blueprint) =>
-    post('/api/blueprints/' + encodeURIComponent(id) + '/simulate', blueprint),
+    postOpen('/api/blueprints/' + encodeURIComponent(id) + '/simulate', blueprint),
   blueprintCompile: (id, blueprint) =>
     post('/api/blueprints/' + encodeURIComponent(id) + '/compile', blueprint),
   costModel: (model) => get('/api/cost-model', model ? { model } : undefined),

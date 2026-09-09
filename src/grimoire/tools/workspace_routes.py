@@ -10,10 +10,14 @@ résolue depuis ``?project=`` — et le test
 cible qu'on lui donne.
 
 Les écritures sont ailleurs dans le même fichier, mais derrière une porte
-différente : :func:`workspace_post` n'est câblé que sur l'hôte mono-projet. Le
-cockpit se déclare ``readOnly`` depuis sa création ; lui donner de quoi
-réclamer une tâche ou créer un override dans un dépôt qu'il ne sert pas serait
-une régression de gouvernance, pas une commodité.
+différente : :func:`workspace_post` reste agnostique de l'hôte appelant (il
+exécute pour le ``project_root`` qu'on lui donne, un point c'est tout), mais
+qui a le droit de l'appeler ne l'est pas. L'atelier le câble sans condition.
+Le cockpit (``cmd_cockpit.py::_CockpitHandler.do_POST``) ne le câble que pour
+le projet qu'il sert en direct — ``_HOME_SLUG``, résolu une fois au lancement,
+jamais pour un autre projet du registre qu'on ne fait que regarder (#351/#356).
+Lui donner de quoi réclamer une tâche ou créer un override dans un dépôt qu'il
+ne sert pas serait une régression de gouvernance, pas une commodité.
 
 Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
 une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
@@ -305,7 +309,12 @@ TASK_ACTIONS = ("claim", "move", "block", "close")
 
 
 def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
-    """Résout une écriture de la vue de travail. Hôte mono-projet uniquement."""
+    """Résout une écriture de la vue de travail pour ``project_root``.
+
+    Agnostique de l'hôte appelant : c'est à l'appelant de décider s'il a le
+    droit d'écrire ici (l'atelier, toujours ; le cockpit, seulement pour son
+    projet de lancement — voir le docstring du module).
+    """
     if not path.startswith(PREFIX):
         return WORKSPACE_UNHANDLED
     from grimoire.core.exceptions import GrimoireError

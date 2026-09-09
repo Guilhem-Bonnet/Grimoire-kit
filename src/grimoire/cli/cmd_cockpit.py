@@ -129,6 +129,14 @@ def _resolve_project_path(slug: str | None) -> Path | None:
     return Path(projects[0]["path"]) if projects else None
 
 
+# Slug du projet servi en direct par CE process (#351/#356) — distinct de
+# `selected_slug()` (la sélection courante, persistée au disque, qui dérive
+# librement dès que l'UI navigue vers un autre projet du registre). Réglé une
+# fois, avant `serve_forever()` (voir `_select_cwd_project`), jamais ensuite :
+# c'est ce qui garde l'écriture ouverte sur LE projet de lancement même après
+# une navigation Flotte, et fermée sur tout autre projet du registre.
+_HOME_SLUG: str | None = None
+
 _API_CACHE: dict[Path, Any] = {}
 
 
@@ -238,6 +246,17 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         asked = parse_qs(urlparse(self.path).query).get("project", [""])[0]
         return asked or selected_slug()
 
+    def _is_home_request(self) -> bool:
+        """Vrai si la requête cible le projet servi en direct par ce process.
+
+        `_HOME_SLUG` ne bouge jamais après le démarrage ; `_query_slug()` peut
+        pointer ailleurs dès que l'UI navigue vers un autre projet du
+        registre (carte Flotte, `?project=` explicite) — cette requête-là
+        reste en lecture seule, comme toute navigation cockpit vers un projet
+        qu'on ne fait que regarder (#356).
+        """
+        return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
+
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
         path = parsed.path
@@ -281,14 +300,43 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": str(exc)})
             return
         if payload is API_GET_UNHANDLED:
-            self._send_json(404, {"ok": False, "error": "not found"})
-            return
+            # `/api/blueprints/<id>` (et son `/diff`) sont restés hors de la
+            # table partagée `api_get()` du temps où le cockpit ne servait
+            # jamais qu'une flotte en lecture seule, jamais un projet ouvert
+            # directement (#351 a fusionné `serve` ici). Concevoir a
+            # maintenant besoin de les lire pour dessiner le graphe du projet
+            # déjà sélectionné — une lecture, pas une édition : `blueprint_put`
+            # et `/compile` restent absents d'ici, seule la mutation reste
+            # bloquée par `readOnly` côté client (#356).
+            if path.startswith("/api/blueprints/"):
+                try:
+                    api = _project_api(proot)
+                    if path.endswith("/diff"):
+                        bp_id = path.split("/")[3]
+                        ref = parse_qs(urlparse(self.path).query).get("ref", ["HEAD"])[0]
+                        payload = api.blueprint_diff(bp_id, ref)
+                    else:
+                        payload = api.blueprint_get(path.rsplit("/", 1)[1])
+                except FileNotFoundError:
+                    self._send_json(404, {"ok": False, "error": "blueprint introuvable"})
+                    return
+            else:
+                self._send_json(404, {"ok": False, "error": "not found"})
+                return
         # Même forme de réponse que l'atelier : la charge utile brute, pour que
         # le même code de page fonctionne contre les deux serveurs. Seul
-        # ``/api/status`` est enrichi, pour que l'UI sache qu'elle est sur un
-        # hôte multi-projets en lecture seule et n'y propose pas de mutation.
+        # ``/api/status`` est enrichi, pour que l'UI sache si l'hôte accepte
+        # des mutations. Depuis #356 ce n'est plus toujours faux : le projet
+        # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
+        # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
+        # naviguer vers un AUTRE projet du registre reste en lecture seule.
         if path == "/api/status" and isinstance(payload, dict):
-            payload = {**payload, "host": "cockpit", "readOnly": True, "project": self._query_slug()}
+            payload = {
+                **payload,
+                "host": "cockpit",
+                "readOnly": not self._is_home_request(),
+                "project": self._query_slug(),
+            }
         self._send_json(200, payload)
 
     def do_POST(self) -> None:  # http.server contract
@@ -299,6 +347,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._local_only():
             return
+        from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
+
         if path == "/api/projects/select":
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -369,6 +419,71 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": str(exc)})
             except (PermissionError, OSError) as exc:
                 self._send_json(403, {"ok": False, "error": str(exc)})
+            return
+        if path.startswith(WORKSPACE_PREFIX):
+            # Écritures de la vue de travail (réclamer/réaliser une tâche,
+            # écrire un fichier, créer un override, lancer une commande) :
+            # l'ancien atelier les honorait, `cockpit serve` en a hérité sans
+            # les câbler quand #351 a fait de lui le seul serveur restant —
+            # même trouvaille que `--project-root` (d5047fc6), pour la même
+            # raison : fusionner deux commandes ne devait pas couper une
+            # capacité (#356). Restreint à `_HOME_SLUG` : le projet qu'on ne
+            # fait que regarder via le registre reste en lecture seule.
+            if not self._is_home_request():
+                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                return
+            proot = _resolve_project_path(self._query_slug() or None)
+            if proot is None or not proot.is_dir():
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
+
+            result = workspace_post(proot, path, body)
+            if result is WORKSPACE_UNHANDLED:
+                self._send_json(404, {"ok": False, "error": "route inconnue"})
+            else:
+                self._send_json(200, result)
+            return
+        if path.startswith("/api/blueprints/") and path.endswith(("/validate", "/simulate")):
+            # Calcul, pas écriture : `blueprint_lint`/`blueprint_simulate` ne
+            # touchent jamais le disque (voir leurs docstrings — la simulation
+            # « ne produit aucun effet »). `/compile` et `PUT` restent absents
+            # d'ici ; ce sont eux, pas ceux-ci, que `readOnly` doit bloquer
+            # côté client (#356 — Concevoir doit pouvoir valider/simuler le
+            # projet déjà sélectionné sur le cockpit, comme sur l'atelier).
+            proot = _resolve_project_path(self._query_slug() or None)
+            if proot is None or not proot.is_dir():
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            api = _project_api(proot)
+            bp_id = path.split("/")[3]
+            try:
+                blueprint = body or api.blueprint_get(bp_id)
+                if path.endswith("/validate"):
+                    self._send_json(200, api.blueprint_lint(blueprint))
+                else:
+                    qs = parse_qs(urlparse(self.path).query)
+                    inject = None
+                    if qs.get("injectNode"):
+                        inject = {
+                            "nodeId": qs["injectNode"][0],
+                            "class": qs.get("injectClass", ["unknown"])[0],
+                        }
+                    self._send_json(200, api.blueprint_simulate(blueprint, inject_failure=inject))
+            except FileNotFoundError:
+                self._send_json(404, {"ok": False, "error": "blueprint introuvable"})
             return
         if path != "/api/memory":
             self._send_json(404, {"ok": False, "error": "not found"})
@@ -568,6 +683,57 @@ def _unregistered_cwd_notice(projects: list[dict[str, str]]) -> str | None:
     )
 
 
+def _select_cwd_project(root: Path | None = None) -> str | None:
+    """Si le dossier courant est un projet Grimoire, le rendre courant.
+
+    Décision #351 : lancer le cockpit depuis un projet doit l'ouvrir dessus,
+    sans perdre le caractère multi-projet (la bascule reste dans l'UI). Le
+    projet est enregistré automatiquement s'il ne l'était pas encore — c'est
+    l'utilisateur qui vient d'exprimer son intention en lançant la commande
+    ici, l'enregistrement explicite ferait répéter une décision déjà prise.
+
+    ``GRIMOIRE_NO_COCKPIT`` désactive cette adoption, comme elle désactive
+    déjà l'enregistrement au moment de l'initialisation : une commande qui
+    écrit dans l'état de la machine doit pouvoir être exécutée sans le faire,
+    et la suite de tests est le premier appelant à en avoir besoin.
+
+    Renvoie un message à afficher quand le projet vient d'être enregistré, ou
+    ``None`` si rien n'a changé.
+
+    Retient aussi ce slug dans ``_HOME_SLUG`` (#356) : c'est le seul projet
+    pour lequel *ce* process honorera une écriture, même après que l'UI ait
+    navigué ailleurs dans le registre — voir ``_CockpitHandler._is_home_request``.
+    """
+    global _HOME_SLUG
+    if os.environ.get("GRIMOIRE_NO_COCKPIT"):
+        return None
+    cwd = (root or Path.cwd()).resolve()
+    if not looks_grimoire(cwd):
+        return None
+    slug = slug_for_path(cwd)
+    message = None
+    if slug is None:
+        slug = register_project(cwd)
+        if slug is None:
+            return None
+        message = f"[green]+[/green] Projet courant enregistré → [b]{slug}[/b] ({cwd})"
+    set_selected_slug(slug)
+    _HOME_SLUG = slug
+    return message
+
+
+def _suggest_free_port(start: int, attempts: int = 10) -> int | None:
+    """Premier port libre après ``start`` (exclu), ou ``None`` si rien trouvé."""
+    for candidate in range(start + 1, start + 1 + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", candidate))
+            except OSError:
+                continue
+            return candidate
+    return None
+
+
 @cockpit_app.command("list")
 def list_projects() -> None:
     """List the projects governed by the cockpit."""
@@ -713,8 +879,15 @@ def serve(
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
     do_refresh: Annotated[bool, typer.Option("--refresh/--no-refresh", help="Regenerate data before serving.")] = True,
     with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+    project_root: Annotated[
+        Path | None,
+        typer.Option("--project-root", help="Projet à ouvrir (défaut : dossier courant)."),
+    ] = None,
 ) -> None:
     """Serve the cockpit on 127.0.0.1 (local only)."""
+    cwd_notice = _select_cwd_project(project_root)
+    if cwd_notice:
+        console.print(cwd_notice)
     serve_dir = _serve_dir()
     _sync_site(serve_dir)
     if do_refresh:
@@ -724,15 +897,18 @@ def serve(
             console.print("[dim]Registre vide → cockpit vide (aucune donnée inventée).[/dim]")
             console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
                           "ou [b]grimoire cockpit scan <dossier>[/b][/dim]")
-    notice = _unregistered_cwd_notice(load_registry())
-    if notice:
-        console.print(notice)
+    if cwd_notice is None:
+        notice = _unregistered_cwd_notice(load_registry())
+        if notice:
+            console.print(notice)
 
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as exc:
-        console.print(f"[red]✗[/red] Port {port} indisponible : {exc}")
+        alt = _suggest_free_port(port)
+        hint = f" — essaie [b]--port {alt}[/b]" if alt else ""
+        console.print(f"[red]✗[/red] Port {port} déjà utilisé{hint}.")
         raise typer.Exit(1) from exc
 
     # Basculement, pas 2 (ADR-006) : la vue de travail est la page par défaut
@@ -765,6 +941,10 @@ def start(
             webbrowser.open(str(state["url"]))
         return
 
+    cwd_notice = _select_cwd_project()
+    if cwd_notice:
+        console.print(cwd_notice)
+
     serve_dir = _serve_dir()
     _sync_site(serve_dir)
     if _generate_data(serve_dir, with_tests):
@@ -782,9 +962,17 @@ def start(
             break
         time.sleep(0.25)
     else:
-        console.print("[red]✗[/red] Le cockpit n'a pas démarré à temps (port occupé ?).")
+        alt = _suggest_free_port(port) if _port_alive(port) else None
+        hint = f" — essaie [b]--port {alt}[/b]" if alt else ""
+        console.print(f"[red]✗[/red] Le cockpit n'a pas démarré à temps (port {port} déjà utilisé{hint} ?).")
         raise typer.Exit(1)
 
+    # Adoption du projet courant une fois le démon vivant seulement : elle écrit
+    # dans l'état de la machine, et un démarrage qui échoue ne doit rien y
+    # laisser — c'est exactement ce que vérifie `test_start_timeout_fails`.
+    cwd_notice = _select_cwd_project()
+    if cwd_notice:
+        console.print(cwd_notice)
     write_state({"pid": pid, "port": port, "url": url})
     console.print(f"[bold green]Cockpit démarré[/bold green] → [link]{url}[/link]")
     console.print("[dim]Arrêt : [b]grimoire cockpit stop[/b] · état : [b]grimoire cockpit status[/b][/dim]")
