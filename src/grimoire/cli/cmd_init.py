@@ -62,7 +62,10 @@ class ArchetypeSpec:
 ARCHETYPE_CATALOG: tuple[ArchetypeSpec, ...] = (
     ArchetypeSpec("minimal", "Minimal", "3 meta-agents", "base layer — always included", base=True),
     ArchetypeSpec("web-app", "Web App", "2 agents", "TDD, type-safety, API-first"),
-    ArchetypeSpec("infra-ops", "Infra & DevOps", "7 agents", "IaC, security-first, observability"),
+    ArchetypeSpec(
+        "infra-ops", "Infra & DevOps", "7 agents",
+        "homelab/self-hosted (Proxmox, K3s, Longhorn) — IaC, security-first, observability",
+    ),
     ArchetypeSpec("platform-engineering", "Platform Eng.", "4 agents", "architecture-first, contract-driven"),
     ArchetypeSpec("agentic-standard", "Agentic Standard", "3 meta-agents", "normative traceability, evidence gates"),
     ArchetypeSpec("creative-studio", "Creative Studio", "5 agents", "visual-consistency, brand-voice"),
