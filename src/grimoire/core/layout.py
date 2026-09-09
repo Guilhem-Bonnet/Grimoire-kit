@@ -26,6 +26,7 @@ migrate`` moves its files.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 # ── Tier roots (relative to the project root) ────────────────────────────────
@@ -133,6 +134,53 @@ def layered_files(
         for path in sorted(directory.iterdir()):
             if path.is_file() and path.suffix == suffix:
                 found.setdefault(path.stem, path)
+    return found
+
+
+_AGENT_TAG_RE = re.compile(r"^name:\s*\"?([\w-]+)\"?", re.MULTILINE)
+_AGENT_PERSONA_RE = re.compile(r'<agent[^>]*\bname="([^"]+)"')
+
+
+def agent_identity(path: Path) -> tuple[str, str] | None:
+    """Return ``(tag, persona name)`` read from an agent file, or ``None``.
+
+    The one parse both readers of "who is this agent" must share: the doctor
+    deciding whether an installed agent exists, and the routing map deciding
+    whether the entry-point persona can reach it. Reading either from a
+    different source than the other is how an override agent went invisible
+    to one while being routable by the other (issue #345).
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    tag = _AGENT_TAG_RE.search(text)
+    if not tag:
+        return None
+    persona = _AGENT_PERSONA_RE.search(text)
+    return tag.group(1), (persona.group(1) if persona else tag.group(1))
+
+
+def installed_agents(project_root: Path, *, include_legacy: bool = True) -> dict[str, tuple[str, Path]]:
+    """Map ``tag -> (persona name, path)`` for every agent actually on disk.
+
+    Reads :func:`agent_dirs`, the same tier order the rest of the kit resolves
+    against — overrides shadow the kit tier, never the other way round, and an
+    agent present in both counts once. Neither a manifest nor a scaffolder's
+    in-flight copy plan is a *fact about this install*; the files on disk are.
+    """
+    found: dict[str, tuple[str, Path]] = {}
+    for directory in agent_dirs(project_root, include_legacy=include_legacy):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.iterdir()):
+            if not (path.is_file() and path.suffix == ".md"):
+                continue
+            identity = agent_identity(path)
+            if identity is None:
+                continue
+            tag, persona = identity
+            found.setdefault(tag, (persona, path))
     return found
 
 

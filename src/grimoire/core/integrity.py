@@ -22,11 +22,12 @@ and an ignored check is worse than no check.
 
 from __future__ import annotations
 
-import csv
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from grimoire.core import layout
 
 #: Only kit-provided *inputs* are in scope. ``_grimoire-output/`` holds what a
 #: run is supposed to produce; naming a file before it exists is the point.
@@ -250,15 +251,18 @@ def dead_path_references(project_root: Path) -> list[DeadReference]:
 
 
 def installed_agent_tags(project_root: Path) -> set[str]:
-    """Agent tags listed in the project's generated manifest."""
-    manifest = project_root / "_grimoire" / "kit" / "agent-manifest.csv"
-    if not manifest.is_file():
-        return set()
-    try:
-        with manifest.open(encoding="utf-8", newline="") as handle:
-            return {row["name"] for row in csv.DictReader(handle) if row.get("name")}
-    except (OSError, csv.Error, KeyError):
-        return set()
+    """Agent tags actually on disk, across every tier.
+
+    Reads :func:`layout.installed_agents`, which walks ``layout.agent_dirs()`` —
+    overrides shadowing kit, deduplicated — the same source every other reader
+    of "who is installed" uses. The generated ``agent-manifest.csv`` only ever
+    recorded the kit tier's own copies, so an agent placed in
+    ``overrides/agents/`` passed unseen and came back ``FAIL — agent routé
+    mais non installé`` (issue #345). The manifest still ships, for the
+    migration report and the "what did `up` last write" audit trail — it is
+    just no longer the authority on who exists.
+    """
+    return set(layout.installed_agents(project_root))
 
 
 def roster_incoherences(project_root: Path) -> RosterReport:
