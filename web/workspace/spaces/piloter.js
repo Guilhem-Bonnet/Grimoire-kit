@@ -171,6 +171,19 @@ function renderFleet(root, ctx, rows, onSelect) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap';
 
+  // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
+  // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
+  // « le cockpit ne détecte rien » ; l'état vide nomme le geste attendu.
+  if (!rows.length) {
+    wrap.append(text(
+      'p',
+      'lbl',
+      "Aucun projet enregistré. Ce cockpit lit un registre, il ne scanne pas le disque : "
+      + "grimoire cockpit add <chemin> pour un projet, ou grimoire cockpit scan <racine> pour explorer un dossier.",
+    ));
+    return wrap;
+  }
+
   const aligned = rows.filter((r) => r.health?.kit?.upToDate).length;
   const active = rows.filter((r) => r.health?.activity?.active).length;
   const watch = rows.flatMap((r) => watchReasons(r.entry, r.health).map((reason) => ({ ...r, reason })));
