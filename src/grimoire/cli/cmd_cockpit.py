@@ -292,9 +292,14 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self._send_json(200, payload)
 
     def do_POST(self) -> None:  # http.server contract
+        # `withProject()` (web/workspace/api.js) ajoute `?project=<slug>` à
+        # TOUTE requête, POST comprises — comme le fait déjà `do_GET` ci-dessus,
+        # il faut donc comparer le chemin sans sa query string, sinon chaque
+        # route ci-dessous reste injoignable dès qu'un projet est sélectionné.
+        path = urlparse(self.path).path
         if not self._local_only():
             return
-        if self.path == "/api/projects/select":
+        if path == "/api/projects/select":
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 data = json.loads(self.rfile.read(length) or b"{}")
@@ -314,7 +319,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, {"ok": True, "selected": slug})
             return
-        if self.path == "/api/projects/update":
+        if path == "/api/projects/update":
             # Seule écriture du cockpit dans un dépôt. Aperçu par défaut ;
             # l'alignement effectif exige `confirm: true`, comme les mutations
             # mémoire. Le cockpit gouverne une flotte : un bouton qui réécrit
@@ -331,7 +336,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, update_project(target, dry_run=data.get("confirm") is not True))
             return
-        if self.path in ("/api/projects/add", "/api/projects/scan"):
+        if path in ("/api/projects/add", "/api/projects/scan"):
             # Le cockpit est en lecture seule sur les *projets* ; peupler le
             # registre de la machine n'en est pas une écriture — c'est
             # exactement ce que fait déjà `grimoire cockpit add|scan`.
@@ -342,7 +347,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
             try:
-                if self.path.endswith("/add"):
+                if path.endswith("/add"):
                     # Noms distincts de ``proot``/``slug`` plus bas : même
                     # portée de fonction, types différents.
                     added_root = resolve_within_allowed(str(data.get("path", "")))
@@ -365,7 +370,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except (PermissionError, OSError) as exc:
                 self._send_json(403, {"ok": False, "error": str(exc)})
             return
-        if self.path != "/api/memory":
+        if path != "/api/memory":
             self._send_json(404, {"ok": False, "error": "not found"})
             return
         try:
