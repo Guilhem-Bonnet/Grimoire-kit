@@ -563,6 +563,44 @@ def _unregistered_cwd_notice(projects: list[dict[str, str]]) -> str | None:
     )
 
 
+def _select_cwd_project() -> str | None:
+    """Si le dossier courant est un projet Grimoire, le rendre courant.
+
+    Décision #351 : lancer le cockpit depuis un projet doit l'ouvrir dessus,
+    sans perdre le caractère multi-projet (la bascule reste dans l'UI). Le
+    projet est enregistré automatiquement s'il ne l'était pas encore — c'est
+    l'utilisateur qui vient d'exprimer son intention en lançant la commande
+    ici, l'enregistrement explicite ferait répéter une décision déjà prise.
+
+    Renvoie un message à afficher quand le projet vient d'être enregistré, ou
+    ``None`` si rien n'a changé.
+    """
+    cwd = Path.cwd().resolve()
+    if not looks_grimoire(cwd):
+        return None
+    slug = slug_for_path(cwd)
+    message = None
+    if slug is None:
+        slug = register_project(cwd)
+        if slug is None:
+            return None
+        message = f"[green]+[/green] Projet courant enregistré → [b]{slug}[/b] ({cwd})"
+    set_selected_slug(slug)
+    return message
+
+
+def _suggest_free_port(start: int, attempts: int = 10) -> int | None:
+    """Premier port libre après ``start`` (exclu), ou ``None`` si rien trouvé."""
+    for candidate in range(start + 1, start + 1 + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", candidate))
+            except OSError:
+                continue
+            return candidate
+    return None
+
+
 @cockpit_app.command("list")
 def list_projects() -> None:
     """List the projects governed by the cockpit."""
@@ -710,6 +748,9 @@ def serve(
     with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
 ) -> None:
     """Serve the cockpit on 127.0.0.1 (local only)."""
+    cwd_notice = _select_cwd_project()
+    if cwd_notice:
+        console.print(cwd_notice)
     serve_dir = _serve_dir()
     _sync_site(serve_dir)
     if do_refresh:
@@ -719,15 +760,18 @@ def serve(
             console.print("[dim]Registre vide → cockpit vide (aucune donnée inventée).[/dim]")
             console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
                           "ou [b]grimoire cockpit scan <dossier>[/b][/dim]")
-    notice = _unregistered_cwd_notice(load_registry())
-    if notice:
-        console.print(notice)
+    if cwd_notice is None:
+        notice = _unregistered_cwd_notice(load_registry())
+        if notice:
+            console.print(notice)
 
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as exc:
-        console.print(f"[red]✗[/red] Port {port} indisponible : {exc}")
+        alt = _suggest_free_port(port)
+        hint = f" — essaie [b]--port {alt}[/b]" if alt else ""
+        console.print(f"[red]✗[/red] Port {port} déjà utilisé{hint}.")
         raise typer.Exit(1) from exc
 
     # Basculement, pas 2 (ADR-006) : la vue de travail est la page par défaut
@@ -760,6 +804,10 @@ def start(
             webbrowser.open(str(state["url"]))
         return
 
+    cwd_notice = _select_cwd_project()
+    if cwd_notice:
+        console.print(cwd_notice)
+
     serve_dir = _serve_dir()
     _sync_site(serve_dir)
     if _generate_data(serve_dir, with_tests):
@@ -777,7 +825,9 @@ def start(
             break
         time.sleep(0.25)
     else:
-        console.print("[red]✗[/red] Le cockpit n'a pas démarré à temps (port occupé ?).")
+        alt = _suggest_free_port(port) if _port_alive(port) else None
+        hint = f" — essaie [b]--port {alt}[/b]" if alt else ""
+        console.print(f"[red]✗[/red] Le cockpit n'a pas démarré à temps (port {port} déjà utilisé{hint} ?).")
         raise typer.Exit(1)
 
     write_state({"pid": pid, "port": port, "url": url})

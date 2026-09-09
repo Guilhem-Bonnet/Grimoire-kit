@@ -921,7 +921,7 @@ app.add_typer(features_app, name="features", rich_help_panel="Project")
 app.add_typer(host_app, name="host", rich_help_panel="Project")
 app.add_typer(providers_app, name="providers", rich_help_panel="Project")
 app.add_typer(web_app, name="web", rich_help_panel="Data")
-app.command("serve", rich_help_panel="Project")(serve_cmd)
+app.command("serve", hidden=True)(serve_cmd)  # alias déprécié — voir `cockpit serve` (#351)
 
 
 @registry_app.command("list")

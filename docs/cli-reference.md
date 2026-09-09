@@ -665,14 +665,21 @@ Cockpit local de gouvernance, servi sur `127.0.0.1` uniquement. Le registre vit
 dans `~/.grimoire/cockpit/registry.json` ; `grimoire init` y inscrit le projet
 et l'annonce, et `GRIMOIRE_NO_COCKPIT` désactive cette inscription.
 
-Le cockpit **ne scanne jamais le disque** : `list` et `serve` lisent le
-registre tel quel, jamais le système de fichiers. Un projet qui porte les
-marqueurs Grimoire mais n'a jamais été enregistré n'apparaît donc pas — ce
-n'est pas un défaut de détection. Pour le rendre visible : depuis ce projet,
-`grimoire cockpit list` ou `grimoire cockpit serve` signale « ce dossier
-ressemble à un projet Grimoire mais n'est pas enregistré » et donne la
-commande `grimoire cockpit add <chemin>` à lancer. Un registre vide nomme de
-la même façon `grimoire cockpit scan <racine>`.
+Le cockpit **ne scanne jamais le disque** : `list` lit le registre tel quel,
+jamais le système de fichiers. Un projet qui porte les marqueurs Grimoire mais
+n'a jamais été enregistré n'apparaît donc pas dans `list` — ce n'est pas un
+défaut de détection, `grimoire cockpit list` signale « ce dossier ressemble à
+un projet Grimoire mais n'est pas enregistré » et donne la commande
+`grimoire cockpit add <chemin>` à lancer.
+
+`serve` et `start` font l'exception (#351) : lancés depuis un dossier qui
+porte un marqueur Grimoire, ils l'enregistrent automatiquement s'il ne l'était
+pas encore et l'ouvrent sélectionné d'emblée — sans cesser d'être
+multi-projets, la bascule vers un autre projet reste dans l'UI. C'est
+l'intention exprimée en lançant la commande depuis ce dossier qui justifie
+l'ajout automatique, pas une décision prise à la place de l'utilisateur : le
+registre reste modifiable (`remove`, `prune`). Un registre vide, ou un
+lancement hors de tout projet Grimoire, nomme `grimoire cockpit scan <racine>`.
 
 | Commande | Description |
 | --- | --- |
@@ -1165,16 +1172,15 @@ Gestion des extensions (bundles d'artefacts gouvernés). Voir
 | `grimoire ext publish <source> --registry <clone>` | Publier une extension ou un `.blueprint.json` |
 | `grimoire ext add-blueprint <id> --registry <clone>` | Installer un blueprint publié |
 
-## `grimoire serve`
+## `grimoire serve` *(alias déprécié)*
 
-Mode local UI + API — marketplace, éditeur de blueprints, wizard de setup.
-Voir [Mode local & blueprints](serve-blueprints.md).
-
-| Option | Rôle |
-| --- | --- |
-| `--port, -p` | Port d'écoute (défaut 4173, bind 127.0.0.1) |
-| `--project-root` | Racine du projet servi (défaut : dossier courant) |
-| `--open / --no-open` | Ouvrir (ou non) le navigateur sur la vue de travail |
+`grimoire serve` est un alias de [`grimoire cockpit serve`](#cockpit-multi-projets)
+(#351) : les deux commandes ouvraient la même UI, l'une en mono-projet, l'autre
+en multi-projets — `cockpit serve` fait maintenant les deux, en s'ouvrant
+directement sur le projet courant quand on le lance depuis un projet Grimoire.
+`serve` reste utilisable pour ne pas casser les scripts existants ; il affiche
+un avertissement et délègue à `cockpit serve`. `--project-root` est ignoré :
+lancer la commande depuis le projet visé suffit.
 
 Pour une UI custom ou une racine de kit explicite (`--ui-dir`, `--kit-root`),
 utiliser la forme longue : `python -m grimoire.tools.forge_server`.
