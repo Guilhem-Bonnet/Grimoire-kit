@@ -208,6 +208,30 @@ def test_refresh_generates_when_project_registered(
     assert "régénérées" in res.output
 
 
+def test_refresh_purges_dead_paths_before_generating(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#340 : un chemin disparu est retiré du registre, pas seulement ignoré à l'affichage.
+
+    La purge doit être écrite, pas juste filtrée en mémoire — sinon le prochain
+    appel paie de nouveau le coût des dossiers morts.
+    """
+    proj = _project(tmp_path, "vivant")
+    runner.invoke(app, ["cockpit", "add", str(proj)])
+    ghost = tmp_path / "disparu"
+    projects = project_registry.load_registry()
+    projects.append({"name": "fantome", "path": str(ghost), "slug": "fantome"})
+    project_registry.save_registry(projects)
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    res = runner.invoke(app, ["cockpit", "refresh"])
+
+    assert res.exit_code == 0
+    assert "1 entrée(s) ignorée(s), chemin disparu" in res.output
+    remaining = project_registry.load_registry()
+    assert [p["slug"] for p in remaining] == ["vivant"]
+
+
 def test_generate_data_warns_on_subprocess_failure(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

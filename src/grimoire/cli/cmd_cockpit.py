@@ -624,9 +624,24 @@ def _sync_site(serve_dir: Path) -> None:
 
 
 def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
-    """Regenerate the data layer from the registry. Returns True if projects were generated."""
+    """Regenerate the data layer from the registry. Returns True if projects were generated.
+
+    Purge d'office les entrées dont le chemin a disparu avant de lancer la
+    génération (#340) : sans ça, `gen-site-data.py` enchaînait git, le board et
+    la mémoire pour chaque dossier mort, et c'est ce qui rendait `serve` lent
+    sans rien dire. La purge écrit le registre — pas seulement un filtre en
+    mémoire — pour que le prochain appel n'ait plus le même coût à payer.
+    """
     projects = load_registry()
     if not projects:
+        return False
+    keep, drop = classify_registry(projects)
+    if drop:
+        save_registry(keep)
+        console.print(
+            f"[yellow]−[/yellow] {len(drop)} entrée(s) ignorée(s), chemin disparu — retirée(s) du registre."
+        )
+    if not keep:
         return False
     gen = site_script("gen-site-data.py")
     cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]
