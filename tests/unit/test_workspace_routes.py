@@ -7,13 +7,15 @@ deux hôtes en même temps, et chaque lecture doit répondre pour le projet qu'o
 lui a désigné — jamais pour l'autre, jamais pour « le dernier sélectionné ».
 
 Le second volet est le contraire : le cockpit se déclare ``readOnly`` — sauf
-pour le projet qu'il sert en direct (``_HOME_SLUG``, résolu au lancement
-depuis le dossier courant, #351/#356 : fusionner ``serve`` dans ``cockpit
-serve`` ne devait pas retirer la capacité d'écrire depuis ce projet-là). Les
+pour le projet qu'il sert en direct (``home_slug()``, résolu au lancement
+depuis le dossier courant via ``set_home_slug()``, #351/#356 : fusionner
+``serve`` dans ``cockpit serve`` ne devait pas retirer la capacité d'écrire
+depuis ce projet-là, ni celle d'y enregistrer et compiler un blueprint). Les
 écritures de la vue de travail (réclamer une tâche, prendre un override,
-lancer une commande) restent donc refusées sur tout AUTRE projet du registre —
-celui qu'on ne fait que regarder — mais honorées sur le projet de lancement,
-exactement comme sur l'hôte mono-projet historique.
+lancer une commande, enregistrer ou compiler un blueprint) restent donc
+refusées sur tout AUTRE projet du registre — celui qu'on ne fait que
+regarder — mais honorées sur le projet de lancement, exactement comme sur
+l'hôte mono-projet historique.
 """
 
 from __future__ import annotations
@@ -80,6 +82,24 @@ def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, Any]:
             return exc.code, {"raw": body}
 
 
+def _put(port: int, path: str, payload: dict[str, Any]) -> tuple[int, Any]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 — loopback de test
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        try:
+            return exc.code, json.loads(body)
+        except json.JSONDecodeError:
+            return exc.code, {"raw": body}
+
+
 @pytest.fixture
 def atelier(real_project: Path) -> Iterator[int]:
     """`grimoire serve` : un projet, l'atelier."""
@@ -121,16 +141,18 @@ def cockpit_home(
 ) -> Iterator[int]:
     """Le même cockpit, mais lancé depuis ``projet-a`` (#351/#356).
 
-    ``monkeypatch.setattr`` sur ``_HOME_SLUG`` mime ce que ``serve()`` ferait
-    via ``_select_cwd_project`` sans passer par un vrai ``cwd`` ni écrire
-    l'état persistant du registre — et s'annule tout seul en fin de test, pour
-    qu'aucun autre test de ce fichier n'hérite d'un projet de lancement.
+    ``reg.set_home_slug()`` persiste l'état de sélection exactement comme le
+    ferait ``_select_cwd_project`` depuis un vrai ``cwd`` — sous le
+    ``GRIMOIRE_COCKPIT_HOME`` jetable de ce test, jamais l'état réel de la
+    machine. Aucun monkeypatch sur un attribut de module : le handler lit ce
+    même état à chaque requête (``_is_home_request``), donc ce test le prouve
+    plutôt que de le supposer.
     """
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "cockpit-home"))
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "projet-a")
     cmd_cockpit._API_CACHE.clear()
     reg.register_project(real_project, "projet-a")
     reg.register_project(second_project, "projet-b")
+    assert reg.set_home_slug("projet-a")
     serve_dir = tmp_path / "serve-home"
     serve_dir.mkdir(parents=True)
     handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
@@ -240,6 +262,48 @@ def test_le_cockpit_execute_une_commande_de_la_liste_blanche_sur_son_projet_de_l
     assert code == 200
     assert payload["ok"] is True
     assert "grimoire-kit" in payload["output"]
+
+
+def test_le_cockpit_enregistre_et_compile_un_blueprint_sur_son_projet_de_lancement(
+    cockpit_home: int, project_with_blueprint: tuple[Path, str]
+) -> None:
+    """« Enregistrer et compiler un blueprint depuis l'écran de conception »
+    (#356) : ce que le produit attend de l'interface, restauré ici pour le
+    projet de lancement — `PUT` réécrit le fichier, `/compile` en émet le
+    mission pack, exactement comme sur l'atelier avant que #351 ne fasse de
+    `cockpit serve` le seul serveur restant."""
+    _, bp_id = project_with_blueprint
+    code, blueprint = _get(cockpit_home, f"/api/blueprints/{bp_id}?project=projet-a")
+    assert code == 200
+
+    code, saved = _put(cockpit_home, f"/api/blueprints/{bp_id}?project=projet-a", blueprint)
+    assert code == 200
+    assert saved["saved"] == bp_id
+
+    code, compiled = _post(
+        cockpit_home, f"/api/blueprints/{bp_id}/compile?project=projet-a", blueprint
+    )
+    assert code == 200
+    assert compiled["compiled"] == bp_id
+
+
+def test_le_cockpit_refuse_d_enregistrer_ou_de_compiler_sur_un_autre_projet(
+    cockpit_home: int, project_with_blueprint: tuple[Path, str]
+) -> None:
+    """L'autre moitié de la garantie #356 : avoir un projet de lancement
+    n'ouvre PAS l'écriture au reste du registre. `projet-b` reste refusé même
+    depuis un cockpit qui sait écrire ailleurs."""
+    _, bp_id = project_with_blueprint
+    code, blueprint = _get(cockpit_home, f"/api/blueprints/{bp_id}?project=projet-a")
+    assert code == 200
+
+    code, _ = _put(cockpit_home, f"/api/blueprints/{bp_id}?project=projet-b", blueprint)
+    assert code == 403
+
+    code, _ = _post(
+        cockpit_home, f"/api/blueprints/{bp_id}/compile?project=projet-b", blueprint
+    )
+    assert code == 403
 
 
 def test_l_atelier_execute_une_commande_de_la_liste_blanche(atelier: int) -> None:

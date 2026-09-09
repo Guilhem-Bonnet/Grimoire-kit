@@ -39,6 +39,7 @@ from grimoire.tools.project_registry import (
     browse,
     classify_registry,
     crawl_projects,
+    home_slug,
     load_registry,
     looks_grimoire,
     projects_payload,
@@ -50,6 +51,7 @@ from grimoire.tools.project_registry import (
     save_registry,
     scan_payload,
     selected_slug,
+    set_home_slug,
     set_selected_slug,
     slug_for_path,
     state_file,
@@ -127,15 +129,6 @@ def _resolve_project_path(slug: str | None) -> Path | None:
                 return Path(p["path"])
         return None
     return Path(projects[0]["path"]) if projects else None
-
-
-# Slug du projet servi en direct par CE process (#351/#356) — distinct de
-# `selected_slug()` (la sélection courante, persistée au disque, qui dérive
-# librement dès que l'UI navigue vers un autre projet du registre). Réglé une
-# fois, avant `serve_forever()` (voir `_select_cwd_project`), jamais ensuite :
-# c'est ce qui garde l'écriture ouverte sur LE projet de lancement même après
-# une navigation Flotte, et fermée sur tout autre projet du registre.
-_HOME_SLUG: str | None = None
 
 _API_CACHE: dict[Path, Any] = {}
 
@@ -249,13 +242,17 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def _is_home_request(self) -> bool:
         """Vrai si la requête cible le projet servi en direct par ce process.
 
-        `_HOME_SLUG` ne bouge jamais après le démarrage ; `_query_slug()` peut
-        pointer ailleurs dès que l'UI navigue vers un autre projet du
-        registre (carte Flotte, `?project=` explicite) — cette requête-là
-        reste en lecture seule, comme toute navigation cockpit vers un projet
-        qu'on ne fait que regarder (#356).
+        Lit `home_slug()` — l'état de sélection persisté par
+        `_select_cwd_project`, pas un global figé une fois pour toutes — donc
+        chaque requête voit l'état réel du disque, y compris dans un test qui
+        le pose lui-même via `set_home_slug()`. `_query_slug()` peut pointer
+        ailleurs dès que l'UI navigue vers un autre projet du registre (carte
+        Flotte, `?project=` explicite) — cette requête-là reste en lecture
+        seule, comme toute navigation cockpit vers un projet qu'on ne fait
+        que regarder (#356).
         """
-        return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
+        home = home_slug()
+        return bool(home) and self._query_slug() == home
 
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
@@ -327,7 +324,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # le même code de page fonctionne contre les deux serveurs. Seul
         # ``/api/status`` est enrichi, pour que l'UI sache si l'hôte accepte
         # des mutations. Depuis #356 ce n'est plus toujours faux : le projet
-        # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
+        # de lancement direct (``home_slug()``) les honore, exactement comme le
         # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
         # naviguer vers un AUTRE projet du registre reste en lecture seule.
         if path == "/api/status" and isinstance(payload, dict):
@@ -427,8 +424,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # les câbler quand #351 a fait de lui le seul serveur restant —
             # même trouvaille que `--project-root` (d5047fc6), pour la même
             # raison : fusionner deux commandes ne devait pas couper une
-            # capacité (#356). Restreint à `_HOME_SLUG` : le projet qu'on ne
-            # fait que regarder via le registre reste en lecture seule.
+            # capacité (#356). Restreint au projet de lancement (`home_slug()`)
+            # : le projet qu'on ne fait que regarder via le registre reste en
+            # lecture seule.
             if not self._is_home_request():
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
                 return
@@ -450,13 +448,20 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             else:
                 self._send_json(200, result)
             return
-        if path.startswith("/api/blueprints/") and path.endswith(("/validate", "/simulate")):
-            # Calcul, pas écriture : `blueprint_lint`/`blueprint_simulate` ne
-            # touchent jamais le disque (voir leurs docstrings — la simulation
-            # « ne produit aucun effet »). `/compile` et `PUT` restent absents
-            # d'ici ; ce sont eux, pas ceux-ci, que `readOnly` doit bloquer
-            # côté client (#356 — Concevoir doit pouvoir valider/simuler le
-            # projet déjà sélectionné sur le cockpit, comme sur l'atelier).
+        if path.startswith("/api/blueprints/") and path.endswith(("/validate", "/simulate", "/compile")):
+            # `blueprint_lint`/`blueprint_simulate` sont du calcul, jamais une
+            # écriture (voir leurs docstrings — la simulation « ne produit
+            # aucun effet ») : ouverts pour n'importe quel projet du registre,
+            # comme les lectures. `/compile`, lui, réécrit le blueprint sur
+            # disque et émet le mission pack — une vraie mutation, restreinte
+            # au projet de lancement (`home_slug()`) comme `PUT` et le reste
+            # des écritures (#356 : « enregistrer et compiler un blueprint
+            # depuis l'écran de conception » fait partie de ce que l'interface
+            # doit pouvoir faire pour SON projet, pas pour un autre du
+            # registre qu'on ne fait que regarder).
+            if path.endswith("/compile") and not self._is_home_request():
+                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                return
             proot = _resolve_project_path(self._query_slug() or None)
             if proot is None or not proot.is_dir():
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
@@ -473,7 +478,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 blueprint = body or api.blueprint_get(bp_id)
                 if path.endswith("/validate"):
                     self._send_json(200, api.blueprint_lint(blueprint))
-                else:
+                elif path.endswith("/simulate"):
                     qs = parse_qs(urlparse(self.path).query)
                     inject = None
                     if qs.get("injectNode"):
@@ -482,8 +487,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                             "class": qs.get("injectClass", ["unknown"])[0],
                         }
                     self._send_json(200, api.blueprint_simulate(blueprint, inject_failure=inject))
+                else:
+                    self._send_json(200, api.blueprint_compile(blueprint))
             except FileNotFoundError:
                 self._send_json(404, {"ok": False, "error": "blueprint introuvable"})
+            except ValueError as exc:
+                # Fail-closed (H4) : `blueprint_compile` refuse un blueprint
+                # bloqué à la simulation — même code que l'atelier
+                # (`forge_http.py`) pour le même refus.
+                self._send_json(400, {"ok": False, "error": str(exc)})
             return
         if path != "/api/memory":
             self._send_json(404, {"ok": False, "error": "not found"})
@@ -545,6 +557,38 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             "stdout": res.stdout, "stderr": res.stderr, "action": action,
             "mutation": is_mutation,
         })
+
+    def do_PUT(self) -> None:  # http.server contract
+        """Enregistrer un blueprint édité (#356) — la seule route PUT du cockpit.
+
+        Sans `do_PUT`, `http.server` répond 501 (méthode inconnue) : c'est ce
+        que faisait le cockpit avant #356, y compris pour son propre projet
+        de lancement. Réécrit le fichier sur disque exactement comme
+        `forge_http.py::do_PUT` de l'atelier — restreint au projet de
+        lancement (`home_slug()`) comme le reste des écritures.
+        """
+        path = urlparse(self.path).path
+        if not self._local_only():
+            return
+        if not path.startswith("/api/blueprints/"):
+            self._send_json(404, {"ok": False, "error": "route inconnue"})
+            return
+        if not self._is_home_request():
+            self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        proot = _resolve_project_path(self._query_slug() or None)
+        if proot is None or not proot.is_dir():
+            self._send_json(404, {"ok": False, "error": "projet inconnu"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "bad json"})
+            return
+        bp_id = path.rsplit("/", 1)[1]
+        saved = _project_api(proot).blueprint_put(bp_id, body)
+        self._send_json(200, saved)
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -700,11 +744,14 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     Renvoie un message à afficher quand le projet vient d'être enregistré, ou
     ``None`` si rien n'a changé.
 
-    Retient aussi ce slug dans ``_HOME_SLUG`` (#356) : c'est le seul projet
-    pour lequel *ce* process honorera une écriture, même après que l'UI ait
-    navigué ailleurs dans le registre — voir ``_CockpitHandler._is_home_request``.
+    Persiste aussi ce slug via ``set_home_slug()`` (#356) : c'est le seul
+    projet pour lequel le cockpit honorera une écriture, même après que l'UI
+    ait navigué ailleurs dans le registre — voir
+    ``_CockpitHandler._is_home_request``. Une lecture d'état (``home_slug()``),
+    pas un global posé une fois pour toutes : un test peut le poser lui-même
+    (``set_home_slug()``) sans monkeypatcher le module, exactement comme
+    ``selected_slug()``/``set_selected_slug()`` juste au-dessus.
     """
-    global _HOME_SLUG
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return None
     cwd = (root or Path.cwd()).resolve()
@@ -718,7 +765,7 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
             return None
         message = f"[green]+[/green] Projet courant enregistré → [b]{slug}[/b] ({cwd})"
     set_selected_slug(slug)
-    _HOME_SLUG = slug
+    set_home_slug(slug)
     return message
 
 

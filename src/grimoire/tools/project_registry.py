@@ -240,6 +240,34 @@ def set_selected_slug(slug: str) -> bool:
     return True
 
 
+def home_slug() -> str:
+    """Projet servi en écriture en direct par CE process (#351/#356), ou "".
+
+    Contrairement à `selected_slug()`, qui retombe sur le projet primaire du
+    registre pour toujours désigner quelqu'un, celui-ci n'a pas de repli :
+    une session cockpit jamais lancée depuis un dossier de projet
+    (`_select_cwd_project` jamais appelé, ou `GRIMOIRE_NO_COCKPIT`) n'a aucun
+    projet à servir en écriture, et le dit par une chaîne vide plutôt que par
+    une devinette. Persisté à l'état local (pas le registre), pour ne bouger
+    qu'avec un nouveau lancement — jamais avec la sélection courante, qu'une
+    navigation Flotte change en cours de route sans rouvrir le process.
+    """
+    chosen = str(read_state().get("home_project", ""))
+    if chosen and any(p.get("slug") == chosen for p in load_registry()):
+        return chosen
+    return ""
+
+
+def set_home_slug(slug: str) -> bool:
+    """Persiste le projet de lancement direct. ``False`` si absent du registre."""
+    if not any(p.get("slug") == slug for p in load_registry()):
+        return False
+    state = read_state()
+    state["home_project"] = slug
+    write_state(state)
+    return True
+
+
 def projects_payload(*, selected: str | None = None) -> dict[str, Any]:
     """Registre tel que servi à l'UI — chaque entrée dit si son chemin existe encore."""
     projects = [
