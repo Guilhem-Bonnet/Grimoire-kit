@@ -568,7 +568,7 @@ def _unregistered_cwd_notice(projects: list[dict[str, str]]) -> str | None:
     )
 
 
-def _select_cwd_project() -> str | None:
+def _select_cwd_project(root: Path | None = None) -> str | None:
     """Si le dossier courant est un projet Grimoire, le rendre courant.
 
     Décision #351 : lancer le cockpit depuis un projet doit l'ouvrir dessus,
@@ -587,7 +587,7 @@ def _select_cwd_project() -> str | None:
     """
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return None
-    cwd = Path.cwd().resolve()
+    cwd = (root or Path.cwd()).resolve()
     if not looks_grimoire(cwd):
         return None
     slug = slug_for_path(cwd)
@@ -758,9 +758,13 @@ def serve(
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
     do_refresh: Annotated[bool, typer.Option("--refresh/--no-refresh", help="Regenerate data before serving.")] = True,
     with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+    project_root: Annotated[
+        Path | None,
+        typer.Option("--project-root", help="Projet à ouvrir (défaut : dossier courant)."),
+    ] = None,
 ) -> None:
     """Serve the cockpit on 127.0.0.1 (local only)."""
-    cwd_notice = _select_cwd_project()
+    cwd_notice = _select_cwd_project(project_root)
     if cwd_notice:
         console.print(cwd_notice)
     serve_dir = _serve_dir()

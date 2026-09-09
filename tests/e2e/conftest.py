@@ -145,6 +145,11 @@ def served_cockpit(
     cockpit_home = tmp_path_factory.mktemp("cockpit-home-flotte")
     env = dict(os.environ)
     env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
+    # Le cockpit adopte le projet du répertoire courant (#351). Ici le
+    # répertoire courant est le dépôt du kit lui-même, qui est un projet
+    # Grimoire : sans cette variable, il prendrait la place du projet que ce
+    # harnais enrôle et veut afficher. L'adoption a ses propres tests.
+    env["GRIMOIRE_NO_COCKPIT"] = "1"
     env["NO_COLOR"] = "1"
     added = subprocess.run(
         [sys.executable, "-m", "grimoire", "cockpit", "add", str(project_root)],

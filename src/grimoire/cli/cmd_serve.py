@@ -38,9 +38,4 @@ def serve(
         "[yellow]⚠[/yellow] [b]grimoire serve[/b] est déprécié, "
         "utilise [b]grimoire cockpit serve[/b] : même commande, désormais seule."
     )
-    if project_root is not None:
-        console.print(
-            f"[dim]--project-root est ignoré : lance la commande depuis {project_root} "
-            "pour que ce projet soit sélectionné.[/dim]"
-        )
-    cockpit_serve(port=port, open_browser=open_browser, do_refresh=True, with_tests=False)
+    cockpit_serve(project_root=project_root, port=port, open_browser=open_browser, do_refresh=True, with_tests=False)
