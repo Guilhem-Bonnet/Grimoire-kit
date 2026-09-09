@@ -6,6 +6,22 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
+  de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
+  `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
+  est disponible et retombe silencieusement sur l'implémentation Python
+  pure sinon (`GRIMOIRE_POLICIES_BACKEND=python|rust|auto` force le choix
+  des deux côtés pour les tests). Rien n'est publié : la wheel PyPI reste la
+  wheel universelle actuelle, le crate porte le classifieur `Private :: Do
+  Not Upload`, et construire l'extension localement (`maturin develop`,
+  voir CONTRIBUTING.md) n'est jamais nécessaire pour contribuer au kit. Un
+  job CI dédié (`rust-policies-core.yml`) construit et teste le crate sans
+  toucher à la publication. `tests/unit/test_policies.py` tourne sans
+  modification dans les deux configurations ;
+  `tests/unit/test_policies_rust_parity.py` prouve que les deux
+  implémentations rendent le même verdict sur les mêmes entrées.
 
 ## [3.41.0] - 2026-09-08
 ### Ajouté
