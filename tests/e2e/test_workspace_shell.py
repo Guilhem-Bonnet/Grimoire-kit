@@ -643,11 +643,16 @@ def test_navigation_clavier_le_focus_ouvre_sans_delai_et_alt_epingle(workspace: 
 
 
 def test_la_coque_sait_quel_hote_la_sert(workspace: Page) -> None:
-    """L'atelier n'est pas en lecture seule ; le cockpit l'est. Le front lit
-    `status.host`, pas une supposition sur le port."""
+    """`grimoire serve` est un alias déprécié de `cockpit serve` depuis #351 :
+    un seul binaire répond désormais des deux côtés, `status.host` vaut donc
+    toujours `cockpit`. Ce qui distingue encore un lancement direct — celui de
+    cette fixture, `grimoire serve --project-root <projet>` — d'une simple
+    navigation cockpit vers un projet du registre, c'est `readOnly` : le
+    projet qu'on sert en direct n'est pas en lecture seule, lui (#356). Le
+    front lit ce champ, pas une supposition sur le port."""
     host = workspace.evaluate(
         "() => ({ kind: window.GrimoireWorkspace.host.kind, ro: window.GrimoireWorkspace.host.readOnly })"
     )
 
-    assert host["kind"] == "atelier"
+    assert host["kind"] == "cockpit"
     assert host["ro"] is False

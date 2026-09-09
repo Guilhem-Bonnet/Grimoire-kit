@@ -420,7 +420,14 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 export async function mount(root, ctx) {
   injectStyles();
   const cockpit = ctx.host.kind === 'cockpit';
-  let level = cockpit ? 'flotte' : 'projet';
+  // Flotte reste le point d'entrée du pilotage multi-projets — y compris
+  // quand une navigation cockpit délibérée a un projet en `?project=` — SAUF
+  // quand ce projet vient du lancement direct depuis son dossier (#351) :
+  // `ctx.host.projectFromUrl` distingue les deux (voir api.js). Sans cette
+  // exception, `cockpit serve` lancé dans un projet — seul serveur restant
+  // depuis #356 — n'ouvrait plus jamais Piloter sur sa propre fiche.
+  const directLaunch = ctx.host.project && !ctx.host.projectFromUrl;
+  let level = cockpit && !directLaunch ? 'flotte' : 'projet';
   let selected = ctx.host.project || null;
 
   const zoomLevels = cockpit

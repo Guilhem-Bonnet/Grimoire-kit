@@ -23,13 +23,13 @@
 // `project_health.flows`), ctx.api.blueprintGet/Put/Validate/Simulate/Compile,
 // ctx.api.primitives(), ctx.api.costModel().
 //
-// Limite assumée : `/api/blueprints/<id>` (GET, diff, validate, simulate,
-// compile, PUT) ne vit QUE sur l'atelier mono-projet (forge_routes.py :
-// « les routes blueprint … restent dans le serveur de l'atelier »). Sur le
-// cockpit, le niveau Projet reste lisible (route partagée) mais Workflow et
-// Nœud affichent un état explicite au lieu de tenter un appel qui rendrait
-// 404 — c'est la portée réelle du critère « Flotte seulement sur le cockpit,
-// en lecture ».
+// Limite restante (#356, suite à la fusion #351 de `serve` dans `cockpit
+// serve`) : seules `blueprintPut` (PUT) et `/compile` écrivent sur disque et
+// restent atelier-only, bloquées côté client par `readOnly` (api.js). GET,
+// `/diff`, `/validate` et `/simulate` sont des lectures ou du calcul pur —
+// elles répondent désormais sur les deux hôtes pour le projet déjà
+// sélectionné (`cmd_cockpit.py::do_GET`/`do_POST`), donc les niveaux Workflow
+// et Nœud fonctionnent identiquement sur l'atelier et sur le cockpit.
 
 const ZOOM_LEVELS_ATELIER = [
   { id: 'projet', label: 'Projet' },
@@ -245,8 +245,13 @@ function renderEdgesSvg(nodes, edges, pos) {
 export async function mount(root, ctx) {
   injectStyles();
 
+  // Un projet déjà ciblé (`?project=`, ou sélection courante du cockpit —
+  // voir `api.js: boot()`) doit ouvrir directement sur ses blueprints : la
+  // Flotte n'est le point d'entrée que quand aucun projet n'est encore choisi
+  // (#356). Piloter, lui, reste Flotte-first même projet sélectionné : son
+  // niveau Flotte est la vue de pilotage, pas un repli d'absence de projet.
   const state = {
-    zoom: ctx.host.kind === 'cockpit' ? 'flotte' : 'projet',
+    zoom: ctx.host.kind === 'cockpit' && !ctx.host.project ? 'flotte' : 'projet',
     view: 'carte',
     containers: [],
     selectedId: null,
@@ -258,7 +263,14 @@ export async function mount(root, ctx) {
   };
 
   const zoomLevels = ctx.host.kind === 'cockpit' ? ZOOM_LEVELS_COCKPIT : ZOOM_LEVELS_ATELIER;
-  const graphAvailable = ctx.host.kind !== 'cockpit';
+  // Lecture, validation et simulation du graphe marchent désormais sur les
+  // deux hôtes : `cockpit serve` est le seul serveur restant (#351) et sait
+  // depuis #356 servir `/api/blueprints/<id>` (+ validate/simulate) pour le
+  // projet déjà sélectionné — seules l'écriture (`blueprintPut`, absente
+  // d'ici) et `/compile` restent atelier-only, derrière `readOnly` côté
+  // client. Cette constante reste nommée `graphAvailable` (elle garde ses six
+  // points d'appel) mais n'a plus de condition réelle à trancher.
+  const graphAvailable = true;
 
   // Rail « 2 » (bibliothèque) : la coque ne sait pas ce qu'est une palette de
   // nœuds (README, « ctx.rail … enregistre ce que fait le rail ‘2’ tant que
