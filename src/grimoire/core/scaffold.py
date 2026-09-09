@@ -584,16 +584,13 @@ class ProjectScaffolder:
 
     @staticmethod
     def _agent_identity(path: Path) -> tuple[str, str] | None:
-        """Return ``(tag, persona name)`` for an agent file, or None if unreadable."""
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            return None
-        tag = re.search(r"^name:\s*\"?([\w-]+)\"?", text, re.MULTILINE)
-        persona = re.search(r'<agent[^>]*\bname="([^"]+)"', text)
-        if not tag:
-            return None
-        return tag.group(1), (persona.group(1) if persona else tag.group(1))
+        """Return ``(tag, persona name)`` for an agent file, or None if unreadable.
+
+        Delegates to :func:`layout.agent_identity` so the scaffolder and the
+        doctor parse the same frontmatter the same way (issue #345) — a second
+        regex here would only need to drift once to reopen the gap.
+        """
+        return layout.agent_identity(path)
 
     def _tpl_vars(self) -> dict[str, str]:
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
@@ -660,16 +657,41 @@ class ProjectScaffolder:
         the one thing in the kit that cannot be written ahead of time — it is a
         fact about *this* install, so it is generated here, once every agent is
         planned.
+
+        Iterating ``p.copies`` alone only ever described the kit tier's own
+        plan: a project agent living in ``overrides/agents/`` — the sanctioned
+        way to customise a project — could never route, structurally, because
+        it never appears in a kit copy plan. This still reads the plan for the
+        kit tier, which is not on disk yet at plan time, but reads the
+        overrides tier straight off disk and lets it win on a shared tag, the
+        same priority :func:`layout.agent_dirs` enforces everywhere else
+        (issue #345).
         """
-        rows: list[str] = []
+        sources: dict[str, Path] = {}
         for fc in sorted(p.copies, key=lambda c: c.dst.name):
             if not fc.src.is_file() or not _is_agent_markdown(fc.dst):
                 continue
             identity = self._agent_identity(fc.src)
             if identity is None:
                 continue
-            tag, persona = identity
-            role = self._extract_agent_description(fc.src).replace('"', "'")
+            sources[identity[0]] = fc.src
+        overrides_dir = layout.overrides_dir(self._target) / layout.AGENTS_SUBDIR
+        if overrides_dir.is_dir():
+            for path in sorted(overrides_dir.iterdir()):
+                if not (path.is_file() and path.suffix == ".md"):
+                    continue
+                identity = self._agent_identity(path)
+                if identity is None:
+                    continue
+                sources[identity[0]] = path  # Override tier wins on a shared tag.
+
+        rows: list[str] = []
+        for tag, src in sorted(sources.items()):
+            identity = self._agent_identity(src)
+            if identity is None:
+                continue
+            _, persona = identity
+            role = self._extract_agent_description(src).replace('"', "'")
             rows.append(
                 f'      <agent tag="{tag}" name="{persona}" role="{role}"/>'
             )

@@ -20,11 +20,16 @@ from grimoire.tools import workspace_language as wl
 
 
 def _manifest(root: Path, *names: str) -> None:
-    kit = root / "_grimoire" / "kit"
-    kit.mkdir(parents=True, exist_ok=True)
-    lines = ["name,file,category,description,icon"]
-    lines.extend(f"{n},{n}.md,meta,{n}," for n in names)
-    (kit / "agent-manifest.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    """Install agent tags as real files, since that is what is checked now.
+
+    ``installed_agent_tags`` used to read the generated CSV; it now reads
+    ``layout.agent_dirs()`` directly, so a fixture that wrote only the CSV
+    would exercise a source of truth the code no longer consults (#345).
+    """
+    agents = root / "_grimoire" / "kit" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (agents / f"{n}.md").write_text(f'---\nname: "{n}"\n---\n', encoding="utf-8")
 
 
 # ── Tokens ───────────────────────────────────────────────────────────────────

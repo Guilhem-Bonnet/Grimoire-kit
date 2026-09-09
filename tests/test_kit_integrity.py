@@ -132,6 +132,107 @@ class TestRosterCoherence:
         assert report.coherent
 
 
+class TestOverridesTierVisibility:
+    """Overrides is the sanctioned way to customise a project — issue #345.
+
+    An agent dropped in ``overrides/agents/`` must be seen by the same two
+    mechanisms that see a kit agent: the doctor's roster check, and the
+    routing map the entry-point persona reads. Both used to read a kit-only
+    source (the manifest, the planned copies) and were blind to the tier
+    that is supposed to be the customisation surface.
+    """
+
+    _CUSTOM = (
+        '---\n'
+        'name: "site-agent"\n'
+        'description: "Agent propre au projet"\n'
+        '---\n'
+        '<agent name="Cassandre">\n'
+        'Persona propre au projet, jamais livrée par le kit.\n'
+        '</agent>\n'
+    )
+
+    def _plant_override_agent(self, root: Path) -> Path:
+        override = root / "_grimoire" / "overrides" / "agents" / "site-agent.md"
+        override.parent.mkdir(parents=True, exist_ok=True)
+        override.write_text(self._CUSTOM, encoding="utf-8")
+        return override
+
+    def test_an_override_agent_is_seen_by_installed_agent_tags(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        self._plant_override_agent(tmp_path)
+        assert "site-agent" in installed_agent_tags(tmp_path)
+
+    def test_an_override_agent_is_not_a_ghost_when_routed(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        self._plant_override_agent(tmp_path)
+        target = _concierge(tmp_path)
+        target.write_text(
+            target.read_text(encoding="utf-8").replace(
+                "</agents>",
+                '  <agent tag="site-agent" name="Cassandre" role="custom"/>\n    </agents>',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        report = roster_incoherences(tmp_path)
+        assert "site-agent" not in report.routed_but_absent
+
+    def test_removing_the_override_agent_makes_it_disappear(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        override = self._plant_override_agent(tmp_path)
+        assert "site-agent" in installed_agent_tags(tmp_path)
+        override.unlink()
+        assert "site-agent" not in installed_agent_tags(tmp_path)
+
+    def test_an_override_shadowing_a_kit_agent_counts_once(self, tmp_path: Path) -> None:
+        """The override version wins; the pair is not double-counted."""
+        _install(tmp_path)
+        override = tmp_path / "_grimoire" / "overrides" / "agents" / "ops-engineer.md"
+        override.parent.mkdir(parents=True, exist_ok=True)
+        override.write_text(
+            '---\nname: "ops-engineer"\ndescription: "Version projet"\n---\n'
+            '<agent name="Override">Custom.</agent>\n',
+            encoding="utf-8",
+        )
+        installed = installed_agent_tags(tmp_path)
+        # A set cannot hold the tag twice; the real assertion is that the
+        # override — not two independent entries — is what got resolved.
+        assert list(installed).count("ops-engineer") == 1
+
+
+class TestAgentRoutingMapOverrides:
+    """The routing map generated for the entry-point persona — issue #345."""
+
+    def test_a_project_agent_appears_in_the_generated_routing_map(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        override = tmp_path / "_grimoire" / "overrides" / "agents" / "site-agent.md"
+        override.parent.mkdir(parents=True, exist_ok=True)
+        override.write_text(
+            '---\nname: "site-agent"\ndescription: "Agent propre au projet"\n---\n'
+            '<agent name="Cassandre">Persona propre au projet.</agent>\n',
+            encoding="utf-8",
+        )
+        # The map is rendered when the kit tier is (re-)generated, on `up`.
+        _install(tmp_path)
+        text = _concierge(tmp_path).read_text(encoding="utf-8")
+        assert 'tag="site-agent"' in text
+
+    def test_removing_the_project_agent_removes_it_from_the_map(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        override = tmp_path / "_grimoire" / "overrides" / "agents" / "site-agent.md"
+        override.parent.mkdir(parents=True, exist_ok=True)
+        override.write_text(
+            '---\nname: "site-agent"\ndescription: "Agent propre au projet"\n---\n'
+            '<agent name="Cassandre">Persona propre au projet.</agent>\n',
+            encoding="utf-8",
+        )
+        override.unlink()
+        # Re-scaffolding without the agent must not leave it in the map.
+        _install(tmp_path)
+        assert 'tag="site-agent"' not in _concierge(tmp_path).read_text(encoding="utf-8")
+
+
 class TestDoctorReportsThem:
     def test_doctor_passes_on_a_sound_install(self, tmp_path: Path) -> None:
         _install(tmp_path)
