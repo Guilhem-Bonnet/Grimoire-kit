@@ -282,6 +282,21 @@ def test_init_hook_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert project_registry.load_registry() == []
 
 
+def _post_path(port: int, path: str, payload: dict[str, Any]) -> int:
+    """POST brut sur un chemin arbitraire — la query string comprise."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            return int(resp.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
 def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/memory",
@@ -440,3 +455,30 @@ def test_sync_site_preserves_generated_data(tmp_path: Path) -> None:
     sentinel.write_text('{"generated": true}', encoding="utf-8")
     cmd_cockpit._sync_site(serve)
     assert json.loads(sentinel.read_text(encoding="utf-8")) == {"generated": True}
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/api/memory", {}),
+        ("/api/projects/select", {"slug": "served"}),
+        ("/api/projects/add", {}),
+        ("/api/projects/scan", {}),
+    ],
+)
+def test_post_routes_survivent_a_une_query_string(
+    api_server: int, path: str, payload: dict[str, Any]
+) -> None:
+    """Une route POST reste joignable quand l'URL porte `?project=<slug>`.
+
+    L'interface ajoute ce paramètre à *toute* requête dès qu'un projet est
+    sélectionné, POST comprises. `do_POST` comparait le chemin brut à des
+    chemins exacts : plus aucune route ne correspondait, et l'intégralité des
+    écritures du cockpit répondait 404 — sans qu'aucun test existant ne le
+    voie, faute d'en émettre une avec query string.
+
+    Le verdict retenu est « pas 404 » plutôt que « 200 » : ces routes refusent
+    légitimement une charge incomplète, et c'est l'injoignabilité qu'on garde
+    ici, pas leur logique métier.
+    """
+    assert _post_path(api_server, f"{path}?project=served", payload) != 404
