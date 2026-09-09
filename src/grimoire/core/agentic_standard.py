@@ -436,6 +436,16 @@ def _profile_rank(profile_id: str) -> int:
         return -1
 
 
+def profile_rank(profile_id: str) -> int:
+    """Return where *profile_id* sits on ``PROFILE_LADDER`` (higher = stricter).
+
+    Public wrapper around ``_profile_rank``: callers outside this module (the
+    anti-downgrade guard in ``cmd_up``) need to compare an installed profile
+    against a freshly resolved one without duplicating the ladder logic.
+    """
+    return _profile_rank(profile_id)
+
+
 def _highest_profile(profile_ids: Iterable[str]) -> str:
     best = "starter"
     best_rank = 0

@@ -253,3 +253,63 @@ class TestUpAlias:
             if flag not in declared
         ]
         assert not missing, f"options absentes de `up` : {missing}"
+
+
+class TestUpPreservesStandardProfile:
+    """#344 — `up` sans `--needs` ne doit jamais rétrograder le profil du standard."""
+
+    def _artifact_count(self, target: Path) -> int:
+        manifest = target / "_grimoire" / "standard" / "standard-profile.yaml"
+        return manifest.read_text(encoding="utf-8").count("path:")
+
+    def test_bare_up_preserves_the_profile_earned_by_needs(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        needs = "multi-agent-orchestration,hooks-skills-governance,observability-cockpit"
+        first = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--needs", needs],
+        )
+        assert first.exit_code == 0, first.output
+        before = self._artifact_count(target)
+        assert before > 6, "l'install --needs doit couvrir bien plus que `starter`"
+
+        second = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert second.exit_code == 0, second.output
+        after = self._artifact_count(target)
+
+        # Le manifeste ne doit pas perdre de politiques : c'est exactement la
+        # rétrogradation silencieuse vers `starter` que #344 signale.
+        assert after == before, (
+            f"`up` nu a fait tomber le manifeste de {before} à {after} artefacts"
+        )
+        assert "profile 'starter'" not in second.output
+
+    def test_bare_up_without_history_still_defaults_to_starter(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert result.exit_code == 0, result.output
+        assert (target / "_grimoire" / "standard" / "standard-profile.yaml").is_file()
+        assert "profile 'starter'" in result.output
+
+    def test_explicit_needs_reduction_is_reported_as_a_change_not_done(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        needs = "multi-agent-orchestration,hooks-skills-governance,observability-cockpit"
+        first = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--needs", needs],
+        )
+        assert first.exit_code == 0, first.output
+
+        result = runner.invoke(
+            cli_app,
+            ["-o", "json", "up", str(target), "--backend", "local", "--needs", "solo-prototyping"],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        steps = {s["step"]: s for s in data["steps"]}
+        assert steps["standard"]["status"] != "done"
+        assert "governed" in steps["standard"]["detail"] or "orchestrated" in steps["standard"]["detail"]

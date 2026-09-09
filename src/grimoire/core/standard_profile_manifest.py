@@ -39,6 +39,29 @@ def read_profile(manifest: Path) -> str | None:
     return str(profile) if profile else None
 
 
+def read_install_manifest_needs(manifest: Path) -> tuple[str, ...]:
+    """Return the ``needs`` recorded by ``install-manifest.yaml``, or ``()`` if absent.
+
+    ``grimoire standard init --needs ...`` and ``grimoire up --needs ...`` both
+    write this manifest once, on first install (see ``_step_standard`` in
+    ``cmd_up.py``). A later ``grimoire up`` with no ``--needs`` reads it back
+    instead of falling through to the ``starter`` default — the whole point of
+    persisting the selection is that the user should not have to repeat it on
+    every update, and silently forgetting it is exactly the regression that
+    dropped 8 compliance artifacts from a governed project (#344).
+    """
+    data = _load(manifest)
+    if data is None:
+        return ()
+    selection = data.get("selection")
+    if not isinstance(selection, dict):
+        return ()
+    needs = selection.get("needs")
+    if not isinstance(needs, list):
+        return ()
+    return tuple(str(n) for n in needs if str(n).strip())
+
+
 def read_artifact_paths(manifest: Path) -> list[Path]:
     """Return every artifact path the manifest records as generated.
 
