@@ -824,6 +824,8 @@ def _step_standard(
         state.steps.append(StepResult("standard", "skipped", "blocked: no project configuration"))
         return
     already_initialized = (target / _STANDARD_PROFILE_MARKER).is_file()
+    manifest_path = target / "_grimoire" / "standard" / "install-manifest.yaml"
+    explicit_needs = bool(needs)
     if dry_run:
         if already_initialized:
             state.steps.append(StepResult("standard", "planned", "refresh untouched standard artifacts"))
@@ -833,11 +835,28 @@ def _step_standard(
         return
 
     try:
-        from grimoire.core.agentic_standard import resolve_install_plan, setup_standard_profile
+        from grimoire.core.agentic_standard import (
+            profile_rank,
+            resolve_install_plan,
+            setup_standard_profile,
+        )
+        from grimoire.core.standard_profile_manifest import (
+            read_install_manifest_needs,
+            read_profile,
+        )
+
+        effective_needs = list(needs)
+        if not effective_needs:
+            # #344 — `up` without `--needs` used to hardcode `starter`, which
+            # silently dropped every policy a prior `--needs` install had
+            # earned. `install-manifest.yaml` already records that selection
+            # (written below, once, on first install); read it back instead
+            # of forgetting it on every subsequent `up`.
+            effective_needs = list(read_install_manifest_needs(manifest_path))
 
         plan = None
-        if needs:
-            plan = resolve_install_plan(needs=needs)
+        if effective_needs:
+            plan = resolve_install_plan(needs=effective_needs)
             profile_id = plan.profile
             extra_artifacts = list(plan.extra_artifacts)
         else:
@@ -845,6 +864,22 @@ def _step_standard(
             extra_artifacts = []
             if not quiet:
                 _print_needs_suggestions(target)
+
+        existing_profile = read_profile(target / _STANDARD_PROFILE_MARKER) if already_initialized else None
+        downgrade = (
+            existing_profile is not None
+            and profile_rank(existing_profile) > profile_rank(profile_id)
+        )
+        if downgrade and not explicit_needs:
+            # Last-resort guard: whatever resolved the target profile (no
+            # `--needs` this run, and none — or a smaller one — persisted)
+            # covers less than what is already installed. Preserve it rather
+            # than silently regress; an explicit `--needs` overrides this.
+            state.steps.append(StepResult(
+                "standard", "skipped",
+                f"profile '{existing_profile}' preserved (pass --needs to change)",
+            ))
+            return
 
         result = setup_standard_profile(
             target,
@@ -862,16 +897,25 @@ def _step_standard(
         if plan is not None:
             from grimoire.cli.cmd_standard import _install_manifest_text
 
-            manifest_path = target / "_grimoire" / "standard" / "install-manifest.yaml"
             if not manifest_path.exists():
                 manifest_path.parent.mkdir(parents=True, exist_ok=True)
                 manifest_path.write_text(
                     _install_manifest_text(plan, project_name, "bootstrap"), encoding="utf-8",
                 )
-        state.steps.append(StepResult(
-            "standard", "done",
-            f"profile '{result.profile}' — {len(result.written)} artifact(s) written",
-        ))
+        if downgrade:
+            # Explicit `--needs` may legitimately shrink the profile — honor
+            # it, but never call a scope reduction "done": that word is what
+            # let #344 go unnoticed for a whole update cycle.
+            state.steps.append(StepResult(
+                "standard", "changed",
+                f"profile '{existing_profile}' -> '{result.profile}' "
+                f"— {len(result.written)} artifact(s) written",
+            ))
+        else:
+            state.steps.append(StepResult(
+                "standard", "done",
+                f"profile '{result.profile}' — {len(result.written)} artifact(s) written",
+            ))
         state.actions.append(f"Initialized agentic standard (profile {result.profile})")
     except (GrimoireError, ValueError, KeyError, OSError) as exc:
         state.steps.append(StepResult("standard", "failed", f"standard init error: {exc}"))

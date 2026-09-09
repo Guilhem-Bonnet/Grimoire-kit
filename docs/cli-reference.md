@@ -112,6 +112,14 @@ modifiés. Ce que le projet possède — `project-context.yaml`, `.mcp.json`, la
 mémoire, les décisions de conformité, tout `_grimoire/overrides/` — n'est jamais
 réécrit.
 
+Le profil du standard suit la même règle : les `--needs` passés à l'installation
+sont persistés dans `_grimoire/standard/install-manifest.yaml` et réutilisés à
+chaque `up` sans argument — un `up` nu ne rétrograde jamais un profil vers
+`starter` (#344). Si le profil déjà en place est plus large que celui qu'un
+`up` nu résoudrait, il est préservé et l'étape rapporte `skipped`. Seul un
+`--needs` explicite qui réduit le périmètre est honoré, et il est alors
+rapporté comme un changement de profil, jamais comme `done`.
+
 L'écriture est différentielle : sans nouvelle version du kit, aucun fichier
 n'est touché et le rapport indique `kit artifacts already up to date`. La
 commande est donc sûre à lancer à tout moment.
