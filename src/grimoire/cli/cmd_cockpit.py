@@ -577,9 +577,16 @@ def _select_cwd_project() -> str | None:
     l'utilisateur qui vient d'exprimer son intention en lançant la commande
     ici, l'enregistrement explicite ferait répéter une décision déjà prise.
 
+    ``GRIMOIRE_NO_COCKPIT`` désactive cette adoption, comme elle désactive
+    déjà l'enregistrement au moment de l'initialisation : une commande qui
+    écrit dans l'état de la machine doit pouvoir être exécutée sans le faire,
+    et la suite de tests est le premier appelant à en avoir besoin.
+
     Renvoie un message à afficher quand le projet vient d'être enregistré, ou
     ``None`` si rien n'a changé.
     """
+    if os.environ.get("GRIMOIRE_NO_COCKPIT"):
+        return None
     cwd = Path.cwd().resolve()
     if not looks_grimoire(cwd):
         return None
@@ -835,6 +842,12 @@ def start(
         console.print(f"[red]✗[/red] Le cockpit n'a pas démarré à temps (port {port} déjà utilisé{hint} ?).")
         raise typer.Exit(1)
 
+    # Adoption du projet courant une fois le démon vivant seulement : elle écrit
+    # dans l'état de la machine, et un démarrage qui échoue ne doit rien y
+    # laisser — c'est exactement ce que vérifie `test_start_timeout_fails`.
+    cwd_notice = _select_cwd_project()
+    if cwd_notice:
+        console.print(cwd_notice)
     write_state({"pid": pid, "port": port, "url": url})
     console.print(f"[bold green]Cockpit démarré[/bold green] → [link]{url}[/link]")
     console.print("[dim]Arrêt : [b]grimoire cockpit stop[/b] · état : [b]grimoire cockpit status[/b][/dim]")

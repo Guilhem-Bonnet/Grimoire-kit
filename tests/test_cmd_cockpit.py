@@ -178,7 +178,14 @@ def test_start_timeout_fails(runner: CliRunner, monkeypatch: pytest.MonkeyPatch)
     _mock_daemon(monkeypatch, pid=1, alive=False)
     res = runner.invoke(app, ["cockpit", "start", "--no-open", "--port", "9192"])
     assert res.exit_code == 1
-    assert cmd_cockpit._read_state() is None
+    # Un démarrage raté ne laisse aucun état de démon. On vérifie l'absence de
+    # ces clés-là, et non un fichier vide : `selected_project` partage le même
+    # fichier et peut légitimement y avoir été posé par une sélection
+    # antérieure, sans rien dire du démon.
+    state = cmd_cockpit._read_state() or {}
+    assert "pid" not in state
+    assert "port" not in state
+    assert "url" not in state
 
 
 def test_serve_port_in_use(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
