@@ -28,12 +28,12 @@ import glossary from './glossary.js';
 // ── Les six espaces, dans l'ordre de la barre ───────────────────────────────
 
 const SPACES = [
-  { id: 'piloter',  label: 'Piloter',  term: 'flotte',    primary: 'Mettre à jour' },
-  { id: 'concevoir', label: 'Concevoir', term: 'blueprint', primary: 'Compiler' },
-  { id: 'executer',  label: 'Exécuter',  term: 'tache',     primary: 'Réclamer' },
-  { id: 'observer',  label: 'Observer',  term: 'trace',     primary: 'Rafraîchir' },
-  { id: 'memoire',   label: 'Mémoire',   term: 'memoire',   primary: 'Indexer' },
-  { id: 'source',    label: 'Source',    term: 'etage',     primary: 'Valider' },
+  { id: 'piloter',  label: 'Piloter',  term: 'flotte' },
+  { id: 'concevoir', label: 'Concevoir', term: 'blueprint' },
+  { id: 'executer',  label: 'Exécuter',  term: 'tache' },
+  { id: 'observer',  label: 'Observer',  term: 'trace' },
+  { id: 'memoire',   label: 'Mémoire',   term: 'memoire' },
+  { id: 'source',    label: 'Source',    term: 'etage' },
 ];
 
 // Rail : 1 explorateur, 2 bibliothèque, 3 preuves, 4 inspecteur, 5 dock.
@@ -480,7 +480,6 @@ async function goto(id, params) {
   for (const button of document.querySelectorAll('[data-space]')) {
     button.setAttribute('aria-selected', String(button.dataset.space === space.id));
   }
-  $('primary-action').textContent = space.primary;
   const canvas = $('canvas');
   canvas.replaceChildren();
   canvas.dataset.grid = space.id === 'concevoir' ? 'on' : 'off';
