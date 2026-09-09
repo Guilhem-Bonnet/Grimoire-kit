@@ -1401,20 +1401,34 @@ def main(argv: list[str]) -> int:
         projects = [{"name": args.name or root.name, "path": str(root)}]
 
     heads = []
-    for i, proj in enumerate(projects):
+    skipped = 0
+    for proj in projects:
         proot = Path(proj.get("path", root)).resolve()
         name = proj.get("name") or proot.name
         slug = _slug(proj.get("slug") or name)
+        # Un chemin disparu ne coûte pas juste une entrée fausse : `build_project`
+        # enchaîne git, le board, la mémoire… pour un dossier qui n'existe plus,
+        # et c'est ce qui rendait `cockpit serve` silencieusement lent (#340).
+        # Ni génération ni tentative : l'entrée est ignorée, comptée, nommée.
+        if not proot.is_dir():
+            skipped += 1
+            print(f"[SKIP] {slug} — chemin disparu : {proot}")
+            continue
         pdir = out_dir / "projects" / slug
         head = build_project(proot, pdir, args.with_tests, demo=args.demo)
         head.update(slug=slug, name=name, path=str(proot))
-        heads.append(head)
-        # Le projet primaire alimente aussi le flat data/ (rétro-compat vitrine mono-projet)
-        if i == 0:
+        # Le projet primaire alimente aussi le flat data/ (rétro-compat vitrine
+        # mono-projet) — le premier des SURVIVANTS, pas le premier de la liste
+        # brute : un chemin disparu en tête ne doit pas laisser data/ vide.
+        if not heads:
             for f in pdir.glob("*.json"):
                 shutil.copy2(f, out_dir / f.name)
+        heads.append(head)
         print(f"[OK] {slug} — v{head['version']} · {head['commits_total']} commits · "
               f"antifragile {head.get('antifragile')} · mémoire {head.get('memory_backend')}")
+
+    if skipped:
+        print(f"[SKIP] {skipped} entrée(s) ignorée(s), chemin disparu — `grimoire cockpit prune` les retire.")
 
     index = {
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),

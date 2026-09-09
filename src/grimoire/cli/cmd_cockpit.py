@@ -653,9 +653,28 @@ def _sync_site(serve_dir: Path) -> None:
 
 
 def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
-    """Regenerate the data layer from the registry. Returns True if projects were generated."""
+    """Regenerate the data layer from the registry. Returns True if projects were generated.
+
+    Signale les entrées dont le chemin a disparu, sans y toucher (#340). Le
+    coût, lui, est déjà évité : `gen-site-data.py` ignore ces entrées au lieu
+    d'enchaîner git, le board et la mémoire pour un dossier mort, et c'est ce
+    qui rendait `serve` lent sans rien dire.
+
+    Retirer ces entrées d'office serait une perte de configuration silencieuse :
+    un chemin absent n'est pas toujours un chemin mort — disque externe
+    débranché, montage réseau tombé, partition d'un autre système non montée.
+    L'utilisateur décide, avec `grimoire cockpit prune`.
+    """
     projects = load_registry()
     if not projects:
+        return False
+    keep, drop = classify_registry(projects)
+    if drop:
+        console.print(
+            f"[yellow]−[/yellow] {len(drop)} entrée(s) ignorée(s), chemin disparu — "
+            "`grimoire cockpit prune` les retire."
+        )
+    if not keep:
         return False
     gen = site_script("gen-site-data.py")
     cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]

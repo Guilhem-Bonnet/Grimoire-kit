@@ -17,6 +17,10 @@ TOOLS = ROOT / "framework" / "tools"
 #: qui permette encore de prouver qu'un test n'a pas touché l'état réel.
 REAL_HOME = Path.home()
 
+#: Chemin du registre cockpit réel — celui de la machine qui lance la suite,
+#: jamais celui, isolé, que ``GRIMOIRE_COCKPIT_HOME`` fait pointer ailleurs.
+_REAL_COCKPIT_REGISTRY = REAL_HOME / ".grimoire" / "cockpit" / "registry.json"
+
 #: Variables qui décident où le kit écrit son état hors projet. Elles sont
 #: toutes détournées, mais aucune n'est le vrai garde-fou : ``HOME`` l'est.
 #: Les poser explicitement rend la protection lisible et survit à un code qui
@@ -247,3 +251,56 @@ def project_with_blueprint(real_project: Path) -> Iterator[tuple[Path, str]]:
         if not target.is_file():
             pytest.skip(f"`grimoire blueprint new` n'a pas produit de fichier ici : {result.stderr[-400:]}")
     yield real_project, bp_id
+
+
+# ── Garde de suite : le registre cockpit réel ne bouge jamais ─────────────────
+#
+# Régression (#338/#339) : sur un poste réel, 276 des 281 entrées du registre
+# étaient des chemins `/tmp/pytest-of-<user>/...` disparus — écrits par la
+# suite elle-même avant que l'isolation `HOME` (#153) n'existe. `_isolate_user_state`
+# ferme ce trou pour tout ce qui passe par `Path.home()`, et
+# `TestCockpitRegistry` (tests/unit/test_user_state_isolation.py) le prouve
+# pour un appel direct à `register_project`. Ce garde-ci couvre la portée que
+# ni l'un ni l'autre ne teste : la SUITE ENTIÈRE, telle qu'elle s'exécute
+# réellement en CI — sous-processus `grimoire` compris — plutôt qu'un seul
+# appel isolé. Une empreinte prise avant le premier test et comparée après le
+# dernier est le seul moyen de le garantir sans relire chaque test un par un.
+def _cockpit_registry_fingerprint() -> tuple[bytes, float] | None:
+    """``None`` si le fichier n'existe pas — un stat suffit, pas besoin d'ouvrir."""
+    try:
+        stat = _REAL_COCKPIT_REGISTRY.stat()
+    except OSError:
+        return None
+    return (_REAL_COCKPIT_REGISTRY.read_bytes(), stat.st_mtime)
+
+
+_registry_fingerprint_at_start: tuple[bytes, float] | None = None
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Empreinte prise à l'ouverture de session, avant la moindre collecte de test."""
+    global _registry_fingerprint_at_start
+    _registry_fingerprint_at_start = _cockpit_registry_fingerprint()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Comparaison à la fermeture : un test qui a écrit là ne doit jamais passer inaperçu.
+
+    Un simple ``assert`` ici n'aurait pas d'effet sur le code de sortie —
+    ``pytest_sessionfinish`` s'exécute après que les résultats sont déjà
+    figés. On force donc ``session.exitstatus`` explicitement : c'est ce que
+    la CI regarde, pas la sortie texte.
+    """
+    after = _cockpit_registry_fingerprint()
+    if after != _registry_fingerprint_at_start:
+        session.exitstatus = 1
+        terminal = session.config.pluginmanager.get_plugin("terminalreporter")
+        message = (
+            "GARDE #339 : le registre cockpit réel de la machine "
+            f"({_REAL_COCKPIT_REGISTRY}) a changé pendant la suite — "
+            "un test écrit hors de l'isolation GRIMOIRE_COCKPIT_HOME/HOME."
+        )
+        if terminal is not None:
+            terminal.write_line(message, red=True, bold=True)
+        else:
+            print(message)
