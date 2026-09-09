@@ -657,6 +657,15 @@ Cockpit local de gouvernance, servi sur `127.0.0.1` uniquement. Le registre vit
 dans `~/.grimoire/cockpit/registry.json` ; `grimoire init` y inscrit le projet
 et l'annonce, et `GRIMOIRE_NO_COCKPIT` désactive cette inscription.
 
+Le cockpit **ne scanne jamais le disque** : `list` et `serve` lisent le
+registre tel quel, jamais le système de fichiers. Un projet qui porte les
+marqueurs Grimoire mais n'a jamais été enregistré n'apparaît donc pas — ce
+n'est pas un défaut de détection. Pour le rendre visible : depuis ce projet,
+`grimoire cockpit list` ou `grimoire cockpit serve` signale « ce dossier
+ressemble à un projet Grimoire mais n'est pas enregistré » et donne la
+commande `grimoire cockpit add <chemin>` à lancer. Un registre vide nomme de
+la même façon `grimoire cockpit scan <racine>`.
+
 | Commande | Description |
 | --- | --- |
 | `grimoire cockpit add <chemin>` | Enregistrer un projet local |

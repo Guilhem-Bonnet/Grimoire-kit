@@ -543,13 +543,42 @@ def prune(
     console.print(f"[green]−[/green] {len(drop)} entrée(s) retirée(s), {len(keep)} conservée(s).")
 
 
+def _unregistered_cwd_notice(projects: list[dict[str, str]]) -> str | None:
+    """Une ligne quand le dossier courant est un projet Grimoire absent du registre.
+
+    Le cockpit ne scanne jamais le disque (#341 le refuse explicitement) : il
+    lit le registre tel quel. Sans ce message, un dossier qui porte
+    ``_grimoire/`` mais n'a jamais été enregistré disparaît en silence, et
+    l'utilisateur en conclut — à tort — que la détection est en cause plutôt
+    que l'enregistrement.
+    """
+    cwd = Path.cwd().resolve()
+    if not looks_grimoire(cwd):
+        return None
+    if any(Path(p.get("path", "")).resolve() == cwd for p in projects):
+        return None
+    return (
+        f"[yellow]•[/yellow] Ce dossier ([b]{cwd}[/b]) ressemble à un projet Grimoire "
+        f"mais n'est pas enregistré. Ajoute-le : [b]grimoire cockpit add {cwd}[/b]"
+    )
+
+
 @cockpit_app.command("list")
 def list_projects() -> None:
     """List the projects governed by the cockpit."""
     projects = load_registry()
     if not projects:
-        console.print("[dim]Aucun projet enregistré. Ajoute-en un : [b]grimoire cockpit add <path>[/b][/dim]")
+        console.print(
+            "[dim]Aucun projet enregistré. Ajoute-en un : [b]grimoire cockpit add <path>[/b] "
+            "ou scanne une racine : [b]grimoire cockpit scan <racine>[/b][/dim]"
+        )
+        notice = _unregistered_cwd_notice(projects)
+        if notice:
+            console.print(notice)
         return
+    notice = _unregistered_cwd_notice(projects)
+    if notice:
+        console.print(notice)
     table = Table(title="Cockpit — projets gouvernés", title_style="bold")
     table.add_column("Slug", style="cyan")
     table.add_column("Nom")
@@ -671,6 +700,9 @@ def serve(
             console.print("[dim]Registre vide → cockpit vide (aucune donnée inventée).[/dim]")
             console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
                           "ou [b]grimoire cockpit scan <dossier>[/b][/dim]")
+    notice = _unregistered_cwd_notice(load_registry())
+    if notice:
+        console.print(notice)
 
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
