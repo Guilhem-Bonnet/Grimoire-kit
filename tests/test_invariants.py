@@ -55,7 +55,7 @@ def _grimoire(args: list[str], cwd: Path, *, extra_env: dict[str, str] | None = 
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-m", "grimoire", *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True, check=False, timeout=180,
+        cwd=str(cwd), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
 
 
