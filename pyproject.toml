@@ -94,6 +94,11 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-xdist>=3.0",
+    # Fuzzing basé sur les propriétés — cœur de métier de l'agent
+    # security-auditor (issue #352) : campagnes reproductibles sur les
+    # lecteurs de YAML édité à la main (registre de fournisseurs, profil du
+    # standard...), chaque plantage rejoué comme cas explicite via @example.
+    "hypothesis>=6.100",
     "mypy>=1.10",
     "ruff>=0.6",
     "pre-commit>=4.0",
