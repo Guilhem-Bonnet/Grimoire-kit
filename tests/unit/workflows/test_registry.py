@@ -268,20 +268,6 @@ class TestDeclaredPatterns:
 
 
 class TestDeclaredTeams:
-    @pytest.mark.parametrize(
-        ("slug", "team"),
-        [
-            ("boomerang-orchestration", "team-build"),
-            ("subagent-orchestration", "team-build"),
-            ("incident-response", "team-ops"),
-        ],
-    )
-    def test_declared_team(self, tmp_path: Path, slug: str, team: str) -> None:
-        entry = registry.find_workflow(tmp_path, slug)
-
-        assert entry is not None
-        assert entry.team == team
-
     def test_every_declared_team_resolves(self, tmp_path: Path) -> None:
         """Déclarer une équipe absente donnerait un `show` qui promet dans le vide."""
         from grimoire.workflows.teams import load_team
@@ -290,12 +276,25 @@ class TestDeclaredTeams:
             if entry.team:
                 assert load_team(tmp_path, entry.team) is not None, entry.slug
 
-    @pytest.mark.parametrize("slug", ["party-mode", "state-checkpoint", "repo-map-generator"])
+    @pytest.mark.parametrize(
+        "slug",
+        [
+            "party-mode",
+            "state-checkpoint",
+            "repo-map-generator",
+            "boomerang-orchestration",
+            "subagent-orchestration",
+            "incident-response",
+        ],
+    )
     def test_a_workflow_without_a_grounded_team_declares_none(self, tmp_path: Path, slug: str) -> None:
         """Mieux vaut aucune équipe qu'une équipe devinée.
 
-        Ces trois-là ne nomment pas de roster et ne recoupent la spécialité
-        d'aucune équipe : leur en attribuer une serait une invention.
+        `framework/teams/team-build.yaml` et `team-ops.yaml` référençaient des
+        agents (`architect`, `dev`, `qa`, `sm`, `tech-writer`) qu'aucun
+        archétype du kit ne livre (issue #346) : les manifestes sont retirés,
+        et les workflows qui les citaient ne déclarent plus d'équipe plutôt
+        que d'en promettre une vide.
         """
         entry = registry.find_workflow(tmp_path, slug)
 

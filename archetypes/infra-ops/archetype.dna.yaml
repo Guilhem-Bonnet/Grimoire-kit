@@ -3,10 +3,10 @@ $schema: "grimoire-archetype-dna/v1"
 id: infra-ops
 name: "Infra Ops"
 version: "1.0.0"
-description: "Infrastructure & DevOps complète — 10 agents spécialisés pour Terraform, K8s, Ansible, monitoring, sécurité, backup"
+description: "Infrastructure & DevOps complète — 10 agents spécialisés pour Terraform, K8s, Ansible, monitoring, sécurité, backup. Périmètre homelab/auto-hébergement (Proxmox, LXC, K3s, FluxCD, Longhorn) : pensé pour un laboratoire personnel, pas pour du cloud d'entreprise (issue #347)."
 icon: "wrench"
 author: "grimoire-kit"
-tags: [infrastructure, devops, k8s, terraform, ansible, monitoring, security, backup, ops]
+tags: [infrastructure, devops, k8s, terraform, ansible, monitoring, security, backup, ops, homelab, self-hosted]
 
 inherits: minimal
 

@@ -5,7 +5,6 @@ triggers:
   - alerte critique résolue
   - incident infra détecté
   - incident sécurité détecté
-team: team-ops
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
