@@ -82,11 +82,14 @@ jobs:
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
 
-      - name: Build and install the compiled core (maturin develop)
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte.
         run: |
           pip install "maturin>=1.7,<2"
-          cd rust/grimoire-policies-core
-          maturin develop --release
+          maturin build --release --manifest-path rust/grimoire-policies-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
 
       - name: Verify the compiled core is importable
         run: python -c "import grimoire_policies_core; print('grimoire_policies_core', grimoire_policies_core.__version__)"
