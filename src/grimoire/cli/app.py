@@ -1564,7 +1564,7 @@ def self_version(ctx: typer.Context) -> None:
             from urllib.request import urlopen
 
             url = "https://pypi.org/pypi/grimoire-kit/json"
-            with urlopen(url, timeout=5) as resp:
+            with urlopen(url, timeout=5) as resp:  # noqa: S310 — URL locale construite par le kit, pas une entrée utilisateur
                 pypi_data = json.loads(resp.read())
                 latest = pypi_data.get("info", {}).get("version")
         except Exception:
