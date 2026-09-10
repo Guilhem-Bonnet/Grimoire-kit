@@ -304,27 +304,49 @@ def _bundled(kind: str) -> list[Path]:
     return sorted(directory.glob("*.md"))
 
 
+def _skill_files(project_root: Path) -> list[Path]:
+    """Archetype-shipped skill definitions, overrides winning over the kit tier.
+
+    Mirrors :func:`_agent_files`: a skill an archetype attaches to one of its
+    agents (issue #375) is copied by the scaffolder into the project's own
+    skill directory, not bundled with the package, so it must be read from
+    disk the same way agents are.
+    """
+    seen: dict[str, Path] = {}
+    for directory in layout.skill_dirs(project_root):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.md")):
+            seen.setdefault(path.stem, path)
+    return list(seen.values())
+
+
 def collect_skills(project_root: Path, *, governed: bool | None = None) -> tuple[SkillSpec, ...]:
-    """Bundled skills, minus the ones this project has no use for."""
+    """Bundled, host-wide skills plus the skills this project's archetypes ship.
+
+    Bundled skills (``grimoire-agent-dispatch``, ``grimoire-memory``, …) are
+    always in scope; project skills come from the archetype(s) the project
+    installed and are what an agent's ``skills:`` frontmatter usually
+    references (issue #375). A slug present in both wins from the project
+    copy — the same override-over-kit precedence as agents.
+    """
     enrolled = is_standard_enrolled(project_root) if governed is None else governed
-    skills: list[SkillSpec] = []
-    for path in _bundled("skills"):
+    by_slug: dict[str, SkillSpec] = {}
+    for path in [*_bundled("skills"), *_skill_files(project_root)]:
         slug = path.stem
         if slug == "grimoire-evidence" and not enrolled:
             # A protocol for gates a project does not have is noise in the
             # skill list, and noise is what makes a skill list unusable.
             continue
         meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-        skills.append(
-            SkillSpec(
-                slug=slug,
-                name=str(meta.get("name") or slug),
-                description=str(meta.get("description") or slug),
-                body=body.strip() + "\n",
-                tools=_tool_verbs(meta.get("tools")),
-            )
+        by_slug[slug] = SkillSpec(
+            slug=slug,
+            name=str(meta.get("name") or slug),
+            description=str(meta.get("description") or slug),
+            body=body.strip() + "\n",
+            tools=_tool_verbs(meta.get("tools")),
         )
-    return tuple(skills)
+    return tuple(by_slug.values())
 
 
 def _prompt_commands() -> list[CommandSpec]:

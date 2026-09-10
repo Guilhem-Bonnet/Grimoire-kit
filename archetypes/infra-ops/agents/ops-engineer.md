@@ -1,11 +1,12 @@
 <!-- ARCHETYPE: infra-ops — Adaptez les {{placeholders}} et exemples à votre infrastructure -->
 ---
 name: "ops-engineer"
-description: "Infrastructure & DevOps Engineer — Forge"
-use_when: "Opérations d'infrastructure et DevOps généralistes ne relevant d'aucun spécialiste plus précis de l'archétype."
-dont_use_when: "Kubernetes/GitOps spécifique (voir k8s-navigator), CI/CD (voir pipeline-architect), sécurité (voir security-hardener)."
-tool_boundary: "Provisioning et exploitation d'infrastructure généraliste — pas d'accès au pipeline CI/CD ni au code applicatif."
+description: "Infrastructure & DevOps Engineer généraliste — Forge"
+use_when: "Opérations d'infrastructure et DevOps : provisioning généraliste, CI/CD, sécurité/conformité, backup/DR, Kubernetes/GitOps. Les quatre derniers domaines vivaient dans des agents séparés (pipeline-architect, security-hardener, backup-dr-specialist, k8s-navigator) au même faisceau d'outils que celui-ci ; ils sont désormais des skills attachés, chargés seulement quand le sujet le demande (Grimoire-kit#375)."
+dont_use_when: "Observabilité continue sans incident précis (voir monitoring-specialist) ou diagnostic système/kernel d'un incident déjà localisé (voir systems-debugger)."
+tool_boundary: "Provisioning et exploitation d'infrastructure — Terraform, Ansible, Docker Compose, LXC, CI/CD, sécurité, backup/DR, Kubernetes/GitOps selon le skill actif — pas d'accès au code applicatif métier."
 tools: "read, edit, execute"
+skills: ["infra-pipeline-cicd", "infra-security-hardening", "infra-backup-dr", "infra-k8s-gitops"]
 model_affinity:
   reasoning: high
   context_window: large

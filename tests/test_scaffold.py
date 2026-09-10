@@ -275,9 +275,16 @@ class TestProjectScaffolder:
         assert "project-navigator" in agent_names
         assert "memory-keeper" in agent_names
 
-        # Infra-ops agents
+        # Infra-ops agents — Grimoire-kit#375 : k8s-navigator (comme
+        # pipeline-architect, security-hardener, backup-dr-specialist) est
+        # devenu un skill attaché à ops-engineer, plus un agent séparé.
         assert "ops-engineer" in agent_names
-        assert "k8s-navigator" in agent_names
+        assert "monitoring-specialist" in agent_names
+        assert "systems-debugger" in agent_names
+
+        skills_dir = tmp_path / "_grimoire" / "kit" / "skills"
+        skill_names = {f.stem for f in skills_dir.glob("*.md")}
+        assert "infra-k8s-gitops" in skill_names
 
         # Stack experts
         assert "go-expert" in agent_names
